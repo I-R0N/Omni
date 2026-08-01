@@ -1,6 +1,6 @@
 
 
-import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
+import { GameEntity, EnemySubtype, EnemyRole, EntityType, Vector2 } from '../../types';
 import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
@@ -50,7 +50,7 @@ export class AISystem {
    * full-entity scans) into an O(enemies²) walk on a handful of entries
    * instead of O(allEntities²) with filtering.
    */
-  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[] = []) {
+  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[] = [], projectiles: GameEntity[] = []) {
     const t0 = performance.now();
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
@@ -86,6 +86,11 @@ export class AISystem {
       // dogfighter (matches the old "no subtype → RAMMING" fallback).
       const move: EnemyMovement = enemy.enemySubtype ? ENEMY_BEHAVIOR[enemy.enemySubtype].move : 'dogfighter';
       this.moveStrategies[move](dt, enemy, player, flowField, enemies, shards);
+
+      // Evasive trait ((h) bosses): juke sideways out of an incoming straight
+      // shot.  Gated on the trait being present, so the projectile scan only
+      // runs for the handful of enemies that actually evade.
+      if (enemy.evasive) this.applyEvasiveDodge(dt, enemy, projectiles);
 
       // Directional arc shield (Bulwark): slew the covered sector toward the
       // player at a capped rate so it ATTEMPTS to face the threat — flank it
@@ -525,6 +530,58 @@ export class AISystem {
           if (d2 < bestSq) { bestSq = d2; best = s; }
       }
       return best;
+  }
+
+  /**
+   * EVASIVE counterplay trait ((h) bosses, WEAPONS_AMMO_PLAN §7).
+   *
+   * Scans player-owned projectiles inside the trait's `sense` radius for one
+   * that is CLOSING and aimed to pass within `missRadius` of the enemy, then
+   * kicks the enemy perpendicular to that shot's travel — a real dodge, not a
+   * damage-reduction fudge.  Three deliberate blind spots keep the §7 answers
+   * honest:
+   *   - HOMING shots are ignored: the Seeker re-acquires mid-juke, so it is the
+   *     designated answer.
+   *   - Lightning arcs never exist as travelling projectiles, so chains hit.
+   *   - One juke per `cooldown`: a Shotgun cone or a Cannon splash still lands
+   *     because the enemy can only step out of the way once.
+   * O(projectiles) and only for enemies carrying the trait; the whole pass
+   * already rides the PerfController `ai` task cadence.  Toroidal.
+   */
+  private applyEvasiveDodge(dt: number, enemy: GameEntity, projectiles: GameEntity[]) {
+      const cfg = enemy.evasive!;
+      const t = (enemy.dodgeTimer ?? 0) - dt;
+      if (t > 0) { enemy.dodgeTimer = t; return; }
+      enemy.dodgeTimer = 0;
+      if ((enemy.hitStun ?? 0) > 0) return; // staggered — can't juke
+
+      const senseSq = cfg.sense * cfg.sense;
+      for (let i = 0; i < projectiles.length; i++) {
+          const p = projectiles[i];
+          if (p.ownerType !== EntityType.PLAYER || p.homing) continue;
+          const dx = wrapDeltaX(enemy.position.x, p.position.x); // enemy → shot
+          const dy = wrapDeltaY(enemy.position.y, p.position.y);
+          const d2 = dx * dx + dy * dy;
+          if (d2 > senseSq) continue;
+          const vx = p.velocity.x, vy = p.velocity.y;
+          const vmag = Math.sqrt(vx * vx + vy * vy);
+          if (vmag < 1e-3) continue;
+          // Closing check: the shot must be travelling TOWARD the enemy
+          // (enemy→shot points opposite to the shot's velocity).
+          const closing = -(dx * vx + dy * vy) / vmag;
+          if (closing <= 0) continue;
+          // Perpendicular miss distance of the shot's line from the enemy.
+          const perp = Math.abs(dx * vy - dy * vx) / vmag;
+          if (perp > cfg.missRadius) continue;
+          // Juke perpendicular to the shot, toward the side the enemy is
+          // already offset to — the shortest way out of the line.
+          const nx = -vy / vmag, ny = vx / vmag;
+          const sign = (dx * nx + dy * ny) >= 0 ? -1 : 1;
+          enemy.velocity.x += nx * sign * cfg.impulse;
+          enemy.velocity.y += ny * sign * cfg.impulse;
+          enemy.dodgeTimer = cfg.cooldown;
+          return;
+      }
   }
 
   /** Clamp an entity's speed to `cap` in place (no-op when under). */

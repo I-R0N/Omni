@@ -235,8 +235,12 @@ export class WeaponSystem {
       if (enemy.weaponCooldown > 0) continue;
       if (!inRange) continue;
 
-      // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides.
-      const weapon = arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
+      // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides, then
+      // the per-entity override on top ((h) boss phases re-tune the same gun
+      // through the same Partial<WeaponConfig> pattern).
+      const weapon = enemy.weaponOverride
+        ? { ...ENEMY_WEAPON, ...arch.weapon, ...enemy.weaponOverride }
+        : arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
 
       // Laser snipers fire EXACTLY down the rendered lock-on line (= the ship's
       // facing) with no spread — the sight is a promise.  Everyone else aims at

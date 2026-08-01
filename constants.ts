@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -2339,6 +2339,34 @@ export const ENEMY_WEAPON: WeaponConfig = {
   pierce: 0,
 };
 
+// ── Boss weapons ((h)) ────────────────────────────────────────────────────────
+// WEAPONS_AMMO_PLAN §6 weapon parity: a weapon-boss WIELDS a themed variant of
+// the literal player archetype, built by spreading the player's own WEAPONS
+// entry and overriding the enemy-facing numbers.  Same projectile family,
+// colour and cone the player knows — so the telegraph reads "that's MY
+// shotgun" — with no parallel weapon table.  Overrides only; the archetype
+// merge in WeaponSystem is `{...ENEMY_WEAPON, ...arch.weapon}`, so everything
+// not named here falls back to ENEMY_WEAPON.
+//
+// Damage numbers are PROVISIONAL (first-pass boss tuning; revisit in M7).
+export const BOSS_WEAPONS: Record<'SCATTER', Partial<WeaponConfig>> = {
+  // Reaver's scattergun — the player Shotgun's cone and pellet look, slowed
+  // down and given per-pellet bite so a full cone at close range really hurts
+  // but a single clipped pellet doesn't.
+  SCATTER: {
+    ...WEAPONS[WeaponType.SHOTGUN],
+    name: 'Reaver Scattergun',
+    cooldown: 1.5,     // vs the player's 0.65 — a boss beat you can read
+    damage: 5,         // per pellet (player: 3); 7 pellets = 35 on a full cone
+    count: 7,
+    spread: 21,
+    speed: 15,
+    lifetime: 0.95,
+    recoil: 0,         // enemies don't take recoil
+    pierce: 0,
+  },
+};
+
 // --- ASSETS ---
 export { ASSETS };
 
@@ -3131,8 +3159,9 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // Nest spawner (Stage 4): periodically births `batch` `subtype` brood every
   // `interval` seconds, up to `maxBrood` live brood (a hard cap on the
   // self-replicating population).  Brood are spawned at the nest and DON'T gate
-  // wave completion (Stage 2b countsTowardWave=false).
-  spawner?: { subtype: EnemySubtype; interval: number; batch: number; maxBrood: number };
+  // wave completion (Stage 2b countsTowardWave=false).  A boss PHASE can stamp
+  // the same shape per-entity (GameEntity.spawner) to raise/drop escorts.
+  spawner?: SpawnerConfig;
   // Consume-and-grow (Stage 3b/5): stamped onto the entity at spawn so
   // GameEngine.updateConsumers feeds the bubble nearby shards.  Absent → not a
   // consumer.
@@ -3316,6 +3345,24 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     shoots: false, contactDamage: 16,
     consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
   },
+  // ── (h) Bosses ──
+  // Reaver (BOSS_SCATTER): the first weapon-boss.  A big raked twin-prong
+  // brawler that wields a THEMED VARIANT OF THE PLAYER'S OWN SHOTGUN (see
+  // BOSS_WEAPONS below) — same yellow pellet cone, enemy-tuned numbers — so
+  // the read is "that's MY shotgun" (WEAPONS_AMMO_PLAN §6 weapon parity).
+  // Its counterplay identity is the EVASIVE trait: it side-steps straight
+  // shots, so the Seeker (homing) is the designated answer and cones/chains
+  // still land.  RAMMING role — it closes to shotgun range and brawls.
+  // Phases (BOSS_DEFS) layer an arc shield + a swarm escort + an enraged
+  // cadence on top; nothing about it is bespoke scripting.
+  [EnemySubtype.BOSS_SCATTER]: {
+    color: '#fbbf24', size: 76, health: 130,
+    maxSpeed: 6.2, accel: 5.0, turnRate: 2.4,
+    sprite: ASSETS.ENEMY_TANK, mass: 90, shape: 'talon',
+    shoots: true, contactDamage: 16,
+    weapon: BOSS_WEAPONS.SCATTER,
+    telegraph: 0.45,
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3495,19 +3542,36 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 };
 
 // ── Enemy counterplay traits ──────────────────────────────────────────────────
-// Soft-counter levers stamped on an enemy at spawn (WaveSystem.spawnEnemy).
+// Soft-counter levers stamped on an enemy at spawn (WaveSystem.buildEnemy).
 // SOFT by design: a chip weapon still works, just slowly, while the demanded
-// tool trivialises the threat.  v1 = armor only (Tank); evasive / front-shield /
-// regen join with their enemies + the bosses.
+// tool trivialises the threat.  The trait-counterplay map that keeps every
+// weapon a "right answer" somewhere is WEAPONS_AMMO_PLAN §7.
 //   armor.chipThreshold — per-hit damage at/above this lands in full
 //   armor.reduction     — fraction cut from hits BELOW the threshold
 // So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
 // Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
 // through.  AoE/explosion damage isn't chip-resisted (it's an answer).
-export const ENEMY_TRAITS: Partial<Record<EnemySubtype, {
+//
+// EVASIVE ((h) bosses): the enemy senses STRAIGHT player projectiles closing on
+// it and jukes sideways.  Deliberately blind to HOMING shots (they re-acquire
+// mid-juke) — the Seeker is the designated answer — and one juke per `cooldown`
+// means a Shotgun cone or a Lightning chain still connects.  Numbers are
+// PROVISIONAL (first pass; retune in the M7 economy/progression pass).
+//   sense       — radius (units) within which incoming shots are noticed
+//   missRadius  — perpendicular miss distance that still counts as "aimed at me"
+//   impulse     — lateral velocity kick applied to the juke
+//   cooldown    — seconds between jukes (the counterplay window)
+export interface EnemyTraitSet {
   armor?: { chipThreshold: number; reduction: number };
-}>> = {
+  evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
+}
+export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
+  // Reaver (boss 1): pure evasion — no armor, so every weapon hurts it once it
+  // is actually HIT.  Phase 3 adds armor on top (see BOSS_DEFS).
+  [EnemySubtype.BOSS_SCATTER]: {
+    evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 },
+  },
 };
 
 // Maps each subtype to its role — used by AI routing and shooting logic.
@@ -3525,6 +3589,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
   [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
   [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
+  [EnemySubtype.BOSS_SCATTER]: EnemyRole.RAMMING, // closes to shotgun range and brawls
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3560,7 +3625,136 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
   [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
   [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (GameEngine.updateDragon drives it)
+  // (h) bosses ride the EXISTING strategies — the boss-ness lives in BOSS_DEFS
+  // phases + traits, not in a bespoke movement routine.
+  [EnemySubtype.BOSS_SCATTER]: { move: 'dogfighter' },
 };
+
+// ── (h) Bosses ────────────────────────────────────────────────────────────────
+// Bosses are WAVE-MAP CAPSTONES (decision #39e): every BOSS_CONSTANTS
+// .WAVE_INTERVAL-th wave of an arena is a boss wave — the boss warps in through
+// the shared rift VFX (GameEngine.openPortal) alongside a reduced normal spawn
+// budget, and the wave only clears when it (and the escorts) are dead.
+//
+// A boss is NOT a new entity category.  It is an ENEMY_VARIANTS archetype like
+// any other, routed through ENEMY_BEHAVIOR, with a BOSS_DEFS row on top that
+// describes its PHASES.  A phase is expressed entirely through fields the
+// existing systems already read — a `Partial<WeaponConfig>` override, an arc
+// shield, a brood spawner, a trait set, a speed multiplier — so a phase change
+// is a stamp, never a bespoke script.  GameEngine.updateBosses applies a phase
+// once, on the health-fraction transition.
+//
+// PAYOUT — model (d) (WEAPONS_AMMO_PLAN §6, settled): a boss pays SALVAGE and a
+// SHOP DISCOUNT.  There is deliberately NO weapon-unlock plumbing: weapons stay
+// purely purchased, and a boss is an income accelerator.
+export const BOSS_CONSTANTS = {
+  /** A boss wave every Nth wave (0-based index where (index+1) % N === 0). */
+  WAVE_INTERVAL: 5,
+  /** The normal spawn budget of a boss wave, scaled down — the boss IS most of
+   *  the wave.  PROVISIONAL. */
+  COMPANION_BUDGET_FRAC: 0.55,
+  /** Score paid on a boss kill (on top of the normal tier kill points). */
+  SCORE: 2500,
+  /** Salvage drops sprayed on a boss kill — the model-(d) income accelerator.
+   *  PROVISIONAL: sized ≈ 3× the wave-clear spray. */
+  SALVAGE_DROPS: 36,
+  /** Shop discount earned per boss kill, and the run cap.  Applied to every
+   *  station purchase as `cost × (1 - discount)`.  PROVISIONAL. */
+  DISCOUNT_PER_KILL: 0.05,
+  DISCOUNT_MAX: 0.25,
+  /** Entrance / death rift VFX (GameEngine.openPortal). */
+  PORTAL_RADIUS: 300,
+  PORTAL_DURATION: 1.1,
+  /** Aura ring drawn around a live boss (RenderSystem). */
+  AURA_SCALE: 1.28,
+  AURA_ALPHA: 0.5,
+} as const;
+
+/** One phase of a boss fight.  Entered when health/maxHealth ≤ `atHealthFrac`
+ *  (phases are listed in descending order, phase 0 = full health).  Every
+ *  field maps onto machinery that already exists — see BOSS_CONSTANTS. */
+export interface BossPhaseDef {
+  atHealthFrac: number;
+  /** Banner text on entry (a normal wave announcement). */
+  announce?: string;
+  /** Hull tint for the phase (also the aura + HUD bar colour). */
+  color?: string;
+  /** Multiplier on the archetype maxSpeed while in this phase. */
+  speedMult?: number;
+  /** Weapon override merged over the archetype weapon (GameEntity
+   *  .weaponOverride → WeaponSystem.updateEnemyShooting). */
+  weapon?: Partial<WeaponConfig>;
+  /** Arc shield raised for this phase.  Absent → any existing shield is
+   *  dropped on entry, so a phase can also be "shield down". */
+  shield?: { amount: number; regen: number; arc?: { deg: number; slew: number } };
+  /** Escort brood spawned while in this phase (GameEntity.spawner →
+   *  GameEngine.updateNests).  Absent → escorts stop. */
+  spawner?: SpawnerConfig;
+  /** Traits active in this phase, REPLACING the archetype's ENEMY_TRAITS row
+   *  (so a phase can drop evasion as well as add armor). */
+  traits?: EnemyTraitSet;
+}
+
+export interface BossDef {
+  /** Display name for the HUD boss bar + banners. */
+  name: string;
+  /** Phases, descending by `atHealthFrac`; index 0 must be 1. */
+  phases: BossPhaseDef[];
+}
+
+export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
+  // ── Reaver — the scattergun boss ──
+  // Phase 1  brawls with the themed player Shotgun and jukes straight shots.
+  // Phase 2  raises a tracking arc shield: face-tanking stops working, you have
+  //          to flank it (the Bulwark's soft counter, at boss scale).
+  // Phase 3  drops the shield, trades evasion for ARMOR, calls a swarm escort
+  //          and empties its magazine faster — a burn-it-down finish where the
+  //          answer flips from Seeker (evade) to a big-hit weapon (armor).
+  [EnemySubtype.BOSS_SCATTER]: {
+    name: 'REAVER',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#fbbf24',
+        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 } },
+      },
+      {
+        atHealthFrac: 0.66,
+        announce: 'REAVER RAISES ITS GUARD',
+        color: '#f59e0b',
+        speedMult: 1.1,
+        shield: { amount: 90, regen: 6, arc: { deg: 160, slew: 2.4 } },
+        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 1.25, spread: 16, count: 8 },
+        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 1.1 } },
+      },
+      {
+        atHealthFrac: 0.33,
+        announce: 'REAVER — ENRAGED',
+        color: '#ef4444',
+        speedMult: 1.25,
+        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 0.95, spread: 30, count: 9, damage: 4 },
+        spawner: { subtype: EnemySubtype.SWARM, interval: 5.0, batch: 3, maxBrood: 9 },
+        traits: { armor: { chipThreshold: 6, reduction: 0.6 } },
+      },
+    ],
+  },
+};
+
+/** Boss rotation — a boss wave takes the next entry, cycling.  Order is the
+ *  intended teaching order (evasion first, then the heavier lessons). */
+export const BOSS_ROTATION: EnemySubtype[] = [EnemySubtype.BOSS_SCATTER];
+
+/** True when the 0-based wave index is a boss-capstone wave. */
+export function isBossWave(index: number): boolean {
+  return BOSS_ROTATION.length > 0
+    && (index + 1) % BOSS_CONSTANTS.WAVE_INTERVAL === 0;
+}
+
+/** The boss subtype for a given 0-based boss wave index (cycles the rotation). */
+export function bossForWave(index: number): EnemySubtype {
+  const n = Math.floor((index + 1) / BOSS_CONSTANTS.WAVE_INTERVAL) - 1;
+  return BOSS_ROTATION[Math.max(0, n) % BOSS_ROTATION.length];
+}
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
 // Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each

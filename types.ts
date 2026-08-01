@@ -146,12 +146,21 @@ export enum EnemySubtype {
   //           via portal.  Engine-managed (GameEngine.updateDragon); the AI
   //           'dragon' strategy is a no-op.
   DRAGON   = 'DRAGON',
+  // (h) BOSSES — wave capstones.  A boss is an ordinary wave enemy built from
+  // the same ENEMY_VARIANTS/ENEMY_BEHAVIOR tables; what makes it a boss is a
+  // BOSS_DEFS row (phases + payout) and the WaveSystem boss-wave cadence.
+  //   BOSS_SCATTER — "Reaver": an EVASIVE brawler wielding a themed variant of
+  //   the player's own Shotgun (WEAPONS_AMMO_PLAN §6 weapon-parity).
+  BOSS_SCATTER = 'BOSS_SCATTER',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon'
+  // (h) bosses — 'talon' is a forward-raked twin-prong warship hull: big,
+  // predatory, and unlike any of the rank-and-file silhouettes.
+  | 'talon';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -208,6 +217,17 @@ export interface ConsumeConfig {
   pull?: number;          // optional inward tug (accel) on mobile candidates in
                           // sense range — the suck-in before the swallow.  Tiles
                           // (static) are never pulled.
+}
+
+// Brood-spawner config (Stage 4 Nest; reused by boss phases in (h)).  Births
+// `batch` `subtype` brood every `interval` seconds up to `maxBrood` live units
+// of that subtype.  Lives either on the archetype (ENEMY_VARIANTS.spawner) or,
+// for a boss phase, stamped per-entity (GameEntity.spawner).
+export interface SpawnerConfig {
+  subtype: EnemySubtype;
+  interval: number;
+  batch: number;
+  maxBrood: number;
 }
 
 // Live instance on the player (GameEntity.statusEffects).
@@ -433,6 +453,14 @@ export interface GameEntity {
   // Counterplay trait: armored enemies shrug off per-hit damage below
   // `chipThreshold`, scaled by `(1 - reduction)` — demands big-hit weapons.
   armor?: { chipThreshold: number; reduction: number };
+  // Counterplay trait (bosses, (h)): EVASIVE — the enemy actively side-steps
+  // incoming STRAIGHT player projectiles it senses on a collision course.
+  // Homing shots are deliberately not dodged (Seeker is the designated
+  // answer, WEAPONS_AMMO_PLAN §7), and a cone/chain still lands because only
+  // one juke fires per `cooldown`.  Stamped at spawn from ENEMY_TRAITS;
+  // applied by AISystem.applyEvasiveDodge.  `dodgeTimer` is the live cooldown.
+  evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
+  dodgeTimer?: number;
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;
@@ -580,6 +608,23 @@ export interface GameEntity {
   // Nest brood spawn timer (Stage 4): seconds until the next batch; ticked by
   // GameEngine.updateNests for an enemy whose archetype has a `spawner` config.
   spawnTimer?: number;
+  // Per-entity brood spawner override ((h) bosses).  updateNests reads this
+  // FIRST and falls back to the archetype's ENEMY_VARIANTS.spawner, so a boss
+  // PHASE can switch escort broods on and off without a bespoke spawn pass.
+  // Absent → the archetype config applies.
+  spawner?: SpawnerConfig;
+  // Per-entity weapon override ((h) bosses).  Merged over the archetype weapon
+  // by WeaponSystem.updateEnemyShooting, so a boss phase can re-tune its gun
+  // (cadence / count / damage) through the same Partial<WeaponConfig> pattern
+  // the archetypes already use.  Absent → the archetype weapon as-is.
+  weaponOverride?: Partial<WeaponConfig>;
+  // ── Boss ((h)) ──────────────────────────────────────────────────────────
+  // `isBoss` marks a wave capstone: it drives the HUD boss bar, the render
+  // aura, and the boss payout in GameEngine.handleEntityDeath.  `bossPhase`
+  // is the index of the currently-applied BOSS_DEFS phase (GameEngine
+  // .updateBosses applies a phase once on transition).
+  isBoss?: boolean;
+  bossPhase?: number;
   // Swarm movement scratch (Stage 4): per-gnat timer/phase reused by the
   // DBG-selectable swarm modes (vortex dart cadence, weave phase accumulator,
   // burst coast/dash cadence) — see AISystem.updateSwarm.
@@ -1249,6 +1294,21 @@ export interface EngineStats {
   /** Enemies left to destroy this wave (unspawned remainder + alive).
    *  Completion model: the wave ends only when this reaches 0. */
   enemiesRemaining?: number;
+  /** Live boss readout ((h)) — present only while a boss is alive, so the
+   *  HUD can show a named capstone bar with its phase pips.  `healthFrac` /
+   *  `shieldFrac` are 0..1; `phase` is the 0-based BOSS_DEFS phase index. */
+  boss?: {
+    name: string;
+    healthFrac: number;
+    shieldFrac: number;
+    phase: number;
+    phaseCount: number;
+    color: string;
+  };
+  /** Accumulated boss shop discount, 0..1 ((h) payout model (d)) — every
+   *  station purchase is priced at `cost × (1 - bossDiscount)`.  Surfaced so
+   *  the shop can show the earned discount. */
+  bossDiscount?: number;
   /** Run score — animated integer ticker toward the true run total. */
   score?: number;
   /** Kill-combo readout: active multiplier (1 = no combo), the kill

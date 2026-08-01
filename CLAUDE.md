@@ -331,6 +331,13 @@ Notable existing field categories on `GameEntity`:
   `portalReady` (stamped per step by the interaction check when this
   portal wins the nearest-in-range arbitration; drives the render-side
   entry halo)
+- Boss ((h)): `isBoss` (drives the HUD boss bar, the render aura and the
+  `payBossBounty` payout), `bossPhase` (index of the applied `BOSS_DEFS`
+  phase; `-1` at spawn = "none applied yet"), plus the two per-entity
+  overrides a phase stamps — `weaponOverride` (`Partial<WeaponConfig>`
+  merged over the archetype weapon by `WeaponSystem`) and `spawner`
+  (`SpawnerConfig` read FIRST by `GameEngine.updateNests`, archetype
+  config as fallback).  Both are generic, not boss-only.
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
   `shieldRechargeTimer`/`shieldHitFlash`, `ownedWeapons`/
   `equippedWeapons` (the 2-slot loadout — see §5 WEAPONS note),
@@ -528,7 +535,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `shieldArc: {deg,spin}` (seeds `shieldArcHalfWidth`/`shieldArcSpin`/
   `shieldArcAngle` — a sweeping sector that only absorbs hits from the
   covered side), and `consume`/`multiply`/`ambient` (the bubble's
-  eat-grow-split + always-present fauna flag).
+  eat-grow-split + always-present fauna flag).  Finally the (h) BOSSES:
+  `BOSS_SCATTER` (REAVER) is a plain archetype row here; its boss-ness
+  is the `BOSS_DEFS` phase table below.
 - `WEAPONS`, `WEAPON_LIST`.  Ammo is DELETED as a system (pivot 1b): no
   drops, pool, per-shot costs, HUD strip, select gating, or dry-fallback —
   weapon pressure is cooldown + the 2-SLOT EQUIP LOADOUT.
@@ -614,15 +623,52 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
   Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
   DBG "Enemy scale" knob (Player section) with a live hp/dmg-mult readout.
-- `ENEMY_TRAITS` — enemy counterplay traits (the soft-counter engine).
-  v1 = `armor` only (Tank / RAMMER_3): per-hit damage below
+- `ENEMY_TRAITS` (typed `EnemyTraitSet`) — enemy counterplay traits (the
+  soft-counter engine).  `armor` (Tank / RAMMER_3): per-hit damage below
   `chipThreshold` is cut by `reduction`, so chip weapons (Blaster,
   Shotgun) plink while heavy hits (Cannon, Lightning, charged, a
   Gunnery-boosted Blaster past the threshold) punch through.  Stamped
-  at spawn (`WaveSystem.spawnEnemy`), applied in the PhysicsSystem
+  at spawn (`WaveSystem.buildEnemy`), applied in the PhysicsSystem
   projectile-damage path (gated by `physics.traitsEnabled`, DBG
   "Traits"); armored enemies show the REDUCED hit number as feedback.
-  evasive / front-shield / regen join with their enemies + the bosses.
+  `evasive` ((h) bosses, Reaver): `AISystem.applyEvasiveDodge` scans
+  player-owned projectiles inside `sense` for one that is CLOSING and
+  aimed within `missRadius`, then kicks the enemy perpendicular to it —
+  a REAL dodge, one per `cooldown`.  Deliberately blind to HOMING shots
+  (the Seeker is the designated answer, WEAPONS_AMMO_PLAN §7); lightning
+  chains never exist as travelling projectiles so they always connect;
+  and the one-juke-per-cooldown rule is why a Shotgun cone still lands.
+  front-shield / regen join with the second boss.
+- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
+  `bossForWave()` / `BOSS_WEAPONS` — the (h) BOSS framework.  Bosses are
+  WAVE-MAP CAPSTONES: every `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave
+  (`isBossWave`) warps a boss in through the shared `openPortal` rift
+  and cuts the normal spawn budget to `COMPANION_BUDGET_FRAC`.  A boss
+  is NOT a new entity category — it is an ordinary `ENEMY_VARIANTS`
+  archetype routed through `ENEMY_BEHAVIOR`, tracked as a counted wave
+  enemy (so clear-the-field completion already gates on killing it),
+  with a `BOSS_DEFS` row on top describing its PHASES.  A `BossPhaseDef`
+  is expressed ENTIRELY through fields existing systems already read —
+  a `Partial<WeaponConfig>` override, an arc shield, a `SpawnerConfig`,
+  an `EnemyTraitSet`, a speed multiplier, a colour — and
+  `GameEngine.updateBosses` stamps one once on the health-fraction
+  transition (`applyBossPhase`; absent fields are CLEARED, so a phase
+  can drop a shield or trade a trait away).  Never bespoke scripting.
+  PAYOUT is **model (d)** (WEAPONS_AMMO_PLAN §6): `payBossBounty` pays
+  SCORE + a physical `SALVAGE_DROPS` spray + a run-scoped SHOP DISCOUNT
+  (`GameEngine.bossDiscount`, capped at `DISCOUNT_MAX`, applied by
+  `modulePrice()` to every catalog price and purchase — resale still
+  values items at FULL cost so a discount can't be laundered into
+  credits).  There is deliberately NO weapon-unlock plumbing.  Roster
+  today: **BOSS_SCATTER "REAVER"** — an EVASIVE brawler wielding a
+  themed variant of the player's own Shotgun (`BOSS_WEAPONS.SCATTER`
+  spreads `WEAPONS[SHOTGUN]`, so the read is "that's MY shotgun"), on
+  the bespoke `'talon'` hull; phase 1 jukes, phase 2 raises a tracking
+  arc shield (flank it), phase 3 drops the shield, trades evasion for
+  ARMOR and calls a SWARM escort — the answer flips from Seeker to a
+  big-hit weapon mid-fight.  HUD: `EngineStats.boss` drives a named
+  bar + phase pips; RenderSystem draws a phase-coloured aura ring.
+  DBG: pause ▸ Debug Menu ▸ "Bosses".
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
   framework (generic: `StatusEffectKind` / `EffectPayload` /
   `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
@@ -1129,6 +1175,14 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   `debugGrantWeapon`) are the wave-map test path for weapons now that
   commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
   feeds them.
+- **`window.__omniEngine` / `window.__omniStats`** are debug handles set
+  in `App.tsx` (the live `GameEngine` and the latest `EngineStats`).
+  Nothing in the game reads them; they exist so a browser console — and
+  the headless Playwright smokes each session runs before committing —
+  can drive and inspect a real running build.  TypeScript `private` is
+  compile-time only, so a smoke can read internals through the handle
+  without widening any API.  There is still **no test runner**; smokes
+  are ad-hoc scripts, not a checked-in suite.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through

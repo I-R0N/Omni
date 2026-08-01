@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -314,6 +314,15 @@ export class GameEngine {
   private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
   private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
   private nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
+
+  // ── (h) Bosses ────────────────────────────────────────────────────────────
+  // Bosses are ordinary wave enemies with a BOSS_DEFS phase table; the only
+  // engine state they need is the run's accumulated SHOP DISCOUNT (payout model
+  // (d): salvage + discount, no unlock plumbing) and the live-boss handle the
+  // HUD bar reads.  `bossesKilled` is per-RUN (reset with credits/score).
+  private bossDiscount = 0;   // 0..BOSS_CONSTANTS.DISCOUNT_MAX
+  private bossesKilled = 0;
+  private liveBoss: GameEntity | null = null;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
   // The station lives on the OVERWORLD map (found by isStation at map load).
@@ -1397,6 +1406,8 @@ export class GameEngine {
       waveGraceTimer: undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
+      boss: this.bossStatsSnapshot(),
+      bossDiscount: this.bossDiscount > 0 ? this.bossDiscount : undefined,
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -1568,6 +1579,11 @@ export class GameEngine {
       this.snitchCatchCount = 0;
       this.dragonsKilled = 0;
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
+      // Boss payouts ((h) model (d)) are run-scoped like the credits they
+      // discount — a new run starts at full price.
+      this.bossDiscount = 0;
+      this.bossesKilled = 0;
+      this.liveBoss = null;
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
@@ -1763,6 +1779,8 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
+      boss: this.bossStatsSnapshot(),
+      bossDiscount: this.bossDiscount > 0 ? this.bossDiscount : undefined,
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -2062,7 +2080,8 @@ export class GameEngine {
       // step, so enemies coast smoothly between AI updates (no snap).
       if (this.perfController.shouldRun('ai')) {
           const aiDt = dt * this.perfController.effectiveInterval('ai');
-          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField, this.entityIndex.asteroids);
+          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField,
+              this.entityIndex.asteroids, this.entityIndex.projectiles);
       } else {
           this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
       }
@@ -2287,6 +2306,13 @@ export class GameEngine {
       // flips `active` directly), so they correctly award nothing.
       // scoreScale (default 1) lets the snitch board-clear pay a fraction
       // of the normal kill value per swept enemy.
+      // Boss capstone ((h)): the model-(d) payout (salvage + shop discount)
+      // rides ON TOP of the normal enemy death path below — a boss is still an
+      // enemy, so it explodes, pays kill points and sprays shards like one.
+      if (entity.isBoss === true && entity.type === EntityType.ENEMY
+          && !entity.isExploding && !entity.killedByRival) {
+          this.payBossBounty(entity);
+      }
       if (entity.type === EntityType.ENEMY && !entity.isExploding && !entity.killedByRival) {
           // Ship kills build the combo and are paid at the resulting
           // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
@@ -2723,6 +2749,11 @@ export class GameEngine {
     // attachedToId / consume (Stage 4/5/6).
     this.updateAttachments();
     if (this.perfController.shouldRun('consume')) this.updateConsumers(dt);
+
+    // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
+    // pass, so a phase that raises an escort brood spawns its first batch on
+    // the same step it is entered.
+    this.updateBosses(dt);
 
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
@@ -3746,12 +3777,22 @@ export class GameEngine {
       const svc = this.dockedServices();
       if (!def || !svc) return false;
       if (def.group === 'ship' ? !svc.shipShop : !svc.weaponShop) return false;
-      if (def.cost <= 0 || this.credits < def.cost) return false;
+      const price = this.modulePrice(def.cost);
+      if (def.cost <= 0 || this.credits < price) return false;
       const inv = this.inventory.indexOf(null);
       if (inv === -1) return false; // inventory full
-      this.credits -= def.cost;
+      this.credits -= price;
       this.inventory[inv] = moduleId;
       return true;
+  }
+
+  /** Shop price for a catalog cost after the run's boss discount ((h) payout
+   *  model (d): bosses are income accelerators, so a boss kill makes the shop
+   *  cheaper rather than unlocking anything).  Resale still values items at
+   *  their FULL catalog cost — the discount is a buying perk, and pricing
+   *  sell-back off it would let a discount be laundered into free credits. */
+  private modulePrice(cost: number): number {
+      return Math.max(0, Math.round(cost * (1 - this.bossDiscount)));
   }
 
   /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
@@ -3827,11 +3868,16 @@ export class GameEngine {
                   scrapValue: Math.round(def.cost * MODULE_RESALE.SCRAP_FRACTION),
               };
           }),
-          catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => ({
-              id: d.id, group: d.group as string, kind: d.kind as string,
-              label: d.label, desc: d.desc, cost: d.cost,
-              affordable: this.credits >= d.cost && this.inventory.includes(null),
-          })),
+          // Catalog prices are the DISCOUNTED prices the shop will actually
+          // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
+          catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
+              const price = this.modulePrice(d.cost);
+              return {
+                  id: d.id, group: d.group as string, kind: d.kind as string,
+                  label: d.label, desc: d.desc, cost: price,
+                  affordable: this.credits >= price && this.inventory.includes(null),
+              };
+          }),
       };
   }
 
@@ -4468,7 +4514,10 @@ export class GameEngine {
       for (let i = 0; i < enemies.length; i++) {
           const nest = enemies[i];
           if (nest.spawnTimer === undefined || !nest.active || nest.isExploding) continue;
-          const spawner = nest.enemySubtype ? ENEMY_VARIANTS[nest.enemySubtype].spawner : undefined;
+          // Per-entity spawner first ((h) boss phases raise/drop escorts), then
+          // the archetype's own config (the Nest).
+          const spawner = nest.spawner
+            ?? (nest.enemySubtype ? ENEMY_VARIANTS[nest.enemySubtype].spawner : undefined);
           if (!spawner) continue;
           nest.spawnTimer -= dt;
           if (nest.spawnTimer > 0) continue;
@@ -5193,7 +5242,190 @@ export class GameEngine {
       difficultyLevel: this.difficultyLevel,
       viewportHalfDiagonal,
       forcedEnemy: this.forcedTestEnemy,
+      onBossSpawn: this.handleBossSpawn,
     };
+  }
+
+  /** Live-boss HUD readout ((h)) — undefined when no boss is alive, so the
+   *  HUD bar simply isn't rendered.  Cheap: `liveBoss` is maintained by
+   *  updateBosses, so this is a couple of divisions per frame. */
+  private bossStatsSnapshot(): EngineStats['boss'] {
+      const b = this.liveBoss;
+      if (!b || !b.active || b.isExploding) return undefined;
+      const def = b.enemySubtype ? BOSS_DEFS[b.enemySubtype] : undefined;
+      return {
+          name: def?.name ?? 'BOSS',
+          healthFrac: Math.max(0, Math.min(1, b.health / Math.max(1, b.maxHealth))),
+          shieldFrac: (b.maxShield ?? 0) > 0
+              ? Math.max(0, Math.min(1, (b.shield ?? 0) / b.maxShield!)) : 0,
+          phase: Math.max(0, b.bossPhase ?? 0),
+          phaseCount: def?.phases.length ?? 1,
+          color: b.color || '#f87171',
+      };
+  }
+
+  /** Boss-wave entrance ((h)): the capstone warps in through the shared rift
+   *  VFX, the same abstraction the dragon and the rivals use. */
+  private handleBossSpawn = (boss: GameEntity) => {
+      this.liveBoss = boss;
+      this.openPortal(boss.position, {
+          color: boss.color || '#f87171',
+          radius: BOSS_CONSTANTS.PORTAL_RADIUS,
+          duration: BOSS_CONSTANTS.PORTAL_DURATION,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+  };
+
+  /**
+   * Boss phase pass ((h)).  For the live boss (at most one at a time in a
+   * wave; the DBG menu can stack more, so this walks the enemy index): find
+   * the deepest BOSS_DEFS phase whose `atHealthFrac` the boss has fallen to
+   * and, if it isn't the applied one, STAMP it.
+   *
+   * Every phase field lands on machinery that already exists — the weapon
+   * override merges in WeaponSystem, the arc shield rides the generalized
+   * absorption path, the spawner rides updateNests, the traits ride the
+   * PhysicsSystem damage path and the AISystem dodge.  Nothing here is a
+   * bespoke boss script, which is the whole point of the framework.
+   *
+   * O(enemies) with an early flag check and no work on a non-transition step,
+   * so it stays ungated like the kamikaze/nest passes.
+   */
+  private updateBosses(_dt: number) {
+      if (!this.currentMap) return;
+      const enemies = this.entityIndex.enemies;
+      let live: GameEntity | null = null;
+      for (let i = 0; i < enemies.length; i++) {
+          const b = enemies[i];
+          if (b.isBoss !== true || !b.active || b.isExploding) continue;
+          // The HUD bar tracks the most-wounded live boss (the one being fought).
+          if (!live || (b.health / Math.max(1, b.maxHealth)) < (live.health / Math.max(1, live.maxHealth))) live = b;
+
+          const def = b.enemySubtype ? BOSS_DEFS[b.enemySubtype] : undefined;
+          if (!def) continue;
+          const frac = b.health / Math.max(1, b.maxHealth);
+          let want = 0;
+          for (let p = 0; p < def.phases.length; p++) {
+              if (frac <= def.phases[p].atHealthFrac) want = p;
+          }
+          if (b.bossPhase === want) continue;
+          this.applyBossPhase(b, def, want);
+      }
+      this.liveBoss = live;
+  }
+
+  /** Stamp one BOSS_DEFS phase onto a boss.  Fields absent from the phase are
+   *  CLEARED (a phase can drop a shield or stop escorts), so a phase is a full
+   *  description of the boss's current state rather than a patch. */
+  private applyBossPhase(boss: GameEntity, def: BossDef, index: number) {
+      const phase = def.phases[index];
+      const first = boss.bossPhase === undefined || boss.bossPhase < 0;
+      boss.bossPhase = index;
+
+      const arch = boss.enemySubtype ? ENEMY_VARIANTS[boss.enemySubtype] : undefined;
+      if (phase.color) boss.color = phase.color;
+      if (arch) boss.maxSpeed = arch.maxSpeed * (phase.speedMult ?? 1);
+      boss.weaponOverride = phase.weapon;
+      boss.spawner = phase.spawner;
+      boss.spawnTimer = phase.spawner ? phase.spawner.interval * 0.35 : undefined;
+
+      // Traits REPLACE the previous phase's set — evasion can be traded away.
+      boss.armor = phase.traits?.armor;
+      boss.evasive = phase.traits?.evasive;
+      if (!boss.evasive) boss.dodgeTimer = undefined;
+
+      // Shield: raise / re-arm, or drop it entirely when the phase has none.
+      if (phase.shield) {
+          boss.shield = phase.shield.amount;
+          boss.maxShield = phase.shield.amount;
+          boss.shieldRechargeRate = phase.shield.regen;
+          boss.shieldRechargeTimer = 0;
+          if (phase.shield.arc) {
+              boss.shieldArcHalfWidth = (phase.shield.arc.deg * Math.PI / 180) / 2;
+              boss.shieldArcSpin = phase.shield.arc.slew;
+              boss.shieldArcAngle = boss.rotation;
+          } else {
+              boss.shieldArcHalfWidth = undefined;
+              boss.shieldArcSpin = undefined;
+          }
+      } else {
+          boss.shield = undefined;
+          boss.maxShield = undefined;
+          boss.shieldArcHalfWidth = undefined;
+          boss.shieldArcSpin = undefined;
+      }
+
+      // Phase-transition beat — skipped on the initial stamp (phase 0 applies
+      // on the boss's first tick, and the entrance rift already sold it).
+      if (first) return;
+      if (phase.announce) {
+          const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+          this.waves.announcements.push({
+              text: phase.announce,
+              subtext: `PHASE ${index + 1}`,
+              color: phase.color ?? '#f87171',
+              lifetime: life,
+              maxLifetime: life,
+          });
+      }
+      this.spawnShockwave(boss.position, {
+          radius: Math.max(boss.size.x, boss.size.y) * 3,
+          damage: 0, knockback: 0,
+          color: phase.color ?? '#f87171',
+          lifetime: 0.5,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+  }
+
+  /**
+   * Boss kill payout ((h), WEAPONS_AMMO_PLAN §6 model (d)): SALVAGE + a SHOP
+   * DISCOUNT.  Deliberately NO weapon unlock — weapons stay purely purchased,
+   * and the boss is an income accelerator that funds (or cheapens) the next
+   * shop run.  Called from handleEntityDeath BEFORE the normal enemy death
+   * path, which still runs (explosion, kill points, enemy shards).
+   */
+  private payBossBounty(boss: GameEntity) {
+      this.bossesKilled++;
+      this.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
+      this.bossDiscount = Math.min(
+          BOSS_CONSTANTS.DISCOUNT_MAX,
+          this.bossDiscount + BOSS_CONSTANTS.DISCOUNT_PER_KILL,
+      );
+      // The money is PHYSICAL — the same salvage drops every other source
+      // pays, sprayed off the corpse so it converges and merges normally.
+      for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const d = 30 + Math.random() * 140;
+          this.spawnSalvageDrop({
+              x: boss.position.x + Math.cos(a) * d,
+              y: boss.position.y + Math.sin(a) * d,
+          });
+      }
+      this.openPortal(boss.position, {
+          color: boss.color || '#f87171',
+          radius: BOSS_CONSTANTS.PORTAL_RADIUS,
+          duration: BOSS_CONSTANTS.PORTAL_DURATION,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
+      if (this.liveBoss === boss) this.liveBoss = null;
+  }
+
+  /** DBG: warp a boss in on the offscreen ring, phases and all.  `id` is an
+   *  EnemySubtype key with a BOSS_DEFS row; unknown ids take the first entry
+   *  of BOSS_ROTATION.  Each click stacks another (matches the Dragon menu). */
+  public debugSpawnBoss(id: string) {
+      const ctx = this.waveContext();
+      if (!ctx) return;
+      const subtype = (id in EnemySubtype && BOSS_DEFS[id as EnemySubtype])
+          ? (id as EnemySubtype) : BOSS_ROTATION[0];
+      const pos = { x: 0, y: 0 };
+      const spread = 420 + Math.random() * 260;
+      const a = Math.random() * Math.PI * 2;
+      pos.x = this.player.position.x + Math.cos(a) * spread;
+      pos.y = this.player.position.y + Math.sin(a) * spread;
+      wrapPosition(pos);
+      const boss = this.waves.spawnAt(subtype, pos, ctx, true);
+      this.handleBossSpawn(boss);
   }
 
   /** DBG: force every wave to spawn only `subtype` (or clear with null).

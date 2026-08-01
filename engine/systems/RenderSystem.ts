@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -4183,6 +4183,27 @@ export class RenderSystem {
   // bakes rotation in), so the tail is at -x.
   private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
       const shape = entity.enemyShape ?? 'triangle';
+      // ── Boss aura ((h)): a slow breathing ring under the hull in the boss's
+      // PHASE colour, so a capstone reads as one at a glance and a phase change
+      // is visible in the world (not only on the HUD bar).  Two strokes, no
+      // gradient allocation — bosses are rare, but the pattern stays cheap.
+      if (entity.isBoss === true) {
+          const rb = Math.max(entity.size.x, entity.size.y) * 0.5;
+          const pulse = 1 + Math.sin(nowSec * 2.2) * 0.05;
+          const ra = rb * BOSS_CONSTANTS.AURA_SCALE * pulse;
+          ctx.globalAlpha = BOSS_CONSTANTS.AURA_ALPHA;
+          ctx.strokeStyle = entity.color || '#f87171';
+          ctx.lineWidth = Math.max(2, rb * 0.08);
+          ctx.beginPath();
+          ctx.arc(0, 0, ra, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = BOSS_CONSTANTS.AURA_ALPHA * 0.45;
+          ctx.lineWidth = Math.max(1, rb * 0.04);
+          ctx.beginPath();
+          ctx.arc(0, 0, ra * 1.14, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+      }
       // ── Lightweight gnat render (Stage 4 perf): a die-on-contact gnat (Swarm)
       // appears in large clouds, so it skips the full ship treatment (flame
       // plume + cached body gradient + core eye + per-frame radial gradients) —
@@ -4910,6 +4931,27 @@ export class RenderSystem {
                   const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
                   if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
               }
+              break;
+          }
+          case 'talon': {
+              // (h) boss hull — a forward-raked twin-prong warship: two long
+              // claws reaching past a notched prow, with a broad swept body and
+              // a flared tail.  Deliberately bigger and more predatory in
+              // outline than any rank-and-file silhouette.
+              ctx.moveTo(r * 1.05, -r * 0.30);           // upper claw tip
+              ctx.lineTo(r * 0.34, -r * 0.16);           // claw root
+              ctx.lineTo(r * 0.46, 0);                   // prow notch
+              ctx.lineTo(r * 0.34, r * 0.16);
+              ctx.lineTo(r * 1.05, r * 0.30);            // lower claw tip
+              ctx.lineTo(r * 0.22, r * 0.62);            // starboard shoulder
+              ctx.lineTo(-r * 0.42, r * 0.92);           // starboard wingtip
+              ctx.lineTo(-r * 0.58, r * 0.34);
+              ctx.lineTo(-r * 0.95, r * 0.20);           // tail flare
+              ctx.lineTo(-r * 0.78, 0);
+              ctx.lineTo(-r * 0.95, -r * 0.20);
+              ctx.lineTo(-r * 0.58, -r * 0.34);
+              ctx.lineTo(-r * 0.42, -r * 0.92);          // port wingtip
+              ctx.lineTo(r * 0.22, -r * 0.62);           // port shoulder
               break;
           }
           case 'triangle':

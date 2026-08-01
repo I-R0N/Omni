@@ -32,7 +32,16 @@ const App: React.FC = () => {
     // Initialize Engine
     const engine = new GameEngine((newStats) => {
         setStats(newStats);
+        // Debug handle for the live stats payload — same rationale as
+        // __omniEngine below.
+        (window as any).__omniStats = newStats;
     }, difficultyRef.current);
+
+    // Debug handle.  The game already ships a full in-game DBG menu (pause →
+    // Debug Menu), so the engine is deliberately reachable from the console
+    // too: it is what the headless smoke scripts drive, and it costs one
+    // assignment.  Read/poke at your own risk — nothing in the game reads it.
+    (window as any).__omniEngine = engine;
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -327,6 +336,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugSpawnRival(disposition);
   };
 
+  const handleSpawnBoss = (id: string) => {
+      if (engineRef.current) engineRef.current.debugSpawnBoss(id);
+  };
+
   const handlePerfRecToggle = () => {
       if (engineRef.current) engineRef.current.perfRecToggle();
   };
@@ -495,6 +508,7 @@ const App: React.FC = () => {
         onAddCredits={handleAddCredits}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
+        onSpawnBoss={handleSpawnBoss}
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}
