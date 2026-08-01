@@ -24,7 +24,7 @@ edited here.
 - [x] **M5** — Phase 3 Pair C: controller/joystick, then menu help
 - [x] **M6** — Polish batch: palette residual + map composition + minimap
       faithfulness + NPC station traffic (the optional item — NOT cut)
-- [ ] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
+- [x] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
 - [ ] **M8** — Performance pass (measure first, PR #69/#70 methodology)
 - [ ] **M9** — Visual quality pass
 - [ ] **M10** — Mechanical quality pass + final validation
@@ -244,6 +244,46 @@ its own position, exactly as the snitch and dragon head do.
 the table, which is more legible but also means the ring COUNT is no
 longer derived from `RING_COUNT`. If someone wants nine rings they edit
 the table, not a constant — intended, but worth knowing.
+
+### Iteration 7 — 2026-08-01 — M7: economy & progression tuning
+
+Driven by a scripted auto-pilot harness (`measure-economy.mjs`) that runs
+real 2-minute sessions and reports credits/minute, kills, waves and
+time-to-afford. Everything below is measured, not estimated.
+
+**BEFORE / AFTER (same harness, same pilot, ~80s of sim per run)**
+
+| | before | after |
+|---|---|---|
+| arena income | 37,808 /min | 5,651 /min |
+| hub income | 5,185 /min | 1,432 /min |
+| income split (combat / terrain) | 22 % / 78 % | ≈55 % / 45 % |
+| time to Hull Mk I (arena) | 6 s | 42 s |
+| time to Cannon (arena) | 1.6 min | 10.6 min |
+| full hull repair | 5 s of income | 32 s of income |
+| whole catalog | ≈3 min | ≈60 min |
+
+**Changed**
+
+- `CREDITS_PER_DROP` 1000 → 100. One constant instead of re-pricing 25
+  modules; the price curve is deliberate and readable, so income moved.
+- `SALVAGE_DROP_CHANCE_ASTEROID` 0.45 → 0.28,
+  `_DENT_SHARD` 0.85 → 0.55, `_ENEMY_PRIMARY` 0.55 → 0.85,
+  `_ENEMY_SECONDARY` 0.25 → 0.55, plus a new
+  `SALVAGE_UNITS_PER_ENEMY_TIER` (2) making enemy drops tier-scaled.
+- `WAVE_CLEAR_DROPS` 3 → 10, `SNITCH_CATCH_DROPS` 8 → 30,
+  `BOSS_CONSTANTS.SALVAGE_DROPS` 36 → 90 — all re-sized against the
+  MEASURED ≈35 units/wave of combat income, which the old comments
+  predated (they assumed 4.8-7.2).
+- `resaleValue` + the inventory snapshot now price off `modulePrice()`.
+- `DEATH_PENALTY_CYCLE` + `applyDeathPenalty` + the DBG "Death cost" row.
+
+**Reviewed and deliberately NOT changed** — see the decisions below for
+each: per-wave enemy growth, weapon-weight numbers, resale fractions,
+Mk trade-in.
+
+**Validation**: build green; new 21-assertion economy smoke passing; the
+before/after measured twice with the harness.
 
 ---
 
@@ -476,6 +516,10 @@ below.
 
 _(anything provisional or needing a human ruling)_
 
+> **M7 note:** the provisional-number table below was M7's own input. Rows
+> marked ✔ were revisited and set against measured data in iteration 7;
+> unmarked rows were reviewed and deliberately left.
+
 ### Provisional numbers introduced in M1 (all named in constants, all for M7)
 
 | Constant | Value | Note |
@@ -483,7 +527,7 @@ _(anything provisional or needing a human ruling)_
 | `BOSS_CONSTANTS.WAVE_INTERVAL` | 5 | boss every 5th wave |
 | `BOSS_CONSTANTS.COMPANION_BUDGET_FRAC` | 0.55 | boss-wave normal spawn budget |
 | `BOSS_CONSTANTS.SCORE` | 2500 | on top of tier kill points |
-| `BOSS_CONSTANTS.SALVAGE_DROPS` | 36 | ≈3× the wave-clear spray |
+| `BOSS_CONSTANTS.SALVAGE_DROPS` | ✔ 36 → 90 | re-sized against measured per-wave income |
 | `BOSS_CONSTANTS.DISCOUNT_PER_KILL` / `_MAX` | 0.05 / 0.25 | shop discount |
 | `BOSS_SCATTER` health / size / speed | 130 / 76 / 6.2 | first-pass boss stats |
 | `BOSS_WEAPONS.SCATTER` damage / count | 5 / 7 | 35 on a full cone |
@@ -596,6 +640,83 @@ plan's (decision #36e).
 
 **Revert**: delete `STATION_TRAFFIC`, the two engine methods and the
 `seedStationTraffic()` call in `loadMap`.
+
+### M7-D1 — income moved, not prices
+
+**Chosen**: `CREDITS_PER_DROP` 1000 → 100.
+
+**Alternatives**: (a) multiply all 25 module costs by ~10 — same effect,
+25 edits, and it turns a clean curve (4,000 / 10,000 / 18,000) into
+ugly numbers; (b) leave it and accept that the catalog is a three-minute
+shopping trip. **Revert**: one constant.
+
+### M7-D2 — enemy salvage is tier-scaled
+
+**Chosen**: `spawnSalvageDrop` gained a `units` parameter; enemy kills
+pass `SALVAGE_UNITS_PER_ENEMY_TIER × enemyTier`.
+
+**Why**: the measured 22/78 combat/terrain split meant the optimal
+strategy was to ignore the enemies the game is about. Raising the enemy
+drop *chances* alone couldn't fix it (they cap at 2 drops per kill), and
+cutting terrain to nothing would have contradicted the material-sim
+guardrail — materials SHOULD be worth something. Scaling by tier fixes
+the ratio and adds a legible incentive: fight the hard thing.
+
+**Revert**: drop the `units` argument (defaults to 1) and the constant.
+
+### M7-D3 — the resale money pump (a real exploit, closed)
+
+**Found**: purchases were discounted by the boss bonus, sell-back was
+priced off FULL catalog cost. At the 25 % cap: buy at 0.75 × cost, sell
+at 0.90 × cost → **+15 % of cost per cycle, infinitely repeatable**.
+
+**This corrects M1-D3 in this log**, which asserted the arithmetic was
+safe. It wasn't — I compared the sell fraction against the discount
+instead of against the discounted price.
+
+**Fixed**: `resaleValue` and the inventory snapshot both price off
+`modulePrice()`. The invariant is now smoke-asserted at 0/5/15/25 %
+discount rather than argued about in prose.
+
+### M7-D4 — death penalty: four candidates, mildest default
+
+**Chosen**: `none` (today's free respawn) ships as the default; `repair`,
+`tithe` (25 %) and `uninsured` (all) are live DBG choices.
+
+**Why this shape**: the plan reserves the severity for a human, and the
+gauntlet's own rule is "implement the MILDEST candidate behind a
+DBG-cycle knob with all candidates selectable". `repair` is deliberately
+priced with `STATION_CONSTANTS.REPAIR_COST_PER_HP` rather than a fresh
+number — that guarantees dying is never cheaper than the repair it
+skipped, which is the exact inversion decision #40a warns about. Every
+mode clamps at held credits and keeps the run going.
+
+### M7-D5 — enemy growth vs module power: measured, unchanged
+
+**Analysis**: enemy HP +6 %/wave capped 2.5× and damage +4 %/wave capped
+2.0×, both caps landing at wave 25. Against that, ~25 min of arena
+income (≈141,000) buys roughly Hull Mk III + Gunnery Mk III + Autoloader
+Mk II + Cannon: ≈2× DPS and 1.75× effective HP. Player power and enemy
+power track each other closely, and because the enemy caps at wave 25
+while purchases continue, the player ends with the "comfortable lead"
+the constants already aim for. **No change** — the right outcome of a
+tuning pass is sometimes a confirmation.
+
+### M7-D6 — weapon weight and resale fractions: reviewed, unchanged
+
+Weapon weight spans 1.10× (weaponless) to ≈0.76× (Cannon + Homing), but
+a realistic 2-gun loadout sits in 0.80-0.88×, so the live spread is
+~10 % — present as a trade, not punishing. Resale at 90 % is generous
+but suits a game whose whole progression is rearranging modules;
+scrap at 9 % is the intended field penalty. Both left alone.
+
+### M7-D7 — Mk trade-in NOT implemented
+
+The milestone says to build it "only if buy-sell-buy is clunky in play —
+otherwise log". With sell-back at 90 % of current price, upgrading Hull
+Mk I → Mk II is: tap the tile, Sell, tap Mk II, Buy — two clicks in the
+same panel, net 6,400 vs 10,000 direct. Not clunky. **Logged, not
+built.**
 
 ### Open for a human ruling
 
