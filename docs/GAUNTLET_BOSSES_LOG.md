@@ -72,7 +72,7 @@ could not ask about)_
 
 - [x] **B1** — Capstone scheduling + boss chassis (cadence hook, boss
       archetype base, poise, intro rift + banner, model-(d) payout, DBG rows)
-- [ ] **B2** — First weapon-boss + `evasive` trait
+- [x] **B2** — First weapon-boss + `evasive` trait
 - [ ] **B3** — Second weapon-boss + `front-shield` and `regen` traits
 - [ ] **B4** — Presentation + validation pass (bosses only)
 
@@ -191,3 +191,67 @@ completion, and a hub with no bosses.
 - `debugSpawnBoss` stacks bosses; `bossStatsSnapshot` shows only the
   most-wounded one. Fine for DBG, but if a design ever wants two live
   bosses the HUD needs a list, not a single bar.
+
+### Iteration 2 — 2026-08-01 — B2: REAVER + the evasive trait
+
+**Shipped** (commit `a978ed9`):
+
+- `BOSS_WEAPONS.SCATTER` — spreads `WEAPONS[WeaponType.SHOTGUN]` and
+  overrides the enemy-facing numbers (§6 weapon parity, no parallel
+  table); `EnemySubtype.BOSS_SCATTER` + the `'talon'` hull; the
+  archetype row (weapon, 0.45s telegraph, lighter poise than the
+  Warden); ENEMY_ROLE / ENEMY_BEHAVIOR rows; the 3-phase `BOSS_DEFS`
+  entry; `BOSS_ROTATION` now cycles Warden → Reaver.
+- `EnemyTraitSet.evasive` + `GameEntity.evasive` / `dodgeTimer` +
+  `AISystem.applyEvasiveDodge` + `AISystem.traitsEnabled` (mirrored by
+  `GameEngine.toggleTraits`); `ai.update` now receives the projectile
+  index; `WaveSystem.buildEnemy` stamps it; `applyBossPhase` re-stamps
+  and clears it per phase.
+- `RenderSystem`: the `'talon'` hull. `UIOverlay`: the DBG Reaver row.
+- CLAUDE.md updated in the SAME commit (§5 roster + the ENEMY_TRAITS
+  evasive paragraph).
+
+**Validation**: build green; `tsc --noEmit` unchanged (two pre-existing
+errors). B1's smoke re-run, still 50/50. New B2 smoke: **30 assertions,
+all pass**.
+
+**Decisions taken** (alternatives considered):
+
+- **D6 — Shotgun was the right first weapon-boss**, as the brief's
+  default suggested. It pairs with `evasive` in the way §7 wants: a cone
+  is the weapon that *forgives* juking, so a shotgun boss that jukes
+  teaches the trait by inversion (it does to you what your own shotgun
+  would do to it). Alternative considered: a Lightning boss — deferred
+  to B3's slot precisely because chains ignore dodging, which would
+  have made the trait invisible in its introducing fight.
+- **D7 — the evasive dodge is blind to homing, deliberately.** §7 names
+  the Seeker as "the designated answer". Alternatives: dodge homing too
+  but at reduced impulse (makes the Seeker merely better, not the
+  answer), or reduce damage from straight shots (a fudge, not a dodge —
+  and it would double-count with armor). Chose the literal reading:
+  the trait cannot see homing shots at all.
+- **D8 — one juke per cooldown, and cones/chains are unaffected by
+  construction.** Lightning arcs never exist as travelling projectiles,
+  so they need no special case to keep connecting. A shotgun cone lands
+  because the boss can only step out of one pellet's line. Both fall
+  out of the design rather than being special-cased — worth noting
+  because a naive "reduce incoming accuracy" implementation would have
+  needed exceptions for both.
+- **D9 — Reaver's phase-3 escort is KAMIKAZE, not SWARM.** The Warden
+  already ends on a swarm escort; reusing it would make the two
+  capstones' finales read the same. Bombers also suit a brawler that
+  wants you at close range.
+- **D10 — poise is tuned lighter on the Reaver** (`stunDamage` 9 /
+  `knockScale` 0.3, vs the Warden's 12 / 0.12). It is a duellist, not a
+  fortress; a real hit should still rock it. Provisional.
+
+**Watches**:
+
+- The evasive impulse (7.5) is applied as a raw velocity add, so it is
+  NOT mass-scaled — a lighter enemy given this trait later would juke
+  proportionally harder. Fine for the one boss that has it; worth a
+  mass divisor if the trait spreads to rank-and-file enemies.
+- Reaver phase 2 stacks a tracking arc shield ON TOP of evasion. That is
+  two soft counters at once and could read as frustrating; the flank
+  answer still works, and the arc slew (2.4 rad/s) is beatable. Flagged
+  for the B4 playthrough.
