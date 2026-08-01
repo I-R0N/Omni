@@ -21,7 +21,7 @@ edited here.
 - [x] **M2** — (h) Bosses: second boss + `front-shield` / `regen` traits
 - [x] **M3** — Phase 3 Pair A: death/completion screen + stat legibility
 - [x] **M4** — Phase 3 Pair B: SFX, then explosion variety
-- [ ] **M5** — Phase 3 Pair C: controller/joystick, then menu help
+- [x] **M5** — Phase 3 Pair C: controller/joystick, then menu help
 - [ ] **M6** — Polish batch: palette residual + map composition + minimap
       faithfulness (optional: NPC station traffic — first to cut)
 - [ ] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
@@ -182,6 +182,36 @@ against the game running. The M9 coherence pass should re-check levels
 with everything firing at once — the likeliest problem is that
 `hitEnemy` at 0.10 gain is still too present during a sustained
 Burst-Rifle stream.
+
+### Iteration 5 — 2026-08-01 — M5: gamepad + controls reference
+
+**Shipped** (commit `73ab607`):
+
+- `GAMEPAD_CONSTANTS` (deadzone / move curve / aim radius / trigger
+  threshold / standard-layout button indices).
+- `InputSystem.pollGamepad()` + `takeCycleRequests()` + `takeKeyEdges()` +
+  `gamepadId`; pad state folded into `getMovementVector` /
+  `getMousePosition` / the fire queues / `isKeyDown`.
+- `GameEngine.pollGamepad()` — per-frame service, connection announcement,
+  and the Escape / Q / shoulder edge drain.
+- `EngineStats.gamepad`; the shared `renderControls()` panel in both the
+  main menu (collapsible) and the pause screen.
+- CLAUDE.md updated in the same commit (§2 layout, §8 two new notes).
+
+**Validation**: build green; new 22-assertion smoke against a stubbed
+Gamepad API, all passing; M1-M4 smokes re-run and still green.
+
+**A real bug the smoke caught**: pause was polled via `isKeyDown` once
+per rendered frame, and a genuine `Escape` tap is often shorter than a
+frame — so presses were silently dropped. Fixed by recording press
+EDGES in `handleKeyDown` and draining them, which also unified the
+keyboard and pad paths.
+
+**Watches**: the pad's aim holds its last heading when the right stick
+re-centres (rather than snapping to the mouse). That is the right feel
+for a twin-stick, but it means a player who switches from pad back to
+mouse mid-run keeps the pad heading until they move the mouse. Minor;
+noted for M10.
 
 ---
 
@@ -434,8 +464,62 @@ _(anything provisional or needing a human ruling)_
 | `SFX_DEFS` (23 rows) | see constants | every gain/duration is first-pass |
 | `EXPLOSION_PROFILES` (8 rows) | see constants | counts bounded by the M8 perf pass |
 | `EXPLOSION_HEAVY_MASS` | 16 | catches Tank/Bulwark/Turret/Nest |
+| `GAMEPAD_CONSTANTS` | deadzone 0.22, aim radius 240, trigger 0.4 | untested on real hardware |
+
+### M5-D1 — the right stick synthesises a cursor instead of setting rotation
+
+**Chosen**: the pad's right stick writes `mousePosition` at a fixed
+radius from screen centre; the existing aim line reads it.
+
+**Why**: it means ONE aim path serves mouse, touch and pad, and the
+charge ring / aim telegraph / minimap all keep working with zero
+changes. **Alternative**: a separate `padAimAngle` consumed by a new
+branch in `updatePlayerMovement` — more direct, but it forks the aim
+code and every future aim feature has to remember the fork exists.
+
+**Revert**: delete the `padAim` block in `pollGamepad`.
+
+### M5-D2 — pad buttons map to virtual KEY CODES
+
+**Chosen**: interact is `'KeyE'` and pause is `'Escape'`, pushed into
+the same sets/queues the keyboard feeds.
+
+**Why**: CLAUDE.md's standing rule is that stations and portals share
+the E key and any new proximity interactable must join the nearest-wins
+arbitration rather than adding a second handler. Mapping the pad to the
+same code keeps that rule true for free; a separate `padInteract`
+boolean would have needed a second check at every latch.
+
+### M5-D3 — key edges are queued, not polled
+
+**Chosen**: `handleKeyDown` records press edges; edge-triggered actions
+drain them.
+
+**Why**: correctness — a sub-frame tap was being dropped (found by the
+smoke). It also means adding a new edge action is one `case` in the
+drain rather than another `xHeld` latch field.
+
+**Revert**: replace the drain with `isKeyDown` + per-action latches
+(and reintroduce the dropped-tap bug).
+
+### M5-D4 — Escape and Q became real keyboard bindings
+
+**Chosen**: the edge drain handles both devices, so keyboard players
+gained Esc (pause/resume) and Q (cycle weapon).
+
+**Why**: the milestone asks for a help panel covering keyboard, and the
+keyboard genuinely had no pause or cycle binding — the panel would have
+had two "—" cells for actions the pad could do. Small scope addition,
+logged here rather than assumed.
 
 ### Open for a human ruling
+
+- **The gamepad is untested on real hardware.** The smoke drives a
+  stubbed Gamepad API, which verifies our polling and mapping but not
+  any actual controller's axis ranges, button indices or deadzone
+  behaviour. The mapping assumes the W3C Standard Gamepad layout, which
+  most modern pads report. Worth one pass with a physical pad before
+  ship.
 
 - **Audio settings don't persist.** Volume/mute reset every page load,
   because this game deliberately has no storage layer (CLAUDE.md §1,
