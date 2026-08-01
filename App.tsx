@@ -12,13 +12,15 @@ const App: React.FC = () => {
     fps: 0,
     entityCount: 0,
     currentMapName: 'Initializing',
-    currentMapType: MapType.UNIVERSE,
+    currentMapType: MapType.OVERWORLD,
     currentWeapon: 'Blaster',
     gameState: GameState.MENU,
     difficulty: 3
   });
   const [difficulty, setDifficulty] = useState<number>(3);
-  const [mapType, setMapType] = useState<MapType>(MapType.UNIVERSE);
+  // Menu default mirrors the engine's: a run starts on the Overworld hub
+  // (roadmap step (k)); the grid stays a direct-start override.
+  const [mapType, setMapType] = useState<MapType>(MapType.OVERWORLD);
   // Mirror difficulty into a ref so the one-shot mount effect below can
   // read the latest value without closing over stale state.
   const difficultyRef = useRef(difficulty);
@@ -362,6 +364,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.undock();
   };
 
+  const handleEnterPortal = () => {
+      if (engineRef.current) engineRef.current.enterPortal();
+  };
+
   const handleRepairHull = () => {
       if (engineRef.current) engineRef.current.repairHull();
   };
@@ -497,6 +503,7 @@ const App: React.FC = () => {
         onSellModule={handleSellModule}
         onScrapModule={handleScrapModule}
         onDock={handleDock}
+        onEnterPortal={handleEnterPortal}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}
         onGrantWeapon={handleGrantWeapon}

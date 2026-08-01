@@ -66,7 +66,15 @@ engine/
                           PlasticFieldMap, MetalFieldMap,
                           IndestructibleFieldMap, NebulaFieldMap)
                           sharing the abstract
-                          SingleVariantTileFieldMap base
+                          SingleVariantTileFieldMap base.  BaseMapLayer
+                          also owns the portal factory
+                          (addPortal / addReturnPortal)
+    MapDescriptors.ts     MAP_DESCRIPTORS registry — the thin typed map
+                          layer portals + transitions reference (stable
+                          id, name, MapType, kind, wavesEnabled) plus
+                          mapDescriptor() / descriptorForMapType() /
+                          HUB_DESCRIPTOR.  Wraps the MapType plumbing;
+                          does NOT replace it
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
     InputSystem.ts        Keyboard/mouse/touch state.  Pointer gestures
@@ -128,12 +136,39 @@ Construction:
 
 1. `new GameEngine(onStatsUpdate, difficulty)` wires every subsystem, builds
    the player entity, and calls `loadMap(buildMap(selectedMapType))`.
+   `selectedMapType` defaults to `HUB_DESCRIPTOR.mapType` — a run starts
+   on the OVERWORLD hub (roadmap step (k)).
 2. `initCanvas(ctx)` hands the renderer its 2D context.
 3. `start()` kicks the rAF loop.
 
 State transitions (driven by `UIOverlay` callbacks): `startGame()` /
 `pauseGame()` / `resumeGame()` / `restartGame()`. `setMapType(MapType)` is
 only honored from the main menu; mid-game requires `restartGame()`.
+
+**Map loading comes in two flavours** (roadmap step (k)).  Both share
+`loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
+— and differ only in what they layer on top:
+
+- `resetAndLoadSelectedMap()` (new run: menu start / restart / mid-game
+  map switch) adds the RUN-SCOPED reset — credits, outfit
+  (`resetOutfit()`), score + combo, hull/shield refill, status effects,
+  camera zoom, and the per-run counters (`snitchCatchCount`,
+  `dragonsKilled`, `nextRivalScore`).
+- `transitionToMap(descriptorId)` (portal travel) adds NOTHING of the
+  sort — that is the whole point.  Run state CARRIES: credits, score
+  (+ `displayScore`), `shipSlots` / `weaponSlots` / `inventory`, owned +
+  equipped weapons, and the player's CURRENT hull.  Hull damage crossing
+  a portal is deliberate: repairing at a station is the loop.  It then
+  re-inits WaveSystem from the DESTINATION descriptor's `wavesEnabled`,
+  re-seeds ambient bubbles, and fires the arrival `openPortal` burst.
+  Combat leftovers (shield timers, status effects, HUD messages) clear.
+  Wave progress is FRESH per entry — `WaveSystem.init` zeroes
+  `waveIndex`, so leaving an arena abandons the ladder; there is NO
+  per-map run state.
+
+Death is unchanged by (k): `respawnPlayer()` still refills at the current
+map's spawn.  A death penalty / return-to-hub-on-death is owned by the
+economy tuning pass, not here.
 
 Per-frame `loop()`:
 
@@ -176,12 +211,18 @@ Per-frame `loop()`:
         burst/coast AI + flow-field steering, comet-tail emission,
         catch check (collide/shoot per DBG toggle), wave-end on catch
         (the snitch entity persists across waves)
-     5b. `updateStationDocking()` — one O(1) torus-wrapped distance to
-        the station POI + the E-key edge check; stamps
-        `stationDockReady` (the world-space dock-halo affordance) and
-        flips `dockedAtStation` on dock.  Followed by the Overworld
-        roaming-dragon keeper (auto-respawn on `OVERWORLD_CONSTANTS`
-        timers; OVERWORLD map only).
+     5b. `updateInteractables()` — the two E-key POIs in one pass: a
+        handful of O(1) torus-wrapped distances to the station POIs
+        (`DOCK_RANGE`) and the map portals (`USE_RANGE`), ARBITRATED BY
+        NEAREST so only one wins.  Stamps `stationDockReady` /
+        `portalReady` (the world-space halo affordances) on the winner
+        only, and on the shared E-key edge either docks
+        (`dockedAtStation`) or travels (`enterPortal()` →
+        `transitionToMap`).  A portal entry swaps the map IN PLACE from
+        here — every later step in the same substep re-reads
+        `currentMap`, so the rest of the step runs against the
+        destination.  Followed by the Overworld roaming-dragon keeper
+        (auto-respawn on `OVERWORLD_CONSTANTS` timers; OVERWORLD only).
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
         same-type drop merge pass (`DropSystem.mergeDrops`;
         `dropMerge` task)
@@ -282,6 +323,14 @@ Notable existing field categories on `GameEntity`:
   STATION_VARIANTS services/name/colour), `stationDockReady` (stamped
   per step by the dock proximity check; drives the render-side dock
   halo)
+- Map portal: `isPortal` (portal entities — the SAME recipe as the
+  station: INTERACTABLE + mass ∞ + no dropType, so broadphase / static
+  grid / flow-field obstacles all skip them), `portalTargetId` (the
+  destination's MAP-DESCRIPTOR ID — never a bare MapType; `name` carries
+  the destination's display name for the world-space tag),
+  `portalReady` (stamped per step by the interaction check when this
+  portal wins the nearest-in-range arbitration; drives the render-side
+  entry halo)
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
   `shieldRechargeTimer`/`shieldHitFlash`, `ownedWeapons`/
   `equippedWeapons` (the 2-slot loadout — see §5 WEAPONS note),
@@ -655,6 +704,28 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
+- `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
+  map portals (roadmap step (k)): rift size / colours (violet out, sky
+  home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
+  burst.  `HUB_PORTAL_SITES` places one rift per full-game arena on the
+  Overworld (targets are DESCRIPTOR IDS, and the map's existing
+  clearance filter drops terrain seeded on top of them);
+  `RETURN_PORTAL_OFFSET` places each arena's single return rift relative
+  to its `playerSpawn`, inside the spawn safe zone those maps already
+  clear.  `USE_RANGE` sits just under the station's `DOCK_RANGE` so the
+  shared-E nearest-wins arbitration has a clear winner at the boundary.
+  `INDICATOR_RANGE` gates the off-screen chevron: a portal is a FIXED
+  landmark, so its arrow only appears once the player is within range,
+  and inside that range it is PERSISTENT (exempt from the
+  chevrons-offscreen-only suppression) and labelled with the
+  destination name.  Because the chevron is range-gated, the MINIMAP is
+  how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
+  ANOMALY — a spinning colour-filled diamond with an expanding radar
+  ping — and, like an enemy blip, it CLAMPS to the minimap border when
+  out of range instead of being culled the way other POI dots are.  The
+  fill carries the portal colour, so an outbound rift (violet) and a
+  return rift (sky) read differently at a glance.
+  Showcase maps get NO portals — they stay menu-only.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -700,6 +771,21 @@ and `DIFFICULTY_STAT_SCALES`.
 
 ## 6a. Maps
 
+Every map is named by a row in the **`MAP_DESCRIPTORS` registry**
+(`engine/maps/MapDescriptors.ts`) — a THIN typed layer of stable string
+ids over the MapType plumbing (roadmap step (k), strategy guardrail #3).
+A descriptor carries exactly five fields, all with live consumers:
+`id` (portal targets + `transitionToMap`), `name` (portal tag + entry
+affordance), `mapType` (what `buildMap` instantiates), `kind`
+(`'hub' | 'arena'` — `HUB_DESCRIPTOR` is where a run starts and where
+every return portal leads), and `wavesEnabled` (handed straight to
+`WaveSystem.init`; the engine's `wavesEnabled` getter reads it, so the
+registry is the ONE source of truth for which maps run waves).
+Descriptors WRAP the MapType keying — `PLAYER_MOVEMENT_CONFIG` and
+`MAP_POPULATION` stay `Record<MapType, …>`.  Deliberately absent: any
+procedural parameter, per-map persistent world state, or spawn table.
+Destroyed tiles do NOT persist across re-entry.
+
 Two families of maps live in `engine/maps/MapClasses.ts`, all subclasses
 of `BaseMapLayer`:
 
@@ -708,13 +794,17 @@ of `BaseMapLayer`:
   `PocketMap` (`POCKET`). These mix
   asteroids, structures (multiple variants), and nebulae and are the
   ones a normal play session uses.  The **Overworld** is the WAVE-FREE
-  home map (increment 1e): `WaveSystem.init(ctx, enabled=false)` — no
+  home HUB (increment 1e): `WaveSystem.init(ctx, enabled=false)` — no
   waves, no snitch; population is the ambient systems (bubbles, score-
-  cadence rivals, an engine-respawned roaming dragon) plus THREE station
-  POIs (HOME at center + SHIPWRIGHT + ARMORY at OVERWORLD_STATIONS
-  offsets; cluster counts read from `MAP_POPULATION` — the
-  authoritative pattern).  Player spawns beside the home station,
-  inside dock range.
+  cadence rivals, an engine-respawned roaming dragon) plus FOUR station
+  POIs (HOME at center + SHIPWRIGHT + ARMORY + TRADE HUB at
+  OVERWORLD_STATIONS offsets; cluster counts read from `MAP_POPULATION`
+  — the authoritative pattern) and FOUR map PORTALS at
+  `HUB_PORTAL_SITES`, one per arena.  Player spawns beside the home
+  station, inside dock range.  The other four full-game maps are the
+  portal-linked ARENAS: each calls `addReturnPortal()` at the end of its
+  `init()` (after its spawn-clearance filter, so the rift isn't swept
+  up) for the always-active way home.
 - **Single-element 6 000 × 6 000 showcase maps** — `AsteroidFieldMap`
   (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`),
   `PlasticFieldMap` (`PLASTIC_FIELD`), `MetalFieldMap` (`METAL_FIELD`),
@@ -738,10 +828,13 @@ of `BaseMapLayer`:
   hardcode their per-variant ratios in their `MapClasses` subclass.
 
 Engine plumbing for adding a map: register the `MapType` value in
-`types.ts`, add the subclass in `MapClasses.ts`, switch on it in
-`GameEngine.buildMap()`, add per-map config in `constants.ts`
-(`PLAYER_MOVEMENT_CONFIG`, `MAP_POPULATION`), and add the menu
-button in `UIOverlay.tsx`.
+`types.ts`, add a row to `MAP_DESCRIPTORS` in `MapDescriptors.ts`, add
+the subclass in `MapClasses.ts`, switch on it in `GameEngine.buildMap()`,
+add per-map config in `constants.ts` (`PLAYER_MOVEMENT_CONFIG`,
+`MAP_POPULATION`), and add the menu button in `UIOverlay.tsx`.  To make
+it portal-reachable as well, add a `HUB_PORTAL_SITES` entry pointing at
+its descriptor id and call `this.addReturnPortal()` at the end of its
+`init()` — showcase maps skip both and stay menu-only.
 
 ---
 
@@ -1013,6 +1106,22 @@ button in `UIOverlay.tsx`.
   shop, `repairHull` the repair service — all REJECT while undocked),
   and `pauseGame()` is a no-op while docked (one full-screen overlay at
   a time).
+- **The map portal POI follows the station's recipe exactly** (roadmap
+  step (k)).  `EntityType.INTERACTABLE` + no `dropType` + `mass:
+  Infinity` → broadphase, static grid, and flow-field obstacle bake all
+  skip it; minimap dot, off-screen chevron, and `handleAsteroidRespawn`
+  avoidance come free from the same POI paths.  A NEW portal type is a
+  descriptor row + a placement entry, never a new entity category.
+  Portal state lives on `GameEngine` (`portals` / `nearestPortal`),
+  cached in `loadMap` beside `stations`.  Two rules to keep:
+  (1) **Destinations are descriptor IDS, not MapType values** —
+  `portalTargetId` is what the future overworld phase will reuse.
+  (2) **Stations and portals share the E key**, so any new
+  proximity-interactable must join `updateInteractables`' nearest-wins
+  arbitration rather than adding a second E handler — otherwise two
+  affordances fight over one key.  The idle rift is pure render-side
+  animation (zero particle cost); `openPortal` only fires on an actual
+  transit.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
   collapsible section) — the old floating top-left DBG button/panel is
   gone.  The 'Overlays' row inside is the old master toggle (renderer

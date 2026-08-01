@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1454,7 +1454,14 @@ export class RenderSystem {
             const halfSize = Math.max(entity.size.x, entity.size.y) * 0.5;
             const onScreen = rx >= camX - halfW - halfSize && rx <= camX + halfW + halfSize
                           && ry >= camY - halfH - halfSize && ry <= camY + halfH + halfSize;
-            this._indicatorBuffer.push({ entity, distSq, onScreen });
+            // Map portals are RANGE-GATED (roadmap step (k)): a rift is a
+            // fixed landmark, so a chevron for one across the map is noise
+            // rather than navigation.  Gate the INDICATOR only — the portal
+            // keeps its minimap dot at every distance (the pushes below are
+            // deliberately left alone).
+            const farPortal = entity.isPortal === true
+                && distSq > PORTAL_CONSTANTS.INDICATOR_RANGE * PORTAL_CONSTANTS.INDICATOR_RANGE;
+            if (!farPortal) this._indicatorBuffer.push({ entity, distSq, onScreen });
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
@@ -3852,6 +3859,103 @@ export class RenderSystem {
                 ctx.fillText(entity.name ?? 'STATION', 0, r + 24);
                 ctx.globalAlpha = 1.0;
 
+            } else if (entity.type === EntityType.INTERACTABLE && entity.isPortal) {
+                // ── Map portal (roadmap step (k)) ─────────────────────────
+                // A persistent rift in the flat-shape language: counter-
+                // rotating arc rings around a dark event horizon, with a
+                // slow breathing pulse.  All animation is render-side
+                // (nowSec) — the entity is static, mass-∞ scenery, and the
+                // idle rift costs NO particles (the openPortal burst only
+                // fires on an actual transit).
+                const r = entity.size.x / 2;
+                const breathe = 0.85 + 0.15 * Math.sin(nowSec * 1.6);
+                const spin = nowSec * 0.5;
+
+                // Entry-available halo at the use radius, pulsing while the
+                // player is in range and this portal won the arbitration —
+                // the world-space half of the "press E" affordance (mirrors
+                // the station's dock halo).
+                if (entity.portalReady) {
+                    const pulse = 0.5 + 0.5 * Math.sin(nowSec * 3.2);
+                    ctx.globalAlpha = 0.10 + pulse * 0.12;
+                    ctx.strokeStyle = entity.color;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, PORTAL_CONSTANTS.USE_RANGE, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Outward bloom — the rift bleeding light into the field.
+                const bloomR = r * 2.1 * breathe;
+                const [pr, pg, pb] = hexToRgb(entity.color);
+                const bloom = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, bloomR);
+                bloom.addColorStop(0, `rgba(${pr}, ${pg}, ${pb}, 0.45)`);
+                bloom.addColorStop(1, `rgba(${pr}, ${pg}, ${pb}, 0)`);
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
+                // Event horizon — a dark disc so the rift reads as a hole,
+                // not a light source.
+                ctx.globalAlpha = 0.92;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
+                ctx.fillStyle = '#0b0616';
+                ctx.fill();
+
+                // Rim of the event horizon — a hard bright edge so the hole
+                // reads against a busy nebula backdrop.
+                ctx.globalAlpha = 0.9;
+                ctx.strokeStyle = entity.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Counter-rotating arc rings — three broken arcs per ring,
+                // spinning opposite ways, which reads as a vortex.  The
+                // inner ring gets a white highlight pass so the swirl stays
+                // legible at gameplay zoom.
+                for (let ring = 0; ring < 2; ring++) {
+                    const rr = r * (ring === 0 ? 0.78 : 1.0);
+                    const dir = ring === 0 ? 1 : -1;
+                    for (let i = 0; i < 3; i++) {
+                        const a0 = spin * dir + (i / 3) * Math.PI * 2;
+                        const a1 = a0 + Math.PI * 0.44;
+                        ctx.globalAlpha = ring === 0 ? 1.0 : 0.7;
+                        ctx.strokeStyle = entity.color;
+                        ctx.lineWidth = ring === 0 ? 6 : 3.5;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, rr, a0, a1);
+                        ctx.stroke();
+                        if (ring === 0) {
+                            ctx.globalAlpha = 0.85;
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 1.6;
+                            ctx.beginPath();
+                            ctx.arc(0, 0, rr, a0, a1);
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                // Hot core — the throat of the rift, breathing.
+                ctx.globalAlpha = 0.55 + 0.35 * breathe;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.2 * breathe, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+
+                // Destination tag — the portal always says where it goes.
+                ctx.globalAlpha = 0.95;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 13px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`↝ ${(entity.name ?? '').toUpperCase()}`, 0, r + 26);
+                ctx.globalAlpha = 1.0;
+
             } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {
                 // ── Snitch — golden comet core ────────────────────────────
                 // The tail is the gold trail strip + sparkle motes emitted by
@@ -5043,18 +5147,31 @@ export class RenderSystem {
       // Limit drawing counts per type to avoid clutter, but keep sorted draw order
       let enemiesDrawn = 0;
       let poisDrawn = 0;
+      let portalsDrawn = 0;
 
       for (let i = 0; i < targets.length; i++) {
           const item = targets[i];
           const t = item.entity;
+          const isPortal = t.isPortal === true;
 
           // Offscreen-only mode: the player can already see an on-screen
           // entity, so its chevron is redundant clutter — skip it.
-          if (this.chevronsOffscreenOnly && item.onScreen) continue;
+          // PORTALS ARE EXEMPT: their arrow is already range-gated to
+          // PORTAL_CONSTANTS.INDICATOR_RANGE, and inside that range it is a
+          // deliberate, labelled navigation cue that should stay on screen
+          // while the player lines up the approach.
+          if (this.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
 
           if (t.type === EntityType.ENEMY) {
               if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
               enemiesDrawn++;
+          } else if (isPortal) {
+              // Portals get their OWN budget rather than competing with the
+              // stations for MAX_VISIBLE.  The buffer is sorted farthest-
+              // first, so on the hub (4 stations) a nearby portal would
+              // otherwise be the one starved out of the shared cap.
+              if (portalsDrawn >= MAX_VISIBLE) continue;
+              portalsDrawn++;
           } else {
               if (poisDrawn >= MAX_VISIBLE) continue;
               poisDrawn++;
@@ -5110,16 +5227,36 @@ export class RenderSystem {
           ctx.lineWidth = 1;
           ctx.stroke();
 
-          // Distance Text (only if far)
+          // Label under the arrow.  A portal always names its DESTINATION —
+          // the chevron is how the player picks which rift to fly to, so an
+          // unlabelled arrow would be ambiguous the moment two are in range.
+          // Distance text keeps its existing far-only rule and stacks below.
           const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
+          const showDist = item.distSq > threshold;
+          const portalName = isPortal ? (t.name ?? '') : '';
 
-          if (item.distSq > threshold) {
+          if (showDist || portalName) {
                ctx.rotate(-angle);
-               ctx.fillStyle = 'rgba(255,255,255,0.7)';
-               ctx.font = '10px monospace';
                ctx.textAlign = 'center';
-               const d = Math.round(dist);
-               ctx.fillText(`${d}m`, 0, 24);
+               let ty = 24;
+               if (portalName) {
+                   // Chevrons at similar bearings crowd the same arc of the
+                   // indicator ring, so the destination name is outlined to
+                   // stay readable when it lands on a neighbour's label.
+                   const label = portalName.toUpperCase();
+                   ctx.font = 'bold 10px monospace';
+                   ctx.lineWidth = 3;
+                   ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                   ctx.strokeText(label, 0, ty);
+                   ctx.fillStyle = t.color;
+                   ctx.fillText(label, 0, ty);
+                   ty += 12;
+               }
+               if (showDist) {
+                   ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                   ctx.font = '10px monospace';
+                   ctx.fillText(`${Math.round(dist)}m`, 0, ty);
+               }
           }
 
           ctx.restore();
@@ -5363,6 +5500,69 @@ export class RenderSystem {
               ctx.fillStyle = entity.color;
               ctx.beginPath();
               ctx.arc(centerX + ex, centerY + ey, blip.RADIUS, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.globalAlpha = 1;
+              continue;
+          }
+
+          if (entity.isPortal === true) {
+              // ── Portal anomaly contact ────────────────────────────────
+              // The chevron is range-gated now, so the minimap is how a
+              // portal gets FOUND.  Two consequences, both handled here:
+              // it clamps to the border instead of being culled when it
+              // falls outside the minimap range (same trick as enemy
+              // blips), and it draws as a spinning diamond with a radar
+              // ping expanding out of it so it can't be mistaken for the
+              // station dots sharing the map.
+              const pb = MINIMAP_CONSTANTS.PORTAL_BLIP;
+              let ex = item.dx * scale;
+              let ey = item.dy * scale;
+              const pExtent = Math.max(Math.abs(ex), Math.abs(ey));
+              const pClampHalf = currentSize / 2 - pb.EDGE_INSET;
+              const pClamped = pExtent > pClampHalf;
+              if (pClamped) {
+                  const f = pClampHalf / pExtent;
+                  ex *= f; ey *= f;
+              }
+              const px = centerX + ex;
+              const py = centerY + ey;
+              const baseAlpha = pClamped ? pb.CLAMPED_ALPHA_MULT : 1;
+              const nowMs = performance.now();
+              // Ping phase 0→1; the ring expands and fades over each cycle.
+              const ping = (nowMs / 1000 * pb.PULSE_HZ) % 1;
+
+              // Expanding radar ping.
+              ctx.globalAlpha = baseAlpha * pb.RING_ALPHA * (1 - ping);
+              ctx.strokeStyle = entity.color;
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.arc(px, py, pb.RING_MIN + (pb.RING_MAX - pb.RING_MIN) * ping, 0, Math.PI * 2);
+              ctx.stroke();
+
+              // Slowly-rotating diamond contact — geometric, so it reads
+              // as an anomaly against the round dots around it.
+              const spin = nowMs / 1000 * pb.SPIN_HZ * Math.PI * 2;
+              ctx.globalAlpha = baseAlpha;
+              ctx.translate(px, py);
+              ctx.rotate(spin);
+              ctx.beginPath();
+              ctx.moveTo(0, -pb.RADIUS);
+              ctx.lineTo(pb.RADIUS, 0);
+              ctx.lineTo(0, pb.RADIUS);
+              ctx.lineTo(-pb.RADIUS, 0);
+              ctx.closePath();
+              ctx.fillStyle = entity.color;
+              ctx.fill();
+              ctx.strokeStyle = `rgba(255,255,255,${pb.OUTLINE_ALPHA})`;
+              ctx.lineWidth = pb.OUTLINE_WIDTH;
+              ctx.stroke();
+              ctx.rotate(-spin);
+              ctx.translate(-px, -py);
+
+              // Hot centre pip.
+              ctx.beginPath();
+              ctx.arc(px, py, pb.CORE_RADIUS, 0, Math.PI * 2);
+              ctx.fillStyle = '#ffffff';
               ctx.fill();
               ctx.globalAlpha = 1;
               continue;

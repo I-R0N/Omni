@@ -17,10 +17,11 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -195,7 +196,13 @@ export class GameEngine {
   // Map the next restart / initial load should build.  Updated from the
   // main-menu map-style buttons so the UI-selected map survives the
   // restartGame() path (which re-instantiates the map class from scratch).
-  private selectedMapType: MapType = MapType.UNIVERSE;
+  // A new run starts on the HUB (roadmap step (k) decision): the player
+  // spawns dock-adjacent at the home station and takes a portal out to an
+  // arena, so the intended loop — earn → outfit → fight → return — is the
+  // default path.  The main menu's map grid stays a direct-start override
+  // (testing + the showcase maps); direct-starting an arena just skips the
+  // hub, and run-state carry works identically either way.
+  private selectedMapType: MapType = HUB_DESCRIPTOR.mapType;
 
   // Debug mode
   private debugMode: boolean = false;
@@ -322,7 +329,14 @@ export class GameEngine {
   private dockedStation: GameEntity | null = null;
   private dockedAtStation: boolean = false;
   private dockInRange: boolean = false;
-  private dockKeyHeld: boolean = false; // E-key edge detector (dock + undock)
+  private dockKeyHeld: boolean = false; // E-key edge detector (dock + undock + portal)
+  // Map portals (roadmap step (k)) — cached at map load exactly like the
+  // stations, and checked with the same proximity pattern.  Stations and
+  // portals SHARE the E key: `updateInteractables` arbitrates by nearest
+  // in-range, so at most one of `nearestStation` / `nearestPortal` is set
+  // on any step and the affordance always names the action it will take.
+  private portals: GameEntity[] = [];
+  private nearestPortal: GameEntity | null = null; // nearest in use range this step
   // Overworld roaming dragon — first spawn shortly after run start, then a
   // fresh rift a while after the previous dragon dies or leaves.
   private overworldDragonTimer: number = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
@@ -1488,11 +1502,18 @@ export class GameEngine {
     }
   }
 
-  /** Reset all run state and load a fresh copy of `selectedMapType`.
-   *  Shared by restartGame() (→ MENU) and the mid-game map switch in
-   *  setMapType() (→ PLAYING).  Leaves gameState untouched; the caller
-   *  decides the target state and pushes the frame. */
-  private resetAndLoadSelectedMap() {
+  /** Tear down MAP-SCOPED state and load a fresh copy of `type`.
+   *
+   *  Everything cleared here rebuilds for the new map on EVERY path —
+   *  a new run and a portal transition alike: the per-map entity list
+   *  and the caches keyed to it (shards, perf tiers, drops, wave
+   *  announcements, damage text), and the roamers whose entities die
+   *  with the old map (snitch / dragons / rivals).  RUN-SCOPED state
+   *  (credits, outfit, score, hull, and the per-run counters that ride
+   *  alongside them) is deliberately NOT touched — resetAndLoadSelectedMap
+   *  resets that on top; transitionToMap preserves it.  That split is
+   *  what makes run state carry across a portal (decision #39d). */
+  private loadMapFresh(type: MapType) {
       this.shards.reset();
       this.perfController.reset();
       this.activeDrops = [];
@@ -1500,33 +1521,59 @@ export class GameEngine {
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
       this.waveAnnouncements = [];
+      this.damageTexts = [];
       // Snitch entity dies with the old map's entity list — just drop the
-      // reference so the next wave spawns a fresh one.
+      // reference so the next wave spawns a fresh one.  The per-run CATCH
+      // COUNT (which ramps snitch speed) is run state and stays.
       this.snitch = null;
       this.snitchTime = 0;
-      this.snitchCatchCount = 0;
       this.dragons = []; // die with the old map's entity list
-      this.dragonsKilled = 0; // reset the doubling payout per run
-      this.rivals = []; // rival ships die with the old map
-      this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
-      // Station / docking state — the station entity itself is rebuilt with
-      // the map (loadMap re-finds it); the overworld dragon timer restarts
-      // its first-spawn countdown.
+      this.rivals = [];  // rival ships die with the old map
+      // Station / docking / portal state — the POI entities themselves are
+      // rebuilt with the map (loadMap re-finds them); the overworld dragon
+      // timer restarts its first-spawn countdown.
       this.dockedAtStation = false;
       this.dockInRange = false;
       this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
-      this.loadMap(this.buildMap(this.selectedMapType));
+      this.loadMap(this.buildMap(type));
+  }
+
+  /** Park the player (and the camera) at the freshly-loaded map's declared
+   *  spawn point, dropping the motion state that belongs to the old map.
+   *  Hull / shield / outfit are untouched — the callers decide those. */
+  private placePlayerAtSpawn() {
+      const spawn = this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
+      this.player.position = { ...spawn };
+      this.player.velocity = { x: 0, y: 0 };
+      this.player.trail = [];
+      this.trailEmitAccumulator = 0;
+      this.wasThrustingLastFrame = false;
+      this.chainBreakPending = false;
+      this.camera.position = { ...spawn };
+      this.shakeTimer = 0;
+      this.camera.shakeOffset = { x: 0, y: 0 };
+  }
+
+  /** Reset all run state and load a fresh copy of `selectedMapType`.
+   *  Shared by restartGame() (→ MENU) and the mid-game map switch in
+   *  setMapType() (→ PLAYING).  Leaves gameState untouched; the caller
+   *  decides the target state and pushes the frame. */
+  private resetAndLoadSelectedMap() {
+      this.loadMapFresh(this.selectedMapType);
+
+      // ── Run-scoped reset — the half a portal transition SKIPS ──────────
+      // Per-run counters that ride with the score/economy rather than with
+      // the map: the snitch speed ramp, the doubling dragon payout, and the
+      // score-cadence rival warp-ins.
+      this.snitchCatchCount = 0;
+      this.dragonsKilled = 0;
+      this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
       this.resetOutfit(); // back to lean (bare hexes, empty inventory, Blaster on W1)
 
-      // Reset Player — at the map's declared spawn point (the Overworld
-      // spawns the player beside the station rather than at the origin).
-      const spawn = this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
-      this.player.position = { ...spawn };
-      this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
@@ -1538,17 +1585,95 @@ export class GameEngine {
       this.comboCount = 0;
       this.comboTimer = 0;
       this._livePointsPopup = null;
-      this.player.trail = [];
-      this.trailEmitAccumulator = 0;
-      this.wasThrustingLastFrame = false;
-      this.chainBreakPending = false;
-      this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
-
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
-      this.camera.position = { ...spawn };
-      this.shakeTimer = 0;
-      this.camera.shakeOffset = { x: 0, y: 0 };
+
+      // Reset Player — at the map's declared spawn point (the Overworld
+      // spawns the player beside the station rather than at the origin).
+      this.placePlayerAtSpawn();
+  }
+
+  // ── Map portals (roadmap step (k)) ──────────────────────────────────────
+
+  /**
+   * Travel to the map named by `descriptorId`, PRESERVING run state.
+   *
+   * This is loadMap + state preservation, not a new lifecycle: it runs the
+   * same per-map rebuild `loadMapFresh` gives a new run (dimensions +
+   * listeners, static grid, flow fields, background layer, minimap/static
+   * tile bakes, station + portal caches, PerfController) and then re-inits
+   * WaveSystem from the DESTINATION descriptor's `wavesEnabled`.  What it
+   * does NOT do is the run-scoped reset: credits, score, the module slots
+   * and inventory, owned weapons, and the player's CURRENT hull all ride
+   * along untouched.  Hull damage carrying is the point — repairing at a
+   * station is the loop (decision #39d).
+   *
+   * Wave progress is FRESH per entry by construction: `initWaveSystem` →
+   * `WaveSystem.init` zeroes waveIndex, so leaving an arena abandons the
+   * ladder and re-entering starts at wave 1.  No per-map run state exists.
+   */
+  public transitionToMap(descriptorId: string): boolean {
+      const dest = mapDescriptor(descriptorId);
+      if (!dest) return false;
+      // Transit is a live-flight action: not from the menu, not while the
+      // station UI has the sim frozen, not mid-death-explosion.
+      if (this.gameState !== GameState.PLAYING) return false;
+      if (this.dockedAtStation || this.player.isExploding) return false;
+
+      // Departure burst at the rift the player is leaving through — fired
+      // before the load so it plays against the map being left.
+      this.openPortal(this.player.position, {
+          color: PORTAL_CONSTANTS.COLOR,
+          radius: PORTAL_CONSTANTS.BURST_RADIUS,
+          duration: PORTAL_CONSTANTS.BURST_DURATION,
+      });
+
+      // NOTE: `selectedMapType` is deliberately NOT updated.  It means
+      // "the map a NEW RUN builds" — set by the menu's map grid — and a
+      // portal is travel within a run, not a new selection.  So restarting
+      // after a portal trip returns to the player's chosen start map (the
+      // hub by default) rather than stranding the next run in an arena.
+      this.loadMapFresh(dest.mapType);
+      this.placePlayerAtSpawn();
+      // Combat state belongs to the fight left behind: shield resumes its
+      // normal recharge and lingering debuffs (corrosion DoT / EMP) drop.
+      // Hull damage does NOT — that's the carry.
+      this.player.shieldRechargeTimer = 0;
+      this.player.shieldHitFlash = 0;
+      this.player.statusEffects = [];
+      this.playerMessages = [];
+
+      // Waves per the DESTINATION descriptor — enabled in an arena, off in
+      // the hub — and the always-present ambient fauna for the new map.
+      this.initWaveSystem();
+      this.seedAmbientBubbles();
+
+      // Arrival burst at the destination spawn.
+      this.openPortal(this.player.position, {
+          color: PORTAL_CONSTANTS.COLOR,
+          radius: PORTAL_CONSTANTS.BURST_RADIUS,
+          duration: PORTAL_CONSTANTS.BURST_DURATION,
+      });
+      this.pushPlayerMessage(dest.name.toUpperCase(), PORTAL_CONSTANTS.COLOR);
+
+      this.prepareFrameEntities();
+      // Accumulator hygiene — the map load is wall-clock work; don't
+      // integrate it as simulated time (mirrors resumeGame / undock).
+      // Called from inside the substep loop, the pending decrement takes
+      // this one step negative, which simply drops a single sim step
+      // across the load hitch — the right answer for a stall.
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
+      return true;
+  }
+
+  /** Enter the portal the interaction check picked this step (nearest
+   *  in-range, arbitrated against the stations).  Routed from the E key
+   *  and the HUD affordance. */
+  public enterPortal(): boolean {
+      const p = this.nearestPortal;
+      if (!p || !p.active || !p.portalTargetId) return false;
+      return this.transitionToMap(p.portalTargetId);
   }
 
   public restartGame() {
@@ -1658,6 +1783,7 @@ export class GameEngine {
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
       dock: this.dockStatsSnapshot(),
+      portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
       weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
       debugMode: this.debugMode,
@@ -2638,10 +2764,12 @@ export class GameEngine {
     this.updateDragons(dt);
     this.updateRivals(dt);
 
-    // Station docking (Overworld) — one O(1) torus-wrapped distance to the
-    // fixed station point + the E-key edge check.  No scan, no
-    // PerfController task needed.
-    this.updateStationDocking();
+    // Station docking + portal travel — a handful of O(1) torus-wrapped
+    // distances to fixed POI points + the shared E-key edge check.  No
+    // scan, no PerfController task needed.  A portal entry swaps the map
+    // in place from here; everything below re-reads `currentMap`, so the
+    // rest of this step runs against the destination.
+    this.updateInteractables();
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
     // leaves (the timer re-arms while a dragon is up).
@@ -3303,30 +3431,63 @@ export class GameEngine {
 
   // ── Space station docking (economy-pivot 1e; multi-station) ──────────────
 
-  /** Per-sim-step dock check: find the nearest station in DOCK_RANGE
-   *  (tiny fixed list — the Overworld has 3), stamp the world-space
-   *  affordance onto it, and dock on the E-key edge.  Runs only while
-   *  PLAYING and undocked (the docked branch lives in the loop's freeze
-   *  short-circuit). */
-  private updateStationDocking() {
-    let nearest: GameEntity | null = null;
-    let nearestD2 = Infinity;
-    const r2 = STATION_CONSTANTS.DOCK_RANGE * STATION_CONSTANTS.DOCK_RANGE;
+  /** Per-sim-step interaction check for the two E-key POIs: stations
+   *  (dock) and map portals (travel).  Both lists are tiny and fixed —
+   *  the Overworld has 4 stations + 4 portals, an arena has 1 portal — so
+   *  this is a handful of O(1) torus-wrapped distances per step, no scan
+   *  and no PerfController task.
+   *
+   *  Stations and portals share the E key, so the two candidates are
+   *  ARBITRATED BY NEAREST: whichever is closer wins, and only the winner
+   *  gets its `*Ready` flag stamped.  That gives exactly one world-space
+   *  halo, exactly one HUD affordance, and an affordance that always names
+   *  the action E will take.  Runs only while PLAYING and undocked (the
+   *  docked branch lives in the loop's freeze short-circuit). */
+  private updateInteractables() {
+    const blocked = this.player.isExploding;
+
+    let station: GameEntity | null = null;
+    let stationD2 = Infinity;
+    const dockR2 = STATION_CONSTANTS.DOCK_RANGE * STATION_CONSTANTS.DOCK_RANGE;
     for (let i = 0; i < this.stations.length; i++) {
         const s = this.stations[i];
-        if (!s.active) continue;
+        s.stationDockReady = false;
+        if (!s.active || blocked) continue;
         const dx = wrapDeltaX(s.position.x, this.player.position.x);
         const dy = wrapDeltaY(s.position.y, this.player.position.y);
         const d2 = dx * dx + dy * dy;
-        const inRange = d2 <= r2 && !this.player.isExploding;
-        s.stationDockReady = inRange;
-        if (inRange && d2 < nearestD2) { nearest = s; nearestD2 = d2; }
+        if (d2 <= dockR2 && d2 < stationD2) { station = s; stationD2 = d2; }
     }
-    this.nearestStation = nearest;
-    this.dockInRange = nearest !== null;
+
+    let portal: GameEntity | null = null;
+    let portalD2 = Infinity;
+    const useR2 = PORTAL_CONSTANTS.USE_RANGE * PORTAL_CONSTANTS.USE_RANGE;
+    for (let i = 0; i < this.portals.length; i++) {
+        const p = this.portals[i];
+        p.portalReady = false;
+        if (!p.active || blocked) continue;
+        const dx = wrapDeltaX(p.position.x, this.player.position.x);
+        const dy = wrapDeltaY(p.position.y, this.player.position.y);
+        const d2 = dx * dx + dy * dy;
+        if (d2 <= useR2 && d2 < portalD2) { portal = p; portalD2 = d2; }
+    }
+
+    // Nearest wins.  Ties (and the both-null case) fall to the station
+    // branch, preserving the pre-portal behaviour exactly.
+    if (station && portal) {
+        if (portalD2 < stationD2) station = null; else portal = null;
+    }
+    this.nearestStation = station;
+    this.nearestPortal = portal;
+    this.dockInRange = station !== null;
+    if (station) station.stationDockReady = true;
+    if (portal) portal.portalReady = true;
 
     const eDown = this.input.isKeyDown('KeyE');
-    if (this.dockInRange && eDown && !this.dockKeyHeld) this.dockAtStation();
+    if (eDown && !this.dockKeyHeld) {
+        if (portal) this.enterPortal();
+        else if (station) this.dockAtStation();
+    }
     this.dockKeyHeld = eDown;
   }
 
@@ -3380,6 +3541,20 @@ export class GameEngine {
         docked: this.dockedAtStation,
         name: variant?.name ?? s?.name,
         services: variant ? { ...variant.services } : undefined,
+    };
+  }
+
+  /** Portal state for EngineStats: the in-range rift the E key would take,
+   *  or undefined when a station won the nearest-in-range arbitration (or
+   *  nothing is in range).  Exactly one of `dock.inRange` / `portal` is
+   *  ever truthy, so the HUD offers a single unambiguous affordance. */
+  private portalStatsSnapshot() {
+    const p = this.nearestPortal;
+    if (!p || !p.portalTargetId) return undefined;
+    return {
+        name: p.name ?? mapDescriptor(p.portalTargetId)?.name ?? 'UNKNOWN',
+        targetId: p.portalTargetId,
+        isReturn: p.portalTargetId === HUB_DESCRIPTOR.id,
     };
   }
 
@@ -6010,11 +6185,13 @@ export class GameEngine {
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.
-  /** True when the active map runs wave gameplay.  The OVERWORLD is the
-   *  wave-free home map (station + ambient fauna only) — WaveSystem is
-   *  initialised disabled there, exactly like difficulty "None". */
+  /** True when the active map runs wave gameplay.  Read straight off the
+   *  map descriptor (roadmap step (k)) so the registry is the ONE source
+   *  of truth: the OVERWORLD hub is the wave-free home map — WaveSystem
+   *  is initialised disabled there, exactly like difficulty "None" — and
+   *  every arena runs waves.  Unregistered maps default to enabled. */
   private get wavesEnabled(): boolean {
-    return this.currentMap?.type !== MapType.OVERWORLD;
+    return descriptorForMapType(this.currentMap?.type)?.wavesEnabled ?? true;
   }
 
   private initWaveSystem() {
@@ -6144,12 +6321,16 @@ export class GameEngine {
       assertPolygonsUnaliased(map.entities, map.name);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
-      // Cache the station POIs (Overworld only; empty elsewhere) so the
-      // per-step dock proximity check iterates a tiny fixed list.
+      // Cache the station POIs (Overworld only; empty elsewhere) and the
+      // map portals (the hub's rifts out, an arena's single rift home) so
+      // the per-step interaction check iterates two tiny fixed lists.
       this.stations = map.entities.filter(e => e.isStation);
+      this.portals = map.entities.filter(e => e.isPortal);
       this.dockedStation = null;
       this.dockedAtStation = false;
       this.dockInRange = false;
+      this.nearestStation = null;
+      this.nearestPortal = null;
   }
 
   private draw() {
