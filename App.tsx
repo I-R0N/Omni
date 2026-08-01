@@ -336,6 +336,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugSpawnRival(disposition);
   };
 
+  const handleRespawn = () => {
+      if (engineRef.current) engineRef.current.respawnFromDeath();
+  };
+
   const handleSpawnBoss = (id: string) => {
       if (engineRef.current) engineRef.current.debugSpawnBoss(id);
   };
@@ -509,6 +513,7 @@ const App: React.FC = () => {
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
         onSpawnBoss={handleSpawnBoss}
+        onRespawn={handleRespawn}
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}

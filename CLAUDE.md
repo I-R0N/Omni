@@ -47,8 +47,9 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
-                          UI, dock affordance; debug panel lives inside
-                          the pause menu)
+                          UI, dock affordance, boss bar, death screen /
+                          run summary; debug panel lives inside the
+                          pause menu)
 
 engine/
   GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
@@ -142,8 +143,21 @@ Construction:
 3. `start()` kicks the rAF loop.
 
 State transitions (driven by `UIOverlay` callbacks): `startGame()` /
-`pauseGame()` / `resumeGame()` / `restartGame()`. `setMapType(MapType)` is
-only honored from the main menu; mid-game requires `restartGame()`.
+`pauseGame()` / `resumeGame()` / `restartGame()` / `respawnFromDeath()`.
+`setMapType(MapType)` is only honored from the main menu; mid-game
+requires `restartGame()`.
+
+**Death is a state, not a silent respawn** (Phase 3 Pair A).  When the
+player's wreck finishes burning the engine enters `GameState.GAME_OVER`
+— the loop's `gameState !== PLAYING` early-out already freezes the sim
+and keeps drawing the static frame — and `EngineStats.runSummary` (score
+/ waves / kills / salvage earned + held / bosses / run time, all
+run-scoped counters) drives the death screen.  From there
+`respawnFromDeath()` puts the player back at the current map's spawn
+with the ENTIRE run intact (the old free-respawn behaviour, now behind
+an explicit choice) and `restartGame()` ends the run.  Attaching a COST
+to the respawn is the economy pass's call (plan decision #40a, the
+salvage death penalty) — `respawnFromDeath` is the hook.
 
 **Map loading comes in two flavours** (roadmap step (k)).  Both share
 `loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
@@ -1211,6 +1225,19 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   compile-time only, so a smoke can read internals through the handle
   without widening any API.  There is still **no test runner**; smokes
   are ad-hoc scripts, not a checked-in suite.
+- **Per-module stat attribution is DERIVED, never hand-written.**
+  `moduleContributions(def)` (constants) turns a `ModuleDef`'s own
+  `effect` — plus a gun's `weight`, which drags thrust — into
+  `{key, text}` pairs in the shared `ModuleStatKey` vocabulary, and
+  `outfittingSnapshot` puts them on every installed hex
+  (`OutfitSlotSnapshot.contrib`).  The pause menu's Ship Status renders
+  one row per key and lights the rows the selected hex feeds.  Because
+  the attribution reads the same `effect` object `applyModuleEffects`
+  sums, the panel cannot drift from the simulation; a new
+  `ModuleEffect` field needs a `moduleContributions` line and a row, or
+  it moves something invisible.  INACTIVE modules still report their
+  contributions — rendered struck through, which is what makes a failed
+  adjacency read as a cost.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through

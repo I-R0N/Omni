@@ -2527,6 +2527,43 @@ export interface ModuleDef {
   effect?: ModuleEffect;
 }
 
+// ── Derived-stat attribution (Phase 3 stat-legibility) ──────────────────────
+// The pause menu's Ship Status shows the FULL derived-stat set, and tapping a
+// hex highlights the stats that module feeds.  `MODULE_STAT_KEYS` is the shared
+// vocabulary between `applyModuleEffects` (which sums the effects) and the UI
+// (which renders the rows) — one list so a new ModuleEffect field can't be
+// added without a row to show it in.
+export type ModuleStatKey =
+  | 'hull' | 'shield' | 'shieldRegen' | 'damage' | 'fireRate'
+  | 'speed' | 'thrust' | 'overcharge';
+
+/**
+ * What a module contributes, as `{key, text}` pairs the UI can render verbatim
+ * and match against a stat row.  Derived straight from the def's `effect` (and
+ * a gun's `weight`), so attribution can never drift from what
+ * `applyModuleEffects` actually sums.  Returns [] for a module with no effect.
+ */
+export function moduleContributions(def: ModuleDef): { key: ModuleStatKey; text: string }[] {
+  const out: { key: ModuleStatKey; text: string }[] = [];
+  const e = def.effect;
+  const pct = (f: number) => `${f > 0 ? '+' : ''}${Math.round(f * 100)}%`;
+  if (e) {
+    if (e.maxHp)           out.push({ key: 'hull',        text: `+${e.maxHp} max hull` });
+    if (e.shieldCore)      out.push({ key: 'shield',      text: `enables shields (${SHIELD_CONSTANTS.MAX_CHARGE} base)` });
+    if (e.maxShield)       out.push({ key: 'shield',      text: `+${e.maxShield} max shield` });
+    if (e.shieldRegenFrac) out.push({ key: 'shieldRegen', text: `${pct(e.shieldRegenFrac)} shield regen` });
+    if (e.damageFrac)      out.push({ key: 'damage',      text: `${pct(e.damageFrac)} weapon damage` });
+    if (e.cooldownFrac)    out.push({ key: 'fireRate',    text: `${pct(e.cooldownFrac)} faster cadence` });
+    if (e.speedFrac)       out.push({ key: 'speed',       text: `${pct(e.speedFrac)} top speed` });
+    if (e.accelFrac)       out.push({ key: 'thrust',      text: `${pct(e.accelFrac)} thrust` });
+    if (e.overcharge)      out.push({ key: 'overcharge',  text: 'enables charged shots' });
+  }
+  // A mounted gun's WEIGHT is a real (negative) contribution to thrust — the
+  // trade heavier weapons make.  Showing it is the point of the panel.
+  if (def.weight) out.push({ key: 'thrust', text: `−${def.weight} weight (drags thrust)` });
+  return out;
+}
+
 export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
 export const MAX_INSTALLED_GUNS = 2;  // gun COUNT limit in the weapon group (slot-agnostic)
 export const INVENTORY_CAPACITY = 12; // inventory tile count (future ships vary this)

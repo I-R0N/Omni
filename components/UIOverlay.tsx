@@ -51,6 +51,7 @@ interface UIOverlayProps {
   onPause?: () => void;
   onResume?: () => void;
   onRestart?: () => void;
+  onRespawn?: () => void;
   onToggleDebug?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
@@ -166,6 +167,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPause,
   onResume,
   onRestart,
+  onRespawn,
   onToggleDebug,
   onCycleTrailShape,
   onCycleTrailEmitMode,
@@ -1606,16 +1608,91 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
+      {/* ── Death screen / run summary (Phase 3 Pair A) ──────────────
+          The sim is frozen in GAME_OVER (the gameState early-out in the
+          loop), so the wreck sits on a static frame behind this.  Pure
+          presentation over EngineStats.runSummary — the engine keeps the
+          tallies either way. */}
+      {stats.gameState === GameState.GAME_OVER && (() => {
+        const r = stats.runSummary;
+        const mm = Math.floor((r?.timeSec ?? 0) / 60);
+        const ss = (r?.timeSec ?? 0) % 60;
+        const row = (label: string, value: React.ReactNode, accent = 'text-white') => (
+          <div className="flex justify-between items-baseline gap-4 py-1.5 border-b border-slate-700/40 last:border-0">
+            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className={`${accent} font-bold tabular-nums text-lg`}>{value}</span>
+          </div>
+        );
+        return (
+          <div className="absolute inset-0 bg-slate-950/88 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+            <div className="w-full max-w-md flex flex-col gap-5 my-auto">
+              <div className="text-center">
+                <h2 className="text-4xl font-black text-rose-400 tracking-[0.3em]">HULL LOST</h2>
+                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">{r?.mapName}</p>
+              </div>
+
+              <div className="bg-slate-900/70 border border-slate-700/50 rounded-xl px-4 py-3">
+                {row('Score', (r?.score ?? 0).toLocaleString(), 'text-amber-300')}
+                {row('Waves cleared', r?.wavesCleared ?? 0)}
+                {row('Kills', r?.kills ?? 0)}
+                {r !== undefined && r.bossesKilled > 0 && row('Bosses', r.bossesKilled, 'text-rose-300')}
+                {row('Salvage earned', `◈ ${(r?.creditsEarned ?? 0).toLocaleString()}`, 'text-slate-200')}
+                {row('Salvage held', `◈ ${(r?.creditsHeld ?? 0).toLocaleString()}`, 'text-slate-200')}
+                {row('Time', `${mm}:${String(ss).padStart(2, '0')}`)}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={onRespawn}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest"
+                >
+                  RESPAWN
+                </button>
+                <button
+                  onClick={onRestart}
+                  className="bg-slate-800 hover:bg-red-700 text-slate-300 hover:text-white font-bold py-2.5 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest text-sm"
+                >
+                  END RUN
+                </button>
+                <p className="text-slate-600 text-[10px] text-center mt-1">
+                  Respawn keeps your outfit, salvage and score. Ending the run clears them.
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Player Menu (pause) ── */}
       {stats.gameState === GameState.PAUSED && (() => {
         const ps = stats.playerStats;
         const fmtMult = (m: number | undefined) => `×${(m ?? 1).toFixed(2)}`;
-        const statLine = (label: string, value: React.ReactNode) => (
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-400">{label}</span>
-            <span className="text-white font-bold tabular-nums">{value}</span>
-          </div>
-        );
+        // The INSTALLED module currently selected in a hex flower, if any —
+        // its `contrib` list is what highlights the Ship Status rows below.
+        const selStatMod = (selSlot && selSlot.g !== 'inventory')
+          ? (stats.outfitting?.[selSlot.g]?.[selSlot.i] ?? null) : null;
+        const statRowAttr = (key: string, label: string, value: React.ReactNode) => {
+          const hit = selStatMod?.contrib.filter(c => c.key === key) ?? [];
+          const lit = hit.length > 0;
+          return (
+            <div className={`flex justify-between gap-2 items-baseline py-1 rounded px-1.5 -mx-0.5 transition-colors ${
+              lit ? (selStatMod!.active ? 'bg-sky-500/15' : 'bg-rose-500/10') : ''}`}>
+              <span className={lit ? (selStatMod!.active ? 'text-sky-200' : 'text-rose-300') : 'text-slate-400'}>
+                {label}
+                {hit.map((c, i) => (
+                  <span
+                    key={i}
+                    className={`ml-2 text-[10px] ${selStatMod!.active
+                      ? 'text-sky-400' : 'text-rose-400/70 line-through'}`}
+                  >
+                    {c.text}
+                  </span>
+                ))}
+              </span>
+              <span className="text-white font-bold tabular-nums shrink-0">{value}</span>
+            </div>
+          );
+        };
         return (
         <div
           /* No justify-center: on a scrollable flex column it clips
@@ -1646,15 +1723,43 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </button>
             </div>
 
-            {/* Ship status */}
+            {/* Ship status — the FULL derived-stat set with per-module
+                attribution (stat legibility, Phase 3 Pair A).  Selecting a
+                hex above highlights the rows that module feeds and lists its
+                contribution inline; an OFFLINE module's contributions show
+                struck through, which is what makes a failed adjacency read
+                as a cost rather than a shrug. */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
-              <div className="flex flex-col gap-1 text-xs">
-                {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
-                {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
-                {statLine('Damage', fmtMult(ps?.damageMult))}
-                {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
-                {statLine('Speed', fmtMult(ps?.speedMult))}
+              <div className="flex items-baseline justify-between mb-2 gap-2 flex-wrap">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Ship Status</h3>
+                {selStatMod
+                  ? <span className={`text-[10px] uppercase tracking-widest font-bold ${selStatMod.active ? 'text-sky-300' : 'text-rose-400'}`}>
+                      {selStatMod.label}{selStatMod.active ? '' : ' — offline'}
+                    </span>
+                  : <span className="text-slate-600 text-[10px]">tap a hex to trace a stat</span>}
+              </div>
+              <div className="flex flex-col text-xs">
+                {statRowAttr('hull', 'Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
+                {statRowAttr('shield', 'Shield', (ps?.maxShield ?? 0) > 0
+                  ? `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`
+                  : <span className="text-slate-500">no shield core</span>)}
+                {statRowAttr('shieldRegen', 'Shield regen', (ps?.maxShield ?? 0) > 0
+                  ? `${(ps?.shieldRegen ?? 0).toFixed(1)} /s`
+                  : <span className="text-slate-500">—</span>)}
+                {statRowAttr('damage', 'Damage', fmtMult(ps?.damageMult))}
+                {statRowAttr('fireRate', 'Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
+                {statRowAttr('speed', 'Top speed', fmtMult(ps?.speedMult))}
+                {statRowAttr('thrust', 'Thrust', <>
+                  {fmtMult(ps?.thrustMult)}
+                  {(ps?.gunWeight ?? 0) > 0 && (
+                    <span className="text-slate-500 font-normal ml-1.5 text-[10px]">
+                      ({ps!.gunWeight} gun weight)
+                    </span>
+                  )}
+                </>)}
+                {statRowAttr('overcharge', 'Charged shots', ps?.overcharge
+                  ? <span className="text-emerald-300">enabled</span>
+                  : <span className="text-slate-500">no Overcharge</span>)}
               </div>
             </div>
 

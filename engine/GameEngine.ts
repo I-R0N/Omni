@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, moduleContributions } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -323,6 +323,17 @@ export class GameEngine {
   private bossDiscount = 0;   // 0..BOSS_CONSTANTS.DISCOUNT_MAX
   private bossesKilled = 0;
   private liveBoss: GameEntity | null = null;
+
+  // ── Run summary (Phase 3 Pair A — death screen) ───────────────────────────
+  // Run-scoped tallies the death screen reports.  All reset with the rest of
+  // the run state in resetAndLoadSelectedMap and all CARRY across portal
+  // transitions, exactly like credits and score.  `runCreditsEarned` is
+  // cumulative income (credits is the spendable balance), `runSeconds` is
+  // sim time so a pause or a station visit doesn't inflate it.
+  private runKills = 0;
+  private runWavesCleared = 0;
+  private runCreditsEarned = 0;
+  private runSeconds = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
   // The station lives on the OVERWORLD map (found by isStation at map load).
@@ -1417,15 +1428,7 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
-      playerStats: this.gameState === GameState.PAUSED ? {
-        health: Math.max(0, Math.round(this.player.health)),
-        maxHealth: this.player.maxHealth,
-        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
-        maxShield: this.player.maxShield ?? 0,
-        damageMult: this.player.damageMult ?? 1,
-        cooldownMult: this.player.cooldownMult ?? 1,
-        speedMult: this.moduleSpeedMult,
-      } : undefined,
+      playerStats: this.gameState === GameState.PAUSED ? this.playerStatsSnapshot() : undefined,
       outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
@@ -1584,6 +1587,11 @@ export class GameEngine {
       this.bossDiscount = 0;
       this.bossesKilled = 0;
       this.liveBoss = null;
+      // Run-summary tallies (Phase 3 Pair A) reset with the run they describe.
+      this.runKills = 0;
+      this.runWavesCleared = 0;
+      this.runCreditsEarned = 0;
+      this.runSeconds = 0;
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
@@ -1698,6 +1706,23 @@ export class GameEngine {
       this.prepareFrameEntities();
   }
 
+  /**
+   * Death screen → RESPAWN (Phase 3 Pair A).  Puts the player back at the
+   * CURRENT map's spawn with the run intact — the same `respawnPlayer` the
+   * loop used to call silently, now behind an explicit choice.  The run
+   * summary stays available because nothing about the run is reset here.
+   *
+   * This is the hook the M7 economy pass attaches a death cost to
+   * (decision #40a): the mildest candidate is what ships today — free.
+   */
+  public respawnFromDeath() {
+      if (this.gameState !== GameState.GAME_OVER) return;
+      this.respawnPlayer();
+      this.gameState = GameState.PLAYING;
+      this.lastTime = performance.now(); // no physics jump across the screen
+      this.simAccumulator = 0;
+  }
+
   private selectWeapon(wType: WeaponType) {
     this.currentWeaponIndex = this.weapons.selectWeapon(this.player, wType);
   }
@@ -1790,15 +1815,8 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
-      playerStats: menuOpen ? {
-        health: Math.max(0, Math.round(this.player.health)),
-        maxHealth: this.player.maxHealth,
-        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
-        maxShield: this.player.maxShield ?? 0,
-        damageMult: this.player.damageMult ?? 1,
-        cooldownMult: this.player.cooldownMult ?? 1,
-        speedMult: this.moduleSpeedMult,
-      } : undefined,
+      playerStats: menuOpen ? this.playerStatsSnapshot() : undefined,
+      runSummary: this.gameState === GameState.GAME_OVER ? this.runSummarySnapshot() : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
       dock: this.dockStatsSnapshot(),
       portal: this.portalStatsSnapshot(),
@@ -2319,6 +2337,7 @@ export class GameEngine {
           // A rival-killed enemy (killedByRival) pays the player NOTHING — the
           // rival stole it (Stage 7); the theft is shown by the rival's popup.
           const mult = this.registerComboKill();
+          this.runKills++; // run-summary tally (Phase 3 Pair A)
           const scale = opts?.scoreScale ?? 1;
           this.awardScore(
               Math.round(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1) * scale * mult),
@@ -2648,6 +2667,10 @@ export class GameEngine {
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
 
+    // Run clock (Phase 3 Pair A).  SIM time, so a pause or a station visit
+    // doesn't inflate the number the death screen reports.
+    this.runSeconds += dt;
+
     // Kill-combo window — lapses if no ship dies for COMBO_WINDOW_SEC.
     if (this.comboTimer > 0) {
         this.comboTimer -= dt;
@@ -2775,7 +2798,12 @@ export class GameEngine {
         if (this.player.explosionTimer !== undefined) {
             this.player.explosionTimer -= dt;
             if (this.player.explosionTimer <= 0) {
-                this.respawnPlayer();
+                // Phase 3 Pair A: the wreck finishes burning and the RUN
+                // SUMMARY comes up instead of a silent free respawn.  The
+                // player still chooses to respawn from there — the screen adds
+                // the reckoning, not (yet) the penalty; attaching a cost to
+                // that choice is the M7 economy pass's call (decision #40a).
+                this.gameState = GameState.GAME_OVER;
             }
         }
         this.camera.position.x = this.player.position.x;
@@ -3255,6 +3283,9 @@ export class GameEngine {
   // per-frame movement line alongside the DBG thrust/speed cycles.
   private moduleSpeedMult = 1;
   private moduleThrustMult = 1;
+  /** Σ weight of the MOUNTED guns — the drag term inside moduleThrustMult.
+   *  Kept so the Ship Status panel can show the trade, not just its result. */
+  private moduleGunWeight = 0;
 
   /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
    *  when its family has no requirement (hull / gun roots) or it touches
@@ -3322,6 +3353,7 @@ export class GameEngine {
       // BASE_BOOST, heavier arsenals drag (Blaster-only ≈ the 1.0 baseline).
       this.moduleThrustMult = (1 + accel)
           * (WEAPON_WEIGHT.BASE_BOOST / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight));
+      this.moduleGunWeight = gunWeight; // reported by the Ship Status panel
       const newMaxHp = 100 + maxHp;
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
@@ -3844,6 +3876,42 @@ export class GameEngine {
       }));
   }
 
+  /** The FULL derived-stat set for the pause menu's Ship Status panel (stat
+   *  legibility, Phase 3 Pair A).  Every number `applyModuleEffects` produces
+   *  has a field here, so a module effect can't move something invisible. */
+  private playerStatsSnapshot(): EngineStats['playerStats'] {
+      return {
+          health: Math.max(0, Math.round(this.player.health)),
+          maxHealth: this.player.maxHealth,
+          shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+          maxShield: this.player.maxShield ?? 0,
+          damageMult: this.player.damageMult ?? 1,
+          cooldownMult: this.player.cooldownMult ?? 1,
+          speedMult: this.moduleSpeedMult,
+          thrustMult: this.moduleThrustMult,
+          gunWeight: this.moduleGunWeight,
+          shieldRegen: (this.player.maxShield ?? 0) > 0
+              ? (this.player.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) : 0,
+          overcharge: this.player.overchargeUnlocked ?? false,
+      };
+  }
+
+  /** End-of-run summary for the death screen (Phase 3 Pair A).  Built only in
+   *  GAME_OVER, entirely from run-scoped counters — the screen adds no state
+   *  of its own. */
+  private runSummarySnapshot(): EngineStats['runSummary'] {
+      return {
+          score: Math.round(this.score),
+          wavesCleared: this.runWavesCleared,
+          kills: this.runKills,
+          creditsEarned: this.runCreditsEarned,
+          creditsHeld: this.credits,
+          bossesKilled: this.bossesKilled,
+          timeSec: Math.round(this.runSeconds),
+          mapName: this.currentMap?.name ?? '',
+      };
+  }
+
   /** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
   private outfittingSnapshot() {
       const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
@@ -3854,6 +3922,11 @@ export class GameEngine {
               id, label: def.label, kind: def.kind as string, family: def.family as string,
               active: active[i],
               requires: req !== undefined ? (req[0] as string) : undefined,
+              // Per-module attribution (stat legibility): derived from the def's
+              // own effect, so it can never drift from what applyModuleEffects
+              // sums.  Reported for INACTIVE modules too — the UI strikes them
+              // through, which is what makes an OFFLINE hex legible as a cost.
+              contrib: moduleContributions(def),
           };
       });
       const gunsMounted = this.weaponSlots.reduce(
@@ -5488,6 +5561,7 @@ export class GameEngine {
     // Par = the wave's spawn-stream window; clearing at/under par pays the
     // full speed bonus, decaying to 0 by 2× par.
     const waveNum = clearedIndex + 1;
+    this.runWavesCleared++; // run-summary tally (Phase 3 Pair A)
     const par = Math.max(1, getWaveDurationSec(clearedIndex));
     const speedFrac = Math.max(0, Math.min(1, 1 - Math.max(0, elapsedSec - par) / par));
     const bonus = SCORE_CONSTANTS.WAVE_COMPLETE_BASE
@@ -6488,7 +6562,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
-      (credits) => { this.credits += credits; },
+      (credits) => { this.credits += credits; this.runCreditsEarned += credits; },
     );
   }
 
@@ -6500,7 +6574,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
-      (credits) => { this.credits += credits; },
+      (credits) => { this.credits += credits; this.runCreditsEarned += credits; },
     );
   }
 

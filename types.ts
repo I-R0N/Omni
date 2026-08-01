@@ -46,7 +46,13 @@ export enum MapType {
 export enum GameState {
   MENU = 'MENU',
   PLAYING = 'PLAYING',
-  PAUSED = 'PAUSED'
+  PAUSED = 'PAUSED',
+  // Phase 3 Pair A: the player's hull is gone and the run summary is up.  The
+  // sim is FROZEN in this state (the same short-circuit the station dock uses)
+  // — the death screen offers RESPAWN (continue the run where you fell) or END
+  // RUN (back to the menu).  Attaching a cost to the respawn is the M7
+  // economy pass's call (decision #40a, salvage death penalty).
+  GAME_OVER = 'GAME_OVER',
 }
 
 export interface Vector2 {
@@ -1295,6 +1301,22 @@ export interface PerfTaskStat {
   manual: number;  // manual override (0 = AUTO)
 }
 
+/** One installed hex tile as the UI sees it.  `contrib` is the per-module
+ *  attribution (stat legibility, Phase 3 Pair A): the derived stats this
+ *  module feeds, in the same `ModuleStatKey` vocabulary the Ship Status rows
+ *  use, so tapping a hex can highlight exactly what it moves.  An INACTIVE
+ *  module still reports its contributions — the UI shows them struck through,
+ *  which is what makes an OFFLINE adjacency failure legible as a cost. */
+export interface OutfitSlotSnapshot {
+  id: string;
+  label: string;
+  kind: string;
+  family: string;
+  active: boolean;
+  requires?: string;
+  contrib: { key: string; text: string }[];
+}
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
@@ -1344,11 +1366,35 @@ export interface EngineStats {
   /** Salvage-pickup flash for the HUD chip: credits gained in the current
    *  flash window + remaining-window fraction for fade. */
   salvageFlash?: { amount: number; fraction: number };
-  /** Effective player stats for the player menu (pause screen). */
+  /** Effective player stats for the player menu (pause screen).  This is the
+   *  FULL derived-stat set `applyModuleEffects` produces (stat legibility,
+   *  Phase 3 Pair A) — every number a module can move has a row here, and
+   *  `MODULE_STAT_KEYS` is the shared vocabulary the outfitting snapshot's
+   *  per-module `contrib` entries match against. */
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
     damageMult: number; cooldownMult: number; speedMult: number;
+    /** Thrust multiplier INCLUDING the mounted-gun weight drag, and the raw
+     *  weight that produced it — the trade heavy arsenals make. */
+    thrustMult: number; gunWeight: number;
+    /** Shield recharge, points/sec (0 when no shield core is installed). */
+    shieldRegen: number;
+    /** Whether an ACTIVE Overcharge module is enabling charged shots. */
+    overcharge: boolean;
+  };
+  /** End-of-run summary, present only in GAME_OVER.  Everything here is a
+   *  run-scoped counter the engine already had to keep, or one added
+   *  alongside them; the death screen is pure presentation over it. */
+  runSummary?: {
+    score: number;
+    wavesCleared: number;
+    kills: number;
+    creditsEarned: number;
+    creditsHeld: number;
+    bossesKilled: number;
+    timeSec: number;
+    mapName: string;
   };
   /** Hex-slot outfitting snapshot (built while paused OR docked).
    *  `ship` / `weapon` are the two 7-hex groups (index 0 = center tile;
@@ -1360,8 +1406,8 @@ export interface EngineStats {
    *  prices — no upgrades); `affordable` includes having a free
    *  inventory tile. */
   outfitting?: {
-    ship: ({ id: string; label: string; kind: string; family: string; active: boolean; requires?: string } | null)[];
-    weapon: ({ id: string; label: string; kind: string; family: string; active: boolean; requires?: string } | null)[];
+    ship: (OutfitSlotSnapshot | null)[];
+    weapon: (OutfitSlotSnapshot | null)[];
     /** Mounted-gun count vs. the slot-agnostic gun limit ("Guns N/2" in
      *  the docking UI; weaponless is allowed — guns carry weight). */
     gunsMounted: number;
