@@ -632,9 +632,22 @@ export interface TileClusterConfig {
   outer?: { clusterCount: number; minClusterSize: number; maxClusterSize: number };
 }
 
+/**
+ * Concentric tile RINGS of one variant (RingMap / SevenRingsMap).  A ring map
+ * is structural rather than clustered, so "what this map is made of" is a list
+ * of radii per variant — the same role `tileCluster` plays for the natural
+ * maps.  `keepEvery` thins the emitted ring (2 = every other tile), which is
+ * how the ring maps kept their original tile counts when the map doubled.
+ */
+export interface TileRingConfig {
+  radii: number[];
+  keepEvery?: number;
+}
+
 export interface PerMapVariantSpawn {
   freeSpawn?: FreeSpawnConfig;
   tileCluster?: TileClusterConfig;
+  tileRing?: TileRingConfig;
 }
 
 // ── Variant-specific completion hooks ──────────────────────────────

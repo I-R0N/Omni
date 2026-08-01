@@ -5554,8 +5554,13 @@ export class RenderSystem {
       // Enemy blips pulse so they pop against the static layer; the phase
       // uses performance.now() (render-side animation, frame-rate smooth).
       const blip = MINIMAP_CONSTANTS.ENEMY_BLIP;
+      const bossBlip = MINIMAP_CONSTANTS.BOSS_BLIP;
+      const rivalBlip = MINIMAP_CONSTANTS.RIVAL_BLIP;
+      const stationBlip = MINIMAP_CONSTANTS.STATION_BLIP;
       const pulseT = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * blip.PULSE_HZ * Math.PI * 2);
       const enemyPulseAlpha = blip.PULSE_MIN_ALPHA + (1 - blip.PULSE_MIN_ALPHA) * pulseT;
+      const bossPulseT = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * bossBlip.PULSE_HZ * Math.PI * 2);
+      const bossPulseAlpha = bossBlip.PULSE_MIN_ALPHA + (1 - bossBlip.PULSE_MIN_ALPHA) * bossPulseT;
       const clampHalf = currentSize / 2 - blip.EDGE_INSET;
       for (let i = 0; i < items.length; i++) {
           const item = items[i];
@@ -5565,20 +5570,64 @@ export class RenderSystem {
           if (entity.type === EntityType.ENEMY) {
               // Out-of-range enemies clamp to the minimap border (square
               // clamp, slightly dimmer) instead of vanishing, so a distant
-              // straggler still registers at a glance.
+              // straggler still registers at a glance.  Bosses clamp too —
+              // for the same reason, more urgently.
+              const isBoss = entity.isBoss === true;
+              const inset = isBoss ? bossBlip.EDGE_INSET : blip.EDGE_INSET;
+              const bossClampHalf = currentSize / 2 - inset;
               let ex = item.dx * scale;
               let ey = item.dy * scale;
               const extent = Math.max(Math.abs(ex), Math.abs(ey));
-              const clamped = extent > clampHalf;
+              const limit = isBoss ? bossClampHalf : clampHalf;
+              const clamped = extent > limit;
               if (clamped) {
-                  const f = clampHalf / extent;
+                  const f = limit / extent;
                   ex *= f; ey *= f;
               }
+              const bx = centerX + ex, by = centerY + ey;
+
+              if (isBoss) {
+                  // ── Boss contact: the biggest thing on the map, haloed, in
+                  // the boss's LIVE phase colour — so a phase change reads on
+                  // the minimap the same frame it reads in the world.
+                  ctx.globalAlpha = (clamped ? bossPulseAlpha * blip.CLAMPED_ALPHA_MULT : bossPulseAlpha);
+                  ctx.strokeStyle = entity.color;
+                  ctx.lineWidth = bossBlip.RING_WIDTH;
+                  ctx.beginPath();
+                  ctx.arc(bx, by, bossBlip.RING_RADIUS, 0, Math.PI * 2);
+                  ctx.stroke();
+                  ctx.fillStyle = entity.color;
+                  ctx.beginPath();
+                  ctx.arc(bx, by, bossBlip.RADIUS, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.globalAlpha = 1;
+                  continue;
+              }
+
               ctx.globalAlpha = clamped ? enemyPulseAlpha * blip.CLAMPED_ALPHA_MULT : enemyPulseAlpha;
               ctx.fillStyle = entity.color;
-              ctx.beginPath();
-              ctx.arc(centerX + ex, centerY + ey, blip.RADIUS, 0, Math.PI * 2);
-              ctx.fill();
+              if (entity.isRival === true) {
+                  // ── Rival contact: a heading TRIANGLE, because a rival is a
+                  // ship in the world (it renders from a ship sprite) and its
+                  // team colour is the thing you need off the map.
+                  const r = rivalBlip.RADIUS;
+                  const a = entity.rotation;
+                  const ca = Math.cos(a), sa = Math.sin(a);
+                  ctx.beginPath();
+                  ctx.moveTo(bx + ca * r * 1.4, by + sa * r * 1.4);
+                  ctx.lineTo(bx - (ca * 0.7 + sa) * r, by - (sa * 0.7 - ca) * r);
+                  ctx.lineTo(bx - (ca * 0.7 - sa) * r, by - (sa * 0.7 + ca) * r);
+                  ctx.closePath();
+                  ctx.fill();
+              } else {
+                  // Generic contact — radius nudged by the entity's world size
+                  // so a big beast reads bigger, like it does on screen.
+                  const sizeMul = Math.min(1.9, Math.max(0.85,
+                      Math.max(entity.size.x, entity.size.y) / 34));
+                  ctx.beginPath();
+                  ctx.arc(bx, by, blip.RADIUS * sizeMul, 0, Math.PI * 2);
+                  ctx.fill();
+              }
               ctx.globalAlpha = 1;
               continue;
           }
@@ -5652,6 +5701,19 @@ export class RenderSystem {
           if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
           ctx.fillStyle = entity.color;
+
+          if (entity.isStation === true) {
+              // ── Station contact: a SQUARE, because a station is a fixed
+              // structure and a round dot made it indistinguishable from the
+              // snitch and every other POI.  Colour is the variant's own, so
+              // Home / Shipwright / Armory / Trade Hub stay tellable apart.
+              const h = stationBlip.HALF;
+              ctx.fillRect(dotX - h, dotY - h, h * 2, h * 2);
+              ctx.strokeStyle = `rgba(255,255,255,${stationBlip.OUTLINE_ALPHA})`;
+              ctx.lineWidth = 0.9;
+              ctx.strokeRect(dotX - h, dotY - h, h * 2, h * 2);
+              continue;
+          }
 
           let dotRadius = 1.5;
           if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;

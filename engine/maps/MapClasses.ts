@@ -6,6 +6,11 @@ import { mapDescriptor, HUB_DESCRIPTOR } from './MapDescriptors';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
+import type { ShardVariantId } from '../systems/ShardSystem.types';
+
+/** The tile variants a map's composition table can name. */
+type ShardVariantIdLocal = Extract<ShardVariantId,
+  'glass-tile' | 'plastic-tile' | 'metal-tile' | 'indestructible-tile'>;
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -80,6 +85,65 @@ export abstract class BaseMapLayer {
     };
     wrapPosition(pos);
     this.addPortal(HUB_DESCRIPTOR.id, pos, PORTAL_CONSTANTS.RETURN_COLOR);
+  }
+
+  /**
+   * Populate this map's TILE composition from `MAP_POPULATION[this.type]`.
+   *
+   * MAP_POPULATION is the single source of truth for what a map is made of
+   * (polish batch): the natural maps used to hardcode their own cluster
+   * counts and variant ratios inline, which meant the table documented one
+   * thing and the maps did another.  Every map now reads the table through
+   * this one helper.
+   *
+   * Handles both composition shapes:
+   *   - `tileCluster` — scattered clusters over a `w × h` zone (the natural
+   *     maps).  Nebula clusters also record their centres into
+   *     `nebulaClusterCenters`, which drives the matching background layer.
+   *   - `tileRing` — concentric structural rings at fixed radii (the ring
+   *     maps), where the composition IS the radii.
+   *
+   * `occupied` is the shared hex-occupancy set so no pass can place a tile
+   * on top of an earlier one.  Asteroids (`freeSpawn`) stay with
+   * `spawnAsteroids` / `getRockShardFreeSpawn` — they are not tiles and
+   * don't share the hex grid.
+   */
+  protected populateTilesFromPopulation(
+      w: number, h: number, occupied: Set<string>, hexSize: number = 22,
+  ) {
+    const pop = MAP_POPULATION[this.type];
+    if (!pop) return;
+    // Fixed order so the shared occupancy set resolves overlaps the same way
+    // every load: solid tiles claim their cells first, nebulae fill around
+    // them.  (This is the order the maps used inline.)
+    const CLUSTERED: [ShardVariantIdLocal, StructureVariant][] = [
+      ['glass-tile', 'glass'],
+      ['plastic-tile', 'plastic'],
+      ['metal-tile', 'metal'],
+      ['indestructible-tile', 'indestructible'],
+    ];
+    for (const [key, variant] of CLUSTERED) {
+      const c = pop[key]?.tileCluster;
+      if (!c) continue;
+      this.entities.push(...TileGenerator.generateClusteredMesh(
+          w, h, hexSize, c.clusterCount, c.minClusterSize, c.maxClusterSize, occupied, variant,
+      ));
+    }
+    for (const [key, variant] of CLUSTERED) {
+      const r = pop[key]?.tileRing;
+      if (!r) continue;
+      for (const radius of r.radii) {
+        emitGlassTileRing(this.entities, radius, HEX_SIZE, variant, r.keepEvery ?? 1);
+      }
+    }
+    const neb = pop['nebula-tile']?.tileCluster;
+    if (neb) {
+      this.entities.push(...TileGenerator.generateNebulaClusters(
+          w, h, hexSize,
+          neb.clusterCount, neb.minClusterSize, neb.maxClusterSize,
+          occupied, this.nebulaClusterCenters,
+      ));
+    }
   }
 
   /**
@@ -314,55 +378,17 @@ export class UniverseMap extends BaseMapLayer {
     const OUTER_ZONE_FRAC = 1 - SAFE_ZONE_FRAC;
     const CLUSTER_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
     const CLUSTER_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
-    const GLASS_COUNT  = 42;   // Halved on 2026-04-19 (see commit note)
-    const NEBULA_COUNT = 75;   // Halved on 2026-04-19 (see commit note)
 
-    // Glass landmark clusters — uniform distribution across the 95 %
-    // zone.  Most clusters are stock glass (single-hit) to preserve the
-    // original destructible feel; a smaller share rolls as plastic or
-    // metal tiles.  Per decision #6, indestructible-tile is reserved
-    // for deliberate border placement (e.g. SevenRingsMap's outer
-    // ring) and is not spawned in random clusters here — its share is
-    // redistributed across the destructible variants below.
-    //   glass       ~64 %
-    //   plastic     ~23 %
-    //   metal       ~13 %
-    const GLASS_CLUSTERS   = Math.round(GLASS_COUNT * 0.64);
-    const PLASTIC_CLUSTERS = Math.round(GLASS_COUNT * 0.23);
-    const METAL_CLUSTERS   = GLASS_COUNT - GLASS_CLUSTERS - PLASTIC_CLUSTERS;
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, 22,
-        GLASS_CLUSTERS, 10, 34, occupied, 'glass'
-    ));
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, 22,
-        PLASTIC_CLUSTERS, 8, 22, occupied, 'plastic'
-    ));
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, 22,
-        METAL_CLUSTERS, 6, 14, occupied, 'metal'
-    ));
-
-    // Nebula cloud clusters — same 95 %-zone uniform distribution.
-    // Records each cluster's world-space start position into
-    // `nebulaClusterCenters`, which GameEngine pipes into
-    // BackgroundManager so the background-nebula layer renders puffs
-    // at the same positions — one unified cloud, with parallax drift
-    // of the backdrop as the camera moves.
-    // Cluster size span averages the inner + outer values from
-    // MAP_POPULATION[UNIVERSE]['nebula-tile'].
-    const nebPop = MAP_POPULATION[MapType.UNIVERSE]['nebula-tile']?.tileCluster;
-    const nebMinSize = Math.round(((nebPop?.minClusterSize ?? 14) + (nebPop?.outer?.minClusterSize ?? 7)) / 2);
-    const nebMaxSize = Math.round(((nebPop?.maxClusterSize ?? 42) + (nebPop?.outer?.maxClusterSize ?? 26)) / 2);
-    this.entities.push(...TileGenerator.generateNebulaClusters(
-        CLUSTER_W, CLUSTER_H,
-        22,
-        NEBULA_COUNT,
-        nebMinSize,
-        nebMaxSize,
-        occupied,
-        this.nebulaClusterCenters
-    ));
+    // Composition — glass / plastic / metal landmark clusters and nebula
+    // clouds, all read from MAP_POPULATION[UNIVERSE] (polish batch: the
+    // counts and the 64/23/13 variant split used to live inline here, which
+    // meant the table said one thing and this map did another).  The values
+    // in the table ARE what that code produced, so the map is unchanged.
+    // Nebula cluster centres are recorded into `nebulaClusterCenters`, which
+    // GameEngine pipes into BackgroundManager so the backdrop puffs sit on
+    // the same clouds.  Per decision #6 indestructible-tile is absent from
+    // the natural maps' tables, so no cluster of it is generated here.
+    this.populateTilesFromPopulation(CLUSTER_W, CLUSTER_H, occupied, 22);
 
     // Clear a safe open area around spawn
     this.entities = this.entities.filter(e => {
@@ -410,28 +436,10 @@ export class OverworldMap extends BaseMapLayer {
     const CLUSTER_W = MAP_WIDTH  * 0.95;
     const CLUSTER_H = MAP_HEIGHT * 0.95;
     const occupied = new Set<string>();
-    const pop = MAP_POPULATION[MapType.OVERWORLD];
-    const cluster = (variant: StructureVariant, key: 'glass-tile' | 'plastic-tile' | 'metal-tile') => {
-      const c = pop[key]?.tileCluster;
-      if (!c) return;
-      this.entities.push(...TileGenerator.generateClusteredMesh(
-          CLUSTER_W, CLUSTER_H, 22,
-          c.clusterCount, c.minClusterSize, c.maxClusterSize, occupied, variant
-      ));
-    };
-    cluster('glass', 'glass-tile');
-    cluster('plastic', 'plastic-tile');
-    cluster('metal', 'metal-tile');
-
-    const neb = pop['nebula-tile']?.tileCluster;
-    if (neb) {
-      this.entities.push(...TileGenerator.generateNebulaClusters(
-          CLUSTER_W, CLUSTER_H, 22,
-          neb.clusterCount, neb.minClusterSize, neb.maxClusterSize,
-          occupied,
-          this.nebulaClusterCenters
-      ));
-    }
+    // Composition from MAP_POPULATION[OVERWORLD] — the Overworld was the
+    // first map to read the table, and since the polish batch every map
+    // goes through this same helper.
+    this.populateTilesFromPopulation(CLUSTER_W, CLUSTER_H, occupied, 22);
 
     // Clear every station's and every portal's home patch: nothing
     // generates on top of them (the home station's clearance doubles as
@@ -490,10 +498,9 @@ export class OverworldMap extends BaseMapLayer {
  * the tile ring (any radius R > RING_TILE_RADIUS is one).
  */
 export class RingMap extends BaseMapLayer {
-  // Radius of the tile ring in world units.  Sized so it's clearly
-  // visible from spawn (well inside the half-map) and leaves a large
-  // safe zone at the centre.
-  private static readonly RING_TILE_RADIUS = 1400;
+  // The ring radius now lives in MAP_POPULATION[RING]['glass-tile'].tileRing
+  // (polish batch).  Sized so it's clearly visible from spawn (well inside
+  // the half-map) and leaves a large safe zone at the centre.
   public  static readonly WIDTH  = 12000;
   public  static readonly HEIGHT = 12000;
 
@@ -524,10 +531,10 @@ export class RingMap extends BaseMapLayer {
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
-    // Glass tile ring at the featured radius.
-    // keepEvery = 2: ring radius doubled to track the 2× map, so thin
-    // to half the tiles to preserve the original ring tile count.
-    emitGlassTileRing(this.entities, RingMap.RING_TILE_RADIUS, HEX_SIZE, 'glass', 2);
+    // The featured glass ring, read from MAP_POPULATION[RING] (polish
+    // batch).  keepEvery=2 preserves the original tile count after the map
+    // doubled in size.
+    this.populateTilesFromPopulation(0, 0, new Set<string>(), HEX_SIZE);
 
     // Clear a safe open area around spawn (same rule as UniverseMap so
     // the player never spawns inside an asteroid).
@@ -549,9 +556,10 @@ export class RingMap extends BaseMapLayer {
  * clear of the wrap seam).
  */
 export class SevenRingsMap extends BaseMapLayer {
-  private static readonly RING_COUNT = 7;
+  // The seven radii and their variants live in MAP_POPULATION[SEVEN_RINGS]
+  // (polish batch).  INNER_RADIUS is kept because the spawn-clearance
+  // bubble is sized against the innermost ring.
   private static readonly INNER_RADIUS = 800;
-  private static readonly OUTER_RADIUS = 4400;
   public  static readonly WIDTH  = 12000;
   public  static readonly HEIGHT = 12000;
 
@@ -574,28 +582,13 @@ export class SevenRingsMap extends BaseMapLayer {
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
-    // Evenly-spaced radii from inner to outer.  Division by (COUNT - 1)
-    // places the first and last rings exactly at the declared bounds.
-    // Each ring rolls a variant based on index so the player can visually
-    // read difficulty: inner = glass, mid = plastic, outer plastic
-    // is punctuated by metal rings, and the outermost is indestructible.
-    const RING_VARIANTS: StructureVariant[] = [
-        'glass',        // ring 0 — soft inner
-        'glass',        // ring 1
-        'plastic',      // ring 2
-        'plastic',      // ring 3
-        'metal',        // ring 4
-        'metal',        // ring 5
-        'indestructible', // ring 6 — outer wall
-    ];
-    const step = (SevenRingsMap.OUTER_RADIUS - SevenRingsMap.INNER_RADIUS) /
-                 (SevenRingsMap.RING_COUNT - 1);
-    for (let i = 0; i < SevenRingsMap.RING_COUNT; i++) {
-      const r = SevenRingsMap.INNER_RADIUS + step * i;
-      // keepEvery = 2: ring radii doubled to track the 2× map, so thin
-      // each ring to half its tiles to preserve the original counts.
-      emitGlassTileRing(this.entities, r, HEX_SIZE, RING_VARIANTS[i] ?? 'glass', 2);
-    }
+    // The seven rings, read from MAP_POPULATION[SEVEN_RINGS] (polish
+    // batch).  The composition IS the difficulty gradient — soft glass
+    // inside, then plastic, then metal, with an indestructible outer wall —
+    // and listing the radii per variant in the table makes that gradient
+    // readable without running the map.  keepEvery=2 preserves the original
+    // per-ring tile counts after the map doubled in size.
+    this.populateTilesFromPopulation(0, 0, new Set<string>(), HEX_SIZE);
 
     // Keep a spawn bubble clear — use a radius slightly smaller than the
     // innermost ring so the player doesn't materialize inside a tile.
@@ -622,14 +615,10 @@ export class PocketMap extends BaseMapLayer {
   public static readonly WIDTH  = 4000;
   public static readonly HEIGHT = 4000;
 
-  // Cluster counts — the sandbox is a showcase so population leans
-  // heavy on tiles / nebulae and light on asteroids.  Background nebula
-  // puffs match `NEBULA_CLUSTERS` 1:1 via nebulaClusterCenters, so
-  // bumping this also densifies the backdrop.
-  private static readonly GLASS_CLUSTERS          = 8;
-  private static readonly PLASTIC_CLUSTERS        = 5;
-  private static readonly METAL_CLUSTERS          = 3;
-  private static readonly NEBULA_CLUSTERS         = 12;
+  // Cluster counts live in MAP_POPULATION[POCKET] (polish batch) — the
+  // sandbox is a showcase, so population leans heavy on tiles / nebulae and
+  // light on asteroids.  Background nebula puffs match the nebula cluster
+  // count 1:1 via nebulaClusterCenters, so bumping it densifies the backdrop.
 
   constructor() {
     super('pocket_01', 'Pocket', MapType.POCKET);
@@ -653,31 +642,11 @@ export class PocketMap extends BaseMapLayer {
     const CLUSTER_H = PocketMap.HEIGHT * 0.9;
     const occupied = new Set<string>();
 
-    // Tile variants — destructible flavours, in mid-sized clusters so
-    // each variant reads as a distinct landmark rather than a stray
-    // hex.  Per decision #6, indestructible-tile is reserved for
-    // deliberate border placement and is not spawned here.
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.GLASS_CLUSTERS, 6, 14, occupied, 'glass'
-    ));
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.PLASTIC_CLUSTERS, 5, 10, occupied, 'plastic'
-    ));
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.METAL_CLUSTERS, 4, 8, occupied, 'metal'
-    ));
-
-    // Nebula clusters — same shared occupancy so tiles and nebulae
-    // never overlap.
-    this.entities.push(...TileGenerator.generateNebulaClusters(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.NEBULA_CLUSTERS, 6, 12,
-        occupied,
-        this.nebulaClusterCenters,
-    ));
+    // Tile variants + nebulae, all from MAP_POPULATION[POCKET] (polish
+    // batch).  Shared occupancy so tiles and nebulae never overlap.  Per
+    // decision #6 indestructible-tile is absent from the natural maps'
+    // tables, so none is generated here.
+    this.populateTilesFromPopulation(CLUSTER_W, CLUSTER_H, occupied, HEX_SIZE);
 
     // Keep a small safe bubble around spawn so the player doesn't
     // materialise inside a tile.

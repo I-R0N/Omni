@@ -396,13 +396,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/SHARD_SYSTEM.md` for the design rationale.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
-  count table.  Source of truth for rock-shard free-spawn counts
-  (read via `getRockShardFreeSpawn()`); per-map tile-cluster
-  entries are read by `MapClasses.populate()` for the nebula-cluster
-  sizing and the single-variant showcase maps.  Some natural maps
-  (UniverseMap, PocketMap, SevenRingsMap) still hardcode their own
-  tile-variant ratios; treat MAP_POPULATION as authoritative for
-  documentation but verify the relevant `MapClasses` subclass too.
+  count table, and now the SINGLE SOURCE OF TRUTH for what every map
+  is made of (polish batch).  Rock-shard free-spawn counts are read
+  via `getRockShardFreeSpawn()`; TILE composition is read by the one
+  shared helper `BaseMapLayer.populateTilesFromPopulation()`, which
+  every map calls — the natural maps used to hardcode their own
+  cluster counts and variant ratios inline, so the table documented
+  one thing and the maps did another.  Two composition shapes:
+  `tileCluster` (scattered clusters over a zone — the natural maps;
+  nebula clusters also record their centres for the background layer)
+  and `tileRing` (concentric structural rings at fixed radii — the
+  ring maps, where the composition IS the radii, so SevenRings'
+  glass→plastic→metal→indestructible difficulty gradient is readable
+  from the table without running the map).  Per decision #6
+  indestructible-tile is absent from every natural map's table.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
@@ -813,6 +820,29 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   out of range instead of being culled the way other POI dots are.  The
   fill carries the portal colour, so an outbound rift (violet) and a
   return rift (sky) read differently at a glance.
+- `MINIMAP_CONSTANTS.BOSS_BLIP` / `RIVAL_BLIP` / `STATION_BLIP` — the
+  minimap-faithfulness vocabulary (polish batch).  A contact's SHAPE
+  matches what the thing is in the world instead of everything being
+  a dot: circle = generic contact (radius nudged by the entity's world
+  size, so a big beast reads bigger), triangle = a SHIP with a heading
+  (rivals, which render from ship sprites), square = a fixed structure
+  (stations), diamond = an anomaly (portals), ringed circle = a BOSS
+  (largest, haloed, and it CLAMPS to the border like an enemy rather
+  than being culled).  Colours always come from the entity itself, so
+  a boss phase change or a rival's disposition shows on the map the
+  same frame it shows in the world.
+- `STATION_TRAFFIC` — NPC station traffic, cheap version (polish
+  batch).  Pure AMBIENCE: two civilian shuttles loop between the
+  Overworld's stations so the hub reads as inhabited.  A shuttle is
+  the same inert INTERACTABLE recipe stations and portals use (mass ∞
+  + no dropType → broadphase / static grid / flow-field bake all skip
+  it), engine-managed by `GameEngine.updateStationTraffic` (which
+  integrates its own position, since mass-∞ entities are not moved by
+  PhysicsSystem — the same arrangement the snitch and dragon head
+  use), rendered from an existing rival sprite.  It has no health, no
+  damage, no cargo and no interaction; every one of those would make
+  it a system.  Multi-station networks and real NPC traffic are the
+  Overworld plan's (decision #36e).
   Showcase maps get NO portals — they stay menu-only.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the

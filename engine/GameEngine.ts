@@ -22,7 +22,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, moduleContributions, AUDIO_CONSTANTS, EXPLOSION_PROFILES, EXPLOSION_HEAVY_MASS, ExplosionClass, SfxId, WEAPON_SFX } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, STATION_TRAFFIC, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, moduleContributions, AUDIO_CONSTANTS, EXPLOSION_PROFILES, EXPLOSION_HEAVY_MASS, ExplosionClass, SfxId, WEAPON_SFX } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -285,6 +285,10 @@ export class GameEngine {
   // SCORE_CONSTANTS.SNITCH_POINTS and ends the current wave (see
   // updateSnitch / catchSnitch).  A fresh one spawns for the next wave.
   private snitch: GameEntity | null = null;
+  /** Civilian shuttles looping between the Overworld's stations (polish
+   *  batch).  Pure ambience — see STATION_TRAFFIC.  Rebuilt per map load
+   *  alongside `stations`; empty on every map that has no stations. */
+  private shuttles: { e: GameEntity; targetIdx: number; dockTimer: number }[] = [];
   // Wander clock for the weave oscillation (sim-time accumulated).
   private snitchTime: number = 0;
   // Snitches CAUGHT this run — drives the speed ramp (NOT the wave number),
@@ -2839,6 +2843,8 @@ export class GameEngine {
     this.updateBubbles(dt);
     // Ambient fauna: keep the always-present bubble population topped up.
     this.maintainAmbientBubbles(dt);
+    // Civilian station traffic — ambience only, Overworld only.
+    this.updateStationTraffic(dt);
 
     // Stage 3 reusable mechanics: snap grapples to their targets, and run the
     // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
@@ -5512,6 +5518,104 @@ export class GameEngine {
       }
   }
 
+  // ── NPC station traffic (polish batch, cheap version) ─────────────────────
+  //
+  // Shuttles ferry between the Overworld's stations so the hub reads as
+  // inhabited.  Scenery, not a system: the shuttle is the same non-colliding
+  // INTERACTABLE recipe the stations and portals use, so the broadphase, the
+  // static grid and the flow-field bake all skip it for free, and it has no
+  // health, no damage, and no interaction.  Multi-station networks and real
+  // NPC traffic belong to the Overworld plan (decision #36e).
+
+  /** Seed the shuttle fleet for a freshly-loaded map.  No-op unless the map
+   *  has at least two stations to run between. */
+  private seedStationTraffic() {
+      this.shuttles.length = 0;
+      if (!this.currentMap || this.stations.length < 2) return;
+      for (let i = 0; i < STATION_TRAFFIC.COUNT; i++) {
+          // Start docked at a station, heading for a different one, staggered
+          // so they don't fly in formation.
+          const from = i % this.stations.length;
+          const to = (from + 1 + Math.floor(Math.random() * (this.stations.length - 1))) % this.stations.length;
+          const anchor = this.stations[from].position;
+          const e: GameEntity = {
+              id: nextId('shuttle'),
+              type: EntityType.INTERACTABLE,
+              name: 'Shuttle',
+              position: { x: anchor.x, y: anchor.y },
+              velocity: { x: 0, y: 0 },
+              size: { x: STATION_TRAFFIC.SIZE, y: STATION_TRAFFIC.SIZE },
+              rotation: Math.random() * Math.PI * 2,
+              color: STATION_TRAFFIC.COLOR,
+              active: true,
+              health: 1,
+              maxHealth: 1,
+              mass: Infinity,
+              sprite: RIVAL_CONSTANTS.SPRITES[i % RIVAL_CONSTANTS.SPRITES.length],
+          };
+          this.currentMap.entities.push(e);
+          this.shuttles.push({ e, targetIdx: to, dockTimer: STATION_TRAFFIC.DOCK_SECONDS * Math.random() });
+      }
+  }
+
+  /** Per-step shuttle tick: hold at the pad, then cruise to the next station.
+   *  O(shuttles) with a couple of torus distances — ungated, like the other
+   *  tiny ambience passes. */
+  private updateStationTraffic(dt: number) {
+      if (this.shuttles.length === 0 || this.stations.length < 2) return;
+      const T = STATION_TRAFFIC;
+      for (let i = 0; i < this.shuttles.length; i++) {
+          const s = this.shuttles[i];
+          const e = s.e;
+          if (!e.active) continue;
+
+          if (s.dockTimer > 0) {
+              // Docked: hold station and bleed off any drift.
+              s.dockTimer -= dt;
+              e.velocity.x *= 0.85;
+              e.velocity.y *= 0.85;
+              continue;
+          }
+
+          const target = this.stations[s.targetIdx % this.stations.length].position;
+          const dx = wrapDeltaX(e.position.x, target.x);
+          const dy = wrapDeltaY(e.position.y, target.y);
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+          if (dist < T.ARRIVE_RADIUS) {
+              // Arrived: dock, then pick a DIFFERENT station for the next leg.
+              s.dockTimer = T.DOCK_SECONDS;
+              if (this.stations.length > 1) {
+                  let next = s.targetIdx;
+                  while (next === s.targetIdx) next = Math.floor(Math.random() * this.stations.length);
+                  s.targetIdx = next;
+              }
+              continue;
+          }
+
+          // Cruise: constant speed toward the pad, heading eased so the turn
+          // reads as a ship coming about rather than a snap.
+          //
+          // Position is integrated HERE rather than by PhysicsSystem: a
+          // shuttle is `mass: Infinity` so that the broadphase, the static
+          // grid and the flow-field bake all skip it (the inert-scenery
+          // recipe), and mass-∞ entities are by definition not integrated by
+          // the dynamic pass.  Same arrangement the snitch and the dragon
+          // head use — engine-managed movers own their own position.
+          e.velocity.x = (dx / dist) * T.SPEED;
+          e.velocity.y = (dy / dist) * T.SPEED;
+          e.position.x += e.velocity.x;
+          e.position.y += e.velocity.y;
+          wrapPosition(e.position);
+          const want = Math.atan2(dy, dx);
+          let d = want - e.rotation;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          const step = T.TURN_RATE * dt;
+          e.rotation = Math.abs(d) <= step ? want : e.rotation + Math.sign(d) * step;
+      }
+  }
+
   /** Live-boss HUD readout ((h)) — undefined when no boss is alive, so the
    *  HUD bar simply isn't rendered.  Cheap: `liveBoss` is maintained by
    *  updateBosses, so this is a couple of divisions per frame. */
@@ -6839,6 +6943,9 @@ export class GameEngine {
       // the per-step interaction check iterates two tiny fixed lists.
       this.stations = map.entities.filter(e => e.isStation);
       this.portals = map.entities.filter(e => e.isPortal);
+      // Civilian shuttles are seeded from the freshly-cached station list, so
+      // a map with fewer than two stations simply gets none (polish batch).
+      this.seedStationTraffic();
       this.dockedStation = null;
       this.dockedAtStation = false;
       this.dockInRange = false;

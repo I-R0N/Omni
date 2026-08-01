@@ -292,11 +292,19 @@ export function cycleGlassGlowColor(): number {
 // ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
 // Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
 // the palette so the two tile glows can be A/B'd against a shared
-// vocabulary.  Default index 4 = 'magenta' (#e879f9), the closest
-// match to the legacy fuchsia `#d946ef` baked into SHARD_VARIANTS
-// ['metal-tile'].glow.color.  RenderSystem reads the live hex via
+// vocabulary.  RenderSystem reads the live hex via
 // getActiveMetalGlowColor() in the metal-tile glow branch.
-let activeMetalGlowIndex = 4; // 'magenta' — matches legacy fuchsia
+//
+// SHIPPED DEFAULT changed in the polish batch: 'magenta' → 'amber'.  The
+// magenta default existed only to match a legacy fuchsia hex baked into
+// SHARD_VARIANTS['metal-tile'].glow.color — a compatibility choice, not a
+// design one.  The metal glow is a DAMAGE PULSE on a steel-grey slab, and
+// heated metal glows amber; magenta read as an energy field belonging to
+// some other material.  This is the material-simulation guardrail applied
+// to a colour: the glow should say what is physically happening to the
+// tile.  Glass keeps 'sky' (cold, refractive) and the two now contrast by
+// TEMPERATURE, which is a distinction the eye reads instantly.
+let activeMetalGlowIndex = 2; // 'amber' — heated metal
 
 export function getActiveMetalGlowColor(): string {
   return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
@@ -504,8 +512,15 @@ export const PLASTIC_DENT_RECOVERY = {
   DELAY_SECONDS: 1.5,
 } as const;
 
-// PADIR toggle — direction of the PAuto automata.  false (default) =
-// darken dense interiors (mirrors nebula); true = brighten them.
+// PADIR toggle — direction of the PAuto automata.  false = darken dense
+// interiors (mirrors nebula); true = brighten them.
+//
+// SHIPPED DEFAULT: brighten (polish batch — the comment here used to claim
+// `false (default)` while the code said `true`, one of the palette residuals
+// that sweep resolved).  Brighten is the coherent choice for the MATERIAL:
+// plastic is a soft, light-scattering solid, so a dense interior should read
+// as a thicker slab catching more light.  Darkening made dense plastic read
+// as rock, which is the one material it must not be confused with.
 let activePlasticAutomataBrighten = true; // brighten dense interiors
 
 /** True when the PAuto automata brightens dense interiors instead of
@@ -854,6 +869,33 @@ export const MINIMAP_CONSTANTS = {
     RING_ALPHA: 0.55,     // ring alpha at the start of a ping (fades to 0)
     CLAMPED_ALPHA_MULT: 0.8,
     SPIN_HZ: 0.15,        // slow rotation of the diamond
+  },
+  // Minimap FAITHFULNESS (polish batch): a contact's shape should match what
+  // the thing actually is in the world, not "everything is a dot".  The
+  // vocabulary is deliberately tiny and geometric, because a 75 px map can
+  // only carry a handful of distinguishable silhouettes:
+  //   circle   generic contact (rank-and-file enemies, debris)
+  //   triangle a SHIP with a heading (rivals — which render as ship sprites)
+  //   square   a fixed structure (stations)
+  //   diamond  an anomaly (portals — see PORTAL_BLIP above)
+  //   ringed   a BOSS: the largest contact, with a halo, in its phase colour
+  // Colours always come from the entity itself, so a phase change or a
+  // disposition shows up on the map the same frame it shows up in the world.
+  BOSS_BLIP: {
+    RADIUS: 5,
+    RING_RADIUS: 8.5,
+    RING_WIDTH: 1.2,
+    PULSE_HZ: 1.1,
+    PULSE_MIN_ALPHA: 0.6,
+    EDGE_INSET: 5,        // clamps to the border like an enemy — a boss must
+                          // never be culled for being briefly out of range
+  },
+  RIVAL_BLIP: {
+    RADIUS: 3.4,          // half-height of the heading triangle
+  },
+  STATION_BLIP: {
+    HALF: 3.2,            // half-edge of the square contact
+    OUTLINE_ALPHA: 0.45,
   },
 };
 
@@ -3211,6 +3253,33 @@ export const OVERWORLD_CONSTANTS = {
   DRAGON_RESPAWN_SEC: 90,
 };
 
+// ── NPC station traffic (polish batch, cheap version) ─────────────────────────
+// Pure AMBIENCE: a couple of civilian shuttles looping between the Overworld's
+// stations so the hub reads as inhabited rather than as four empty landmarks.
+//
+// Deliberately the smallest thing that achieves that.  A shuttle is the same
+// non-colliding INTERACTABLE recipe the stations and portals already use (mass
+// ∞ + no dropType → skipped by the broadphase, the static grid and the
+// flow-field bake), engine-managed like the snitch, rendered from an existing
+// rival sprite.  It has NO health, deals and takes NO damage, carries no
+// cargo, and cannot be interacted with — every one of those would be a
+// gameplay system, and this is scenery.  Multi-station networks and real NPC
+// traffic are explicitly the Overworld plan's (decision #36e).
+export const STATION_TRAFFIC = {
+  /** Shuttles alive on the Overworld.  Two is enough to read as traffic and
+   *  small enough to never matter for perf. */
+  COUNT: 2,
+  SIZE: 26,
+  SPEED: 2.4,              // slow — a freighter, not a fighter
+  ARRIVE_RADIUS: 220,      // distance from the target station that counts as docked
+  DOCK_SECONDS: 6,         // it sits at the pad before picking a new destination
+  TURN_RATE: 1.4,          // rad/s heading slew
+  COLOR: '#94a3b8',        // civilian slate — distinct from every team colour
+  /** Warp-in rift when a shuttle first appears (reuses GameEngine.openPortal). */
+  PORTAL_RADIUS: 120,
+  PORTAL_DURATION: 0.7,
+} as const;
+
 // ── Map portals (roadmap step (k)) ─────────────────────────────────────────
 // Traversable rifts that connect the wave-free hub to the wave arenas — the
 // in-game path that makes a run span earn → outfit → fight (decision #39d).
@@ -4717,12 +4786,18 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // matches glass so dense mixed clusters present a single
     // coherent "stay-back" footprint rather than two nested shells.
     repel: { range: 200, strength: 0.06 },
-    // Purple-pink (fuchsia) glow — a vivid "live field" against the
-    // slate-gray metal face, distinct from glass-tile's pale cyan
-    // (`#a5f3fc`) and plastic-tile's green so the materials never
-    // confuse at a glance.  Renders as a fill + thin edge stroke driven
-    // by `entity.repelImpulse` (RenderSystem material-tile branch).
-    glow:  { color: '#d946ef', range: 250, peakAlpha: 0.75 },
+    // AMBER glow — heated metal.  Swept from the old fuchsia `#d946ef` in
+    // the polish batch: the glow is a DAMAGE PULSE on a steel-grey slab, so
+    // it should say "this is being stressed", and a purple-pink energy field
+    // said something else entirely.  Amber still separates cleanly from
+    // glass-tile's pale cyan (`#a5f3fc`) and plastic-tile's green — the
+    // materials now contrast by TEMPERATURE (hot metal vs cold glass), which
+    // the eye reads faster than hue alone.  The DBG "Metal glow" cycle
+    // defaults to the matching 'amber' entry so the live override and this
+    // baked colour agree out of the box.  Renders as a fill + thin edge
+    // stroke driven by `entity.repelImpulse` (RenderSystem material-tile
+    // branch).
+    glow:  { color: '#fbbf24', range: 250, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp;
@@ -5218,33 +5293,43 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'metal-tile':   { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
     'nebula-tile':  { tileCluster: { clusterCount: 42, minClusterSize: 12, maxClusterSize: 36 } },
   },
+  // Deep Space — the big mixed map.  These counts were hardcoded inside
+  // UniverseMap.init() until the polish batch; the values here are exactly
+  // what that code produced (glass 42 clusters split 64/23/13, nebula 75),
+  // so the map is unchanged and the table is now the single source of truth.
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 6000 } },
-    'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
-    'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
-    'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    'glass-tile':          { tileCluster: { clusterCount: 27, minClusterSize: 10, maxClusterSize: 34 } },
+    'plastic-tile':        { tileCluster: { clusterCount: 10, minClusterSize:  8, maxClusterSize: 22 } },
+    'metal-tile':          { tileCluster: { clusterCount:  5, minClusterSize:  6, maxClusterSize: 14 } },
     // indestructible-tile intentionally absent — per decision #6,
     // reserved for deliberate border/structure placement, not random
     // clusters in the natural maps.  INDESTRUCTIBLE_FIELD showcase
     // still spawns it for stress testing.
     'nebula-tile': {
-      tileCluster: {
-        clusterCount:    65,    // halved for 7.5k map (was 130)
-        minClusterSize:  14,
-        maxClusterSize:  42,
-        outer: {
-          clusterCount:   120,  // halved for 7.5k map (was 240)
-          minClusterSize: 7,
-          maxClusterSize: 26,
-        },
-      },
+      // Single uniform pass over the 95 %-of-map zone: the inner/outer
+      // split was removed from the map code long ago (it concentrated
+      // clusters at the centre on smaller maps), so the `outer` block is
+      // gone from the table too rather than sitting here unread.
+      tileCluster: { clusterCount: 75, minClusterSize: 11, maxClusterSize: 34 },
     },
   },
+  // Ring — asteroids plus ONE structural glass ring.  A ring map's identity
+  // is radii, not clusters, hence `tileRing` (see TileRingConfig).
   [MapType.RING]: {
     'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
+    'glass-tile': { tileRing: { radii: [1400], keepEvery: 2 } },
   },
+  // Seven Rings — the difficulty gradient IS the composition: soft glass
+  // inside, plastic, then metal, with an indestructible outer wall.  Radii
+  // are the seven evenly-spaced steps from 800 to 4400 the map used to
+  // compute inline; listing them makes the gradient readable at a glance.
   [MapType.SEVEN_RINGS]: {
     'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
+    'glass-tile':           { tileRing: { radii: [800, 1400], keepEvery: 2 } },
+    'plastic-tile':         { tileRing: { radii: [2000, 2600], keepEvery: 2 } },
+    'metal-tile':           { tileRing: { radii: [3200, 3800], keepEvery: 2 } },
+    'indestructible-tile':  { tileRing: { radii: [4400], keepEvery: 2 } },
   },
   [MapType.POCKET]: {
     'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 1600 } },
@@ -5254,7 +5339,7 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     // indestructible-tile intentionally absent — see UNIVERSE entry
     // above for the decision-#6 rationale.
     'nebula-tile': {
-      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
+      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 12 },
     },
   },
   [MapType.ASTEROID_FIELD]: {
