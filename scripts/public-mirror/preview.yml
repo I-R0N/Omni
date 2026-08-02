@@ -1,0 +1,249 @@
+name: Preview
+
+# Builds the single-file standalone game and publishes it to the `gh-pages`
+# branch of this same repository, then posts the link.
+#
+#   main         -> https://<owner>.github.io/<repo>/
+#   PR #123      -> https://<owner>.github.io/<repo>/pr-123/
+#
+# Requires no secrets: the built-in GITHUB_TOKEN can push to gh-pages here.
+# One-time setup after the first successful run:
+#   Settings -> Pages -> Source: "Deploy from a branch" -> gh-pages -> / (root)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    # Fork PRs get a read-only GITHUB_TOKEN and cannot publish. Skip them.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Resolve target directory and URL
+        id: target
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          owner_lc=$(printf '%s' "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')
+          repo_name="${GITHUB_REPOSITORY##*/}"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            dir="pr-${PR_NUMBER}"
+            url="https://${owner_lc}.github.io/${repo_name}/pr-${PR_NUMBER}/"
+          else
+            dir="."
+            url="https://${owner_lc}.github.io/${repo_name}/"
+          fi
+
+          {
+            echo "dir=${dir}"
+            echo "url=${url}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check event SHA is still the PR head
+        id: guard
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')
+          if [ "$EVENT_SHA" != "$current" ]; then
+            echo "::notice::Commit ${EVENT_SHA} is stale (PR head is ${current}). Skipping build."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `build` is true for any event that should produce a fresh bundle.
+      # Values go through env rather than direct ${{ }} interpolation so the
+      # run block is never assembled from expression text.
+      - name: Decide whether to build
+        id: plan
+        env:
+          ACTION: ${{ github.event.action }}
+          STALE: ${{ steps.guard.outputs.stale }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTION" = "closed" ] || [ "$STALE" = "true" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.plan.outputs.build == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.plan.outputs.build == 'true'
+        run: npm run build
+
+      - name: Inline into a single HTML file
+        if: steps.plan.outputs.build == 'true'
+        run: node scripts/inline-build.mjs
+
+      - name: Publish to gh-pages
+        if: steps.plan.outputs.build == 'true' || github.event.action == 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_DIR: ${{ steps.target.outputs.dir }}
+          IS_CLOSED: ${{ github.event.action == 'closed' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          repo_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # Clone gh-pages if it exists; otherwise start it as an orphan branch.
+          if git ls-remote --exit-code --heads "$repo_url" gh-pages >/dev/null 2>&1; then
+            git clone --depth 1 --branch gh-pages "$repo_url" target
+          else
+            if [ "$IS_CLOSED" = "true" ]; then
+              echo "No gh-pages branch and PR is closed — nothing to clean up."
+              exit 0
+            fi
+            mkdir target
+            git -C target init -q -b gh-pages
+            git -C target remote add origin "$repo_url"
+          fi
+
+          cd target
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$IS_CLOSED" = "true" ]; then
+            if [ -d "$TARGET_DIR" ]; then
+              git rm -r -q "$TARGET_DIR"
+              message="Remove preview for PR #${PR_NUMBER} (closed)"
+            else
+              echo "No preview directory to remove."
+              exit 0
+            fi
+          else
+            # `.nojekyll` stops Pages from running the content through Jekyll.
+            touch .nojekyll
+            mkdir -p "$TARGET_DIR"
+            cp "$GITHUB_WORKSPACE/omniverse-standalone.html" "$TARGET_DIR/index.html"
+            cp "$GITHUB_WORKSPACE/omniverse-standalone.html" "$TARGET_DIR/omniverse-standalone.html"
+            if [ "$TARGET_DIR" = "." ]; then
+              message="Publish main @ ${GITHUB_SHA:0:7}"
+            else
+              message="Preview for PR #${PR_NUMBER} @ ${GITHUB_SHA:0:7}"
+            fi
+          fi
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No content changes to publish."
+            exit 0
+          fi
+          git commit -q -m "$message"
+
+          # gh-pages is a shared branch; retry against concurrent publishes.
+          for attempt in 1 2 3 4 5; do
+            git push origin gh-pages && exit 0
+            sleep $((attempt * 3))
+            git pull --rebase origin gh-pages || true
+          done
+          echo "::error::Could not push to gh-pages after 5 attempts."
+          exit 1
+
+      - name: Write link to the job summary
+        if: steps.plan.outputs.build == 'true'
+        env:
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          {
+            echo "### Playable build"
+            echo
+            echo "[$URL]($URL)"
+            echo
+            echo "Built from \`${GITHUB_SHA:0:7}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post link on the PR
+        if: github.event_name == 'pull_request' && (steps.plan.outputs.build == 'true' || github.event.action == 'closed')
+        uses: actions/github-script@v7
+        env:
+          URL: ${{ steps.target.outputs.url }}
+          IS_CLOSED: ${{ github.event.action == 'closed' }}
+        with:
+          script: |
+            const marker = '<!-- omni-preview -->';
+            let body;
+            if (process.env.IS_CLOSED === 'true') {
+              body = `${marker}\nPreview removed (PR closed).`;
+            } else {
+              const sha = context.payload.pull_request.head.sha.substring(0, 7);
+              body = [
+                marker,
+                '### Play this build',
+                '',
+                `${process.env.URL}`,
+                '',
+                `Built from \`${sha}\` — updates automatically on every push.`,
+                'Pages can take a minute to serve the first deploy.',
+              ].join('\n');
+            }
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Post link on the commit
+        if: github.event_name == 'push' && steps.plan.outputs.build == 'true'
+        uses: actions/github-script@v7
+        env:
+          URL: ${{ steps.target.outputs.url }}
+        with:
+          script: |
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `### Play this build\n\n${process.env.URL}\n\nBuilt from \`${context.sha.substring(0, 7)}\`.`,
+            });
