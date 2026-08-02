@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-SOURCE_REPO="https://github.com/I-R0N/Omni.git"
+SOURCE_REPO="${SOURCE_REPO:-https://github.com/I-R0N/Omni.git}"
 TARGET_OWNER="I-R0N"
 TARGET_REPO="omnispace"
 WORKDIR="${WORKDIR:-$HOME/omnispace-mirror}"
@@ -90,19 +90,22 @@ mkdir -p .github/workflows
 cp "$WORKFLOW_SRC" .github/workflows/preview.yml
 git add .github/workflows/preview.yml
 
-git -c user.name="$NEW_NAME" -c user.email="$NEW_EMAIL" commit -q -m "$(cat <<'MSG'
+# The message is piped to `commit -F -` rather than built with $(cat <<'EOF').
+# bash 3.2, which is what macOS ships, cannot parse a heredoc inside command
+# substitution: it scans for the closing paren using quoting rules, so an
+# apostrophe in the message text opens a string that is never closed.
+git -c user.name="$NEW_NAME" -c user.email="$NEW_EMAIL" commit -q -F - <<'MSG'
 Publish playable builds to GitHub Pages
 
 Replace the two workflows that mirrored the standalone build into a separate
-private repository with a single workflow that publishes to this repository's
-own gh-pages branch and posts the link.
+private repository with a single workflow that publishes to the gh-pages
+branch of this repository and posts the link.
 
   main    -> https://i-r0n.github.io/omnispace/
   PR #123 -> https://i-r0n.github.io/omnispace/pr-123/
 
 This needs no repository secrets; the built-in GITHUB_TOKEN is sufficient.
 MSG
-)"
 echo "Committed the workflow change."
 
 # --------------------------------------------------------------------- push --
