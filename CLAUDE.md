@@ -166,9 +166,23 @@ only honored from the main menu; mid-game requires `restartGame()`.
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
   per-map run state.
 
-Death is unchanged by (k): `respawnPlayer()` still refills at the current
-map's spawn.  A death penalty / return-to-hub-on-death is owned by the
-economy tuning pass, not here.
+Death SEMANTICS are unchanged: `respawnPlayer()` still refills at the
+current map's spawn and the run continues.  A death penalty /
+return-to-hub-on-death is owned by the economy tuning pass, not here.
+What Phase 3 Pair A added is PRESENTATION around that behaviour — when
+the wreck's `explosionTimer` runs out the engine sets `deathPending`
+instead of respawning, which freezes the loop (the `dockedAtStation`
+short-circuit, verbatim) and publishes `EngineStats.runSummary` for the
+full-screen UIOverlay run summary.  Its three buttons are three existing
+paths: `respawnFromDeath()` (→ `respawnPlayer()`, the old auto-respawn),
+`restartRun()` (`resetAndLoadSelectedMap()` + `startGame()` — the menu
+START path without the menu), and `quitToMenu()` (→ `restartGame()`).
+The RUN-SUMMARY COUNTERS (`runKills` / `runCreditsEarned` / `runTimeSec`
+/ `runWavesCleared` / `runHighestWave` / `runBestCombo`, alongside the
+existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
+`resetAndLoadSelectedMap()`, deliberately untouched by `loadMapFresh()`,
+so one summary spans every map a run visited.  `runTimeSec` accumulates
+SIM seconds, so paused / docked / dead time is excluded for free.
 
 Per-frame `loop()`:
 
@@ -177,7 +191,9 @@ Per-frame `loop()`:
    stats, draws a static frame, and returns — the sim FREEZES while the
    React station UI is up (same short-circuit the removed
    `cardChoicePending` card modal used).  The E key undocks from inside
-   this branch.
+   this branch.  `deathPending` (Pair A) freezes the loop the same way,
+   immediately after — and the accumulator drain below breaks out of the
+   substep loop the moment it is raised mid-frame.
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
    - `PerfController.beginStep(...)` — samples a load signal
@@ -1048,7 +1064,11 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   mirror is REMOVED (score stays the pure performance metric).  Each
   collected unit pays `SALVAGE_CONSTANTS.CREDITS_PER_DROP` (conversion
   happens once at collection; `dropValue` counts units so merges stay
-  value-conserving).  Pickup feedback: `player.salvagePickupFlash`
+  value-conserving).  Both drop paths credit through
+  `GameEngine.earnCredits()`, which also feeds the run summary's
+  "Salvage earned" counter — resale (sell/scrap) and the DBG grant
+  deliberately do NOT, since a refund of money already earned would
+  double-count.  Pickup feedback: `player.salvagePickupFlash`
   (accumulating "+N credits" window)
   → `EngineStats.salvageFlash` → the in-game HUD Salvage chip (silver,
   under the score chip in `UIOverlay`; credits are on `EngineStats` every

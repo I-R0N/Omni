@@ -129,6 +129,23 @@ export class GameEngine {
   // window lapses.  Ship kills only; shard/tile kills don't touch it.
   private comboCount: number = 0;
   private comboTimer: number = 0;
+
+  // ── Run-summary counters (Phase 3 Pair A, milestone A1) ─────────────────
+  // Everything the death/run-summary overlay reports that no other system
+  // already tracks.  RUN-scoped, so they are zeroed in
+  // resetAndLoadSelectedMap() and deliberately NOT in loadMapFresh() — a
+  // portal excursion is the same run, so its kills and seconds carry.
+  private runKills: number = 0;          // enemy ships downed BY THE PLAYER
+  private runCreditsEarned: number = 0;  // salvage income only (see earnCredits)
+  private runTimeSec: number = 0;        // SIM seconds — pauses/docks don't count
+  private runWavesCleared: number = 0;   // clears across every arena this run
+  private runHighestWave: number = 0;    // best wave NUMBER reached (1-based)
+  private runBestCombo: number = 1;      // highest combo multiplier reached
+  // Death beat: set when the player's explosion finishes instead of
+  // respawning straight away.  While set the loop short-circuits (the
+  // dockedAtStation precedent) and UIOverlay shows the run summary.  Death
+  // SEMANTICS are unchanged — RESPAWN still calls respawnPlayer().
+  private deathPending: boolean = false;
   // ── Progression ─────────────────────────────────────────────────────────
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
@@ -1502,9 +1519,10 @@ export class GameEngine {
   }
 
   public pauseGame() {
-    // The docked station UI already freezes the sim; stacking the pause
-    // menu on top of it would double up two full-screen overlays.
-    if (this.gameState === GameState.PLAYING && !this.dockedAtStation) {
+    // The docked station UI and the death/run-summary screen already freeze
+    // the sim; stacking the pause menu on top would double up two
+    // full-screen overlays.
+    if (this.gameState === GameState.PLAYING && !this.dockedAtStation && !this.deathPending) {
         this.gameState = GameState.PAUSED;
     }
   }
@@ -1594,11 +1612,31 @@ export class GameEngine {
       this.bossesKilled = 0;
       this.liveBoss = null;
 
+      // Run-summary counters (A1) — the whole point of resetting them HERE is
+      // that a portal excursion (transitionToMap) leaves them alone, so one
+      // run's summary spans every map it visited.
+      this.runKills = 0;
+      this.runCreditsEarned = 0;
+      this.runTimeSec = 0;
+      this.runWavesCleared = 0;
+      this.runHighestWave = 0;
+      this.runBestCombo = 1;
+      this.deathPending = false;
+
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
       this.resetOutfit(); // back to lean (bare hexes, empty inventory, Blaster on W1)
 
+      // Clear the WRECK state too (A1).  Before the run-summary screen the
+      // player could never be mid-explosion at a run reset — the auto-respawn
+      // always cleared it first.  Now RESTART RUN / MAIN MENU are reachable
+      // from the death screen, so a reset that left `isExploding` set would
+      // re-raise the death screen on the next step (explosionTimer is already 0).
+      this.player.isExploding = false;
+      this.player.explosionTimer = undefined;
+      this.player.active = true;
+      this.player.sprite = ASSETS.PLAYER_SHIP;
       this.player.health = this.player.maxHealth;
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
@@ -1707,6 +1745,42 @@ export class GameEngine {
       this.prepareFrameEntities();
   }
 
+  // ── Death / run-summary screen actions (A1) ──────────────────────────────
+  // Three buttons, three EXISTING engine paths — nothing here invents a new
+  // consequence for dying.  The death penalty question is owned by the
+  // economy tuning pass (roadmap step 6), so RESPAWN is byte-for-byte the
+  // auto-respawn that used to fire when the wreck finished.
+
+  /** Primary action: continue the run from the current map's spawn. */
+  public respawnFromDeath() {
+      if (!this.deathPending) return;
+      this.deathPending = false;
+      this.respawnPlayer();
+      // Same stale-time guard resumeGame() uses — the loop was frozen while
+      // the summary was up, so drop the accumulated wall-clock.
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
+      this.prepareFrameEntities();
+  }
+
+  /** Wipe the run and drop straight back into play on the same map — the
+   *  main menu's START path (resetAndLoadSelectedMap + startGame) without the
+   *  round trip through the menu. */
+  public restartRun() {
+      this.deathPending = false;
+      this.resetAndLoadSelectedMap();
+      this.startGame();
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
+      this.prepareFrameEntities();
+  }
+
+  /** Wipe the run and return to the main menu — restartGame() verbatim; the
+   *  flag clear rides along inside resetAndLoadSelectedMap(). */
+  public quitToMenu() {
+      this.restartGame();
+  }
+
   private selectWeapon(wType: WeaponType) {
     this.currentWeaponIndex = this.weapons.selectWeapon(this.player, wType);
   }
@@ -1809,6 +1883,7 @@ export class GameEngine {
         speedMult: this.moduleSpeedMult,
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
+      runSummary: this.deathPending ? this.runSummarySnapshot() : undefined,
       dock: this.dockStatsSnapshot(),
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
@@ -1910,6 +1985,16 @@ export class GameEngine {
         return;
     }
 
+    // Dead, run-summary screen up (A1): freeze the sim on exactly the same
+    // terms as the docked station above — the wreck field stays drawn behind
+    // the React overlay until RESPAWN / RESTART RUN / MAIN MENU is chosen.
+    if (this.deathPending) {
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
     // ── Fixed-timestep accumulator (Phase 1) ─────────────────────────────────
     // Drain the accumulator at a fixed simulation rate regardless of the
     // render frame rate.  Any leftover time carries to the next frame.
@@ -1925,6 +2010,10 @@ export class GameEngine {
     let steps = 0;
     let frameSimMs = 0; // raw per-frame sim total (summed across substeps)
     while (this.simAccumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
+        // Death raised mid-frame (A1): stop draining immediately and drop the
+        // leftover time, so the summary screen freezes on the frame the wreck
+        // finished rather than a few substeps later.
+        if (this.deathPending) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -2328,6 +2417,10 @@ export class GameEngine {
           // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
           // A rival-killed enemy (killedByRival) pays the player NOTHING — the
           // rival stole it (Stage 7); the theft is shown by the rival's popup.
+          // Run summary (A1): this branch is exactly "an enemy ship the
+          // PLAYER downed" — rival-stolen kills are filtered out above, so
+          // the counter matches the points the player was actually paid.
+          this.runKills++;
           const mult = this.registerComboKill();
           const scale = opts?.scoreScale ?? 1;
           this.awardScore(
@@ -2658,6 +2751,16 @@ export class GameEngine {
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
 
+    // Run clock (A1) — SIM seconds, so time spent paused, docked or on the
+    // death screen is excluded for free (all three freeze the loop).  The
+    // highest wave reached is sampled here rather than at wave start so a
+    // wave-free hub visit can't stomp the arena high-water mark.
+    this.runTimeSec += dt;
+    if (this.wavesEnabled) {
+        const n = this.waveIndex + 1;
+        if (n > this.runHighestWave) this.runHighestWave = n;
+    }
+
     // Kill-combo window — lapses if no ship dies for COMBO_WINDOW_SEC.
     if (this.comboTimer > 0) {
         this.comboTimer -= dt;
@@ -2784,7 +2887,12 @@ export class GameEngine {
         if (this.player.explosionTimer !== undefined) {
             this.player.explosionTimer -= dt;
             if (this.player.explosionTimer <= 0) {
-                this.respawnPlayer();
+                // A1: the wreck finishing no longer respawns on its own — it
+                // raises the run-summary screen and freezes the sim.  RESPAWN
+                // on that screen calls respawnPlayer() with the same effect
+                // the auto-respawn had, so death semantics are unchanged.
+                this.player.explosionTimer = 0;
+                this.deathPending = true;
             }
         }
         this.camera.position.x = this.player.position.x;
@@ -3573,6 +3681,25 @@ export class GameEngine {
     return true;
   }
 
+  /** Run summary for EngineStats (A1) — built ONLY while `deathPending`, so
+   *  it costs nothing on a live frame.  Every field is a counter that already
+   *  exists on the engine; nothing is recomputed here. */
+  private runSummarySnapshot() {
+    return {
+      score: this.score,
+      bestCombo: this.runBestCombo,
+      kills: this.runKills,
+      bosses: this.bossesKilled,
+      wavesCleared: this.runWavesCleared,
+      highestWave: this.runHighestWave,
+      wavesEnabled: this.wavesEnabled,
+      credits: this.credits,
+      creditsEarned: this.runCreditsEarned,
+      timeSec: Math.floor(this.runTimeSec),
+      mapName: this.currentMap?.name ?? '',
+    };
+  }
+
   /** Dock state for EngineStats: in-range/docked + the station's name and
    *  services so the UI shows the right affordance + panels. */
   private dockStatsSnapshot() {
@@ -3915,7 +4042,20 @@ export class GameEngine {
   private registerComboKill(): number {
       this.comboCount++;
       this.comboTimer = SCORE_CONSTANTS.COMBO_WINDOW_SEC;
-      return this.comboMultiplier();
+      const mult = this.comboMultiplier();
+      // Run summary (A1): the best multiplier the run ever reached.
+      if (mult > this.runBestCombo) this.runBestCombo = mult;
+      return mult;
+  }
+
+  /** Salvage income — the ONE way credits are earned in the field.  Wraps the
+   *  `this.credits += n` the drop paths used to do inline so the run-summary
+   *  "earned this run" counter can't drift from the balance.  Deliberately
+   *  NOT used by resale (sell/scrap is a refund of money already earned, so
+   *  routing it here would double-count) nor by the DBG credit grant. */
+  private earnCredits(n: number) {
+      this.credits += n;
+      this.runCreditsEarned += n;
   }
 
   /** Style a gold "+N" points popup: text + magnitude-tiered colour/size
@@ -5602,6 +5742,10 @@ export class GameEngine {
     // Par = the wave's spawn-stream window; clearing at/under par pays the
     // full speed bonus, decaying to 0 by 2× par.
     const waveNum = clearedIndex + 1;
+    // Run summary (A1): clears accumulate across every arena the run visits
+    // (wave progress itself is fresh per portal entry), so the summary reports
+    // total clears alongside the best single-arena wave reached.
+    this.runWavesCleared++;
     const par = Math.max(1, getWaveDurationSec(clearedIndex));
     const speedFrac = Math.max(0, Math.min(1, 1 - Math.max(0, elapsedSec - par) / par));
     const bonus = SCORE_CONSTANTS.WAVE_COMPLETE_BASE
@@ -6602,7 +6746,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
-      (credits) => { this.credits += credits; },
+      (credits) => { this.earnCredits(credits); },
     );
   }
 
@@ -6614,7 +6758,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
-      (credits) => { this.credits += credits; },
+      (credits) => { this.earnCredits(credits); },
     );
   }
 

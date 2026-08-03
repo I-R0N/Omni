@@ -1401,6 +1401,29 @@ export interface EngineStats {
       cost: number; affordable: boolean;
     }[];
   };
+  /** Death / run-summary screen (Phase 3 Pair A).  Present ONLY while the
+   *  player is dead and the summary overlay is up — the sim is frozen while
+   *  set, exactly like `dock.docked`.  Death SEMANTICS are unchanged: the
+   *  screen's RESPAWN button performs the refill-at-spawn that used to fire
+   *  automatically, and the run continues.  `credits` is the current balance
+   *  (which purchases have already drawn down); `creditsEarned` is gross
+   *  salvage income for the run, so the two read differently on purpose. */
+  runSummary?: {
+    score: number;
+    bestCombo: number;
+    kills: number;
+    bosses: number;
+    wavesCleared: number;
+    highestWave: number;
+    /** False on the wave-free hub — the wave rows are hidden rather than
+     *  reported as zero when the run never touched an arena. */
+    wavesEnabled: boolean;
+    credits: number;
+    creditsEarned: number;
+    /** SIM seconds; time paused / docked / on this screen is excluded. */
+    timeSec: number;
+    mapName: string;
+  };
   /** Station docking state (Overworld only).  `inRange` drives the DOCK
    *  affordance; `docked` opens the station UI (the sim is frozen while
    *  set — cardChoicePending-style short-circuit).  `name`/`services`

@@ -51,6 +51,12 @@ interface UIOverlayProps {
   onPause?: () => void;
   onResume?: () => void;
   onRestart?: () => void;
+  /** Death / run-summary screen (Phase 3 Pair A) — RESPAWN continues the run
+   *  from the current map's spawn (unchanged death semantics), RESTART RUN
+   *  wipes and replays the same map, MAIN MENU wipes and exits to the menu. */
+  onRespawn?: () => void;
+  onRestartRun?: () => void;
+  onQuitToMenu?: () => void;
   onToggleDebug?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
@@ -166,6 +172,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPause,
   onResume,
   onRestart,
+  onRespawn,
+  onRestartRun,
+  onQuitToMenu,
   onToggleDebug,
   onCycleTrailShape,
   onCycleTrailEmitMode,
@@ -1351,9 +1360,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
           )}
 
-          {/* Pause button — hidden while docked (the station UI already
-              freezes the sim and owns the screen) */}
-          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && (
+          {/* Pause button — hidden while docked or dead (the station UI and
+              the run-summary screen already freeze the sim and own the
+              screen) */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && (
             <button
               onClick={onPause}
               className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 shadow-lg border border-slate-600/60 transition-all active:scale-95"
@@ -1429,7 +1439,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* Stations and portals share the E key; the engine arbitrates by
           nearest-in-range, so at most one of these is ever offered and the
           button names the action E will take. */}
-      {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && (
+      {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && !stats.runSummary && (
         <button
           onClick={onDock}
           className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
@@ -1438,7 +1448,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </button>
       )}
 
-      {stats.gameState === GameState.PLAYING && stats.portal && !stats.dock?.docked && (
+      {stats.gameState === GameState.PLAYING && stats.portal && !stats.dock?.docked && !stats.runSummary && (
         <button
           onClick={onEnterPortal}
           className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-violet-600/85 hover:bg-violet-500 border border-violet-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
@@ -1578,6 +1588,88 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* Drag ghost — fixed-positioned, shared by the station UI and the
           pause cargo panel. */}
       {renderDragGhost()}
+
+      {/* ── Death / run summary (Phase 3 Pair A) ── */}
+      {/* The sim is frozen while `runSummary` is present (loop short-circuit,
+          same as the docked station), so the wreck field stays drawn behind
+          this overlay.  Presentation only: RESPAWN is the auto-respawn that
+          used to fire on its own, so dying still costs nothing but time —
+          the death PENALTY question belongs to the economy tuning pass. */}
+      {stats.runSummary && (() => {
+        const rs = stats.runSummary;
+        const mm = Math.floor(rs.timeSec / 60);
+        const ss = rs.timeSec % 60;
+        const row = (label: string, value: React.ReactNode, note?: string) => (
+          <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
+            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className="text-right">
+              <span className="text-white font-bold tabular-nums text-sm">{value}</span>
+              {note && <span className="text-slate-500 text-[10px] ml-1.5">{note}</span>}
+            </span>
+          </div>
+        );
+        return (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+            <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
+
+              <div className="text-center">
+                <h2 className="text-4xl font-black text-rose-400 tracking-[0.2em]">DESTROYED</h2>
+                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">{rs.mapName}</p>
+              </div>
+
+              {/* Headline — the run's performance metric, big. */}
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 text-center">
+                <div className="text-amber-300 text-[10px] font-bold uppercase tracking-widest">Score</div>
+                <div className="text-amber-200 text-4xl font-black tabular-nums leading-tight">
+                  {rs.score.toLocaleString()}
+                </div>
+                {rs.bestCombo > 1 && (
+                  <div className="text-slate-400 text-[11px] mt-0.5">
+                    best combo <span className="text-amber-300 font-bold tabular-nums">×{rs.bestCombo}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
+                {rs.wavesEnabled && row('Waves cleared', rs.wavesCleared, `high ${rs.highestWave}`)}
+                {row('Enemies destroyed', rs.kills.toLocaleString(), rs.bosses > 0 ? `${rs.bosses} boss${rs.bosses > 1 ? 'es' : ''}` : undefined)}
+                {row('Salvage earned', `◈${rs.creditsEarned.toLocaleString()}`, `◈${rs.credits.toLocaleString()} left`)}
+                {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={onRespawn}
+                  data-testid="death-respawn"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest uppercase"
+                >
+                  Respawn
+                </button>
+                <p className="text-slate-500 text-[10px] text-center -mt-1">
+                  Continue this run — hull restored at the {rs.mapName} spawn. Score, Salvage and outfit are kept.
+                </p>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    onClick={onRestartRun}
+                    data-testid="death-restart"
+                    className="bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg text-xs tracking-widest uppercase transition-all active:scale-95"
+                  >
+                    Restart Run
+                  </button>
+                  <button
+                    onClick={onQuitToMenu}
+                    data-testid="death-menu"
+                    className="bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg text-xs tracking-widest uppercase transition-all active:scale-95"
+                  >
+                    Main Menu
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
