@@ -47,8 +47,9 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
-                          UI, dock affordance, death/run-summary screen;
-                          debug panel lives inside the pause menu)
+                          UI, dock affordance, death/run-summary screen,
+                          audio settings row; debug panel lives inside
+                          the pause menu)
 
 engine/
   GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
@@ -118,6 +119,12 @@ engine/
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
                           projectiles)
+    AudioSystem.ts        SFX manager — gesture-unlocked WebAudio,
+                          per-id polyphony caps + retrigger collapse,
+                          tier-thinned global voice ceiling, torus-
+                          wrapped pan/attenuation, synthesis primitives
+    SfxRegistry.ts        The procedural draft of every sound in
+                          docs/SFX_INVENTORY.md, keyed by its stable id
     PerfRecorder.ts       DBG in-game FPS/perf capture harness — records
                           the per-frame timing + PerfSnapshot stream over a
                           window and exports a copy-paste report (DBG panel
@@ -125,6 +132,8 @@ engine/
 
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
+                          EXCEPT docs/SFX_INVENTORY.md, which IS current
+                          and IS the source of truth for sound (see §8)
 .github/workflows/        pr-preview, publish-standalone
 ```
 
@@ -503,6 +512,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (UniverseMap, PocketMap, SevenRingsMap) still hardcode their own
   tile-variant ratios; treat MAP_POPULATION as authoritative for
   documentation but verify the relevant `MapClasses` subclass too.
+- `AUDIO_CONSTANTS` — mixer + voice-budget tuning for AudioSystem
+  (master volume, the three tier-thinned voice ceilings, the retrigger
+  COLLAPSE bump + its saturation cap, near/far attenuation radii, pan
+  width).  WHAT plays and with what per-sound parameters lives in
+  `docs/SFX_INVENTORY.md` and, in code, in `SfxRegistry`.
+- `EXPLOSION_PROFILES` / `ExplosionProfile` — per-entity-class death FX
+  on the EXISTING ParticleSystem: ring shape, debris count/speed/size/
+  lifetime, an accent HUE, screen punch, and the profile's SFX id.  11
+  profiles (swarm / standard / heavy / kamikaze / bubble / rival /
+  player / boss + glass / rock / metal).  `GameEngine.deathFx()` is the
+  SINGLE classification returning both the profile and the sound, so a
+  class's look and its voice cannot drift apart.  Plastic and nebula
+  resolve to a NULL profile — their existing deliberate non-burst
+  (plastic never sparks; nebulae fade via `mergeFadeTimer`) is itself
+  differentiation.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
@@ -1421,6 +1445,45 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   feeds them.  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
   with its full phase table, each click stacking another (the Dragon-menu
   pattern).
+- **Sound goes through one id, and the id is the contract.**  Every
+  trigger site calls `audio.play('<inventory id>')` (or
+  `audio.loop(id, on, …)` for sustained sounds) and nothing else.
+  `docs/SFX_INVENTORY.md` is the source of truth for WHAT plays and with
+  what parameters — trigger site, mix tier, duration, sonic character,
+  frequency + envelope, variation, polyphony + throttle, mix level,
+  positional vs UI-flat.  `SfxRegistry` holds the procedural draft for
+  each id; replacing a draft with a recorded asset is a registry change
+  and NEVER a call-site change.  A headless smoke parses the document
+  and asserts registry↔document parity in BOTH directions, so adding a
+  sound means adding its row first.  Systems that need to make a sound
+  expose ONE generic sink (`PhysicsSystem.sfx`, `ShardSystem.sfx`,
+  `DropSystem.sfx`, `WeaponSystem.onEnemyFire`) assigned once in the
+  GameEngine constructor — the same settable-field style as
+  `setPhysics` / `traitsEnabled` — so no system imports audio state and
+  adding a sound is a call rather than a signature change.
+- **Audio is EVENT-DRIVEN; nothing audio-related runs per frame** except
+  `audio.setListener(camera)` and `audio.setActive(...)`, two number
+  writes and a boolean.  Voice lifetimes come from the duration each
+  synth returns and are pruned lazily inside `play()` — no timers, no
+  `onended` handlers.  Measured: `play()` costs ~0.3 µs, and a heavy
+  mass-death scene shows no frame-time difference between muted and
+  unmuted.  Three mechanisms keep a 400-death frame sane: per-id
+  polyphony caps, a per-id retrigger window that COLLAPSES simultaneous
+  triggers while bumping the survivor's gain (so bulk reads as HEAVIER,
+  not thinner or louder), and a global ceiling that thins tier 3 then
+  tier 2 — tier 1 always plays.  Positional pan and attenuation use
+  `wrapDeltaX`/`wrapDeltaY` (listener-first: `wrapDeltaX(from, to)`
+  returns `to - from`, so source-first inverts the stereo image).
+  A FROZEN SIM (paused / docked / menu) silences the WORLD — loops and
+  positional one-shots — but deliberately NOT flat/UI sounds, because
+  the station and pause screens are exactly where docking cues,
+  purchases and menu clicks have to be heard.  The AudioContext is
+  created on the FIRST USER GESTURE (AudioSystem arms its own
+  capture-phase window listeners rather than hooking InputSystem, which
+  only sees canvas-targeted events and so misses the menu tap that is
+  usually a phone session's first gesture).  Master volume + mute are
+  IN-MEMORY only, consistent with the project keeping no state across
+  reloads.
 - **`window.__omniEngine` / `window.__omniStats` are debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
   `window`.  NOTHING in the game reads them — they exist so headless
