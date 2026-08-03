@@ -47,8 +47,8 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
-                          UI, dock affordance; debug panel lives inside
-                          the pause menu)
+                          UI, dock affordance, death/run-summary screen;
+                          debug panel lives inside the pause menu)
 
 engine/
   GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
