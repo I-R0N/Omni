@@ -52,28 +52,143 @@ and re-runs its smokes.
       row.
 - [x] **B4** — Explosion variety per entity class on the existing
       ParticleSystem, paired to inventory SFX ids.
-- [ ] **B5** — Validation: perf A/B, phone-scale check, full-loop smoke,
+- [x] **B5** — Validation: perf A/B, phone-scale check, full-loop smoke,
       rebase, CLAUDE.md sync, completion summary.
+
+---
+
+## COMPLETION SUMMARY
+
+**All five milestones complete.** `npm run build` green; `npx tsc
+--noEmit` shows only the two errors already present on the base commit
+(`constants.ts` `defaultOutcome`, `ShardSystem.ts`
+`requireSizeDeltaFraction` — confirmed by stashing and re-running).
+Four headless Playwright suites, **113 assertions** (B2 26, B3 32, B4 28,
+B5 27), green across consecutive full rounds.
+
+The plan branch had NOT moved from the base commit (`73a86c2`) when the
+PR was opened, so the required rebase was a no-op; the smokes were
+re-run against the final tree regardless.
+
+### What shipped
+
+**`docs/SFX_INVENTORY.md` — the deliverable.** 81 entries across
+weapons, enemy weapons, impacts, destruction, movement/material,
+pickups, station, portals, waves, roamers, status effects and UI.  Each
+carries a stable id, its trigger site, a mix tier, target duration,
+sonic character in words, frequency range + envelope, variation scheme,
+polyphony cap + throttle rule, relative mix level, and positional vs
+UI-flat.  §9 ranks which drafts are worth an external generation budget.
+It is a generation brief AND the implementation map, and it is
+**enforced**: a smoke parses the document and asserts registry↔document
+parity in both directions.
+
+**`AudioSystem` — event-driven, gesture-unlocked, torus-correct.**  The
+AudioContext is built on the first user gesture (own capture-phase
+window listeners, because InputSystem only sees canvas-targeted events
+and would miss the menu tap that is usually a phone session's first
+gesture).  Nothing audio-related runs per frame beyond `setListener`
+and `setActive`.  Three mechanisms keep a mass-death frame sane: per-id
+polyphony caps, a retrigger window that COLLAPSES simultaneous triggers
+while bumping the survivor's gain with saturation, and a global ceiling
+that thins tier 3 then tier 2 while tier 1 always plays.  A frozen sim
+silences the world but not the UI.
+
+**`SfxRegistry` — 81 procedural drafts.**  No audio asset files, so the
+standalone build pipeline is untouched and real assets drop in later by
+id without any call site changing.
+
+**Wiring** across GameEngine / PhysicsSystem / WeaponSystem /
+ShardSystem / DropSystem, riding existing dispatch where one existed
+(`handleProjectileHit`, `handleEntityDeath`) and one generic `sfx` sink
+per system where none did.  One pause-menu row: mute, slider, readout.
+
+**`EXPLOSION_PROFILES` — classes that die differently.**  Before this,
+every enemy death was the same burst tinted by `entity.color`.  Now ring
+shape, debris count/speed/size/lifetime, an accent HUE and the screen
+punch all vary per class, and `deathFx()` is the SINGLE classification
+returning both the profile and the sound so they cannot drift apart.
+
+### Measured results
+
+- **Audio is free.**  `play()` costs **0.1–0.3 µs** per call (1000 calls
+  in 0.1–0.3 ms).  In a same-harness A/B on a heavy scene (50 live
+  enemies, 4 mass deaths per frame, 150 frames, fresh field per run),
+  the UNMUTED median frame time came in **below** the muted baseline on
+  every run (−3.4%, −7.7%, −11.6%) — i.e. the difference is lost in
+  noise, with muted-run drift of 2.6–11.9% bounding that noise.
+- **Explosion budget spent differently, not more.**  Particles per
+  death: gnat 7 (down from ~15), standard 16 (the same envelope as the
+  PR #69 trimmed burst it replaces), bubble 17, heavy 22, bomber 29.
+  The class that dies in BULK got cheaper.  `MAX_PARTICLES` still holds
+  after 60 simultaneous deaths.
+- **Class differentiation is real, not nominal.**  Heavy hulls throw
+  slower/bigger/longer-lived debris than standard kills; bombers throw
+  the fastest; bubbles the slowest with no hot core.  Materials: glass
+  debris averages 7.5 units/step, metal 6.0, rock 2.9.
+- **Phone scale.**  At 390×844 the audio row fits inside the viewport,
+  the mute button is a 36×36 touch target, the slider is 194 px wide,
+  the pause menu does not scroll horizontally, and tapping mute toggles
+  the mixer.
 
 ---
 
 ## FOR-USER-REVIEW
 
-*(Consolidated at the top on completion. Items accumulate here as they
-arise; nothing here was silently decided.)*
+1. **Where to spend an external generation budget: `docs/SFX_INVENTORY.md`
+   §9.** Ranked by (importance × how badly synthesis handles it), not by
+   importance alone. Top of the list: `destroy.player` (the run ends on
+   it), `snitch.catch` (the game's best moment, and a cascade chime is
+   what additive synthesis does worst), `boss.death` / `boss.intro`,
+   `dragon.arrive` (a creature roar has formant structure oscillators
+   cannot fake), `destroy.tile.glass` (the most-heard destruction sound),
+   the Cannon and Shotgun, and `move.thrust` (a loop that plays for a
+   whole session — the bar there is *tolerability*).
 
-- **Volume preference is in-memory only.** Durable storage is fenced for
-  this project (no persistence beyond in-memory run state, CLAUDE.md §1),
-  so master volume and mute reset on reload. If you want them to stick,
-  that is a `localStorage` decision for you to make, not one this session
-  should take unilaterally.
-- **Every number in `docs/SFX_INVENTORY.md` is provisional.** Durations,
-  frequencies, envelopes and mix levels were derived from the trigger
-  sites and mix-budget reasoning, not from listening on your hardware.
-  Expect to move mix levels in particular.
-- **§9 of the inventory** ranks the drafts most worth an external
-  generation budget. That list is the answer to "where do I spend money
-  on sound".
+2. **Volume and mute are IN-MEMORY only.** This project keeps no state
+   across reloads (CLAUDE.md §1), so the preference resets with the
+   page. Making it stick is a `localStorage` decision — a durability
+   choice for you, not one this session should take unilaterally.
+
+3. **Every number in this pass is PROVISIONAL.** All of
+   `AUDIO_CONSTANTS` (voice ceilings 24/20/14, collapse bump 1.22
+   saturating at 2.2, near 420 / far 2600 / pan-width 900 world units,
+   default volume 0.7), all 11 `EXPLOSION_PROFILES`, the three
+   call-site constants (`SALVAGE_STREAK_WINDOW_MS` 1500,
+   `SALVAGE_STREAK_MAX` 11, `SNITCH_NEAR_RANGE` 1200), and every
+   synthesis parameter in the registry. They were reasoned about against
+   the mix-budget model in inventory §2, not listened to on your
+   hardware. **Expect to move mix levels first** — the relative levels
+   are the designed part, the absolute ones are a starting point.
+
+4. **Three judgment calls worth a second opinion:**
+   - **Plastic and nebula still make NO death particles.** Both were
+     deliberate existing looks (plastic has never sparked; nebulae fade
+     via `mergeFadeTimer`), so I treated "the material that makes no
+     spark" as differentiation rather than an omission to fix. If you
+     want them differentiated visually too, that is a one-row change
+     each.
+   - **A refused outfit move now BUZZES** (`poi.reject` on the
+     drydock guard). It is the most common thing a player tries and
+     cannot do, so it fires often while the adjacency rules are being
+     learned. If it grates, the fix is the 250 ms throttle or the 0.38
+     mix level, not removing it.
+   - **The snitch has a proximity SHIMMER loop** audible within 1200
+     units. It is pure carrot and it is quiet (mix 0.18), but it is also
+     the only always-on world loop besides thrust and the portal hum. If
+     three ambient loops is one too many, the snitch is the one to cut.
+
+5. **Enemy fire is voiced APART from player fire** (darker, duller).
+   That was a deliberate legibility call — incoming vs outgoing is
+   information the player acts on, and a busy screen loses it visually.
+   Worth confirming it reads that way to you in play.
+
+6. **One transient smoke failure worth knowing about.** During a
+   back-to-back run of all four suites, B5 failed one assertion once
+   (the perf A/B's baseline-stability check) under container load. Three
+   consecutive isolated re-runs were 27/27 with drift 2.6–11.9% against
+   a 25% threshold. The conclusive evidence for "audio is free" is the
+   microbenchmark, which is not load-sensitive.
 
 ---
 
@@ -370,3 +485,60 @@ budget and the gnat burst below its old cost; burst-and-SFX firing
 together for four classes; `MAX_PARTICLES` holding after 60 simultaneous
 deaths; and glass > metal > rock on debris speed across three showcase
 maps.
+
+---
+
+### Iteration 4 — B5: validation
+
+**Done.** Perf A/B, phone-scale check, full-loop smoke, rebase check,
+CLAUDE.md sync, and this summary.  B5 smoke **27/27**, and all four
+suites green across consecutive rounds (**113 assertions** total).
+
+**DECISIONS TAKEN**
+
+31. **The perf harness was REBUILT after its first result was
+    unusable.** The first cut reported a 34% median regression — but it
+    ran the muted and unmuted passes over a SHARED, GROWING field
+    (entities accumulated between runs, so the later run was strictly
+    heavier) and compared a fixed WALL-CLOCK window with unequal frame
+    counts.  The rebuilt harness restarts the field before each run,
+    measures a fixed FRAME COUNT, holds the population stable by
+    replacing each kill 1:1, and runs muted → unmuted → muted again so
+    container drift is visible rather than assumed away.  With those
+    fixed, the unmuted run measures BELOW the muted baseline on every
+    round.
+    *Recorded because* the first number was wrong in a way that would
+    have looked like a real regression, and the fix was the harness.
+
+32. **The load-bearing perf evidence is the MICROBENCHMARK.**
+    `play()` at 0.1–0.3 µs is not load-sensitive and does not depend on
+    a noisy container; the frame-time A/B corroborates it.  A
+    frame-time comparison alone would have been the weaker claim.
+
+33. **One B5 assertion was WRONG and was corrected, not tuned away.**
+    "Mass deaths are collapsed/dropped rather than all voiced" failed
+    because headless frames here run ~300 ms — longer than every
+    retrigger window in the table — so most triggers legitimately get
+    their own voice.  Collapse is a WITHIN-ONE-STEP mechanism and this
+    harness has no dense steps.  Replaced with what the scene can
+    actually show (suppression engages; peak concurrency stays low),
+    with a comment pointing at B2's 200-trigger burst as the direct
+    proof of the collapse itself.
+
+34. **A too-weak B3 assertion was found and tightened.** The station
+    test read `!bought || purchase >= 1`, which passed VACUOUSLY because
+    the purchase was silently failing: `debugTeleportToStation` lands at
+    the HOME station first, which is drydock-only, and the module id was
+    wrong.  Now the smoke cycles until a station with a ship shop is in
+    range and asserts the purchase actually succeeded.
+    *Recorded because* a test that cannot fail is worse than no test,
+    and this one hid a real gap in coverage for two milestones.
+
+35. **CLAUDE.md was synced in ONE commit at B5 rather than per
+    milestone.** The iteration discipline asks for same-commit sync; the
+    milestone queue schedules "CLAUDE.md final sync" in B5.  I followed
+    the queue.  Flagging the tension rather than leaving it implicit.
+
+**Rebase.** `origin/claude/game-feedback-plan-UN3MV` was still at
+`73a86c2` — the base commit — so there was nothing to rebase onto.  The
+smokes were re-run against the final tree anyway.
