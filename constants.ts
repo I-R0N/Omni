@@ -2526,7 +2526,7 @@ export const SCORE_CONSTANTS = {
 // the docking UI; raising the limit is a future ship purchase — see the
 // ship-catalog entry in docs/PARKING_LOT.md).  Going WEAPONLESS is
 // allowed — every gun carries a WEIGHT, and a light ship accelerates
-// harder (WEAPON_WEIGHT below).
+// harder (SHIP_WEIGHT below).
 //
 // ADJACENCY REQUIREMENTS (MODULE_REQUIREMENTS): an installed module only
 // FUNCTIONS while it touches an ACTIVE module of its required family —
@@ -2570,8 +2570,9 @@ export interface ModuleDef {
   desc: string;
   cost: number;
   weapon?: WeaponType;     // family 'gun' only
-  // Gun mass (family 'gun'): mounted weight drags acceleration via the
-  // WEAPON_WEIGHT curve — no gun mounted = a slight accel boost.
+  // Module mass.  Adds to the SHIP's total weight, which drags acceleration
+  // via the SHIP_WEIGHT curve — no gun mounted = a slight accel boost.  Only
+  // guns set it today; the fold reads it off any module.
   weight?: number;
   effect?: ModuleEffect;
 }
@@ -2590,14 +2591,25 @@ export const MODULE_RESALE = {
 // Autoloader stack floor — cadence never drops below 40% of base.
 export const COOLDOWN_FLOOR = 0.4;
 
-// ── Weapon weight → acceleration ────────────────────────────────────────────
-// Every mounted gun weighs the ship down; thrust is scaled by
-//   BASE_BOOST / (1 + DRAG_PER_WEIGHT × Σ mounted-gun weight)
-// tuned so the starter Blaster (weight 1) is EXACTLY the old 1.0 baseline:
-// flying weaponless gives the +10% BASE_BOOST, heavy arsenals (Cannon +
-// Homing ≈ 4.5 weight) drag to ≈0.76×.  This is the gamification hook the
-// heavier gun unlocks trade against.  Numbers provisional pending playtest.
-export const WEAPON_WEIGHT = {
+// ── Ship weight → acceleration ──────────────────────────────────────────────
+// WEIGHT IS A SHIP ATTRIBUTE, not a property of any one module: the ship has
+// a HULL weight of its own, every mounted module adds to it, and the ship's
+// total weight is what drags thrust:
+//   BASE_BOOST / (1 + DRAG_PER_WEIGHT × ship weight)
+// where ship weight = HULL_BASE + Σ (weight of every ACTIVE module).
+//
+// `HULL_BASE` is 0 TODAY — the current hull contributes nothing, so the
+// arithmetic is unchanged (the starter Blaster, weight 1, is EXACTLY the 1.0
+// baseline; flying weaponless gives the +10% BASE_BOOST; heavy arsenals like
+// Cannon + Homing ≈ 4.5 weight drag to ≈0.76×).  It exists as the seam for
+// SHIP CLASSES: a heavier hull sets a higher HULL_BASE and starts the whole
+// curve further along, without any other code moving.  Numbers provisional
+// pending playtest.
+//
+// Only guns carry a `weight` in MODULE_DEFS today, but the fold is
+// module-agnostic — give any module a weight and it joins the ship's total.
+export const SHIP_WEIGHT = {
+  HULL_BASE: 0,
   BASE_BOOST: 1.10,
   DRAG_PER_WEIGHT: 0.10,
 };

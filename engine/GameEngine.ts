@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -3372,6 +3372,10 @@ export class GameEngine {
   // per-frame movement line alongside the DBG thrust/speed cycles.
   private moduleSpeedMult = 1;
   private moduleThrustMult = 1;
+  // Total SHIP weight (hull + every active module).  A first-class ship
+  // attribute — the acceleration curve reads it, and the Ship Status panel
+  // reports it as its own stat rather than blaming individual guns.
+  private shipWeight = SHIP_WEIGHT.HULL_BASE;
 
   /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
    *  when its family has no requirement (hull / gun roots) or it touches
@@ -3412,13 +3416,16 @@ export class GameEngine {
       this.computeActiveSlots(this.weaponSlots, this.activeWeapon);
       let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
       let shieldCore = false, overcharge = false;
-      let gunWeight = 0;
+      // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
+      // module's weight is a contribution to the SHIP's attribute, not an
+      // effect the module has on acceleration — see SHIP_WEIGHT.
+      let shipWeight = SHIP_WEIGHT.HULL_BASE;
       const fold = (slots: (string | null)[], active: boolean[]) => {
           for (let i = 0; i < slots.length; i++) {
               const id = slots[i];
               if (id === null || !active[i]) continue;
               const d = moduleDef(id);
-              gunWeight += d?.weight ?? 0;
+              shipWeight += d?.weight ?? 0;
               const e = d?.effect;
               if (!e) continue;
               maxHp += e.maxHp ?? 0;
@@ -3435,10 +3442,11 @@ export class GameEngine {
       fold(this.shipSlots, this.activeShip);
       fold(this.weaponSlots, this.activeWeapon);
       this.moduleSpeedMult = 1 + speed;
-      // Weapon weight: flying light is faster — no gun mounted earns the
-      // BASE_BOOST, heavier arsenals drag (Blaster-only ≈ the 1.0 baseline).
+      // Ship weight: flying light is faster — an unladen ship earns the
+      // BASE_BOOST, a heavy one drags (Blaster-only ≈ the 1.0 baseline).
+      this.shipWeight = shipWeight;
       this.moduleThrustMult = (1 + accel)
-          * (WEAPON_WEIGHT.BASE_BOOST / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight));
+          * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));
       const newMaxHp = 100 + maxHp;
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
@@ -4007,8 +4015,8 @@ export class GameEngine {
       const pct = (f: number) => `${f >= 0 ? '+' : '−'}${Math.round(Math.abs(f) * 100)}%`;
       const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
       const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
-      const cool: Contrib[] = [], charge: Contrib[] = [];
-      let gunWeight = 0, gunCount = 0, shieldCore = false;
+      const cool: Contrib[] = [], charge: Contrib[] = [], weight: Contrib[] = [];
+      let shipWeight = SHIP_WEIGHT.HULL_BASE, shieldCore = false;
 
       const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
           for (let i = 0; i < slots.length; i++) {
@@ -4022,11 +4030,16 @@ export class GameEngine {
                   area, idx: i, moduleId: id, label: def.label, active: on,
                   requires: on ? undefined : (req !== undefined ? (req[0] as string) : undefined),
               };
-              // A gun is an adjacency ROOT, so it is always active; its weight
-              // is what shows up as acceleration drag below.
-              if (def.family === 'gun') {
-                  if (on) { gunWeight += def.weight ?? 0; gunCount++; }
-                  accel.push({ ...base, display: `weight ${(def.weight ?? 0).toFixed(1)}` });
+              // Weight is a contribution to the SHIP's weight, not to
+              // acceleration: a gun does not make the ship accelerate worse,
+              // it makes the ship HEAVIER, and weight is what drags thrust.
+              // So a weighted module files under `weight` and tapping it
+              // highlights Ship weight — Acceleration then carries ONE derived
+              // row for the whole ship's weight (below).  Read off any module,
+              // not just guns.
+              if (def.weight) {
+                  if (on) shipWeight += def.weight;
+                  weight.push({ ...base, display: `+${def.weight.toFixed(1)}` });
               }
               const e = def.effect;
               if (!e) continue;
@@ -4056,15 +4069,14 @@ export class GameEngine {
           }
       }
 
-      // Weapon-weight drag is MULTIPLICATIVE and depends on the whole mounted
-      // set, so it cannot be attributed per gun without lying about the
-      // arithmetic.  The guns appear above as weight rows (that is what makes
-      // tapping a gun highlight Acceleration); this synthetic row carries the
-      // factor they add up to.
-      const dragMult = WEAPON_WEIGHT.BASE_BOOST
-          / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight);
+      // Weight drag is MULTIPLICATIVE over the ship's TOTAL weight, so it
+      // belongs to the ship, not to any hex.  One derived row on Acceleration
+      // names the ship weight it came from; the modules that make up that
+      // weight live on the Ship weight line above.
+      const dragMult = SHIP_WEIGHT.BASE_BOOST
+          / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight);
       accel.push({
-          label: gunCount === 0 ? 'Flying weaponless' : `Weight drag (Σ${gunWeight.toFixed(1)})`,
+          label: shipWeight === 0 ? 'Unladen ship' : `Ship weight ${shipWeight.toFixed(1)}`,
           display: `×${dragMult.toFixed(2)}`,
           active: true,
       });
@@ -4085,7 +4097,10 @@ export class GameEngine {
                'lower is faster'),
           line('speed', 'Top speed', `×${this.moduleSpeedMult.toFixed(2)}`, '×1.00', speed),
           line('accel', 'Acceleration', `×${this.moduleThrustMult.toFixed(2)}`, '×1.00', accel,
-               'mounted guns weigh the ship down'),
+               'a heavier ship accelerates worse'),
+          line('weight', 'Ship weight', shipWeight.toFixed(1),
+               SHIP_WEIGHT.HULL_BASE.toFixed(1), weight,
+               'hull + everything mounted; drags Acceleration'),
           line('overcharge', 'Charged shots',
                this.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
       ];

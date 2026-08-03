@@ -770,10 +770,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `syncLoadoutFromSlots`, badged W1/W2 dynamically).  WEAPONLESS flight
   is allowed (the Blaster is removable): firing gates off while
   `player.currentWeapon` is undefined, and every gun carries a
-  `weight` — thrust scales by `WEAPON_WEIGHT.BASE_BOOST / (1 + DRAG ×
-  Σweight)`, so no gun = +10% acceleration, Blaster-only = the 1.0
+  `weight` — but WEIGHT IS A SHIP ATTRIBUTE, not a gun stat: the ship's
+  total weight is `SHIP_WEIGHT.HULL_BASE + Σ (weight of every ACTIVE
+  module)`, and thrust scales by `SHIP_WEIGHT.BASE_BOOST / (1 + DRAG ×
+  ship weight)`.  So no gun = +10% acceleration, Blaster-only = the 1.0
   baseline, heavy arsenals drag (the gamification hook heavier gun
-  unlocks trade against).  ADJACENCY REQUIREMENTS: an installed module
+  unlocks trade against).  `HULL_BASE` is 0 today — the seam for SHIP
+  CLASSES, where a heavier hull starts the curve further along with no
+  other code moving.  The fold is module-agnostic (only guns set a
+  `weight` today; any module may).  Live total on
+  `GameEngine.shipWeight`.  ADJACENCY REQUIREMENTS: an installed module
   FUNCTIONS only while it touches an ACTIVE module of its required
   family — engine⇢hull, thrusters⇢engine, shield/plating⇢hull,
   capacitor⇢shield, weapon-mods⇢gun; hull + guns are the roots, so a
@@ -805,7 +811,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   scope, parameterised by context.  STAT LEGIBILITY (Phase 3 Pair A):
   `EngineStats.outfitting.statLines` carries the full derived-stat set
   (hull / shield / shield regen / damage / fire cooldown / top speed /
-  acceleration / charged shots) with PER-MODULE ATTRIBUTION, built by
+  acceleration / ship weight / charged shots) with PER-MODULE
+  ATTRIBUTION, built by
   `GameEngine.statBreakdown()` from the SAME slot walk
   `applyModuleEffects` folds — the UI renders, it never recomputes, so
   the panel cannot disagree with the sim.  A contributor's `active`
@@ -813,10 +820,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   module (`requires` names the family it must touch) AND for shield
   plating with no shield core (connected but with nothing to plate).  A
   contributor with no `area`/`idx` is a DERIVED row with no hex behind
-  it — today just the weapon-weight drag factor, which is
-  MULTIPLICATIVE over the whole mounted set and so cannot be attributed
-  per gun; the guns themselves appear as weight rows, which is what
-  makes tapping a gun highlight Acceleration.  `renderShipStatus()` is
+  it — today just the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE
+  over the ship's total weight and so belongs to no hex.  The weighted
+  modules instead file under the **Ship weight** stat line, so tapping a
+  gun highlights Ship weight rather than Acceleration: a gun does not
+  make the ship accelerate worse, it makes the ship HEAVIER, and weight
+  is what drags thrust.  That indirection is the whole reason weight is
+  modelled as a ship attribute.  `renderShipStatus()` is
   shared verbatim by the pause menu and the docked station: rows expand
   to their contributors (`openStat`), and tapping a hex in either flower
   highlights every stat it feeds (the shared `selSlot`) while the detail
