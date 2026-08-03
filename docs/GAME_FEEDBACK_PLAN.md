@@ -1400,6 +1400,22 @@ k. After N waves, spawn a portal to a new map.
        (coupled to resale; permanent = money pump above
        10%).
 
+43. **Phase 3 execution notes (user, 2026-08-03).** Pair B
+    runs OVERNIGHT as a gauntlet IN PARALLEL with the user
+    working Pair A — Pair B must keep its UIOverlay surface
+    minimal (one settings row) and rebase onto the plan-branch
+    tip before opening its PR; whichever merges second
+    rebases. Two directives added: (1) Pair B's deliverable
+    includes `docs/SFX_INVENTORY.md` — every action needing a
+    sound + per-effect generation parameters, doubling as the
+    user's external-generation brief and the session's draft-
+    synthesis map (drafts stay procedural, keyed by inventory
+    ID for later asset drop-in). (2) Minimap:
+    remove nebula entirely; explore replacing shard dots with
+    a flow-field path rendering — recorded under the polish
+    batch's minimap-faithfulness item, which runs in the THIRD
+    gauntlet together with Pair C.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1593,10 +1609,14 @@ observes the three strategy guardrails (decision #36e).
 5. **Polish batch** — material-palette-residual + map-composition +
    minimap-faithfulness bundled into 1–2 small sessions (map-composition
    doubles as regional-identity groundwork per the strategy's
-   "maps become known for characteristics"). Optional, FIRST TO CUT:
-   NPC station traffic, cheap version (1–2 shuttles between Overworld
-   stations reusing rival sprites + openPortal; parking-lot promotion,
-   decision #40).
+   "maps become known for characteristics"). **Minimap directives
+   (user, decision #43): remove nebula from the minimap entirely, and
+   explore replacing the per-shard dots with a flow-field path/
+   streamline rendering instead.** Runs in the THIRD gauntlet together
+   with Pair C (accepted recommendation, decision #42 turn). Optional,
+   FIRST TO CUT: NPC station traffic, cheap version (1–2 shuttles
+   between Overworld stations reusing rival sprites + openPortal;
+   parking-lot promotion, decision #40).
 6. **Economy & progression tuning pass** (parking-lot promotion,
    decision #40) — one playtest-driven session tuning together:
    Overworld income pacing, per-wave enemy growth vs discrete module
@@ -1639,7 +1659,7 @@ each pair.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| a | SFX system | pending | `claude/sfx-system-<suffix>` | New cross-cutting system. Depends on Phase 1+2 so all sound categories are known. |
+| a | SFX system | pending | `claude/gauntlet-pair-b-<suffix>` | New cross-cutting system. **User directive (decision #43):** deliverable includes `docs/SFX_INVENTORY.md` — a comprehensive list of every action needing a sound effect WITH per-effect generation parameters (trigger, character, duration, pitch/envelope, variation, concurrency/throttle, mix level, positional), serving BOTH as the user's brief for generating higher-quality effects externally AND as the session's map for draft synthesized effects. Draft effects are procedural (WebAudio) — no asset files, keyed by inventory ID so real assets can drop in later. |
 | b | Enemy-explosion variety | pending | `claude/explosion-variety-<suffix>` | Per-material shard composition on enemy death. Pairs with (a). Depends on (g2). |
 
 ### Pair C — Input
