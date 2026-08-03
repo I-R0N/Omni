@@ -1382,6 +1382,11 @@ export interface EngineStats {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
     damageMult: number; cooldownMult: number; speedMult: number;
+    /** Total SHIP weight (hull + every ACTIVE module) — a ship attribute that
+     *  drags acceleration AND scales the player's collision mass. */
+    shipWeight: number;
+    /** Rounded world position, for the pause menu's Condition readout. */
+    position: { x: number; y: number };
   };
   /** Hex-slot outfitting snapshot (built while paused OR docked).
    *  `ship` / `weapon` are the two 7-hex groups (index 0 = center tile;
@@ -1452,6 +1457,11 @@ export interface EngineStats {
     wavesEnabled: boolean;
     credits: number;
     creditsEarned: number;
+    /** Salvage forfeited to THIS death (SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION
+     *  of the unspent balance, charged once as the summary is raised), and the
+     *  running total across the whole run. */
+    creditsLost: number;
+    creditsLostRun: number;
     /** SIM seconds; time paused / docked / on this screen is excluded. */
     timeSec: number;
     mapName: string;

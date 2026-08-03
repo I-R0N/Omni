@@ -1760,6 +1760,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {rs.wavesEnabled && row('Waves cleared', rs.wavesCleared, `high ${rs.highestWave}`)}
                 {row('Enemies destroyed', rs.kills.toLocaleString(), rs.bosses > 0 ? `${rs.bosses} boss${rs.bosses > 1 ? 'es' : ''}` : undefined)}
                 {row('Salvage earned', `◈${rs.creditsEarned.toLocaleString()}`, `◈${rs.credits.toLocaleString()} left`)}
+                {rs.creditsLost > 0 && (
+                  <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
+                    <span className="text-rose-400/90 text-[11px] uppercase tracking-widest">Salvage lost</span>
+                    <span className="text-right">
+                      <span className="text-rose-300 font-bold tabular-nums text-sm">−◈{rs.creditsLost.toLocaleString()}</span>
+                      {rs.creditsLostRun > rs.creditsLost && (
+                        <span className="text-slate-500 text-[10px] ml-1.5">◈{rs.creditsLostRun.toLocaleString()} this run</span>
+                      )}
+                    </span>
+                  </div>
+                )}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
               </div>
 
@@ -1772,7 +1783,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   Respawn
                 </button>
                 <p className="text-slate-500 text-[10px] text-center -mt-1">
-                  Continue this run — hull restored at the {rs.mapName} spawn. Score, Salvage and outfit are kept.
+                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept; the wreck cost you {Math.round(100 * (rs.creditsLost / Math.max(1, rs.creditsLost + rs.credits)))}% of your unspent Salvage.
                 </p>
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <button
@@ -1889,6 +1900,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <div className="flex flex-col gap-1 text-xs">
                 {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
                 {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
+                {statLine('Weight', `${(ps?.shipWeight ?? 0).toFixed(1)}`)}
+                {statLine('Location', (
+                  <>
+                    {stats.currentMapName}
+                    <span className="text-slate-500 font-normal ml-1.5 text-[10px]">
+                      {ps ? `${ps.position.x}, ${ps.position.y}` : ''}
+                    </span>
+                  </>
+                ))}
               </div>
             </div>
 

@@ -146,6 +146,10 @@ export class GameEngine {
   // dockedAtStation precedent) and UIOverlay shows the run summary.  Death
   // SEMANTICS are unchanged — RESPAWN still calls respawnPlayer().
   private deathPending: boolean = false;
+  // Salvage forfeited to the CURRENT death (shown on the summary) and across
+  // the whole run (so repeated deaths read as a running cost).
+  private lastDeathCreditsLost: number = 0;
+  private runCreditsLost: number = 0;
   // ── Progression ─────────────────────────────────────────────────────────
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
@@ -1622,6 +1626,8 @@ export class GameEngine {
       this.runHighestWave = 0;
       this.runBestCombo = 1;
       this.deathPending = false;
+      this.lastDeathCreditsLost = 0;
+      this.runCreditsLost = 0;
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
@@ -1881,6 +1887,11 @@ export class GameEngine {
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.moduleSpeedMult,
+        shipWeight: this.shipWeight,
+        position: {
+          x: Math.round(this.player.position.x),
+          y: Math.round(this.player.position.y),
+        },
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
       runSummary: this.deathPending ? this.runSummarySnapshot() : undefined,
@@ -2888,10 +2899,17 @@ export class GameEngine {
             this.player.explosionTimer -= dt;
             if (this.player.explosionTimer <= 0) {
                 // A1: the wreck finishing no longer respawns on its own — it
-                // raises the run-summary screen and freezes the sim.  RESPAWN
-                // on that screen calls respawnPlayer() with the same effect
-                // the auto-respawn had, so death semantics are unchanged.
+                // raises the run-summary screen and freezes the sim.
                 this.player.explosionTimer = 0;
+                // Death penalty (user call): forfeit a fraction of UNSPENT
+                // Salvage, charged HERE — once, on the transition into the
+                // summary — so the screen can report exactly what it cost and
+                // so neither respawning nor restarting can double-charge.
+                // Money already spent on modules is untouched.
+                const lost = Math.floor(this.credits * SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION);
+                this.credits -= lost;
+                this.lastDeathCreditsLost = lost;
+                this.runCreditsLost += lost;
                 this.deathPending = true;
             }
         }
@@ -3447,6 +3465,14 @@ export class GameEngine {
       this.shipWeight = shipWeight;
       this.moduleThrustMult = (1 + accel)
           * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));
+      // Weight is PHYSICAL too (user call): the player's collision mass scales
+      // with it, so PhysicsSystem's impulse solver (which divides by mass)
+      // shoves a heavy ship less and lets it plow through debris, while a
+      // stripped hull gets knocked around.  Normalised so the LEAN loadout is
+      // exactly the old constant — no change to the feel a run starts with.
+      this.player.mass = PHYSICS_CONSTANTS.PLAYER_MASS
+          * ((SHIP_WEIGHT.MASS_BASE + shipWeight)
+             / (SHIP_WEIGHT.MASS_BASE + SHIP_WEIGHT.MASS_REFERENCE));
       const newMaxHp = 100 + maxHp;
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
@@ -3703,6 +3729,8 @@ export class GameEngine {
       wavesEnabled: this.wavesEnabled,
       credits: this.credits,
       creditsEarned: this.runCreditsEarned,
+      creditsLost: this.lastDeathCreditsLost,
+      creditsLostRun: this.runCreditsLost,
       timeSec: Math.floor(this.runTimeSec),
       mapName: this.currentMap?.name ?? '',
     };
@@ -4069,6 +4097,19 @@ export class GameEngine {
           }
       }
 
+      // Fire RATE is the inverse of the cooldown multiplier, so the per-module
+      // cooldown cuts above do not sum in rate space.  Same shape as the
+      // acceleration drag row: the hex contributions stay in the units the
+      // modules are actually specified in (−8% cooldown), and one derived row
+      // carries the cooldown total the headline rate inverts.
+      if (cool.length > 0) {
+          cool.push({
+              label: 'Resulting cooldown',
+              display: `×${(this.player.cooldownMult ?? 1).toFixed(2)}`,
+              active: true,
+          });
+      }
+
       // Weight drag is MULTIPLICATIVE over the ship's TOTAL weight, so it
       // belongs to the ship, not to any hex.  One derived row on Acceleration
       // names the ship weight it came from; the modules that make up that
@@ -4086,15 +4127,19 @@ export class GameEngine {
           ({ id, label, display, baseDisplay, contributors, note });
 
       return [
-          line('hull', 'Hull', `${this.player.maxHealth}`, '100', hull),
-          line('shield', 'Shield', `${this.player.maxShield}`, '0', shield,
+          // "Max hull"/"Max shield", not "Hull"/"Shield": the Condition block
+          // shows the LIVE pools (87 / 150) under those names, and the same
+          // word against two different numbers reads as a contradiction.
+          line('hull', 'Max hull', `${this.player.maxHealth}`, '100', hull),
+          line('shield', 'Max shield', `${this.player.maxShield}`, '0', shield,
                shieldCore ? undefined : 'no shield core installed'),
           line('shieldRegen', 'Shield regen',
                `${(this.player.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE).toFixed(1)}/s`,
                `${SHIELD_CONSTANTS.RECHARGE_RATE.toFixed(1)}/s`, regen),
           line('damage', 'Damage', `×${(this.player.damageMult ?? 1).toFixed(2)}`, '×1.00', dmg),
-          line('cooldown', 'Fire cooldown', `×${(this.player.cooldownMult ?? 1).toFixed(2)}`, '×1.00', cool,
-               'lower is faster'),
+          line('cooldown', 'Fire rate',
+               `×${(1 / (this.player.cooldownMult ?? 1)).toFixed(2)}`, '×1.00', cool,
+               'modules cut cooldown; the rate is its inverse'),
           line('speed', 'Top speed', `×${this.moduleSpeedMult.toFixed(2)}`, '×1.00', speed),
           line('accel', 'Acceleration', `×${this.moduleThrustMult.toFixed(2)}`, '×1.00', accel,
                'a heavier ship accelerates worse'),

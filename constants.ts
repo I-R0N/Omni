@@ -2610,8 +2610,26 @@ export const COOLDOWN_FLOOR = 0.4;
 // module-agnostic — give any module a weight and it joins the ship's total.
 export const SHIP_WEIGHT = {
   HULL_BASE: 0,
-  BASE_BOOST: 1.10,
-  DRAG_PER_WEIGHT: 0.10,
+  // Base thrust with an unladen ship, and how hard each unit of weight drags.
+  // EVERY module carries a weight now (user call), so a fully-outfitted ship
+  // is several times heavier than a lean one and DRAG_PER_WEIGHT was halved
+  // (0.10 -> 0.05) while BASE_BOOST was raised slightly (1.10 -> 1.15) to
+  // compensate.  Net effect at the two ends of the curve:
+  //   weaponless bare frame (w 1.0)  -> x1.10  (was x1.10 — the fly-light hook)
+  //   lean start, hull + Blaster (2.0) -> x1.05  (was x1.00 — the slight base bump)
+  //   fully outfitted (w ~13.9)      -> x0.68  (was x0.82 with guns only)
+  // So a maxed ship is now genuinely heavy and leans on Engine/Thrusters to
+  // stay nimble, which is the point of weighting every module.
+  BASE_BOOST: 1.15,
+  DRAG_PER_WEIGHT: 0.05,
+  // Weight is PHYSICAL, not just a thrust number: the player's collision mass
+  // scales with it, so a heavy ship shrugs off impacts and plows debris while
+  // a stripped one gets shoved around.  Normalised so the LEAN loadout
+  // (MASS_REFERENCE) is exactly today's PHYSICS_CONSTANTS.PLAYER_MASS; the
+  // MASS_BASE term is the hull's own inertia, which keeps the ratio finite
+  // when every module is stripped off.
+  MASS_BASE: 4,
+  MASS_REFERENCE: 2,
 };
 
 /** Which family an installed module must TOUCH (an ACTIVE module of any
@@ -2639,12 +2657,16 @@ export const HEX_ADJACENCY: readonly (readonly number[])[] = [
 // level (rounded) so the salvage economy is unchanged in total: reaching
 // "Mk III power" costs about what L3 used to.
 const MK = ['', ' Mk I', ' Mk II', ' Mk III'];
+/** `mk1Weight` is the Mk I mass; Mk II/III scale linearly with the mark, the
+ *  same way their effects and prices do — a bigger plate is a heavier plate. */
 const statMks = (
   family: ModuleFamily, group: ModuleGroup, kind: ModuleKind, label: string,
   descOf: (mk: number) => string, costs: number[], effOf: (mk: number) => ModuleEffect,
+  mk1Weight: number,
 ): ModuleDef[] => costs.map((cost, i) => ({
   id: `${family}_mk${i + 1}`, family, mark: i + 1, group, kind,
   label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost, effect: effOf(i + 1),
+  weight: +(mk1Weight * (i + 1)).toFixed(1),
 }));
 
 export const MODULE_DEFS: readonly ModuleDef[] = [
@@ -2653,13 +2675,13 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // hex (mirror of the starter Blaster on gun hex W1): it adds no stats
   // but is the adjacency ROOT the whole ship-module tree chains from, so
   // bought modules work out of the box.  cost 0 keeps it out of the shop.
-  { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0 },
-  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk })),
-  { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true } },
-  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk })),
-  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk })),
-  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk })),
-  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk })),
+  { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
+  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
+  { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
+  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
+  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
+  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
+  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk }), 0.4),
   // ── Weapon group: guns (gun hexes only) ──
   { id: 'wpn_blaster',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm',   cost: 0, weight: 1.0 },
   { id: 'wpn_burst',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000, weight: 1.3 },
@@ -2671,9 +2693,9 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000, weight: 2.0 },
   { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000, weight: 2.5 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
-  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk })),
-  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk })),
-  { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true } },
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
+  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
+  { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 
 export function moduleDef(id: string): ModuleDef | undefined {
@@ -2874,6 +2896,14 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
   CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
+  // Death penalty (interim, user call): dying forfeits this fraction of the
+  // player's UNSPENT Salvage, charged once when the run-summary screen is
+  // raised so the summary can report exactly what it cost.  0.25 is
+  // PROVISIONAL — big enough that a death stings, small enough that it never
+  // wipes a run — and is placeholder for the dynamic system the economy
+  // tuning pass (roadmap step 6) will design.  Money already SPENT on modules
+  // is untouched: the penalty taxes hoarding, not investment.
+  DEATH_PENALTY_FRACTION: 0.25,
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)

@@ -166,10 +166,16 @@ only honored from the main menu; mid-game requires `restartGame()`.
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
   per-map run state.
 
-Death SEMANTICS are unchanged: `respawnPlayer()` still refills at the
-current map's spawn and the run continues.  A death penalty /
-return-to-hub-on-death is owned by the economy tuning pass, not here.
-What Phase 3 Pair A added is PRESENTATION around that behaviour — when
+Death: `respawnPlayer()` refills at the current map's spawn and the run
+continues.  There IS now an interim death PENALTY (user call): raising the
+summary forfeits `SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION` of the
+player's UNSPENT credits — charged ONCE, on the transition into
+`deathPending`, so neither respawning nor restarting can double-charge,
+and money already spent on modules is untouched (the penalty taxes
+hoarding, not investment).  `lastDeathCreditsLost` / `runCreditsLost`
+carry it to the summary.  The fraction is PROVISIONAL and the fuller
+dynamic system still belongs to the economy tuning pass (step 6).
+The screen itself is PRESENTATION around the respawn behaviour — when
 the wreck's `explosionTimer` runs out the engine sets `deathPending`
 instead of respawning, which freezes the loop (the `dockedAtStation`
 short-circuit, verbatim) and publishes `EngineStats.runSummary` for the
@@ -770,16 +776,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `syncLoadoutFromSlots`, badged W1/W2 dynamically).  WEAPONLESS flight
   is allowed (the Blaster is removable): firing gates off while
   `player.currentWeapon` is undefined, and every gun carries a
-  `weight` — but WEIGHT IS A SHIP ATTRIBUTE, not a gun stat: the ship's
-  total weight is `SHIP_WEIGHT.HULL_BASE + Σ (weight of every ACTIVE
-  module)`, and thrust scales by `SHIP_WEIGHT.BASE_BOOST / (1 + DRAG ×
-  ship weight)`.  So no gun = +10% acceleration, Blaster-only = the 1.0
-  baseline, heavy arsenals drag (the gamification hook heavier gun
-  unlocks trade against).  `HULL_BASE` is 0 today — the seam for SHIP
-  CLASSES, where a heavier hull starts the curve further along with no
-  other code moving.  The fold is module-agnostic (only guns set a
-  `weight` today; any module may).  Live total on
-  `GameEngine.shipWeight`.  ADJACENCY REQUIREMENTS: an installed module
+  `weight` — and so does EVERY OTHER MODULE.  WEIGHT IS A SHIP
+  ATTRIBUTE: the ship's total is `SHIP_WEIGHT.HULL_BASE + Σ (weight of
+  every ACTIVE module)`, and thrust scales by `SHIP_WEIGHT.BASE_BOOST /
+  (1 + DRAG × ship weight)`.  Armour is heavy, electronics are light,
+  and a Mk III weighs 3× its Mk I (`statMks` scales weight with the mark
+  like effect and price).  Live total on `GameEngine.shipWeight`.
+  Landmarks on the curve: stripped hull ×1.15, weaponless bare frame
+  ×1.10, lean start (Base Hull + Blaster) ×1.05, fully outfitted ×0.92
+  even WITH Thrusters Mk III — so a maxed ship is genuinely heavy and
+  leans on Engine/Thrusters to stay nimble.  WEIGHT IS ALSO PHYSICAL:
+  `applyModuleEffects` scales `player.mass` with it
+  (`MASS_BASE`/`MASS_REFERENCE`, normalised so the lean loadout is
+  exactly `PHYSICS_CONSTANTS.PLAYER_MASS`), so PhysicsSystem's impulse
+  solver shoves a heavy ship less and lets it plow debris — a full
+  outfit is ≈3× the lean mass.  `HULL_BASE` is 0 today — the seam for
+  SHIP CLASSES, where a heavier hull starts the curve further along with
+  no other code moving.  ADJACENCY REQUIREMENTS: an installed module
   FUNCTIONS only while it touches an ACTIVE module of its required
   family — engine⇢hull, thrusters⇢engine, shield/plating⇢hull,
   capacitor⇢shield, weapon-mods⇢gun; hull + guns are the roots, so a
@@ -810,8 +823,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   UIOverlay component
   scope, parameterised by context.  STAT LEGIBILITY (Phase 3 Pair A):
   `EngineStats.outfitting.statLines` carries the full derived-stat set
-  (hull / shield / shield regen / damage / fire cooldown / top speed /
-  acceleration / ship weight / charged shots) with PER-MODULE
+  (max hull / max shield / shield regen / damage / fire rate / top speed
+  / acceleration / ship weight / charged shots) with PER-MODULE
   ATTRIBUTION, built by
   `GameEngine.statBreakdown()` from the SAME slot walk
   `applyModuleEffects` folds — the UI renders, it never recomputes, so
@@ -820,13 +833,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   module (`requires` names the family it must touch) AND for shield
   plating with no shield core (connected but with nothing to plate).  A
   contributor with no `area`/`idx` is a DERIVED row with no hex behind
-  it — today just the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE
-  over the ship's total weight and so belongs to no hex.  The weighted
+  it — today the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE over
+  the ship's total weight and so belongs to no hex, and the FIRE-RATE
+  line's "Resulting cooldown" row (same shape: per-module rows stay in
+  the units modules are specified in — "−8% cooldown" — and the derived
+  row carries the total the headline rate inverts, because rate is
+  1/cooldown and does not sum additively).  The weighted
   modules instead file under the **Ship weight** stat line, so tapping a
   gun highlights Ship weight rather than Acceleration: a gun does not
   make the ship accelerate worse, it makes the ship HEAVIER, and weight
   is what drags thrust.  That indirection is the whole reason weight is
-  modelled as a ship attribute.  `renderShipStatus()` is
+  modelled as a ship attribute.  The pause menu pairs it with a small CONDITION block — the readouts
+  that MOVE in flight rather than derive from the outfit: hull and shield
+  current-vs-max, the ship's weight, and the player's map + coordinates.
+  (Hence "Max hull"/"Max shield" on the derived lines: the same word
+  against two different numbers reads as a contradiction.)
+  `renderShipStatus()` is
   shared verbatim by the pause menu and the docked station: rows expand
   to their contributors (`openStat`), and tapping a hex in either flower
   highlights every stat it feeds (the shared `selSlot`) while the detail
