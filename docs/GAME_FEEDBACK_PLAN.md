@@ -1355,6 +1355,51 @@ k. After N waves, spawn a portal to a new map.
        pre-approved. Next: (h) bosses via a boss-only
        gauntlet.
 
+42. **(h) Bosses SHIPPED (PR #77, boss gauntlet,
+    2026-08-03).** The one-step-per-gauntlet process (#41c)
+    worked: 4 milestones, one commit each, 147 headless
+    assertions green ×3 rounds, ledger at
+    `docs/GAUNTLET_BOSSES_LOG.md` (18 logged decisions with
+    alternatives). Verified in code at review: BOSS_DEFS
+    phase tables on existing machinery only; payout = score
+    + salvage spray + TIMED shop discount (resale priced off
+    the discounted number — kills the buy/sell money pump
+    the closed PR #76 shipped); no unlock plumbing; bosses
+    are ordinary COUNTED wave enemies.
+    a. Three capstones rotating every 5th wave: WARDEN
+       (chassis, mid), REAVER (Shotgun-wielding brawler,
+       evasive), BASTION (Cannon-wielding stand-off,
+       front-shield + regen) — weapon-bosses wield literal
+       player archetypes via BOSS_WEAPONS spreads (§6
+       parity).
+    b. Traits now live: evasive (blind to homing — Seeker is
+       THE answer), front-shield (permanent directional
+       plate, no pool — geometric answers), regen
+       (FIXED-bucket burst gate — the sliding-window version
+       inverts the trait; PR #76's pitfall used as input),
+       plus poise (heavy hulls exempt from chip hit-stun,
+       plain archetype field). §7 counterplay table verified
+       LIVE — every weapon a right answer somewhere, four
+       designated.
+    c. Real engine bug found + fixed: enemy-owned explosion
+       rings could never damage the player (player isn't in
+       currentMap.entities; the shield-absorb branch was
+       dead code). Fixed via applyBlastToPlayer
+       (kamikaze-path generalization), NOT by widening the
+       ring machinery. CLAUDE.md corrected.
+    d. FOR-USER-REVIEW items ROUTED: → step-6 tuning pass:
+       boss cadence (wave 5 lands on the Bulwark teaching
+       wave; interacts with the early-game pressure
+       question), Blaster's armor-answer gap on a lean run
+       (cheap lever: Warden chipThreshold 8→6), Bastion's
+       DPS floor (lever: regen perSec, not HP), all
+       provisional boss numbers (payout 12 salvage / 2500
+       score / discount rate+window). → playtest watch:
+       Reaver phase-2 evasion+arc-shield double-counter.
+       → settled by design: timed-not-permanent discount
+       (coupled to resale; permanent = money pump above
+       10%).
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1537,11 +1582,10 @@ observes the three strategy guardrails (decision #36e).
    portal/return-portal POIs; the earn → outfit → fight → return loop
    is closed. Fresh-per-entry excursions; death still ends the run
    (penalty design stays with the tuning pass, step 6).
-3. **(h) Bosses** — WAVE-MAP capstones (the wave maps are the nodes,
-   decision #39e). Consumes doc §6 (model (d): salvage/discount
-   payouts, NO unlock plumbing; weapon-bosses wield themed player
-   archetypes) + §7 (wire evasive / front-shield / regen traits
-   against the counterplay table).
+3. ~~**(h) Bosses**~~ — **DONE** (PR #77, decision #42). Three
+   rotating capstones (Warden/Reaver/Bastion), model-(d) payouts,
+   evasive/front-shield/regen + poise live, §7 table verified. Boss
+   tuning items routed to step 6 (decision #42d).
 4. **Phase 3 pairs in parallel** (below): A = (i) death screen +
    stat-legibility (per-module attribution — parking-lot promotion,
    decision #40); B = (a) SFX → (b) explosion variety;
@@ -1559,8 +1603,12 @@ observes the three strategy guardrails (decision #36e).
    power, Mk trade-in, weapon-weight numbers, resale fractions, AND
    the **salvage death penalty decision** (severity is a user call;
    must be tuned WITH repair cost + resale or incentives invert).
-   Absorbs the PR #72 "absolute prices" playtest watch. Runs last so
-   every system that shapes income has landed.
+   Absorbs the PR #72 "absolute prices" playtest watch, PLUS the
+   boss items routed by decision #42d: boss cadence vs the teaching
+   waves, the Blaster armor-answer gap on a lean run, Bastion's DPS
+   floor, and every provisional boss number (payout / discount
+   rate+window / trait thresholds). Runs last so every system that
+   shapes income has landed.
 7. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
    → `main`, one deploy.
 
