@@ -20,38 +20,139 @@ one-step-per-gauntlet process ruled in decision #41c.
 
 ## FOR-USER-REVIEW
 
-Four items, none of them decided silently.
+Seven open items.  Each one: what it is in plain terms, what I'd do, and
+why.  None was decided silently; all are cheap to reverse.
 
-- **The penalty-free respawn does make the screen read soft.** Flagged as
-  the brief instructed, NOT fixed.  The summary is honest about it — the
-  RESPAWN sub-line says "Score, Salvage and outfit are kept" — but a
-  player who dies loses only the seconds it takes to fly back, so
-  "DESTROYED" is presentation over a non-event.  Everything the screen
-  would need to express a penalty (gross-earned vs balance, run time,
-  clears) is already on `EngineStats.runSummary`, so whatever the economy
-  tuning pass (step 6, decisions #40a/#42d) rules can be shown without
-  new plumbing.  **User call, not this gauntlet's.**
+---
 
-- **"Charged shots" was added as an eighth stat line (D12).** The brief
-  names seven stats and does not mention Overcharge.  It is included
-  because it is a derived capability `applyModuleEffects` produces from
-  an installed module, and leaving the one capability module out of a
-  panel whose job is "what is my outfit doing for me" would be the odd
-  gap.  One row, no cost.  **Say the word and it comes out.**
+### 1. Dying costs you nothing
 
-- **"Fire cooldown" replaced the old "Fire rate" row (D13).** Fire rate
-  was `×(1/cooldownMult)` — a second derived number the engine does not
-  hold, which would have had to be recomputed in React (the exact thing
-  the parking-lot sketch warns against).  The row now shows the engine's
-  own `cooldownMult` with a "lower is faster" note.  **Wording is
-  provisional** if it reads worse in play.
+**What it is.** When you die you get full hull back at the map's spawn
+point and keep your score, your Salvage and your whole outfit.  The
+screen says DESTROYED, but nothing was destroyed.  The beat has no
+weight because the mechanic behind it has no teeth.  (This was a HARD
+CONSTRAINT on the gauntlet — flag it, don't fix it — so it is unchanged.)
 
-- **The pause menu's old "Ship Status" block was split in two.** It now
-  reads `Condition` (hull / shield current-vs-max — the two pools that
-  MOVE in flight) followed by the shared `Ship Status` widget (the eight
-  derived stats with attribution).  The alternative was one panel mixing
-  live pools with static derived values.  **Reversible in one edit** if
-  the split reads as clutter on a phone.
+**Recommendation.** Leave the penalty decision to step 6 as planned, but
+when you get there, the cheapest lever is already built: **stop the free
+full-hull heal on respawn.**  Respawn at a fraction of max hull instead.
+
+**Why.** Hull repair is already pay-per-HP at a station, so flying home
+damaged is already an economic cost.  A free full heal on death actively
+*undercuts* that service — right now dying is the cheapest way to repair
+your ship, which is backwards.  Making respawn leave you damaged turns
+death into a repair bill using a system that already ships, with no new
+punishment mechanic, no credit confiscation and no hub teleport.  I'd
+avoid the teleport option specifically: it charges the player in *travel
+time*, which punishes patience rather than mistakes, and it fights the
+portal loop you just finished building.
+
+---
+
+### 2. "Charged shots" is a stat row
+
+**What it is.** The panel lists eight numeric stats plus one yes/no row
+reading Enabled or Locked.  It's there because Overcharge is a
+purchasable module, and without this row it would be the only module in
+the game whose effect appears nowhere.
+
+**Recommendation.** Keep it.
+
+**Why.** The entire point of A2 is "every module can be traced to what it
+does for me."  Deleting the row reintroduces exactly one blind spot, and
+it's on a 45,000-credit purchase.  It costs one line and sits last, below
+everything numeric.  If it reads oddly among the multipliers, restyle it
+as a badge — that's a nicer fix than removing information.
+
+---
+
+### 3. "Fire cooldown ×0.84" instead of "Fire rate ×1.19"
+
+**What it is.** Same fact, inverted.  The old panel said fire *rate*
+(higher = better); the new one says fire *cooldown* (lower = better).
+
+**Recommendation.** Go back to **Fire rate** — and I think my original
+reasoning here was wrong, not just debatable.
+
+**Why.** Every other row in the panel is "bigger is better": hull 150,
+damage ×1.36, top speed ×1.24.  Fire cooldown is the sole row where the
+good direction flips, which is a genuine misread risk when you're
+scanning it between waves.  I originally switched it to avoid computing a
+derived value in React — but that rule is satisfied by having the
+**engine** publish the inverted number, which it can do trivially.  I
+conflated "don't recompute in the UI" with "don't derive at all."  Revert
+the wording, keep the architecture: one line in `statBreakdown()`.
+
+---
+
+### 4. The pause panel split into "Condition" + "Ship Status"
+
+**What it is.** A small box with hull and shield as current-vs-max
+(87 / 150), then the big box with the derived stats and their breakdowns.
+
+**Recommendation.** Keep the split — but rename the derived row from
+**Hull** to **Max hull**.
+
+**Why.** The split itself is right: "87 / 150" answers *am I hurt*, "150"
+answers *how tough did I build this ship*, and those are different
+questions that shouldn't share a heading.  But right now the word "Hull"
+appears in both boxes against two different numbers, which reads as a
+contradiction at a glance.  Naming the derived one "Max hull" removes the
+collision for free.  Same for Shield if you want symmetry.
+
+---
+
+### 5. Bosses lost their phase-coloured indicator
+
+**What it is.** A boss's off-screen arrow used to be tinted by its
+current phase.  Under the type legend it's the same red as any other
+enemy — distinguished instead by being ~1.7× bigger and carrying the
+boss's name.
+
+**Recommendation.** Keep the shared red.
+
+**Why.** A colour legend only works if it has no exceptions.  The moment
+one enemy is a different colour, the player has to ask "is that a
+different *kind* of thing, or the same thing in a different *state*?" —
+which is the exact confusion the legend was introduced to kill.  Phase is
+already shown twice, in both places it matters: the aura ring on the boss
+hull and the phase pips on the HUD boss bar.  A third encoding, on a
+12-pixel arrow, buys almost nothing and costs the legend its clarity.
+
+---
+
+### 6. The red blink means "hunting YOU", not "angry"
+
+**What it is.** A bubble that a rival provoked stays purple.  It only
+blinks red when *you* are its target.  Same for rivals.
+
+**Recommendation.** Keep it scoped to the player.
+
+**Why.** The blink is a threat warning, and its value is entirely in how
+often it's wrong.  A bubble brawling with a rival is a spectacle, not a
+danger — blinking for it would teach the player within one session that
+the alarm doesn't mean anything.  If you want third-party fights legible,
+the minimap is the surface for it, not the threat channel.
+
+---
+
+### 7. Guns still add to ship weight
+
+**What it is.** Weight is now a ship attribute (`SHIP_WEIGHT.HULL_BASE` +
+every mounted module), but guns kept their weights, so mounting a Cannon
+still drags acceleration.  I did not remove the mechanic when moving the
+model.
+
+**Recommendation.** Keep guns contributing; put the ship-class axis in
+`HULL_BASE` (which is 0 today and exists exactly for that).
+
+**Why.** Gun weight is the only cost attached to buying a bigger gun.
+Remove it and the arsenal becomes strictly additive — every upgrade is a
+pure win, the "weaponless flight is +10% acceleration" option loses its
+counterpart, and one of the few real trade-offs in the outfit disappears.
+Ship classes give you the different-weight-ships axis you're after
+without spending that one.  If you *do* want guns weightless, it's a
+one-line change (drop `weight` from the gun rows in `MODULE_DEFS`).
 
 ---
 
