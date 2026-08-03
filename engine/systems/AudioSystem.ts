@@ -135,7 +135,7 @@ export class AudioSystem {
 
   // ── Mixer state (in-memory only — see FOR-USER-REVIEW in the gauntlet
   //    log: durable preference storage is out of scope for this project) ──
-  private _volume = AUDIO_CONSTANTS.DEFAULT_VOLUME;
+  private _volume: number = AUDIO_CONSTANTS.DEFAULT_VOLUME;
   private _muted = false;
   /** False while paused / docked / in the menu — i.e. whenever the sim is
    *  frozen.  Silences the WORLD (loops and positional one-shots) but

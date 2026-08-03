@@ -23,7 +23,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, EXPLOSION_PROFILES, ExplosionProfile, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -2572,31 +2572,121 @@ export class GameEngine {
       [EnemySubtype.BUBBLE]:   'destroy.enemy.bubble',
   };
 
-  /** The death sound for an entity, or null when it has none (POIs,
-   *  particles, drops).  Bosses and the player are handled by their own
-   *  bespoke beats and never route here. */
-  private deathSfxId(entity: GameEntity): string | null {
-      if (entity.type === EntityType.PLAYER) return 'destroy.player';
+  /** Enemy subtype → its death FX profile (roadmap step (b)).  Same shape
+   *  and same fallbacks as ENEMY_DEATH_SFX, and resolved by the SAME
+   *  classification below, so a class's look and its voice can never
+   *  disagree. */
+  private static readonly ENEMY_DEATH_FX: Partial<Record<EnemySubtype, ExplosionProfile>> = {
+      [EnemySubtype.SWARM]:    EXPLOSION_PROFILES.SWARM,
+      [EnemySubtype.RAMMER_3]: EXPLOSION_PROFILES.HEAVY,
+      [EnemySubtype.KAMIKAZE]: EXPLOSION_PROFILES.KAMIKAZE,
+      [EnemySubtype.BUBBLE]:   EXPLOSION_PROFILES.BUBBLE,
+  };
+
+  /** Material family → its break FX profile.  Plastic and nebula are
+   *  deliberately absent: plastic has always emitted no death spark burst
+   *  and nebula fades out through `mergeFadeTimer` in the renderer, and
+   *  both of those are existing deliberate looks, not omissions. */
+  private static readonly MATERIAL_FX: Record<string, ExplosionProfile> = {
+      glass: EXPLOSION_PROFILES.GLASS,
+      rock:  EXPLOSION_PROFILES.ROCK,
+      metal: EXPLOSION_PROFILES.METAL,
+  };
+
+  /**
+   * ONE classification of a dying entity into BOTH its visual profile and
+   * its sound — the thing that makes a differentiated explosion and its
+   * SFX land as a single beat (roadmap step (b) pairs with step (a)).
+   *
+   * Either half may be null: a POI has neither, the dragon head's death is
+   * staged bespoke by `dragonDeath`, and plastic/nebula have a voice but
+   * deliberately no particle burst.
+   */
+  private deathFx(entity: GameEntity): { fx: ExplosionProfile | null; sfx: string | null } {
+      if (entity.type === EntityType.PLAYER) {
+          return { fx: EXPLOSION_PROFILES.PLAYER, sfx: 'destroy.player' };
+      }
       // A severed dragon segment is material, but breaking a piece off
       // something ALIVE has its own voice.  Checked before the material
       // branch, since a segment is a real tile-variant STRUCTURE.
-      if (entity.dragonSegment === true) return 'destroy.dragon.segment';
+      if (entity.dragonSegment === true) {
+          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          return { fx: GameEngine.MATERIAL_FX[mat] ?? null, sfx: 'destroy.dragon.segment' };
+      }
       if (entity.type === EntityType.ENEMY) {
-          if (entity.isRival) return 'destroy.rival';
           // The dragon head's death is staged by dragonDeath, not here.
-          if (entity.enemySubtype === EnemySubtype.DRAGON) return null;
-          const byType = GameEngine.ENEMY_DEATH_SFX[entity.enemySubtype as EnemySubtype];
-          if (byType) return byType;
+          if (entity.enemySubtype === EnemySubtype.DRAGON) return { fx: null, sfx: null };
+          if (entity.isBoss) return { fx: EXPLOSION_PROFILES.BOSS, sfx: null }; // payBossBounty owns the voice
+          if (entity.isRival) return { fx: EXPLOSION_PROFILES.RIVAL, sfx: 'destroy.rival' };
+          const byType = GameEngine.ENEMY_DEATH_FX[entity.enemySubtype as EnemySubtype];
+          if (byType) {
+              return { fx: byType, sfx: GameEngine.ENEMY_DEATH_SFX[entity.enemySubtype as EnemySubtype] ?? null };
+          }
           // A `poise` hull is by definition a heavy one — reading the trait
           // beats maintaining a second subtype list that drifts from it.
-          return entity.poise ? 'destroy.enemy.heavy' : 'destroy.enemy.standard';
+          return entity.poise
+              ? { fx: EXPLOSION_PROFILES.HEAVY,    sfx: 'destroy.enemy.heavy' }
+              : { fx: EXPLOSION_PROFILES.STANDARD, sfx: 'destroy.enemy.standard' };
       }
       if (entity.type === EntityType.STRUCTURE) {
           const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
-          if (!mat) return null;
-          return entity.mass === Infinity ? `destroy.tile.${mat}` : `destroy.shard.${mat}`;
+          if (!mat) return { fx: null, sfx: null };
+          return {
+              fx: GameEngine.MATERIAL_FX[mat] ?? null,
+              sfx: entity.mass === Infinity ? `destroy.tile.${mat}` : `destroy.shard.${mat}`,
+          };
       }
-      return null;
+      return { fx: null, sfx: null };
+  }
+
+  /**
+   * Render one death burst from its profile: up to two rings, the body-
+   * coloured debris, the profile's accent layer, and a hot spark layer.
+   * Every layer is optional (count/scale 0 skips it), which is how a
+   * bubble gets no hot core and a material break gets no ring.
+   *
+   * Runs entirely on the EXISTING ParticleSystem — no new particle engine,
+   * and no gradients, so there is nothing to cache per entity here.
+   */
+  private playDeathFx(entity: GameEntity, p: ExplosionProfile) {
+      const pos = entity.position;
+      const color = entity.color || '#f87171';
+      const r = Math.max(entity.size.x, entity.size.y);
+      if (p.ringScale > 0) {
+          this.spawnShockwave(pos, {
+              radius: r * p.ringScale, damage: 0, knockback: 0,
+              color, lifetime: p.ringLifetime,
+          });
+      }
+      if (p.coreScale > 0) {
+          this.spawnShockwave(pos, {
+              radius: r * p.coreScale, damage: 0, knockback: 0,
+              color: '#ffffff', lifetime: p.coreLifetime,
+          });
+      }
+      if (p.debrisCount > 0) {
+          this.spawnParticles(pos, p.debrisCount, color, {
+              speedMin: p.debrisSpeedMin, speedMax: p.debrisSpeedMax,
+              sizeMin: p.debrisSizeMin,   sizeMax: p.debrisSizeMax,
+              lifetimeMin: p.debrisLifeMin, lifetimeMax: p.debrisLifeMax,
+          });
+      }
+      // The accent is what lets a class read by HUE rather than only by the
+      // body tint — amber embers on a heavy hull, cyan droplets on a bubble.
+      if (p.accent && p.accentCount > 0) {
+          this.spawnParticles(pos, p.accentCount, p.accent, {
+              speedMin: p.debrisSpeedMin * 0.7, speedMax: p.debrisSpeedMax * 0.8,
+              sizeMin: p.debrisSizeMin * 0.7,   sizeMax: p.debrisSizeMax * 0.8,
+              lifetimeMin: p.debrisLifeMin * 1.2, lifetimeMax: p.debrisLifeMax * 1.4,
+          });
+      }
+      if (p.sparkCount > 0) {
+          this.spawnParticles(pos, p.sparkCount, '#ffffff', {
+              speedMin: p.sparkSpeedMin, speedMax: p.sparkSpeedMax,
+              sizeMin: 1, sizeMax: 3, lifetimeMin: 0.15, lifetimeMax: 0.35,
+          });
+      }
+      if (p.shake > 0) this.handleScreenShake(p.shake);
   }
 
   private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
@@ -2607,10 +2697,10 @@ export class GameEngine {
       // dragonDeath — both layered on top rather than replacing this.
       // Every id here collapses on retrigger, which is what keeps a
       // 40-fragment shatter to one heavier sound instead of 40 thin ones.
-      if (!entity.isExploding && !entity.isBoss) {
-          const sfx = this.deathSfxId(entity);
-          if (sfx) this.audio.play(sfx, { x: entity.position.x, y: entity.position.y });
-      }
+      // Resolved ONCE and reused for the burst below, so a class's look and
+      // its voice come from a single classification.
+      const death = entity.isExploding ? { fx: null, sfx: null } : this.deathFx(entity);
+      if (death.sfx) this.audio.play(death.sfx, { x: entity.position.x, y: entity.position.y });
       // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
       // not the normal enemy explosion/shard/drop path.
       if (entity.enemySubtype === EnemySubtype.DRAGON && !entity.isExploding) {
@@ -2866,69 +2956,28 @@ export class GameEngine {
           }
       }
 
-      // Death burst particles — size/color tuned per entity type
-      if (entity.type === EntityType.ENEMY) {
-          const ec = entity.color || '#f87171';
-          const r = Math.max(entity.size.x, entity.size.y);
-          // Tiny pop-on-contact gnats (Swarm) die in bulk, so they get a
-          // deliberately LIGHT burst — one small ring + a few sparks, no screen
-          // shake — to avoid particle/shake spam when a cloud goes down at once.
-          if (entity.diesOnContact) {
-              this.spawnShockwave(entity.position, { radius: r * 1.6, damage: 0, knockback: 0, color: ec, lifetime: 0.2 });
-              this.spawnParticles(entity.position, 5, ec, {
-                  speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3,
-                  lifetimeMin: 0.18, lifetimeMax: 0.4,
-              });
-          } else {
-              // Expanding shockwave ring (visual only) — a satisfying pop sized
-              // to the enemy; bigger enemies pop bigger.
-              this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
-              this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
-              // Big colored debris burst + white core flash.  (Counts trimmed
-              // ~40 % — Tier 2b — so a mass death spawns fewer particles; the
-              // pop still reads at MAX_PARTICLES-bounded density.)
-              this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), ec, {
-                  speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
-                  lifetimeMin: 0.3, lifetimeMax: 0.7,
-              });
-              this.spawnParticles(entity.position, 5, '#ffffff', {
-                  speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
-                  lifetimeMin: 0.15, lifetimeMax: 0.35,
-              });
-              // Small tier-scaled screen punch (respects the DBG shake toggle).
-              this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
+      // Death burst — differentiated per entity class by EXPLOSION_PROFILES
+      // (roadmap step (b)).  Before this, every enemy died the same way
+      // tinted by its colour, so a gnat, a tank and a bomber were one event
+      // at three sizes; a profile varies ring shape, debris count/speed/
+      // size/lifetime, an accent hue and the screen punch.  The profile was
+      // chosen by the SAME lookup that picked the sound above.
+      //
+      // Classes with a deliberate NON-burst keep it: plastic has never
+      // sparked on death, and nebulae fade out via mergeFadeTimer in the
+      // renderer.  Both resolve to a null profile rather than a special
+      // case here.
+      if (death.fx) {
+          this.playDeathFx(entity, death.fx);
+          // Enemy hulls additionally scale their punch by tier, as before.
+          if (entity.type === EntityType.ENEMY && death.fx.shake > 0) {
+              this.handleScreenShake((entity.enemyTier ?? 1));
           }
-      } else if (entity.type === EntityType.PLAYER) {
-          // Cyan energy explosion
-          this.spawnParticles(entity.position, 12, '#38bdf8', {
-              speedMin: 4, speedMax: 12, sizeMin: 1.5, sizeMax: 3,
-              lifetimeMin: 0.3, lifetimeMax: 0.6,
-          });
-          this.spawnParticles(entity.position, 6, '#ffffff', {
-              speedMin: 6, speedMax: 16, sizeMin: 1, sizeMax: 2,
-              lifetimeMin: 0.15, lifetimeMax: 0.3,
-          });
-      } else if (variant === 'rock-shard' || variant === 'glass-shard') {
-          // Small shard break — quick dusty puff.  Tile-shards
-          // (glass-shard) puff the parent's tile colour; rock-shards
-          // puff slate.  Stage 5: drives off shardVariant instead of
-          // shardType so it works for both legacy ASTEROID-typed
-          // entities and post-collapse STRUCTURE-typed shards.
-          const breakColor = variant === 'glass-shard'
-            ? (entity.color || '#6366f1')
-            : '#94a3b8';
-          this.spawnParticles(entity.position, 4, breakColor, {
-              speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
-              lifetimeMin: 0.15, lifetimeMax: 0.35,
-          });
-      } else if (variant === 'plastic-tile' || variant === 'plastic-shard') {
-          // Plastic intentionally emits no death spark burst.
-      } else if (isNebula) {
-          // Nebulae fade out gracefully via mergeFadeTimer in the
-          // renderer — no spark burst on destruction.  Merge/transmute
-          // events emit a subtle glimmer instead (see NebulaSystem).
-      } else {
-          // Generic fallback (structures, misc)
+      } else if (entity.type !== EntityType.PLAYER
+                 && entity.type !== EntityType.ENEMY
+                 && !isShardFamily) {
+          // Generic fallback for anything outside the classification
+          // (misc structures) — unchanged from before.
           const numParticles = 4 + Math.floor(Math.random() * 3);
           const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
           this.spawnParticles(entity.position, numParticles, entity.color || '#facc15', {

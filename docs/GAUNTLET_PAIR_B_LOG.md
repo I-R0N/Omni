@@ -50,7 +50,7 @@ and re-runs its smokes.
       manager, procedural registry, polyphony caps, positional pan.
 - [x] **B3** — Wire the inventory tier by tier + the one pause-menu audio
       row.
-- [ ] **B4** — Explosion variety per entity class on the existing
+- [x] **B4** — Explosion variety per entity class on the existing
       ParticleSystem, paired to inventory SFX ids.
 - [ ] **B5** — Validation: perf A/B, phone-scale check, full-loop smoke,
       rebase, CLAUDE.md sync, completion summary.
@@ -278,3 +278,95 @@ IS FROZEN; a refused outfit move playing the reject; portal transit;
 volume set + clamp and mute toggling both ways; `EngineStats.audio`
 populated; the slider and mute button actually present in the pause menu;
 and the global voice ceiling holding during live play.
+
+---
+
+### Iteration 3 — B4: explosion variety
+
+**Done.** `EXPLOSION_PROFILES` (11 profiles) in `constants.ts`, a single
+`deathFx()` classification returning BOTH the visual profile and the
+sound, and `playDeathFx()` rendering a burst from a profile on the
+EXISTING ParticleSystem.  `npm run build` green; `npx tsc --noEmit`
+shows only the two errors already on the base commit
+(`constants.ts` `defaultOutcome`, `ShardSystem` `requireSizeDeltaFraction`
+— confirmed by stashing and re-running).  B4 smoke **28/28**.
+
+**What was actually wrong before.** Every enemy death ran the same code
+tinted by `entity.color`, with exactly two special cases (gnats got a
+lighter burst, everything else the standard one).  A gnat, a tank and a
+bomber were the same event at three sizes.  A profile now varies the
+four things the eye reads: ring shape, debris count/speed/size/lifetime,
+an accent HUE mixed into the burst, and the screen punch.
+
+**Measured result** (from the smoke, particles per death): gnat 7,
+standard 16, bubble 17, heavy 22, bomber 29 — and the relationships hold
+in the right directions: the heavy hull throws slower, bigger,
+longer-lived debris than a standard kill; the bomber throws the fastest;
+the bubble is the slowest with the fattest droplets and no hot core at
+all.  Materials: glass debris averages 7.5 units/step, metal 6.0, rock
+2.9 — glass shatters, rock crumbles, metal sits between with a spark
+layer.
+
+**DECISIONS TAKEN**
+
+25. **One classification, two outputs.** `deathFx(entity)` returns
+    `{ fx, sfx }` and both the burst and the sound come from it.
+    *Alternative:* keep the separate `deathSfxId()` from B3 and add a
+    parallel profile lookup.
+    *Chosen because* B4's brief is that audio and visual land as ONE
+    beat, and two lookups over the same entity is exactly how they drift
+    apart later.  The profile table even carries the `sfx` id itself, so
+    a new class is one row.
+
+26. **The particle budget is spent DIFFERENTLY, not spent MORE.**
+    STANDARD lands on 16 particles — the same envelope as the 15–18 the
+    PR #69 trimmed burst used — and the gnat DROPPED from ~15 to 7.
+    Only the three rare deaths (heavy 22, bomber 29, boss 34) spend
+    more.
+    *Alternative:* scale every profile up for impact.
+    *Chosen because* the classes that spend more are the ones that
+    happen once in a while, and the class that happens in BULK now costs
+    less than before — so the worst case (a flock popping) improved.
+    `MAX_PARTICLES` is still the backstop and the smoke asserts it holds
+    after 60 simultaneous deaths.
+
+27. **Plastic and nebula keep their deliberate NON-burst.** Plastic has
+    never sparked on death and nebulae fade out through `mergeFadeTimer`
+    in the renderer.
+    *Alternative:* give every material a burst for consistency.
+    *Chosen because* both are existing deliberate looks, and "the
+    material that makes no spark" is itself differentiation.  They
+    resolve to a null profile rather than being special-cased at the
+    call site.
+
+28. **The accent layer is what makes a class read by HUE.** Amber embers
+    on a heavy hull, orange on a bomber, cyan droplets on a bubble, the
+    player's own cyan on a rival.
+    *Chosen because* tinting one burst by body colour cannot
+    differentiate classes that happen to share a palette, and hue is the
+    cheapest signal the eye picks up in peripheral vision.
+
+29. **A boss dies in its PHASE colour**, since the phase tint is already
+    on `entity.color` when it dies — so the last thing you see is the
+    state you beat.  The `payBossBounty` payoff beat layers on top; the
+    profile deliberately carries no `sfx` for bosses so the two do not
+    both fire a death sound.
+
+30. **No gradients were added.** The brief's caching requirement
+    (`enemyBodyGrad` pattern) is satisfied by construction: profiles are
+    plain numbers and colour strings handed to the existing
+    `ParticleSystem.spawn`, so there is nothing per-frame to cache.
+
+**Numbers invented in this milestone:** every field of all 11 profiles.
+Provisional — the ratios between profiles are the designed part; the
+absolute values are a starting point.
+
+**Smoke coverage (28 assertions):** every class produces a burst; gnat
+cheaper than standard; ring counts per class (gnat and bubble have no
+white core, standard does); heavy slower/bigger/longer-lived than
+standard; bomber fastest; bubble slowest; accent classes read in ≥2 hues
+while a plain kill stays two-tone; the standard burst inside the trimmed
+budget and the gnat burst below its old cost; burst-and-SFX firing
+together for four classes; `MAX_PARTICLES` holding after 60 simultaneous
+deaths; and glass > metal > rock on debris speed across three showcase
+maps.
