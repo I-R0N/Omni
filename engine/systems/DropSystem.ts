@@ -40,6 +40,10 @@ import {
  * collected" and keeps the surface area of Phase 3 small.
  */
 export class DropSystem {
+  /** SFX sink (SFX_INVENTORY §6/§7.1).  Set once by GameEngine; same
+   *  generic shape as PhysicsSystem.sfx / ShardSystem.sfx. */
+  public sfx: ((id: string, x: number, y: number) => void) | null = null;
+
   constructor(private particles: ParticleSystem) {}
 
   // --- Reward application --------------------------------------------------
@@ -460,6 +464,8 @@ export class DropSystem {
     shardHealthOverride?: number,
   ) {
     if (breakShards.length === 0) return;
+    // A deforming knock — softer than a break, because the tile survived.
+    this.sfx?.('move.dent', tile.position.x, tile.position.y);
 
     // Expand `countMin/countMax` templates into individual spawn
     // entries before iterating — keeps the per-shard loop simple

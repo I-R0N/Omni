@@ -83,6 +83,10 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
  * optional callbacks so the subsystem stays self-contained.
  */
 export class WeaponSystem {
+  /** SFX sink for enemy fire.  Set once by GameEngine; the system itself
+   *  stays free of audio state (same shape as PhysicsSystem.sfx). */
+  public onEnemyFire: ((id: string, x: number, y: number) => void) | null = null;
+
   constructor(private projectiles: ProjectileSystem) {}
 
   /**
@@ -270,6 +274,20 @@ export class WeaponSystem {
         if (fx) { shot.appliesEffect = fx; shot.color = CORROSION.COLOR; }
       }
       this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
+      // Enemy-fire audio (SFX_INVENTORY §4.2), voiced apart from the
+      // player's family so incoming and outgoing are tellable by ear.
+      // The variant picks the voice: the Bulwark's fan sounds ONCE per
+      // volley rather than per pellet, since that is one gesture visually
+      // too.
+      if (this.onEnemyFire) {
+        const id = enemy.isBoss ? 'enemy.shot.boss'
+          : shot.homing ? 'enemy.shot.missile'
+          : fx ? 'enemy.shot.acid'
+          : (arch.burst && (enemy.burstQueue === undefined || enemy.burstQueue >= arch.burst.size))
+            ? 'enemy.shot.fan'
+          : 'enemy.shot.basic';
+        this.onEnemyFire(id, enemy.position.x, enemy.position.y);
+      }
 
       // Cadence: archetypes with a `burst` fire `size` shots `gap` apart then
       // reload for the weapon's full `cooldown`; everyone else fires one shot

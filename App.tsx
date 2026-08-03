@@ -213,6 +213,23 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleScreenShake();
   };
 
+  // Audio settings.  The slider is a live user gesture, so it doubles as
+  // an unlock trigger on the rare path where the AudioContext is still
+  // locked when the pause menu opens.
+  const handleSetVolume = (v: number) => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.setVolume(v);
+  };
+
+  const handleToggleMute = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.toggleMute();
+  };
+
   const handleToggleTileOutlines = () => {
       if (engineRef.current) engineRef.current.toggleTileOutlines();
   };
@@ -486,6 +503,8 @@ const App: React.FC = () => {
         onToggleShardLod={handleToggleShardLod}
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
+        onSetVolume={handleSetVolume}
+        onToggleMute={handleToggleMute}
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
         onToggleRepelPush={handleToggleRepelPush}

@@ -48,7 +48,7 @@ and re-runs its smokes.
       per-effect generation parameters.
 - [x] **B2** — `engine/systems/AudioSystem.ts`: gesture-unlocked WebAudio
       manager, procedural registry, polyphony caps, positional pan.
-- [ ] **B3** — Wire the inventory tier by tier + the one pause-menu audio
+- [x] **B3** — Wire the inventory tier by tier + the one pause-menu audio
       row.
 - [ ] **B4** — Explosion variety per entity class on the existing
       ParticleSystem, paired to inventory SFX ids.
@@ -174,3 +174,107 @@ against the tier/frequency budget in §2, not measured.
 
 **No code touched.** Build gate not applicable to a docs-only milestone;
 `npm run build` still run as a guard that the tree is clean.
+
+---
+
+### Iteration 2 — B3: wire the inventory + the audio row
+
+**Done.** The full `SfxRegistry` (all 81 inventory ids), trigger wiring
+across GameEngine / PhysicsSystem / WeaponSystem / ShardSystem /
+DropSystem, and the one pause-menu audio row.  `npm run build` green;
+B3 smoke **31/31**, B2 re-run **26/26**.
+
+**Registry ↔ inventory parity is ASSERTED, not assumed.** The smoke
+parses `docs/SFX_INVENTORY.md` for every id in the tables' first column
+and checks two directions: every documented id is registered, AND
+`registeredCount` equals the documented count (no undocumented extras).
+That is what keeps the document a real source of truth rather than a
+stale sibling of the code.
+
+**DECISIONS TAKEN**
+
+16. **One generic `sfx` hook per system, not one callback per sound.**
+    `PhysicsSystem.sfx`, `ShardSystem.sfx`, `DropSystem.sfx` and
+    `WeaponSystem.onEnemyFire` are settable fields assigned once in the
+    GameEngine constructor.
+    *Alternatives:* thread more callbacks through `physics.update(...)`
+    alongside `onDamage`/`onDeath`/`onShake`/`onHit`; import the audio
+    manager directly into each system.
+    *Chosen because* the update signature is already four callbacks wide
+    and every new sound would widen it further, while a direct import
+    would put audio state inside a physics system.  A settable field
+    matches the existing `setPhysics` / `setRegenAdapter` /
+    `setTileFormedHandler` / `traitsEnabled` style, and adding a
+    physics-side sound is now a call rather than a signature change.
+
+17. **Impacts and destruction ride the EXISTING dispatch.**
+    `handleProjectileHit` already switches on target class and shard
+    variant for its particle layer; `handleEntityDeath` already
+    dispatches by entity class.  The sounds hang off those same
+    branches.
+    *Alternative:* a separate audio pass over the frame's events.
+    *Chosen because* audio and visual then land on the same frame from
+    the same branch by construction — they cannot drift apart — which is
+    also what B4 needs when it differentiates the explosion visuals.
+
+18. **One `MATERIAL_SFX` table drives BOTH chip and break.** A material
+    can never sound like glass when shot and like rock when destroyed,
+    because both ids are built from the same row.
+
+19. **Unknown enemy archetypes fall back to `destroy.enemy.standard`,
+    and `poise` picks the heavy voice.**
+    *Alternative:* an exhaustive subtype→sound map.
+    *Chosen because* an exhaustive map goes stale silently — a new
+    archetype would be MUTE until someone noticed.  Falling back means a
+    new enemy is audible on day one, and reading the `poise` trait for
+    "heavy" beats maintaining a second list that drifts from the traits
+    it duplicates.
+
+20. **A chain, a fan, and a shatter each get ONE trigger.** The lightning
+    chain fires `impact.lightning.arc` once at the impact rather than
+    per arc; the Bulwark's 3-shot fan is one `enemy.shot.fan`; a
+    40-fragment shatter collapses into one bumped voice.
+    *Chosen because* each is ONE gesture visually, and the collapse rule
+    already makes bulk read as heavier rather than louder.
+
+21. **`portal.open` is fired inside `openPortal` itself**, which the
+    player's own transit also calls (twice).
+    *Alternative:* fire it only at roamer arrival/departure sites.
+    *Chosen because* every rift in the game routes through `openPortal`,
+    so one call site covers dragons, rivals, bosses and any future
+    roamer for free — and the id's 400 ms retrigger window collapses the
+    player's own two calls into the `portal.transit` voice rather than
+    stacking a third layer on it.
+
+22. **A refused outfit move is audible.** `moveModule` plays
+    `poi.reject` on the drydock guard and on a failed internal move.
+    *Chosen because* outfitting away from a drydock is the single most
+    common thing a player tries and cannot do, and a silent `return
+    false` is indistinguishable from a broken button.
+
+23. **The UI footprint is exactly one strip** — a mute button, a range
+    slider and a percentage readout, inserted between the shop hint and
+    the map switcher in the pause menu, plus `EngineStats.audio` and two
+    props.  Menu-level sounds (`ui.confirm` / `ui.back`) are fired from
+    `startGame` / `pauseGame` / `resumeGame` on the ENGINE side rather
+    than from UIOverlay handlers, specifically to keep the overlay diff
+    minimal while Pair A is working it (decision #43).
+
+24. **`startGame()` also calls `audio.unlock()`**, on top of the window
+    listeners, because it is a user gesture by construction and belt-and-
+    braces costs one idempotent call.
+
+**Numbers invented in this milestone:** `SALVAGE_STREAK_WINDOW_MS`
+(1500), `SALVAGE_STREAK_MAX` (11 semitones), `SNITCH_NEAR_RANGE` (1200
+world units), and every synthesis parameter in the ~70 new registry
+entries.  Provisional.
+
+**Smoke coverage (31 assertions):** registry↔document parity in both
+directions; all seven player weapons fire their own voice through the
+real click path; dragon arrival, rift open, boss intro and rival warp-in;
+corrosion, EMP and the EMP dead-air loop; the thrust loop rising and
+falling with throttle; dock / purchase / undock all audible WHILE THE SIM
+IS FROZEN; a refused outfit move playing the reject; portal transit;
+volume set + clamp and mute toggling both ways; `EngineStats.audio`
+populated; the slider and mute button actually present in the pause menu;
+and the global voice ceiling holding during live play.

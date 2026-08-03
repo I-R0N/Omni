@@ -1730,6 +1730,13 @@ export interface EngineStats {
   perfRecording?: boolean;
   perfRecSamples?: number;
   perfRecScene?: string;
+  // ── Audio (SFX system, Phase 3 Pair B) ───────────────────────────────
+  // Master volume + mute for the pause-menu audio row.  In-memory only:
+  // this project keeps no state across reloads (CLAUDE.md §1), so the
+  // preference resets with the page — the persistence question is logged
+  // under FOR-USER-REVIEW in docs/GAUNTLET_PAIR_B_LOG.md rather than
+  // decided here.
+  audio?: { volume: number; muted: boolean };
 }
 
 export interface DamageText {

@@ -49,6 +49,15 @@ const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
 
 /** One live dragon mini-boss (Stage 6): its head entity + Snake body + per-
  *  dragon lifecycle/attack timers.  Multiple can be alive at once. */
+// Audio-only tuning that belongs to a single call site each (SFX_INVENTORY
+// §7.1 / §8.1).  PROVISIONAL, like every other number in this pass.
+/** Consecutive salvage pickups inside this window climb the pickup scale. */
+const SALVAGE_STREAK_WINDOW_MS = 1500;
+/** Cap on that climb, so a long magnet train doesn't run off the top. */
+const SALVAGE_STREAK_MAX = 11;
+/** Range at which the snitch's shimmer loop becomes audible (world units). */
+const SNITCH_NEAR_RANGE = 1200;
+
 interface DragonInstance {
   head: GameEntity;
   body: GameEntity[];                    // eaten/spawned tiles, head→tail
@@ -59,6 +68,7 @@ interface DragonInstance {
   missileTimer: number;                  // countdown to the next homing missile
   portal?: { x: number; y: number };     // exit-portal centre (leave state only)
   headThrough?: boolean;                  // head has crossed the exit portal
+  roaredOnProvoke?: boolean;              // provoke roar fired (edge latch, audio only)
 }
 
 // A rival ship (Stage 7) and its engine-managed lifecycle/AI state.  The ship
@@ -106,6 +116,13 @@ export class GameEngine {
   // docs/SFX_INVENTORY.md for the id contract and
   // engine/systems/AudioSystem.ts for the voice budget.
   public audio: AudioSystem;
+  // Salvage-pickup streak: consecutive collections inside
+  // SALVAGE_STREAK_WINDOW_MS step the pickup chime up a semitone, so a
+  // magnetised cluster climbs a scale instead of rattling.  Audio-only
+  // state — it feeds nothing else.
+  private salvageStreak = 0;
+  private salvageStreakAt = 0;
+
   // In-game FPS / perf capture harness (DBG tool).  Zero cost while idle;
   // records the per-frame timing + PerfSnapshot stream over a window and
   // exports a copy-paste text block (see engine/systems/PerfRecorder.ts).
@@ -1313,15 +1330,22 @@ export class GameEngine {
     // suppress edge strokes on edges that are cleanly butted against
     // a neighbour tile (queried via hasStaticTileNear).
     this.renderer.setPhysics(this.physics);
+    // Physics-side SFX sink (shield absorb/deflect/break, armor chip,
+    // crashes).  One generic hook so PhysicsSystem never imports audio
+    // state — see PhysicsSystem.sfx.
+    this.physics.sfx = (id, x, y, gain) => this.audio.play(id, { x, y, gain });
     this.ai = new AISystem();
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();
     this.projectiles = new ProjectileSystem();
     this.weapons = new WeaponSystem(this.projectiles);
+    this.weapons.onEnemyFire = (id, x, y) => this.audio.play(id, { x, y });
     this.drops = new DropSystem(this.particles);
+    this.drops.sfx = (id, x, y) => this.audio.play(id, { x, y });
     this.waves = new WaveSystem();
     this.nebulas = new NebulaSystem(this.particles, this.drops);
     this.shards = new ShardSystem(this.particles);
+    this.shards.sfx = (id, x, y) => this.audio.play(id, { x, y });
     // Wire the variant-specific completion hook for the
     // neighbourhood-blend regen path (today: nebula-tile only).
     this.shards.setRegenAdapter(this.nebulas);
@@ -1438,6 +1462,10 @@ export class GameEngine {
     } else {
       this.resetAndLoadSelectedMap();
       this.gameState = GameState.PLAYING;
+      // Start is a user gesture by construction, so this doubles as a
+      // guaranteed unlock point on top of the window listeners.
+      this.audio.unlock();
+      this.audio.play('ui.confirm');
       this.initWaveSystem();
       this.prepareFrameEntities();
     }
@@ -1585,12 +1613,14 @@ export class GameEngine {
     if (this.gameState === GameState.PLAYING && !this.dockedAtStation
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
+        this.audio.play('ui.back');
     }
   }
 
   public resumeGame() {
     if (this.gameState === GameState.PAUSED) {
         this.gameState = GameState.PLAYING;
+        this.audio.play('ui.confirm');
         this.lastTime = performance.now(); // Prevent physics jump
         this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
@@ -1744,6 +1774,10 @@ export class GameEngine {
    * `WaveSystem.init` zeroes waveIndex, so leaving an arena abandons the
    * ladder and re-entering starts at wave 1.  No per-map run state exists.
    */
+  /** Portal travel audio (SFX_INVENTORY §7.3).  One id covers the whole
+   *  cut — pull, snap of silence, arrival bloom — because the map swap is
+   *  instantaneous and two sounds across a zero-length gap phase against
+   *  each other.  Flat, not positional: the player IS the transit. */
   public transitionToMap(descriptorId: string, opts?: { descend?: boolean }): boolean {
       const dest = mapDescriptor(descriptorId);
       if (!dest) return false;
@@ -1752,6 +1786,7 @@ export class GameEngine {
       if (this.gameState !== GameState.PLAYING) return false;
       if (this.dockedAtStation || this.player.isExploding) return false;
 
+      this.audio.play('portal.transit');
       // Departure burst at the rift the player is leaving through — fired
       // before the load so it plays against the map being left.
       this.openPortal(this.player.position, {
@@ -1893,10 +1928,12 @@ export class GameEngine {
   }
 
   private selectWeapon(wType: WeaponType) {
+      this.audio.play('weapon.cycle');
     this.currentWeaponIndex = this.weapons.selectWeapon(this.player, wType);
   }
 
   public cycleWeapon() {
+      this.audio.play('weapon.cycle');
     if (this.gameState !== GameState.PLAYING) return;
     this.currentWeaponIndex = this.weapons.cycleWeapon(this.player);
   }
@@ -2078,6 +2115,7 @@ export class GameEngine {
       perfRecording: this.perfRecorder.recording,
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
+      audio: { volume: this.audio.volume, muted: this.audio.muted },
     });
 
     // Audio follows the camera, and goes quiet whenever the sim does.  Two
@@ -2523,7 +2561,56 @@ export class GameEngine {
       this.currentMap.entities.length = writeIdx;
   }
 
+  /** Enemy subtype → its death voice (SFX_INVENTORY §5.2).  Anything not
+   *  listed falls back to `destroy.enemy.standard`, so a new archetype is
+   *  audible from the day it is added rather than silent until someone
+   *  remembers to wire it. */
+  private static readonly ENEMY_DEATH_SFX: Partial<Record<EnemySubtype, string>> = {
+      [EnemySubtype.SWARM]:    'destroy.enemy.small',
+      [EnemySubtype.RAMMER_3]: 'destroy.enemy.heavy',
+      [EnemySubtype.KAMIKAZE]: 'destroy.enemy.kamikaze',
+      [EnemySubtype.BUBBLE]:   'destroy.enemy.bubble',
+  };
+
+  /** The death sound for an entity, or null when it has none (POIs,
+   *  particles, drops).  Bosses and the player are handled by their own
+   *  bespoke beats and never route here. */
+  private deathSfxId(entity: GameEntity): string | null {
+      if (entity.type === EntityType.PLAYER) return 'destroy.player';
+      // A severed dragon segment is material, but breaking a piece off
+      // something ALIVE has its own voice.  Checked before the material
+      // branch, since a segment is a real tile-variant STRUCTURE.
+      if (entity.dragonSegment === true) return 'destroy.dragon.segment';
+      if (entity.type === EntityType.ENEMY) {
+          if (entity.isRival) return 'destroy.rival';
+          // The dragon head's death is staged by dragonDeath, not here.
+          if (entity.enemySubtype === EnemySubtype.DRAGON) return null;
+          const byType = GameEngine.ENEMY_DEATH_SFX[entity.enemySubtype as EnemySubtype];
+          if (byType) return byType;
+          // A `poise` hull is by definition a heavy one — reading the trait
+          // beats maintaining a second subtype list that drifts from it.
+          return entity.poise ? 'destroy.enemy.heavy' : 'destroy.enemy.standard';
+      }
+      if (entity.type === EntityType.STRUCTURE) {
+          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          if (!mat) return null;
+          return entity.mass === Infinity ? `destroy.tile.${mat}` : `destroy.shard.${mat}`;
+      }
+      return null;
+  }
+
   private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
+      // Destruction audio (SFX_INVENTORY §5).  Fired FIRST, before any of
+      // the bespoke branches below return early, so every death that
+      // reaches this handler is heard.  A boss additionally gets its
+      // payout beat from payBossBounty, and a dragon its own from
+      // dragonDeath — both layered on top rather than replacing this.
+      // Every id here collapses on retrigger, which is what keeps a
+      // 40-fragment shatter to one heavier sound instead of 40 thin ones.
+      if (!entity.isExploding && !entity.isBoss) {
+          const sfx = this.deathSfxId(entity);
+          if (sfx) this.audio.play(sfx, { x: entity.position.x, y: entity.position.y });
+      }
       // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
       // not the normal enemy explosion/shard/drop path.
       if (entity.enemySubtype === EnemySubtype.DRAGON && !entity.isExploding) {
@@ -2545,6 +2632,12 @@ export class GameEngine {
       if (entity.isBoss === true && entity.type === EntityType.ENEMY
           && !entity.isExploding && !entity.killedByRival) {
           this.payBossBounty(entity);
+      }
+      // A rival stole this kill — a small, pointed, deflating sting.  The
+      // sound is the ONLY immediate signal the player was robbed, since
+      // the points popup simply never appears.
+      if (entity.type === EntityType.ENEMY && !entity.isExploding && entity.killedByRival) {
+          this.audio.play('rival.steal', { x: entity.position.x, y: entity.position.y });
       }
       if (entity.type === EntityType.ENEMY && !entity.isExploding && !entity.killedByRival) {
           // Ship kills build the combo and are paid at the resulting
@@ -3177,6 +3270,10 @@ export class GameEngine {
     // the same per-second emission count as full throttle, keeping
     // consecutive points (and PATH-shape segments) close together at
     // low throttle instead of stretching out into long choppy strokes.
+    // Engine rumble (SFX_INVENTORY §6): filter cutoff tracks throttle.
+    // Flat rather than positional — it is the player's own ship.
+    this.audio.loop('move.thrust', throttle > 0, { param: Math.min(1, throttle) });
+
     if (throttle > 0) {
         // Latch a chain break the first frame thrust resumes.  Stays set
         // through subsequent substeps / frames until an emission consumes
@@ -3471,7 +3568,33 @@ export class GameEngine {
     this.particles.spawnGlitterTrail(this.currentMap.entities, this.player);
   }
 
+  /** Shard variant → its material's impact / destruction SFX suffix.  One
+   *  table drives both `impact.tile.*` and `destroy.tile.*`/`destroy.shard.*`
+   *  so a material can never sound like one thing when chipped and another
+   *  when broken. */
+  private static readonly MATERIAL_SFX: Record<string, string> = {
+      'glass-tile': 'glass', 'glass-shard': 'glass',
+      'rock-tile': 'rock',   'rock-shard': 'rock',
+      'metal-tile': 'metal', 'metal-shard': 'metal',
+      'plastic-tile': 'plastic', 'plastic-shard': 'plastic',
+      'nebula-tile': 'nebula',   'nebula-shard': 'nebula',
+      // Indestructible tiles never die, but they DO get shot at.
+      'indestructible-tile': 'metal',
+  };
+
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
+    // Impact audio (SFX_INVENTORY §4.3).  This handler already switches on
+    // target class and shard variant for the particle layer, so the sound
+    // rides the same dispatch — audio and visual land as one beat.
+    if (target.type === EntityType.ENEMY) {
+        this.audio.play('impact.hull.enemy', { x: impactPos.x, y: impactPos.y });
+    } else if (target.type === EntityType.PLAYER) {
+        this.audio.play('impact.hull.player', { x: impactPos.x, y: impactPos.y });
+    } else if (target.type === EntityType.STRUCTURE) {
+        const mat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+        if (mat) this.audio.play(`impact.tile.${mat}`, { x: impactPos.x, y: impactPos.y });
+    }
+
     // Status-effect rounds (e.g. corrosion) debuff the player on hit.
     if (proj.appliesEffect && target.type === EntityType.PLAYER && !target.isExploding) {
       this.applyStatusEffect(target, proj.appliesEffect);
@@ -3729,6 +3852,17 @@ export class GameEngine {
    *  today).  Re-hits add a stack up to maxStacks and refresh the timer. */
   private applyStatusEffect(target: GameEntity, payload: EffectPayload) {
     const list = target.statusEffects ?? (target.statusEffects = []);
+    // Corrosion steps a semitone per stack so three stacks are audible AS
+    // three; the EMP's power-down is the warning that fire is about to do
+    // nothing (SFX_INVENTORY §8.2).
+    if (target.type === EntityType.PLAYER) {
+      const stacks = (list.find(e => e.kind === payload.kind)?.stacks ?? 0) + 1;
+      if (payload.kind === 'corrosion') {
+        this.audio.play('status.corrosion.apply', { pitch: Math.pow(2, (stacks - 1) / 12) });
+      } else {
+        this.audio.play('status.disable.apply');
+      }
+    }
     const existing = list.find(e => e.kind === payload.kind);
     if (existing) {
       existing.stacks = Math.min(payload.maxStacks, existing.stacks + 1);
@@ -3751,7 +3885,13 @@ export class GameEngine {
     // early-out so it can't stick after the effect lapses.
     this.player.systemsDisabled = false;
     const list = this.player.statusEffects;
-    if (!list || list.length === 0) return;
+    if (!list || list.length === 0) {
+      // Nothing active: make sure the EMP dead-air loop is down.  The
+      // recovery rise is played by the splice below, once per effect, so
+      // it is deliberately NOT repeated here.
+      this.audio.loop('status.disable.loop', false);
+      return;
+    }
     let acidParticle = false;
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
@@ -3764,8 +3904,12 @@ export class GameEngine {
         this.player.systemsDisabled = true;
       }
       e.remaining -= dt;
-      if (e.remaining <= 0) list.splice(i, 1);
+      if (e.remaining <= 0) { list.splice(i, 1); this.audio.play('status.expire'); }
     }
+    // Dead-air hum while EMP'd — the audible half of "your systems are
+    // off".  Idempotent, so driving it from the live flag each tick is the
+    // intended usage.
+    this.audio.loop('status.disable.loop', this.player.systemsDisabled === true);
     // Occasional acid drip on the ship while corroding (throttled).
     if (acidParticle && Math.random() < 0.4) {
       this.spawnParticles(this.player.position, 1, CORROSION.COLOR, {
@@ -3841,6 +3985,10 @@ export class GameEngine {
     }
     this.nearestStation = station;
     this.nearestPortal = portal;
+    // The rift's presence, audible: a slow beating hum whenever one is in
+    // range.  Tells the player they can travel without looking down.
+    this.audio.loop('portal.idle', portal !== null,
+                    portal ? { x: portal.position.x, y: portal.position.y } : undefined);
     this.dockInRange = station !== null;
     if (station) station.stationDockReady = true;
     if (portal) portal.portalReady = true;
@@ -3893,6 +4041,7 @@ export class GameEngine {
     if (this.dockedAtStation || !this.nearestStation || this.player.isExploding) return false;
     this.dockedAtStation = true;
     this.dockedStation = this.nearestStation;
+    this.audio.play('poi.dock');
     this.player.velocity.x = 0;
     this.player.velocity.y = 0;
     return true;
@@ -3902,6 +4051,7 @@ export class GameEngine {
    *  hygiene so the first post-dock frame doesn't integrate stale time. */
   public undock() {
     if (!this.dockedAtStation) return;
+    this.audio.play('poi.undock');
     this.dockedAtStation = false;
     this.dockedStation = null;
     this.lastTime = performance.now();
@@ -3920,6 +4070,7 @@ export class GameEngine {
     this.credits -= heal * per;
     this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
     this.pushPlayerMessage(`+${heal} hull`, '#4ade80');
+    this.audio.play('poi.repair');
     return true;
   }
 
@@ -4067,8 +4218,18 @@ export class GameEngine {
       to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ): boolean {
       const cargoOnly = from.area === 'inventory' && to.area === 'inventory';
-      if (!cargoOnly && !this.dockedServices()?.drydock) return false;
-      return this.moveModuleInternal(from, to);
+      if (!cargoOnly && !this.dockedServices()?.drydock) {
+          // Outfitting away from a drydock is the single most common thing
+          // a player tries and cannot do — it needs an audible "no".
+          this.audio.play('poi.reject');
+          return false;
+      }
+      const moved = this.moveModuleInternal(from, to);
+      // Seating a module into a hex is the tactile beat; dropping one back
+      // into cargo is the softer one; a refused move is the reject buzz.
+      this.audio.play(!moved ? 'poi.reject'
+          : to.area === 'inventory' ? 'poi.module.stow' : 'poi.module.install');
+      return moved;
   }
 
   /** SELL an inventory module back for MODULE_RESALE.SELL_FRACTION of its
@@ -4081,6 +4242,7 @@ export class GameEngine {
       if (value === null || value <= 0) return false;
       this.inventory[idx] = null;
       this.credits += value;
+      this.audio.play('poi.sell');
       return true;
   }
 
@@ -4093,6 +4255,7 @@ export class GameEngine {
       if (value === null) return false;
       this.inventory[idx] = null;
       this.credits += value;
+      this.audio.play('poi.scrap');
       return true;
   }
 
@@ -4170,6 +4333,7 @@ export class GameEngine {
       if (inv === -1) return false; // inventory full
       this.credits -= price;
       this.inventory[inv] = moduleId;
+      this.audio.play('poi.purchase');
       return true;
   }
 
@@ -4927,6 +5091,10 @@ export class GameEngine {
   // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
   private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity) {
+      // One trigger for the whole chain: every arc in a chain lands within
+      // this id's retrigger window, so the collapse rule turns a five-link
+      // chain into one bigger crackle instead of five thin ones.
+      this.audio.play('impact.lightning.arc', { x: impactPos.x, y: impactPos.y });
       if (!this.currentMap) return;
 
       // Per-projectile chain overrides (set by ProjectileSystem.spawn from
@@ -5218,6 +5386,7 @@ export class GameEngine {
                       e.attachedToId = target.id;
                       e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
                       e.bubbleLatchTimer = B.LATCH_DURATION;
+                      this.audio.play('bubble.latch', { x: target.position.x, y: target.position.y });
                       if (target.id === 'player') this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
                       this.spawnParticles(target.position, 10, e.color || '#67e8f9', {
                           speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
@@ -5272,6 +5441,7 @@ export class GameEngine {
   /** Break a bubble's latch: it falls off, goes SICK (sluggish + can't eat),
    *  and loses aggro — it does NOT die (shoot it while sick for the kill). */
   private detachLatch(e: GameEntity) {
+      this.audio.play('bubble.detach', { x: e.position.x, y: e.position.y });
       e.attachedToId = undefined;
       e.attachOffset = undefined;
       e.bubbleLatchTimer = 0;
@@ -5616,6 +5786,9 @@ export class GameEngine {
   }
 
   private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {      if (!this.currentMap) return;
+      // Compact splash blast — deliberately not the boss-death boom, since
+      // a Cannon build fires this several times a fight.
+      this.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
 
       // Impact-frame visuals (instant): bright spark burst + screen shake.
       // These don't wait for the wavefront — the player should feel the
@@ -5900,6 +6073,7 @@ export class GameEngine {
    *  the same `openPortal` abstraction the dragon and the rivals use. */
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
+      this.audio.play('boss.intro');
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,
@@ -5952,6 +6126,9 @@ export class GameEngine {
    *  CLEARED (a phase can drop a shield or stop escorts), so a phase is a full
    *  description of the boss's current state rather than a patch. */
   private applyBossPhase(boss: GameEntity, def: BossDef, index: number) {
+      // A phase change must interrupt the fight's rhythm — index 0 is the
+      // spawn stamp, so only real transitions sound.
+      if (index > 0) this.audio.play('boss.phase', { x: boss.position.x, y: boss.position.y });
       const phase = def.phases[index];
       const first = boss.bossPhase === undefined || boss.bossPhase < 0;
       boss.bossPhase = index;
@@ -6063,6 +6240,7 @@ export class GameEngine {
    * shards like any other enemy.
    */
   private payBossBounty(boss: GameEntity) {
+      this.audio.play('boss.death');
       this.bossesKilled++;
       this.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
       // Stack the discount fraction (capped) and refresh the window.
@@ -6307,7 +6485,8 @@ export class GameEngine {
     this.awardScore(bonus, this.player.position);
 
     // Wave-clear celebration — gold for a snitch catch, green for a
-    // clear-the-field win.
+    // clear-the-field win.  The audio mirrors the same split.
+    this.audio.play(bySnitch ? 'wave.clear.snitch' : 'wave.clear');
     this.playWaveClearCelebration(bySnitch);
     // The snitch is wave bookkeeping only in that it pays out + ends the
     // wave on catch; the entity itself persists across wave boundaries
@@ -6400,6 +6579,7 @@ export class GameEngine {
           && !this.player.isExploding
           && playerDistSq < SNITCH_CONSTANTS.PANIC_RADIUS * SNITCH_CONSTANTS.PANIC_RADIUS;
       if (panic || this.snitchAiTimer <= 0) {
+        this.audio.play('snitch.dart', { x: s.position.x, y: s.position.y });
         this.snitchAiState = 'dart';
         this.snitchAiTimer = SNITCH_CONSTANTS.DART_DURATION_MIN
             + Math.random() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
@@ -6423,6 +6603,12 @@ export class GameEngine {
     // Speed eases toward the state target — near-instant on the way up
     // (the burst), visibly slower on the way back down (the catch window
     // opens gradually as the dart bleeds off).
+    // Proximity shimmer — the carrot.  Rides the distance this pass has
+    // already computed, so it costs one comparison.
+    this.audio.loop('snitch.near',
+                    playerDistSq < SNITCH_NEAR_RANGE * SNITCH_NEAR_RANGE,
+                    { x: s.position.x, y: s.position.y });
+
     const darting = this.snitchAiState === 'dart';
     // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×
     // cruise per wave, capped; coast is a fixed fraction of it.  Read live
@@ -6563,6 +6749,7 @@ export class GameEngine {
   /** Snitch caught: big gold payout + burst, then end the wave through
    *  the shared cleared path (no early-clear bonus stacks on top). */
   private catchSnitch(s: GameEntity) {
+      this.audio.play('snitch.catch');
     s.active = false;
     this.snitch = null;
     this.snitchCatchCount++; // the NEXT snitch spawns faster — catching ramps speed, not waves
@@ -6708,6 +6895,12 @@ export class GameEngine {
                   if ((inst.body[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
               }
           }
+          // The fight just started — a shorter, angrier roar, once per
+          // dragon (the flag is sticky, so the edge fires exactly once).
+          if (d.provoked && !inst.roaredOnProvoke) {
+              inst.roaredOnProvoke = true;
+              this.audio.play('dragon.provoked', { x: d.position.x, y: d.position.y });
+          }
 
           // ── Head attacks: ONLY once provoked — spit gnats + lob missiles ──
           if (inst.state === 'roam' && d.provoked) {
@@ -6761,6 +6954,9 @@ export class GameEngine {
       const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
       wrapPosition(pos);
       this.openDragonPortal(pos);
+      // The roar rides on TOP of the rift the portal already sounds — a
+      // dragon arriving should make the player look up.
+      this.audio.play('dragon.arrive', { x: pos.x, y: pos.y });
 
       const v = ENEMY_VARIANTS[EnemySubtype.DRAGON];
       const d: GameEntity = {
@@ -6947,6 +7143,8 @@ export class GameEngine {
 
   /** Dragon killed: big payoff + score + collapse the rift + scatter the body. */
   private dragonDeath(inst: DragonInstance) {
+      this.audio.play('destroy.dragon',
+                      { x: inst.head.position.x, y: inst.head.position.y });
       const d = inst.head;
       // Payout doubles per kill this run: 3000, 6000, 12000, …
       this.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, this.dragonsKilled), d.position);
@@ -6965,6 +7163,8 @@ export class GameEngine {
   /** Despawn a dragon (left via portal — no payoff).  The body leaves with it.
    *  Caller removes it from `this.dragons`. */
   private despawnDragon(inst: DragonInstance) {
+      this.audio.play('dragon.leave',
+                      { x: inst.head.position.x, y: inst.head.position.y });
       inst.head.active = false;
       for (let i = 0; i < inst.body.length; i++) inst.body[i].active = false;
   }
@@ -6986,6 +7186,12 @@ export class GameEngine {
    * dragon and the rival ships; tune via the caller's PORTAL_* constants.
    */
   private openPortal(pos: Vector2, opts: { color: string; radius: number; duration: number }) {
+      // A rift tearing open, heard from OUTSIDE (SFX_INVENTORY §7.3) — the
+      // roamer arrivals/departures and the boss entrance all route here.
+      // The player's own transit fires openPortal twice around the map
+      // swap; this id's retrigger window collapses both into the
+      // portal.transit voice instead of stacking a third layer on it.
+      this.audio.play('portal.open', { x: pos.x, y: pos.y });
       const { color, radius, duration } = opts;
       // White core flash (fast, small) → the rift "ignites".
       this.spawnShockwave(pos, { radius: radius * 0.42, damage: 0, knockback: 0, color: '#ffffff', lifetime: duration * 0.55 });
@@ -7155,6 +7361,7 @@ export class GameEngine {
                   wrapPosition(portal);
                   inst.portal = portal;
                   this.openPortal(portal, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
+                  this.audio.play('rival.warp.out', { x: portal.x, y: portal.y });
               }
           } else if (inst.state === 'leave' && inst.portal) {
               const cr = R.PORTAL_CONSUME_RADIUS;
@@ -7206,6 +7413,7 @@ export class GameEngine {
           ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
           fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
       });
+      this.audio.play('rival.warp.in', { x: ship.position.x, y: ship.position.y });
   }
 
   /** Rival weapon: a blaster bolt that may damage the wave enemies (hitsEnemies)
@@ -7303,6 +7511,23 @@ export class GameEngine {
   // sites in updateGameLogic / handleEntityDeath / collection paths.
 
   private applyDropEffect(entity: GameEntity) {
+    // Pickup audio (SFX_INVENTORY §7.1).  Salvage arrives in magnetised
+    // CLUSTERS, so a fixed pitch reads as a machine-gun rattle; stepping
+    // it up a semitone per pickup inside a short window turns a cluster
+    // into a climbing scale instead.  The streak resets once collection
+    // pauses.
+    const pos = entity.position;
+    if (entity.dropType === 'salvage') {
+        const now = performance.now();
+        this.salvageStreak = (now - this.salvageStreakAt < SALVAGE_STREAK_WINDOW_MS)
+            ? Math.min(this.salvageStreak + 1, SALVAGE_STREAK_MAX) : 0;
+        this.salvageStreakAt = now;
+        this.audio.play('pickup.salvage', {
+            x: pos.x, y: pos.y, pitch: Math.pow(2, this.salvageStreak / 12),
+        });
+    } else if (entity.dropType === 'health') {
+        this.audio.play('pickup.health', { x: pos.x, y: pos.y });
+    }
     this.drops.applyDropEffect(
       this.player,
       entity,

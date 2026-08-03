@@ -77,6 +77,10 @@ interface UIOverlayProps {
   onToggleShardLod?: () => void;
   onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
+  // Audio settings (Phase 3 Pair B).  Deliberately the ONLY UI surface
+  // this pass adds — Pair A owns the overlay's structural work.
+  onSetVolume?: (v: number) => void;
+  onToggleMute?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
   onToggleRepelPush?: () => void;
@@ -232,6 +236,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardLod,
   onToggleMergeRate,
   onToggleScreenShake,
+  onSetVolume,
+  onToggleMute,
   onToggleTileOutlines,
   onToggleChevronMode,
   onToggleRepelPush,
@@ -2113,6 +2119,34 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <p className="text-slate-500 text-[11px] text-center">
               Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
             </p>
+
+            {/* Audio — master volume + mute.  One row by design: Pair A is
+                developing the overlay's structural UI in parallel, so this
+                pass keeps its footprint to a single settings strip. */}
+            <div className="mx-auto w-full max-w-xs flex items-center gap-3 px-3 py-2
+                            bg-slate-900/70 border border-slate-700/60 rounded-lg">
+              <button
+                onClick={onToggleMute}
+                aria-label={stats.audio?.muted ? 'Unmute' : 'Mute'}
+                className="pointer-events-auto cursor-pointer shrink-0 w-9 h-9 rounded-md
+                           bg-slate-800/80 border border-slate-600/60 text-base
+                           hover:bg-slate-700/80 active:bg-slate-600/80"
+              >
+                {stats.audio?.muted ? '🔇' : '🔊'}
+              </button>
+              <input
+                type="range" min={0} max={100} step={1}
+                value={Math.round((stats.audio?.volume ?? 0.7) * 100)}
+                onChange={e => onSetVolume?.(Number(e.target.value) / 100)}
+                aria-label="Master volume"
+                className="pointer-events-auto cursor-pointer flex-1 accent-sky-400
+                           disabled:opacity-40"
+                disabled={stats.audio?.muted === true}
+              />
+              <span className="shrink-0 w-10 text-right text-slate-400 text-[11px] tabular-nums">
+                {stats.audio?.muted ? '—' : `${Math.round((stats.audio?.volume ?? 0.7) * 100)}%`}
+              </span>
+            </div>
 
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}

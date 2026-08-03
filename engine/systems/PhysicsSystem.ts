@@ -1117,6 +1117,12 @@ export class PhysicsSystem {
    * direction does not.  Falls back to the position bearing only if the
    * projectile has no usable velocity.  Toroidal.
    */
+  /** SFX sink (SFX_INVENTORY §4.3).  Set once by GameEngine; null in any
+   *  context without audio.  A single generic hook rather than one
+   *  callback per sound, so adding a physics-side sound is a call, not a
+   *  signature change.  PhysicsSystem stays free of audio state. */
+  public sfx: ((id: string, x: number, y: number, gain?: number) => void) | null = null;
+
   public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
       const half = target.shieldArcHalfWidth;
       if (half === undefined) return true; // full bubble
@@ -1227,6 +1233,9 @@ export class PhysicsSystem {
       shielded.shield! -= projDmg;
       shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
       shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+      // A ricochet, not a landing: the deflect voice RISES in pitch, which
+      // is the information the player needs.
+      this.sfx?.('impact.shield.deflect', proj.position.x, proj.position.y);
       if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
       return true;
   }
@@ -2850,6 +2859,11 @@ export class PhysicsSystem {
               projDmg -= absorbed;
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+              // Shield hits must be tellable from hull hits BY EAR — "did
+              // that cost me health?" is a live decision.  A shield that
+              // just collapsed gets its own, louder cue.
+              this.sfx?.(target.shield! <= 0 ? 'impact.shield.break' : 'impact.shield.absorb',
+                         target.position.x, target.position.y);
           }
           // (h) front-shield: a permanent directional plate on the entity's
           // FACING cuts covered hits.  Deliberately applied BEFORE the regen
@@ -2865,6 +2879,9 @@ export class PhysicsSystem {
           // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
           if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
               projDmg *= (1 - target.armor.reduction);
+              // A thick, dead clunk: the audible half of the reduced
+              // damage number this path already shows.
+              this.sfx?.('impact.armor.chip', target.position.x, target.position.y);
           }
           // (h) regen: feed the APPLIED damage into the fixed burst bucket.
           // No-op without the trait.
@@ -3155,6 +3172,12 @@ export class PhysicsSystem {
           if ((player.shield ?? 0) > 0) {
               player.shieldHitFlash = Math.max(player.shieldHitFlash ?? 0, SHIELD_CONSTANTS.CONTACT_FLASH_DURATION);
           }
+          // Body slam against an enemy hull — harder-edged than the tile
+          // crash, and gated on a real impact so drifting contact is silent.
+          const other = a.type === EntityType.PLAYER ? b : a;
+          if (other.type === EntityType.ENEMY && Math.abs(velAlongNormal) > 2.0) {
+              this.sfx?.('crash.player.enemy', player.position.x, player.position.y);
+          }
       }
 
       // Structure crashing — player path.
@@ -3180,6 +3203,10 @@ export class PhysicsSystem {
           const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
+              // Grinding, not explosive — and scaled by how hard you hit,
+              // so a graze and a full-speed wall are different sounds.
+              this.sfx?.('crash.player.tile', player.position.x, player.position.y,
+                         Math.min(1, impactSpeed / (STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 3)));
               // Stamp the pre-retention crash velocity so the death
               // pipeline (ShardSystem.shatter / spawnGlassShards)
               // scatters debris along the player's heading — same
