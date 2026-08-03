@@ -3983,6 +3983,114 @@ export class GameEngine {
   }
 
   /** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
+  /** Per-stat module attribution for the Ship Status panel (A2).
+   *
+   *  Walks the two hex groups exactly the way `applyModuleEffects`'s `fold`
+   *  does — same slots, same `activeShip`/`activeWeapon` fixpoint — and files
+   *  each module's effect under the derived stat it feeds.  The HEADLINE
+   *  value of every line is read straight off the player entity / the module
+   *  multipliers, so the panel can never disagree with the simulation: the
+   *  breakdown explains the number, it does not derive it.
+   *
+   *  A contributor's `active` means "this amount is IN the total".  It is
+   *  false both for an adjacency-inactive module (`requires` names the family
+   *  it must touch) and for shield PLATING with no shield core installed —
+   *  plating that is perfectly well connected but has nothing to plate.
+   *
+   *  Menu-only (built with the rest of the outfitting snapshot while paused
+   *  or docked), so it costs nothing on a live frame. */
+  private statBreakdown() {
+      type Contrib = {
+          area?: 'ship' | 'weapon'; idx?: number; moduleId?: string;
+          label: string; display: string; active: boolean; requires?: string;
+      };
+      const pct = (f: number) => `${f >= 0 ? '+' : '−'}${Math.round(Math.abs(f) * 100)}%`;
+      const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
+      const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
+      const cool: Contrib[] = [], charge: Contrib[] = [];
+      let gunWeight = 0, gunCount = 0, shieldCore = false;
+
+      const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
+          for (let i = 0; i < slots.length; i++) {
+              const id = slots[i];
+              if (id === null) continue;
+              const def = moduleDef(id);
+              if (!def) continue;
+              const on = active[i];
+              const req = MODULE_REQUIREMENTS[def.family];
+              const base: Contrib = {
+                  area, idx: i, moduleId: id, label: def.label, active: on,
+                  requires: on ? undefined : (req !== undefined ? (req[0] as string) : undefined),
+              };
+              // A gun is an adjacency ROOT, so it is always active; its weight
+              // is what shows up as acceleration drag below.
+              if (def.family === 'gun') {
+                  if (on) { gunWeight += def.weight ?? 0; gunCount++; }
+                  accel.push({ ...base, display: `weight ${(def.weight ?? 0).toFixed(1)}` });
+              }
+              const e = def.effect;
+              if (!e) continue;
+              if (e.maxHp)           hull.push({ ...base, display: `+${e.maxHp} HP` });
+              if (e.maxShield)       shield.push({ ...base, display: `+${e.maxShield}` });
+              if (e.shieldCore)    { if (on) shieldCore = true;
+                                     shield.push({ ...base, display: `+${SHIELD_CONSTANTS.MAX_CHARGE} base` }); }
+              if (e.shieldRegenFrac) regen.push({ ...base, display: pct(e.shieldRegenFrac) });
+              if (e.speedFrac)       speed.push({ ...base, display: pct(e.speedFrac) });
+              if (e.accelFrac)       accel.push({ ...base, display: pct(e.accelFrac) });
+              if (e.damageFrac)      dmg.push({ ...base, display: pct(e.damageFrac) });
+              if (e.cooldownFrac)    cool.push({ ...base, display: pct(-e.cooldownFrac) });
+              if (e.overcharge)      charge.push({ ...base, display: on ? 'enabled' : 'offline' });
+          }
+      };
+      walk('ship', this.shipSlots, this.activeShip);
+      walk('weapon', this.weaponSlots, this.activeWeapon);
+
+      // Plating with no shield core is connected-but-pointless: `maxShield`
+      // is gated to 0 in applyModuleEffects, so report zero contribution and
+      // name the missing piece rather than showing a number that isn't real.
+      if (!shieldCore) {
+          for (const c of shield) {
+              if (c.moduleId === 'shield') continue;
+              c.active = false;
+              c.requires = 'shield core';
+          }
+      }
+
+      // Weapon-weight drag is MULTIPLICATIVE and depends on the whole mounted
+      // set, so it cannot be attributed per gun without lying about the
+      // arithmetic.  The guns appear above as weight rows (that is what makes
+      // tapping a gun highlight Acceleration); this synthetic row carries the
+      // factor they add up to.
+      const dragMult = WEAPON_WEIGHT.BASE_BOOST
+          / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight);
+      accel.push({
+          label: gunCount === 0 ? 'Flying weaponless' : `Weight drag (Σ${gunWeight.toFixed(1)})`,
+          display: `×${dragMult.toFixed(2)}`,
+          active: true,
+      });
+
+      const line = (id: string, label: string, display: string, baseDisplay: string,
+                    contributors: Contrib[], note?: string) =>
+          ({ id, label, display, baseDisplay, contributors, note });
+
+      return [
+          line('hull', 'Hull', `${this.player.maxHealth}`, '100', hull),
+          line('shield', 'Shield', `${this.player.maxShield}`, '0', shield,
+               shieldCore ? undefined : 'no shield core installed'),
+          line('shieldRegen', 'Shield regen',
+               `${(this.player.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE).toFixed(1)}/s`,
+               `${SHIELD_CONSTANTS.RECHARGE_RATE.toFixed(1)}/s`, regen),
+          line('damage', 'Damage', `×${(this.player.damageMult ?? 1).toFixed(2)}`, '×1.00', dmg),
+          line('cooldown', 'Fire cooldown', `×${(this.player.cooldownMult ?? 1).toFixed(2)}`, '×1.00', cool,
+               'lower is faster'),
+          line('speed', 'Top speed', `×${this.moduleSpeedMult.toFixed(2)}`, '×1.00', speed),
+          line('accel', 'Acceleration', `×${this.moduleThrustMult.toFixed(2)}`, '×1.00', accel,
+               'mounted guns weigh the ship down'),
+          line('overcharge', 'Charged shots',
+               this.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
+      ];
+  }
+
   private outfittingSnapshot() {
       const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
           if (id === null) return null;
@@ -4013,6 +4121,10 @@ export class GameEngine {
                   scrapValue: Math.round(price * MODULE_RESALE.SCRAP_FRACTION),
               };
           }),
+          // Per-module stat attribution (Pair A, A2).  Built from the SAME
+          // slot walk applyModuleEffects folds, so the UI never recomputes a
+          // derived stat — it only renders what the sim is already using.
+          statLines: this.statBreakdown(),
           // Catalog prices are the DISCOUNTED prices the shop will actually
           // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
           catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {

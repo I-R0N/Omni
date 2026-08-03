@@ -1396,6 +1396,32 @@ export interface EngineStats {
     /** `sellValue`/`scrapValue` are the rounded MODULE_RESALE payouts —
      *  sell-back needs a station (any), scrap works anywhere. */
     inventory: ({ id: string; label: string; kind: string; family: string; group: string; sellValue: number; scrapValue: number } | null)[];
+    /** Per-stat module attribution for the Ship Status panel (Phase 3 Pair
+     *  A).  Built from the SAME slot walk `applyModuleEffects` folds, so the
+     *  UI renders rather than recomputes: `display` is the derived value the
+     *  sim is actually using and `contributors` explains how it got there.
+     *
+     *  A contributor's `active` means "this amount is IN the total" — false
+     *  both for an adjacency-OFFLINE module (`requires` names the family it
+     *  must touch) and for shield plating with no shield core.  A contributor
+     *  with no `area`/`idx` is a DERIVED row with no hex behind it (today:
+     *  the weapon-weight drag factor), so it highlights nothing. */
+    statLines: {
+      id: string;
+      label: string;
+      display: string;
+      baseDisplay: string;
+      note?: string;
+      contributors: {
+        area?: 'ship' | 'weapon';
+        idx?: number;
+        moduleId?: string;
+        label: string;
+        display: string;
+        active: boolean;
+        requires?: string;
+      }[];
+    }[];
     catalog: {
       id: string; group: string; kind: string; label: string; desc: string;
       cost: number; affordable: boolean;

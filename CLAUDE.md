@@ -797,8 +797,29 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   + the fully live inventory honeycomb (drag-reorder + tap → a detail
   strip with Scrap enabled and Sell disabled-until-docked).  The shared
   hex renderers (`renderHexGroup`/`renderInventoryHex`/
-  `renderModuleDetail`/`renderDragGhost`) live at UIOverlay component
-  scope, parameterised by context.  Kind
+  `renderModuleDetail`/`renderDragGhost`/`renderShipStatus`) live at
+  UIOverlay component
+  scope, parameterised by context.  STAT LEGIBILITY (Phase 3 Pair A):
+  `EngineStats.outfitting.statLines` carries the full derived-stat set
+  (hull / shield / shield regen / damage / fire cooldown / top speed /
+  acceleration / charged shots) with PER-MODULE ATTRIBUTION, built by
+  `GameEngine.statBreakdown()` from the SAME slot walk
+  `applyModuleEffects` folds — the UI renders, it never recomputes, so
+  the panel cannot disagree with the sim.  A contributor's `active`
+  means "this amount is IN the total": false for an adjacency-OFFLINE
+  module (`requires` names the family it must touch) AND for shield
+  plating with no shield core (connected but with nothing to plate).  A
+  contributor with no `area`/`idx` is a DERIVED row with no hex behind
+  it — today just the weapon-weight drag factor, which is
+  MULTIPLICATIVE over the whole mounted set and so cannot be attributed
+  per gun; the guns themselves appear as weight rows, which is what
+  makes tapping a gun highlight Acceleration.  `renderShipStatus()` is
+  shared verbatim by the pause menu and the docked station: rows expand
+  to their contributors (`openStat`), and tapping a hex in either flower
+  highlights every stat it feeds (the shared `selSlot`) while the detail
+  strip lists that module's exact per-stat amounts.  Every hex button
+  carries a stable `data-hex="<group>:<idx>"` (the interactive-only
+  `data-tile` stays the drag drop-target hook).  Kind
   `'ship-part'` stays reserved schema; the two competing ship-design
   directions (ship catalog CHOSEN vs modular physical ship SUPERSEDED)
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate

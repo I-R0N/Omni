@@ -303,6 +303,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // cargo panel).  'inventory' selections drive the sell/scrap strip; the
   // detail strip below the flowers acts on this slot.
   const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon' | 'inventory'; i: number } | null>(null);
+  // Which Ship Status stat row is expanded to its per-module contributors
+  // (A2).  Controlled so it survives the 60 Hz overlay re-render, same as the
+  // pause-menu section collapse state.
+  const [openStat, setOpenStat] = useState<string | null>(null);
   // Drag-and-drop outfitting (drydock only): pointer-based so touch and
   // mouse both work.  A press that never travels >8px falls through to
   // the normal click (hex selection); a real drag suppresses the click
@@ -430,6 +434,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             return (
               <button
                 key={i}
+                /* `data-tile` is the DRAG drop-target hook, so it only
+                   exists on interactive flowers; `data-hex` is a stable
+                   identity for every hex (read-only flowers included). */
+                data-hex={`${g}:${i}`}
                 data-tile={interactive ? `${g}:${i}` : undefined}
                 onPointerDown={interactive && m !== null ? beginDrag(g, i, m.label) : undefined}
                 onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
@@ -487,6 +495,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             return (
               <button
                 key={i}
+                data-hex={`inventory:${i}`}
                 data-tile={`inventory:${i}`}
                 onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
                 onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g: 'inventory', i }); }}
@@ -514,6 +523,97 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   )}
                 </span>
               </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  /** Ship Status — the full derived-stat set with per-module attribution
+   *  (Phase 3 Pair A).  Shared verbatim by the pause menu and the docked
+   *  station, like the hex widgets around it.
+   *
+   *  Every number is `EngineStats.outfitting.statLines`, which the engine
+   *  builds from the same slot walk `applyModuleEffects` folds — nothing is
+   *  recomputed here.  Tapping a row expands its contributors; tapping a hex
+   *  in the flowers highlights every stat that hex feeds (the shared
+   *  `selSlot` state), and OFFLINE modules are listed with their contribution
+   *  struck through plus the contact they are missing. */
+  const renderShipStatus = () => {
+    const lines = out?.statLines ?? [];
+    if (lines.length === 0) return null;
+    const selHex = selSlot && selSlot.g !== 'inventory'
+      ? { area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i } : null;
+    const feeds = (c: { area?: string; idx?: number }) =>
+      selHex !== null && c.area === selHex.area && c.idx === selHex.idx;
+    return (
+      <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+        <div className="flex items-baseline justify-between mb-2">
+          <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Ship Status</h3>
+          <span className="text-slate-500 text-[10px]">
+            {selHex ? 'highlighted: fed by the selected hex' : 'tap a stat for its modules'}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          {lines.map(l => {
+            const open = openStat === l.id;
+            const lit = selHex !== null && l.contributors.some(feeds);
+            const counted = l.contributors.filter(c => c.active).length;
+            return (
+              <div
+                key={l.id}
+                className={`rounded transition-colors ${lit ? 'bg-amber-500/10 ring-1 ring-amber-400/40' : ''}`}
+              >
+                <button
+                  data-testid={`stat-${l.id}`}
+                  onClick={() => setOpenStat(open ? null : l.id)}
+                  className="w-full flex items-baseline justify-between gap-2 px-1.5 py-1.5 text-left hover:bg-slate-700/30 rounded transition-colors"
+                >
+                  <span className="text-slate-400 text-xs flex items-baseline gap-1.5">
+                    {l.label}
+                    <span className="text-slate-600 text-[9px]">{open ? '▾' : '▸'}</span>
+                  </span>
+                  <span className="flex items-baseline gap-1.5">
+                    {counted > 0 && (
+                      <span className={`text-[9px] font-bold tabular-nums ${lit ? 'text-amber-300' : 'text-slate-600'}`}>
+                        {counted} mod{counted > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    <span className="text-white font-bold tabular-nums text-xs">{l.display}</span>
+                  </span>
+                </button>
+                {open && (
+                  <div
+                    data-testid={`stat-detail-${l.id}`}
+                    className="px-1.5 pb-2 pt-0.5 flex flex-col gap-0.5 text-[11px]"
+                  >
+                    <div className="flex justify-between gap-2 text-slate-500">
+                      <span>Base</span>
+                      <span className="tabular-nums">{l.baseDisplay}</span>
+                    </div>
+                    {l.contributors.map((c, i) => (
+                      <div
+                        key={i}
+                        className={`flex justify-between gap-2 ${feeds(c) ? 'text-amber-200' : c.active ? 'text-slate-300' : 'text-slate-600'}`}
+                      >
+                        <span className="truncate">
+                          {c.label}
+                          {!c.active && c.requires && (
+                            <span className="text-rose-400/80 ml-1.5 text-[9px] uppercase tracking-wide">
+                              offline · needs {c.requires}
+                            </span>
+                          )}
+                        </span>
+                        <span className={`tabular-nums shrink-0 ${c.active ? '' : 'line-through'}`}>{c.display}</span>
+                      </div>
+                    ))}
+                    {l.contributors.length === 0 && (
+                      <span className="text-slate-600">No modules feed this stat.</span>
+                    )}
+                    {l.note && <span className="text-slate-500 text-[10px] mt-0.5">{l.note}</span>}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -569,6 +669,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {selHexMod.active
               ? <span className="text-emerald-300 ml-2 font-bold text-[10px] uppercase">Online</span>
               : <span className="text-rose-400 ml-2 font-bold text-[10px] uppercase">Offline — must touch {selHexMod.requires}</span>}
+            {/* Exact effect (A2): every stat this hex feeds, with the amount
+                it contributes.  An OFFLINE module lists the same stats with
+                a zero contribution, so "what am I losing" reads directly. */}
+            {(() => {
+              const eff = (out?.statLines ?? []).flatMap(l =>
+                l.contributors
+                  .filter(c => c.area === selSlot.g && c.idx === selSlot.i)
+                  .map(c => ({ stat: l.label, display: c.display, active: c.active })));
+              if (eff.length === 0) {
+                return <div className="text-slate-500 text-[10px] mt-0.5">Contributes no ship stats.</div>;
+              }
+              return (
+                <div data-testid="detail-effects" className="text-[10px] mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5">
+                  {eff.map((e, i) => (
+                    <span key={i} className={e.active ? 'text-amber-200' : 'text-slate-600'}>
+                      {e.stat} <span className={`tabular-nums font-bold ${e.active ? '' : 'line-through'}`}>{e.display}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           {ctx === 'station' && canEditInstalled && (
             <button
@@ -1518,6 +1639,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 thrusters⇢engine, shield/plating⇢hull, capacitor⇢shield,
                 weapon-mods⇢gun; hull + guns are the roots).  Drag tiles
                 between the inventory and the flowers — drydock only. */}
+            {/* Full derived-stat set with per-module attribution (A2) — the
+                same shared widget the pause menu shows, so an outfitting
+                change here can be read back immediately. */}
+            {renderShipStatus()}
+
             {out && (
               <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3 flex flex-col gap-2">
                 {!canEdit && (
@@ -1719,7 +1845,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* ── Player Menu (pause) ── */}
       {stats.gameState === GameState.PAUSED && (() => {
         const ps = stats.playerStats;
-        const fmtMult = (m: number | undefined) => `×${(m ?? 1).toFixed(2)}`;
         const statLine = (label: string, value: React.ReactNode) => (
           <div className="flex justify-between gap-2">
             <span className="text-slate-400">{label}</span>
@@ -1756,17 +1881,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </button>
             </div>
 
-            {/* Ship status */}
+            {/* Live pools (the two stats that MOVE in flight) — the derived
+                per-module breakdown lives in the shared Ship Status widget
+                right below. */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
+              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Condition</h3>
               <div className="flex flex-col gap-1 text-xs">
                 {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
                 {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
-                {statLine('Damage', fmtMult(ps?.damageMult))}
-                {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
-                {statLine('Speed', fmtMult(ps?.speedMult))}
               </div>
             </div>
+
+            {/* Full derived-stat set with per-module attribution (A2) —
+                the SAME widget the docked station shows. */}
+            {renderShipStatus()}
 
             {/* Modules & cargo — the same hex-tile language as the station
                 UI, but the flowers are READ-ONLY (no drag source, no drop
