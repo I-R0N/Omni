@@ -782,20 +782,55 @@ export const UI_CONSTANTS = {
     OFFSET_MODIFIER: 0.85, // Multiplier of entity size
     OFFSET_BASE: 10 // Pixel padding
   },
+  // Off-screen indicators.  Arrows ride the SCREEN EDGE (an inset viewport
+  // rect) rather than a fixed centre ring, and their SIZE carries distance:
+  // a closing threat grows, a far straggler shrinks to a small tick.  That
+  // is what lets the whole layer be smaller than the old fixed-size ring
+  // while reading MORE clearly — proximity is in the glyph, not in a number.
+  //
+  // Colour is BY TYPE, never the entity's own colour (user call): one look
+  // tells you what a contact IS.  A rival or a bubble that is hunting the
+  // PLAYER blinks red on top of its type colour — those two are the only
+  // contacts whose hostility is conditional, so the blink is exactly the
+  // "it's coming for you" signal.
   INDICATORS: {
-    RADIUS: 120, // Distance from center of screen
-    TEXT_THRESHOLD_ENEMY: 250000, // Distance sq to show text
+    EDGE_INSET: 26,          // px in from the viewport edge the arrows ride
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5, // Max arrows for POIs
     // Enemy chevrons are range-unlimited (maps are big and live wave
     // enemies are capped at TIMED_WAVE_CONFIG.MAX_CONCURRENT_ENEMIES),
     // so every live enemy is always findable.  The cap here only guards
     // pathological counts; alpha fades with distance to a floor so far
-    // chevrons read as "out there" without shouting.
+    // chevrons read as "out there" without shouting.  The budget keeps the
+    // NEAREST contacts (renderIndicators selects nearest-first).
     MAX_VISIBLE_ENEMY: 12,
+    // Ambient bubbles get their own small budget: they are fauna, not wave
+    // threats, so a bloom of them must never crowd out the enemy arrows.
+    MAX_VISIBLE_BUBBLE: 4,
     ENEMY_FADE_START: 800,   // world units — full opacity inside this
     ENEMY_FADE_END: 4000,    // world units — alpha floor from here out
     ENEMY_MIN_ALPHA: 0.35,
+    // Proximity size ramp — the arrow's half-length in px, interpolated on
+    // distance.  NEAR is deliberately close to the old fixed size and FAR is
+    // roughly half of it, so a screen full of distant contacts costs far less
+    // real estate than before while a closing one is MORE prominent.
+    SIZE_NEAR: 11,           // px at/inside NEAR_DIST
+    SIZE_FAR: 5,             // px at/beyond FAR_DIST
+    NEAR_DIST: 350,          // world units
+    FAR_DIST: 3500,          // world units
+    BOSS_SCALE: 1.7,         // boss arrows stay oversized (never lose the boss)
+    AGGRO_BLINK_HZ: 2.5,     // red-blink rate for a rival/bubble hunting you
+    // Type → colour.  Bosses share the enemy red; their SIZE and self-label
+    // are what set them apart, so the palette stays a clean type legend.
+    COLORS: {
+      ENEMY:   '#ef4444',    // red-500
+      STATION: '#6366f1',    // indigo-500
+      PORTAL:  '#22c55e',    // green-500
+      RIVAL:   '#eab308',    // yellow-500
+      BUBBLE:  '#a855f7',    // purple-500
+      AGGRO:   '#ef4444',    // blink colour for a provoked rival / bubble
+      OTHER:   '#94a3b8',    // slate-400 — any POI without a type of its own
+    },
   }
 };
 

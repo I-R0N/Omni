@@ -475,7 +475,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
   NOT brighten the membrane (the held meal reads instead); calm bubbles render
   faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
-  hit-flash always reads.  Renders with NO health bar or off-screen chevron.
+  hit-flash always reads.  Renders with NO health bar; its off-screen
+  indicator is PURPLE under its own small budget, blinking red once it is
+  hunting the player (see the off-screen-indicator note in §8).
   Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek / burst),
   engagement + ambient payload in `BUBBLE_CONSTANTS`).  Finally the Stage-6
   DRAGON (an engine-managed serpent MINI-BOSS — `'dragon'` AI strategy is a
@@ -733,9 +735,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   survives a 390px-wide screen); `EngineStats.bossDiscount` drives the
   shop's discount banner; RenderSystem draws a phase-coloured aura ring
   (`AURA_SCALE`/`AURA_ALPHA`) on the boss hull, an oversized SELF-LABELLED
-  off-screen chevron that is exempt from both the enemy-chevron budget and
-  the distance fade (losing the boss arrow behind a crowd of stragglers is
-  the case the arrow exists for), and a ringed `MINIMAP_CONSTANTS.BOSS_BLIP`
+  off-screen indicator that is exempt from both the enemy budget and the
+  distance fade (losing the boss arrow behind a crowd of stragglers is
+  the case the arrow exists for; it wears the shared enemy RED — its size
+  and self-label are what set it apart), and a ringed `MINIMAP_CONSTANTS.BOSS_BLIP`
   contact that clamps to the border instead of being culled.  DBG: pause ▸
   Debug Menu ▸ Bosses.
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
@@ -850,11 +853,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   to its `playerSpawn`, inside the spawn safe zone those maps already
   clear.  `USE_RANGE` sits just under the station's `DOCK_RANGE` so the
   shared-E nearest-wins arbitration has a clear winner at the boundary.
-  `INDICATOR_RANGE` gates the off-screen chevron: a portal is a FIXED
+  `INDICATOR_RANGE` gates the off-screen indicator: a portal is a FIXED
   landmark, so its arrow only appears once the player is within range,
   and inside that range it is PERSISTENT (exempt from the
-  chevrons-offscreen-only suppression) and labelled with the
-  destination name.  Because the chevron is range-gated, the MINIMAP is
+  offscreen-only suppression) and labelled with the
+  destination name.  The ARROW is green (the type legend, §8); the rift's
+  own violet/sky colours still drive the world-space + minimap art.  Because the chevron is range-gated, the MINIMAP is
   how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
   ANOMALY — a spinning colour-filled diamond with an expanding radar
   ping — and, like an enemy blip, it CLAMPS to the minimap border when
@@ -1293,6 +1297,32 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   buy-then-sell would net `discount - (1 - SELL_FRACTION)` of cost per
   cycle — an infinite money pump above a 10% discount.  Any future price
   modifier must join `modulePrice`, not add a second discount path.
+- **Off-screen indicators are EDGE-anchored, size-coded and typed.**
+  `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
+  INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
+  edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE
+  (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
+  ordinary enemies no longer print a distance number: a dozen little
+  "1234m" strings were most of the old clutter, and the glyph already says
+  it.  POIs keep the far-only readout; portals and bosses keep their
+  self-labels (an unlabelled arrow is ambiguous the moment a second one is
+  on the edge), and label LINES stack vertically — stacking them radially
+  puts line 2 on top of line 1 at a near-horizontal bearing.
+  COLOUR IS BY TYPE, never `entity.color` (`INDICATORS.COLORS`): red enemy
+  / indigo station / green portal / yellow rival / purple bubble, plus
+  slate for any other POI.  A rival or a bubble is only CONDITIONALLY
+  hostile, so those two cross-fade to red on `AGGRO_BLINK_HZ` while
+  hunting the PLAYER specifically — the bubble reads `provoked &&
+  aggroTargetId === 'player'`, the rival reads `GameEntity.huntingPlayer`
+  (a mirror of the `RivalInstance.disposition` logic stamped by
+  `updateRivals`, since disposition lives on the instance, not the hull).
+  Budgets are per type (`MAX_VISIBLE` / `MAX_VISIBLE_ENEMY` /
+  `MAX_VISIBLE_BUBBLE`, portals with their own) and the buffer is sorted
+  NEAREST-FIRST so a budget keeps the closest contacts.  Bubbles ARE
+  indicated now (they used to be excluded as clutter) — the small separate
+  budget is what keeps a bloom of fauna from starving the enemy arrows.
+  Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
+
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through

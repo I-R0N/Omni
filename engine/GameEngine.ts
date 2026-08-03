@@ -6633,6 +6633,10 @@ export class GameEngine {
           if (doScan) {
               const huntsPlayer = inst.disposition === 'hostile'
                   || (inst.disposition === 'neutral' && s.provoked === true);
+              // Publish it on the ENTITY so the renderer's off-screen indicator
+              // can blink a hunting rival red without reaching into the
+              // RivalInstance (disposition lives on the instance, not the hull).
+              s.huntingPlayer = huntsPlayer;
               target = null;
               let acqD2 = R.VISION * R.VISION;
               for (let i = 0; i < enemies.length; i++) {

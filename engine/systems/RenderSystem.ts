@@ -1434,12 +1434,14 @@ export class RenderSystem {
             this._attractors.push(entity);
         }
 
-        // Off-screen indicator chevrons — for enemies and non-drop POIs.  Gnats
-        // (diesOnContact, Swarm) and bubbles (ambient fauna) are EXCLUDED: a
-        // cloud of them would crowd the screen with chevrons, and they aren't
-        // wave threats the player needs steering toward; the minimap still
-        // shows them for finding stragglers.
-        if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true && entity.enemyShape !== 'bubble')
+        // Off-screen indicator arrows — for enemies and non-drop POIs.  Gnats
+        // (diesOnContact, Swarm) are EXCLUDED: a cloud of them would crowd the
+        // screen with arrows and they aren't threats the player needs steering
+        // toward; the minimap still shows them for finding stragglers.
+        // Bubbles ARE included (purple, blinking red once they hunt you) under
+        // their own small MAX_VISIBLE_BUBBLE budget, so ambient fauna can never
+        // starve the enemy arrows.
+        if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
                 || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
             // Enemies are range-UNLIMITED here (live count is capped by the
             // wave concurrency cap): the maps are big and the chevrons are
@@ -1516,8 +1518,11 @@ export class RenderSystem {
     this.lastTileLightingCount = 0;
     this.lastLodShardCount = 0;
 
-    // Sort indicators once for the frame
-    this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
+    // Sort indicators once for the frame — NEAREST FIRST, so the per-type
+    // budgets in renderIndicators keep the closest contacts (they used to be
+    // sorted farthest-first, which spent the budget on distant stragglers and
+    // culled the ones actually bearing down on the player).
+    this._indicatorBuffer.sort((a, b) => a.distSq - b.distSq);
 
     // Drop any tiles from the static cache that died since the previous
     // frame so we don't paint a ghost copy from the pre-baked canvas.
@@ -5237,19 +5242,30 @@ export class RenderSystem {
       if (!Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.y)) return;
 
       const {
-          RADIUS, TEXT_THRESHOLD_ENEMY, TEXT_THRESHOLD_POI, MAX_VISIBLE,
-          MAX_VISIBLE_ENEMY, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
+          EDGE_INSET, TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
+          MAX_VISIBLE_BUBBLE, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
+          SIZE_NEAR, SIZE_FAR, NEAR_DIST, FAR_DIST, BOSS_SCALE, AGGRO_BLINK_HZ,
+          COLORS,
       } = UI_CONSTANTS.INDICATORS;
 
       if (targets.length === 0) return;
 
       const cx = width / 2;
       const cy = height / 2;
+      // Half-extents of the inset viewport rect the arrows ride.  Clamped so a
+      // very small window can't invert the rect.
+      const hx = Math.max(8, cx - EDGE_INSET);
+      const hy = Math.max(8, cy - EDGE_INSET);
+      // One blink phase for the whole frame — every hunting contact pulses in
+      // sync, which reads as a single alarm rather than N flickers.
+      const blink = 0.55 + 0.45 * Math.sin(performance.now() * 0.001 * AGGRO_BLINK_HZ * Math.PI * 2);
 
-      // Limit drawing counts per type to avoid clutter, but keep sorted draw order
+      // Per-type budgets.  The buffer is sorted NEAREST-FIRST, so these keep
+      // the closest contacts of each type and drop the far ones.
       let enemiesDrawn = 0;
       let poisDrawn = 0;
       let portalsDrawn = 0;
+      let bubblesDrawn = 0;
 
       for (let i = 0; i < targets.length; i++) {
           const item = targets[i];
@@ -5257,27 +5273,45 @@ export class RenderSystem {
           const isPortal = t.isPortal === true;
 
           // Offscreen-only mode: the player can already see an on-screen
-          // entity, so its chevron is redundant clutter — skip it.
+          // entity, so its arrow is redundant clutter — skip it.
           // PORTALS ARE EXEMPT: their arrow is already range-gated to
           // PORTAL_CONSTANTS.INDICATOR_RANGE, and inside that range it is a
           // deliberate, labelled navigation cue that should stay on screen
           // while the player lines up the approach.
           if (this.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
 
-          const isBoss = t.isBoss === true;
+          const isBoss   = t.isBoss === true;
+          const isBubble = t.enemyShape === 'bubble';
+          const isRival  = t.isRival === true;
+
+          // ── Type → colour + hostility blink (user-specified legend) ──
+          // A rival/bubble is only conditionally hostile, so its type colour
+          // says WHAT it is and the red blink says it is coming for you.
+          let color: string;
+          let hunting = false;
           if (t.type === EntityType.ENEMY) {
-              // A (h) boss capstone never competes for the enemy chevron
-              // budget: losing the boss arrow behind a crowd of stragglers is
-              // exactly the case the arrow exists for.
-              if (!isBoss) {
+              if (isBubble)      { color = COLORS.BUBBLE; hunting = t.provoked === true && t.aggroTargetId === 'player'; }
+              else if (isRival)  { color = COLORS.RIVAL;  hunting = t.huntingPlayer === true; }
+              else               { color = COLORS.ENEMY; }
+          } else if (isPortal)      color = COLORS.PORTAL;
+          else if (t.isStation)     color = COLORS.STATION;
+          else                      color = COLORS.OTHER;
+
+          if (t.type === EntityType.ENEMY) {
+              // A (h) boss capstone never competes for the enemy budget:
+              // losing the boss arrow behind a crowd of stragglers is exactly
+              // the case the arrow exists for.
+              if (isBubble) {
+                  if (bubblesDrawn >= MAX_VISIBLE_BUBBLE) continue;
+                  bubblesDrawn++;
+              } else if (!isBoss) {
                   if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
                   enemiesDrawn++;
               }
           } else if (isPortal) {
               // Portals get their OWN budget rather than competing with the
-              // stations for MAX_VISIBLE.  The buffer is sorted farthest-
-              // first, so on the hub (4 stations) a nearby portal would
-              // otherwise be the one starved out of the shared cap.
+              // stations for MAX_VISIBLE — otherwise on the hub (4 stations) a
+              // portal could be starved out of a shared cap.
               if (portalsDrawn >= MAX_VISIBLE) continue;
               portalsDrawn++;
           } else {
@@ -5288,90 +5322,100 @@ export class RenderSystem {
           const dx = wrapDeltaX(playerPos.x, t.position.x);
           const dy = wrapDeltaY(playerPos.y, t.position.y);
           const angle = Math.atan2(dy, dx);
-
-          // One sqrt per indicator instead of two — the distance-text
-          // branch below would otherwise recompute it.
           const dist = Math.sqrt(item.distSq);
 
-          // Skip if the enemy is already closer than the indicator ring
-          const screenDist = dist * camera.zoom;
-          if (t.type === EntityType.ENEMY && screenDist < RADIUS) continue;
+          // Ride the SCREEN EDGE: intersect the bearing ray with the inset
+          // viewport rect (whichever axis it leaves first wins).
+          const ca = Math.cos(angle), sa = Math.sin(angle);
+          const tEdge = Math.min(
+              ca !== 0 ? hx / Math.abs(ca) : Infinity,
+              sa !== 0 ? hy / Math.abs(sa) : Infinity,
+          );
+          const ix = cx + ca * tEdge;
+          const iy = cy + sa * tEdge;
 
-          const ix = cx + Math.cos(angle) * RADIUS;
-          const iy = cy + Math.sin(angle) * RADIUS;
+          // SIZE carries distance: near contacts grow, far ones shrink to a
+          // small tick.  This is what replaces the per-enemy distance number.
+          const f = Math.max(0, Math.min(1, (dist - NEAR_DIST) / (FAR_DIST - NEAR_DIST)));
+          let size = SIZE_NEAR + (SIZE_FAR - SIZE_NEAR) * f;
+          if (isBoss) size *= BOSS_SCALE;
 
           ctx.save();
-          // Far enemies fade toward an alpha floor — still findable, but
-          // a distant straggler doesn't shout like a closing threat.
-          // A boss never fades with distance — it is the thing you are
-          // supposed to be flying toward.
+          // Far enemies fade toward an alpha floor — still findable, but a
+          // distant straggler doesn't shout like a closing threat.  A boss
+          // never fades: it is the thing you are supposed to be flying toward.
           if (t.type === EntityType.ENEMY && !isBoss && dist > ENEMY_FADE_START) {
-              const f = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
-              ctx.globalAlpha = 1 - f * (1 - ENEMY_MIN_ALPHA);
+              const ff = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
+              ctx.globalAlpha = 1 - ff * (1 - ENEMY_MIN_ALPHA);
           }
           ctx.translate(ix, iy);
           ctx.rotate(angle);
 
-          ctx.fillStyle = t.color;
+          // A hunting rival/bubble cross-fades toward the alarm red rather
+          // than blinking on/off, so it never disappears mid-pulse.
+          ctx.fillStyle = hunting && blink > 0.5 ? COLORS.AGGRO : color;
+          if (hunting) ctx.globalAlpha *= 0.65 + 0.35 * blink;
+
+          // One glyph for everything: a solid triangular arrowhead with a
+          // notched tail.  POIs used to get a different (bigger) pointer —
+          // shape now means "contact", colour means "what kind", so the two
+          // families no longer have to be told apart by silhouette.
+          const w = size * 0.72;
           ctx.beginPath();
-
-          if (t.type === EntityType.ENEMY) {
-              // Caret (^) chevron pointing toward the enemy — scaled up for a
-              // boss so the capstone arrow reads apart from the stragglers'.
-              const k = isBoss ? 1.6 : 1;
-              const w = 7 * k, h = 9 * k;
-              ctx.moveTo( h,  0);      // tip
-              ctx.lineTo(-h,  w);      // bottom-left
-              ctx.lineTo(-h + 4 * k,  0);  // inner notch
-              ctx.lineTo(-h, -w);      // top-left
-          } else {
-              // Standard pointer for POIs
-              ctx.moveTo(12, 0);
-              ctx.lineTo(-8,  8);
-              ctx.lineTo(-2,  0);
-              ctx.lineTo(-8, -8);
-          }
-
+          ctx.moveTo( size, 0);              // tip (points at the contact)
+          ctx.lineTo(-size * 0.65,  w);
+          ctx.lineTo(-size * 0.30,  0);      // inner notch
+          ctx.lineTo(-size * 0.65, -w);
           ctx.closePath();
           ctx.fill();
-          
-          ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+          // Thin dark keyline instead of the old white one: it separates the
+          // arrow from bright terrain without washing out the type colour.
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)';
           ctx.lineWidth = 1;
           ctx.stroke();
 
-          // Label under the arrow.  A portal always names its DESTINATION —
-          // the chevron is how the player picks which rift to fly to, so an
-          // unlabelled arrow would be ambiguous the moment two are in range.
-          // Distance text keeps its existing far-only rule and stacks below.
-          const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
-          const showDist = item.distSq > threshold;
-          // A boss labels itself for the same reason a portal does: an
-          // unlabelled arrow is ambiguous the moment anything else is on the
-          // ring, and the boss is the one you must not lose track of.
+          // Labels.  A portal always names its DESTINATION (the arrow is how
+          // the player picks which rift to fly to) and a boss names itself —
+          // both would be ambiguous unlabelled.  Ordinary enemies get NO
+          // distance text any more: their size already carries it, and a dozen
+          // little "1234m" strings was most of the old clutter.  POIs keep the
+          // far-only distance readout.
           const portalName = isPortal ? (t.name ?? '')
               : isBoss ? (t.enemySubtype ? (BOSS_DEFS[t.enemySubtype]?.name ?? 'BOSS') : 'BOSS') : '';
+          const showDist = t.type !== EntityType.ENEMY && item.distSq > TEXT_THRESHOLD_POI;
 
           if (showDist || portalName) {
                ctx.rotate(-angle);
                ctx.textAlign = 'center';
-               let ty = isBoss ? 30 : 24;
+               ctx.textBaseline = 'middle';
+               // Anchor the label block INWARD from the arrow (toward screen
+               // centre) — at the screen edge a fixed downward offset would run
+               // the text off the viewport.  Extra LINES then stack vertically
+               // (text stacks vertically, not radially: a near-horizontal
+               // bearing would otherwise shove line 2 sideways ON TOP of line 1),
+               // away from whichever horizontal edge the arrow is nearest.
+               const lx = -ca * (size + 12);
+               let ly = -sa * (size + 12);
+               const lineStep = iy > cy ? -11 : 11;
                if (portalName) {
-                   // Chevrons at similar bearings crowd the same arc of the
-                   // indicator ring, so the destination name is outlined to
-                   // stay readable when it lands on a neighbour's label.
+                   // Arrows at similar bearings crowd the same stretch of edge,
+                   // so labels are outlined to stay readable when they overlap.
                    const label = portalName.toUpperCase();
-                   ctx.font = 'bold 10px monospace';
+                   ctx.font = 'bold 9px monospace';
                    ctx.lineWidth = 3;
                    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-                   ctx.strokeText(label, 0, ty);
-                   ctx.fillStyle = t.color;
-                   ctx.fillText(label, 0, ty);
-                   ty += 12;
+                   ctx.strokeText(label, lx, ly);
+                   ctx.fillStyle = color;
+                   ctx.fillText(label, lx, ly);
+                   ly += lineStep;
                }
                if (showDist) {
-                   ctx.fillStyle = 'rgba(255,255,255,0.7)';
-                   ctx.font = '10px monospace';
-                   ctx.fillText(`${Math.round(dist)}m`, 0, ty);
+                   ctx.font = '9px monospace';
+                   ctx.lineWidth = 3;
+                   ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                   ctx.strokeText(`${Math.round(dist)}m`, lx, ly);
+                   ctx.fillStyle = 'rgba(255,255,255,0.75)';
+                   ctx.fillText(`${Math.round(dist)}m`, lx, ly);
                }
           }
 

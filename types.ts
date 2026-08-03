@@ -629,6 +629,12 @@ export interface GameEntity {
   // AISystem skips it.  Renders from `sprite` (an old enemy PNG) with a
   // disposition-coloured ring.
   isRival?: boolean;
+  // True while this roamer is actively hunting the PLAYER (as opposed to the
+  // wave enemies it normally fights).  Stamped by GameEngine.updateRivals on
+  // the rivalScan cadence — the rival's DISPOSITION lives on RivalInstance,
+  // not the hull, so the renderer needs this mirror to blink the off-screen
+  // indicator red.  Unset on every other entity.
+  huntingPlayer?: boolean;
   // Projectile flags for rival fire: `hitsEnemies` lets an ENEMY-owned shot
   // damage other ENEMY targets (so a rival can shoot the wave enemies), and
   // `sparesPlayer` makes an ENEMY-owned shot pass THROUGH the player (so an
