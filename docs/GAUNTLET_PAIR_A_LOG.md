@@ -39,9 +39,10 @@ _(Consolidated at A3.  Items appear here as they are found.)_
 - [x] **A1** — Death/run-summary screen (overlay + per-run counters +
       RESPAWN / RESTART RUN / MAIN MENU actions) — commit `9fc6c6b`,
       build green, smoke **61/61**
-- [ ] **A2** — Stat legibility: per-module attribution on
+- [x] **A2** — Stat legibility: per-module attribution on
       `EngineStats.outfitting`, full derived-stat set in the pause Ship
-      Status, hex→stat highlighting
+      Status, hex→stat highlighting — commit `33a9cdf`, build green,
+      smoke **88/88** (A1 still 61/61)
 - [ ] **A3** — Validation + presentation pass (phone-scale DOM
       measurement, full-loop smoke, CLAUDE.md final sync)
 
@@ -123,6 +124,55 @@ floor assertion needed to compare against the live value; and
 arena, because the new run is on wave 1).  Both assertions were
 corrected to state what they actually mean.
 
+### Iteration 2 — A2: stat legibility / per-module attribution
+
+Implemented, built, smoked (88 new assertions + the 61 A1 assertions
+re-run, 0 failures), committed (`33a9cdf`), pushed.
+
+**Shape.** `GameEngine.statBreakdown()` walks `shipSlots` / `weaponSlots`
+against `activeShip` / `activeWeapon` — the identical walk
+`applyModuleEffects`'s `fold` performs — and files each module's
+`ModuleEffect` under the derived stat it feeds.  Published as
+`EngineStats.outfitting.statLines`, built only with the rest of the
+outfitting snapshot (paused OR docked).  Eight lines: hull, shield,
+shield regen, damage, fire cooldown, top speed, acceleration, charged
+shots.
+
+**The invariant the smoke enforces.** Every headline `display` is read
+off the player entity / the module multipliers, never recomputed.  The
+smoke parses the rendered contributor strings back into numbers, refolds
+them the way `applyModuleEffects` would, and asserts the result equals
+what the SIM is using — across three outfits (lean start, full
+`debugOutfitAll`, deliberately stranded modules).  That is what "matches
+`applyModuleEffects` to the digit" means here, and it is checked
+mechanically rather than by inspection.
+
+**Two states the panel now makes explicit** instead of silently
+dropping: an adjacency-OFFLINE module (struck-through amount + the
+family it must touch), and shield PLATING with no shield core — whose
+hex is legitimately ONLINE but whose contribution is gated to 0 by
+`applyModuleEffects`.  Both were previously invisible: the player saw a
+number that did not move and nothing explaining why.
+
+**Shared, not forked.** `renderShipStatus()` joins the existing shared
+hex renderers at UIOverlay component scope and is called verbatim from
+the pause menu and the docked station.  The pause panel keeps a small
+`Condition` block for the two pools that move in flight (hull / shield
+current-vs-max), because those are live readouts rather than derived
+stats and belong next to each other.
+
+**Test-affordance added.** Read-only flowers carried no stable selector
+(`data-tile` exists only on interactive flowers, being the drag
+drop-target hook).  Added `data-hex="<group>:<idx>"` unconditionally —
+one attribute, no behaviour change, and the drag path is untouched.
+
+Two smoke failures on the first run were test bugs, not product bugs:
+every ring hex touches the CENTRE hex, so a centre-mounted gun makes the
+whole weapon flower online (the "stranded autoloader" fixture had to put
+the gun on a ring hex); and refolding two 2-decimal displays can land
+one ulp off the sim's own rounding, so the acceleration tolerance is
+0.015 rather than 0.01.
+
 ---
 
 ## Decisions taken
@@ -188,6 +238,54 @@ _(Each entry: what was chosen, the alternatives, and why.)_
   did I do"; the high-water mark answers "how far did I get".  Both rows
   are hidden entirely when the run died on the wave-free hub, rather
   than reported as zero.
+
+- **D9 — the breakdown is BUILT BY THE ENGINE, including its display
+  strings.** Alternatives: (a) publish raw numbers and format in React,
+  (b) publish the raw slot arrays and let React fold them.  (b) is what
+  the parking-lot entry explicitly warns against (recomputing derived
+  stats in the UI, which can then disagree with the sim).  (a) is
+  defensible but each stat has its own unit (flat HP vs fraction vs
+  multiplier vs boolean capability), so the format table would have had
+  to be duplicated per stat in React anyway.  Formatting in the engine
+  keeps ONE source of truth and matches how `enemyScaleInfo` and the
+  module `desc` strings already work.
+
+- **D10 — a contributor's `active` means "counted in the total", not
+  "the hex is online".** These differ in exactly one case today: shield
+  plating on a hull-adjacent hex with no shield core.  The hex is
+  online; the contribution is zero.  Alternative: add a second boolean.
+  Rejected as a field for one case — the UI question is always "is this
+  amount in the number above", and `requires` already carries the
+  because-clause ('shield core' rather than a module family).  The
+  divergence is documented on the type.
+
+- **D11 — weapon-weight drag is ONE derived row, not per-gun shares.**
+  The formula is `BASE_BOOST / (1 + DRAG × Σweight)` — multiplicative
+  over the whole mounted set, so any per-gun split would be an invented
+  attribution.  Alternatives: (a) split the drag evenly, (b) marginal
+  attribution (each gun's effect given the others), (c) omit guns from
+  the stat entirely.  (a) and (b) both print numbers that do not
+  reconstruct the total; (c) breaks the "tap a hex, see what it feeds"
+  requirement for guns.  Chose: guns appear as WEIGHT rows (so they
+  highlight Acceleration and their weight is visible), plus one
+  slot-less row carrying the factor those weights add up to.  The
+  slot-less shape is generic — any future non-module term lands the same
+  way.
+
+- **D12 — "Charged shots" is included as a stat line.** The brief lists
+  seven stats and does not mention overcharge.  Included anyway because
+  it is a derived player capability produced by `applyModuleEffects`
+  from an installed module, and the panel's whole job is "what is my
+  outfit doing for me" — leaving the one capability module unexplained
+  would be the odd gap.  It is one row and costs nothing.  Flagging it
+  as a scope judgment call rather than deciding silently.
+
+- **D13 — "Fire cooldown", not "Fire rate".** The old panel showed fire
+  rate as `×(1/cooldownMult)`, which is a SECOND derived number the
+  engine does not hold.  The brief says fire cooldown; showing the
+  engine's actual `cooldownMult` keeps the render-don't-recompute rule
+  intact, and the row carries a "lower is faster" note so the direction
+  reads.  Provisional if the wording tests badly with the user.
 
 - **D8 — no new numbers were invented.** Nothing in A1 is a balance
   knob; the only magnitudes are layout (max-w-sm, py-3 tap targets) and
