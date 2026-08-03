@@ -2770,6 +2770,39 @@ export const TIMED_WAVE_CONFIG = {
   TIER_SET_LENGTH: 3,
 };
 
+// ── Audio ─────────────────────────────────────────────────────────────────────
+// Mixer + voice-budget tuning for AudioSystem.  WHAT plays and with what
+// per-sound parameters lives in docs/SFX_INVENTORY.md (and, in code, in the
+// SfxRegistry defs); this block is only the global machinery.
+//
+// The three voice ceilings are the anti-mass-death budget: a single sim step
+// in this engine can kill 40 enemies (snitch board-clear) or shatter a merged
+// rock parent into 200 fragments.  Tier 3 stops being admitted first, then
+// tier 2; tier 1 (the sounds the player acts on) always plays.  Together with
+// the per-id retrigger COLLAPSE (which bumps the live voice's gain instead of
+// stacking a new one), a bulk event reads as one HEAVIER sound rather than as
+// hundreds of thin ones — the same "cosmetic output, safe to drop" reasoning
+// as enforceCap for particles, applied to a budget the ear rather than the
+// frame time enforces.
+//
+// PROVISIONAL: every number here was reasoned about, not measured on the
+// user's hardware (gauntlet log, FOR-USER-REVIEW).
+export const AUDIO_CONSTANTS = {
+  DEFAULT_VOLUME: 0.7,     // master gain at boot; in-memory only (no persistence)
+  MAX_VOICES: 24,          // hard ceiling across all tiers
+  MAX_VOICES_TIER2: 20,    // tier-2 triggers stop being admitted here
+  MAX_VOICES_TIER3: 14,    // tier-3 (material chatter) stops first
+  COLLAPSE_BUMP: 1.22,     // gain multiplier per collapsed retrigger
+  COLLAPSE_BUMP_CAP: 2.2,  // saturation, so 40 collapses ≠ 40× loud
+  VOICE_RELEASE_PAD: 0.03, // slack added to a voice's tracked lifetime (s)
+  LOOP_RAMP: 0.09,         // loop fade in/out time constant (s)
+  NOISE_BUFFER_SEC: 2,     // shared white-noise buffer length
+  // Positional model.  Distances are world units, measured torus-wrapped.
+  NEAR_RADIUS: 420,        // full volume inside this
+  FAR_RADIUS: 2600,        // inaudible beyond this (linear between)
+  PAN_WIDTH: 900,          // world units mapping to full L/R pan
+} as const;
+
 // ── Snitch ───────────────────────────────────────────────────────────────────
 // A golden-comet snitch rides the asteroid flow field with a burst/coast AI
 // and PERSISTS across waves — one keeps flying until the player catches it.

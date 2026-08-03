@@ -101,6 +101,10 @@ export class WeaponSystem {
     target: Vector2,
     onShake?: (amount: number) => void,
     charged: boolean = false,
+    /** Fired once per shot actually spawned, for SFX.  Symmetrical with
+     *  `onShake` — WeaponSystem stays free of audio state; the caller
+     *  maps the weapon type onto an SFX_INVENTORY id. */
+    onFire?: (weapon: WeaponType, isCharged: boolean, subShotIndex: number) => void,
   ): boolean {
     // Weaponless flight (no gun mounted) is a legal outfit — nothing to
     // fire.  The weight system pays this back as an acceleration boost.
@@ -147,6 +151,7 @@ export class WeaponSystem {
     }
 
     this.projectiles.spawn(entities, player, target, config, EntityType.PLAYER);
+    onFire?.(config.type, isCharged, 0);
     return true;
   }
 
@@ -159,7 +164,8 @@ export class WeaponSystem {
     entities: GameEntity[],
     player: GameEntity,
     dt: number,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onFire?: (weapon: WeaponType, isCharged: boolean, subShotIndex: number) => void,
   ) {
     if (player.weaponCooldown && player.weaponCooldown > 0) {
       player.weaponCooldown -= dt;
@@ -181,6 +187,10 @@ export class WeaponSystem {
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;
     this.projectiles.spawn(entities, player, { x: targetX, y: targetY }, config, EntityType.PLAYER);
+    // Sub-shot index counts UP as the queue drains, so the caller can step
+    // the pitch and make a burst read as a rising triplet.
+    onFire?.(config.type, player.burstCharged === true,
+             (config.burstCount ?? 1) - player.burstQueue);
     if (onShake && config.type === WeaponType.BURST) onShake(3);
 
     // Clear the charged flag once the burst fully drains so the next

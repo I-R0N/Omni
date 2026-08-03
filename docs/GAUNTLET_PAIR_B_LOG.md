@@ -46,7 +46,7 @@ and re-runs its smokes.
 
 - [x] **B1** — `docs/SFX_INVENTORY.md`: every player-audible action with
       per-effect generation parameters.
-- [ ] **B2** — `engine/systems/AudioSystem.ts`: gesture-unlocked WebAudio
+- [x] **B2** — `engine/systems/AudioSystem.ts`: gesture-unlocked WebAudio
       manager, procedural registry, polyphony caps, positional pan.
 - [ ] **B3** — Wire the inventory tier by tier + the one pause-menu audio
       row.

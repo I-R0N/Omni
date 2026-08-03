@@ -16,6 +16,8 @@ import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
+import { AudioSystem } from './systems/AudioSystem';
+import { registerSfx } from './systems/SfxRegistry';
 import { nextId } from './systems/IdAllocator';
 import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
@@ -98,6 +100,12 @@ export class GameEngine {
   // hands every skippable pass an effective frame-skip interval.  See
   // engine/systems/PerfController.ts.
   private perfController: PerfController;
+  // SFX manager.  PUBLIC because UIOverlay's audio row (master volume +
+  // mute) and the headless smokes both drive it directly — it holds no
+  // simulation state, so there is nothing to protect.  See
+  // docs/SFX_INVENTORY.md for the id contract and
+  // engine/systems/AudioSystem.ts for the voice budget.
+  public audio: AudioSystem;
   // In-game FPS / perf capture harness (DBG tool).  Zero cost while idle;
   // records the per-frame timing + PerfSnapshot stream over a window and
   // exports a copy-paste text block (see engine/systems/PerfRecorder.ts).
@@ -1291,6 +1299,14 @@ export class GameEngine {
     this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
     
     this.input = new InputSystem();
+    // Audio: the AudioContext is NOT created here.  Mobile browsers
+    // refuse to start audio outside a user gesture, so the manager only
+    // arms one-shot window listeners and builds its graph on the first
+    // real tap/click/keypress (including a menu tap, which on phones is
+    // usually the first gesture there is).
+    this.audio = new AudioSystem();
+    registerSfx(this.audio);
+    this.audio.armGestureUnlock();
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
     // Wire physics into the renderer so the material-tile branch can
@@ -2063,6 +2079,12 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
     });
+
+    // Audio follows the camera, and goes quiet whenever the sim does.  Two
+    // number writes and a boolean per frame — the manager is otherwise
+    // purely event-driven, so this is the entire per-frame audio cost.
+    this.audio.setListener(this.camera.position.x, this.camera.position.y);
+    this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation);
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
@@ -3272,15 +3294,24 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
+    const prevCharge = this.player.chargeProgress ?? 0;
     this.player.chargeProgress = (this.player.overchargeUnlocked && this.player.currentWeapon !== undefined && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
+    // Charge audio (SFX_INVENTORY §4.1): the whine TRACKS progress, so the
+    // player can charge without watching their own ship, and a bell ping
+    // marks the moment the shot arms.  `loop` is idempotent both ways, so
+    // firing it every step with a live predicate is the intended usage.
+    this.audio.loop('weapon.charge.loop', this.player.chargeProgress > 0,
+                    { param: this.player.chargeProgress });
+    if (this.player.chargeProgress >= 1 && prevCharge < 1) this.audio.play('weapon.charge.ready');
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
     // EMP-disabled (Stage 3c) so an in-flight burst halts too.
     const tWeapons = performance.now();
     if (this.currentMap && !this.player.systemsDisabled) {
-        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
+        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt,
+                                     this.handleScreenShake, this.playWeaponSfx);
     }
     this.lastWeaponsMs = performance.now() - tWeapons;
 
@@ -4805,7 +4836,7 @@ export class GameEngine {
   private handleShooting(target: Vector2, charged: boolean = false) {
       if (!this.currentMap) return;
       // Weapon offline while EMP-disabled (Stage 3c).
-      if (this.player.systemsDisabled) return;
+      if (this.player.systemsDisabled) { this.audio.play('weapon.reject'); return; }
 
       // Convert screen-space target to world coords once; the rest of the
       // firing flow lives in WeaponSystem.
@@ -4820,7 +4851,14 @@ export class GameEngine {
           { x: worldX, y: worldY },
           this.handleScreenShake,
           charged,
+          this.playWeaponSfx,
       );
+      // A trigger pull that produced nothing still makes a sound — the
+      // dead click is the feedback that the weapon is on cooldown, EMP'd,
+      // or missing.  Its own hard throttle keeps mashing bearable.
+      if (!fired && (this.player.weaponCooldown ?? 0) <= 0) {
+          this.audio.play('weapon.reject');
+      }
 
       // Keep the HUD weapon index aligned with the player's current weapon in
       // case WeaponSystem auto-fell back to blaster on an empty mag.
@@ -4828,6 +4866,36 @@ export class GameEngine {
           this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
       }
   }
+
+  /** WeaponType → SFX_INVENTORY §4.1 id.  A plain table rather than a
+   *  switch so adding a weapon is a row, matching how ENEMY_BEHAVIOR and
+   *  SHARD_VARIANTS dispatch. */
+  private static readonly WEAPON_SFX: Record<WeaponType, string> = {
+      [WeaponType.BLASTER]:   'weapon.blaster.fire',
+      [WeaponType.BURST]:     'weapon.burst.fire',
+      [WeaponType.SHOTGUN]:   'weapon.shotgun.fire',
+      [WeaponType.BOUNCER]:   'weapon.bouncer.fire',
+      [WeaponType.LIGHTNING]: 'weapon.lightning.fire',
+      [WeaponType.HOMING]:    'weapon.homing.fire',
+      [WeaponType.CANNON]:    'weapon.cannon.fire',
+  };
+
+  /** Fired by WeaponSystem once per spawned player shot.  A charged shot
+   *  LAYERS `weapon.charged.release` over the family voice so every weapon
+   *  reads as the same supercharged gesture (SFX_INVENTORY §4.1). */
+  private playWeaponSfx = (weapon: WeaponType, isCharged: boolean, subShot: number) => {
+      const pos = this.player.position;
+      if (subShot > 0) {
+          // Rising triplet: a semitone (×2^(1/12)) per sub-shot.
+          this.audio.play('weapon.burst.sub', {
+              x: pos.x, y: pos.y, pitch: Math.pow(2, subShot / 12),
+          });
+          return;
+      }
+      const id = GameEngine.WEAPON_SFX[weapon];
+      if (id) this.audio.play(id, { x: pos.x, y: pos.y });
+      if (isCharged) this.audio.play('weapon.charged.release', { x: pos.x, y: pos.y });
+  };
 
   // Thin wrappers that delegate to ProjectileSystem / TrailSystem.  Kept so
   // existing GameEngine call sites stay unchanged during the Phase 2 split.
