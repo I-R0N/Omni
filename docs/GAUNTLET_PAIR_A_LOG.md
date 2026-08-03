@@ -20,7 +20,7 @@ one-step-per-gauntlet process ruled in decision #41c.
 
 ## FOR-USER-REVIEW
 
-_(Consolidated at A3.  Items appear here as they are found.)_
+Four items, none of them decided silently.
 
 - **The penalty-free respawn does make the screen read soft.** Flagged as
   the brief instructed, NOT fixed.  The summary is honest about it — the
@@ -31,6 +31,27 @@ _(Consolidated at A3.  Items appear here as they are found.)_
   clears) is already on `EngineStats.runSummary`, so whatever the economy
   tuning pass (step 6, decisions #40a/#42d) rules can be shown without
   new plumbing.  **User call, not this gauntlet's.**
+
+- **"Charged shots" was added as an eighth stat line (D12).** The brief
+  names seven stats and does not mention Overcharge.  It is included
+  because it is a derived capability `applyModuleEffects` produces from
+  an installed module, and leaving the one capability module out of a
+  panel whose job is "what is my outfit doing for me" would be the odd
+  gap.  One row, no cost.  **Say the word and it comes out.**
+
+- **"Fire cooldown" replaced the old "Fire rate" row (D13).** Fire rate
+  was `×(1/cooldownMult)` — a second derived number the engine does not
+  hold, which would have had to be recomputed in React (the exact thing
+  the parking-lot sketch warns against).  The row now shows the engine's
+  own `cooldownMult` with a "lower is faster" note.  **Wording is
+  provisional** if it reads worse in play.
+
+- **The pause menu's old "Ship Status" block was split in two.** It now
+  reads `Condition` (hull / shield current-vs-max — the two pools that
+  MOVE in flight) followed by the shared `Ship Status` widget (the eight
+  derived stats with attribution).  The alternative was one panel mixing
+  live pools with static derived values.  **Reversible in one edit** if
+  the split reads as clutter on a phone.
 
 ---
 
@@ -43,8 +64,12 @@ _(Consolidated at A3.  Items appear here as they are found.)_
       `EngineStats.outfitting`, full derived-stat set in the pause Ship
       Status, hex→stat highlighting — commit `33a9cdf`, build green,
       smoke **88/88** (A1 still 61/61)
-- [ ] **A3** — Validation + presentation pass (phone-scale DOM
-      measurement, full-loop smoke, CLAUDE.md final sync)
+- [x] **A3** — Validation + presentation pass (phone-scale DOM
+      measurement, full-loop smoke, CLAUDE.md final sync) — commit
+      `d97b44b`, build green, full-loop smoke **89/89**; all three suites
+      green together (**238 assertions**)
+
+**QUEUE COMPLETE.**
 
 ---
 
@@ -172,6 +197,91 @@ whole weapon flower online (the "stranded autoloader" fixture had to put
 the gun on a ring hex); and refolding two 2-decimal displays can land
 one ulp off the sim's own rounding, so the acceleration tolerance is
 0.015 rather than 0.01.
+
+### Iteration 3 — A3: validation + presentation pass
+
+**Full-loop smoke (89 assertions).** One continuous run, driving the real
+engine through the real paths: start on the hub → collect twelve REAL
+salvage drops → dock at the Shipwright → buy a module → install it →
+undock → portal to Deep Space → kill live wave enemies through the real
+death path → die → assert EVERY `runSummary` field equals its engine
+counter → respawn → pause → re-dock.  The stat attribution is refolded
+against the simulation at four separate points along that path (after
+outfitting, in the pause menu after a death+respawn, and docked again at
+the end).
+
+Two economy invariants the loop pins down, both of which would be easy to
+regress later:
+- Gross earned tracks the balance EXACTLY while nothing is spent, and
+  stops tracking it the moment something is bought — the summary shows
+  both numbers, and they are supposed to diverge.
+- Credits, gross earned, outfit and the run clock all carry across a
+  portal; none of them survive a RESTART RUN.
+
+**Phone-scale measurement (390×844).** All three overlays — death
+summary, pause menu, docked station — measured for `scrollWidth ≤ 390`
+AND for any descendant wider than the viewport.  The pause menu was
+re-measured with a stat row expanded (the tallest/widest state the new
+widget can reach).  All clean.  Tap targets on the death screen's three
+actions are ≥40px tall (this is what caught the 36px secondary buttons
+in A1).
+
+**One smoke bug fixed, no product bugs found.** The loop initially read
+station services off the station ENTITY; they live in `STATION_VARIANTS`
+and reach the UI via `EngineStats.dock.services`.  Corrected to read them
+the way the UI does.
+
+**Final suite, run together:** A1 **61/61**, A2 **88/88**, A3 **89/89** —
+**238 assertions, 0 failures**, no page errors on any run.  `npm run
+build` green throughout (the project's only gate; §7 — no test runner was
+added).
+
+**CLAUDE.md** synced in each milestone's own commit: §2 (UIOverlay now
+lists the death screen), §3 (death semantics unchanged + the
+`deathPending` freeze + the run-scoped counters), §5 (the `statLines`
+attribution contract, the shared `renderShipStatus`, `data-hex`), §8
+(`earnCredits` and why resale stays out of it).
+
+---
+
+## Completion summary
+
+Phase 3 **Pair A** is complete: both roadmap rows — (i) death/completion
+screen and stat-legibility (decision #40b) — are implemented, validated
+and pushed, in three commits (one per milestone) plus ledger commits.
+
+**A1 — death/run-summary screen.** Player death raises a full-screen
+summary instead of silently auto-respawning: score + best combo, waves
+cleared and highest wave, enemies destroyed (bosses noted), salvage
+earned vs balance, run time, current map.  RESPAWN / RESTART RUN / MAIN
+MENU are three EXISTING engine paths, wired not invented.  Death
+SEMANTICS are untouched, per the brief's hard constraint — the penalty
+question stays with the economy tuning pass.  Six run-scoped counters
+added, reset in `resetAndLoadSelectedMap()` and deliberately not in
+`loadMapFresh()`, so one summary spans every map a run visited.
+
+**A2 — per-module stat attribution.** `EngineStats.outfitting.statLines`
+carries the full derived-stat set built from the same slot walk
+`applyModuleEffects` folds, so the panel explains the sim's numbers
+rather than deriving its own.  Rows expand to their contributors; tapping
+a hex highlights every stat it feeds and lists that module's exact
+amounts.  OFFLINE modules and core-less shield plating report ZERO
+contribution with the missing piece named — two states that were
+previously invisible.  `renderShipStatus()` is shared verbatim by the
+pause menu and the docked station; nothing was forked.
+
+**A3 — validation.** 238 headless assertions across three suites,
+phone-scale DOM measurement of all three overlays, CLAUDE.md synced.
+
+**Scope held.** No SFX (Pair B), no controller (Pair C), no polish-batch
+items, no economy or boss changes.  `docs/GAME_FEEDBACK_PLAN.md` and
+`docs/PARKING_LOT.md` were not modified.  No numbers were invented: the
+only magnitudes introduced are layout, and they were measured.
+
+**13 decisions recorded below with their alternatives.  Four items are
+flagged FOR-USER-REVIEW at the top of this file** — the penalty-free
+respawn (flagged, not fixed, as instructed), and three presentation
+judgment calls that are each one edit to reverse.
 
 ---
 
