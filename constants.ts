@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -839,6 +839,20 @@ export const MINIMAP_CONSTANTS = {
   // from the station / POI dots it sits among.  So: a rotated-square
   // contact with a radar ping expanding out of it, clamped to the border
   // like an enemy blip when it is off-range rather than disappearing.
+  // Boss blips ((h) capstones).  A boss is THE priority contact on a wave
+  // map, so it reads as a ringed target rather than another enemy dot —
+  // same clamp-instead-of-cull rule as an enemy blip, but bigger, with a
+  // slow targeting ring so it is findable at a glance on a 75px minimap.
+  BOSS_BLIP: {
+    RADIUS: 4.5,
+    RING_RADIUS: 8,
+    RING_WIDTH: 1.2,
+    RING_ALPHA: 0.75,
+    PULSE_HZ: 1.0,        // slower than the enemy pulse — a heartbeat, not an alarm
+    PULSE_MIN_ALPHA: 0.7,
+    EDGE_INSET: 6,
+    CLAMPED_ALPHA_MULT: 0.85,
+  },
   PORTAL_BLIP: {
     RADIUS: 4.5,          // half-diagonal of the diamond contact
     CORE_RADIUS: 1.1,     // bright centre pip — kept small so the coloured
@@ -2339,6 +2353,53 @@ export const ENEMY_WEAPON: WeaponConfig = {
   pierce: 0,
 };
 
+// ── Boss weapons ((h)) ────────────────────────────────────────────────────────
+// WEAPONS_AMMO_PLAN §6 weapon parity: a weapon-boss WIELDS a themed variant of
+// the literal PLAYER archetype, built by spreading the player's own WEAPONS
+// entry and overriding the enemy-facing numbers.  Same projectile family, cone
+// and colour the player knows — so the telegraph reads "that's MY shotgun" —
+// with NO parallel weapon table.  Overrides only: WeaponSystem merges these as
+// `{...ENEMY_WEAPON, ...arch.weapon, ...entity.weaponOverride}`, so anything
+// not named here falls back to ENEMY_WEAPON.
+//
+// Damage numbers are PROVISIONAL (first-pass boss tuning; the plan's step-6
+// economy/progression pass owns the real balance).
+export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = {
+  // Reaver's scattergun — the player Shotgun's cone and pellet look, slowed to
+  // a readable boss beat and given per-pellet bite, so a full cone at brawling
+  // range really hurts while a single clipped pellet does not.
+  SCATTER: {
+    ...WEAPONS[WeaponType.SHOTGUN],
+    name: 'Reaver Scattergun',
+    cooldown: 1.5,     // vs the player's 0.65 — a boss beat you can read
+    damage: 5,         // per pellet (player: 3); 7 pellets = 35 on a full cone
+    count: 7,
+    spread: 21,
+    speed: 15,
+    lifetime: 0.95,
+    recoil: 0,         // enemies take no recoil
+    pierce: 0,
+  },
+  // Bastion's siege battery — the player Plasma Cannon, AoE and all: the same
+  // purple heavy slug that splashes on impact.  Halved damage and a much
+  // longer beat, because a boss lobbing the player's artillery on the player's
+  // cadence would be unsurvivable.  The splash is what makes hiding behind
+  // cover (or hugging the hull) stop working.
+  SIEGE: {
+    ...WEAPONS[WeaponType.CANNON],
+    name: 'Bastion Siege Battery',
+    cooldown: 3.2,          // vs the player's 1.40 — a slow, readable lob
+    damage: 9,              // direct hit (player: 18)
+    speed: 11,              // slow shells you can see coming and boost out of
+    lifetime: 3.2,
+    explosionRadius: 130,
+    explosionDamage: 6,     // splash (player: 10)
+    explosionKnockback: 5,
+    recoil: 0,
+    pierce: 0,
+  },
+};
+
 // --- ASSETS ---
 export { ASSETS };
 
@@ -3131,8 +3192,19 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // Nest spawner (Stage 4): periodically births `batch` `subtype` brood every
   // `interval` seconds, up to `maxBrood` live brood (a hard cap on the
   // self-replicating population).  Brood are spawned at the nest and DON'T gate
-  // wave completion (Stage 2b countsTowardWave=false).
-  spawner?: { subtype: EnemySubtype; interval: number; batch: number; maxBrood: number };
+  // wave completion (Stage 2b countsTowardWave=false).  A boss PHASE stamps the
+  // same shape per-entity (GameEntity.spawner) to raise / drop escorts.
+  spawner?: SpawnerConfig;
+  // Preferred stand-off distance for the 'skirmisher' movement strategy,
+  // overriding the shared AI_CONFIG.SKIRMISHER.PREFERRED_DIST.  This is what
+  // gives an archetype its own RANGE BAND (the (h) siege boss stands well back
+  // and lobs; the rank-and-file keep the shared default).  Absent → the shared
+  // constant.  No effect on non-skirmisher strategies.
+  preferredDistance?: number;
+  // Stagger resistance ((h)): a heavy hull ignores the per-hit stun below
+  // `stunDamage` and takes `knockScale`× the normal knockback impulse, so chip
+  // fire can't lock it up or shove it around.  Absent → full kick, always stun.
+  poise?: PoiseConfig;
   // Consume-and-grow (Stage 3b/5): stamped onto the entity at spawn so
   // GameEngine.updateConsumers feeds the bubble nearby shards.  Absent → not a
   // consumer.
@@ -3316,6 +3388,63 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     shoots: false, contactDamage: 16,
     consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
   },
+  // ── (h) Bosses ──
+  // Warden (BOSS_WARDEN): the CHASSIS boss — the plain capstone that proves the
+  // framework needs no new mechanics.  A huge, heavy bastion prow that holds
+  // mid-range and lobs slow, heavy siege bolts on a readable telegraph.  Its
+  // defence is layered rather than novel: a full barrier shield in phase 1
+  // (the generalized absorption path), ARMOR underneath it (the trait shipped
+  // with the Tank), and POISE so a stream of chip fire can neither stagger it
+  // nor push it off its line.  Phase 2 blows the barrier AND the plating off
+  // and calls a swarm escort — a pure damage race.  SHOOTING role: it keeps
+  // its distance and makes you come to it.
+  [EnemySubtype.BOSS_WARDEN]: {
+    color: '#38bdf8', size: 82, health: 120, // PROVISIONAL — see BOSS_CONSTANTS
+    maxSpeed: 3.2, accel: 2.0, turnRate: 1.0,
+    sprite: ASSETS.ENEMY_TANK, mass: 140, shape: 'warden',
+    shoots: true, contactDamage: 18,
+    weapon: { cooldown: 2.0, damage: 14, speed: 8, size: 12, color: '#7dd3fc', glow: true },
+    telegraph: 0.8,
+    poise: { stunDamage: 12, knockScale: 0.12 },
+  },
+  // Reaver (BOSS_SCATTER): the first WEAPON-boss.  A fast, forward-raked
+  // twin-prong brawler that wields a THEMED VARIANT OF THE PLAYER'S OWN
+  // SHOTGUN (BOSS_WEAPONS.SCATTER — same yellow pellet cone, enemy-tuned
+  // numbers), so the read is "that's MY shotgun" (WEAPONS_AMMO_PLAN §6).
+  // Its counterplay identity is the EVASIVE trait: it side-steps straight
+  // shots, so the Seeker (homing) is the designated answer while cones and
+  // chains still land.  RAMMING role — it closes to scattergun range and
+  // brawls, the opposite range band to the Warden.  Lighter poise than the
+  // Warden: it is a duellist, not a fortress, so a real hit still rocks it.
+  [EnemySubtype.BOSS_SCATTER]: {
+    color: '#fbbf24', size: 74, health: 105, // PROVISIONAL
+    maxSpeed: 6.2, accel: 5.0, turnRate: 2.4,
+    sprite: ASSETS.ENEMY_TANK, mass: 90, shape: 'talon',
+    shoots: true, contactDamage: 16,
+    weapon: BOSS_WEAPONS.SCATTER,
+    telegraph: 0.45,
+    poise: { stunDamage: 9, knockScale: 0.3 },
+  },
+  // Bastion (BOSS_SIEGE): the second WEAPON-boss and the Reaver's inverse on
+  // every axis — slow, huge and plated instead of fast and evasive, lobbing
+  // the PLAYER'S OWN Plasma Cannon (BOSS_WEAPONS.SIEGE, splash and all) in
+  // 2-shell salvos from a LONG stand-off (`preferredDistance`) instead of
+  // brawling.  Its counterplay identity is the pair of B3 traits: a permanent
+  // FRONT-SHIELD plate (face-tanking never becomes viable — flank it, ricochet
+  // into its back, or splash past the plate edge) over REGEN that only a
+  // genuine damage BURST shuts off.  SHOOTING role, and the only archetype
+  // that overrides the shared skirmisher stand-off.
+  [EnemySubtype.BOSS_SIEGE]: {
+    color: '#c084fc', size: 92, health: 150, // PROVISIONAL
+    maxSpeed: 2.4, accel: 1.6, turnRate: 0.8,
+    sprite: ASSETS.ENEMY_TANK, mass: 200, shape: 'bastion',
+    shoots: true, contactDamage: 20,
+    weapon: BOSS_WEAPONS.SIEGE,
+    burst: { size: 2, gap: 0.55 },
+    telegraph: 1.0,
+    preferredDistance: 620, // long stand-off — the third distinct range band
+    poise: { stunDamage: 14, knockScale: 0.08 },
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3495,19 +3624,110 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 };
 
 // ── Enemy counterplay traits ──────────────────────────────────────────────────
-// Soft-counter levers stamped on an enemy at spawn (WaveSystem.spawnEnemy).
+// Soft-counter levers stamped on an enemy at spawn (WaveSystem.buildEnemy).
 // SOFT by design: a chip weapon still works, just slowly, while the demanded
-// tool trivialises the threat.  v1 = armor only (Tank); evasive / front-shield /
-// regen join with their enemies + the bosses.
+// tool trivialises the threat.  The trait-counterplay map that keeps every
+// weapon a "right answer" somewhere is WEAPONS_AMMO_PLAN §7.
 //   armor.chipThreshold — per-hit damage at/above this lands in full
 //   armor.reduction     — fraction cut from hits BELOW the threshold
 // So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
 // Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
 // through.  AoE/explosion damage isn't chip-resisted (it's an answer).
-export const ENEMY_TRAITS: Partial<Record<EnemySubtype, {
+//
+// A trait SET is also what a (h) boss phase carries (BossPhaseDef.traits): a
+// phase REPLACES the set, so a boss can trade one defence for another as it
+// breaks down.  front-shield / regen join in milestone B3.
+//
+// EVASIVE ((h) bosses): the enemy senses STRAIGHT player projectiles closing on
+// it and JUKES sideways — a real dodge, not a damage-reduction fudge.  Three
+// deliberate blind spots keep the §7 counterplay table honest:
+//   - HOMING shots are ignored (they re-acquire mid-juke) — the SEEKER is the
+//     designated answer.
+//   - Lightning arcs never exist as travelling projectiles, so chains connect.
+//   - One juke per `cooldown`, so a Shotgun cone or a Cannon splash still lands.
+// Gated by `physics.traitsEnabled` (DBG "Traits") exactly like armor.
+//   sense       — radius (units) within which incoming shots are noticed
+//   missRadius  — perpendicular miss distance that still counts as "aimed at me"
+//   impulse     — lateral velocity kick applied to the juke
+//   cooldown    — seconds between jukes (the counterplay window)
+// Numbers PROVISIONAL.
+//
+// FRONT-SHIELD ((h) B3): a PERMANENT directional armour plate centred on the
+// entity's FACING — the Bulwark's arc geometry generalized, but with NO pool to
+// deplete, so face-tanking never becomes viable no matter how long you hold the
+// trigger.  Its answers fall out of WHERE damage is applied rather than from
+// special cases: lightning chains and shockwave rings damage in GameEngine,
+// OUTSIDE the projectile path, so they bypass the plate for free; a Laser
+// ricochet arrives from behind; and a slow fortress can simply be flanked.
+//   deg       — total covered arc, centred on `rotation`
+//   reduction — fraction cut from a covered hit
+//
+// REGEN ((h) B3): heals `perSec` unless a damage BURST shuts it off.  The burst
+// window is a FIXED BUCKET, not a sliding one, and that IS the mechanic: the
+// first damaging hit ARMS the bucket and it expires on schedule regardless of
+// what lands inside.  A refreshing window would instead measure "damage until
+// the player pauses" — any sustained weapon clears that, chip damage would stop
+// healing through, and the trait would invert.  With fixed buckets the
+// arithmetic lands on the §7 table by construction (per `windowSec` = 0.4s):
+//   Blaster  ≈12  → heals through (chip)      Shotgun cone 18 → opens the burn
+//   Burst Rifle 15 → just under the gate      Cannon 18 (+10 splash) → opens it
+//   Seeker 8 / Lightning 9 → under (their answers are other traits)
+//   perSec      — health per second while not burning
+//   burstDamage — damage inside one bucket that shuts regen off
+//   windowSec   — bucket length (armed by the first hit)
+//   burnSec     — how long regen stays off after a burst
+// Damage from EVERY player path feeds the bucket via noteTraitDamage(), so
+// splash and chain damage count toward a burst exactly like pellets do.
+export interface EnemyTraitSet {
   armor?: { chipThreshold: number; reduction: number };
-}>> = {
+  evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
+  frontShield?: { deg: number; reduction: number };
+  regen?: { perSec: number; burstDamage: number; windowSec: number; burnSec: number };
+}
+
+/**
+ * Feed one applied-damage event into a REGEN-trait entity's fixed burst bucket.
+ * Called from every path that damages an enemy on the player's behalf — the
+ * PhysicsSystem projectile hit, the lightning chain, and the shockwave ring —
+ * so splash and chain damage count toward a burst like pellets do.
+ *
+ * The bucket is FIXED, not sliding: only the FIRST hit arms the timer (see the
+ * EnemyTraitSet comment for why that distinction is the whole trait).  No-op
+ * for entities without the trait, so call sites stay unconditional.
+ */
+export function noteTraitDamage(entity: GameEntity, damage: number) {
+  const cfg = entity.regen;
+  if (!cfg || !(damage > 0)) return;
+  if ((entity.regenBucketTimer ?? 0) <= 0) {
+    // First hit of a new bucket arms the window.
+    entity.regenBucketTimer = cfg.windowSec;
+    entity.regenBucket = 0;
+  }
+  entity.regenBucket = (entity.regenBucket ?? 0) + damage;
+  if (entity.regenBucket >= cfg.burstDamage) {
+    entity.regenBurnTimer = cfg.burnSec;
+    entity.regenBucketTimer = 0;
+    entity.regenBucket = 0;
+  }
+}
+export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
+  // Warden (chassis boss): the same chip-resist lesson at capstone scale — its
+  // phase table re-states it (and trades it away in phase 2), but the archetype
+  // row is what a DBG/one-off spawn gets before the first phase stamps.
+  [EnemySubtype.BOSS_WARDEN]: { armor: { chipThreshold: 8, reduction: 0.65 } },
+  // Reaver (weapon boss 1): pure EVASION — no armor, so every weapon hurts it
+  // once it is actually HIT.  Its phase 3 trades evasion for armor (BOSS_DEFS).
+  [EnemySubtype.BOSS_SCATTER]: {
+    evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 },
+  },
+  // Bastion (weapon boss 2): plate + regen.  Its phase table layers them (both
+  // at once in phase 2 is the hard part of the fight) — this row is what a
+  // DBG/one-off spawn gets before the first phase stamps.
+  [EnemySubtype.BOSS_SIEGE]: {
+    frontShield: { deg: 150, reduction: 0.75 },
+    regen: { perSec: 3.5, burstDamage: 16, windowSec: 0.4, burnSec: 3.0 },
+  },
 };
 
 // Maps each subtype to its role — used by AI routing and shooting logic.
@@ -3525,6 +3745,9 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
   [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
   [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
+  [EnemySubtype.BOSS_WARDEN]: EnemyRole.SHOOTING, // holds mid-range and shells you
+  [EnemySubtype.BOSS_SCATTER]: EnemyRole.RAMMING, // closes to scattergun range and brawls
+  [EnemySubtype.BOSS_SIEGE]:   EnemyRole.SHOOTING, // stands well back and lobs shells
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3560,7 +3783,227 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
   [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
   [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (GameEngine.updateDragon drives it)
+  // (h) bosses ride the EXISTING strategies — the boss-ness lives in the
+  // BOSS_DEFS phase table + traits, never in a bespoke movement routine.
+  [EnemySubtype.BOSS_WARDEN]: { move: 'skirmisher' },
+  [EnemySubtype.BOSS_SCATTER]: { move: 'dogfighter' },
+  [EnemySubtype.BOSS_SIEGE]:   { move: 'skirmisher' }, // + its own preferredDistance
 };
+
+// ── (h) Bosses ────────────────────────────────────────────────────────────────
+// Bosses are WAVE-ARENA CAPSTONES (decision #39e): every
+// BOSS_CONSTANTS.WAVE_INTERVAL-th wave of an arena is a boss wave — the boss
+// warps in through the shared rift VFX (GameEngine.openPortal) alongside a
+// reduced normal spawn budget, and the wave only clears when it is dead.  The
+// Overworld hub runs no waves, so it gets no bosses for free.
+//
+// A boss is NOT a new entity category.  It is an ENEMY_VARIANTS archetype like
+// any other, routed through ENEMY_BEHAVIOR and tracked as a COUNTED wave enemy,
+// with a BOSS_DEFS row on top describing its PHASES.  A phase is expressed
+// entirely through fields the existing systems already read — a
+// `Partial<WeaponConfig>` override, a shield (arc or bubble), a brood spawner,
+// a trait set, a speed multiplier, a colour — so a phase change is a STAMP,
+// never a script (strategy guardrail #36e).  GameEngine.updateBosses applies a
+// phase once, on the health-fraction transition.
+//
+// PAYOUT — model (d) (WEAPONS_AMMO_PLAN §6 / decision #37e, settled): a boss
+// pays SALVAGE and a timed SHOP DISCOUNT.  There is deliberately NO
+// weapon-unlock plumbing: weapons stay purely purchased and the boss is an
+// income accelerator.
+export const BOSS_CONSTANTS = {
+  /** A boss wave every Nth wave (0-based index where (index + 1) % N === 0).
+   *  PROVISIONAL: 5 puts the first capstone on wave 5, which is currently the
+   *  Bulwark intro — see the log's FOR-USER-REVIEW item 1. */
+  WAVE_INTERVAL: 5,
+  /** The normal spawn budget of a boss wave, scaled down — the boss IS most of
+   *  the wave, so a capstone isn't also a crowd.  PROVISIONAL. */
+  COMPANION_BUDGET_FRAC: 0.55,
+  /** Score paid on a boss kill, on top of the normal tier kill points. */
+  SCORE: 2500,
+  /** Salvage units sprayed on a boss kill — the model-(d) income accelerator.
+   *  PROVISIONAL sizing against today's economy: combat income runs ≈5–7
+   *  units/wave and a snitch catch pays 8, so 12 (≈12,000 credits) is worth
+   *  roughly two waves of fighting without trivialising a 25k–60k module. */
+  SALVAGE_DROPS: 12,
+  /** Timed shop discount earned per boss kill: `fraction` off every catalog
+   *  price for `seconds` of sim time, capped at FRACTION_MAX.  Killing another
+   *  boss inside the window stacks the fraction and refreshes the clock.
+   *  TIMED rather than run-permanent so it reads as a beat ("cash in now")
+   *  rather than a silent permanent buff — and see MODULE_RESALE: resale is
+   *  priced off the SAME discounted number, or buy-low/sell-high is a pump.
+   *  PROVISIONAL. */
+  DISCOUNT_FRACTION: 0.15,
+  DISCOUNT_FRACTION_MAX: 0.35,
+  DISCOUNT_SECONDS: 180,
+  /** Debris particles thrown on the death payoff beat (on top of the normal
+   *  enemy explosion).  Matches the dragon's scale — a capstone should read
+   *  as an event, not as a big drone popping. */
+  DEATH_DEBRIS: 26,
+  /** Entrance / death rift VFX (GameEngine.openPortal). */
+  PORTAL_RADIUS: 300,
+  PORTAL_DURATION: 1.1,
+  /** Aura ring drawn around a live boss (RenderSystem). */
+  AURA_SCALE: 1.24,
+  AURA_ALPHA: 0.5,
+} as const;
+
+/** One phase of a boss fight.  Entered when health/maxHealth ≤ `atHealthFrac`
+ *  (phases listed in DESCENDING order; phase 0 must be 1 = full health).  Every
+ *  field maps onto machinery that already exists — see the block comment. */
+export interface BossPhaseDef {
+  atHealthFrac: number;
+  /** Banner text on entry (a normal wave announcement). */
+  announce?: string;
+  /** Hull tint for the phase (also the aura + HUD bar colour). */
+  color?: string;
+  /** Multiplier on the archetype maxSpeed while in this phase. */
+  speedMult?: number;
+  /** Weapon override merged over the archetype weapon (GameEntity
+   *  .weaponOverride → WeaponSystem.updateEnemyShooting). */
+  weapon?: Partial<WeaponConfig>;
+  /** Shield raised for this phase — a full bubble, or a tracking sector when
+   *  `arc` is set (the Bulwark's geometry).  ABSENT → any existing shield is
+   *  dropped on entry, so a phase can also mean "barrier blown". */
+  shield?: { amount: number; regen: number; arc?: { deg: number; slew: number } };
+  /** Escort brood spawned while in this phase (GameEntity.spawner →
+   *  GameEngine.updateNests).  Absent → escorts stop. */
+  spawner?: SpawnerConfig;
+  /** Traits active in this phase, REPLACING the archetype's ENEMY_TRAITS row —
+   *  so a phase can trade a defence away as well as add one. */
+  traits?: EnemyTraitSet;
+}
+
+export interface BossDef {
+  /** Display name for the HUD boss bar + banners. */
+  name: string;
+  /** Phases, descending by `atHealthFrac`; index 0 must be 1. */
+  phases: BossPhaseDef[];
+}
+
+export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
+  // ── Warden — the chassis boss ──
+  // Phase 1  a barrier shield over armor plating: chip fire does almost
+  //          nothing, so you have to bring a big hit (or wear the shield down
+  //          and then bring one).
+  // Phase 2  barrier blown AND plating gone: it speeds up, shortens its beat
+  //          and calls a swarm escort — every weapon works now, the question is
+  //          whether you can out-damage the escort.
+  [EnemySubtype.BOSS_WARDEN]: {
+    name: 'WARDEN',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#38bdf8',
+        shield: { amount: 80, regen: 5 },
+        traits: { armor: { chipThreshold: 8, reduction: 0.65 } },
+      },
+      {
+        atHealthFrac: 0.5,
+        announce: 'WARDEN — BARRIER DOWN',
+        color: '#f97316',
+        speedMult: 1.35,
+        weapon: { cooldown: 1.2, damage: 11, speed: 9, size: 10, count: 2, spread: 12, color: '#fdba74', glow: true },
+        spawner: { subtype: EnemySubtype.SWARM, interval: 5.0, batch: 3, maxBrood: 9 },
+      },
+    ],
+  },
+  // ── Reaver — the scattergun boss (weapon-boss 1) ──
+  // Phase 1  brawls with the themed player Shotgun and JUKES straight shots:
+  //          the Seeker is the felt answer, everything else has to lead it.
+  // Phase 2  raises a TRACKING ARC SHIELD on top of the evasion — face-tanking
+  //          stops working and you have to flank (the Bulwark's soft counter at
+  //          boss scale).  Slower jukes, tighter/faster cone.
+  // Phase 3  shield gone, evasion TRADED for ARMOR, a wider point-blank cone
+  //          and a KAMIKAZE escort — the right answer flips from Seeker
+  //          (dodge) to a big-hit weapon (chip-resist) mid-fight.
+  [EnemySubtype.BOSS_SCATTER]: {
+    name: 'REAVER',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#fbbf24',
+        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 } },
+      },
+      {
+        atHealthFrac: 0.66,
+        announce: 'REAVER RAISES ITS GUARD',
+        color: '#f59e0b',
+        speedMult: 1.1,
+        shield: { amount: 90, regen: 6, arc: { deg: 160, slew: 2.4 } },
+        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 1.25, spread: 16, count: 8 },
+        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 1.1 } },
+      },
+      {
+        atHealthFrac: 0.33,
+        announce: 'REAVER — ENRAGED',
+        color: '#ef4444',
+        speedMult: 1.25,
+        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 0.95, spread: 30, count: 9, damage: 4 },
+        spawner: { subtype: EnemySubtype.KAMIKAZE, interval: 6.0, batch: 2, maxBrood: 4 },
+        traits: { armor: { chipThreshold: 6, reduction: 0.6 } },
+      },
+    ],
+  },
+  // ── Bastion — the siege boss (weapon-boss 2) ──
+  // Phase 1  a FRONT-SHIELD plate only: shooting it in the face barely
+  //          scratches it, so the lesson is "get behind it" (or splash /
+  //          chain past the plate, which bypass the projectile path entirely).
+  // Phase 2  plate PLUS regen — the hard part of the fight.  Note the
+  //          deliberate ORDERING in PhysicsSystem: the plate reduces damage
+  //          BEFORE the burst bucket sees it, so bursting a plated target
+  //          means bursting it FROM BEHIND.
+  // Phase 3  plate blown off, regen stronger, a TURRET escort pins you down:
+  //          a pure damage race in the open.
+  [EnemySubtype.BOSS_SIEGE]: {
+    name: 'BASTION',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#c084fc',
+        traits: { frontShield: { deg: 150, reduction: 0.75 } },
+      },
+      {
+        atHealthFrac: 0.7,
+        announce: 'BASTION — REPAIR SYSTEMS ONLINE',
+        color: '#a855f7',
+        weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 2.6 },
+        traits: {
+          frontShield: { deg: 150, reduction: 0.75 },
+          regen: { perSec: 3.5, burstDamage: 16, windowSec: 0.4, burnSec: 3.0 },
+        },
+      },
+      {
+        atHealthFrac: 0.35,
+        announce: 'BASTION — PLATING BREACHED',
+        color: '#f472b6',
+        speedMult: 1.3,
+        weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 2.1, explosionRadius: 160 },
+        spawner: { subtype: EnemySubtype.TURRET, interval: 8.0, batch: 1, maxBrood: 3 },
+        traits: { regen: { perSec: 5, burstDamage: 16, windowSec: 0.4, burnSec: 3.0 } },
+      },
+    ],
+  },
+};
+
+/** Boss rotation — each boss wave takes the next entry, cycling.  Order is the
+ *  intended teaching order (the plain chassis lesson first). */
+export const BOSS_ROTATION: EnemySubtype[] = [
+  EnemySubtype.BOSS_WARDEN,   // the plain chassis lesson first
+  EnemySubtype.BOSS_SCATTER,  // then evasion — bring the Seeker
+  EnemySubtype.BOSS_SIEGE,    // then plate + regen — flank it, and burst it
+];
+
+/** True when the 0-based wave index is a boss-capstone wave. */
+export function isBossWave(index: number): boolean {
+  return BOSS_ROTATION.length > 0
+    && (index + 1) % BOSS_CONSTANTS.WAVE_INTERVAL === 0;
+}
+
+/** The boss subtype for a given 0-based boss-wave index (cycles the rotation). */
+export function bossForWave(index: number): EnemySubtype {
+  const n = Math.floor((index + 1) / BOSS_CONSTANTS.WAVE_INTERVAL) - 1;
+  return BOSS_ROTATION[Math.max(0, n) % BOSS_ROTATION.length];
+}
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
 // Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each

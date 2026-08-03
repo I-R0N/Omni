@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1120,6 +1120,21 @@ export class PhysicsSystem {
   public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
       const half = target.shieldArcHalfWidth;
       if (half === undefined) return true; // full bubble
+      return PhysicsSystem.sectorCoversHit(target, proj, target.shieldArcAngle ?? 0, half);
+  }
+
+  /**
+   * Shared directional-cover test: does `proj` arrive inside the sector of
+   * half-width `half` centred on `center` (world radians) around `target`?
+   *
+   * Gated on the shot's TRAVEL direction, not its position, so a fast bolt that
+   * overshoots the hull can't tunnel in from the covered side and count as an
+   * open-side hit.  Falls back to the relative bearing for shots with no
+   * velocity.  Toroidal.  Used by BOTH the Bulwark's arc shield (a depleting
+   * pool centred on `shieldArcAngle`) and the (h) `front-shield` trait (a
+   * permanent plate centred on the entity's FACING).
+   */
+  public static sectorCoversHit(target: GameEntity, proj: GameEntity, center: number, half: number): boolean {
       let bearing: number;
       const vx = proj.velocity?.x ?? 0, vy = proj.velocity?.y ?? 0;
       if (vx * vx + vy * vy > 1e-6) {
@@ -1130,10 +1145,20 @@ export class PhysicsSystem {
               wrapDeltaX(target.position.x, proj.position.x),
           );
       }
-      let d = bearing - (target.shieldArcAngle ?? 0);
+      let d = bearing - center;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       return Math.abs(d) <= half;
+  }
+
+  /** (h) `front-shield` trait: is this hit landing on the plate?  The plate is
+   *  centred on the entity's FACING and never depletes — so the counterplay is
+   *  geometric (flank / ricochet in from behind) or path-based (chains and
+   *  shockwave rings damage outside this projectile path entirely). */
+  public static frontShieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
+      const cfg = target.frontShield;
+      if (!cfg) return false;
+      return PhysicsSystem.sectorCoversHit(target, proj, target.rotation, (cfg.deg * Math.PI / 180) / 2);
   }
 
   /** World-unit radius of an arc shield's interception ring (matches the
@@ -2826,11 +2851,24 @@ export class PhysicsSystem {
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
           }
+          // (h) front-shield: a permanent directional plate on the entity's
+          // FACING cuts covered hits.  Deliberately applied BEFORE the regen
+          // burst bucket below sees the damage — so bursting a plated target
+          // means bursting it FROM BEHIND, which is what makes the plate+regen
+          // phase the hard part of the Bastion fight.
+          if (this.traitsEnabled && target.frontShield && projDmg > 0
+              && PhysicsSystem.frontShieldCoversHit(target, proj)) {
+              projDmg *= (1 - target.frontShield.reduction);
+              target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+          }
           // Armored enemies shrug off small per-hit "chip" damage — demands
           // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
           if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
               projDmg *= (1 - target.armor.reduction);
           }
+          // (h) regen: feed the APPLIED damage into the fixed burst bucket.
+          // No-op without the trait.
+          if (this.traitsEnabled) noteTraitDamage(target, projDmg);
           if (projDmg > 0) {
               // Indestructible tiles eat the projectile without losing
               // health — flash only, health stays pinned.  Everything
@@ -2897,10 +2935,15 @@ export class PhysicsSystem {
               // the hit reads (post-armor projDmg, so chip hits kick weakly).
               if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
                   const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
-                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG;
+                  // POISE ((h)): a heavy hull takes a scaled-down shove and only
+                  // staggers on a real hit, so a chip stream can neither push it
+                  // off its line nor hold it in permanent hit-stun.  Absent →
+                  // unchanged behaviour for every rank-and-file enemy.
+                  const poise = target.poise;
+                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG * (poise ? poise.knockScale : 1);
                   target.velocity.x += (proj.velocity.x / vmag) * kick;
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
-                  target.hitStun = HIT_FEEDBACK.STUN_SEC;
+                  if (!poise || projDmg >= poise.stunDamage) target.hitStun = HIT_FEEDBACK.STUN_SEC;
                   target.hitFlash = 0.18; // bigger flash + scale-punch on impact
                   // Scale-punch magnitude ∝ damage / maxHealth, so a chip on a
                   // tanky beast barely flinches and a heavy hit on a frail enemy snaps.

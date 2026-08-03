@@ -107,6 +107,7 @@ interface UIOverlayProps {
   onAddCredits?: () => void;
   onSpawnDragon?: (type: string) => void;
   onSpawnRival?: (disposition: string) => void;
+  onSpawnBoss?: (id: string) => void;
   // Perf recorder (DBG FPS harness): toggle capture, cycle the scene label,
   // and export the copy-paste report string (returned so the overlay can
   // write it to the clipboard + show a manual-copy fallback).
@@ -218,6 +219,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onAddCredits,
   onSpawnDragon,
   onSpawnRival,
+  onSpawnBoss,
   onPerfRecToggle,
   onPerfRecCycleScene,
   onPerfRecExport,
@@ -258,7 +260,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
-    perf: true, timing: true, dragon: true, rival: true, perfrec: true,
+    perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -925,6 +927,24 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
               )}
 
+              {/* ── Boss capstone summon ((h), DBG) ────────────────── */}
+              {renderSectionHeader('boss', 'Bosses')}
+              {!collapsed.boss && (
+                <div className="pointer-events-auto flex flex-wrap gap-2 px-1 py-1">
+                  {[{ k: 'BOSS_WARDEN', label: 'Warden' }, { k: 'BOSS_SCATTER', label: 'Reaver' },
+                    { k: 'BOSS_SIEGE', label: 'Bastion' }].map(({ k, label }) => (
+                    <button
+                      key={k}
+                      onClick={() => onSpawnBoss && onSpawnBoss(k)}
+                      title="Warp this boss in with its full phase table (DBG). Each click stacks another."
+                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all bg-slate-800 border-slate-700 text-slate-300 hover:border-rose-400 hover:text-white"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* ── Perf recorder (FPS harness, DBG) ───────────────── */}
               {renderSectionHeader('perfrec', 'Perf REC')}
               {!collapsed.perfrec && (
@@ -1348,6 +1368,63 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       </div>
 
+      {/* ── Boss bar ((h)) ──────────────────────────────────────────
+          Present only while a capstone boss is alive.  Sized for PHONE
+          scale: the name and the percent readout are the two things
+          that have to survive a 390px-wide screen, so they anchor the
+          two ends of the row and the pips sit under them rather than
+          competing for the same line.  Pure EngineStats — no per-frame
+          React state. */}
+      {stats.gameState === GameState.PLAYING && stats.boss && (
+        <div className="absolute top-14 sm:top-16 left-1/2 -translate-x-1/2 pointer-events-none w-[min(560px,92vw)] px-1">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span
+              className="text-[12px] sm:text-[13px] font-extrabold uppercase tracking-[0.2em] drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] truncate"
+              style={{ color: stats.boss.color }}
+            >
+              {stats.boss.name}
+            </span>
+            <span className="flex items-center gap-1.5 shrink-0">
+              <span className="flex gap-1 items-center">
+                {Array.from({ length: stats.boss.phaseCount }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="w-2 h-2 rounded-full border"
+                    style={{
+                      borderColor: stats.boss!.color,
+                      background: i <= stats.boss!.phase ? stats.boss!.color : 'transparent',
+                      opacity: i <= stats.boss!.phase ? 1 : 0.4,
+                    }}
+                  />
+                ))}
+              </span>
+              <span
+                className="text-[12px] sm:text-[13px] font-extrabold tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]"
+                style={{ color: stats.boss.color }}
+              >
+                {Math.ceil(stats.boss.healthFrac * 100)}%
+              </span>
+            </span>
+          </div>
+          {/* Thicker than a normal HUD bar on purpose — at phone scale a
+              2px strip reads as decoration, not as the fight's state. */}
+          <div className="h-3.5 sm:h-3 rounded-full bg-slate-900/85 border border-slate-500/70 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
+            <div
+              className="h-full transition-[width] duration-150"
+              style={{ width: `${stats.boss.healthFrac * 100}%`, background: stats.boss.color }}
+            />
+          </div>
+          {stats.boss.shieldFrac > 0 && (
+            <div className="h-1.5 mt-0.5 rounded-full bg-slate-900/70 overflow-hidden">
+              <div
+                className="h-full bg-cyan-300/90 transition-[width] duration-150"
+                style={{ width: `${stats.boss.shieldFrac * 100}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Interaction affordance (station dock / portal travel) ── */}
       {/* Stations and portals share the E key; the engine arbitrates by
           nearest-in-range, so at most one of these is ever offered and the
@@ -1457,6 +1534,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 a purchase lands in the inventory. */}
             {out && (svc?.shipShop || svc?.weaponShop) && (
               <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
+                {/* Boss bounty ((h) payout model (d)): a TIMED discount already
+                    baked into every price below — shown so the beat reads. */}
+                {stats.bossDiscount && (
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-rose-900/40 border border-rose-500/40 text-rose-200">
+                    <span>Boss bounty · {Math.round(stats.bossDiscount.fraction * 100)}% off</span>
+                    <span className="tabular-nums">{stats.bossDiscount.secondsLeft}s</span>
+                  </div>
+                )}
                 {(['ship', 'weapon'] as const).filter(g => (g === 'ship' ? svc?.shipShop : svc?.weaponShop)).map(g => (
                   <div key={g}>
                     <h3 className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>

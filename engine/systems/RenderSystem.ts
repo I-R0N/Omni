@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -4183,6 +4183,44 @@ export class RenderSystem {
   // bakes rotation in), so the tail is at -x.
   private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
       const shape = entity.enemyShape ?? 'triangle';
+      // ── Boss aura ((h)): a slow breathing ring under the hull in the boss's
+      // PHASE colour, so a capstone reads as one at a glance and a phase change
+      // is visible IN THE WORLD, not only on the HUD bar.  Two strokes, no
+      // gradient allocation — bosses are rare, but the pattern stays cheap.
+      if (entity.isBoss === true) {
+          const rb = Math.max(entity.size.x, entity.size.y) * 0.5;
+          const pulse = 1 + Math.sin(nowSec * 2.2) * 0.05;
+          const ra = rb * BOSS_CONSTANTS.AURA_SCALE * pulse;
+          ctx.globalAlpha = BOSS_CONSTANTS.AURA_ALPHA;
+          ctx.strokeStyle = entity.color || '#f87171';
+          ctx.lineWidth = Math.max(2, rb * 0.08);
+          ctx.beginPath();
+          ctx.arc(0, 0, ra, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = BOSS_CONSTANTS.AURA_ALPHA * 0.45;
+          ctx.lineWidth = Math.max(1, rb * 0.04);
+          ctx.beginPath();
+          ctx.arc(0, 0, ra * 1.14, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+      }
+      // ── Front-shield plate ((h) trait): a thick arc on the entity's FACING,
+      // so WHERE the plate is is legible in the world and "get behind it" is a
+      // readable instruction.  Drawn in the entity's local frame (rotation is
+      // already baked in), so the plate is centred on +x.  No pool bar — the
+      // plate never depletes; only the geometry matters.
+      if (entity.frontShield) {
+          const rp = Math.max(entity.size.x, entity.size.y) * 0.5;
+          const half = (entity.frontShield.deg * Math.PI / 180) / 2;
+          const flash = (entity.shieldHitFlash && entity.shieldHitFlash > 0) ? 1 : 0;
+          ctx.globalAlpha = 0.34 + flash * 0.45;
+          ctx.strokeStyle = flash ? '#ffffff' : '#e9d5ff';
+          ctx.lineWidth = Math.max(3, rp * 0.16);
+          ctx.beginPath();
+          ctx.arc(0, 0, rp * 1.05, -half, half);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+      }
       // ── Lightweight gnat render (Stage 4 perf): a die-on-contact gnat (Swarm)
       // appears in large clouds, so it skips the full ship treatment (flame
       // plume + cached body gradient + core eye + per-frame radial gradients) —
@@ -4912,6 +4950,70 @@ export class RenderSystem {
               }
               break;
           }
+          case 'warden': {
+              // (h) boss hull — a bastion prow: a broad blunt ram face carried
+              // on a wide buttressed body with flared engine shoulders.
+              // Deliberately heavier and more architectural in outline than any
+              // rank-and-file silhouette, so a capstone reads at a glance.
+              ctx.moveTo(r * 0.98, -r * 0.26);          // prow, port corner
+              ctx.lineTo(r * 1.06, 0);                  // ram tip
+              ctx.lineTo(r * 0.98, r * 0.26);           // prow, starboard corner
+              ctx.lineTo(r * 0.52, r * 0.52);           // forward buttress
+              ctx.lineTo(r * 0.30, r * 0.94);           // starboard sponson
+              ctx.lineTo(-r * 0.20, r * 0.98);
+              ctx.lineTo(-r * 0.44, r * 0.60);
+              ctx.lineTo(-r * 0.98, r * 0.44);          // engine shoulder
+              ctx.lineTo(-r * 0.80, 0);                 // tail notch
+              ctx.lineTo(-r * 0.98, -r * 0.44);
+              ctx.lineTo(-r * 0.44, -r * 0.60);
+              ctx.lineTo(-r * 0.20, -r * 0.98);
+              ctx.lineTo(r * 0.30, -r * 0.94);          // port sponson
+              ctx.lineTo(r * 0.52, -r * 0.52);
+              break;
+          }
+          case 'talon': {
+              // (h) boss hull — a forward-raked twin-prong warship: two long
+              // claws reaching past a notched prow, with a broad swept body and
+              // a flared tail.  Predatory where 'warden' is architectural, so
+              // the two capstones read as different silhouettes at a glance.
+              ctx.moveTo(r * 1.05, -r * 0.30);           // upper claw tip
+              ctx.lineTo(r * 0.34, -r * 0.16);           // claw root
+              ctx.lineTo(r * 0.46, 0);                   // prow notch
+              ctx.lineTo(r * 0.34, r * 0.16);
+              ctx.lineTo(r * 1.05, r * 0.30);            // lower claw tip
+              ctx.lineTo(r * 0.22, r * 0.62);            // starboard shoulder
+              ctx.lineTo(-r * 0.42, r * 0.92);           // starboard wingtip
+              ctx.lineTo(-r * 0.58, r * 0.34);
+              ctx.lineTo(-r * 0.95, r * 0.20);           // tail flare
+              ctx.lineTo(-r * 0.78, 0);
+              ctx.lineTo(-r * 0.95, -r * 0.20);
+              ctx.lineTo(-r * 0.58, -r * 0.34);
+              ctx.lineTo(-r * 0.42, -r * 0.92);          // port wingtip
+              ctx.lineTo(r * 0.22, -r * 0.62);           // port shoulder
+              break;
+          }
+          case 'bastion': {
+              // (h) boss hull — a squat siege fortress: a heavy flat plated
+              // face (the front-shield reads as part of the silhouette) over a
+              // wide blocky chassis with recessed engine blocks aft.
+              ctx.moveTo(r * 0.72, -r * 0.70);           // plate, port corner
+              ctx.lineTo(r * 0.88, -r * 0.34);
+              ctx.lineTo(r * 0.94, 0);                   // plate apex
+              ctx.lineTo(r * 0.88, r * 0.34);
+              ctx.lineTo(r * 0.72, r * 0.70);            // plate, starboard corner
+              ctx.lineTo(r * 0.10, r * 0.88);
+              ctx.lineTo(-r * 0.46, r * 0.82);           // chassis shoulder
+              ctx.lineTo(-r * 0.52, r * 0.44);
+              ctx.lineTo(-r * 0.92, r * 0.38);           // engine block
+              ctx.lineTo(-r * 0.92, r * 0.12);
+              ctx.lineTo(-r * 0.66, 0);
+              ctx.lineTo(-r * 0.92, -r * 0.12);
+              ctx.lineTo(-r * 0.92, -r * 0.38);
+              ctx.lineTo(-r * 0.52, -r * 0.44);
+              ctx.lineTo(-r * 0.46, -r * 0.82);
+              ctx.lineTo(r * 0.10, -r * 0.88);
+              break;
+          }
           case 'triangle':
           default:
               ctx.moveTo(r, 0); ctx.lineTo(-r * 0.75, r * 0.8); ctx.lineTo(-r * 0.75, -r * 0.8);
@@ -5162,9 +5264,15 @@ export class RenderSystem {
           // while the player lines up the approach.
           if (this.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
 
+          const isBoss = t.isBoss === true;
           if (t.type === EntityType.ENEMY) {
-              if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
-              enemiesDrawn++;
+              // A (h) boss capstone never competes for the enemy chevron
+              // budget: losing the boss arrow behind a crowd of stragglers is
+              // exactly the case the arrow exists for.
+              if (!isBoss) {
+                  if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
+                  enemiesDrawn++;
+              }
           } else if (isPortal) {
               // Portals get their OWN budget rather than competing with the
               // stations for MAX_VISIBLE.  The buffer is sorted farthest-
@@ -5195,7 +5303,9 @@ export class RenderSystem {
           ctx.save();
           // Far enemies fade toward an alpha floor — still findable, but
           // a distant straggler doesn't shout like a closing threat.
-          if (t.type === EntityType.ENEMY && dist > ENEMY_FADE_START) {
+          // A boss never fades with distance — it is the thing you are
+          // supposed to be flying toward.
+          if (t.type === EntityType.ENEMY && !isBoss && dist > ENEMY_FADE_START) {
               const f = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
               ctx.globalAlpha = 1 - f * (1 - ENEMY_MIN_ALPHA);
           }
@@ -5206,11 +5316,13 @@ export class RenderSystem {
           ctx.beginPath();
 
           if (t.type === EntityType.ENEMY) {
-              // Caret (^) chevron pointing toward the enemy
-              const w = 7, h = 9;
+              // Caret (^) chevron pointing toward the enemy — scaled up for a
+              // boss so the capstone arrow reads apart from the stragglers'.
+              const k = isBoss ? 1.6 : 1;
+              const w = 7 * k, h = 9 * k;
               ctx.moveTo( h,  0);      // tip
               ctx.lineTo(-h,  w);      // bottom-left
-              ctx.lineTo(-h + 4,  0);  // inner notch
+              ctx.lineTo(-h + 4 * k,  0);  // inner notch
               ctx.lineTo(-h, -w);      // top-left
           } else {
               // Standard pointer for POIs
@@ -5233,12 +5345,16 @@ export class RenderSystem {
           // Distance text keeps its existing far-only rule and stacks below.
           const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
           const showDist = item.distSq > threshold;
-          const portalName = isPortal ? (t.name ?? '') : '';
+          // A boss labels itself for the same reason a portal does: an
+          // unlabelled arrow is ambiguous the moment anything else is on the
+          // ring, and the boss is the one you must not lose track of.
+          const portalName = isPortal ? (t.name ?? '')
+              : isBoss ? (t.enemySubtype ? (BOSS_DEFS[t.enemySubtype]?.name ?? 'BOSS') : 'BOSS') : '';
 
           if (showDist || portalName) {
                ctx.rotate(-angle);
                ctx.textAlign = 'center';
-               let ty = 24;
+               let ty = isBoss ? 30 : 24;
                if (portalName) {
                    // Chevrons at similar bearings crowd the same arc of the
                    // indicator ring, so the destination name is outlined to
@@ -5487,20 +5603,38 @@ export class RenderSystem {
           if (entity.type === EntityType.ENEMY) {
               // Out-of-range enemies clamp to the minimap border (square
               // clamp, slightly dimmer) instead of vanishing, so a distant
-              // straggler still registers at a glance.
+              // straggler still registers at a glance.  A (h) BOSS takes the
+              // same clamp but draws as a RINGED target — it is the priority
+              // contact on the map and has to be findable on a 75px minimap.
+              const bb = entity.isBoss === true ? MINIMAP_CONSTANTS.BOSS_BLIP : null;
+              const inset = bb ? bb.EDGE_INSET : blip.EDGE_INSET;
+              const half = currentSize / 2 - inset;
               let ex = item.dx * scale;
               let ey = item.dy * scale;
               const extent = Math.max(Math.abs(ex), Math.abs(ey));
-              const clamped = extent > clampHalf;
+              const clamped = extent > half;
               if (clamped) {
-                  const f = clampHalf / extent;
+                  const f = half / extent;
                   ex *= f; ey *= f;
               }
-              ctx.globalAlpha = clamped ? enemyPulseAlpha * blip.CLAMPED_ALPHA_MULT : enemyPulseAlpha;
+              const alpha = bb
+                  ? (bb.PULSE_MIN_ALPHA + (1 - bb.PULSE_MIN_ALPHA)
+                     * (0.5 + 0.5 * Math.sin(performance.now() / 1000 * bb.PULSE_HZ * Math.PI * 2)))
+                  : enemyPulseAlpha;
+              const mult = bb ? bb.CLAMPED_ALPHA_MULT : blip.CLAMPED_ALPHA_MULT;
+              ctx.globalAlpha = clamped ? alpha * mult : alpha;
               ctx.fillStyle = entity.color;
               ctx.beginPath();
-              ctx.arc(centerX + ex, centerY + ey, blip.RADIUS, 0, Math.PI * 2);
+              ctx.arc(centerX + ex, centerY + ey, bb ? bb.RADIUS : blip.RADIUS, 0, Math.PI * 2);
               ctx.fill();
+              if (bb) {
+                  ctx.globalAlpha = (clamped ? alpha * mult : alpha) * bb.RING_ALPHA;
+                  ctx.strokeStyle = entity.color;
+                  ctx.lineWidth = bb.RING_WIDTH;
+                  ctx.beginPath();
+                  ctx.arc(centerX + ex, centerY + ey, bb.RING_RADIUS, 0, Math.PI * 2);
+                  ctx.stroke();
+              }
               ctx.globalAlpha = 1;
               continue;
           }
