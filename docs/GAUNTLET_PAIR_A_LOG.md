@@ -76,6 +76,75 @@ solver lets it plow debris while a stripped hull gets shoved around.
 
 ---
 
+## Test plan
+
+### Automated — 4 headless Playwright suites, 287 assertions
+
+Scratchpad scripts driving the REAL engine in a REAL browser via
+`window.__omniEngine` / `window.__omniStats` (CLAUDE.md §8).  No test
+runner was added to the project (§7); `npm run build` remains the gate.
+All four run at a 390×844 viewport and assert a clean console.
+
+| suite | asserts | covers |
+|---|---|---|
+| `smoke-a1` | 66 | Death screen: summary fields vs engine counters, sim frozen while up, pause blocked, the salvage penalty charged EXACTLY once, RESPAWN / RESTART RUN / MAIN MENU paths, a new run zeroing every counter, wave rows hidden on the hub, ≥40px tap targets |
+| `smoke-a2` | 110 | Stat attribution: all 9 lines present, every contributor set REFOLDED back to the simulation's own values across 4 outfits, OFFLINE modules and core-less plating reporting zero with the reason named, Fire rate = inverse of the sim cooldown, hex→stat highlighting, the same widget in pause AND station |
+| `smoke-a3` | 93 | One continuous run: earn real salvage → dock → buy → outfit → portal → fight → die → summary → respawn → pause → re-dock, with attribution refolded at 4 points and phone-scale layout measured on all three overlays |
+| `smoke-ind` | 18 | Off-screen indicators, by PIXEL SAMPLING the canvas: type→colour legend classified by hue, edge placement, the proximity size ramp, the aggro blink cycle, nearest-first buffer order |
+
+The load-bearing assertion is A2's **refold**: it parses the rendered
+contributor strings back into numbers, folds them the way
+`applyModuleEffects` does, and requires the result to equal what the sim
+is using.  That is what "matches to the digit" means here, and it is
+checked mechanically rather than by eye.
+
+### Manual — what headless cannot reach
+
+**Feel** (no assertion can rule on these):
+- Death beat: explosion → summary timing.  Does it land as a beat or an
+  interruption?
+- The new weight curve.  A maxed ship is ×0.92 thrust and ~3× collision
+  mass — sluggish in a *good* way, or just annoying?  Does plowing
+  debris feel earned?
+- 25% death penalty severity.
+- Indicator size ramp at real combat distances; blink rate (2.5 Hz)
+  alarming vs irritating.
+
+**Touch + legibility** (geometry is measured, readability is not):
+- **Drag-and-drop outfitting** — NOT exercised by any smoke (they call
+  `moveModule()` directly).  The Condition and Ship Status blocks moved
+  the flowers down the page; worth a real drag on glass.
+- Stat-row tap targets — only the death screen's three buttons are
+  measured against the 40px floor.
+- Indicator arrows in the top corners overlap the score / pause chips.
+- **Indigo station vs purple bubble are adjacent hues** — they classify
+  cleanly by hue in code, but that is not the same as telling them apart
+  on a phone in daylight.
+
+### Known gaps
+
+1. **Boss indicator** — the type-legend smoke covers enemy / station /
+   portal / rival / bubble, but not the boss's oversized self-labelled
+   red arrow.
+2. **`huntingPlayer` in a real run** — the blink test stamps the flag
+   synthetically; nothing asserts `updateRivals` actually sets it.
+3. **Portal label stacking** — fixed by eye from a screenshot, no
+   assertion guards the regression.
+4. **Only 390×844** — no desktop viewport, no landscape.
+5. **Balance is unverified by construction.**  The suites prove the
+   panel AGREES with the sim; they cannot prove the sim's numbers are
+   good.  Every provisional value (25% penalty, the weight table,
+   BASE_BOOST / DRAG_PER_WEIGHT) is a playtest question for step 6.
+
+### Durability
+
+The four scripts live in the SESSION SCRATCHPAD, not the repo — they die
+with the session.  Committing them (e.g. under `scripts/smoke/`) is a
+user call, since CLAUDE.md §7 records that this project deliberately has
+no test runner.
+
+---
+
 ## Milestone checklist
 
 - [x] **A1** — Death/run-summary screen (overlay + per-run counters +
