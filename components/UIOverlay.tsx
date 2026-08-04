@@ -2148,6 +2148,29 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </span>
             </div>
 
+            {/* Audio diagnostics.  Only shown when audio is NOT audible, so
+                it costs nothing in the normal case — but on a phone there is
+                no console, and "no sound" has four very different causes that
+                are otherwise indistinguishable from the outside. */}
+            {stats.audio && !stats.audio.audible && !stats.audio.muted && (
+              <div className="mx-auto w-full max-w-xs px-3 py-2 rounded-lg
+                              bg-amber-950/40 border border-amber-500/40
+                              text-[11px] leading-relaxed text-amber-200/90">
+                {stats.audio.state === null ? (
+                  <>Audio not started yet — tap anywhere to enable it.</>
+                ) : stats.audio.state === 'running' ? (
+                  <>Audio is running.</>
+                ) : (
+                  <>Audio is <span className="font-bold">{stats.audio.state}</span> — tap
+                    anywhere to resume it.</>
+                )}
+                <div className="mt-1 text-amber-200/70">
+                  On iPhone, also check the <span className="font-bold">side ring/silent
+                  switch</span> — it silences web audio even at full volume.
+                </div>
+              </div>
+            )}
+
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}
             <div className="text-center">

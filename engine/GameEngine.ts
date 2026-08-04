@@ -2115,7 +2115,10 @@ export class GameEngine {
       perfRecording: this.perfRecorder.recording,
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
-      audio: { volume: this.audio.volume, muted: this.audio.muted },
+      audio: {
+        volume: this.audio.volume, muted: this.audio.muted,
+        state: this.audio.contextState, audible: this.audio.audible,
+      },
     });
 
     // Audio follows the camera, and goes quiet whenever the sim does.  Two

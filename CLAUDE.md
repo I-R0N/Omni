@@ -1484,6 +1484,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   usually a phone session's first gesture).  Master volume + mute are
   IN-MEMORY only, consistent with the project keeping no state across
   reloads.
+- **iOS needs three things desktop does not.**  (1) The ring/silent switch
+  silences WebAudio, because Safari puts it in the "ambient" session by
+  default — the game claims the `playback` session instead, via
+  `navigator.audioSession` on 16.4+ and, on older iOS, by playing a
+  detached-proof silent WAV data URI from an in-document
+  `<audio playsinline>` element (a data URI, so the standalone build is
+  still asset-free; it MUST be appended to the document or iOS ignores it).
+  (2) iOS uses a non-standard `'interrupted'` AudioContext state after a
+  call / Siri / app switch, so `unlock()` resumes on anything that is not
+  `'running'`, never on `'suspended'` alone.  (3) The gesture listeners are
+  NOT `once` — an interruption after the first gesture would otherwise
+  leave the game permanently silent — and `visibilitychange` re-unlocks on
+  tab return.  `audio.audible` (context exists AND running) is the honest
+  "can this be heard" check; `unlocked` alone is not.
 - **`window.__omniEngine` / `window.__omniStats` are debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
   `window`.  NOTHING in the game reads them — they exist so headless

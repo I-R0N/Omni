@@ -38,6 +38,21 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
  * headless smoke asserts that no context exists before a gesture.
  */
 
+// ~600-byte silent 8 kHz WAV.  Used ONLY to promote the iOS audio session
+// off "ambient" (which the hardware mute switch silences) on versions
+// predating navigator.audioSession.  A data URI, not an asset file, so the
+// single-file standalone build is unaffected.
+const SILENT_WAV =
+  'data:audio/wav;base64,'
+  + 'UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA'
+  + 'gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
+
 // ── Registry types ──────────────────────────────────────────────────────────
 
 /** Mix priority (SFX_INVENTORY §2).  1 never thins; 3 thins first. */
@@ -132,6 +147,8 @@ export class AudioSystem {
   private master: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
   private gestureBound = false;
+  /** iOS session-category shim — see claimPlaybackSession(). */
+  private silentEl: HTMLAudioElement | null = null;
 
   // ── Mixer state (in-memory only — see FOR-USER-REVIEW in the gauntlet
   //    log: durable preference storage is out of scope for this project) ──
@@ -177,32 +194,102 @@ export class AudioSystem {
   // ── Unlock ────────────────────────────────────────────────────────────────
 
   /**
-   * Arm one-shot window listeners that create the AudioContext on the
-   * first real user gesture.  Deliberately owned here rather than pushed
-   * into InputSystem: InputSystem only engages on CANVAS-targeted events
-   * (so overlay menus keep native touch scrolling), but a menu tap is a
-   * perfectly good unlock gesture — and on mobile it is usually the FIRST
-   * one.  Capture-phase + `once` means this never interferes with either
+   * Arm window listeners that create — and KEEP ALIVE — the AudioContext
+   * on user gestures.  Deliberately owned here rather than pushed into
+   * InputSystem: InputSystem only engages on CANVAS-targeted events (so
+   * overlay menus keep native touch scrolling), but a menu tap is a
+   * perfectly good unlock gesture, and on mobile it is usually the FIRST
+   * one.  Capture-phase + passive means this never interferes with either
    * the overlay or the game input path.
+   *
+   * These listeners are deliberately NOT `once`.  iOS suspends or
+   * INTERRUPTS an AudioContext for reasons the page never sees — a phone
+   * call, Siri, another app taking the audio session, backgrounding the
+   * tab — and a one-shot listener would leave the game permanently silent
+   * with no way back.  `unlock()` is idempotent and costs a state
+   * comparison, so re-checking on every gesture is the cheap, robust
+   * option.
    */
   public armGestureUnlock() {
     if (this.gestureBound || typeof window === 'undefined') return;
     this.gestureBound = true;
     const fire = () => this.unlock();
-    const opts = { capture: true, once: true, passive: true } as const;
+    const opts = { capture: true, passive: true } as const;
     window.addEventListener('pointerdown', fire, opts);
     window.addEventListener('touchend', fire, opts);
     window.addEventListener('keydown', fire, opts);
     window.addEventListener('mousedown', fire, opts);
+    // Returning to the tab is the other moment iOS hands the audio session
+    // back — resume there too, so a backgrounded phone recovers by itself.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.unlock();
+    });
+  }
+
+  /**
+   * Route audio into a session category that IGNORES the iOS ring/silent
+   * switch.
+   *
+   * This is the single biggest iOS-vs-everything-else difference: Safari
+   * puts WebAudio in the "ambient" session by default, and ambient audio
+   * is silenced by the hardware mute switch.  Everything else works
+   * perfectly — context running, voices scheduled, no errors — and the
+   * device simply discards the samples.  A game's SFX are "playback",
+   * not "ambient", so say so.
+   *
+   *   - Safari 16.4+ exposes `navigator.audioSession`; setting the type
+   *     is the clean, official fix.
+   *   - Older iOS has no such API, and the only lever is a side effect:
+   *     playing an `<audio>` element promotes the page's session
+   *     category.  A ~600-byte silent WAV data URI does it, and being a
+   *     data URI it stays inside the single-file standalone build (no
+   *     asset file, so scripts/inline-build.mjs is still untouched).
+   *
+   * Both paths are best-effort and wrapped: on a browser that does
+   * neither, this is a no-op and audio behaves as before.
+   */
+  private claimPlaybackSession() {
+    if (typeof navigator === 'undefined') return;
+    try {
+      const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+      if (session) { session.type = 'playback'; return; }
+    } catch { /* not supported — fall through to the element trick */ }
+    if (typeof document === 'undefined' || this.silentEl) return;
+    try {
+      const el = document.createElement('audio');
+      el.src = SILENT_WAV;
+      el.loop = true;
+      el.setAttribute('playsinline', '');   // iOS: don't hand off to the native player
+      el.setAttribute('webkit-playsinline', '');
+      el.volume = 0.001;                     // audibly nothing; 0 can be optimised away
+      // MUST be in the document: a detached element does not reliably
+      // promote the audio session on iOS, which is the entire point of it.
+      el.style.display = 'none';
+      document.body.appendChild(el);
+      this.silentEl = el;
+      void el.play().catch(() => { /* blocked until a gesture; retried on the next one */ });
+    } catch { /* no element audio available */ }
   }
 
   /** Create (or resume) the context.  Idempotent; safe to call from any
-   *  gesture handler.  Returns false when audio is unavailable. */
+   *  gesture handler, and cheap enough to call from every one.  Returns
+   *  false when audio is unavailable. */
   public unlock(): boolean {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      // NOT just 'suspended': iOS also uses a non-standard 'interrupted'
+      // state (phone call, Siri, another app). Resume on anything that is
+      // not already running, or the game stays silent for the rest of the
+      // session.
+      if (this.ctx.state !== 'running') {
+        void this.ctx.resume();
+        this.claimPlaybackSession();
+        if (this.silentEl && this.silentEl.paused) {
+          void this.silentEl.play().catch(() => { /* still blocked */ });
+        }
+      }
       return true;
     }
+    this.claimPlaybackSession();
     const Ctor: typeof AudioContext | undefined =
       typeof window !== 'undefined'
         ? (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
@@ -225,12 +312,16 @@ export class AudioSystem {
     const data = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    if (this.ctx.state !== 'running') void this.ctx.resume();
     return true;
   }
 
   public get unlocked(): boolean { return this.ctx !== null; }
   public get contextState(): string | null { return this.ctx ? this.ctx.state : null; }
+  /** True once audio can actually be heard: context built AND running.
+   *  `unlocked` alone is not enough on iOS, where a context can sit in
+   *  'suspended' or 'interrupted' indefinitely. */
+  public get audible(): boolean { return this.ctx !== null && this.ctx.state === 'running'; }
 
   // ── Mixer ─────────────────────────────────────────────────────────────────
 

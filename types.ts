@@ -1736,7 +1736,11 @@ export interface EngineStats {
   // preference resets with the page — the persistence question is logged
   // under FOR-USER-REVIEW in docs/GAUNTLET_PAIR_B_LOG.md rather than
   // decided here.
-  audio?: { volume: number; muted: boolean };
+  // `state` is the live AudioContext state (null before the first user
+  // gesture creates it).  Surfaced because on a phone there is no console:
+  // "no sound" is otherwise indistinguishable from "context never started",
+  // "context interrupted", and "device mute switch is on".
+  audio?: { volume: number; muted: boolean; state: string | null; audible: boolean };
 }
 
 export interface DamageText {

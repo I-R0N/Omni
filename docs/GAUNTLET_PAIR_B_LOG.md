@@ -135,6 +135,17 @@ returning both the profile and the sound so they cannot drift apart.
 
 ## FOR-USER-REVIEW
 
+0. **iOS SILENT-SWITCH TRADEOFF — decide this one.** The no-sound-on-iPhone
+   fix claims the `playback` audio session. That is what makes the game
+   audible with the ring/silent switch on, but on iOS `playback` also
+   **stops whatever the user was already listening to** (music, a podcast).
+   The alternative, `ambient`, mixes politely with other audio but is
+   silenced by the mute switch — i.e. the bug. There is no iOS category
+   that both ignores the mute switch and mixes. I chose audible-by-default
+   because "no sound" was the reported problem; if you would rather the
+   game never interrupt music, the change is one string in
+   `claimPlaybackSession`.
+
 1. **Where to spend an external generation budget: `docs/SFX_INVENTORY.md`
    §9.** Ranked by (importance × how badly synthesis handles it), not by
    importance alone. Top of the list: `destroy.player` (the run ends on
