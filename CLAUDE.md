@@ -1495,6 +1495,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   an OfflineAudioContext and asserts a dominant-frequency proxy stays
   under the band AND that the ordering survives — so this is a guarded
   invariant, not a one-off tuning.
+- **Ambient shard chatter is NEAR-FIELD; the player's own shards are not.**
+  A dense field collides/merges/snaps constantly, so `destroy.shard.*`,
+  `move.tilesnap`, `move.merge` and `crash.shard.tile` carry only to
+  `AUDIO_CONSTANTS.SHARD_FAR_RADIUS` instead of the normal `FAR_RADIUS`.
+  The exception is the point: a shard destroyed BY the player is played at
+  the NORMAL radius, keyed off the `killedByPlayer` stamp that already
+  exists for scoring (set by the projectile / crash / lightning / AoE
+  paths) — so a shard you shot from range is still yours to hear.  Direct
+  player↔shard contact is covered by `crash.player.tile` at full range,
+  because mobile shards are `STRUCTURE`s.  Radii resolve caller → def →
+  global default (`SfxDef.near`/`.far`, `play(id, {near, far})`).
 - **The engine loop IDLES; it does not switch on and off.**
   `move.thrust` runs continuously while the player is alive and THROTTLE
   MODULATES it (gain and filter cutoff together, both heavily smoothed) —

@@ -1,4 +1,16 @@
 import { AudioSystem, SynthCtx, tone, noise, ms, LoopVoice } from './AudioSystem';
+import { AUDIO_CONSTANTS } from '../../constants';
+
+/** Close-proximity range for AMBIENT shard chatter — shards colliding,
+ *  merging and snapping with each other where the player is not involved.
+ *  A dense field generates these constantly, and at the normal radius they
+ *  chatter from events the player has nothing to do with.  The SAME sound
+ *  played because the player shot or rammed the shard is fired with the
+ *  normal radius by the caller (GameEngine.deathFx → killedByPlayer). */
+const SHARD_RANGE = {
+  near: AUDIO_CONSTANTS.SHARD_NEAR_RADIUS,
+  far:  AUDIO_CONSTANTS.SHARD_FAR_RADIUS,
+} as const;
 
 /**
  * SfxRegistry — the procedural draft of every sound in
@@ -357,6 +369,7 @@ function registerImpacts(a: AudioSystem) {
   // shard field, and it is texture, not information.
   a.register('crash.shard.tile', {
     tier: 3, gain: 0.14, poly: 4, minInterval: ms(60), collapse: true, jitter: 0.16, positional: true,
+    ...SHARD_RANGE,
     render: s => noise(s, { f0: 1500, f1: 500, type: 'lowpass', attack: ms(1), decay: ms(95), gain: 0.5 }),
   });
 }
@@ -415,6 +428,10 @@ function registerDestruction(a: AudioSystem) {
                       type: BiquadFilterType, q: number, tonal: number | 0, jitter: number) =>
     a.register(id, {
       tier: 3, gain, poly: 4, minInterval: ms(50), collapse: true, jitter, positional: true,
+      // Near-field BY DEFAULT: most shard breaks are shards hitting each
+      // other, which is not the player's business.  A break the player
+      // caused is played with the normal radius (see deathFx).
+      ...SHARD_RANGE,
       render: (s: SynthCtx) => {
         let end = noise(s, { f0, f1, type, q, attack: ms(2), decay: ms(dur), gain: 0.45 });
         if (tonal) end = Math.max(end, tone(s, { type: 'triangle', f0: tonal, attack: ms(1), decay: ms(dur * 0.6), gain: 0.22 }));
@@ -630,6 +647,7 @@ function registerWorld(a: AudioSystem) {
   // Crystallisation: a rising granular rush resolving on a soft thunk.
   a.register('move.tilesnap', {
     tier: 3, gain: 0.28, poly: 2, minInterval: ms(200), jitter: 0.10, positional: true,
+    ...SHARD_RANGE,
     // Metal assembles CONSTANTLY in a metal field, so this fires in bulk —
     // the original 1 k→3 k rise stacked into a whine.  Lowered to a warm
     // swell that resolves on the same thunk.
@@ -642,6 +660,7 @@ function registerWorld(a: AudioSystem) {
   // Two things becoming one.  Very quiet — this fires all the time.
   a.register('move.merge', {
     tier: 3, gain: 0.12, poly: 3, minInterval: ms(120), collapse: true, jitter: 0.16, positional: true,
+    ...SHARD_RANGE,
     render: s => noise(s, { f0: 400, f1: 180, type: 'lowpass', attack: ms(5), decay: ms(130), gain: 0.5 }),
   });
 

@@ -114,6 +114,25 @@ delta from the camera (`wrapDeltaX`) and attenuate by torus-wrapped
 distance. Straight `a.x - b.x` gives a hard pan flip at the seam, so
 distance and pan both go through the wrap helpers, no exceptions.
 
+**Ambient events are NEAR-FIELD; the player's own are not.** A dense shard
+field generates constant shard-on-shard collisions, merges and snaps. At
+the normal radius (2600) the player hears a running commentary on physics
+they are not part of. So the shard-chatter rows carry a much shorter
+range (`SHARD_NEAR_RADIUS` / `SHARD_FAR_RADIUS`, 240/850) — audible only
+in close proximity.
+
+The exception is what makes this feel right rather than merely quieter:
+**a shard destroyed BY the player is played at the normal radius**. The
+`killedByPlayer` stamp already exists for scoring and is set by every
+player damage path — projectile, crash, lightning chain, cannon splash —
+so a shard you shot from range is still your shard and still audible,
+while the identical break happening across the map is not. Direct
+player↔shard contact is covered separately by `crash.player.tile`, which
+is full-range because shards are `STRUCTURE`s.
+
+Any row may override its radii; the caller may override them again. The
+precedence is caller → row → global default.
+
 ---
 
 ## 4. Combat
@@ -179,7 +198,7 @@ almost this whole table. Shield rows come from `PhysicsSystem`.
 | `impact.explosion.aoe` | `GameEngine.applyExplosionAoE` / `spawnShockwave` (player-owned) | 2 | 400 | Compact splash blast. Low thump, mid crackle, quick out. Not the boss-death boom — this fires several times a fight. | 70 Hz sine 3→320 + noise LP 2 kHz 2→260 | pitch ±7% | 3, ≥180 ms | 0.58 | world |
 | `crash.player.tile` | `PhysicsSystem` static-tile contact past `CRASH_VELOCITY_THRESHOLD` | 1 | 260 | Heavy scraping collision. You flew into a wall. Grinding, not explosive. Loudness scales with impact speed. | 130 Hz thud 2→200 + noise LP 900 Hz 5→240 | pitch ±8%, gain ∝ impact speed | 2, ≥180 ms | 0.55 | world |
 | `crash.player.enemy` | `PhysicsSystem` player↔enemy body contact | 1 | 200 | Metallic body slam. Harder-edged than the tile crash, with a hull ring. | 200 Hz thud + 1.1 kHz ring; 1→180 | pitch ±8% | 2, ≥140 ms | 0.52 | world |
-| `crash.shard.tile` | `PhysicsSystem` shard↔tile / shard↔shard above the momentum threshold | 3 | 110 | Distant knock of debris hitting debris. Quiet — this happens constantly in a shard field. | 350 Hz LP 1.5 kHz; 1→95 | pitch ±16% | 4, ≥60 ms **+gain** | 0.14 | world |
+| `crash.shard.tile` | `PhysicsSystem` shard↔tile / shard↔shard above the momentum threshold. **NOT CURRENTLY WIRED** — registered and specified, but no call site fires it. Deliberate: shard-on-shard contact is exactly the chatter being suppressed, so adding it would work against the proximity rule above. Wire it only alongside a reason to. | 3 | 110 | Distant knock of debris hitting debris. Quiet — this happens constantly in a shard field. | 350 Hz LP 1.5 kHz; 1→95 | pitch ±16% | 4, ≥60 ms **+gain** | 0.14 | **near-field** |
 
 ---
 
@@ -201,11 +220,11 @@ dispatches by entity class and shard variant.
 | `destroy.tile.metal` | same, `metal-tile` | 2 | 480 | Structural failure — a bending groan into a deep clanging break, with an inharmonic tail that hums on. | 110/166/244 Hz inharmonic cluster 2→480 + LP noise burst 1→140 | pitch ±8% | 3, ≥110 ms **+gain** | 0.50 | world |
 | `destroy.tile.plastic` | same, `plastic-tile` | 2 | 260 | Snapping crack — brittle, deadened, no tail. | 600 Hz snap LP 2 kHz; 1→230 | pitch ±12% | 3, ≥80 ms **+gain** | 0.38 | world |
 | `destroy.tile.nebula` | same, `nebula-tile` | 3 | 500 | Dissipating gas sigh. Airy, pitchless, slow. Fires very often in nebula fields — keep it near-subliminal. | noise BP 600 Hz sweeping down; 40→480 | pitch ±16% | 3, ≥140 ms **+gain** | 0.16 | world |
-| `destroy.shard.glass` | same, `glass-shard` | 3 | 200 | The tile sound, smaller and thinner. A tinkle rather than a shatter. | noise BP 2.1→2.7 kHz + 1.5 kHz partial; 2→200 | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
-| `destroy.shard.rock` | same, `rock-shard` | 3 | 190 | Small stone crack. | as tile ×0.5 dur, +35% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
-| `destroy.shard.metal` | same, `metal-shard` | 3 | 250 | A small clonk with a brief hum. | noise BP 850→620 Hz Q2.5 + 300 Hz partial; 2→250 | pitch ±12% | 4, ≥50 ms **+gain** | 0.24 | world |
-| `destroy.shard.plastic` | same, `plastic-shard` | 3 | 160 | Tiny dead snap. | as tile ×0.55 dur, +40% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.18 | world |
-| `destroy.shard.nebula` | same, `nebula-shard` | 3 | 280 | Faint puff. | as tile ×0.5 dur | pitch ±18% | 4, ≥70 ms **+gain** | 0.12 | world |
+| `destroy.shard.glass` | same, `glass-shard` (**near-field** unless `killedByPlayer`) | 3 | 200 | The tile sound, smaller and thinner. A tinkle rather than a shatter. | noise BP 2.1→2.7 kHz + 1.5 kHz partial; 2→200 | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
+| `destroy.shard.rock` | same, `rock-shard` (**near-field** unless `killedByPlayer`) | 3 | 190 | Small stone crack. | as tile ×0.5 dur, +35% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
+| `destroy.shard.metal` | same, `metal-shard` (**near-field** unless `killedByPlayer`) | 3 | 250 | A small clonk with a brief hum. | noise BP 850→620 Hz Q2.5 + 300 Hz partial; 2→250 | pitch ±12% | 4, ≥50 ms **+gain** | 0.24 | world |
+| `destroy.shard.plastic` | same, `plastic-shard` (**near-field** unless `killedByPlayer`) | 3 | 160 | Tiny dead snap. | as tile ×0.55 dur, +40% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.18 | world |
+| `destroy.shard.nebula` | same, `nebula-shard` (**near-field** unless `killedByPlayer`) | 3 | 280 | Faint puff. | as tile ×0.5 dur | pitch ±18% | 4, ≥70 ms **+gain** | 0.12 | world |
 
 ### 5.2 Ship destruction
 
@@ -238,8 +257,8 @@ dispatches by entity class and shard variant.
 | `move.thrust` | `updateGameLogic`, ALWAYS ON while alive; stops on death / pause / dock | 2 | **L** | Continuous engine rumble that **idles rather than switching on**. Throttle swells an already-running bed — gating the whole loop on `throttle > 0` snapped on and off with the input and read as jarring. Gain *and* cutoff move together (volume alone reads as a fader; timbre too reads as an engine working harder), both heavily smoothed. Must be *bland* — it plays constantly and any character in it becomes torture within five minutes. | noise LP 90 Hz (idle) → 850 Hz (full) + 36 Hz sine bed; gain 0.38→1.0 of mix; both `setTargetAtTime` τ = 0.22 s | none (continuous) | 1 (singleton) | 0.22 | flat |
 | `move.dent` | `DropSystem.spawnDentShard` (plastic / metal / rock dent) | 3 | 140 | A single deforming knock. Softer than a break — nothing was destroyed. | 260 Hz LP 900 Hz; 2→120 | pitch ±14% | 4, ≥60 ms **+gain** | 0.20 | world |
 | `move.dent.recover` | `ShardSystem` plastic dent snap-back | 3 | 180 | Reverse of the dent — a rubbery *boink* as the shape springs back. | 200→320 Hz up-glide; 3→160 | pitch ±14% | 3, ≥100 ms | 0.16 | world |
-| `move.tilesnap` | `ShardSystem` shard→tile snap (`TILE_SNAP` path) | 3 | 260 | Crystallisation — fragments locking into a solid. A warm rising swell resolving on a soft thunk. Metal assembles constantly, so this fires in BULK: it must not stack into a whine. | noise BP 380→820 Hz swell 10→200 + 130 Hz thunk at 200 ms | pitch ±10% | 2, ≥200 ms | 0.28 | world |
-| `move.merge` | `ShardSystem.composeEntities` (bond forms) | 3 | 150 | Two things becoming one — a short gluey suck with a soft landing. Very quiet; this fires all the time in a shard field. | 400→180 Hz glide, LP 1.2 kHz; 5→130 | pitch ±16% | 3, ≥120 ms **+gain** | 0.12 | world |
+| `move.tilesnap` | `ShardSystem` shard→tile snap (`TILE_SNAP` path), **near-field** | 3 | 260 | Crystallisation — fragments locking into a solid. A warm rising swell resolving on a soft thunk. Metal assembles constantly, so this fires in BULK: it must not stack into a whine. | noise BP 380→820 Hz swell 10→200 + 130 Hz thunk at 200 ms | pitch ±10% | 2, ≥200 ms | 0.28 | world |
+| `move.merge` | `ShardSystem.composeEntities` (bond forms). **NOT CURRENTLY WIRED** — same reasoning as `crash.shard.tile`. | 3 | 150 | Two things becoming one — a short gluey suck with a soft landing. Very quiet; this fires all the time in a shard field. | 400→180 Hz glide, LP 1.2 kHz; 5→130 | pitch ±16% | 3, ≥120 ms **+gain** | 0.12 | **near-field** |
 | `move.regenpop` | `ShardSystem` regen completion (`regenPopTimer` set) | 3 | 200 | A gentle materialising pop — something came back. Friendly, not alarming. | 300→700 Hz up-blip + soft noise; 3→170 | pitch ±12% | 3, ≥120 ms **+gain** | 0.18 | world |
 
 ---

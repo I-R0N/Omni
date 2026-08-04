@@ -2959,6 +2959,15 @@ export const AUDIO_CONSTANTS = {
   // Positional model.  Distances are world units, measured torus-wrapped.
   NEAR_RADIUS: 420,        // full volume inside this
   FAR_RADIUS: 2600,        // inaudible beyond this (linear between)
+  // AMBIENT shard chatter — shards colliding, merging and snapping with
+  // each other somewhere the player is not.  At the normal radius a dense
+  // field chatters constantly from events the player has nothing to do
+  // with, so these carry only in CLOSE PROXIMITY.  The same material
+  // destroyed BY the player (killedByPlayer: shot, rammed, chained,
+  // splashed) is played at the normal radius instead — proximity is the
+  // rule for ambient events, not for the player's own.
+  SHARD_NEAR_RADIUS: 240,
+  SHARD_FAR_RADIUS: 850,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 } as const;
 

@@ -97,6 +97,12 @@ export interface SfxDef {
   jitter?: number;
   /** World-positioned (panned + distance-attenuated) vs UI-flat. */
   positional?: boolean;
+  /** Audible radii in world units, overriding the global defaults.  Exists
+   *  so AMBIENT events — shards colliding with each other somewhere the
+   *  player is not — carry only in close proximity, while the same
+   *  material heard because the PLAYER caused it carries normally. */
+  near?: number;
+  far?: number;
   render: (s: SynthCtx) => number;
 }
 
@@ -107,6 +113,8 @@ export interface SfxLoopDef {
   tier: SfxTier;
   gain: number;
   positional?: boolean;
+  near?: number;
+  far?: number;
   start: (s: SynthCtx) => LoopVoice;
 }
 
@@ -368,7 +376,8 @@ export class AudioSystem {
    */
   public play(
     id: string,
-    opts?: { x?: number; y?: number; gain?: number; pitch?: number; param?: number },
+    opts?: { x?: number; y?: number; gain?: number; pitch?: number; param?: number;
+             near?: number; far?: number },
   ) {
     const def = this.defs.get(id);
     if (!def) return;
@@ -428,7 +437,10 @@ export class AudioSystem {
       const dx = wrapDeltaX(this.lx, opts.x);
       const dy = wrapDeltaY(this.ly, opts.y);
       const d = Math.sqrt(dx * dx + dy * dy);
-      const atten = this.attenuation(d);
+      // Caller override beats the def's own range, which beats the global
+      // default — so ONE id can be near-field when it happens ambiently
+      // and full-range when the player caused it.
+      const atten = this.attenuation(d, opts.near ?? def.near, opts.far ?? def.far);
       if (atten <= 0) { this.counts.dropped++; return; } // out of earshot
       g *= atten;
       pan = Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH));
@@ -508,7 +520,7 @@ export class AudioSystem {
         const d = Math.sqrt(dx * dx + dy * dy);
         live.panner.pan.setTargetAtTime(
           Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH)), now, 0.08);
-        live.gain.gain.setTargetAtTime(def.gain * this.attenuation(d), now, 0.08);
+        live.gain.gain.setTargetAtTime(def.gain * this.attenuation(d, def.near, def.far), now, 0.08);
       }
       return;
     }
@@ -519,7 +531,7 @@ export class AudioSystem {
     if (def.positional && opts?.x !== undefined && opts?.y !== undefined) {
       const dx = wrapDeltaX(this.lx, opts.x);
       const dy = wrapDeltaY(this.ly, opts.y);
-      g *= this.attenuation(Math.sqrt(dx * dx + dy * dy));
+      g *= this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far);
       panner = this.ctx.createStereoPanner();
       panner.pan.value = Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH));
     }
@@ -578,12 +590,13 @@ export class AudioSystem {
     return st;
   }
 
-  /** Distance attenuation: full inside NEAR, linear to zero at FAR. */
-  private attenuation(d: number): number {
-    const { NEAR_RADIUS, FAR_RADIUS } = AUDIO_CONSTANTS;
-    if (d <= NEAR_RADIUS) return 1;
-    if (d >= FAR_RADIUS) return 0;
-    return 1 - (d - NEAR_RADIUS) / (FAR_RADIUS - NEAR_RADIUS);
+  /** Distance attenuation: full inside `near`, linear to zero at `far`. */
+  private attenuation(d: number, near?: number, far?: number): number {
+    const n = near ?? AUDIO_CONSTANTS.NEAR_RADIUS;
+    const f = far ?? AUDIO_CONSTANTS.FAR_RADIUS;
+    if (d <= n) return 1;
+    if (d >= f) return 0;
+    return 1 - (d - n) / (f - n);
   }
 
   /** In-place compaction of retired end times (mutate, don't allocate). */
