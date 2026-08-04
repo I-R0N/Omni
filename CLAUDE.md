@@ -1484,6 +1484,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   usually a phone session's first gesture).  Master volume + mute are
   IN-MEMORY only, consistent with the project keeping no state across
   reloads.
+- **Material chatter lives BELOW ~2 kHz, and Q matters as much as pitch.**
+  Sounds that fire in BULK (tile chips, shard breaks, tile snaps, merges)
+  are judged by what a hundred of them sound like, not one — up in the
+  fatiguing band a hundred is a whine however quiet each is.  A HIGH-Q
+  bandpass on noise rings, and ringing is what reads as whining, so
+  lowering Q turns the same filter into a knock.  Materials keep their
+  relative ORDER (glass brightest → metal → rock dullest) so they stay
+  tellable apart.  A headless smoke renders every material voice through
+  an OfflineAudioContext and asserts a dominant-frequency proxy stays
+  under the band AND that the ordering survives — so this is a guarded
+  invariant, not a one-off tuning.
+- **The engine loop IDLES; it does not switch on and off.**
+  `move.thrust` runs continuously while the player is alive and THROTTLE
+  MODULATES it (gain and filter cutoff together, both heavily smoothed) —
+  gating the loop on `throttle > 0` snapped the whole bed on and off with
+  the input and read as jarring.  It stops only on death, pause and dock.
 - **iOS needs three things desktop does not.**  (1) The ring/silent switch
   silences WebAudio, because Safari puts it in the "ambient" session by
   default — the game claims the `playback` session instead, via

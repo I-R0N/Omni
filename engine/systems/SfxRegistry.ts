@@ -270,9 +270,15 @@ function registerImpacts(a: AudioSystem) {
     },
   });
 
-  chip('impact.tile.glass',   { gain: 0.22, dur: 70,  f0: 2400, q: 6,   tonal: 3700, jitter: 0.14 });
+  // Pitches here were lowered ~1.5 octaves and the filter Q cut (playtest:
+  // the originals read as an unpleasant high whine when a material field
+  // chips repeatedly).  A HIGH-Q bandpass on noise is a whine by
+  // construction — Q is what makes it ring rather than knock — so the Q
+  // came down along with the frequency.  Glass stays the BRIGHTEST of the
+  // materials; it just no longer lives up where the ear gets tired.
+  chip('impact.tile.glass',   { gain: 0.22, dur: 80,  f0: 900,  q: 3,   tonal: 1250, jitter: 0.14 });
   chip('impact.tile.rock',    { gain: 0.24, dur: 80,  f0: 2000, f1: 700, type: 'lowpass', tonal: 480, jitter: 0.14 });
-  chip('impact.tile.metal',   { gain: 0.26, dur: 120, f0: 1670, q: 8,   tonal: 1100, jitter: 0.10 });
+  chip('impact.tile.metal',   { gain: 0.26, dur: 165, f0: 520,  q: 3,   tonal: 330,  jitter: 0.10 });
   chip('impact.tile.plastic', { gain: 0.20, dur: 55,  f0: 1400, type: 'lowpass', tonal: 700, jitter: 0.14 });
   chip('impact.tile.nebula',  { gain: 0.16, dur: 190, f0: 900, q: 1.5,  jitter: 0.16 });
 
@@ -363,9 +369,9 @@ function registerDestruction(a: AudioSystem) {
   a.register('destroy.tile.glass', {
     tier: 2, gain: 0.46, poly: 3, minInterval: ms(90), collapse: true, jitter: 0.10, positional: true,
     render: s => Math.max(
-      noise(s, { f0: 5000, type: 'highpass', attack: ms(1), decay: ms(40), gain: 0.5 }),
-      noise(s, { f0: 4000, f1: 6000, type: 'highpass', attack: ms(10), decay: ms(350), gain: 0.32 }),
-      tone(s, { type: 'triangle', f0: 3100, f1: 2400, attack: ms(1), decay: ms(120), gain: 0.18 }),
+      noise(s, { f0: 1400, type: 'bandpass', q: 1.4, attack: ms(1), decay: ms(45), gain: 0.5 }),
+      noise(s, { f0: 1050, f1: 1500, type: 'bandpass', q: 1.6, attack: ms(10), decay: ms(360), gain: 0.32 }),
+      tone(s, { type: 'triangle', f0: 900, f1: 700, attack: ms(1), decay: ms(140), gain: 0.2 }),
     ),
   });
 
@@ -373,7 +379,7 @@ function registerDestruction(a: AudioSystem) {
     tier: 2, gain: 0.44, poly: 3, minInterval: ms(90), collapse: true, jitter: 0.10, positional: true,
     render: s => Math.max(
       tone(s, { f0: 120, f1: 70, attack: ms(2), decay: ms(90), gain: 0.6 }),
-      noise(s, { f0: 3000, f1: 800, type: 'lowpass', attack: ms(8), decay: ms(320), gain: 0.42 }),
+      noise(s, { f0: 1200, f1: 420, type: 'lowpass', attack: ms(8), decay: ms(320), gain: 0.42 }),
     ),
   });
 
@@ -382,10 +388,10 @@ function registerDestruction(a: AudioSystem) {
   a.register('destroy.tile.metal', {
     tier: 2, gain: 0.50, poly: 3, minInterval: ms(110), collapse: true, jitter: 0.08, positional: true,
     render: s => Math.max(
-      tone(s, { type: 'triangle', f0: 220, f1: 190, attack: ms(2), decay: ms(440), gain: 0.4 }),
-      tone(s, { type: 'triangle', f0: 331, f1: 300, attack: ms(2), decay: ms(400), gain: 0.28 }),
-      tone(s, { type: 'triangle', f0: 487, f1: 450, attack: ms(2), decay: ms(360), gain: 0.2 }),
-      noise(s, { f0: 2500, type: 'highpass', attack: ms(1), decay: ms(120), gain: 0.3 }),
+      tone(s, { type: 'triangle', f0: 110, f1: 95,  attack: ms(2), decay: ms(480), gain: 0.45 }),
+      tone(s, { type: 'triangle', f0: 166, f1: 150, attack: ms(2), decay: ms(430), gain: 0.3 }),
+      tone(s, { type: 'triangle', f0: 244, f1: 225, attack: ms(2), decay: ms(380), gain: 0.22 }),
+      noise(s, { f0: 900, f1: 400, type: 'lowpass', attack: ms(1), decay: ms(140), gain: 0.3 }),
     ),
   });
 
@@ -416,10 +422,13 @@ function registerDestruction(a: AudioSystem) {
       },
     });
 
-  shardBreak('destroy.shard.glass',   0.22, 190, 5600, 7000, 'highpass', 1, 4300, 0.14);
-  shardBreak('destroy.shard.rock',    0.22, 180, 3200, 1100, 'lowpass',  1, 170,  0.14);
-  shardBreak('destroy.shard.metal',   0.24, 230, 2600, 2000, 'bandpass', 4, 640,  0.12);
-  shardBreak('destroy.shard.plastic', 0.18, 150, 2600, 1000, 'lowpass',  1, 840,  0.14);
+  // Same lowering as the tiles.  The ORDER is preserved — glass still the
+  // brightest, metal in the middle, rock the dullest — so materials remain
+  // tellable apart; the whole set just moved down.
+  shardBreak('destroy.shard.glass',   0.22, 200, 1250, 1650, 'bandpass', 1.8, 1000, 0.14);
+  shardBreak('destroy.shard.rock',    0.22, 180, 1100, 480,  'lowpass',  1, 150,  0.14);
+  shardBreak('destroy.shard.metal',   0.24, 250, 850,  620,  'bandpass', 2.5, 300,  0.12);
+  shardBreak('destroy.shard.plastic', 0.18, 150, 1100, 520,  'lowpass',  1, 620,  0.14);
   shardBreak('destroy.shard.nebula',  0.12, 270, 1200, 450,  'bandpass', 1.2, 0,   0.18);
 
   // 5.2 Ships.
@@ -553,27 +562,55 @@ function registerDestruction(a: AudioSystem) {
 // ── 6 World, movement, materials ────────────────────────────────────────────
 
 function registerWorld(a: AudioSystem) {
-  // Deliberately BLAND.  This plays for an entire session, so the design
-  // constraint is tolerability, not character (SFX_INVENTORY §6).  Cutoff
-  // and gain track throttle.
+  // The ship's engine, ALWAYS RUNNING while alive.
+  //
+  // The first cut gated this on `throttle > 0`, which snapped the whole
+  // bed on and off with the input and was jarring (playtest).  A real
+  // engine idles: the loop now runs continuously and THROTTLE MODULATES
+  // it, so accelerating swells an existing sound rather than starting a
+  // new one.  Two things move together and both are heavily smoothed —
+  // GAIN (idle floor → full) and filter CUTOFF (dull → open) — because
+  // changing only volume reads as a fader, while changing timbre too
+  // reads as an engine working harder.
+  //
+  // Still deliberately BLAND: it plays for an entire session, so the
+  // design constraint is tolerability, not character (SFX_INVENTORY §6).
   a.registerLoop('move.thrust', {
     tier: 2, gain: 0.22,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0, param } = s;
+      // Idle is a LOW rumble, not a quiet version of full throttle — the
+      // cutoff floor is what keeps a coasting ship from sounding like it
+      // is still burning.
+      const IDLE_GAIN = 0.38;          // fraction of full at zero throttle
+      const CUT_IDLE = 90, CUT_FULL = 850;   // Hz
+      const SMOOTH = 0.22;             // s; long enough that taps don't pump
+      const level  = (p: number) => IDLE_GAIN + (1 - IDLE_GAIN) * p;
+      const cutoff = (p: number) => CUT_IDLE + (CUT_FULL - CUT_IDLE) * p;
+
       const src = ctx.createBufferSource();
       src.buffer = s.noise; src.loop = true;
       const filt = ctx.createBiquadFilter();
       filt.type = 'lowpass'; filt.Q.value = 0.7;
-      const cutoff = (p: number) => 300 + 800 * p;
       filt.frequency.setValueAtTime(cutoff(param), t0);
+      // Sub bed: a constant low sine so the idle has body even with the
+      // noise almost closed off.
       const bed = ctx.createOscillator();
-      bed.type = 'sine'; bed.frequency.value = 40;
-      const bedGain = ctx.createGain(); bedGain.gain.value = 0.25;
-      src.connect(filt); filt.connect(dest);
-      bed.connect(bedGain); bedGain.connect(dest);
+      bed.type = 'sine'; bed.frequency.value = 36;
+      const bedGain = ctx.createGain(); bedGain.gain.value = 0.3;
+      // One throttle-driven gain over BOTH layers.
+      const swell = ctx.createGain();
+      swell.gain.setValueAtTime(level(param), t0);
+
+      src.connect(filt); filt.connect(swell);
+      bed.connect(bedGain); bedGain.connect(swell);
+      swell.connect(dest);
       src.start(t0); bed.start(t0);
       return {
-        set: (p, now) => filt.frequency.setTargetAtTime(cutoff(p), now, 0.06),
+        set: (p, now) => {
+          swell.gain.setTargetAtTime(level(p), now, SMOOTH);
+          filt.frequency.setTargetAtTime(cutoff(p), now, SMOOTH);
+        },
         stop: now => { try { src.stop(now + 0.05); bed.stop(now + 0.05); } catch { /* already stopped */ } },
       };
     },
@@ -593,9 +630,12 @@ function registerWorld(a: AudioSystem) {
   // Crystallisation: a rising granular rush resolving on a soft thunk.
   a.register('move.tilesnap', {
     tier: 3, gain: 0.28, poly: 2, minInterval: ms(200), jitter: 0.10, positional: true,
+    // Metal assembles CONSTANTLY in a metal field, so this fires in bulk —
+    // the original 1 k→3 k rise stacked into a whine.  Lowered to a warm
+    // swell that resolves on the same thunk.
     render: s => Math.max(
-      noise(s, { f0: 1000, f1: 3000, type: 'bandpass', q: 1.5, attack: ms(10), decay: ms(200), gain: 0.4 }),
-      tone(s, { f0: 180, f1: 120, attack: ms(2), decay: ms(60), gain: 0.45, delay: ms(200) }),
+      noise(s, { f0: 380, f1: 820, type: 'bandpass', q: 1.2, attack: ms(10), decay: ms(200), gain: 0.4 }),
+      tone(s, { f0: 130, f1: 90, attack: ms(2), decay: ms(60), gain: 0.45, delay: ms(200) }),
     ),
   });
 

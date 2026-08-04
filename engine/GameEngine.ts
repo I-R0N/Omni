@@ -3185,6 +3185,9 @@ export class GameEngine {
     }
 
     if (this.player.isExploding) {
+        // Cut the engine with the ship — this branch returns early, so the
+        // idle bed would otherwise hum right through the death explosion.
+        this.audio.loop('move.thrust', false);
         // `> 0` is load-bearing, not defensive: the sim keeps running after
         // death now, so without it this branch would re-fire (and re-charge
         // the penalty) on every subsequent step.
@@ -3322,9 +3325,11 @@ export class GameEngine {
     // the same per-second emission count as full throttle, keeping
     // consecutive points (and PATH-shape segments) close together at
     // low throttle instead of stretching out into long choppy strokes.
-    // Engine rumble (SFX_INVENTORY §6): filter cutoff tracks throttle.
-    // Flat rather than positional — it is the player's own ship.
-    this.audio.loop('move.thrust', throttle > 0, { param: Math.min(1, throttle) });
+    // Engine rumble (SFX_INVENTORY §6).  ALWAYS ON while alive — the loop
+    // idles and the throttle swells it, rather than the whole bed snapping
+    // on and off with the input.  Flat rather than positional: it is the
+    // player's own ship.
+    this.audio.loop('move.thrust', true, { param: Math.min(1, throttle) });
 
     if (throttle > 0) {
         // Latch a chain break the first frame thrust resumes.  Stays set

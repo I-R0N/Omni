@@ -67,8 +67,19 @@ first (§3).
 
 **Frequency budget.** Tier 1 mostly lives 200 Hz–4 kHz where it competes
 least. Destruction (tier 2) owns the low end below 200 Hz. Material
-chatter (tier 3) sits above 2 kHz and stays quiet. This is why the
+chatter (tier 3) sits in the low-mids and stays quiet. This is why the
 low-end rows below are deliberately short — a long boom eats the mix.
+
+**Material chatter must not live above ~2 kHz.** The first draft put the
+glass and metal chips at 2.4 kHz and 1.67 kHz with filter Q up at 6–8,
+and playtest was blunt: it whined. Two lessons worth keeping. (1) A
+sound that fires in BULK is judged by what a *hundred* of them sound
+like, not one — and up there, a hundred is a whine no matter how quiet
+each one is. (2) **Q matters as much as frequency**: a high-Q bandpass
+on noise rings, and ringing is what the ear reads as whining. Lowering Q
+turns the same filter into a knock. Materials still keep their relative
+ORDER (glass brightest, metal middle, rock dullest) — the whole set just
+moved down.
 
 ---
 
@@ -155,9 +166,9 @@ almost this whole table. Shield rows come from `PhysicsSystem`.
 |---|---|---|---|---|---|---|---|---|---|
 | `impact.hull.enemy` | `handleProjectileHit`, `EntityType.ENEMY` | 2 | 90 | Sharp metallic tick with a tiny spark fizz. Reads as "connected". | 1.6 kHz click + noise HP 3 kHz; 1→75 | pitch ±12% **(required — the most-fired sound in the game)** | 6, ≥30 ms **+gain** | 0.34 | world |
 | `impact.hull.player` | `handleProjectileHit`, `EntityType.PLAYER` | 1 | 170 | Duller, closer, more alarming than the enemy version — a body blow on your own hull, with a hint of internal ring. | 240 Hz thud 1→110 + 900 Hz ring 2→150 | pitch ±6% | 3, ≥90 ms | 0.60 | world |
-| `impact.tile.glass` | `handleProjectileHit`, `STRUCTURE`, `glass-*` | 3 | 80 | Bright glassy tink. Crystalline, no body. | 2.4 kHz + 3.7 kHz partials; 1→70 | pitch ±14% | 5, ≥25 ms **+gain** | 0.22 | world |
+| `impact.tile.glass` | `handleProjectileHit`, `STRUCTURE`, `glass-*` | 3 | 80 | Glassy tink — the brightest of the materials, but a *knock* rather than a ring. | 900 Hz BP Q3 + 1.25 kHz partial; 1→80 | pitch ±14% | 5, ≥25 ms **+gain** | 0.22 | world |
 | `impact.tile.rock` | same, `rock-*` | 3 | 90 | Dry stony knock with a dust rasp. | 480 Hz knock + noise LP 2 kHz; 1→80 | pitch ±14% | 5, ≥25 ms **+gain** | 0.24 | world |
-| `impact.tile.metal` | same, `metal-*` | 3 | 130 | Ringing clang with a short metallic tail. The most tonal of the material hits. | 1.1 kHz + 1.67 kHz inharmonic pair; 1→120 | pitch ±10% | 4, ≥30 ms **+gain** | 0.26 | world |
+| `impact.tile.metal` | same, `metal-*` | 3 | 165 | Low metallic clonk with a short hum. The most tonal of the material hits — but a LOW tone. | 520 Hz BP Q3 + 330 Hz partial; 1→165 | pitch ±10% | 4, ≥30 ms **+gain** | 0.26 | world |
 | `impact.tile.plastic` | same, `plastic-*` | 3 | 70 | Muted plasticky tock. Deadened, no ring at all. | 700 Hz square LP 1.4 kHz; 1→55 | pitch ±14% | 5, ≥25 ms **+gain** | 0.20 | world |
 | `impact.tile.nebula` | same, `nebula-*` | 3 | 200 | Soft breathy poof, almost pitchless. Gas, not matter. | noise BP 900 Hz Q 1.5; 15→190 | pitch ±16% | 4, ≥40 ms **+gain** | 0.16 | world |
 | `impact.shield.absorb` | `PhysicsSystem` projectile path, damage taken into `shield` (any entity) | 1 | 150 | Energy splash — a filtered *whoosh* with a bright rim. Clearly *not* a hull hit; the player must be able to tell shield from health by ear. | noise BP 1.8 kHz sweeping up; 2→130 + 700 Hz sine 1→90 | pitch ±8% | 3, ≥60 ms | 0.48 | world |
@@ -185,14 +196,14 @@ dispatches by entity class and shard variant.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `destroy.tile.glass` | `handleEntityDeath`, `glass-tile` | 2 | 380 | Shatter — a bright spray of crystalline fragments over a short crack. The most satisfying material break; give it the most sparkle. | crack 3 kHz 1→40, then noise HP 4 kHz granular tail 10→360 | pitch ±10%, grain seed | 3, ≥90 ms **+gain** | 0.46 | world |
+| `destroy.tile.glass` | `handleEntityDeath`, `glass-tile` | 2 | 380 | Shatter — a spray of crystalline fragments over a short crack. Still the most sparkle of any material, pitched down out of the fatiguing band. | crack 2 kHz BP 1→45, then noise BP 1.5→2.4 kHz granular tail 10→360 | pitch ±10%, grain seed | 3, ≥90 ms **+gain** | 0.46 | world |
 | `destroy.tile.rock` | same, `rock-tile` | 2 | 340 | Dry crumble. Stone cracking then gravel falling. Body, no ring. | 120 Hz crack 2→90 + noise LP 3 kHz decaying 8→320 | pitch ±10% | 3, ≥90 ms **+gain** | 0.44 | world |
-| `destroy.tile.metal` | same, `metal-tile` | 2 | 460 | Structural failure — a bending groan into a clanging break, with an inharmonic tail that rings on. | 220/331/487 Hz inharmonic cluster 2→440 + noise burst 1→120 | pitch ±8% | 3, ≥110 ms **+gain** | 0.50 | world |
+| `destroy.tile.metal` | same, `metal-tile` | 2 | 480 | Structural failure — a bending groan into a deep clanging break, with an inharmonic tail that hums on. | 110/166/244 Hz inharmonic cluster 2→480 + LP noise burst 1→140 | pitch ±8% | 3, ≥110 ms **+gain** | 0.50 | world |
 | `destroy.tile.plastic` | same, `plastic-tile` | 2 | 260 | Snapping crack — brittle, deadened, no tail. | 600 Hz snap LP 2 kHz; 1→230 | pitch ±12% | 3, ≥80 ms **+gain** | 0.38 | world |
 | `destroy.tile.nebula` | same, `nebula-tile` | 3 | 500 | Dissipating gas sigh. Airy, pitchless, slow. Fires very often in nebula fields — keep it near-subliminal. | noise BP 600 Hz sweeping down; 40→480 | pitch ±16% | 3, ≥140 ms **+gain** | 0.16 | world |
-| `destroy.shard.glass` | same, `glass-shard` | 3 | 200 | The tile sound, smaller and thinner. A tinkle rather than a shatter. | as `destroy.tile.glass` ×0.5 dur, +40% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
+| `destroy.shard.glass` | same, `glass-shard` | 3 | 200 | The tile sound, smaller and thinner. A tinkle rather than a shatter. | noise BP 2.1→2.7 kHz + 1.5 kHz partial; 2→200 | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
 | `destroy.shard.rock` | same, `rock-shard` | 3 | 190 | Small stone crack. | as tile ×0.5 dur, +35% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.22 | world |
-| `destroy.shard.metal` | same, `metal-shard` | 3 | 240 | A small clang with a brief ring. | as tile ×0.5 dur, +35% pitch | pitch ±12% | 4, ≥50 ms **+gain** | 0.24 | world |
+| `destroy.shard.metal` | same, `metal-shard` | 3 | 250 | A small clonk with a brief hum. | noise BP 850→620 Hz Q2.5 + 300 Hz partial; 2→250 | pitch ±12% | 4, ≥50 ms **+gain** | 0.24 | world |
 | `destroy.shard.plastic` | same, `plastic-shard` | 3 | 160 | Tiny dead snap. | as tile ×0.55 dur, +40% pitch | pitch ±14% | 4, ≥50 ms **+gain** | 0.18 | world |
 | `destroy.shard.nebula` | same, `nebula-shard` | 3 | 280 | Faint puff. | as tile ×0.5 dur | pitch ±18% | 4, ≥70 ms **+gain** | 0.12 | world |
 
@@ -224,10 +235,10 @@ dispatches by entity class and shard variant.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `move.thrust` | `updateGameLogic`, `throttle > 0`; stops at `throttle === 0` | 2 | **L** | Continuous engine rumble. Filtered noise bed whose cutoff and gain track throttle, plus a quiet low sine for weight. Must be *bland* — it plays constantly and any character in it becomes torture within five minutes. | noise LP 300 Hz→1.1 kHz tracked to throttle; 40 Hz sine bed; gain ramp 120 ms both ways | none (continuous) | 1 (singleton) | 0.22 | flat |
+| `move.thrust` | `updateGameLogic`, ALWAYS ON while alive; stops on death / pause / dock | 2 | **L** | Continuous engine rumble that **idles rather than switching on**. Throttle swells an already-running bed — gating the whole loop on `throttle > 0` snapped on and off with the input and read as jarring. Gain *and* cutoff move together (volume alone reads as a fader; timbre too reads as an engine working harder), both heavily smoothed. Must be *bland* — it plays constantly and any character in it becomes torture within five minutes. | noise LP 90 Hz (idle) → 850 Hz (full) + 36 Hz sine bed; gain 0.38→1.0 of mix; both `setTargetAtTime` τ = 0.22 s | none (continuous) | 1 (singleton) | 0.22 | flat |
 | `move.dent` | `DropSystem.spawnDentShard` (plastic / metal / rock dent) | 3 | 140 | A single deforming knock. Softer than a break — nothing was destroyed. | 260 Hz LP 900 Hz; 2→120 | pitch ±14% | 4, ≥60 ms **+gain** | 0.20 | world |
 | `move.dent.recover` | `ShardSystem` plastic dent snap-back | 3 | 180 | Reverse of the dent — a rubbery *boink* as the shape springs back. | 200→320 Hz up-glide; 3→160 | pitch ±14% | 3, ≥100 ms | 0.16 | world |
-| `move.tilesnap` | `ShardSystem` shard→tile snap (`TILE_SNAP` path) | 3 | 260 | Crystallisation — small fragments locking into a solid. A rising granular rush that resolves on a soft thunk. | noise 1 k→3 kHz rush 10→200 + 180 Hz thunk at 200 ms | pitch ±10% | 2, ≥200 ms | 0.28 | world |
+| `move.tilesnap` | `ShardSystem` shard→tile snap (`TILE_SNAP` path) | 3 | 260 | Crystallisation — fragments locking into a solid. A warm rising swell resolving on a soft thunk. Metal assembles constantly, so this fires in BULK: it must not stack into a whine. | noise BP 380→820 Hz swell 10→200 + 130 Hz thunk at 200 ms | pitch ±10% | 2, ≥200 ms | 0.28 | world |
 | `move.merge` | `ShardSystem.composeEntities` (bond forms) | 3 | 150 | Two things becoming one — a short gluey suck with a soft landing. Very quiet; this fires all the time in a shard field. | 400→180 Hz glide, LP 1.2 kHz; 5→130 | pitch ±16% | 3, ≥120 ms **+gain** | 0.12 | world |
 | `move.regenpop` | `ShardSystem` regen completion (`regenPopTimer` set) | 3 | 200 | A gentle materialising pop — something came back. Friendly, not alarming. | 300→700 Hz up-blip + soft noise; 3→170 | pitch ±12% | 3, ≥120 ms **+gain** | 0.18 | world |
 
