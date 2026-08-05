@@ -1333,7 +1333,8 @@ export class GameEngine {
     // Physics-side SFX sink (shield absorb/deflect/break, armor chip,
     // crashes).  One generic hook so PhysicsSystem never imports audio
     // state — see PhysicsSystem.sfx.
-    this.physics.sfx = (id, x, y, gain) => this.audio.play(id, { x, y, gain });
+    this.physics.sfx = (id, x, y, opts) =>
+        this.audio.play(id, { x, y, gain: opts?.gain, pitch: opts?.pitch });
     this.ai = new AISystem();
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();

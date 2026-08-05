@@ -357,6 +357,22 @@ function registerImpacts(a: AudioSystem) {
     ),
   });
 
+  // A loose rock knocking off the hull — the player's most frequent
+  // physical contact with the world, and previously silent below the
+  // wall-break speed.  Light, hollow and SHORT: it is a nudge, not a
+  // collision.  The caller pitches it by shard size (small knocks higher)
+  // and gains it by impact speed, so a drifting pebble and a boulder slam
+  // are the same voice at different ends of its range rather than two
+  // sounds — one id keeps a busy field coherent.
+  a.register('crash.player.shard', {
+    tier: 1, gain: 0.34, poly: 3, minInterval: ms(70), collapse: true,
+    jitter: 0.12, positional: true,
+    render: s => Math.max(
+      tone(s, { type: 'triangle', f0: 280, f1: 170, attack: ms(1), decay: ms(120), gain: 0.5 }),
+      noise(s, { f0: 900, f1: 380, type: 'lowpass', attack: ms(1), decay: ms(90), gain: 0.3 }),
+    ),
+  });
+
   a.register('crash.player.enemy', {
     tier: 1, gain: 0.52, poly: 2, minInterval: ms(140), jitter: 0.08, positional: true,
     render: s => Math.max(

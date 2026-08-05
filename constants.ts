@@ -1592,6 +1592,12 @@ export const STRUCTURE_CONSTANTS = {
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
   CRASH_VELOCITY_THRESHOLD: 4, // Player speed needed to break through
+  // AUDIO ONLY (no gameplay effect): the relative speed above which player
+  // contact with a MOBILE SHARD makes a sound.  Far below the break
+  // threshold above, because a loose rock knocking off the hull is an
+  // audible event long before it is a destructive one — gating shard
+  // contact at the break speed made ordinary bumping silent.  PROVISIONAL.
+  SHARD_CONTACT_SPEED: 1.2,
   // Fraction of velocity the player KEEPS per breakable-tile crash-
   // through.  At 0.5 a 3-tile plow retained ~12 % of entry speed and
   // read as bouncing off the cluster; 0.65 retains ~27 % and reads as

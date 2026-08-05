@@ -1507,6 +1507,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   POI of their kind at ANY distance so volume swells on approach, and
   `AudioSystem.loop` treats an out-of-earshot positional loop as OFF so a
   far POI holds no oscillators.
+- **Player contact is split by WHAT was hit, at two different speeds.**
+  `crash.player.tile` (static wall) fires above
+  `STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD`; `crash.player.shard`
+  (mobile shard) fires above the much lower `SHARD_CONTACT_SPEED`,
+  because a loose rock knocking off the hull is audible long before it is
+  destructive — sharing one voice at the break threshold made ordinary
+  shard bumping SILENT and hard shard hits sound like masonry.  The shard
+  voice is pitched by the shard's SIZE and gained by impact speed at the
+  call site (`PhysicsSystem.sfx` takes `{gain, pitch}`), so one id spans
+  pebble-tap to boulder-slam.
 - **Ambient shard chatter is NEAR-FIELD; the player's own shards are not.**
   A dense field collides/merges/snaps constantly, so `destroy.shard.*`,
   `move.tilesnap`, `move.merge` and `crash.shard.tile` carry only to

@@ -1121,7 +1121,8 @@ export class PhysicsSystem {
    *  context without audio.  A single generic hook rather than one
    *  callback per sound, so adding a physics-side sound is a call, not a
    *  signature change.  PhysicsSystem stays free of audio state. */
-  public sfx: ((id: string, x: number, y: number, gain?: number) => void) | null = null;
+  public sfx: ((id: string, x: number, y: number,
+                opts?: { gain?: number; pitch?: number }) => void) | null = null;
 
   public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
       const half = target.shieldArcHalfWidth;
@@ -3202,11 +3203,33 @@ export class PhysicsSystem {
           const impactSpeed = Math.abs(velAlongNormal);
           const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
-          if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
+          // CONTACT AUDIO, split by what was hit.  A loose shard bouncing
+          // off the hull is a completely different event from flying into
+          // a wall, and it is audible far BELOW the speed needed to break
+          // anything — so it gets its own voice and its own, much lower
+          // threshold.  Previously both shared `crash.player.tile` gated at
+          // CRASH_VELOCITY_THRESHOLD, which made light shard contact silent
+          // and hard shard contact sound like masonry.
+          if (structure.mass !== Infinity) {
+              if (impactSpeed > STRUCTURE_CONSTANTS.SHARD_CONTACT_SPEED) {
+                  const span = Math.max(1, STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 2);
+                  // Smaller shards knock higher; bigger ones thud.  Size is
+                  // the perceptual cue here, not mass.
+                  const size = Math.max(6, structure.size.x);
+                  this.sfx?.('crash.player.shard', player.position.x, player.position.y, {
+                      gain: Math.max(0.25, Math.min(1, impactSpeed / span)),
+                      pitch: Math.max(0.7, Math.min(1.6, Math.sqrt(38 / size))),
+                  });
+              }
+          } else if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
               // Grinding, not explosive — and scaled by how hard you hit,
               // so a graze and a full-speed wall are different sounds.
-              this.sfx?.('crash.player.tile', player.position.x, player.position.y,
-                         Math.min(1, impactSpeed / (STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 3)));
+              this.sfx?.('crash.player.tile', player.position.x, player.position.y, {
+                  gain: Math.min(1, impactSpeed / (STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 3)),
+              });
+          }
+
+          if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
               // Stamp the pre-retention crash velocity so the death
               // pipeline (ShardSystem.shatter / spawnGlassShards)
               // scatters debris along the player's heading — same
