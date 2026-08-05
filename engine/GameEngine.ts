@@ -4024,27 +4024,37 @@ export class GameEngine {
 
     let station: GameEntity | null = null;
     let stationD2 = Infinity;
+    // Nearest station at ANY distance — drives the presence loop, which
+    // should swell on approach rather than switch on at the dock range.
+    let nearestStationAny: GameEntity | null = null;
+    let nearestStationAnyD2 = Infinity;
     const dockR2 = STATION_CONSTANTS.DOCK_RANGE * STATION_CONSTANTS.DOCK_RANGE;
     for (let i = 0; i < this.stations.length; i++) {
         const s = this.stations[i];
         s.stationDockReady = false;
-        if (!s.active || blocked) continue;
+        if (!s.active) continue;
         const dx = wrapDeltaX(s.position.x, this.player.position.x);
         const dy = wrapDeltaY(s.position.y, this.player.position.y);
         const d2 = dx * dx + dy * dy;
+        if (d2 < nearestStationAnyD2) { nearestStationAny = s; nearestStationAnyD2 = d2; }
+        if (blocked) continue;
         if (d2 <= dockR2 && d2 < stationD2) { station = s; stationD2 = d2; }
     }
 
     let portal: GameEntity | null = null;
     let portalD2 = Infinity;
+    let nearestPortalAny: GameEntity | null = null;
+    let nearestPortalAnyD2 = Infinity;
     const useR2 = PORTAL_CONSTANTS.USE_RANGE * PORTAL_CONSTANTS.USE_RANGE;
     for (let i = 0; i < this.portals.length; i++) {
         const p = this.portals[i];
         p.portalReady = false;
-        if (!p.active || blocked) continue;
+        if (!p.active) continue;
         const dx = wrapDeltaX(p.position.x, this.player.position.x);
         const dy = wrapDeltaY(p.position.y, this.player.position.y);
         const d2 = dx * dx + dy * dy;
+        if (d2 < nearestPortalAnyD2) { nearestPortalAny = p; nearestPortalAnyD2 = d2; }
+        if (blocked) continue;
         if (d2 <= useR2 && d2 < portalD2) { portal = p; portalD2 = d2; }
     }
 
@@ -4055,10 +4065,21 @@ export class GameEngine {
     }
     this.nearestStation = station;
     this.nearestPortal = portal;
-    // The rift's presence, audible: a slow beating hum whenever one is in
-    // range.  Tells the player they can travel without looking down.
-    this.audio.loop('portal.idle', portal !== null,
-                    portal ? { x: portal.position.x, y: portal.position.y } : undefined);
+    // POI presence loops.  Driven by the NEAREST portal / station at any
+    // distance, so the volume swells as the player approaches instead of
+    // snapping on at the interaction range; the per-sound radii do the
+    // falloff.  One loop per id, so with four rifts on the Overworld the
+    // nearest one owns the voice.  Deliberately different characters —
+    // the portal is a tonal hum, the station a broadband bed — so the two
+    // are tellable apart without looking.
+    this.audio.loop('portal.idle', nearestPortalAny !== null,
+                    nearestPortalAny
+                      ? { x: nearestPortalAny.position.x, y: nearestPortalAny.position.y }
+                      : undefined);
+    this.audio.loop('poi.station.idle', nearestStationAny !== null,
+                    nearestStationAny
+                      ? { x: nearestStationAny.position.x, y: nearestStationAny.position.y }
+                      : undefined);
     this.dockInRange = station !== null;
     if (station) station.stationDockReady = true;
     if (portal) portal.portalReady = true;

@@ -2968,6 +2968,15 @@ export const AUDIO_CONSTANTS = {
   // rule for ambient events, not for the player's own.
   SHARD_NEAR_RADIUS: 240,
   SHARD_FAR_RADIUS: 850,
+  // POI presence loops.  Both swell with proximity rather than switching
+  // on at the interaction range — the loop starts from the NEAREST POI at
+  // any distance and the attenuation does the work, so walking toward a
+  // station or a rift is an audible approach.  The station carries further
+  // because it is a much larger object.
+  PORTAL_NEAR_RADIUS: 300,
+  PORTAL_FAR_RADIUS: 1600,
+  STATION_NEAR_RADIUS: 420,
+  STATION_FAR_RADIUS: 2200,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 } as const;
 

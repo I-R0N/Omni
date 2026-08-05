@@ -499,7 +499,19 @@ export class AudioSystem {
     if (!def) return;
     const live = this.loops.get(id);
 
-    if (!on || this._muted || !this._active) {
+    // A positional loop that is out of earshot is treated as OFF rather
+    // than run at zero gain: a presence loop is driven from the nearest POI
+    // at any distance, so without this a station on the far side of the map
+    // would hold oscillators forever for nothing.
+    let outOfEarshot = false;
+    if (on && def.positional && opts?.x !== undefined && opts?.y !== undefined) {
+      const dx = wrapDeltaX(this.lx, opts.x);
+      const dy = wrapDeltaY(this.ly, opts.y);
+      outOfEarshot =
+        this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far) <= 0;
+    }
+
+    if (!on || outOfEarshot || this._muted || !this._active) {
       if (live && this.ctx) {
         live.voice.stop(this.ctx.currentTime);
         try { live.gain.disconnect(); } catch { /* already gone */ }

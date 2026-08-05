@@ -1495,6 +1495,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   an OfflineAudioContext and asserts a dominant-frequency proxy stays
   under the band AND that the ordering survives — so this is a guarded
   invariant, not a one-off tuning.
+- **Sustained loops are judged far more harshly than one-shots, and the
+  POI beds are voiced APART.**  Every "whine" reported in playtest was a
+  LOOP or a bulk-fired chip, never a single event.  So every loop is low:
+  `portal.idle` is a TONAL 55 Hz beat, `poi.station.idle` a BROADBAND
+  ~300 Hz noise bed, `move.thrust` a 36 Hz rumble.  Portal and station are
+  deliberately opposite in CHARACTER (tonal vs broadband) rather than just
+  different in pitch, so the two POIs are tellable apart without looking;
+  a headless smoke measures both the dominant frequency and the
+  zero-crossing regularity to hold that.  Both are driven by the NEAREST
+  POI of their kind at ANY distance so volume swells on approach, and
+  `AudioSystem.loop` treats an out-of-earshot positional loop as OFF so a
+  far POI holds no oscillators.
 - **Ambient shard chatter is NEAR-FIELD; the player's own shards are not.**
   A dense field collides/merges/snaps constantly, so `destroy.shard.*`,
   `move.tilesnap`, `move.merge` and `crash.shard.tile` carry only to

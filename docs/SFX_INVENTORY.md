@@ -114,6 +114,15 @@ delta from the camera (`wrapDeltaX`) and attenuate by torus-wrapped
 distance. Straight `a.x - b.x` gives a hard pan flip at the seam, so
 distance and pan both go through the wrap helpers, no exceptions.
 
+**Sustained loops are judged far more harshly than one-shots.** Every
+"whine" reported in playtest was a LOOP or a bulk-fired chip, never a
+single event. A tone that is pleasant once becomes intolerable held. So
+every `L` row here is low — the portal at 55 Hz, the station at ~300 Hz
+broadband, the engine at 36 Hz — and a headless smoke renders each loop
+through an `OfflineAudioContext` and asserts none of them sits in the
+whine band. The snitch is the brightest of them by design and is still
+capped well below where the complaints came from.
+
 **Ambient events are NEAR-FIELD; the player's own are not.** A dense shard
 field generates constant shard-on-shard collisions, merges and snaps. At
 the normal radius (2600) the player hears a running commentary on physics
@@ -293,7 +302,8 @@ All `flat` — these fire with the sim frozen and a full-screen UI up.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `portal.idle` | `updateInteractables`, `portalReady` true; stops when it clears | 2 | **L** | A low shimmering hum with slow beating between two close partials. The audible half of the rift's presence — it tells the player they're in range without looking. | 110 Hz + 112.5 Hz sines (2.5 Hz beat) + noise BP 3 kHz shimmer; gain ramp 300 ms | none | 1 (singleton) | 0.20 | world |
+| `portal.idle` | `updateInteractables`, driven by the NEAREST portal at any distance; stops beyond earshot | 2 | **L** | A LOW tonal hum that throbs. Two detuned sines beating slowly, plus a breath of heavily-lowpassed air — motion without brightness. Deliberately TONAL, against the station's broadband bed, so the two POIs are tellable apart by ear. **The first draft layered a 3 kHz Q3 noise shimmer on top and that was the whine players reported** — a ringing noise band held continuously is the most fatiguing thing audio can do. | 55 + 56.5 Hz sines (1.5 Hz beat) + 110 Hz partial; noise LP 220 Hz at low gain with a 0.13 Hz cutoff drift | none | 1 (singleton) | 0.24 | world, 300/1600 |
+| `poi.station.idle` | `updateInteractables`, driven by the NEAREST station at any distance; stops beyond earshot | 2 | **L** | LOW WHITE NOISE — a big machine idling. Broadband and pitchless, with a slow cutoff drift so it moves rather than sitting as flat hiss, and a faint mains hum underneath so it reads as machinery rather than weather. The deliberate opposite of the portal's tonal hum. | noise LP 300 Hz (±90 Hz drift at 0.09 Hz) + 48 Hz hum | none | 1 (singleton) | 0.20 | world, 420/2200 |
 | `portal.transit` | `GameEngine.transitionToMap` / `openPortal` on an actual travel | 1 | 1100 | Being pulled through: a rising whoosh that snaps into a brief silence, then a soft arrival bloom on the far side. Handles the whole cut — no separate arrival cue needed at the trigger site. | 200→3 kHz noise sweep 0→600; 80 ms gap; 400 Hz pad bloom 100→400 | none | 1 (singleton) | 0.68 | flat |
 | `portal.open` | `openPortal` when a roamer arrives/leaves (dragon, rival) | 2 | 800 | A rift tearing open at a distance — the transit sound heard from outside, shorter and darker. | 150→1.2 kHz sweep 10→400 + 70 Hz rumble 20→700 | pitch ±6% | 2, ≥400 ms | 0.44 | world |
 
@@ -314,7 +324,7 @@ All `flat` — these fire with the sim frozen and a full-screen UI up.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `snitch.near` | `updateSnitch`, snitch within ~1200 units; stops beyond | 2 | **L** | A high, delicate, wandering shimmer. Slow random pitch drift so it feels alive and slightly out of reach. Pure carrot. | 2.6–3.4 kHz sine, LFO drift 0.3 Hz; noise sparkle 6 kHz | continuous drift | 1 (singleton) | 0.18 | world |
+| `snitch.near` | `updateSnitch`, snitch within ~1200 units; stops beyond | 2 | **L** | A delicate, wandering shimmer — still the brightest SUSTAINED sound in the game, because it is a carrot and should glitter, but pitched down out of the fatiguing band. A tone held indefinitely is judged far more harshly than the same tone in a one-shot. | 0.9–1.2 kHz sine, LFO drift 0.25 Hz | continuous drift | 1 (singleton) | 0.16 | world |
 | `snitch.dart` | `updateSnitch` burst/panic dart begins | 2 | 240 | A quick whipping *swish* — it just bolted. | noise BP 2 k→5 kHz sweep; 2→220 | pitch ±10% | 2, ≥180 ms | 0.30 | world |
 | `snitch.catch` | `GameEngine.catchSnitch` | 1 | 1500 | The best sound in the game. A crystalline capture chime blooming into a bright rising cascade as the board clears and salvage sprays. | 1568 Hz strike 1→200; cascade 784/1047/1319/1568/2093 Hz 80 ms apart; shimmer bed 200→1400 | none | 1 (singleton, ducks tier 2/3) | 0.95 | flat |
 | `dragon.arrive` | `GameEngine.spawnDragon` / `openDragonPortal` | 1 | 1600 | A distant, enormous roar through a tearing rift. Should make the player look up. | 60→110 Hz growl with formant sweep 100→1200; rift noise 200→1000 | none | 1 (singleton) | 0.72 | world |

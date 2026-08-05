@@ -792,24 +792,89 @@ function registerPickupsAndPOI(a: AudioSystem) {
 function registerPortalsAndWaves(a: AudioSystem) {
   // The audible half of the rift's presence: two close partials beating
   // slowly.  Tells the player they are in range without looking.
+  // A LOW hum, and nothing above it.
+  //
+  // The first draft layered a 3 kHz bandpass (Q3) "shimmer" over the low
+  // partials, and playtest identified it as the whine — the same mistake
+  // as the material chips: a high-Q bandpass on noise RINGS, and a ringing
+  // noise band held continuously is the most fatiguing thing audio can do.
+  // The hum was always underneath; it just could not be heard past the
+  // shimmer.  What carries the "rift" character now is the BEAT between
+  // two detuned low sines (a slow 1.5 Hz throb) plus a breath of
+  // heavily-lowpassed air — motion without brightness.
   a.registerLoop('portal.idle', {
-    tier: 2, gain: 0.20, positional: true,
+    tier: 2, gain: 0.24, positional: true,
+    near: AUDIO_CONSTANTS.PORTAL_NEAR_RADIUS,
+    far:  AUDIO_CONSTANTS.PORTAL_FAR_RADIUS,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0 } = s;
-      const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 110;
-      const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 112.5;
-      const g = ctx.createGain(); g.gain.value = 0.35;
-      const shimmer = ctx.createBufferSource();
-      shimmer.buffer = s.noise; shimmer.loop = true;
-      const sf = ctx.createBiquadFilter();
-      sf.type = 'bandpass'; sf.frequency.value = 3000; sf.Q.value = 3;
-      const sg = ctx.createGain(); sg.gain.value = 0.08;
+      // 55 / 56.5 Hz — an octave below the old pair, beating at 1.5 Hz.
+      const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55;
+      const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 56.5;
+      // One quiet partial for body, still well below the whine band.
+      const o3 = ctx.createOscillator(); o3.type = 'sine'; o3.frequency.value = 110;
+      const g  = ctx.createGain(); g.gain.value = 0.55;
+      const g3 = ctx.createGain(); g3.gain.value = 0.16;
+      // Air, not shimmer: lowpassed hard, and a slow LFO on the cutoff so
+      // it breathes instead of sitting still.
+      const air = ctx.createBufferSource();
+      air.buffer = s.noise; air.loop = true;
+      const af = ctx.createBiquadFilter();
+      af.type = 'lowpass'; af.frequency.value = 220; af.Q.value = 0.7;
+      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.13;
+      const lfoDepth = ctx.createGain(); lfoDepth.gain.value = 70;
+      lfo.connect(lfoDepth); lfoDepth.connect(af.frequency);
+      // Kept deliberately faint: this is a seasoning on a TONAL sound, and
+      // at the first setting the portal measured as broadband as the
+      // station, which defeats the point of giving them different voices.
+      const ag = ctx.createGain(); ag.gain.value = 0.07;
       o1.connect(g); o2.connect(g); g.connect(dest);
-      shimmer.connect(sf); sf.connect(sg); sg.connect(dest);
-      o1.start(t0); o2.start(t0); shimmer.start(t0);
+      o3.connect(g3); g3.connect(dest);
+      air.connect(af); af.connect(ag); ag.connect(dest);
+      o1.start(t0); o2.start(t0); o3.start(t0); air.start(t0); lfo.start(t0);
       return {
         stop: now => {
-          try { o1.stop(now + 0.12); o2.stop(now + 0.12); shimmer.stop(now + 0.12); }
+          try {
+            o1.stop(now + 0.12); o2.stop(now + 0.12); o3.stop(now + 0.12);
+            air.stop(now + 0.12); lfo.stop(now + 0.12);
+          } catch { /* already stopped */ }
+        },
+      };
+    },
+  });
+
+  // Station presence: LOW WHITE NOISE — the sound of a big machine idling.
+  // Deliberately the opposite character to the portal, so the two POIs are
+  // tellable apart by ear: the portal is TONAL (beating sines, no noise
+  // above 220 Hz), the station is BROADBAND (noise-led, no pitch centre).
+  // Both are low, both swell with proximity, neither competes with combat.
+  a.registerLoop('poi.station.idle', {
+    tier: 2, gain: 0.20, positional: true,
+    near: AUDIO_CONSTANTS.STATION_NEAR_RADIUS,
+    far:  AUDIO_CONSTANTS.STATION_FAR_RADIUS,
+    start: (s: SynthCtx): LoopVoice => {
+      const { ctx, dest, t0 } = s;
+      const src = ctx.createBufferSource();
+      src.buffer = s.noise; src.loop = true;
+      // Lowpassed to a dull rush — "white noise" in character, but with the
+      // top taken off so it can be held indefinitely without fatigue.
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 300; lp.Q.value = 0.6;
+      // A second, even duller layer with a slow cutoff drift gives the bed
+      // some movement so it doesn't read as a flat hiss.
+      const drift = ctx.createOscillator(); drift.type = 'sine'; drift.frequency.value = 0.09;
+      const driftDepth = ctx.createGain(); driftDepth.gain.value = 90;
+      drift.connect(driftDepth); driftDepth.connect(lp.frequency);
+      // Faint mains-style hum under it — machinery, not weather.
+      const hum = ctx.createOscillator(); hum.type = 'sine'; hum.frequency.value = 48;
+      const humGain = ctx.createGain(); humGain.gain.value = 0.18;
+      const g = ctx.createGain(); g.gain.value = 0.5;
+      src.connect(lp); lp.connect(g); g.connect(dest);
+      hum.connect(humGain); humGain.connect(dest);
+      src.start(t0); drift.start(t0); hum.start(t0);
+      return {
+        stop: now => {
+          try { src.stop(now + 0.12); drift.stop(now + 0.12); hum.stop(now + 0.12); }
           catch { /* already stopped */ }
         },
       };
@@ -886,13 +951,17 @@ function registerPortalsAndWaves(a: AudioSystem) {
 function registerRoamers(a: AudioSystem) {
   // High, delicate, wandering — alive and slightly out of reach.  Pure
   // carrot.
+  // Lowered out of the fatiguing band along with everything else that is
+  // HELD.  It is still the brightest sustained sound in the game — it is a
+  // carrot and should glitter — but a 3 kHz sine held indefinitely is the
+  // exact shape of complaint the portal and the materials produced.
   a.registerLoop('snitch.near', {
-    tier: 2, gain: 0.18, positional: true,
+    tier: 2, gain: 0.16, positional: true,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0 } = s;
-      const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 3000;
-      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.3;
-      const lfoGain = ctx.createGain(); lfoGain.gain.value = 400;
+      const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 1050;
+      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.25;
+      const lfoGain = ctx.createGain(); lfoGain.gain.value = 160;
       lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
       const g = ctx.createGain(); g.gain.value = 0.3;
       osc.connect(g); g.connect(dest);
