@@ -1794,7 +1794,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   Respawn
                 </button>
                 <p className="text-slate-500 text-[10px] text-center -mt-1">
-                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept; the wreck cost you {Math.round(100 * (rs.creditsLost / Math.max(1, rs.creditsLost + rs.credits)))}% of your unspent Salvage.
+                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept
+                  {rs.creditsLost > 0
+                    ? `; the wreck cost you ◈${rs.creditsLost.toLocaleString()} of your unspent Salvage${rs.credits === 0 ? ' — all of it' : ''}.`
+                    : '.'}
                 </p>
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <button

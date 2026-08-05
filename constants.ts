@@ -2909,6 +2909,15 @@ export const SALVAGE_CONSTANTS = {
   // tuning pass (roadmap step 6) will design.  Money already SPENT on modules
   // is untouched: the penalty taxes hoarding, not investment.
   DEATH_PENALTY_FRACTION: 0.25,
+  // ...and a FLOOR, so death still costs something at a low balance where a
+  // percentage rounds to pocket change.  The charge is
+  //   min(balance, max(fraction × balance, MIN))
+  // — whichever of the two is higher, but never more than the player has, so
+  // it can bring them to zero and never below.  12 500 ≈ 12–13 salvage drops
+  // (CREDITS_PER_DROP 1000), i.e. roughly two waves of combat income, and it
+  // is the binding term below a 50 000 balance.  PROVISIONAL like the
+  // fraction: both are placeholders for the economy tuning pass (step 6).
+  DEATH_PENALTY_MIN: 12500,
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)

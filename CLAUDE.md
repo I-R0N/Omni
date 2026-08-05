@@ -168,13 +168,16 @@ only honored from the main menu; mid-game requires `restartGame()`.
 
 Death: `respawnPlayer()` refills at the current map's spawn and the run
 continues.  There IS now an interim death PENALTY (user call): raising the
-summary forfeits `SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION` of the
-player's UNSPENT credits — charged ONCE, on the transition into
-`deathPending`, so neither respawning nor restarting can double-charge,
-and money already spent on modules is untouched (the penalty taxes
-hoarding, not investment).  `lastDeathCreditsLost` / `runCreditsLost`
-carry it to the summary.  The fraction is PROVISIONAL and the fuller
-dynamic system still belongs to the economy tuning pass (step 6).
+summary charges `min(balance, max(DEATH_PENALTY_FRACTION × balance,
+DEATH_PENALTY_MIN))` of the player's UNSPENT credits — whichever of the
+percentage and the flat floor is HIGHER, clamped to what they hold, so a
+broke pilot is zeroed and never driven negative.  Charged ONCE, on the
+transition into `deathPending`, so neither respawning nor restarting can
+double-charge, and money already spent on modules is untouched (the
+penalty taxes hoarding, not investment).  `lastDeathCreditsLost` /
+`runCreditsLost` carry it to the summary.  Both numbers are PROVISIONAL
+and the fuller dynamic system still belongs to the economy tuning pass
+(step 6).
 The screen itself is PRESENTATION around the respawn behaviour — when
 the wreck's `explosionTimer` runs out the engine sets `deathPending`
 instead of respawning, which freezes the loop (the `dockedAtStation`

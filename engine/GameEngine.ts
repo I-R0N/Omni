@@ -2906,7 +2906,16 @@ export class GameEngine {
                 // summary — so the screen can report exactly what it cost and
                 // so neither respawning nor restarting can double-charge.
                 // Money already spent on modules is untouched.
-                const lost = Math.floor(this.credits * SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION);
+                // Whichever is HIGHER — the percentage or the flat floor —
+                // clamped to what the player actually holds, so a broke pilot
+                // is zeroed rather than driven negative.
+                const lost = Math.min(
+                    this.credits,
+                    Math.max(
+                        Math.floor(this.credits * SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION),
+                        SALVAGE_CONSTANTS.DEATH_PENALTY_MIN,
+                    ),
+                );
                 this.credits -= lost;
                 this.lastDeathCreditsLost = lost;
                 this.runCreditsLost += lost;
