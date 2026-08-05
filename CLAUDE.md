@@ -238,9 +238,14 @@ Per-frame `loop()`:
         (`DOCK_RANGE`) and the map portals (`USE_RANGE`), ARBITRATED BY
         NEAREST so only one wins.  Stamps `stationDockReady` /
         `portalReady` (the world-space halo affordances) on the winner
-        only, and on the shared E-key edge either docks
+        only, and on the shared TRIGGER either docks
         (`dockedAtStation`) or travels (`enterPortal()` →
-        `transitionToMap`).  A portal entry swaps the map IN PLACE from
+        `transitionToMap`).  The trigger is SELECTING YOUR OWN SHIP —
+        a tap/click within `INPUT_CONSTANTS.SHIP_SELECT_RADIUS` of the
+        hull, CLAIMED out of the fire queue by
+        `InputSystem.claimTapNear` so using a portal never also shoots
+        (claiming only runs while something is in range, so a tap on
+        the ship in open space still fires) — or the E key.  A portal entry swaps the map IN PLACE from
         here — every later step in the same substep re-reads
         `currentMap`, so the rest of the step runs against the
         destination.  Followed by the Overworld roaming-dragon keeper
@@ -871,7 +876,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   center (drydock only — the future persistent state's player-created
   base), SHIPWRIGHT (+ ship-module shop), ARMORY (+ weapon-module
   shop), TRADE HUB (+ both shops).  Docking = proximity to the NEAREST
-  in-range station + E key / HUD DOCK button; docked = sim frozen (loop
+  in-range station + SELECTING YOUR SHIP (tap/click it) or the E key or
+  the HUD pill; docked = sim frozen (loop
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
@@ -1292,10 +1298,19 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   cached in `loadMap` beside `stations`.  Two rules to keep:
   (1) **Destinations are descriptor IDS, not MapType values** —
   `portalTargetId` is what the future overworld phase will reuse.
-  (2) **Stations and portals share the E key**, so any new
-  proximity-interactable must join `updateInteractables`' nearest-wins
-  arbitration rather than adding a second E handler — otherwise two
-  affordances fight over one key.  The idle rift is pure render-side
+  (2) **Stations and portals share ONE trigger** — selecting the player's
+  own ship (tap/click, `INPUT_CONSTANTS.SHIP_SELECT_RADIUS`), plus E as
+  the keyboard equivalent — so any new proximity-interactable must join
+  `updateInteractables`' nearest-wins arbitration rather than adding a
+  second handler; otherwise two affordances fight over one gesture.  The
+  ship-select tap is CLAIMED from the fire queue before the weapon tick
+  drains it (sim step 5b runs ahead of step 7), which is why using a
+  portal doesn't also fire a shot.  A CONTROLLER button is the third
+  intended path and is deliberately NOT wired here — Pair C (c2) owns the
+  gamepad layer in InputSystem; OR its button into the `selected` flag
+  when it lands.  The prompt naming the control is drawn AT the ship
+  (`GameEntity.interactPrompt`, stamped per step, rendered via
+  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  The idle rift is pure render-side
   animation (zero particle cost); `openPortal` only fires on an actual
   transit.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"

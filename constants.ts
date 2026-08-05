@@ -907,6 +907,11 @@ export const MINIMAP_CONSTANTS = {
 };
 
 export const INPUT_CONSTANTS = {
+  // Tap/click radius (CSS px) around the player's SHIP that counts as
+  // "selecting" it to use an in-range station or portal.  Generous enough for
+  // a thumb on glass, and only ever consulted while something IS in range —
+  // outside that, a tap on the ship is just a shot.
+  SHIP_SELECT_RADIUS: 46,
   // Charge-to-fire model (post-d2): tap (release before CHARGE_FULL) =
   // normal shot via fireEvents; hold for the full CHARGE_FULL duration
   // and release = charged shot via chargeReleaseEvents.  The ring HUD

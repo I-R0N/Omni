@@ -3669,8 +3669,38 @@ export class GameEngine {
     if (station) station.stationDockReady = true;
     if (portal) portal.portalReady = true;
 
+    // ── Trigger: SELECT YOUR SHIP, or press E ────────────────────────────
+    // The primary gesture is tapping/clicking the ship itself — it works the
+    // same on touch and mouse, needs no HUD button under the thumb, and puts
+    // the control where the player is already looking.  The tap is CLAIMED
+    // out of the fire queue (see InputSystem.claimTapNear) so using a portal
+    // never also fires a shot; claiming only happens while something is
+    // actually in range, so tapping the ship in open space still shoots.
+    // E stays as the keyboard equivalent.
+    //
+    // A CONTROLLER button is the third path the user asked for; it is
+    // deliberately NOT wired here because Pair C (c2) owns the gamepad layer
+    // in InputSystem, and adding a second polling path would collide with it.
+    // When c2 lands, OR its button into `selected` below — nothing else moves.
+    // Prompt AT the ship — the control lives there now, so the instruction
+    // does too.  Cleared whenever nothing is in range.
+    this.player.interactPrompt = portal
+        ? (portal.portalTargetId === HUB_DESCRIPTOR.id ? 'TAP SHIP TO RETURN' : 'TAP SHIP TO ENTER')
+        : station ? 'TAP SHIP TO DOCK'
+        : undefined;
+
+    let selected = false;
+    if (station || portal) {
+        const screen = this.renderer.worldToScreen(this.camera, this.player.position);
+        if (screen) {
+            selected = this.input.claimTapNear(
+                screen.x, screen.y,
+                INPUT_CONSTANTS.SHIP_SELECT_RADIUS,
+            );
+        }
+    }
     const eDown = this.input.isKeyDown('KeyE');
-    if (eDown && !this.dockKeyHeld) {
+    if (selected || (eDown && !this.dockKeyHeld)) {
         if (portal) this.enterPortal();
         else if (station) this.dockAtStation();
     }

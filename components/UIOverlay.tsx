@@ -1560,22 +1560,33 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* Stations and portals share the E key; the engine arbitrates by
           nearest-in-range, so at most one of these is ever offered and the
           button names the action E will take. */}
+      {/* Dock prompt.  The PRIMARY control is selecting your own ship (tap /
+          click it); this pill names that control and doubles as a fallback
+          button for anyone who'd rather press it. */}
       {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && !stats.runSummary && (
         <button
           onClick={onDock}
-          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
+          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95 flex flex-col items-center leading-tight"
         >
-          ⚓ Dock <span className="text-sky-200 text-[10px] font-mono normal-case">[E]</span>
+          <span>⬡ Dock at {stats.dock?.name ?? 'Station'}</span>
+          <span className="text-sky-200 text-[10px] font-mono normal-case tracking-normal">
+            tap your ship &nbsp;·&nbsp; [E]
+          </span>
         </button>
       )}
 
+      {/* Portal prompt — same control language as docking, since the two
+          share the interaction (nearest-wins arbitration in
+          updateInteractables), so they must never teach different gestures. */}
       {stats.gameState === GameState.PLAYING && stats.portal && !stats.dock?.docked && !stats.runSummary && (
         <button
           onClick={onEnterPortal}
-          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-violet-600/85 hover:bg-violet-500 border border-violet-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
+          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-violet-600/85 hover:bg-violet-500 border border-violet-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95 flex flex-col items-center leading-tight"
         >
-          ↝ {stats.portal.isReturn ? 'Return to' : 'Enter'} {stats.portal.name}{' '}
-          <span className="text-violet-200 text-[10px] font-mono normal-case">[E]</span>
+          <span>↝ {stats.portal.isReturn ? 'Return to' : 'Enter'} {stats.portal.name}</span>
+          <span className="text-violet-200 text-[10px] font-mono normal-case tracking-normal">
+            tap your ship &nbsp;·&nbsp; [E]
+          </span>
         </button>
       )}
 

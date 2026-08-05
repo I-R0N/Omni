@@ -635,6 +635,10 @@ export interface GameEntity {
   // not the hull, so the renderer needs this mirror to blink the off-screen
   // indicator red.  Unset on every other entity.
   huntingPlayer?: boolean;
+  // Interaction prompt drawn under the PLAYER's hull while a station/portal is
+  // in range — names the control ("TAP SHIP TO ENTER").  Stamped per sim step
+  // by GameEngine.updateInteractables and cleared when nothing is in range.
+  interactPrompt?: string;
   // Projectile flags for rival fire: `hitsEnemies` lets an ENEMY-owned shot
   // damage other ENEMY targets (so a rival can shoot the wave enemies), and
   // `sparesPlayer` makes an ENEMY-owned shot pass THROUGH the player (so an

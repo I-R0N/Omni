@@ -1618,6 +1618,29 @@ export class RenderSystem {
         this.renderPlayerMessages(ctx, playerMessages, width, height);
     }
 
+    // 8b. Interaction prompt AT THE SHIP (screen space).  The control is
+    // "select your ship", so the instruction belongs on the ship rather than
+    // only in a HUD pill at the bottom of the screen — the player is already
+    // looking here.  Drawn just under the hull, outlined so it survives bright
+    // terrain.  `interactPrompt` is stamped per step by
+    // GameEngine.updateInteractables and cleared the moment nothing is in range.
+    if (player?.interactPrompt) {
+        const px = this.worldToScreen(camera, player.position);
+        if (px) {
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const y = px.y + 46;
+            ctx.font = 'bold 11px monospace';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.strokeText(player.interactPrompt, px.x, y);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText(player.interactPrompt, px.x, y);
+            ctx.restore();
+        }
+    }
+
     // 9. Render 2-slot loadout HUD (Screen Space)
     if (player) {
         this.renderLoadoutHUD(ctx, player, width, height);
@@ -5230,6 +5253,25 @@ export class RenderSystem {
       ctx.globalAlpha = 1.0;
   }
 
+
+  /** World → SCREEN (CSS px), mirroring the camera transform the draw pass
+   *  applies: centre, zoom, camera position + shake, toroidal shift.  Returns
+   *  null before the context exists.  Used by GameEngine to hit-test a tap
+   *  against the player's ship. */
+  public worldToScreen(camera: CameraState, pos: Vector2): Vector2 | null {
+      const ctx = this.ctx;
+      if (!ctx) return null;
+      const dpr = window.devicePixelRatio || 1;
+      const width = (ctx.canvas.width || 0) / dpr;
+      const height = (ctx.canvas.height || 0) / dpr;
+      const shake = camera.shakeOffset ?? { x: 0, y: 0 };
+      const rx = shiftX(camera.position.x, pos.x);
+      const ry = shiftY(camera.position.y, pos.y);
+      return {
+          x: width / 2 + (rx - camera.position.x + shake.x) * camera.zoom,
+          y: height / 2 + (ry - camera.position.y + shake.y) * camera.zoom,
+      };
+  }
 
   private renderIndicators(
     ctx: CanvasRenderingContext2D, 
