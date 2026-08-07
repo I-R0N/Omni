@@ -382,16 +382,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.scrapModule(idx);
   };
 
-  const handleDock = () => {
-      if (engineRef.current) engineRef.current.dockAtStation();
-  };
-
   const handleUndock = () => {
       if (engineRef.current) engineRef.current.undock();
-  };
-
-  const handleEnterPortal = () => {
-      if (engineRef.current) engineRef.current.enterPortal();
   };
 
   const handleRepairHull = () => {
@@ -532,8 +524,6 @@ const App: React.FC = () => {
         onPurchaseModule={handlePurchaseModule}
         onSellModule={handleSellModule}
         onScrapModule={handleScrapModule}
-        onDock={handleDock}
-        onEnterPortal={handleEnterPortal}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}
         onGrantWeapon={handleGrantWeapon}

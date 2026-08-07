@@ -879,8 +879,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   center (drydock only — the future persistent state's player-created
   base), SHIPWRIGHT (+ ship-module shop), ARMORY (+ weapon-module
   shop), TRADE HUB (+ both shops).  Docking = proximity to the NEAREST
-  in-range station + SELECTING YOUR SHIP (tap/click it) or the E key or
-  the HUD pill; docked = sim frozen (loop
+  in-range station + SELECTING YOUR SHIP (tap/click it) or the E key;
+  docked = sim frozen (loop
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
@@ -1308,7 +1308,9 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   second handler; otherwise two affordances fight over one gesture.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
-  portal doesn't also fire a shot.  A CONTROLLER button is the third
+  portal doesn't also fire a shot.  There is NO HUD dock/enter button —
+  the ship prompt is the whole affordance (a pill on top of it was
+  redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
   intended path and is deliberately NOT wired here — Pair C (c2) owns the
   gamepad layer in InputSystem; OR its button into the `selected` flag
   when it lands.  The prompt naming the control is drawn AT the ship

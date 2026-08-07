@@ -737,3 +737,51 @@ module's exact effect shown in the detail strip.  Touch points:
 `applyModuleEffects` already sums ACTIVE effects — expose a per-module
 breakdown on `EngineStats.outfitting`; `UIOverlay` pause Ship Status +
 `renderModuleDetail`.
+
+---
+
+## Portal off-screen indicators behave unlike every other indicator (2026-08-05)
+
+**Context:** raised in playtest during the Phase 3 Pair A session, after the
+off-screen indicators were reworked (edge-anchored, size-coded, typed by
+colour).  The portal arrow now reads as an exception to the rules every other
+contact follows, and the exceptions compound at close range.
+
+Where a portal diverges today (all in `RenderSystem.renderIndicators` +
+`PORTAL_CONSTANTS`):
+
+- **Range-gated, not always-on.** Enemies are indicated at any distance and
+  fade toward an alpha floor; a portal shows NO arrow at all until the player
+  is inside `PORTAL_CONSTANTS.INDICATOR_RANGE`, then appears abruptly at full
+  strength.  Every other type fades in; this one pops.
+- **Exempt from offscreen-only suppression.** Every other contact's arrow
+  disappears once you can see the thing.  The portal's persists — so at close
+  range you get the rift ON SCREEN plus an edge arrow pointing at it.
+- **Carries the most text of any type.** Destination name AND a distance
+  readout, while ordinary enemies now print no number at all (their size
+  carries distance).  Stack that on the rift's own world-space tag and the
+  same destination is named two or three times at once.
+
+Net effect: approaching a portal, the arrow is redundant with the thing it
+points at; far from one, there is no arrow to find it by (the minimap anomaly
+blip is doing that job).  Neither end matches how the player has learned to
+read the other five contact types.
+
+**Candidate directions** (none chosen — this is a design call):
+
+1. **Make it obey the normal rules** — drop the suppression exemption and the
+   range gate, let it fade with distance like everything else, and lean on the
+   minimap blip for long-range discovery.  Cheapest; costs the guaranteed
+   labelled cue on approach.
+2. **Keep the exemption, drop the redundancy** — suppress the arrow once the
+   rift is on screen (the world-space tag takes over), keep it while the
+   portal is off screen and in range.  Preserves the navigation cue and kills
+   the double-labelling.
+3. **Promote portals to a separate NAVIGATION layer** rather than a contact
+   type — a distinct treatment (waypoint-style) that isn't competing with the
+   threat arrows at all, which is arguably what a fixed landmark wants.
+
+**Touch points:** `RenderSystem.renderIndicators` (the `isPortal` exemptions
+and the label block), `UI_CONSTANTS.INDICATORS`, `PORTAL_CONSTANTS`
+`INDICATOR_RANGE`, and `MINIMAP_CONSTANTS.PORTAL_BLIP` (which currently
+carries long-range discovery and would carry more under option 1).
