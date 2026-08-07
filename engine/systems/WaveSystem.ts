@@ -50,6 +50,11 @@ export class WaveSystem {
    *  waves had run consecutively.  It deliberately does NOT shift the DISPLAY
    *  wave number — the HUD still counts 1..5 within the stage. */
   public waveOffset: number = 0;
+  /** Set once a stage's CAPSTONE BOSS is down: the ladder for this arena is
+   *  finished, so no further wave ever starts here.  The player mops up what
+   *  is already on the field and then chooses a rift.  Cleared by init(), so
+   *  the next arena starts its own ladder normally. */
+  public halted: boolean = false;
   /** The index the scaling / rotation tables see. */
   private get scaledIndex(): number { return this.waveIndex + this.waveOffset; }
   /** Ids of every enemy spawned by the current wave (dead ones included —
@@ -91,6 +96,7 @@ export class WaveSystem {
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no
    *  wave 1 banner, no grace-period cycling, no enemies. */
   public init(ctx: WaveSpawnContext, enabled: boolean = true) {
+    this.halted = false;
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
@@ -132,7 +138,7 @@ export class WaveSystem {
       this.waveGraceTimer -= dt;
       if (this.waveGraceTimer <= 0) {
         this.waveGraceTimer = 0;
-        this.startWave(this.waveIndex + 1, ctx);
+        if (!this.halted) this.startWave(this.waveIndex + 1, ctx);
       }
     }
   }
@@ -471,6 +477,7 @@ export class WaveSystem {
    * 'cleared' phase.  Survivors carry over, same as the natural rollover.
    */
   public skip(ctx: WaveSpawnContext): boolean {
+    if (this.halted) return false;
     if (this.waveState !== 'cleared' || this.waveGraceTimer <= 0) return false;
     this.waveGraceTimer = 0;
     this.startWave(this.waveIndex + 1, ctx);

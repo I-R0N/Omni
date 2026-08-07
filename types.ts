@@ -1368,10 +1368,6 @@ export interface EngineStats {
     phaseCount: number;
     color: string;
   };
-  /** Live boss shop discount ((h) payout model (d)): the fraction taken off
-   *  every catalog price and every resale value, plus the seconds left on the
-   *  timed window.  Undefined when no window is running. */
-  bossDiscount?: { fraction: number; secondsLeft: number };
   /** Run score — animated integer ticker toward the true run total. */
   score?: number;
   /** Kill-combo readout: active multiplier (1 = no combo), the kill
@@ -1490,10 +1486,18 @@ export interface EngineStats {
     nextStage: number;
     bossName: string;
     mapName: string;
+    /** Performance SCORE paid for the kill.  Score is a separate metric from
+     *  Salvage — it buys nothing; Salvage is the money. */
     scoreAwarded: number;
-    salvageDrops: number;
-    discountFraction: number;
-    discountSeconds: number;
+    /** The capstone's salvage payout in CREDITS (drop count × CREDITS_PER_DROP),
+     *  so the screen speaks the same units the shop does. */
+    salvageCredits: number;
+    /** Capstone module reward: the item's label + description when one landed
+     *  in the inventory, or `rewardCredits` when the inventory was full and it
+     *  paid out its catalog value in Salvage instead. */
+    rewardLabel?: string;
+    rewardDesc?: string;
+    rewardCredits?: number;
   };
   /** Station docking state (Overworld only).  `inRange` drives the DOCK
    *  affordance; `docked` opens the station UI (the sim is frozen while

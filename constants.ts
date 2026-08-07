@@ -3916,6 +3916,13 @@ export const BOSS_CONSTANTS = {
   COMPANION_BUDGET_FRAC: 0.55,
   /** Score paid on a boss kill, on top of the normal tier kill points. */
   SCORE: 2500,
+  // Beat before the stage-clear screen (seconds).  Standard reward-moment
+  // pacing: let the KILL land first — explosion, debris, shake, the salvage
+  // spray converging — and only then take control away for the summary.
+  // Cutting straight to a menu on the killing blow throws away the payoff the
+  // fight was for.  ~1.9s covers the explosion (EXPLOSION_CONSTANTS.DURATION)
+  // plus a short quiet beat; the overlay then FADES in rather than snapping.
+  STAGE_CLEAR_DELAY_SEC: 1.9,
   /** Salvage units sprayed on a boss kill — the model-(d) income accelerator.
    *  PROVISIONAL sizing against today's economy: combat income runs ≈5–7
    *  units/wave and a snitch catch pays 8, so 12 (≈12,000 credits) is worth

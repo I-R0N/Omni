@@ -785,3 +785,58 @@ read the other five contact types.
 and the label block), `UI_CONSTANTS.INDICATORS`, `PORTAL_CONSTANTS`
 `INDICATOR_RANGE`, and `MINIMAP_CONSTANTS.PORTAL_BLIP` (which currently
 carries long-range discovery and would carry more under option 1).
+
+---
+
+## Portal persistence — stages that stay cleared, and enemies that creep back (2026-08-07)
+
+**Context:** raised in playtest while the stage-descent capstone was being
+built.  The session deliberately shipped the SHALLOW version (kill the boss →
+a descent rift opens → the next stage is a fresh arena, and wave progress is
+still fresh per entry).  The user does not want the deep layering handled in
+that session, but wants the direction recorded.
+
+The intent, in the user's framing: gameplay should eventually PERSIST to some
+degree.  Two shapes were described — they are not mutually exclusive, and the
+second is a superset of the first.
+
+**Shape 1 — cleared stages stay cleared, for a while.**
+After beating a stage the player can fly back to the Overworld where their
+own station lives, install newly-acquired modules, spend money at other
+stations, and then return to *the portal they already used* — and NOT face the
+same stage again.  The cleared state persists for some period before the
+arena repopulates with waves.  Today the opposite is true: `WaveSystem.init`
+zeroes `waveIndex` on every entry and there is no per-map run state, so
+re-entering any arena restarts its ladder from wave 1 (CLAUDE.md §6a states
+this invariant explicitly).
+
+**Shape 2 — a tree of sub-portals, with pressure that flows upward.**
+Each Overworld portal arena contains sub-portal arenas; those may contain
+further sub-portals.  An arena is only pacified once every sub-arena beneath
+it is cleared, so clearing an Overworld portal means clearing its whole
+subtree.  If enemies remain in a deep sub-arena they CREEP upward over time —
+into the sub-arena above, and eventually back out into the Overworld portal
+arena.  That gives the map a decay pressure: ignore a branch long enough and
+it re-contaminates everything above it.
+
+**What this collides with today** (all of it deliberate, all of it would have
+to move):
+- **No per-map state at all.** `transitionToMap` carries RUN state (credits,
+  score, outfit, hull) but every map is rebuilt from scratch; destroyed tiles
+  do not persist across re-entry either.
+- **`stageIndex` is linear depth**, not a position in a tree.  A tree needs
+  node identity (which sub-portal of which arena), not a counter.
+- **Descent targets are random arena descriptors** — a placeholder for
+  procedural areas.  Persistence needs STABLE node ids so a cleared node can
+  be recognised on return.
+- **The hub resets depth to 0**, which is exactly the behaviour Shape 1 wants
+  to remove.
+- This is the plan's deferred **waves-to-nodes** item (decision #37f), moved
+  to the Overworld plan, plus the parked **persistent state** entry — which
+  was itself gated on the economy tuning pass.
+
+**Sequencing note:** Shape 1 is the smaller, self-contained step (per-node
+cleared flag + a repopulation timer + stable node ids).  Shape 2 needs a
+graph model, an upward-creep tick, and a way to surface subtree state to the
+player — probably on the minimap or a map screen that does not exist yet.
+Doing Shape 1 first is what makes Shape 2 tractable.

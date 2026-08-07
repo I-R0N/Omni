@@ -166,6 +166,10 @@ export class GameEngine {
   // — the hub is the surface.
   private stageIndex: number = 0;
   private stageClearPending: boolean = false;
+  // Counts down AFTER the capstone dies and BEFORE the screen appears, so the
+  // explosion, debris and salvage spray all land first.  The sim keeps running
+  // during it — that is the point.
+  private stageClearDelay: number = 0;
   private lastStageClear: {
     stage: number; bossName: string; nextStage: number;
     scoreAwarded: number; salvageDrops: number;
@@ -367,8 +371,6 @@ export class GameEngine {
   // the TIMED shop discount from the model-(d) payout (salvage + discount, no
   // unlock plumbing).  All three are run-scoped — reset with credits/score.
   private liveBoss: GameEntity | null = null;
-  private bossDiscount = 0;        // 0..BOSS_CONSTANTS.DISCOUNT_FRACTION_MAX
-  private bossDiscountTimer = 0;   // seconds left on the discount window
   private bossesKilled = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
@@ -1457,7 +1459,6 @@ export class GameEngine {
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
       boss: this.bossStatsSnapshot(),
-      bossDiscount: this.bossDiscountSnapshot(),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -1637,8 +1638,6 @@ export class GameEngine {
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
       // Boss payouts ((h) model (d)) are run-scoped like the credits they
       // discount — a new run starts at full price with no boss in the world.
-      this.bossDiscount = 0;
-      this.bossDiscountTimer = 0;
       this.bossesKilled = 0;
       this.liveBoss = null;
 
@@ -1656,6 +1655,7 @@ export class GameEngine {
       this.deathPending = false;
       this.stageIndex = 0;
       this.stageClearPending = false;
+      this.stageClearDelay = 0;
       this.lastStageClear = null;
       this.lastDeathCreditsLost = 0;
       this.runCreditsLost = 0;
@@ -1742,6 +1742,7 @@ export class GameEngine {
       else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
       // The stage-clear screen belongs to the arena being left.
       this.stageClearPending = false;
+      this.stageClearDelay = 0;
 
       this.loadMapFresh(dest.mapType);
       this.placePlayerAtSpawn();
@@ -1922,7 +1923,6 @@ export class GameEngine {
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
       boss: this.bossStatsSnapshot(),
-      bossDiscount: this.bossDiscountSnapshot(),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -2833,6 +2833,15 @@ export class GameEngine {
     // highest wave reached is sampled here rather than at wave start so a
     // wave-free hub visit can't stomp the arena high-water mark.
     this.runTimeSec += dt;
+    // Stage-clear beat: the capstone is down and the sim is still running so
+    // the explosion plays out; when it expires the screen takes over.
+    if (this.stageClearDelay > 0) {
+        this.stageClearDelay -= dt;
+        if (this.stageClearDelay <= 0) {
+            this.stageClearDelay = 0;
+            if (this.lastStageClear && !this.player.isExploding) this.stageClearPending = true;
+        }
+    }
     if (this.wavesEnabled) {
         const n = this.waveIndex + 1;
         if (n > this.runHighestWave) this.runHighestWave = n;
@@ -4082,7 +4091,7 @@ export class GameEngine {
    *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
    *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
   private modulePrice(cost: number): number {
-      return Math.max(0, Math.round(cost * (1 - this.bossDiscount)));
+      return Math.max(0, Math.round(cost));
   }
 
   /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
@@ -5761,11 +5770,6 @@ export class GameEngine {
 
   /** Timed boss shop-discount readout — undefined when no window is running,
    *  so the shop UI can show the beat only while it is live. */
-  private bossDiscountSnapshot(): EngineStats['bossDiscount'] {
-      if (this.bossDiscount <= 0 || this.bossDiscountTimer <= 0) return undefined;
-      return { fraction: this.bossDiscount, secondsLeft: Math.ceil(this.bossDiscountTimer) };
-  }
-
   /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
    *  the same `openPortal` abstraction the dragon and the rivals use. */
   private handleBossSpawn = (boss: GameEntity) => {
@@ -5796,13 +5800,6 @@ export class GameEngine {
   private updateBosses(dt: number) {
       // Timed shop discount (payout model (d)) — run-scoped, ticks on sim time
       // so it doesn't drain while docked or paused.
-      if (this.bossDiscountTimer > 0) {
-          this.bossDiscountTimer -= dt;
-          if (this.bossDiscountTimer <= 0) {
-              this.bossDiscountTimer = 0;
-              this.bossDiscount = 0;
-          }
-      }
       if (!this.currentMap) return;
       const enemies = this.entityIndex.enemies;
       let live: GameEntity | null = null;
@@ -5943,11 +5940,6 @@ export class GameEngine {
       this.bossesKilled++;
       this.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
       // Stack the discount fraction (capped) and refresh the window.
-      this.bossDiscount = Math.min(
-          BOSS_CONSTANTS.DISCOUNT_FRACTION_MAX,
-          this.bossDiscount + BOSS_CONSTANTS.DISCOUNT_FRACTION,
-      );
-      this.bossDiscountTimer = BOSS_CONSTANTS.DISCOUNT_SECONDS;
       // The money is PHYSICAL — the same salvage drops every other source pays,
       // sprayed off the corpse so it converges and merges normally.
       for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
@@ -5981,11 +5973,20 @@ export class GameEngine {
       // Name the kill and its payout — the banner is what tells the player the
       // capstone is DOWN and that the shop just got cheaper, which is
       // otherwise only legible by opening a station menu.
+      // The DROP-COUNT payout in real money, so the banner and the screen
+      // speak the same units the shop does.
+      const salvageCredits = BOSS_CONSTANTS.SALVAGE_DROPS * SALVAGE_CONSTANTS.CREDITS_PER_DROP;
+      // Capstone reward (user call, replaces the timed shop discount): a
+      // RANDOM module item — something you carry away and install, rather than
+      // a countdown you may not be near a shop to spend.
+      const reward = this.grantBossModule();
       const def = boss.enemySubtype ? BOSS_DEFS[boss.enemySubtype] : undefined;
       const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
       this.waves.announcements.push({
           text: `${def?.name ?? 'BOSS'} DESTROYED`,
-          subtext: `+${BOSS_CONSTANTS.SALVAGE_DROPS} SALVAGE  ·  ${Math.round(this.bossDiscount * 100)}% OFF FOR ${Math.round(BOSS_CONSTANTS.DISCOUNT_SECONDS)}S`,
+          subtext: reward.label
+              ? `+◈${salvageCredits.toLocaleString()}  ·  ${reward.label.toUpperCase()}`
+              : `+◈${salvageCredits.toLocaleString()} SALVAGE`,
           color: boss.color || '#f87171',
           lifetime: life,
           maxLifetime: life,
@@ -5997,18 +5998,49 @@ export class GameEngine {
       // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
       // (or any wave-free map) has no ladder to descend from.
       if (this.wavesEnabled) {
+          // The stage's ladder is FINISHED — no further wave starts in this
+          // arena.  Whatever is still on the field stays (the player mops up),
+          // but the arena stops feeding the fight so the choice between the
+          // two rifts is made in quiet.
+          this.waves.halted = true;
           this.openDescentPortal(boss.position);
           this.lastStageClear = {
               stage: this.stageIndex + 1,
               bossName: def?.name ?? 'Boss',
               nextStage: this.stageIndex + 2,
               scoreAwarded: BOSS_CONSTANTS.SCORE,
-              salvageDrops: BOSS_CONSTANTS.SALVAGE_DROPS,
-              discountFraction: this.bossDiscount,
-              discountSeconds: Math.round(BOSS_CONSTANTS.DISCOUNT_SECONDS),
+              salvageCredits,
+              rewardLabel: reward.label,
+              rewardDesc: reward.desc,
+              rewardCredits: reward.credits,
           };
-          this.stageClearPending = true;
+          // Arm the beat rather than freezing on the killing blow.
+          this.stageClearDelay = BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC;
       }
+  }
+
+  /** Capstone reward: one RANDOM purchasable module dropped straight into the
+   *  inventory (user call — it replaced the timed shop discount, which asked
+   *  the player to be near a shop within a countdown to collect anything).
+   *
+   *  Uniform over the catalog, which is PROVISIONAL: it can hand a Mk III on
+   *  stage 1.  Weighting by stage depth is a tuning-pass question.
+   *
+   *  If the inventory is full there is nowhere to put it, so the reward pays
+   *  its catalog value in Salvage instead — the player is never simply denied
+   *  the drop for having full cargo. */
+  private grantBossModule(): { label?: string; desc?: string; credits?: number } {
+      const catalog = MODULE_DEFS.filter(d => d.cost > 0);
+      if (catalog.length === 0) return {};
+      const def = catalog[Math.floor(Math.random() * catalog.length)];
+      const slot = this.inventory.indexOf(null);
+      if (slot === -1) {
+          const paid = this.modulePrice(def.cost);
+          this.earnCredits(paid);
+          return { credits: paid };
+      }
+      this.inventory[slot] = def.id;
+      return { label: def.label, desc: def.desc };
   }
 
   /** The way DOWN: a descent rift beside the fallen boss, targeting a fresh

@@ -1652,14 +1652,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 a purchase lands in the inventory. */}
             {out && (svc?.shipShop || svc?.weaponShop) && (
               <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
-                {/* Boss bounty ((h) payout model (d)): a TIMED discount already
-                    baked into every price below — shown so the beat reads. */}
-                {stats.bossDiscount && (
-                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-rose-900/40 border border-rose-500/40 text-rose-200">
-                    <span>Boss bounty · {Math.round(stats.bossDiscount.fraction * 100)}% off</span>
-                    <span className="tabular-nums">{stats.bossDiscount.secondsLeft}s</span>
-                  </div>
-                )}
                 {(['ship', 'weapon'] as const).filter(g => (g === 'ship' ? svc?.shipShop : svc?.weaponShop)).map(g => (
                   <div key={g}>
                     <h3 className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
@@ -1702,6 +1694,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           so this is a pause with a payoff report, not an ending.  Dismissing
           returns to the cleared arena where two rifts are waiting. */}
       {stats.stageClear && (() => {
+        // Fades in (the engine already held the screen back for
+        // BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC so the explosion could land).
         const sc = stats.stageClear;
         const row = (label: string, value: React.ReactNode, note?: string) => (
           <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
@@ -1713,7 +1707,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
         );
         return (
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          <div
+            style={{ animation: 'omniFadeIn 420ms ease-out both' }}
+            className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain"
+          >
+            <style>{'@keyframes omniFadeIn{from{opacity:0}to{opacity:1}}'}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
 
               <div className="text-center">
@@ -1724,12 +1722,34 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </p>
               </div>
 
+              {/* Salvage leads — it is the money, and it is what the shop
+                  speaks.  Score is a separate performance metric that buys
+                  nothing, so it is labelled as such and sits below. */}
               <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
-                {row('Bounty', `+${sc.scoreAwarded.toLocaleString()}`, 'points')}
-                {row('Salvage dropped', `◈${sc.salvageDrops.toLocaleString()}`, 'collect it below')}
-                {sc.discountFraction > 0 &&
-                  row('Shop discount', `${Math.round(sc.discountFraction * 100)}% off`, `${sc.discountSeconds}s`)}
+                {row('Salvage', `◈${sc.salvageCredits.toLocaleString()}`, 'sprayed on the wreck')}
+                {row('Score', `+${sc.scoreAwarded.toLocaleString()}`)}
               </div>
+
+              {/* Capstone reward: a module you carry away. */}
+              {(sc.rewardLabel || sc.rewardCredits) && (
+                <div className="bg-emerald-950/40 border border-emerald-600/40 rounded-lg p-3">
+                  <p className="text-emerald-300 font-bold uppercase tracking-widest text-[10px] mb-1">
+                    Salvaged from the wreck
+                  </p>
+                  {sc.rewardLabel ? (
+                    <>
+                      <p className="text-white font-bold text-sm">{sc.rewardLabel}</p>
+                      {sc.rewardDesc && <p className="text-slate-400 text-[11px] mt-0.5">{sc.rewardDesc}</p>}
+                      <p className="text-slate-500 text-[10px] mt-1">In your cargo — install it at a drydock.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-white font-bold text-sm">◈{(sc.rewardCredits ?? 0).toLocaleString()}</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Cargo was full — the module was scrapped for its value.</p>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* The choice is IN THE WORLD, not on this screen — so the screen
                   explains where the two rifts are rather than offering buttons
