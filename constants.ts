@@ -3902,10 +3902,12 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
 // never a script (strategy guardrail #36e).  GameEngine.updateBosses applies a
 // phase once, on the health-fraction transition.
 //
-// PAYOUT — model (d) (WEAPONS_AMMO_PLAN §6 / decision #37e, settled): a boss
-// pays SALVAGE and a timed SHOP DISCOUNT.  There is deliberately NO
-// weapon-unlock plumbing: weapons stay purely purchased and the boss is an
-// income accelerator.
+// PAYOUT: a boss pays SALVAGE plus a RANDOM MODULE dropped into the inventory
+// (GameEngine.grantBossModule).  The module replaced a timed SHOP DISCOUNT
+// (user call, playtest): a countdown you must be near a shop to spend is worse
+// than a thing you carry away, and removing it also removed the buy/sell
+// money-pump the discount created.  There is still deliberately NO
+// weapon-unlock plumbing: weapons stay purely purchased.
 export const BOSS_CONSTANTS = {
   /** A boss wave every Nth wave (0-based index where (index + 1) % N === 0).
    *  PROVISIONAL: 5 puts the first capstone on wave 5, which is currently the
@@ -3926,18 +3928,10 @@ export const BOSS_CONSTANTS = {
   /** Salvage units sprayed on a boss kill — the model-(d) income accelerator.
    *  PROVISIONAL sizing against today's economy: combat income runs ≈5–7
    *  units/wave and a snitch catch pays 8, so 12 (≈12,000 credits) is worth
-   *  roughly two waves of fighting without trivialising a 25k–60k module. */
+   *  roughly two waves of fighting without trivialising a 25k–60k module.
+   *  The stage-clear screen reports this in CREDITS (× CREDITS_PER_DROP), not
+   *  as a drop count — 12 rendered with a money glyph read as 12 credits. */
   SALVAGE_DROPS: 12,
-  /** Timed shop discount earned per boss kill: `fraction` off every catalog
-   *  price for `seconds` of sim time, capped at FRACTION_MAX.  Killing another
-   *  boss inside the window stacks the fraction and refreshes the clock.
-   *  TIMED rather than run-permanent so it reads as a beat ("cash in now")
-   *  rather than a silent permanent buff — and see MODULE_RESALE: resale is
-   *  priced off the SAME discounted number, or buy-low/sell-high is a pump.
-   *  PROVISIONAL. */
-  DISCOUNT_FRACTION: 0.15,
-  DISCOUNT_FRACTION_MAX: 0.35,
-  DISCOUNT_SECONDS: 180,
   /** Debris particles thrown on the death payoff beat (on top of the normal
    *  enemy explosion).  Matches the dragon's scale — a capstone should read
    *  as an event, not as a big drone popping. */

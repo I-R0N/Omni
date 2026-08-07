@@ -202,8 +202,13 @@ SIM seconds, so paused / docked / dead time is excluded for free.
 ladder: `BOSS_CONSTANTS.WAVE_INTERVAL` waves capped by a boss.  Killing
 that boss freezes the loop on a STAGE-CLEAR screen — the same
 short-circuit the death screen uses, but the player is ALIVE, so it
-PAUSES the fight rather than ending it — and opens a DESCENT rift beside
-the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
+PAUSES the fight rather than ending it — after a deliberate
+`BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC` BEAT during which the sim keeps
+running so the explosion, debris and salvage spray land before control is
+taken away (the overlay then fades in).  Killing the capstone also HALTS
+the arena's ladder (`WaveSystem.halted`) — no further wave starts there,
+so the choice between the two rifts is made in quiet.  It opens a DESCENT
+rift beside the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
 `PORTAL_CONSTANTS.DESCENT_COLOR`).  `dismissStageClear()` resumes the
 cleared arena; the CHOICE is then made IN THE WORLD by flying to a rift,
 which is why the screen offers no travel buttons: down the amber rift to
@@ -767,18 +772,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   a phase can drop a shield or stop escorts.  `GameEngine.updateBosses`
   stamps a phase ONCE on the health-fraction transition
   (`applyBossPhase`); nothing about a boss is bespoke scripting.
-  PAYOUT is model (d) (decision #37e): `payBossBounty` pays score + a
-  PHYSICAL salvage spray (`SALVAGE_DROPS`) + a TIMED shop discount
-  (`DISCOUNT_FRACTION` for `DISCOUNT_SECONDS`, stacking to
-  `DISCOUNT_FRACTION_MAX`), and stages the payoff BEAT on the dragon's
+  PAYOUT: `payBossBounty` pays score + a PHYSICAL salvage spray
+  (`SALVAGE_DROPS`) + a RANDOM MODULE dropped into the inventory
+  (`grantBossModule`; pays the item's catalog value in Salvage instead
+  when cargo is full).  The module REPLACED the old timed shop discount
+  (user call): a countdown you must be near a shop to spend is worse than
+  a thing you carry away, and dropping it also removes the buy/sell
+  money-pump hazard the discount created.  It stages the payoff BEAT on the dragon's
   precedent: a rift collapse via `openPortal`, a `DEATH_DEBRIS` burst in
   the phase colour, a heavy shake and a banner naming the boss and what
   it just paid.  There is deliberately NO weapon-unlock plumbing —
   weapons stay purely purchased.
   LEGIBILITY: `EngineStats.boss` drives the HUD capstone bar (name,
   phase pips, health bar + a numeric %, shield strip — sized so all of it
-  survives a 390px-wide screen); `EngineStats.bossDiscount` drives the
-  shop's discount banner; RenderSystem draws a phase-coloured aura ring
+  survives a 390px-wide screen); RenderSystem draws a phase-coloured aura ring
   (`AURA_SCALE`/`AURA_ALPHA`) on the boss hull, an oversized SELF-LABELLED
   off-screen indicator that is exempt from both the enemy budget and the
   distance fade (losing the boss arrow behind a crowd of stragglers is
@@ -1373,13 +1380,13 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   distance falloff.  The kamikaze detonation and the (h) Bastion's siege
   shells are its two callers.  Landing it at the impact point also makes
   the shove instant instead of gated on the ring's wavefront arriving.
-- **A boss discount must price BOTH sides of the shop.**
-  `GameEngine.modulePrice(cost)` applies the (h) boss discount, and BOTH
-  `purchaseModule` and `resaleValue` (sell + scrap) go through it.  If
-  buying were discounted while sell-back stayed on full catalog cost,
-  buy-then-sell would net `discount - (1 - SELL_FRACTION)` of cost per
-  cycle — an infinite money pump above a 10% discount.  Any future price
-  modifier must join `modulePrice`, not add a second discount path.
+- **`modulePrice` is the ONE pricing seam.**  It is identity today (the
+  boss shop-discount that used to live there was removed — the capstone
+  drops a module instead), but `purchaseModule` and `resaleValue` (sell +
+  scrap) both still route through it.  Any future price modifier must
+  join it rather than add a second path: when buying was discounted and
+  sell-back was not, buy-then-sell netted `discount - (1 - SELL_FRACTION)`
+  of cost per cycle — an infinite money pump above a 10% discount.
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
   INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
