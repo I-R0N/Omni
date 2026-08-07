@@ -1736,7 +1736,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
                 {rs.wavesEnabled && row('Waves cleared', rs.wavesCleared, `high ${rs.highestWave}`)}
                 {row('Enemies destroyed', rs.kills.toLocaleString(), rs.bosses > 0 ? `${rs.bosses} boss${rs.bosses > 1 ? 'es' : ''}` : undefined)}
-                {row('Salvage earned', `◈${rs.creditsEarned.toLocaleString()}`, `◈${rs.credits.toLocaleString()} left`)}
+                {/* Salvage reads as a ledger for THIS life: what the sortie
+                    brought in, what the wreck cost, what's left.  The run
+                    gross keeps climbing and isn't the question being asked at
+                    the wreck, so it's demoted to a note on the earned row. */}
+                {row('Salvage earned',
+                     `◈${rs.creditsEarnedLife.toLocaleString()}`,
+                     'since last death')}
                 {rs.creditsLost > 0 && (
                   <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
                     <span className="text-rose-400/90 text-[11px] uppercase tracking-widest">Salvage lost</span>
@@ -1748,6 +1754,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     </span>
                   </div>
                 )}
+                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'after loss')}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
               </div>
 

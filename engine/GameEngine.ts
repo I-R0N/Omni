@@ -137,6 +137,13 @@ export class GameEngine {
   // portal excursion is the same run, so its kills and seconds carry.
   private runKills: number = 0;          // enemy ships downed BY THE PLAYER
   private runCreditsEarned: number = 0;  // salvage income only (see earnCredits)
+  // Salvage collected since the LAST DEATH.  The death screen reports this
+  // rather than the run gross: what the player wants to know at the wreck is
+  // "what did I bring back from THIS sortie", not a number that has been
+  // climbing since the run began.  Snapshotted into `lastLifeCreditsEarned`
+  // and zeroed at each death, so the next life starts its own tally.
+  private lifeCreditsEarned: number = 0;
+  private lastLifeCreditsEarned: number = 0;
   private runTimeSec: number = 0;        // SIM seconds — pauses/docks don't count
   private runWavesCleared: number = 0;   // clears across every arena this run
   private runHighestWave: number = 0;    // best wave NUMBER reached (1-based)
@@ -1621,6 +1628,8 @@ export class GameEngine {
       // run's summary spans every map it visited.
       this.runKills = 0;
       this.runCreditsEarned = 0;
+      this.lifeCreditsEarned = 0;
+      this.lastLifeCreditsEarned = 0;
       this.runTimeSec = 0;
       this.runWavesCleared = 0;
       this.runHighestWave = 0;
@@ -2919,6 +2928,10 @@ export class GameEngine {
                 this.credits -= lost;
                 this.lastDeathCreditsLost = lost;
                 this.runCreditsLost += lost;
+                // Close out this life's income tally for the summary, then
+                // start the next life at zero.
+                this.lastLifeCreditsEarned = this.lifeCreditsEarned;
+                this.lifeCreditsEarned = 0;
                 this.deathPending = true;
             }
         }
@@ -3768,6 +3781,7 @@ export class GameEngine {
       wavesEnabled: this.wavesEnabled,
       credits: this.credits,
       creditsEarned: this.runCreditsEarned,
+      creditsEarnedLife: this.lastLifeCreditsEarned,
       creditsLost: this.lastDeathCreditsLost,
       creditsLostRun: this.runCreditsLost,
       timeSec: Math.floor(this.runTimeSec),
@@ -4267,6 +4281,7 @@ export class GameEngine {
   private earnCredits(n: number) {
       this.credits += n;
       this.runCreditsEarned += n;
+      this.lifeCreditsEarned += n;
   }
 
   /** Style a gold "+N" points popup: text + magnitude-tiered colour/size

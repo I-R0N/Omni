@@ -175,7 +175,12 @@ broke pilot is zeroed and never driven negative.  Charged ONCE, on the
 transition into `deathPending`, so neither respawning nor restarting can
 double-charge, and money already spent on modules is untouched (the
 penalty taxes hoarding, not investment).  `lastDeathCreditsLost` /
-`runCreditsLost` carry it to the summary.  Both numbers are PROVISIONAL
+`runCreditsLost` carry it to the summary, which reports salvage as a
+LEDGER FOR THIS LIFE: earned since the last death
+(`lifeCreditsEarned`, snapshotted + zeroed at each death), lost to the
+wreck, and held after the loss.  The run gross (`runCreditsEarned`)
+stays on `EngineStats` but is deliberately NOT the headline — it keeps
+climbing and isn't the question being asked at the wreck.  Both numbers are PROVISIONAL
 and the fuller dynamic system still belongs to the economy tuning pass
 (step 6).
 The screen itself is PRESENTATION around the respawn behaviour — when

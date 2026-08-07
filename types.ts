@@ -1461,6 +1461,11 @@ export interface EngineStats {
     wavesEnabled: boolean;
     credits: number;
     creditsEarned: number;
+    /** Salvage collected since the LAST DEATH — what this sortie brought
+     *  back.  The screen leads with this rather than the run gross, which
+     *  keeps climbing and answers a question the player isn't asking at the
+     *  wreck.  `credits` is the balance AFTER the loss below. */
+    creditsEarnedLife: number;
     /** Salvage forfeited to THIS death (SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION
      *  of the unspent balance, charged once as the summary is raised), and the
      *  running total across the whole run. */
