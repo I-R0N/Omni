@@ -117,6 +117,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.quitToMenu();
   };
 
+  const handleDismissStageClear = () => {
+      if (engineRef.current) engineRef.current.dismissStageClear();
+  };
+
   const handleSetDifficulty = (level: number) => {
       setDifficulty(level);
       if (engineRef.current) {
@@ -462,6 +466,7 @@ const App: React.FC = () => {
         onRespawn={handleRespawn}
         onRestartRun={handleRestartRun}
         onQuitToMenu={handleQuitToMenu}
+        onDismissStageClear={handleDismissStageClear}
         onToggleDebug={handleToggleDebug}
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}

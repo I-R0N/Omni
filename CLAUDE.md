@@ -198,6 +198,31 @@ existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
 so one summary spans every map a run visited.  `runTimeSec` accumulates
 SIM seconds, so paused / docked / dead time is excluded for free.
 
+**STAGE DESCENT** (boss capstone → deeper stage).  A STAGE is one arena's
+ladder: `BOSS_CONSTANTS.WAVE_INTERVAL` waves capped by a boss.  Killing
+that boss freezes the loop on a STAGE-CLEAR screen — the same
+short-circuit the death screen uses, but the player is ALIVE, so it
+PAUSES the fight rather than ending it — and opens a DESCENT rift beside
+the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
+`PORTAL_CONSTANTS.DESCENT_COLOR`).  `dismissStageClear()` resumes the
+cleared arena; the CHOICE is then made IN THE WORLD by flying to a rift,
+which is why the screen offers no travel buttons: down the amber rift to
+stage N+1, or back through the arena's return rift to the hub.
+`GameEngine.stageIndex` is 0-based DEPTH — incremented by
+`transitionToMap(id, {descend:true})`, zeroed on arrival at the HUB (the
+hub is the surface), and reset per run.  It drives
+`WaveSystem.waveOffset` (`stageIndex × WAVE_INTERVAL`), which is added to
+`waveIndex` for every `enemyHpMult`/`enemyDamageMult` lookup AND for
+`isBossWave`/`bossForWave`, so enemy growth and the boss rotation
+continue across a descent instead of restarting with the arena's wave
+counter.  The DISPLAY wave number is deliberately unshifted — the HUD
+still counts 1..5 within the stage.  The descent target is a RANDOM arena
+descriptor: the existing maps are test terrain and interchangeable, so
+this is the placeholder seam for the procedural AREAS that will
+eventually pick terrain / enemies / flow parameters — swapping a
+generator in changes one line, because the target is a descriptor id like
+every other portal.
+
 Per-frame `loop()`:
 
 1. Measure delta, accumulate into `simAccumulator`.  BUT FIRST: if
@@ -205,9 +230,10 @@ Per-frame `loop()`:
    stats, draws a static frame, and returns — the sim FREEZES while the
    React station UI is up (same short-circuit the removed
    `cardChoicePending` card modal used).  The E key undocks from inside
-   this branch.  `deathPending` (Pair A) freezes the loop the same way,
-   immediately after — and the accumulator drain below breaks out of the
-   substep loop the moment it is raised mid-frame.
+   this branch.  `deathPending` (Pair A) and `stageClearPending` (the boss
+   stage-clear screen) freeze the loop the same way, immediately after —
+   and the accumulator drain below breaks out of the substep loop the
+   moment either is raised mid-frame.
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
    - `PerfController.beginStep(...)` — samples a load signal

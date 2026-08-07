@@ -639,6 +639,10 @@ export interface GameEntity {
   // in range — names the control ("TAP SHIP TO ENTER").  Stamped per sim step
   // by GameEngine.updateInteractables and cleared when nothing is in range.
   interactPrompt?: string;
+  // Portal opened by a boss capstone that leads DEEPER (stage N -> N+1) rather
+  // than to a fixed destination.  Entering one increments GameEngine.stageIndex,
+  // which carries the enemy-growth curve and the boss rotation forward.
+  isDescent?: boolean;
   // Projectile flags for rival fire: `hitsEnemies` lets an ENEMY-owned shot
   // damage other ENEMY targets (so a rival can shoot the wave enemies), and
   // `sparesPlayer` makes an ENEMY-owned shot pass THROUGH the player (so an
@@ -1474,6 +1478,22 @@ export interface EngineStats {
     /** SIM seconds; time paused / docked / on this screen is excluded. */
     timeSec: number;
     mapName: string;
+  };
+  /** Stage-clear screen: present only while a boss capstone has just fallen
+   *  and the summary is up.  The sim is FROZEN while set — the same freeze the
+   *  death screen and the docked station use — but the player is ALIVE, so
+   *  this pauses the fight rather than ending it.  Dismissing resumes the
+   *  cleared arena, where the choice is in-world: the newly-opened DESCENT
+   *  rift (stage `nextStage`) or the arena's return rift home. */
+  stageClear?: {
+    stage: number;
+    nextStage: number;
+    bossName: string;
+    mapName: string;
+    scoreAwarded: number;
+    salvageDrops: number;
+    discountFraction: number;
+    discountSeconds: number;
   };
   /** Station docking state (Overworld only).  `inRange` drives the DOCK
    *  affordance; `docked` opens the station UI (the sim is frozen while

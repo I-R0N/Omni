@@ -3022,6 +3022,11 @@ export const PORTAL_CONSTANTS = {
                              // a landmark at gameplay zoom, like the station)
   COLOR: '#a855f7',          // violet — the established rift language (dragon/rival warps)
   RETURN_COLOR: '#38bdf8',   // sky — return rifts match the hub/station palette
+  // DESCENT rift (boss capstone → next stage).  Its own AMBER reads as neither
+  // the violet way-out nor the sky way-home: "deeper".  DESCENT_OFFSET is how
+  // far from the fallen boss it opens, so it isn't buried in the wreck debris.
+  DESCENT_COLOR: '#f59e0b',
+  DESCENT_OFFSET: 190,
   // Interaction proximity.  Slightly under the station's DOCK_RANGE so that
   // when a portal and a station overlap in range the nearest-wins arbiter
   // has a clear winner rather than a coin flip at the boundary.

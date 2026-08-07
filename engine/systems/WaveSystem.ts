@@ -41,6 +41,17 @@ import { wrapPosition } from '../toroidal';
  */
 export class WaveSystem {
   public waveIndex: number = 0;
+  /** STAGE offset added to `waveIndex` for every DIFFICULTY and BOSS-ROTATION
+   *  lookup.  Wave progress restarts at 1 in each new arena (WaveSystem.init
+   *  zeroes waveIndex), so without this a stage-5 descent would be exactly as
+   *  easy as stage 1 and would re-fight the first boss.  GameEngine sets it to
+   *  `stageIndex × BOSS_CONSTANTS.WAVE_INTERVAL`, which makes the enemy-growth
+   *  curve and the boss rotation both continue across a descent as if the
+   *  waves had run consecutively.  It deliberately does NOT shift the DISPLAY
+   *  wave number — the HUD still counts 1..5 within the stage. */
+  public waveOffset: number = 0;
+  /** The index the scaling / rotation tables see. */
+  private get scaledIndex(): number { return this.waveIndex + this.waveOffset; }
   /** Ids of every enemy spawned by the current wave (dead ones included —
    *  liveness is re-checked against the entity list each tick). */
   public waveEnemyIds: Set<string> = new Set();
@@ -142,7 +153,8 @@ export class WaveSystem {
     // boss in immediately and cuts the normal stream down — the boss IS most of
     // the wave.  A DBG forced-enemy test suppresses it so enemy-isolation runs
     // stay clean.
-    const boss = !ctx.forcedEnemy && isBossWave(index) ? bossForWave(index) : null;
+    const scaled = index + this.waveOffset;
+    const boss = !ctx.forcedEnemy && isBossWave(scaled) ? bossForWave(scaled) : null;
     const budget = Math.max(1, Math.round(
       getWaveSpawnBudget(index) * ctx.enemyScale * (boss ? BOSS_CONSTANTS.COMPANION_BUDGET_FRAC : 1),
     ));
@@ -320,8 +332,8 @@ export class WaveSystem {
     // Per-wave scaling on top of the per-difficulty multipliers (see
     // ENEMY_SCALING).  HP scales at spawn; damage rides a per-enemy
     // damageMult read by the ram + projectile paths.
-    const scaledHealth = Math.max(1, Math.round(config.health * statScale.health * enemyHpMult(this.waveIndex)));
-    const dmgMult = (statScale.damage ?? 1) * enemyDamageMult(this.waveIndex);
+    const scaledHealth = Math.max(1, Math.round(config.health * statScale.health * enemyHpMult(this.scaledIndex)));
+    const dmgMult = (statScale.damage ?? 1) * enemyDamageMult(this.scaledIndex);
     const enemy: GameEntity = {
       id,
       type: EntityType.ENEMY,

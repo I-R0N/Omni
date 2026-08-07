@@ -17,11 +17,11 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
-import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapDescriptors';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -153,6 +153,24 @@ export class GameEngine {
   // dockedAtStation precedent) and UIOverlay shows the run summary.  Death
   // SEMANTICS are unchanged — RESPAWN still calls respawnPlayer().
   private deathPending: boolean = false;
+  // ── Stage descent (boss capstone → deeper stage) ────────────────────────
+  // A STAGE is one arena's ladder: BOSS_CONSTANTS.WAVE_INTERVAL waves capped
+  // by a boss.  Killing that boss freezes the loop on a STAGE-CLEAR screen
+  // (the player is alive, so this pauses rather than ends) and opens a DESCENT
+  // rift beside them.  From there the choice is in-world: down the new rift to
+  // stage N+1, or back through the arena's return rift to the hub.
+  //
+  // `stageIndex` is 0-based DEPTH.  It drives WaveSystem.waveOffset, so enemy
+  // growth and the boss rotation continue across a descent instead of
+  // restarting with the arena's wave counter.  Returning to the HUB resets it
+  // — the hub is the surface.
+  private stageIndex: number = 0;
+  private stageClearPending: boolean = false;
+  private lastStageClear: {
+    stage: number; bossName: string; nextStage: number;
+    scoreAwarded: number; salvageDrops: number;
+    discountFraction: number; discountSeconds: number;
+  } | null = null;
   // Salvage forfeited to the CURRENT death (shown on the summary) and across
   // the whole run (so repeated deaths read as a running cost).
   private lastDeathCreditsLost: number = 0;
@@ -1533,7 +1551,8 @@ export class GameEngine {
     // The docked station UI and the death/run-summary screen already freeze
     // the sim; stacking the pause menu on top would double up two
     // full-screen overlays.
-    if (this.gameState === GameState.PLAYING && !this.dockedAtStation && !this.deathPending) {
+    if (this.gameState === GameState.PLAYING && !this.dockedAtStation
+        && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
     }
   }
@@ -1635,6 +1654,9 @@ export class GameEngine {
       this.runHighestWave = 0;
       this.runBestCombo = 1;
       this.deathPending = false;
+      this.stageIndex = 0;
+      this.stageClearPending = false;
+      this.lastStageClear = null;
       this.lastDeathCreditsLost = 0;
       this.runCreditsLost = 0;
 
@@ -1690,7 +1712,7 @@ export class GameEngine {
    * `WaveSystem.init` zeroes waveIndex, so leaving an arena abandons the
    * ladder and re-entering starts at wave 1.  No per-map run state exists.
    */
-  public transitionToMap(descriptorId: string): boolean {
+  public transitionToMap(descriptorId: string, opts?: { descend?: boolean }): boolean {
       const dest = mapDescriptor(descriptorId);
       if (!dest) return false;
       // Transit is a live-flight action: not from the menu, not while the
@@ -1711,6 +1733,16 @@ export class GameEngine {
       // portal is travel within a run, not a new selection.  So restarting
       // after a portal trip returns to the player's chosen start map (the
       // hub by default) rather than stranding the next run in an arena.
+      // DEPTH.  Descending a boss rift goes one stage deeper; arriving at the
+      // HUB surfaces (the hub is stage 0), so a trip home genuinely restarts
+      // the ladder rather than banking progress.  Any other transition keeps
+      // the current depth.  Set BEFORE loadMapFresh so initWaveSystem, which
+      // runs below, reads the new value.
+      if (opts?.descend) this.stageIndex++;
+      else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
+      // The stage-clear screen belongs to the arena being left.
+      this.stageClearPending = false;
+
       this.loadMapFresh(dest.mapType);
       this.placePlayerAtSpawn();
       // Combat state belongs to the fight left behind: shield resumes its
@@ -1751,7 +1783,7 @@ export class GameEngine {
   public enterPortal(): boolean {
       const p = this.nearestPortal;
       if (!p || !p.active || !p.portalTargetId) return false;
-      return this.transitionToMap(p.portalTargetId);
+      return this.transitionToMap(p.portalTargetId, { descend: p.isDescent === true });
   }
 
   public restartGame() {
@@ -1785,6 +1817,18 @@ export class GameEngine {
       this.deathPending = false;
       this.resetAndLoadSelectedMap();
       this.startGame();
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
+      this.prepareFrameEntities();
+  }
+
+  /** Dismiss the stage-clear screen and resume the fight-cleared arena.  The
+   *  descent rift and the return rift are both in the world; the player picks
+   *  one by flying to it, which is why this needs no destination argument. */
+  public dismissStageClear() {
+      if (!this.stageClearPending) return;
+      this.stageClearPending = false;
+      // Same stale-time hygiene resumeGame() uses after a freeze.
       this.lastTime = performance.now();
       this.simAccumulator = 0;
       this.prepareFrameEntities();
@@ -1904,6 +1948,9 @@ export class GameEngine {
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
       runSummary: this.deathPending ? this.runSummarySnapshot() : undefined,
+      stageClear: this.stageClearPending && this.lastStageClear
+          ? { ...this.lastStageClear, mapName: this.currentMap?.name ?? '' }
+          : undefined,
       dock: this.dockStatsSnapshot(),
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
@@ -2005,6 +2052,16 @@ export class GameEngine {
         return;
     }
 
+    // Stage cleared: the player is ALIVE, so this PAUSES rather than ends —
+    // same freeze as the death screen, dismissed by CONTINUE, after which the
+    // choice (descend / go home) is made in the world by flying to a rift.
+    if (this.stageClearPending) {
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
     // Dead, run-summary screen up (A1): freeze the sim on exactly the same
     // terms as the docked station above — the wreck field stays drawn behind
     // the React overlay until RESPAWN / RESTART RUN / MAIN MENU is chosen.
@@ -2033,7 +2090,7 @@ export class GameEngine {
         // Death raised mid-frame (A1): stop draining immediately and drop the
         // leftover time, so the summary screen freezes on the frame the wreck
         // finished rather than a few substeps later.
-        if (this.deathPending) { this.simAccumulator = 0; break; }
+        if (this.deathPending || this.stageClearPending) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -3707,7 +3764,9 @@ export class GameEngine {
     // Prompt AT the ship — the control lives there now, so the instruction
     // does too.  Cleared whenever nothing is in range.
     this.player.interactPrompt = portal
-        ? (portal.portalTargetId === HUB_DESCRIPTOR.id ? 'TAP SHIP TO RETURN' : 'TAP SHIP TO ENTER')
+        ? (portal.isDescent ? 'TAP SHIP TO DESCEND'
+           : portal.portalTargetId === HUB_DESCRIPTOR.id ? 'TAP SHIP TO RETURN'
+           : 'TAP SHIP TO ENTER')
         : station ? 'TAP SHIP TO DOCK'
         : undefined;
 
@@ -5932,6 +5991,78 @@ export class GameEngine {
           maxLifetime: life,
       });
       if (this.liveBoss === boss) this.liveBoss = null;
+
+      // ── Stage cleared ──────────────────────────────────────────────────
+      // Open the DESCENT rift beside the wreck and raise the stage-clear
+      // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
+      // (or any wave-free map) has no ladder to descend from.
+      if (this.wavesEnabled) {
+          this.openDescentPortal(boss.position);
+          this.lastStageClear = {
+              stage: this.stageIndex + 1,
+              bossName: def?.name ?? 'Boss',
+              nextStage: this.stageIndex + 2,
+              scoreAwarded: BOSS_CONSTANTS.SCORE,
+              salvageDrops: BOSS_CONSTANTS.SALVAGE_DROPS,
+              discountFraction: this.bossDiscount,
+              discountSeconds: Math.round(BOSS_CONSTANTS.DISCOUNT_SECONDS),
+          };
+          this.stageClearPending = true;
+      }
+  }
+
+  /** The way DOWN: a descent rift beside the fallen boss, targeting a fresh
+   *  arena for the next stage.
+   *
+   *  The destination is a RANDOM arena descriptor (user call).  The existing
+   *  maps are test terrain and effectively interchangeable — this is a
+   *  placeholder for the procedural areas that will eventually pick terrain,
+   *  enemies and flow parameters per AREA.  What matters structurally is that
+   *  the target is a descriptor id, exactly like every other portal, so
+   *  swapping in a generator later changes this one line.
+   *
+   *  Marked `isDescent` so `enterPortal` knows to increment the depth; the
+   *  arena's own return rift is untouched, which is what makes the choice
+   *  in-world rather than a menu button. */
+  private openDescentPortal(pos: Vector2) {
+      if (!this.currentMap) return;
+      const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled
+          && HUB_PORTAL_SITES.some(site => site.targetId === d.id));
+      if (arenas.length === 0) return;
+      const dest = arenas[Math.floor(Math.random() * arenas.length)];
+
+      // Offset from the corpse so the rift doesn't sit under the debris.
+      const a = Math.random() * Math.PI * 2;
+      const p = {
+          x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+          y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+      };
+      wrapPosition(p);
+      const portal: GameEntity = {
+          id: nextId('portal'),
+          type: EntityType.INTERACTABLE,
+          isPortal: true,
+          isDescent: true,
+          portalTargetId: dest.id,
+          name: `Stage ${this.stageIndex + 2}`,
+          position: p,
+          velocity: { x: 0, y: 0 },
+          size: { x: PORTAL_CONSTANTS.SIZE, y: PORTAL_CONSTANTS.SIZE },
+          rotation: 0,
+          color: PORTAL_CONSTANTS.DESCENT_COLOR,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          mass: Infinity,
+      };
+      this.currentMap.entities.push(portal);
+      this.portals.push(portal);
+      // Arrival flourish so the rift reads as something that just OPENED.
+      this.openPortal(p, {
+          color: PORTAL_CONSTANTS.DESCENT_COLOR,
+          radius: PORTAL_CONSTANTS.BURST_RADIUS,
+          duration: PORTAL_CONSTANTS.BURST_DURATION,
+      });
   }
 
   /** DBG: warp a boss in near the player, phases and all.  `id` is an
@@ -6962,6 +7093,9 @@ export class GameEngine {
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
+    // Depth carries the difficulty curve and the boss rotation forward; the
+    // arena's own wave counter still restarts at 1 for the HUD.
+    this.waves.waveOffset = this.stageIndex * BOSS_CONSTANTS.WAVE_INTERVAL;
     this.waves.init(ctx, this.wavesEnabled);
   }
 

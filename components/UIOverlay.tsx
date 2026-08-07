@@ -57,6 +57,10 @@ interface UIOverlayProps {
   onRespawn?: () => void;
   onRestartRun?: () => void;
   onQuitToMenu?: () => void;
+  /** Stage-clear screen: dismiss and resume the cleared arena.  There is no
+   *  "descend" action here on purpose — the choice is made by flying to a
+   *  rift, not by pressing a button. */
+  onDismissStageClear?: () => void;
   onToggleDebug?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
@@ -172,6 +176,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onRespawn,
   onRestartRun,
   onQuitToMenu,
+  onDismissStageClear,
   onToggleDebug,
   onCycleTrailShape,
   onCycleTrailEmitMode,
@@ -1691,6 +1696,68 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* Drag ghost — fixed-positioned, shared by the station UI and the
           pause cargo panel. */}
       {renderDragGhost()}
+
+      {/* ── Stage clear (boss capstone down) ── */}
+      {/* Sim frozen while up (loop short-circuit), but the player is ALIVE —
+          so this is a pause with a payoff report, not an ending.  Dismissing
+          returns to the cleared arena where two rifts are waiting. */}
+      {stats.stageClear && (() => {
+        const sc = stats.stageClear;
+        const row = (label: string, value: React.ReactNode, note?: string) => (
+          <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
+            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className="text-right">
+              <span className="text-white font-bold tabular-nums text-sm">{value}</span>
+              {note && <span className="text-slate-500 text-[10px] ml-1.5">{note}</span>}
+            </span>
+          </div>
+        );
+        return (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+            <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
+
+              <div className="text-center">
+                <h2 className="text-4xl font-black text-amber-300 tracking-[0.2em]">STAGE {sc.stage}</h2>
+                <p className="text-emerald-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">Cleared</p>
+                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">
+                  {sc.bossName} destroyed · {sc.mapName}
+                </p>
+              </div>
+
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
+                {row('Bounty', `+${sc.scoreAwarded.toLocaleString()}`, 'points')}
+                {row('Salvage dropped', `◈${sc.salvageDrops.toLocaleString()}`, 'collect it below')}
+                {sc.discountFraction > 0 &&
+                  row('Shop discount', `${Math.round(sc.discountFraction * 100)}% off`, `${sc.discountSeconds}s`)}
+              </div>
+
+              {/* The choice is IN THE WORLD, not on this screen — so the screen
+                  explains where the two rifts are rather than offering buttons
+                  that would bypass flying to them. */}
+              <div className="bg-slate-800/40 border border-amber-600/30 rounded-lg p-3 text-[11px] leading-relaxed text-slate-300">
+                <p className="text-amber-300 font-bold uppercase tracking-widest text-[10px] mb-1.5">A rift has opened</p>
+                <p>
+                  <span className="text-amber-300 font-bold">Descend</span> through the new amber rift to
+                  {' '}<span className="text-white font-bold">Stage {sc.nextStage}</span> — five more waves and a tougher capstone.
+                  Your hull carries through as-is.
+                </p>
+                <p className="mt-1.5">
+                  Or take the <span className="text-sky-300 font-bold">sky rift</span> home to repair, sell and refit — the
+                  ladder restarts at Stage 1 when you do.
+                </p>
+              </div>
+
+              <button
+                onClick={onDismissStageClear}
+                data-testid="stage-continue"
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest uppercase"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Death / run summary (Phase 3 Pair A) ── */}
       {/* The sim is frozen while `runSummary` is present (loop short-circuit,
