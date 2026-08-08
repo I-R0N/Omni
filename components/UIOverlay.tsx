@@ -314,7 +314,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
     // outer pause-only Switch Map / Test wrapper.  'debug' is the pause-menu
     // Debug Menu wrapper (the DBG panel's home since the station increment).
-    fieldmaps: true, switchmap: true, debug: true,
+    // 'menudebug' is the MAIN MENU's debug dropdown — the map / enemy-test
+    // buttons that used to sit on the front door.  Collapsed by default: the
+    // menu is difficulty + START, and everything else is a debug override.
+    fieldmaps: true, switchmap: true, debug: true, menudebug: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -1943,47 +1946,86 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       })()}
 
       {/* ── Main Menu ── */}
+      {/* Condensed to exactly three controls (user call): DIFFICULTY, START,
+          and a collapsed debug dropdown holding the map / enemy-test buttons.
+          The run always begins on the OVERWORLD hub now — map choice is a
+          debug override, not a front-door decision, so the menu no longer
+          asks for one.
+
+          LAYOUT: a fixed-width column centred by `my-auto` inside a
+          scrollable flex column — NOT `justify-center`, which clips content
+          above the reachable scroll area once the debug dropdown is open (the
+          same trap the station and pause panels document).  So the two
+          controls that matter sit dead centre at every screen size, and an
+          expanded debug list scrolls instead of pushing START off-screen. */}
       {stats.gameState === GameState.MENU && (
-        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto overscroll-contain py-8`}>
-          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
-            OMNIVERSE
-          </h1>
-          {/* Build version — short git SHA + UTC build time, baked in at
-              build time by vite.config.ts.  Lets you tell at a glance
-              whether a deployed preview is running the latest commit. */}
-          <div className="mb-8 font-mono text-[10px] tracking-widest text-slate-500">
-            build {__APP_VERSION__} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}Z
-          </div>
-          <p className="text-slate-400 mb-12 max-w-md text-center leading-relaxed">
-            Survive endless waves of escalating enemies across an infinite universe.
-          </p>
-          <div className="mb-8 flex flex-col items-center gap-3">
-            <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
-            <div className="flex gap-2">
-              {[0, 1, 2, 3].map(level => (
-                <button
-                  key={level}
-                  onClick={() => onSetDifficulty && onSetDifficulty(level)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
-                    difficulty === level
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
-                  }`}
-                >
-                  {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
-                </button>
-              ))}
+        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6`}>
+          <div className="w-full max-w-xs flex flex-col items-center gap-8 my-auto">
+
+            <div className="text-center">
+              {/* Steps down on a 320px screen, where 48px monospace-ish
+                  display type runs edge to edge. */}
+              <h1 className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 tracking-tight drop-shadow-lg">
+                OMNIVERSE
+              </h1>
+              {/* Build version — short git SHA + UTC build time, baked in at
+                  build time by vite.config.ts.  Lets you tell at a glance
+                  whether a deployed preview is running the latest commit. */}
+              <div className="mt-2 font-mono text-[10px] tracking-widest text-slate-500">
+                build {__APP_VERSION__} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}Z
+              </div>
             </div>
+
+            <div className="w-full flex flex-col items-center gap-3">
+              <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
+              {/* A 4-up grid rather than a flex row: the buttons then divide
+                  the column's width instead of setting it, so the row can
+                  never overflow a narrow screen. */}
+              <div className="w-full grid grid-cols-4 gap-2">
+                {[0, 1, 2, 3].map(level => (
+                  <button
+                    key={level}
+                    onClick={() => onSetDifficulty && onSetDifficulty(level)}
+                    className={`py-3 rounded-lg text-xs font-bold border transition-all ${
+                      difficulty === level
+                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
+                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
+                    }`}
+                  >
+                    {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              data-testid="menu-start"
+              onClick={onStart}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"
+            >
+              START
+            </button>
+
+            {/* Debug dropdown — the map picker and enemy test rows, collapsed
+                by default so they are reachable without being a front-door
+                choice.  Same PANEL_OPAQUE treatment as the pause menu's Debug
+                Menu, for the same reason: dense rows over a live map. */}
+            <div className="w-full text-center">
+              <button
+                data-testid="menu-debug-toggle"
+                onClick={() => toggleSection('menudebug')}
+                className="pointer-events-auto cursor-pointer text-amber-400/80 text-[11px] uppercase tracking-widest select-none hover:text-amber-300"
+              >
+                Debug Menu {collapsed.menudebug ? '▸' : '▾'}
+              </button>
+              {!collapsed.menudebug && (
+                <div className={`mt-3 w-full ${PANEL_OPAQUE} border border-amber-500/30 rounded-lg px-3 py-3 flex flex-col items-center gap-5`}>
+                  {renderTestPanel()}
+                </div>
+              )}
+            </div>
+
           </div>
-          <div className="mb-8 flex flex-col items-center gap-5">
-            {renderTestPanel()}
-          </div>
-          <button
-            onClick={onStart}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 px-12 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"
-          >
-            START
-          </button>
         </div>
       )}
 

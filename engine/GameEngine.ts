@@ -1817,6 +1817,12 @@ export class GameEngine {
   }
 
   public restartGame() {
+      // Returning to the main menu returns to the DEFAULT map: a run always
+      // begins on the OVERWORLD hub (user call).  The menu no longer offers a
+      // map choice — picking one is a DEBUG override that lasts for the run it
+      // starts, not a preference that sticks to the front door.  Reset before
+      // the load so the menu backdrop is the hub too.
+      this.selectedMapType = HUB_DESCRIPTOR.mapType;
       this.resetAndLoadSelectedMap();
       this.gameState = GameState.MENU;
       this.prepareFrameEntities();

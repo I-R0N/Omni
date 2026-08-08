@@ -145,6 +145,15 @@ State transitions (driven by `UIOverlay` callbacks): `startGame()` /
 `pauseGame()` / `resumeGame()` / `restartGame()`. `setMapType(MapType)` is
 only honored from the main menu; mid-game requires `restartGame()`.
 
+**A run ALWAYS begins on the OVERWORLD hub.**  `selectedMapType` starts at
+`HUB_DESCRIPTOR.mapType` AND `restartGame()` resets it back there, so
+returning to the menu returns to the default — map choice is a DEBUG
+override that lasts the run it starts, never a preference that sticks to
+the front door.  The main menu is correspondingly three controls:
+DIFFICULTY, START, and a collapsed Debug Menu dropdown holding the map
+picker and the enemy-test rows (user call).  So `setMapType` from the menu
+is now reachable only through that dropdown.
+
 **Map loading comes in two flavours** (roadmap step (k)).  Both share
 `loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
 — and differ only in what they layer on top:
@@ -989,7 +998,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   out of range instead of being culled the way other POI dots are.  The
   fill carries the portal colour, so an outbound rift (violet) and a
   return rift (sky) read differently at a glance.
-  Showcase maps get NO portals — they stay menu-only.
+  Showcase maps get NO portals — they stay debug-only.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -1095,10 +1104,12 @@ Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add a row to `MAP_DESCRIPTORS` in `MapDescriptors.ts`, add
 the subclass in `MapClasses.ts`, switch on it in `GameEngine.buildMap()`,
 add per-map config in `constants.ts` (`PLAYER_MOVEMENT_CONFIG`,
-`MAP_POPULATION`), and add the menu button in `UIOverlay.tsx`.  To make
-it portal-reachable as well, add a `HUB_PORTAL_SITES` entry pointing at
-its descriptor id and call `this.addReturnPortal()` at the end of its
-`init()` — showcase maps skip both and stay menu-only.
+`MAP_POPULATION`), and add the button to `renderMapGroup` in
+`UIOverlay.tsx` (which now renders inside the main menu's DEBUG dropdown
+and the pause menu's Switch Map section — the front door offers no map
+choice).  To make it portal-reachable as well, add a `HUB_PORTAL_SITES`
+entry pointing at its descriptor id and call `this.addReturnPortal()` at
+the end of its `init()` — showcase maps skip both and stay debug-only.
 
 ---
 
