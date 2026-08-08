@@ -1609,8 +1609,8 @@ export class GameEngine {
   /** Park the player (and the camera) at the freshly-loaded map's declared
    *  spawn point, dropping the motion state that belongs to the old map.
    *  Hull / shield / outfit are untouched — the callers decide those. */
-  private placePlayerAtSpawn() {
-      const spawn = this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
+  private placePlayerAtSpawn(override?: Vector2) {
+      const spawn = override ?? this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
       this.player.position = { ...spawn };
       this.player.velocity = { x: 0, y: 0 };
       this.player.trail = [];
@@ -1738,6 +1738,10 @@ export class GameEngine {
       // the ladder rather than banking progress.  Any other transition keeps
       // the current depth.  Set BEFORE loadMapFresh so initWaveSystem, which
       // runs below, reads the new value.
+      // Where the player is coming FROM, resolved before the map is swapped —
+      // used below to put them at the matching rift MOUTH on arrival.
+      const fromId = descriptorForMapType(this.currentMap?.type)?.id;
+
       if (opts?.descend) this.stageIndex++;
       else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
       // The stage-clear screen belongs to the arena being left.
@@ -1745,7 +1749,16 @@ export class GameEngine {
       this.stageClearDelay = 0;
 
       this.loadMapFresh(dest.mapType);
-      this.placePlayerAtSpawn();
+      // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
+      // back at the map just left — which is exactly the hub's per-arena
+      // portal — surface beside that rift rather than at the map's declared
+      // spawn.  Coming home from an arena used to dump the player at their
+      // base station on the far side of the hub, which threw away the trip.
+      // Looked up from the LIVE portal entities (not the placement table), so
+      // it keeps working if placement changes, and it silently falls back to
+      // the spawn when there is no matching rift (a descent into a fresh
+      // arena has none).
+      this.placePlayerAtSpawn(this.arrivalBesideRift(fromId));
       // Combat state belongs to the fight left behind: shield resumes its
       // normal recharge and lingering debuffs (corrosion DoT / EMP) drop.
       // Hull damage does NOT — that's the carry.
@@ -6017,6 +6030,23 @@ export class GameEngine {
           // Arm the beat rather than freezing on the killing blow.
           this.stageClearDelay = BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC;
       }
+  }
+
+  /** Arrival point beside the rift that leads back to `fromId`, or undefined
+   *  when the freshly-loaded map has no such rift.  Offset clear of the mouth
+   *  so the player emerges NEXT TO the rift (it stays visible, and the ship
+   *  isn't sitting inside the thing it just came out of) while still being in
+   *  USE_RANGE, so turning straight around is one tap. */
+  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+      if (!fromId) return undefined;
+      const mouth = this.portals.find(p => p.portalTargetId === fromId);
+      if (!mouth) return undefined;
+      const pos = {
+          x: mouth.position.x + PORTAL_CONSTANTS.ARRIVAL_OFFSET,
+          y: mouth.position.y,
+      };
+      wrapPosition(pos);
+      return pos;
   }
 
   /** Capstone reward: one RANDOM purchasable module dropped straight into the

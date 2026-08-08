@@ -3027,6 +3027,11 @@ export const PORTAL_CONSTANTS = {
   // far from the fallen boss it opens, so it isn't buried in the wreck debris.
   DESCENT_COLOR: '#f59e0b',
   DESCENT_OFFSET: 190,
+  // How far from a rift's mouth the player surfaces when a transition puts
+  // them BESIDE it (coming home from an arena arrives at that arena's hub
+  // rift, not at the player's base).  Just clear of the mouth — the rift stays
+  // on screen and still in USE_RANGE, so turning around is one tap.
+  ARRIVAL_OFFSET: 165,
   // Interaction proximity.  Slightly under the station's DOCK_RANGE so that
   // when a portal and a station overlap in range the nearest-wins arbiter
   // has a clear winner rather than a coin flip at the boundary.
