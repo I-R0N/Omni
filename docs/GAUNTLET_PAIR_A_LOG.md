@@ -78,19 +78,26 @@ solver lets it plow debris while a stripped hull gets shoved around.
 
 ## Test plan
 
-### Automated — 4 headless Playwright suites, 287 assertions
+### Automated — 7 headless Playwright suites, 436 assertions
+
+_(Final count.  The queue itself closed at 4 suites / 238 assertions; the
+three suites below the rule were added by the playtest iterations that
+followed — see "Post-queue playtest iterations".)_
 
 Scratchpad scripts driving the REAL engine in a REAL browser via
 `window.__omniEngine` / `window.__omniStats` (CLAUDE.md §8).  No test
 runner was added to the project (§7); `npm run build` remains the gate.
-All four run at a 390×844 viewport and assert a clean console.
+All seven run at a 390×844 viewport and assert a clean console.
 
 | suite | asserts | covers |
 |---|---|---|
-| `smoke-a1` | 66 | Death screen: summary fields vs engine counters, sim frozen while up, pause blocked, the salvage penalty charged EXACTLY once, RESPAWN / RESTART RUN / MAIN MENU paths, a new run zeroing every counter, wave rows hidden on the hub, ≥40px tap targets |
+| `smoke-a1` | 83 | Death screen: summary fields vs engine counters, sim frozen while up, pause blocked, the salvage penalty charged EXACTLY once, the per-life salvage ledger, RESPAWN / RESTART RUN / MAIN MENU paths, a new run zeroing every counter, wave rows hidden on the hub, ≥40px tap targets |
 | `smoke-a2` | 110 | Stat attribution: all 9 lines present, every contributor set REFOLDED back to the simulation's own values across 4 outfits, OFFLINE modules and core-less plating reporting zero with the reason named, Fire rate = inverse of the sim cooldown, hex→stat highlighting, the same widget in pause AND station |
-| `smoke-a3` | 93 | One continuous run: earn real salvage → dock → buy → outfit → portal → fight → die → summary → respawn → pause → re-dock, with attribution refolded at 4 points and phone-scale layout measured on all three overlays |
+| `smoke-a3` | 94 | One continuous run: earn real salvage → dock → buy → outfit → portal → fight → die → summary → respawn → pause → re-dock, with attribution refolded at 4 points and phone-scale layout measured on all three overlays |
 | `smoke-ind` | 18 | Off-screen indicators, by PIXEL SAMPLING the canvas: type→colour legend classified by hue, edge placement, the proximity size ramp, the aggro blink cycle, nearest-first buffer order |
+| `smoke-sel` | 18 | Ship-select interaction: tap / mouse-click on the hull docks or enters, the tap is CLAIMED out of the fire queue, an off-ship tap still fires, the prompt names the right verb per POI, no HUD pill remains |
+| `smoke-stage` | 69 | Stage descent: the delayed stage-clear beat, the payload, the sim freeze, the halted ladder, the descent rift, CONTINUE, descending with hull/credits/score carried, the depth stride, and returning HOME beside the arena's own hub rift |
+| `smoke-boss` | 44 | Boss waves: capstone placement (index 5, not 4) and rotation, the escort composition, the death ROUT paying points + salvage while sparing neutrals, the halt, the depth stride, and the wave-banner width fit at 390px |
 
 The load-bearing assertion is A2's **refold**: it parses the rendered
 contributor strings back into numbers, folds them the way
@@ -130,18 +137,33 @@ checked mechanically rather than by eye.
    synthetically; nothing asserts `updateRivals` actually sets it.
 3. **Portal label stacking** — fixed by eye from a screenshot, no
    assertion guards the regression.
-4. **Only 390×844** — no desktop viewport, no landscape.
+4. **Only 390×844** — no desktop viewport, no landscape.  Parked as
+   "Viewport coverage — test more than 390×844" in `PARKING_LOT.md`, with
+   the specific size-dependent surfaces listed (banner fit, indicator
+   inset, boss bar, hex flowers, minimap) and a mid-session RESIZE case
+   nothing currently covers.
 5. **Balance is unverified by construction.**  The suites prove the
    panel AGREES with the sim; they cannot prove the sim's numbers are
    good.  Every provisional value (25% penalty, the weight table,
-   BASE_BOOST / DRAG_PER_WEIGHT) is a playtest question for step 6.
+   BASE_BOOST / DRAG_PER_WEIGHT, the boss escort tables, the 6-wave stage
+   length) is a playtest question — enumerated for the tuning pass in
+   `GAME_FEEDBACK_PLAN.md`.
+6. **Boss-wave PACING is untested by construction.**  `smoke-boss` proves
+   the capstone lands on the right wave with the right escort and that
+   killing it routs the field; it cannot say whether a dedicated boss wave
+   after five ordinary ones is the right rhythm, or whether the escort
+   tables make each fight harder in the way intended.
 
 ### Durability
 
-The four scripts live in the SESSION SCRATCHPAD, not the repo — they die
+The seven scripts live in the SESSION SCRATCHPAD, not the repo — they die
 with the session.  Committing them (e.g. under `scripts/smoke/`) is a
 user call, since CLAUDE.md §7 records that this project deliberately has
-no test runner.
+no test runner.  Raised as a merge risk and parked as "Automated test
+suite — investigate a real harness" in `PARKING_LOT.md`, which lays out
+six tiers from "promote these smokes into the repo" up to visual
+regression, and states plainly that the stance should be decided before
+any tier is adopted.
 
 ---
 
@@ -159,7 +181,60 @@ no test runner.
       `d97b44b`, build green, full-loop smoke **89/89**; all three suites
       green together (**238 assertions**)
 
-**QUEUE COMPLETE.**
+**QUEUE COMPLETE** (at 238 assertions / 3 suites).
+
+### Post-queue playtest iterations (user-directed)
+
+The user playtested the branch after the queue closed and directed a
+further batch of work on it.  Each item was implemented, built, smoked and
+pushed the same way; several **deliberately override constraints from the
+original brief**, which is recorded here rather than left as an
+inconsistency between this log and the diff.
+
+- [x] **Off-screen indicators** — edge-anchored, size-by-proximity,
+      colour-by-TYPE legend, aggro blink, per-type budgets sorted
+      nearest-first.  New `smoke-ind` suite (18).
+- [x] **Weight is a SHIP attribute** — every module carries a `weight`;
+      the ship's total drags thrust and scales physical mass.  Replaced
+      per-gun weight attribution, so tapping a gun highlights *Ship
+      weight* rather than *Acceleration*.  (The user's framing: "the
+      player may get different weight ships in the future" — hence
+      `SHIP_WEIGHT.HULL_BASE`, the seam for ship classes.)
+- [x] **Ship-select interaction** — docking and portal entry are now
+      "select your own ship" (tap / click / E), claimed out of the fire
+      queue; the HUD dock and portal pills were REMOVED at the user's
+      direction ("prompt on the ship is plenty").  New `smoke-sel` (18).
+- [x] **Salvage death penalty** — **OVERRIDES the brief's "death
+      SEMANTICS do not change" hard constraint**, on explicit user
+      instruction.  `max(25% of balance, 12,500)`, clamped to holdings,
+      charged exactly once on the transition into `deathPending`.  The
+      summary reports it as a per-LIFE ledger (earned since the last
+      death → lost → held), which the user asked for after seeing the
+      run-gross figure read as the wrong question at the wreck.
+- [x] **Stage descent** — the boss capstone raises a stage-clear screen
+      (a PAUSE, not an end — the player is alive) after a deliberate beat,
+      halts the arena's ladder, and opens an amber descent rift.
+      `stageIndex` drives `WaveSystem.waveOffset` so difficulty and the
+      boss rotation continue across a descent.  New `smoke-stage` (69).
+- [x] **Return-portal arrival** — coming home surfaces BESIDE the hub rift
+      you came out of, not at the base station across the map.
+- [x] **Boss payout reworked** — the timed shop discount was REMOVED at
+      the user's direction and replaced with a random MODULE dropped into
+      the inventory; this also removed a buy/sell money-pump hazard.
+      Payouts are reported in CREDITS, not drop counts.
+- [x] **Boss waves own their own wave** — a stage is 5 ordinary waves plus
+      a dedicated capstone wave (`STAGE_WAVE_COUNT`), the capstone streams
+      the boss's OWN escort (`BossDef.companions`), and its death routs the
+      field at full value.  Wave banners now fit the viewport.  New
+      `smoke-boss` (44).
+- [x] **Docs** — `AUDIO_PLAN.md` written (a ~90-cue inventory plus the
+      three hard constraints AAA audio collides with: the single-file
+      standalone build, the torus, and polyphony).  Five `PARKING_LOT.md`
+      entries added: portal indicator behaviour, portal persistence, area
+      composition + map graph, an automated test harness, and viewport
+      coverage.  **This overrides the brief's "do not modify
+      GAME_FEEDBACK_PLAN.md or PARKING_LOT.md"** — the user explicitly
+      lifted it for both files.
 
 ---
 
@@ -340,13 +415,24 @@ Phase 3 **Pair A** is complete: both roadmap rows — (i) death/completion
 screen and stat-legibility (decision #40b) — are implemented, validated
 and pushed, in three commits (one per milestone) plus ledger commits.
 
+**The branch then went beyond Pair A.**  After the queue closed the user
+playtested it and directed a further batch of work on the same branch —
+indicators, ship weight, ship-select interaction, a death penalty, stage
+descent, and a boss-wave rework.  Two of the brief's hard constraints were
+explicitly lifted by the user in the process (death semantics may change;
+the plan and parking-lot docs may be edited).  The queue's own result is
+described first below; everything the playtest added is in "Beyond the
+queue" and in the post-queue checklist above.
+
 **A1 — death/run-summary screen.** Player death raises a full-screen
 summary instead of silently auto-respawning: score + best combo, waves
 cleared and highest wave, enemies destroyed (bosses noted), salvage
 earned vs balance, run time, current map.  RESPAWN / RESTART RUN / MAIN
 MENU are three EXISTING engine paths, wired not invented.  Death
-SEMANTICS are untouched, per the brief's hard constraint — the penalty
-question stays with the economy tuning pass.  Six run-scoped counters
+SEMANTICS were untouched AS SHIPPED IN A1, per the brief's hard
+constraint — the penalty question was left to the economy tuning pass.
+_(Superseded post-queue: the user then asked for a salvage penalty, and
+one now exists — see "Beyond the queue".)_  Six run-scoped counters
 added, reset in `resetAndLoadSelectedMap()` and deliberately not in
 `loadMapFresh()`, so one summary spans every map a run visited.
 
@@ -363,15 +449,63 @@ pause menu and the docked station; nothing was forked.
 **A3 — validation.** 238 headless assertions across three suites,
 phone-scale DOM measurement of all three overlays, CLAUDE.md synced.
 
-**Scope held.** No SFX (Pair B), no controller (Pair C), no polish-batch
-items, no economy or boss changes.  `docs/GAME_FEEDBACK_PLAN.md` and
-`docs/PARKING_LOT.md` were not modified.  No numbers were invented: the
-only magnitudes introduced are layout, and they were measured.
+**Scope held at queue close.** No SFX (Pair B), no controller (Pair C),
+no polish-batch items, no economy or boss changes; the two planning docs
+untouched; no invented numbers (the only magnitudes were layout, and they
+were measured).
 
-**13 decisions recorded below with their alternatives.  Four items are
-flagged FOR-USER-REVIEW at the top of this file** — the penalty-free
-respawn (flagged, not fixed, as instructed), and three presentation
-judgment calls that are each one edit to reverse.
+---
+
+### Beyond the queue (user-directed playtest work on the same branch)
+
+Everything in this section postdates "QUEUE COMPLETE" and was directed by
+the user during playtesting.  It is on this branch and in this PR.
+
+**Constraints the user explicitly lifted.**  Two of the brief's hard
+constraints no longer hold, by instruction, not by drift:
+
+1. *"Death SEMANTICS do not change."*  Lifted — "Let's charge the player
+   a percentage of their salvage on death for now."  Death now costs
+   `max(25% of unspent credits, 12,500)`, clamped to holdings, charged
+   once on the transition into `deathPending`.  Money already spent on
+   modules is untouched: the penalty taxes hoarding, not investment.
+2. *"Do not modify `GAME_FEEDBACK_PLAN.md` or `PARKING_LOT.md`."*  Lifted
+   for both.  Five parking-lot entries and a plan update were requested.
+
+**What changed, in one line each.**
+
+- *Indicators.*  Edge-anchored arrows, size by proximity, colour by TYPE
+  (not `entity.color`), aggro blink for conditionally-hostile contacts,
+  per-type budgets kept nearest-first.
+- *Ship weight.*  Every module has a weight; the SHIP's total drags thrust
+  and scales physical mass.  Guns file under **Ship weight**, not
+  Acceleration — a gun does not make the ship accelerate worse, it makes
+  the ship heavier.  This replaced decision **D11** (see below).
+- *Ship-select.*  Docking and portal entry are "select your own ship";
+  the HUD pills were deleted.
+- *Stage descent.*  A capstone kill pauses on a stage-clear screen and
+  opens an amber descent rift; `stageIndex` carries difficulty and the
+  boss rotation down with it.  Returning home surfaces beside the rift
+  you came out of.
+- *Boss payout.*  The timed shop discount is gone (it was also a buy/sell
+  money pump above a 10% discount); a random module drops into the
+  inventory instead, and payouts read in credits.
+- *Boss waves.*  A stage is five ordinary waves plus the boss's OWN wave;
+  the capstone streams its own escort and its death routs the field at
+  full value.
+- *Banners.*  Wave/boss banner text now fits the viewport instead of
+  clipping off both edges of a 390px phone.
+
+**Numbers WERE invented here, unlike in the queue.**  The penalty
+fraction and floor, the ship-weight curve, the boss escort tables and the
+6-wave stage length are all provisional balance values.  They are
+enumerated as tuning metrics in `GAME_FEEDBACK_PLAN.md` rather than left
+implicit in the diff.
+
+**13 decisions recorded below with their alternatives** (D11 superseded
+by the ship-weight change).  **The four FOR-USER-REVIEW items at the top
+of this file are all RESOLVED** — item 1 (penalty-free respawn) by the
+penalty above; the three presentation calls by the user concurring.
 
 ---
 
@@ -460,6 +594,12 @@ _(Each entry: what was chosen, the alternatives, and why.)_
   divergence is documented on the type.
 
 - **D11 — weapon-weight drag is ONE derived row, not per-gun shares.**
+  **SUPERSEDED post-queue** by the user's call that weight is a SHIP
+  attribute: every module now carries a weight, the drag row is
+  multiplicative over the ship's TOTAL weight, and guns file under *Ship
+  weight* instead of *Acceleration*.  The slot-less derived-row shape D11
+  chose is what made that a small change, so the reasoning below still
+  holds — only the set of contributors widened.
   The formula is `BASE_BOOST / (1 + DRAG × Σweight)` — multiplicative
   over the whole mounted set, so any per-gun split would be an invented
   attribution.  Alternatives: (a) split the drag evenly, (b) marginal

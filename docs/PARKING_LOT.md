@@ -940,3 +940,116 @@ node ids; and destroyed terrain does not persist across re-entry.
 - Do flow-field parameters, enemy mixes and ambient fauna cluster by region
   too?  The user's original framing of an AREA included all of these, so the
   material combination is likely one facet of a broader per-node profile.
+
+---
+
+## Automated test suite — investigate a real harness (2026-08-08)
+
+**Raised as a merge risk during the Phase 3 Pair A gauntlet.**  The project
+has, by design, no test runner and no lint step (CLAUDE.md §7: "Don't invent
+one unless the user asks").  Validation today is `npm run build` — which only
+type-checks — plus whatever headless Playwright smokes the session author
+happens to write.  Those smokes have proven genuinely valuable (the Pair A
+session ran 436 assertions across 7 suites and they caught real regressions:
+a wreck-state leak on restart, indicator budgets culling the nearest contacts,
+a stale-`dist` false pass), but they are **session-scoped scratchpad files**,
+not repo artifacts.  They evaporate with the session.  The next session
+re-derives them from scratch, and nothing prevents a later change from
+silently breaking behaviour an earlier session proved.
+
+That is the actual risk: **there is no regression net that outlives a
+session.**  Every guarantee this repo has is re-established by hand, per
+session, by whoever remembers to.
+
+**What to investigate** (roughly in order of value-per-effort):
+
+1. **Promote the smokes into the repo.**  The cheapest large win.  They
+   already drive the real engine in a real browser through
+   `window.__omniEngine` / `window.__omniStats` (CLAUDE.md §8), so there is
+   nothing to port — it is `npm i -D @playwright/test`, a `tests/` directory,
+   a `test` script, and a decision about where the preview server comes from.
+   The debug handles exist precisely for this and cost nothing per frame.
+2. **A type-check script.**  `tsc --noEmit` as its own npm script, so a type
+   error surfaces without a full Vite build.  Minutes of work.
+3. **Unit tests for the pure layer.**  Vitest over the genuinely pure,
+   dependency-free functions: `engine/toroidal.ts` (wrap math — the single
+   most invariant-critical code in the repo and the easiest to break
+   silently), the `constants.ts` pure helpers (`isBossWave`, `bossForWave`,
+   `buildWaveSpawnList`, `buildBossWaveSpawnList`, `enemyHpMult`,
+   `getWaveSpawnBudget`, `modulePrice`, `moduleFitsSlot`), and the module
+   adjacency fixpoint.  No DOM, no canvas, fast.
+4. **Headless SIM tests without a browser.**  The engine constructs a
+   `GameEngine` before `initCanvas`; a large amount of sim logic (waves,
+   physics stepping, module effects, death routing) may be drivable in Node
+   with a stub context.  Worth a spike — if it works it is far faster than
+   Playwright and covers the parts that actually carry the game.
+5. **Visual regression.**  Screenshot diffs for the HUD at 390×844 and the
+   station/pause panels.  This is where the "AAA test suite" framing points,
+   and it is also the flakiest and most maintenance-hungry tier — the Pair A
+   session already burned real time on canvas-sampling flakiness (the fix was
+   to PAUSE the sim and classify by dominant-hue histogram rather than
+   brightest pixel).  Do this LAST, and only for surfaces that are stable.
+6. **CI gating.**  Today's two workflows (`pr-preview`, `publish-standalone`)
+   gate nothing.  Once (1)–(3) exist, run them on PR.
+
+**Explicitly NOT decided:** whether the project wants this at all.  The
+no-test-runner stance is deliberate and has kept the repo light.  The
+counter-argument is that the codebase is now ~15k lines with a god-class
+orchestrator, three exotic engine-managed roamers, a boss phase machine and a
+module system, and the cost of a silent regression has grown a lot since that
+stance was set.  **Decide the stance first, then pick tiers** — a half-adopted
+harness that nobody runs is worse than none.
+
+---
+
+## Viewport coverage — test more than 390×844 (2026-08-08)
+
+**Raised as a merge risk during the Phase 3 Pair A gauntlet.**  Every UI
+assertion written in that session ran at a single viewport: **390×844**, the
+iPhone the game is actually played on.  That is the right primary target, and
+it is the *hard* one (it is where the death screen, the stage-clear screen,
+the boss HUD bar, the hex flowers and the wave banner all had to be made to
+fit).  But it is one point in a space, and several of this session's changes
+are **size-dependent by construction**:
+
+- `RenderSystem.fitFontPx` scales banner text off canvas width — its
+  behaviour at 1920px (never shrinks) and at 320px (shrinks hard, possibly to
+  the readability floor) is untested.
+- Off-screen indicators anchor to an INSET VIEWPORT RECT
+  (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) and ramp size by distance; the inset
+  is a fixed px value, so it is proportionally huge on a small screen and
+  negligible on a large one.
+- The boss HUD bar was explicitly "sized so all of it survives a 390px-wide
+  screen" — meaning it was tuned to a floor, not designed responsively.
+- The station and pause panels are honeycomb hex grids with drag-and-drop;
+  hex layout is computed, and both the drag ghost and the drop targets are
+  position-sensitive.
+- The minimap is a fixed `MINIMAP_CONSTANTS.SIZE` square with a fixed margin,
+  and the wave banner is positioned relative to it.
+
+**Viewports worth covering:**
+
+| Viewport | Why |
+|---|---|
+| 320×568 (iPhone SE, 1st gen) | the narrowest phone still in use — the real floor |
+| 390×844 (iPhone 12–15) | today's only target; keep it |
+| 430×932 (Pro Max) | the large-phone case |
+| 768×1024 (iPad portrait) | tablet portrait — tall, but wide enough to change layout |
+| 1024×768 (iPad landscape) | the first genuinely LANDSCAPE case |
+| 1440×900 / 1920×1080 (desktop) | where the game is developed and where nothing shrinks |
+
+**Also worth testing, and cheaper than it sounds:** a **mid-session resize**.
+Rotating a phone or resizing a desktop window is a real user action, and
+nothing in the current suites ever changes the viewport after load.  Caches
+keyed on canvas size (the nebula render fast-path, gradient caches, the
+minimap) are exactly the sort of thing that survives a resize incorrectly.
+
+**Cheapest path:** the existing smokes already take a viewport in
+`browser.newContext({ viewport })`; parameterising the DOM-layout assertions
+over a viewport list is a loop, not a rewrite.  The scroll-width check
+(`document.documentElement.scrollWidth <= width`) and the ≥40px tap-target
+check generalise directly.  The canvas-pixel assertions do not, and should
+stay pinned to one viewport.
+
+**Depends on** the test-suite entry above: this is only worth building on top
+of a harness that outlives a session.
