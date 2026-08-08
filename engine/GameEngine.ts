@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -153,6 +153,17 @@ export class GameEngine {
   // dockedAtStation precedent) and UIOverlay shows the run summary.  Death
   // SEMANTICS are unchanged — RESPAWN still calls respawnPlayer().
   private deathPending: boolean = false;
+  // Counts down AFTER the wreck's explosion finishes and BEFORE the summary
+  // appears — the boss stage-clear beat applied to the player's own death
+  // (user call).  The sim keeps running through it AND through the screen
+  // itself: unlike pause/dock/stage-clear, death does NOT freeze the world,
+  // so the field stays alive behind the (semi-transparent) summary.
+  private deathDelay: number = 0;
+  // The summary is SNAPSHOTTED at the moment of death rather than rebuilt per
+  // frame, precisely because the sim keeps running behind it — otherwise the
+  // run clock would tick and stray kills would score while the player reads
+  // their own obituary.
+  private deathSummary: ReturnType<GameEngine['runSummarySnapshot']> | null = null;
   // ── Stage descent (boss capstone → deeper stage) ────────────────────────
   // A STAGE is one arena's ladder: BOSS_CONSTANTS.WAVE_INTERVAL ordinary waves
   // and then the boss's OWN capstone wave (STAGE_WAVE_COUNT waves in all), so
@@ -1656,6 +1667,8 @@ export class GameEngine {
       this.runHighestWave = 0;
       this.runBestCombo = 1;
       this.deathPending = false;
+      this.deathDelay = 0;
+      this.deathSummary = null;
       this.stageIndex = 0;
       this.stageClearPending = false;
       this.stageClearDelay = 0;
@@ -1819,11 +1832,9 @@ export class GameEngine {
   public respawnFromDeath() {
       if (!this.deathPending) return;
       this.deathPending = false;
+      this.deathDelay = 0;
+      this.deathSummary = null;
       this.respawnPlayer();
-      // Same stale-time guard resumeGame() uses — the loop was frozen while
-      // the summary was up, so drop the accumulated wall-clock.
-      this.lastTime = performance.now();
-      this.simAccumulator = 0;
       this.prepareFrameEntities();
   }
 
@@ -1832,6 +1843,8 @@ export class GameEngine {
    *  round trip through the menu. */
   public restartRun() {
       this.deathPending = false;
+      this.deathDelay = 0;
+      this.deathSummary = null;
       this.resetAndLoadSelectedMap();
       this.startGame();
       this.lastTime = performance.now();
@@ -1963,7 +1976,7 @@ export class GameEngine {
         },
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
-      runSummary: this.deathPending ? this.runSummarySnapshot() : undefined,
+      runSummary: this.deathPending ? (this.deathSummary ?? undefined) : undefined,
       stageClear: this.stageClearPending && this.lastStageClear
           ? { ...this.lastStageClear, mapName: this.currentMap?.name ?? '' }
           : undefined,
@@ -2078,15 +2091,14 @@ export class GameEngine {
         return;
     }
 
-    // Dead, run-summary screen up (A1): freeze the sim on exactly the same
-    // terms as the docked station above — the wreck field stays drawn behind
-    // the React overlay until RESPAWN / RESTART RUN / MAIN MENU is chosen.
-    if (this.deathPending) {
-        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
-        this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
-        return;
-    }
+    // NOTE — deliberately NO `deathPending` short-circuit here.  Death is the
+    // one full-screen overlay that does NOT freeze the sim (user call): the
+    // field keeps moving behind the semi-transparent summary, so the player
+    // watches the fight carry on without them.  The dead player is already
+    // inert — `updateGameLogic` returns early while `isExploding`, so no
+    // input, weapons, docking, drop-collection or wave progress happens —
+    // and the summary itself is a SNAPSHOT taken at the moment of death, so
+    // nothing behind the screen can move the numbers on it.
 
     // ── Fixed-timestep accumulator (Phase 1) ─────────────────────────────────
     // Drain the accumulator at a fixed simulation rate regardless of the
@@ -2103,10 +2115,11 @@ export class GameEngine {
     let steps = 0;
     let frameSimMs = 0; // raw per-frame sim total (summed across substeps)
     while (this.simAccumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
-        // Death raised mid-frame (A1): stop draining immediately and drop the
-        // leftover time, so the summary screen freezes on the frame the wreck
-        // finished rather than a few substeps later.
-        if (this.deathPending || this.stageClearPending) { this.simAccumulator = 0; break; }
+        // Stage-clear raised mid-frame: stop draining immediately and drop the
+        // leftover time, so the screen freezes on the frame the capstone died
+        // rather than a few substeps later.  (Death is NOT here — it no longer
+        // freezes the sim.)
+        if (this.stageClearPending) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -2844,11 +2857,24 @@ export class GameEngine {
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
 
-    // Run clock (A1) — SIM seconds, so time spent paused, docked or on the
-    // death screen is excluded for free (all three freeze the loop).  The
-    // highest wave reached is sampled here rather than at wave start so a
+    // Run clock (A1) — SIM seconds, so time spent paused or docked is
+    // excluded for free (both freeze the loop).  DEATH no longer freezes it
+    // (the field stays alive behind the summary), so the dead window is
+    // excluded EXPLICITLY here — reading your own obituary is not play time.
+    // The highest wave reached is sampled here rather than at wave start so a
     // wave-free hub visit can't stomp the arena high-water mark.
-    this.runTimeSec += dt;
+    if (!this.deathPending && this.deathDelay <= 0) this.runTimeSec += dt;
+    // Death beat: the wreck has finished and the sim is STILL running so the
+    // field keeps moving; when it expires the summary fades in over a live
+    // map.  Ticked here (before the isExploding early-return below) because
+    // the player stays flagged exploding for the whole of it.
+    if (this.deathDelay > 0) {
+        this.deathDelay -= dt;
+        if (this.deathDelay <= 0) {
+            this.deathDelay = 0;
+            this.deathPending = true;
+        }
+    }
     // Stage-clear beat: the capstone is down and the sim is still running so
     // the explosion plays out; when it expires the screen takes over.
     if (this.stageClearDelay > 0) {
@@ -2986,11 +3012,14 @@ export class GameEngine {
     }
 
     if (this.player.isExploding) {
-        if (this.player.explosionTimer !== undefined) {
+        // `> 0` is load-bearing, not defensive: the sim keeps running after
+        // death now, so without it this branch would re-fire (and re-charge
+        // the penalty) on every subsequent step.
+        if (this.player.explosionTimer !== undefined && this.player.explosionTimer > 0) {
             this.player.explosionTimer -= dt;
             if (this.player.explosionTimer <= 0) {
                 // A1: the wreck finishing no longer respawns on its own — it
-                // raises the run-summary screen and freezes the sim.
+                // arms the beat that raises the run-summary screen.
                 this.player.explosionTimer = 0;
                 // Death penalty (user call): forfeit a fraction of UNSPENT
                 // Salvage, charged HERE — once, on the transition into the
@@ -3014,7 +3043,13 @@ export class GameEngine {
                 // start the next life at zero.
                 this.lastLifeCreditsEarned = this.lifeCreditsEarned;
                 this.lifeCreditsEarned = 0;
-                this.deathPending = true;
+                // Freeze the numbers HERE — the world keeps simulating behind
+                // the screen, so a summary read live would drift.
+                this.deathSummary = this.runSummarySnapshot();
+                // Arm the beat instead of raising the screen on the frame the
+                // wreck finished: the same reward-moment pacing the boss
+                // capstone uses, applied to the player's own death.
+                this.deathDelay = UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC;
             }
         }
         this.camera.position.x = this.player.position.x;
@@ -3851,9 +3886,10 @@ export class GameEngine {
     return true;
   }
 
-  /** Run summary for EngineStats (A1) — built ONLY while `deathPending`, so
-   *  it costs nothing on a live frame.  Every field is a counter that already
-   *  exists on the engine; nothing is recomputed here. */
+  /** Run summary for EngineStats (A1) — built ONCE, at the moment of death,
+   *  and then republished verbatim while `deathPending` (the sim keeps running
+   *  behind the screen, so a live rebuild would drift).  Every field is a
+   *  counter that already exists on the engine; nothing is recomputed here. */
   private runSummarySnapshot() {
     return {
       score: this.score,

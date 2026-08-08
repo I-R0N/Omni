@@ -166,6 +166,45 @@ interface UIOverlayProps {
   onSetForcedEnemy?: (subtype: string | null) => void;
 }
 
+/**
+ * Shared full-screen overlay scrim (user call: "all menus slightly
+ * transparent to continue displaying the dynamic map").
+ *
+ * ONE constant for all five overlays — main menu, pause, station, death,
+ * stage-clear — so the game never has two different ideas of how much world
+ * shows through.  Two deliberate choices:
+ *
+ * - **The alpha is a legibility floor, not a taste knob.**  The map behind is
+ *   a starfield with nebulae, salvage glints and explosions, i.e. arbitrary
+ *   bright colour under arbitrary text.  55% slate-950 is what keeps
+ *   `text-slate-500` body copy readable over the worst case (a lit nebula)
+ *   while still reading clearly as "the world is still there".
+ * - **The blur is SMALL on purpose.**  A heavy `backdrop-blur` is the usual
+ *   way to buy legibility, but it defeats the point — the ask is to SEE the
+ *   map move, and 12px of blur turns motion into a smear.  3px softens the
+ *   high-frequency starfield (which is what actually fights small text)
+ *   without hiding anything that moves.
+ *
+ * Note this does NOT track whether the sim is running: the pause menu freezes
+ * the world and still shows it, which is exactly what was asked for.
+ */
+const OVERLAY_SCRIM = 'bg-slate-950/55 backdrop-blur-[3px]';
+
+/**
+ * Backing for content that must stay readable REGARDLESS of what is on the
+ * map behind it — dense, small, information-bearing panels where the scrim's
+ * legibility floor isn't enough.  Today that is the debug menu (rows of 10px
+ * mono readouts, explicitly called out as needing to stay visible).  Nearly
+ * opaque plus its own blur, so it reads like a panel sitting ON the scrim
+ * rather than more transparency stacked on transparency.
+ */
+const PANEL_OPAQUE = 'bg-slate-950/95 backdrop-blur-md';
+
+/** The overlay fade-in.  Death and stage-clear both interrupt live play, so
+ *  both ease in rather than snapping over the frame the fight ended. */
+const OVERLAY_FADE_IN = { animation: 'omniFadeIn 420ms ease-out both' } as const;
+const OVERLAY_KEYFRAMES = '@keyframes omniFadeIn{from{opacity:0}to{opacity:1}}';
+
 const UIOverlay: React.FC<UIOverlayProps> = ({
   stats,
   onCycleWeapon,
@@ -1387,8 +1426,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     </div>
   );
 
+  // Is a full-screen overlay up?  The scrims are translucent now, so the HUD
+  // behind them is no longer hidden by opacity — and a score chip, wave
+  // counter and pause button ghosting through a run summary reads as
+  // double-vision, not as depth.  What the transparency is FOR is seeing the
+  // MAP, so the DOM HUD steps aside while a menu is open.  (The canvas-drawn
+  // minimap and loadout strip stay: those are part of the game view.)
+  const overlayUp =
+    stats.gameState === GameState.MENU ||
+    stats.gameState === GameState.PAUSED ||
+    stats.dock?.docked === true ||
+    !!stats.runSummary ||
+    !!stats.stageClear;
+
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+
+      {!overlayUp && (<>
 
       {/* ── Top Bar ── */}
       <div className="flex justify-between items-start">
@@ -1561,6 +1615,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           drawn AT the ship by RenderSystem — one affordance, in the place the
           player is already looking.  A HUD pill on top of it was redundant. */}
 
+      </>)}
+
       {/* ── Station UI (docked) ── */}
       {/* The sim is frozen while docked (loop short-circuit).  Panels are
           gated by the station's SERVICES: the HOME drydock hosts the hex
@@ -1575,7 +1631,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1708,10 +1764,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         );
         return (
           <div
-            style={{ animation: 'omniFadeIn 420ms ease-out both' }}
-            className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain"
+            style={OVERLAY_FADE_IN}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
           >
-            <style>{'@keyframes omniFadeIn{from{opacity:0}to{opacity:1}}'}</style>
+            <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
 
               <div className="text-center">
@@ -1799,7 +1855,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
         );
         return (
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          <div
+            style={OVERLAY_FADE_IN}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
+          >
+            <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
 
               <div className="text-center">
@@ -1884,7 +1944,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto overscroll-contain py-8">
+        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto overscroll-contain py-8`}>
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
             OMNIVERSE
           </h1>
@@ -1941,7 +2001,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -2038,7 +2098,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 Debug Menu {collapsed.debug ? '▸' : '▾'}
               </button>
               {!collapsed.debug && (
-                <div className="mt-3 mx-auto w-full max-w-xs bg-slate-900/70 border border-amber-500/30 rounded-lg px-3 py-2 text-left">
+                <div className={`mt-3 mx-auto w-full max-w-xs ${PANEL_OPAQUE} border border-amber-500/30 rounded-lg px-3 py-2 text-left`}>
                   {debugSections}
                 </div>
               )}

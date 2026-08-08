@@ -776,6 +776,15 @@ export const COLLISION_CONFIG = {
 };
 
 export const UI_CONSTANTS = {
+  // Beat between the WRECK finishing and the run-summary screen appearing
+  // (seconds).  The same reward-moment pacing as the boss capstone's
+  // BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC, applied to the player's own death:
+  // let the kill land — explosion, debris, the field still fighting — before
+  // a menu takes the screen.  Unlike every other full-screen overlay, the sim
+  // does NOT freeze through this beat OR through the screen that follows it,
+  // so the map behind stays alive; the overlay then FADES in rather than
+  // snapping.  Sits on top of EXPLOSION_CONSTANTS.DURATION, not inside it.
+  DEATH_SCREEN_DELAY_SEC: 1.6,
   HEALTH_BAR: {
     PLAYER_WIDTH: 44, PLAYER_HEIGHT: 5,
     ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,

@@ -192,10 +192,23 @@ climbing and isn't the question being asked at the wreck.  Both numbers are PROV
 and the fuller dynamic system still belongs to the economy tuning pass
 (step 6).
 The screen itself is PRESENTATION around the respawn behaviour — when
-the wreck's `explosionTimer` runs out the engine sets `deathPending`
-instead of respawning, which freezes the loop (the `dockedAtStation`
-short-circuit, verbatim) and publishes `EngineStats.runSummary` for the
-full-screen UIOverlay run summary.  Its three buttons are three existing
+the wreck's `explosionTimer` runs out the engine no longer respawns; it
+arms `deathDelay` (`UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC`), the boss
+capstone's reward-moment BEAT applied to the player's own death, and only
+then sets `deathPending`, which publishes `EngineStats.runSummary` for
+the full-screen UIOverlay run summary (which FADES in).  DEATH IS THE ONE
+FULL-SCREEN OVERLAY THAT DOES NOT FREEZE THE SIM (user call) — there is
+deliberately no `deathPending` short-circuit in `loop()` and it is
+excluded from the substep-drain break, so the field keeps fighting behind
+the (translucent) summary.  Three things make that safe: the dead player
+is already inert (`updateGameLogic` returns early while `isExploding`, so
+no input / weapons / docking / drop collection / wave progress), the
+explosion-timer branch is guarded on `explosionTimer > 0` so the PENALTY
+cannot be re-charged every step, and the summary is a SNAPSHOT
+(`deathSummary`, taken at the moment of death and republished verbatim)
+so nothing behind the screen can move the numbers on it.  `runTimeSec`
+likewise stops explicitly while `deathDelay > 0 || deathPending` — reading
+your own obituary is not play time.  Its three buttons are three existing
 paths: `respawnFromDeath()` (→ `respawnPlayer()`, the old auto-respawn),
 `restartRun()` (`resetAndLoadSelectedMap()` + `startGame()` — the menu
 START path without the menu), and `quitToMenu()` (→ `restartGame()`).
@@ -204,7 +217,9 @@ The RUN-SUMMARY COUNTERS (`runKills` / `runCreditsEarned` / `runTimeSec`
 existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
 `resetAndLoadSelectedMap()`, deliberately untouched by `loadMapFresh()`,
 so one summary spans every map a run visited.  `runTimeSec` accumulates
-SIM seconds, so paused / docked / dead time is excluded for free.
+SIM seconds, so paused / docked time is excluded for free (both freeze
+the loop); DEAD time is excluded by the explicit gate above, since death
+no longer freezes anything.
 
 **STAGE DESCENT** (boss capstone → deeper stage).  A STAGE is one arena's
 ladder: `BOSS_CONSTANTS.WAVE_INTERVAL` ordinary waves and then the boss's
@@ -255,10 +270,13 @@ Per-frame `loop()`:
    stats, draws a static frame, and returns — the sim FREEZES while the
    React station UI is up (same short-circuit the removed
    `cardChoicePending` card modal used).  The E key undocks from inside
-   this branch.  `deathPending` (Pair A) and `stageClearPending` (the boss
-   stage-clear screen) freeze the loop the same way, immediately after —
-   and the accumulator drain below breaks out of the substep loop the
-   moment either is raised mid-frame.
+   this branch.  `stageClearPending` (the boss stage-clear screen) freezes
+   the loop the same way, immediately after — and the accumulator drain
+   below breaks out of the substep loop the moment it is raised mid-frame.
+   `deathPending` is deliberately NOT in this list: the death screen is
+   the one full-screen overlay that leaves the world running (see §3's
+   Death paragraph).  So the freezing overlays are PAUSED / docked /
+   stage-clear; death is not one.
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
    - `PerfController.beginStep(...)` — samples a load signal
@@ -1450,6 +1468,25 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   font size, so it's ONE `measureText`, not a binary search in a draw path.
   Any new canvas string built from authored/variable content should go
   through it rather than hardcoding a px size.
+- **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
+  `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
+  `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
+  death, stage-clear — so the game never has two ideas of how much world
+  shows through (user call: menus keep displaying the dynamic map).  Two
+  things about it are load-bearing rather than taste: the ALPHA is a
+  legibility floor (the map behind is arbitrary bright colour under
+  arbitrary text), and the BLUR is deliberately tiny — a heavy
+  `backdrop-blur` is the usual way to buy legibility but it turns motion
+  into a smear, which is the exact thing the transparency exists to show.
+  It is NOT coupled to whether the sim is running: the pause menu freezes
+  the world and still shows it.  Dense information panels that must stay
+  readable regardless of what is behind them use `PANEL_OPAQUE` instead
+  (today: the debug menu) — a panel ON the scrim, not more transparency
+  stacked on transparency.  And because the scrim no longer hides what is
+  under it, the DOM HUD is gated off while any overlay is up
+  (`overlayUp`): a score chip ghosting through a run summary reads as
+  double-vision, not depth.  The canvas-drawn minimap and loadout strip
+  stay — those are the game view, which is the point.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through
