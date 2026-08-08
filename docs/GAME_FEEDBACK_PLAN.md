@@ -1400,7 +1400,23 @@ k. After N waves, spawn a portal to a new map.
        (coupled to resale; permanent = money pump above
        10%).
 
-43. **Phase 3 Pair A SHIPPED, and then GREW (PR #78, Pair A
+43. **Phase 3 execution notes (user, 2026-08-03).** Pair B
+    runs OVERNIGHT as a gauntlet IN PARALLEL with the user
+    working Pair A — Pair B must keep its UIOverlay surface
+    minimal (one settings row) and rebase onto the plan-branch
+    tip before opening its PR; whichever merges second
+    rebases. Two directives added: (1) Pair B's deliverable
+    includes `docs/SFX_INVENTORY.md` — every action needing a
+    sound + per-effect generation parameters, doubling as the
+    user's external-generation brief and the session's draft-
+    synthesis map (drafts stay procedural, keyed by inventory
+    ID for later asset drop-in). (2) Minimap:
+    remove nebula entirely; explore replacing shard dots with
+    a flow-field path rendering — recorded under the polish
+    batch's minimap-faithfulness item, which runs in the THIRD
+    gauntlet together with Pair C.
+
+44. **Phase 3 Pair A SHIPPED, and then GREW (PR #78, Pair A
     gauntlet, 2026-08-03 → 08).** Both Pair A rows —
     (i) death/completion screen and stat-legibility
     (#40b) — landed on the #41c process: 3 milestones, one
@@ -1477,7 +1493,13 @@ k. After N waves, spawn a portal to a new map.
        AAA sampled audio collides with: the 5.6 MB
        single-file standalone build, the TORUS vs
        `PannerNode`, and polyphony under this game's event
-       rate) — Pair B input, nothing implemented. Five
+       rate) — Pair B input, nothing implemented. Written
+       BEFORE #43 was recorded, so it OVERLAPS the
+       `SFX_INVENTORY.md` #43 makes Pair B's deliverable:
+       the inventories duplicate, SFX_INVENTORY ships, and
+       AUDIO_PLAN is read for the constraint + architecture
+       analysis it adds. Noted at the top of that file so
+       Pair B does not have to work the overlap out. Five
        PARKING_LOT entries: portal indicator behaviour,
        portal persistence, area composition + map graph, an
        automated test harness, viewport coverage.
@@ -1679,26 +1701,37 @@ observes the three strategy guardrails (decision #36e).
    stat-legibility (per-module attribution — parking-lot promotion,
    decision #40); B = (a) SFX → (b) explosion variety;
    C = (c2) controller/joystick → (c1) menu help.
-   - ~~**Pair A**~~ — **DONE** (PR #78, decision #43). Both rows
+   - ~~**Pair A**~~ — **DONE** (PR #78, decision #44). Both rows
      shipped, then the branch absorbed a user-directed playtest batch
      (death penalty, ship weight, ship-select interaction, stage
      descent, boss-wave rework). Ledger:
      `docs/GAUNTLET_PAIR_A_LOG.md`.
-   - **Pair B** — design input now exists: `docs/AUDIO_PLAN.md`
-     (written in the Pair A session, decision #43g). Its §6 "open
-     decisions" — chiefly the **standalone-build fork** — should be
-     settled BEFORE any audio asset is authored, since that decides
-     the asset budget.
+   - **Pair B** — running in parallel per #43, which makes
+     `docs/SFX_INVENTORY.md` its deliverable. Prior design input now
+     also exists: `docs/AUDIO_PLAN.md`, written independently in the
+     Pair A session (#44g) before #43 was recorded, so the two overlap
+     — AUDIO_PLAN's §4 cue inventory and SFX_INVENTORY cover the same
+     ground and **SFX_INVENTORY is the one that ships** (it carries the
+     per-effect generation parameters #43 asks for). What AUDIO_PLAN
+     adds beyond it is the CONSTRAINT analysis: its §6 open decisions —
+     chiefly the **standalone-build fork** — should be settled BEFORE
+     any audio asset is authored, since that decides the asset budget,
+     and its §2b torus note is a correctness requirement, not a
+     preference.
    - **Pair C** — unchanged, and note that the ship-select interaction
-     (#43) left a deliberate hole for it: the controller BUTTON is the
+     (#44) left a deliberate hole for it: the controller BUTTON is the
      third intended path into `updateInteractables`' `selected` flag.
 5. **Polish batch** — material-palette-residual + map-composition +
    minimap-faithfulness bundled into 1–2 small sessions (map-composition
    doubles as regional-identity groundwork per the strategy's
-   "maps become known for characteristics"). Optional, FIRST TO CUT:
-   NPC station traffic, cheap version (1–2 shuttles between Overworld
-   stations reusing rival sprites + openPortal; parking-lot promotion,
-   decision #40).
+   "maps become known for characteristics"). **Minimap directives
+   (user, decision #43): remove nebula from the minimap entirely, and
+   explore replacing the per-shard dots with a flow-field path/
+   streamline rendering instead.** Runs in the THIRD gauntlet together
+   with Pair C (accepted recommendation, decision #42 turn). Optional,
+   FIRST TO CUT: NPC station traffic, cheap version (1–2 shuttles
+   between Overworld stations reusing rival sprites + openPortal;
+   parking-lot promotion, decision #40).
 6. **Economy & progression tuning pass** (parking-lot promotion,
    decision #40) — one playtest-driven session tuning together:
    Overworld income pacing, per-wave enemy growth vs discrete module
@@ -1712,7 +1745,7 @@ observes the three strategy guardrails (decision #36e).
    rate+window / trait thresholds). Runs last so every system that
    shapes income has landed.
 
-   **Tuning metrics routed here by decision #43** (merge risk 3 — every
+   **Tuning metrics routed here by decision #44** (merge risk 3 — every
    number below was invented in the Pair A session and is unverified by
    construction: the smokes prove the systems AGREE with themselves,
    never that the values are good):
@@ -1730,7 +1763,7 @@ observes the three strategy guardrails (decision #36e).
    | `BossDef.companions` (×3) | Warden armour / Reaver speed / Bastion emplacements | Each escort is meant to RESTATE its boss's problem. Does it, or does it just add HP? |
    | Boss-death ROUT payout | full value | The rout pays 100% of every surviving enemy. Is that a satisfying capstone bonus or an income spike that trivialises the next shop run? (The snitch sweep pays 50% — the two should probably be reasoned about together.) |
    | `BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC` | 1.9 | The beat between the killing blow and the screen. Feel-only. |
-   | `BOSS_CONSTANTS.SALVAGE_DROPS` | 12 (≈◈12,000) | Unchanged in value, but now the ONLY money the capstone pays directly (the discount is gone, decision #43e), so its weight in the economy went up. |
+   | `BOSS_CONSTANTS.SALVAGE_DROPS` | 12 (≈◈12,000) | Unchanged in value, but now the ONLY money the capstone pays directly (the discount is gone, decision #44e), so its weight in the economy went up. |
    | Capstone MODULE drop | uniform over `cost > 0` | A uniform roll can pay a Mk I trinket or a top-tier core. Should it weight by stage depth? |
    | `PORTAL_CONSTANTS.ARRIVAL_OFFSET` | 165 | Arrival distance from the rift mouth — must stay inside `USE_RANGE` so turning around is one tap. Geometry, not balance, but it is a tuned number. |
    | `INPUT_CONSTANTS.SHIP_SELECT_RADIUS` | 46 | Too small and docking feels unresponsive; too large and it eats shots aimed near the hull. |
@@ -1761,7 +1794,7 @@ each pair.
 | i | Death/completion screen | **DONE** (PR #78) | `claude/gauntlet-pair-a-772nqe` | `deathPending` freezes the loop (the `dockedAtStation` precedent); `EngineStats.runSummary` drives a full-screen overlay; RESPAWN / RESTART RUN / MAIN MENU are three EXISTING engine paths. Six run-scoped counters, reset in `resetAndLoadSelectedMap()` and deliberately NOT in `loadMapFresh()`, so one summary spans every map a run visited. |
 | stat-legibility | Per-module effect attribution in the pause menu | **DONE** (PR #78) | `claude/gauntlet-pair-a-772nqe` | `EngineStats.outfitting.statLines` is built by `GameEngine.statBreakdown()` from the SAME slot walk `applyModuleEffects` folds — the UI renders, never recomputes, so the panel cannot disagree with the sim. OFFLINE modules and core-less plating report zero with the missing piece named. `renderShipStatus()` is shared verbatim by pause and station. |
 
-**Pair A also absorbed a user-directed playtest batch** (decision #43):
+**Pair A also absorbed a user-directed playtest batch** (decision #44):
 the salvage death penalty, ship weight as a ship attribute,
 select-your-ship docking/portal entry, stage descent with an amber
 descent rift, and the boss-wave rework (own wave + own escort + a
@@ -1773,7 +1806,7 @@ provisional numbers are routed to step 6.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| a | SFX system | pending | `claude/sfx-system-<suffix>` | New cross-cutting system. Depends on Phase 1+2 so all sound categories are known. |
+| a | SFX system | pending | `claude/gauntlet-pair-b-<suffix>` | New cross-cutting system. **User directive (decision #43):** deliverable includes `docs/SFX_INVENTORY.md` — a comprehensive list of every action needing a sound effect WITH per-effect generation parameters (trigger, character, duration, pitch/envelope, variation, concurrency/throttle, mix level, positional), serving BOTH as the user's brief for generating higher-quality effects externally AND as the session's map for draft synthesized effects. Draft effects are procedural (WebAudio) — no asset files, keyed by inventory ID so real assets can drop in later. |
 | b | Enemy-explosion variety | pending | `claude/explosion-variety-<suffix>` | Per-material shard composition on enemy death. Pairs with (a). Depends on (g2). |
 
 ### Pair C — Input

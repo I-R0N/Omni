@@ -5,6 +5,19 @@ system".  **Nothing here is implemented.**  The game currently has ZERO
 audio: no `AudioContext`, no audio assets in `public/assets/`, no audio
 system, no trigger hooks.
 
+> **Relationship to `docs/SFX_INVENTORY.md`.**  This file was written in the
+> Pair A session, independently and before plan decision #43 made
+> `SFX_INVENTORY.md` the Pair B deliverable.  The two overlap: §4 below and
+> that inventory cover the same cues, and **SFX_INVENTORY is the one that
+> ships** — it carries the per-effect generation parameters (trigger,
+> character, duration, envelope, variation, throttle, mix, positional) that
+> #43 asks for, which §4 does not.  Read this file for what it adds on top:
+> §2's hard constraints (the standalone-build fork, the TORUS vs
+> `PannerNode`, polyphony, iOS unlock, the fixed-timestep/audio-clock split),
+> §3's bus + music-director architecture, §5's music beds, and §6's open
+> decisions.  §2a and §2b in particular are correctness requirements, not
+> preferences.
+
 ---
 
 ## 1. Direction (user, 2026-08-08)
