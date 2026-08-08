@@ -840,3 +840,103 @@ cleared flag + a repopulation timer + stable node ids).  Shape 2 needs a
 graph model, an upward-creep tick, and a way to surface subtree state to the
 player — probably on the minimap or a map screen that does not exist yet.
 Doing Shape 1 first is what makes Shape 2 tractable.
+
+---
+
+## Area composition — material combinations + a real map graph (2026-08-08)
+
+**Context:** raised during the stage-descent session, as design notes for the
+procedural AREAS that will replace today's hand-built test arenas.  The
+descent portal currently picks a RANDOM arena descriptor as an explicit
+placeholder (`GameEngine.openDescentPortal`) — this entry is what should
+eventually sit behind that seam.  Not for that session; recorded for the
+Overworld / procedural-areas work.
+
+### 1. An area is a COMBINATION of materials
+
+Two independent axes, each drawn from the shard-family vocabulary that
+already exists (`ShardVariantId`, `SHARD_VARIANTS`):
+
+- **Tile material** (static hex terrain): rock, glass, nebula, metal, plastic.
+- **Asteroid material** (mobile shards): rock, glass, metal, plastic.
+  Nebula is deliberately absent here — nebula shards are cloud, not rubble.
+
+An area draws a SET from each axis, not a single value: "rock + glass tiles,
+rock asteroids" is one area; "metal + plastic + nebula tiles, metal
+asteroids" is another.
+
+### 2. Two independent rarity rules
+
+**(a) Fewer variants are common; more variants are rare.**  A single-material
+area is the baseline; each additional material in the combination makes it
+rarer.  This is what keeps most areas legible ("this is a glass field") while
+making a five-material area a genuine event.
+
+**(b) Within a combination, the materials themselves have a rarity order**,
+increasing:
+
+> Rock → Glass → Nebula → Metal → Plastic
+
+Rock is the common substrate; plastic is the rarest.  A plastic-bearing area
+should feel like a find.
+
+These compose: a two-material *rock + glass* area is far more likely than a
+two-material *metal + plastic* one, and both are more likely than any
+three-material set.
+
+### 3. Extensibility is a requirement, not a nicety
+
+More material types are already planned, so the rarity model must be DATA,
+not code.  The shape that fits the codebase: a per-material weight table
+(alongside or inside `SHARD_VARIANTS`, which is already the per-variant
+behaviour table) plus a per-combination-SIZE weight curve.  Adding a material
+should mean adding one row and picking where it sits in the rarity order —
+never touching the sampler.
+
+Deliberately excluded from the rarity table: `indestructible-tile`, which is
+structural furniture rather than an area's material identity.
+
+**Interaction with existing config:** `MAP_POPULATION` is currently a static
+`Record<MapType, …>` of per-variant counts.  A generated area needs the same
+shape produced at RUNTIME from the drawn combination — so either
+MAP_POPULATION grows a "generated" branch, or the generator emits a
+population record the existing `MapClasses.populate()` path consumes
+unchanged.  The latter is much less invasive and keeps one populate path.
+
+### 4. A real map GRAPH — nodes and edges
+
+The user wants an actual designed map structure: **nodes** (areas) and
+**edges** (portal links) rather than today's flat list of interchangeable
+arenas.
+
+The payoff is REGIONAL IDENTITY: clusters of adjacent nodes sharing similar
+material combinations, so travel reads as moving through different parts of a
+galaxy — a glass-and-nebula region, a metal belt — instead of a shuffle of
+unrelated rooms.  Material similarity should therefore be a property of
+NEIGHBOURHOODS in the graph, not rolled independently per node; a sensible
+model is to seed regions and let per-node draws perturb a regional base
+composition.
+
+**This is the same graph the portal-persistence entry needs** (see "Portal
+persistence — stages that stay cleared, and enemies that creep back"): its
+Shape 2 (sub-portal arenas, an unfinished branch letting enemies creep
+upward) is a tree/graph traversal problem, and its Shape 1 needs stable node
+ids so a cleared node is recognised on return.  Building the graph once
+serves both — **it should probably be the first piece built**, since
+composition-per-node and persistence-per-node both hang off node identity.
+
+**What it collides with today:** `MAP_DESCRIPTORS` is a flat registry of
+hand-authored maps with no adjacency; `stageIndex` is a linear depth counter,
+not a position in a graph; descent targets are random rather than stable
+node ids; and destroyed terrain does not persist across re-entry.
+
+### Open questions (not decided)
+
+- Are the two axes (tile / asteroid material) drawn INDEPENDENTLY, or should
+  asteroid material be correlated with tile material?  A rock field with
+  plastic asteroids may read as incoherent — or as interesting.
+- Does the regional base composition drift with DEPTH as well as position, so
+  deeper stages skew toward the rarer end of the order?
+- Do flow-field parameters, enemy mixes and ambient fauna cluster by region
+  too?  The user's original framing of an AREA included all of these, so the
+  material combination is likely one facet of a broader per-node profile.
