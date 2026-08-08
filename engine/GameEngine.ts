@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -154,8 +154,11 @@ export class GameEngine {
   // SEMANTICS are unchanged — RESPAWN still calls respawnPlayer().
   private deathPending: boolean = false;
   // ── Stage descent (boss capstone → deeper stage) ────────────────────────
-  // A STAGE is one arena's ladder: BOSS_CONSTANTS.WAVE_INTERVAL waves capped
-  // by a boss.  Killing that boss freezes the loop on a STAGE-CLEAR screen
+  // A STAGE is one arena's ladder: BOSS_CONSTANTS.WAVE_INTERVAL ordinary waves
+  // and then the boss's OWN capstone wave (STAGE_WAVE_COUNT waves in all), so
+  // the capstone never lands inside a normal wave and cannot start until wave
+  // WAVE_INTERVAL is cleared.  Killing that boss freezes the loop on a
+  // STAGE-CLEAR screen
   // (the player is alive, so this pauses rather than ends) and opens a DESCENT
   // rift beside them.  From there the choice is in-world: down the new rift to
   // stage N+1, or back through the arena's return rift to the hub.
@@ -6006,6 +6009,28 @@ export class GameEngine {
       });
       if (this.liveBoss === boss) this.liveBoss = null;
 
+      // ── The capstone's death ROUTS its forces ──────────────────────────
+      // Killing the boss wipes every enemy still standing, each through the
+      // FULL death path at FULL value (user call) — so the escort explodes,
+      // pays its kill points and sprays its salvage rather than being
+      // silently deleted or left to be mopped up after the fight is over.
+      // Mechanically this is the snitch board-clear (catchSnitch), minus the
+      // half-value scale.  NEUTRAL third parties (bubbles, dragons) and
+      // RIVALS are spared: they are not the boss's forces, and a capstone
+      // should not vacuum the ambient fauna off the map.  Snapshot the count
+      // first so the shards/particles those deaths append aren't re-scanned.
+      if (this.currentMap) {
+          const ents = this.currentMap.entities;
+          const n = ents.length;
+          for (let i = 0; i < n; i++) {
+              const e = ents[i];
+              if (e !== boss && e.type === EntityType.ENEMY && e.active && !e.isExploding
+                  && !e.thirdParty && !e.isRival) {
+                  this.handleEntityDeath(e);
+              }
+          }
+      }
+
       // ── Stage cleared ──────────────────────────────────────────────────
       // Open the DESCENT rift beside the wreck and raise the stage-clear
       // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
@@ -7157,7 +7182,7 @@ export class GameEngine {
     if (!ctx) return;
     // Depth carries the difficulty curve and the boss rotation forward; the
     // arena's own wave counter still restarts at 1 for the HUD.
-    this.waves.waveOffset = this.stageIndex * BOSS_CONSTANTS.WAVE_INTERVAL;
+    this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
     this.waves.init(ctx, this.wavesEnabled);
   }
 

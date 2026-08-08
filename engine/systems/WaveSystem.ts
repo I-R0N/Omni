@@ -18,6 +18,7 @@ import {
   getWaveDurationSec,
   getWaveSpawnBudget,
   buildWaveSpawnList,
+  buildBossWaveSpawnList,
 } from '../../constants';
 import { PhysicsSystem } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
@@ -45,10 +46,10 @@ export class WaveSystem {
    *  lookup.  Wave progress restarts at 1 in each new arena (WaveSystem.init
    *  zeroes waveIndex), so without this a stage-5 descent would be exactly as
    *  easy as stage 1 and would re-fight the first boss.  GameEngine sets it to
-   *  `stageIndex × BOSS_CONSTANTS.WAVE_INTERVAL`, which makes the enemy-growth
+   *  `stageIndex × STAGE_WAVE_COUNT`, which makes the enemy-growth
    *  curve and the boss rotation both continue across a descent as if the
    *  waves had run consecutively.  It deliberately does NOT shift the DISPLAY
-   *  wave number — the HUD still counts 1..5 within the stage. */
+   *  wave number — the HUD still counts 1..STAGE_WAVE_COUNT within the stage. */
   public waveOffset: number = 0;
   /** Set once a stage's CAPSTONE BOSS is down: the ladder for this arena is
    *  finished, so no further wave ever starts here.  The player mops up what
@@ -155,17 +156,21 @@ export class WaveSystem {
     this.lastSpawnAtSec = -Infinity;
     this.durationSec = getWaveDurationSec(index);
 
-    // Boss capstone ((h)): every BOSS_CONSTANTS.WAVE_INTERVAL-th wave warps a
-    // boss in immediately and cuts the normal stream down — the boss IS most of
-    // the wave.  A DBG forced-enemy test suppresses it so enemy-isolation runs
+    // Boss capstone ((h)): the LAST wave of every stage is the boss's OWN wave
+    // — it warps a boss in immediately and streams only that boss's designed
+    // ESCORT (BossDef.companions), on a cut-down budget.  Because it is its own
+    // wave, wave `WAVE_INTERVAL` must be fully cleared before the capstone ever
+    // starts.  A DBG forced-enemy test suppresses it so enemy-isolation runs
     // stay clean.
     const scaled = index + this.waveOffset;
     const boss = !ctx.forcedEnemy && isBossWave(scaled) ? bossForWave(scaled) : null;
     const budget = Math.max(1, Math.round(
       getWaveSpawnBudget(index) * ctx.enemyScale * (boss ? BOSS_CONSTANTS.COMPANION_BUDGET_FRAC : 1),
     ));
-    this.spawnList = buildWaveSpawnList(index, budget, ctx.forcedEnemy);
-    this.scheduleSpawns(budget);
+    this.spawnList = boss
+      ? buildBossWaveSpawnList(boss, budget)
+      : buildWaveSpawnList(index, budget, ctx.forcedEnemy);
+    this.scheduleSpawns(this.spawnList.length);
 
     this.waveState = 'active';
     const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;

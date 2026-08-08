@@ -207,13 +207,25 @@ so one summary spans every map a run visited.  `runTimeSec` accumulates
 SIM seconds, so paused / docked / dead time is excluded for free.
 
 **STAGE DESCENT** (boss capstone → deeper stage).  A STAGE is one arena's
-ladder: `BOSS_CONSTANTS.WAVE_INTERVAL` waves capped by a boss.  Killing
+ladder: `BOSS_CONSTANTS.WAVE_INTERVAL` ordinary waves and then the boss's
+OWN dedicated capstone wave — `STAGE_WAVE_COUNT` (= WAVE_INTERVAL + 1)
+waves in all.  The capstone is its own wave, not a boss bolted onto wave
+5, so wave 5 must be fully CLEARED before the boss ever warps in, and the
+capstone wave streams only that boss's designed escort
+(`BossDef.companions` → `buildBossWaveSpawnList`) instead of the ordinary
+weighted mix.  Killing
 that boss freezes the loop on a STAGE-CLEAR screen — the same
 short-circuit the death screen uses, but the player is ALIVE, so it
 PAUSES the fight rather than ending it — after a deliberate
 `BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC` BEAT during which the sim keeps
 running so the explosion, debris and salvage spray land before control is
-taken away (the overlay then fades in).  Killing the capstone also HALTS
+taken away (the overlay then fades in).  Killing the capstone also ROUTS
+its forces: every enemy still standing dies through the FULL death path
+at FULL value (the snitch board-clear, minus the half-value scale), so
+the escort explodes, pays its kill points and sprays its salvage rather
+than being left to mop up after the fight is over — NEUTRAL third
+parties (`thirdParty`: bubbles, dragons) and RIVALS are spared, since
+they are not the boss's forces.  It also HALTS
 the arena's ladder (`WaveSystem.halted`) — no further wave starts there,
 so the choice between the two rifts is made in quiet.  It opens a DESCENT
 rift beside the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
@@ -224,12 +236,12 @@ stage N+1, or back through the arena's return rift to the hub.
 `GameEngine.stageIndex` is 0-based DEPTH — incremented by
 `transitionToMap(id, {descend:true})`, zeroed on arrival at the HUB (the
 hub is the surface), and reset per run.  It drives
-`WaveSystem.waveOffset` (`stageIndex × WAVE_INTERVAL`), which is added to
+`WaveSystem.waveOffset` (`stageIndex × STAGE_WAVE_COUNT`), which is added to
 `waveIndex` for every `enemyHpMult`/`enemyDamageMult` lookup AND for
 `isBossWave`/`bossForWave`, so enemy growth and the boss rotation
 continue across a descent instead of restarting with the arena's wave
 counter.  The DISPLAY wave number is deliberately unshifted — the HUD
-still counts 1..5 within the stage.  The descent target is a RANDOM arena
+still counts 1..6 within the stage.  The descent target is a RANDOM arena
 descriptor: the existing maps are test terrain and interchangeable, so
 this is the placeholder seam for the procedural AREAS that will
 eventually pick terrain / enemies / flow parameters — swapping a
@@ -765,14 +777,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
   front-shield reduce damage BEFORE the bucket sees it, so bursting a
   plated target means bursting it FROM BEHIND.
-- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
-  `bossForWave()` — the (h) BOSS capstone tables.  Every
-  `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave of an ARENA is a boss wave
+- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
+  `isBossWave()` / `bossForWave()` / `buildBossWaveSpawnList()` — the (h)
+  BOSS capstone tables.  A stage is `BOSS_CONSTANTS.WAVE_INTERVAL`
+  ordinary waves plus the boss's OWN wave, so every
+  `STAGE_WAVE_COUNT`-th wave of an ARENA is a boss wave
   (decision #39e; the Overworld hub runs no waves, so it gets none for
   free): `WaveSystem.startWave` spawns the rotation's next boss on the
   offscreen ring, fires the shared `openPortal` entrance rift via the
-  `onBossSpawn` context hook, cuts the companion budget by
-  `COMPANION_BUDGET_FRAC`, and banners the boss name.  A `BossPhaseDef` is
+  `onBossSpawn` context hook, streams the boss's OWN escort
+  (`BossDef.companions`, cycled to a budget cut by
+  `COMPANION_BUDGET_FRAC` — a capstone wave is a designed encounter, not
+  the weighted mix with a boss added), and banners the boss name.
+  `STAGE_WAVE_COUNT` is the ONE stride the rotation, `isBossWave` and
+  `GameEngine.initWaveSystem`'s `waveOffset` all read, so stage length is
+  a single edit.  A `BossPhaseDef` is
   a FULL description of the boss's current state — colour, `speedMult`,
   `weapon` (`Partial<WeaponConfig>` → `GameEntity.weaponOverride`),
   `shield` (bubble or tracking arc), `spawner` (`GameEntity.spawner` →
@@ -1421,6 +1440,16 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
 
+- **Wave banners FIT the viewport, they don't assume it.**  Banner text is
+  authored content — boss names, phase announcements, reward labels — so its
+  width isn't known at design time, and the game is played on a 390px-wide
+  phone where "WARDEN DESTROYED" at the 48px design size measures ~460px and
+  clips off BOTH edges.  `RenderSystem.fitFontPx` shrinks a line until it
+  measures inside `width - WAVE_ANNOUNCE_CONSTANTS.SIDE_MARGIN × 2`, floored
+  at the `*_MIN_PX` readability floor; monospace advance width is linear in
+  font size, so it's ONE `measureText`, not a binary search in a draw path.
+  Any new canvas string built from authored/variable content should go
+  through it rather than hardcoding a px size.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through

@@ -5827,6 +5827,24 @@ export class RenderSystem {
       ctx.restore();
   }
 
+  /** Largest font size in [minPx, basePx] at which `text` measures within
+   *  `maxWidth`.  Monospace advance width is linear in font size, so ONE
+   *  measurement gives the exact ratio — no binary search, no per-frame
+   *  measure loop in a draw path. */
+  private fitFontPx(
+      ctx: CanvasRenderingContext2D,
+      text: string,
+      maxWidth: number,
+      basePx: number,
+      minPx: number,
+  ): number {
+      if (!text) return basePx;
+      ctx.font = `bold ${basePx}px monospace`;
+      const w = ctx.measureText(text).width;
+      if (w <= maxWidth || w <= 0) return basePx;
+      return Math.max(minPx, Math.floor(basePx * (maxWidth / w)));
+  }
+
   private renderWaveAnnouncements(
       ctx: CanvasRenderingContext2D,
       announcements: WaveAnnouncement[],
@@ -5860,14 +5878,26 @@ export class RenderSystem {
           // Position above the minimap: bottom edge minus minimap area minus comfortable gap
           const baseY = height - MINIMAP_CONSTANTS.MARGIN - MINIMAP_CONSTANTS.SIZE - 30;
 
+          // Banner text is authored content (boss names, reward labels) whose
+          // length is not known here, and the game is played on a 390px-wide
+          // phone — "WARDEN DESTROYED" at 48px monospace is ~460px and clips
+          // off BOTH edges.  So fit each line to the viewport instead of
+          // trusting the design size: shrink the font until it measures inside
+          // the safe width, floored so it never becomes unreadable.
+          const safe = Math.max(80, width - WAVE_ANNOUNCE_CONSTANTS.SIDE_MARGIN * 2);
+          const mainPx = this.fitFontPx(ctx, a.text, safe,
+              WAVE_ANNOUNCE_CONSTANTS.TEXT_PX, WAVE_ANNOUNCE_CONSTANTS.TEXT_MIN_PX);
+
           // Main text
-          ctx.font = 'bold 48px monospace';
+          ctx.font = `bold ${mainPx}px monospace`;
           ctx.fillStyle = a.color;
-          ctx.fillText(a.text, width / 2, baseY - (a.subtext ? 28 : 0));
+          ctx.fillText(a.text, width / 2, baseY - (a.subtext ? mainPx * 0.58 : 0));
 
           // Subtext (smaller, cyan)
           if (a.subtext) {
-              ctx.font = 'bold 24px monospace';
+              const subPx = this.fitFontPx(ctx, a.subtext, safe,
+                  WAVE_ANNOUNCE_CONSTANTS.SUBTEXT_PX, WAVE_ANNOUNCE_CONSTANTS.SUBTEXT_MIN_PX);
+              ctx.font = `bold ${subPx}px monospace`;
               ctx.fillStyle = '#22d3ee';
               ctx.fillText(a.subtext, width / 2, baseY);
           }

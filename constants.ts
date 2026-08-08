@@ -2125,6 +2125,18 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
   FADEIN: 0.3,
   HOLD: 1.0,
   FADEOUT: 0.5,
+  // Banner type sizes.  These are the DESIGN sizes on a roomy viewport;
+  // RenderSystem.fitFontPx shrinks a line that would overflow (banner text is
+  // authored content — boss names, reward labels — so its width isn't known
+  // at design time, and the game is played on a 390px-wide phone).  The MIN
+  // sizes are the readability floor: below them, clipping is the better
+  // failure, but in practice no shipped string reaches them.
+  TEXT_PX: 48,
+  TEXT_MIN_PX: 18,
+  SUBTEXT_PX: 24,
+  SUBTEXT_MIN_PX: 11,
+  /** Clear space kept at each edge when fitting a banner line. */
+  SIDE_MARGIN: 16,
 };
 
 // Glitter trail — bright points trailing behind the player along travel path.
@@ -3914,12 +3926,16 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
 // money-pump the discount created.  There is still deliberately NO
 // weapon-unlock plumbing: weapons stay purely purchased.
 export const BOSS_CONSTANTS = {
-  /** A boss wave every Nth wave (0-based index where (index + 1) % N === 0).
-   *  PROVISIONAL: 5 puts the first capstone on wave 5, which is currently the
-   *  Bulwark intro — see the log's FOR-USER-REVIEW item 1. */
+  /** NORMAL waves per stage, BEFORE the capstone.  The boss then gets its OWN
+   *  wave on top (user call) — a stage is `WAVE_INTERVAL` ordinary waves and
+   *  then wave `WAVE_INTERVAL + 1`, which is the boss wave and nothing else.
+   *  A capstone therefore never lands inside a normal wave's stream, and the
+   *  stage cannot clear until wave 5 is fully cleared.  See STAGE_WAVE_COUNT. */
   WAVE_INTERVAL: 5,
   /** The normal spawn budget of a boss wave, scaled down — the boss IS most of
-   *  the wave, so a capstone isn't also a crowd.  PROVISIONAL. */
+   *  the wave, so a capstone isn't also a crowd.  Now that the boss owns its
+   *  own wave, this budget buys the boss's OWN ESCORT (BossDef.companions),
+   *  not a slice of the ordinary wave mix.  PROVISIONAL. */
   COMPANION_BUDGET_FRAC: 0.55,
   /** Score paid on a boss kill, on top of the normal tier kill points. */
   SCORE: 2500,
@@ -3980,6 +3996,12 @@ export interface BossDef {
   name: string;
   /** Phases, descending by `atHealthFrac`; index 0 must be 1. */
   phases: BossPhaseDef[];
+  /** The boss's OWN ESCORT — the only enemies its dedicated wave streams in
+   *  (cycled to fill the COMPANION_BUDGET_FRAC budget).  A boss wave is not an
+   *  ordinary wave with a boss bolted on: the escort is chosen to state the
+   *  same problem the boss states, so the wave reads as one encounter.  Omit
+   *  and the boss fights alone. */
+  companions?: EnemySubtype[];
 }
 
 export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
@@ -3992,6 +4014,10 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
   //          whether you can out-damage the escort.
   [EnemySubtype.BOSS_WARDEN]: {
     name: 'WARDEN',
+    // Escort: an ARMOURED honour guard that restates the boss's own lesson —
+    // a Bulwark's arc shield and a Tank's armor both punish chip fire, so the
+    // whole wave asks the same question the Warden asks.
+    companions: [EnemySubtype.BULWARK, EnemySubtype.RAMMER_3, EnemySubtype.SHOOTER_2],
     phases: [
       {
         atHealthFrac: 1,
@@ -4020,6 +4046,9 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
   //          (dodge) to a big-hit weapon (chip-resist) mid-fight.
   [EnemySubtype.BOSS_SCATTER]: {
     name: 'REAVER',
+    // Escort: a FAST pack.  The Reaver's problem is hitting something that
+    // jukes; the escort makes standing still to line a shot up expensive.
+    companions: [EnemySubtype.RAMMER_1, EnemySubtype.SWARM, EnemySubtype.KAMIKAZE],
     phases: [
       {
         atHealthFrac: 1,
@@ -4058,6 +4087,9 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
   //          a pure damage race in the open.
   [EnemySubtype.BOSS_SIEGE]: {
     name: 'BASTION',
+    // Escort: EMPLACEMENTS.  The Bastion's answer is to flank it; turrets and
+    // a nest make the flanking lane the thing you have to earn.
+    companions: [EnemySubtype.TURRET, EnemySubtype.NEST, EnemySubtype.SHOOTER_3],
     phases: [
       {
         atHealthFrac: 1,
@@ -4095,16 +4127,35 @@ export const BOSS_ROTATION: EnemySubtype[] = [
   EnemySubtype.BOSS_SIEGE,    // then plate + regen — flank it, and burst it
 ];
 
-/** True when the 0-based wave index is a boss-capstone wave. */
+/** Waves in ONE STAGE: `WAVE_INTERVAL` ordinary waves plus the boss's own
+ *  dedicated wave.  This is the stride the boss rotation, the boss test, and
+ *  `WaveSystem.waveOffset` all step by — keep them reading THIS constant so a
+ *  stage-length change stays one edit. */
+export const STAGE_WAVE_COUNT = BOSS_CONSTANTS.WAVE_INTERVAL + 1;
+
+/** True when the 0-based wave index is a boss-capstone wave.  The capstone is
+ *  the LAST wave of the stage and carries nothing but the boss and its own
+ *  escort — so wave `WAVE_INTERVAL` must be fully cleared before it starts. */
 export function isBossWave(index: number): boolean {
   return BOSS_ROTATION.length > 0
-    && (index + 1) % BOSS_CONSTANTS.WAVE_INTERVAL === 0;
+    && (index + 1) % STAGE_WAVE_COUNT === 0;
 }
 
 /** The boss subtype for a given 0-based boss-wave index (cycles the rotation). */
 export function bossForWave(index: number): EnemySubtype {
-  const n = Math.floor((index + 1) / BOSS_CONSTANTS.WAVE_INTERVAL) - 1;
+  const n = Math.floor((index + 1) / STAGE_WAVE_COUNT) - 1;
   return BOSS_ROTATION[Math.max(0, n) % BOSS_ROTATION.length];
+}
+
+/** The spawn list for a BOSS wave: the boss's own escort, cycled to fill the
+ *  budget.  Deliberately NOT `buildWaveSpawnList` — a capstone wave is a
+ *  designed encounter, not the ordinary weighted mix with a boss added. */
+export function buildBossWaveSpawnList(boss: EnemySubtype, budget: number): EnemySubtype[] {
+  const escort = BOSS_DEFS[boss]?.companions;
+  if (!escort || escort.length === 0) return [];
+  const list: EnemySubtype[] = [];
+  for (let i = 0; i < budget; i++) list.push(escort[i % escort.length]);
+  return list;
 }
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
