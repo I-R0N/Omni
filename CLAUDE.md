@@ -161,6 +161,14 @@ only honored from the main menu; mid-game requires `restartGame()`.
   a portal is deliberate: repairing at a station is the loop.  It then
   re-inits WaveSystem from the DESTINATION descriptor's `wavesEnabled`,
   re-seeds ambient bubbles, and fires the arrival `openPortal` burst.
+  ARRIVAL is BESIDE THE RIFT YOU CAME OUT OF: if the destination holds a
+  portal pointing back at the map just left — which is exactly the hub's
+  per-arena rift — the player surfaces `PORTAL_CONSTANTS.ARRIVAL_OFFSET`
+  from its mouth instead of at the map's declared `playerSpawn`
+  (`arrivalBesideRift`, read off the LIVE portal entities so it survives
+  placement changes).  Coming home used to dump the player at their base
+  station across the hub, throwing the trip away.  No matching rift — a
+  descent into a fresh arena, or a new run — falls back to `playerSpawn`.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
   Wave progress is FRESH per entry — `WaveSystem.init` zeroes
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
