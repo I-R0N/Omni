@@ -47,8 +47,8 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
-                          UI, dock affordance; debug panel lives inside
-                          the pause menu)
+                          UI, dock affordance, death/run-summary screen;
+                          debug panel lives inside the pause menu)
 
 engine/
   GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
@@ -145,6 +145,15 @@ State transitions (driven by `UIOverlay` callbacks): `startGame()` /
 `pauseGame()` / `resumeGame()` / `restartGame()`. `setMapType(MapType)` is
 only honored from the main menu; mid-game requires `restartGame()`.
 
+**A run ALWAYS begins on the OVERWORLD hub.**  `selectedMapType` starts at
+`HUB_DESCRIPTOR.mapType` AND `restartGame()` resets it back there, so
+returning to the menu returns to the default — map choice is a DEBUG
+override that lasts the run it starts, never a preference that sticks to
+the front door.  The main menu is correspondingly three controls:
+DIFFICULTY, START, and a collapsed Debug Menu dropdown holding the map
+picker and the enemy-test rows (user call).  So `setMapType` from the menu
+is now reachable only through that dropdown.
+
 **Map loading comes in two flavours** (roadmap step (k)).  Both share
 `loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
 — and differ only in what they layer on top:
@@ -161,14 +170,107 @@ only honored from the main menu; mid-game requires `restartGame()`.
   a portal is deliberate: repairing at a station is the loop.  It then
   re-inits WaveSystem from the DESTINATION descriptor's `wavesEnabled`,
   re-seeds ambient bubbles, and fires the arrival `openPortal` burst.
+  ARRIVAL is BESIDE THE RIFT YOU CAME OUT OF: if the destination holds a
+  portal pointing back at the map just left — which is exactly the hub's
+  per-arena rift — the player surfaces `PORTAL_CONSTANTS.ARRIVAL_OFFSET`
+  from its mouth instead of at the map's declared `playerSpawn`
+  (`arrivalBesideRift`, read off the LIVE portal entities so it survives
+  placement changes).  Coming home used to dump the player at their base
+  station across the hub, throwing the trip away.  No matching rift — a
+  descent into a fresh arena, or a new run — falls back to `playerSpawn`.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
   Wave progress is FRESH per entry — `WaveSystem.init` zeroes
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
   per-map run state.
 
-Death is unchanged by (k): `respawnPlayer()` still refills at the current
-map's spawn.  A death penalty / return-to-hub-on-death is owned by the
-economy tuning pass, not here.
+Death: `respawnPlayer()` refills at the current map's spawn and the run
+continues.  There IS now an interim death PENALTY (user call): raising the
+summary charges `min(balance, max(DEATH_PENALTY_FRACTION × balance,
+DEATH_PENALTY_MIN))` of the player's UNSPENT credits — whichever of the
+percentage and the flat floor is HIGHER, clamped to what they hold, so a
+broke pilot is zeroed and never driven negative.  Charged ONCE, on the
+transition into `deathPending`, so neither respawning nor restarting can
+double-charge, and money already spent on modules is untouched (the
+penalty taxes hoarding, not investment).  `lastDeathCreditsLost` /
+`runCreditsLost` carry it to the summary, which reports salvage as a
+LEDGER FOR THIS LIFE: earned since the last death
+(`lifeCreditsEarned`, snapshotted + zeroed at each death), lost to the
+wreck, and held after the loss.  The run gross (`runCreditsEarned`)
+stays on `EngineStats` but is deliberately NOT the headline — it keeps
+climbing and isn't the question being asked at the wreck.  Both numbers are PROVISIONAL
+and the fuller dynamic system still belongs to the economy tuning pass
+(step 6).
+The screen itself is PRESENTATION around the respawn behaviour — when
+the wreck's `explosionTimer` runs out the engine no longer respawns; it
+arms `deathDelay` (`UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC`), the boss
+capstone's reward-moment BEAT applied to the player's own death, and only
+then sets `deathPending`, which publishes `EngineStats.runSummary` for
+the full-screen UIOverlay run summary (which FADES in).  DEATH IS THE ONE
+FULL-SCREEN OVERLAY THAT DOES NOT FREEZE THE SIM (user call) — there is
+deliberately no `deathPending` short-circuit in `loop()` and it is
+excluded from the substep-drain break, so the field keeps fighting behind
+the (translucent) summary.  Three things make that safe: the dead player
+is already inert (`updateGameLogic` returns early while `isExploding`, so
+no input / weapons / docking / drop collection / wave progress), the
+explosion-timer branch is guarded on `explosionTimer > 0` so the PENALTY
+cannot be re-charged every step, and the summary is a SNAPSHOT
+(`deathSummary`, taken at the moment of death and republished verbatim)
+so nothing behind the screen can move the numbers on it.  `runTimeSec`
+likewise stops explicitly while `deathDelay > 0 || deathPending` — reading
+your own obituary is not play time.  Its three buttons are three existing
+paths: `respawnFromDeath()` (→ `respawnPlayer()`, the old auto-respawn),
+`restartRun()` (`resetAndLoadSelectedMap()` + `startGame()` — the menu
+START path without the menu), and `quitToMenu()` (→ `restartGame()`).
+The RUN-SUMMARY COUNTERS (`runKills` / `runCreditsEarned` / `runTimeSec`
+/ `runWavesCleared` / `runHighestWave` / `runBestCombo`, alongside the
+existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
+`resetAndLoadSelectedMap()`, deliberately untouched by `loadMapFresh()`,
+so one summary spans every map a run visited.  `runTimeSec` accumulates
+SIM seconds, so paused / docked time is excluded for free (both freeze
+the loop); DEAD time is excluded by the explicit gate above, since death
+no longer freezes anything.
+
+**STAGE DESCENT** (boss capstone → deeper stage).  A STAGE is one arena's
+ladder: `BOSS_CONSTANTS.WAVE_INTERVAL` ordinary waves and then the boss's
+OWN dedicated capstone wave — `STAGE_WAVE_COUNT` (= WAVE_INTERVAL + 1)
+waves in all.  The capstone is its own wave, not a boss bolted onto wave
+5, so wave 5 must be fully CLEARED before the boss ever warps in, and the
+capstone wave streams only that boss's designed escort
+(`BossDef.companions` → `buildBossWaveSpawnList`) instead of the ordinary
+weighted mix.  Killing
+that boss freezes the loop on a STAGE-CLEAR screen — the same
+short-circuit the death screen uses, but the player is ALIVE, so it
+PAUSES the fight rather than ending it — after a deliberate
+`BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC` BEAT during which the sim keeps
+running so the explosion, debris and salvage spray land before control is
+taken away (the overlay then fades in).  Killing the capstone also ROUTS
+its forces: every enemy still standing dies through the FULL death path
+at FULL value (the snitch board-clear, minus the half-value scale), so
+the escort explodes, pays its kill points and sprays its salvage rather
+than being left to mop up after the fight is over — NEUTRAL third
+parties (`thirdParty`: bubbles, dragons) and RIVALS are spared, since
+they are not the boss's forces.  It also HALTS
+the arena's ladder (`WaveSystem.halted`) — no further wave starts there,
+so the choice between the two rifts is made in quiet.  It opens a DESCENT
+rift beside the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
+`PORTAL_CONSTANTS.DESCENT_COLOR`).  `dismissStageClear()` resumes the
+cleared arena; the CHOICE is then made IN THE WORLD by flying to a rift,
+which is why the screen offers no travel buttons: down the amber rift to
+stage N+1, or back through the arena's return rift to the hub.
+`GameEngine.stageIndex` is 0-based DEPTH — incremented by
+`transitionToMap(id, {descend:true})`, zeroed on arrival at the HUB (the
+hub is the surface), and reset per run.  It drives
+`WaveSystem.waveOffset` (`stageIndex × STAGE_WAVE_COUNT`), which is added to
+`waveIndex` for every `enemyHpMult`/`enemyDamageMult` lookup AND for
+`isBossWave`/`bossForWave`, so enemy growth and the boss rotation
+continue across a descent instead of restarting with the arena's wave
+counter.  The DISPLAY wave number is deliberately unshifted — the HUD
+still counts 1..6 within the stage.  The descent target is a RANDOM arena
+descriptor: the existing maps are test terrain and interchangeable, so
+this is the placeholder seam for the procedural AREAS that will
+eventually pick terrain / enemies / flow parameters — swapping a
+generator in changes one line, because the target is a descriptor id like
+every other portal.
 
 Per-frame `loop()`:
 
@@ -177,7 +279,13 @@ Per-frame `loop()`:
    stats, draws a static frame, and returns — the sim FREEZES while the
    React station UI is up (same short-circuit the removed
    `cardChoicePending` card modal used).  The E key undocks from inside
-   this branch.
+   this branch.  `stageClearPending` (the boss stage-clear screen) freezes
+   the loop the same way, immediately after — and the accumulator drain
+   below breaks out of the substep loop the moment it is raised mid-frame.
+   `deathPending` is deliberately NOT in this list: the death screen is
+   the one full-screen overlay that leaves the world running (see §3's
+   Death paragraph).  So the freezing overlays are PAUSED / docked /
+   stage-clear; death is not one.
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
    - `PerfController.beginStep(...)` — samples a load signal
@@ -216,9 +324,14 @@ Per-frame `loop()`:
         (`DOCK_RANGE`) and the map portals (`USE_RANGE`), ARBITRATED BY
         NEAREST so only one wins.  Stamps `stationDockReady` /
         `portalReady` (the world-space halo affordances) on the winner
-        only, and on the shared E-key edge either docks
+        only, and on the shared TRIGGER either docks
         (`dockedAtStation`) or travels (`enterPortal()` →
-        `transitionToMap`).  A portal entry swaps the map IN PLACE from
+        `transitionToMap`).  The trigger is SELECTING YOUR OWN SHIP —
+        a tap/click within `INPUT_CONSTANTS.SHIP_SELECT_RADIUS` of the
+        hull, CLAIMED out of the fire queue by
+        `InputSystem.claimTapNear` so using a portal never also shoots
+        (claiming only runs while something is in range, so a tap on
+        the ship in open space still fires) — or the E key.  A portal entry swaps the map IN PLACE from
         here — every later step in the same substep re-reads
         `currentMap`, so the rest of the step runs against the
         destination.  Followed by the Overworld roaming-dragon keeper
@@ -459,7 +572,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
   NOT brighten the membrane (the held meal reads instead); calm bubbles render
   faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
-  hit-flash always reads.  Renders with NO health bar or off-screen chevron.
+  hit-flash always reads.  Renders with NO health bar; its off-screen
+  indicator is PURPLE under its own small budget, blinking red once it is
+  hunting the player (see the off-screen-indicator note in §8).
   Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek / burst),
   engagement + ambient payload in `BUBBLE_CONSTANTS`).  Finally the Stage-6
   DRAGON (an engine-managed serpent MINI-BOSS — `'dragon'` AI strategy is a
@@ -689,14 +804,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
   front-shield reduce damage BEFORE the bucket sees it, so bursting a
   plated target means bursting it FROM BEHIND.
-- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
-  `bossForWave()` — the (h) BOSS capstone tables.  Every
-  `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave of an ARENA is a boss wave
+- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
+  `isBossWave()` / `bossForWave()` / `buildBossWaveSpawnList()` — the (h)
+  BOSS capstone tables.  A stage is `BOSS_CONSTANTS.WAVE_INTERVAL`
+  ordinary waves plus the boss's OWN wave, so every
+  `STAGE_WAVE_COUNT`-th wave of an ARENA is a boss wave
   (decision #39e; the Overworld hub runs no waves, so it gets none for
   free): `WaveSystem.startWave` spawns the rotation's next boss on the
   offscreen ring, fires the shared `openPortal` entrance rift via the
-  `onBossSpawn` context hook, cuts the companion budget by
-  `COMPANION_BUDGET_FRAC`, and banners the boss name.  A `BossPhaseDef` is
+  `onBossSpawn` context hook, streams the boss's OWN escort
+  (`BossDef.companions`, cycled to a budget cut by
+  `COMPANION_BUDGET_FRAC` — a capstone wave is a designed encounter, not
+  the weighted mix with a boss added), and banners the boss name.
+  `STAGE_WAVE_COUNT` is the ONE stride the rotation, `isBossWave` and
+  `GameEngine.initWaveSystem`'s `waveOffset` all read, so stage length is
+  a single edit.  A `BossPhaseDef` is
   a FULL description of the boss's current state — colour, `speedMult`,
   `weapon` (`Partial<WeaponConfig>` → `GameEntity.weaponOverride`),
   `shield` (bubble or tracking arc), `spawner` (`GameEntity.spawner` →
@@ -704,22 +826,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   a phase can drop a shield or stop escorts.  `GameEngine.updateBosses`
   stamps a phase ONCE on the health-fraction transition
   (`applyBossPhase`); nothing about a boss is bespoke scripting.
-  PAYOUT is model (d) (decision #37e): `payBossBounty` pays score + a
-  PHYSICAL salvage spray (`SALVAGE_DROPS`) + a TIMED shop discount
-  (`DISCOUNT_FRACTION` for `DISCOUNT_SECONDS`, stacking to
-  `DISCOUNT_FRACTION_MAX`), and stages the payoff BEAT on the dragon's
+  PAYOUT: `payBossBounty` pays score + a PHYSICAL salvage spray
+  (`SALVAGE_DROPS`) + a RANDOM MODULE dropped into the inventory
+  (`grantBossModule`; pays the item's catalog value in Salvage instead
+  when cargo is full).  The module REPLACED the old timed shop discount
+  (user call): a countdown you must be near a shop to spend is worse than
+  a thing you carry away, and dropping it also removes the buy/sell
+  money-pump hazard the discount created.  It stages the payoff BEAT on the dragon's
   precedent: a rift collapse via `openPortal`, a `DEATH_DEBRIS` burst in
   the phase colour, a heavy shake and a banner naming the boss and what
   it just paid.  There is deliberately NO weapon-unlock plumbing —
   weapons stay purely purchased.
   LEGIBILITY: `EngineStats.boss` drives the HUD capstone bar (name,
   phase pips, health bar + a numeric %, shield strip — sized so all of it
-  survives a 390px-wide screen); `EngineStats.bossDiscount` drives the
-  shop's discount banner; RenderSystem draws a phase-coloured aura ring
+  survives a 390px-wide screen); RenderSystem draws a phase-coloured aura ring
   (`AURA_SCALE`/`AURA_ALPHA`) on the boss hull, an oversized SELF-LABELLED
-  off-screen chevron that is exempt from both the enemy-chevron budget and
-  the distance fade (losing the boss arrow behind a crowd of stragglers is
-  the case the arrow exists for), and a ringed `MINIMAP_CONSTANTS.BOSS_BLIP`
+  off-screen indicator that is exempt from both the enemy budget and the
+  distance fade (losing the boss arrow behind a crowd of stragglers is
+  the case the arrow exists for; it wears the shared enemy RED — its size
+  and self-label are what set it apart), and a ringed `MINIMAP_CONSTANTS.BOSS_BLIP`
   contact that clamps to the border instead of being culled.  DBG: pause ▸
   Debug Menu ▸ Bosses.
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
@@ -751,10 +876,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `syncLoadoutFromSlots`, badged W1/W2 dynamically).  WEAPONLESS flight
   is allowed (the Blaster is removable): firing gates off while
   `player.currentWeapon` is undefined, and every gun carries a
-  `weight` — thrust scales by `WEAPON_WEIGHT.BASE_BOOST / (1 + DRAG ×
-  Σweight)`, so no gun = +10% acceleration, Blaster-only = the 1.0
-  baseline, heavy arsenals drag (the gamification hook heavier gun
-  unlocks trade against).  ADJACENCY REQUIREMENTS: an installed module
+  `weight` — and so does EVERY OTHER MODULE.  WEIGHT IS A SHIP
+  ATTRIBUTE: the ship's total is `SHIP_WEIGHT.HULL_BASE + Σ (weight of
+  every ACTIVE module)`, and thrust scales by `SHIP_WEIGHT.BASE_BOOST /
+  (1 + DRAG × ship weight)`.  Armour is heavy, electronics are light,
+  and a Mk III weighs 3× its Mk I (`statMks` scales weight with the mark
+  like effect and price).  Live total on `GameEngine.shipWeight`.
+  Landmarks on the curve: stripped hull ×1.15, weaponless bare frame
+  ×1.10, lean start (Base Hull + Blaster) ×1.05, fully outfitted ×0.92
+  even WITH Thrusters Mk III — so a maxed ship is genuinely heavy and
+  leans on Engine/Thrusters to stay nimble.  WEIGHT IS ALSO PHYSICAL:
+  `applyModuleEffects` scales `player.mass` with it
+  (`MASS_BASE`/`MASS_REFERENCE`, normalised so the lean loadout is
+  exactly `PHYSICS_CONSTANTS.PLAYER_MASS`), so PhysicsSystem's impulse
+  solver shoves a heavy ship less and lets it plow debris — a full
+  outfit is ≈3× the lean mass.  `HULL_BASE` is 0 today — the seam for
+  SHIP CLASSES, where a heavier hull starts the curve further along with
+  no other code moving.  ADJACENCY REQUIREMENTS: an installed module
   FUNCTIONS only while it touches an ACTIVE module of its required
   family — engine⇢hull, thrusters⇢engine, shield/plating⇢hull,
   capacitor⇢shield, weapon-mods⇢gun; hull + guns are the roots, so a
@@ -781,8 +919,42 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   + the fully live inventory honeycomb (drag-reorder + tap → a detail
   strip with Scrap enabled and Sell disabled-until-docked).  The shared
   hex renderers (`renderHexGroup`/`renderInventoryHex`/
-  `renderModuleDetail`/`renderDragGhost`) live at UIOverlay component
-  scope, parameterised by context.  Kind
+  `renderModuleDetail`/`renderDragGhost`/`renderShipStatus`) live at
+  UIOverlay component
+  scope, parameterised by context.  STAT LEGIBILITY (Phase 3 Pair A):
+  `EngineStats.outfitting.statLines` carries the full derived-stat set
+  (max hull / max shield / shield regen / damage / fire rate / top speed
+  / acceleration / ship weight / charged shots) with PER-MODULE
+  ATTRIBUTION, built by
+  `GameEngine.statBreakdown()` from the SAME slot walk
+  `applyModuleEffects` folds — the UI renders, it never recomputes, so
+  the panel cannot disagree with the sim.  A contributor's `active`
+  means "this amount is IN the total": false for an adjacency-OFFLINE
+  module (`requires` names the family it must touch) AND for shield
+  plating with no shield core (connected but with nothing to plate).  A
+  contributor with no `area`/`idx` is a DERIVED row with no hex behind
+  it — today the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE over
+  the ship's total weight and so belongs to no hex, and the FIRE-RATE
+  line's "Resulting cooldown" row (same shape: per-module rows stay in
+  the units modules are specified in — "−8% cooldown" — and the derived
+  row carries the total the headline rate inverts, because rate is
+  1/cooldown and does not sum additively).  The weighted
+  modules instead file under the **Ship weight** stat line, so tapping a
+  gun highlights Ship weight rather than Acceleration: a gun does not
+  make the ship accelerate worse, it makes the ship HEAVIER, and weight
+  is what drags thrust.  That indirection is the whole reason weight is
+  modelled as a ship attribute.  The pause menu pairs it with a small CONDITION block — the readouts
+  that MOVE in flight rather than derive from the outfit: hull and shield
+  current-vs-max, the ship's weight, and the player's map + coordinates.
+  (Hence "Max hull"/"Max shield" on the derived lines: the same word
+  against two different numbers reads as a contradiction.)
+  `renderShipStatus()` is
+  shared verbatim by the pause menu and the docked station: rows expand
+  to their contributors (`openStat`), and tapping a hex in either flower
+  highlights every stat it feeds (the shared `selSlot`) while the detail
+  strip lists that module's exact per-stat amounts.  Every hex button
+  carries a stable `data-hex="<group>:<idx>"` (the interactive-only
+  `data-tile` stays the drag drop-target hook).  Kind
   `'ship-part'` stays reserved schema; the two competing ship-design
   directions (ship catalog CHOSEN vs modular physical ship SUPERSEDED)
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate
@@ -799,7 +971,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   center (drydock only — the future persistent state's player-created
   base), SHIPWRIGHT (+ ship-module shop), ARMORY (+ weapon-module
   shop), TRADE HUB (+ both shops).  Docking = proximity to the NEAREST
-  in-range station + E key / HUD DOCK button; docked = sim frozen (loop
+  in-range station + SELECTING YOUR SHIP (tap/click it) or the E key;
+  docked = sim frozen (loop
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
@@ -813,18 +986,19 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   to its `playerSpawn`, inside the spawn safe zone those maps already
   clear.  `USE_RANGE` sits just under the station's `DOCK_RANGE` so the
   shared-E nearest-wins arbitration has a clear winner at the boundary.
-  `INDICATOR_RANGE` gates the off-screen chevron: a portal is a FIXED
+  `INDICATOR_RANGE` gates the off-screen indicator: a portal is a FIXED
   landmark, so its arrow only appears once the player is within range,
   and inside that range it is PERSISTENT (exempt from the
-  chevrons-offscreen-only suppression) and labelled with the
-  destination name.  Because the chevron is range-gated, the MINIMAP is
+  offscreen-only suppression) and labelled with the
+  destination name.  The ARROW is green (the type legend, §8); the rift's
+  own violet/sky colours still drive the world-space + minimap art.  Because the chevron is range-gated, the MINIMAP is
   how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
   ANOMALY — a spinning colour-filled diamond with an expanding radar
   ping — and, like an enemy blip, it CLAMPS to the minimap border when
   out of range instead of being culled the way other POI dots are.  The
   fill carries the portal colour, so an outbound rift (violet) and a
   return rift (sky) read differently at a glance.
-  Showcase maps get NO portals — they stay menu-only.
+  Showcase maps get NO portals — they stay debug-only.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -930,10 +1104,12 @@ Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add a row to `MAP_DESCRIPTORS` in `MapDescriptors.ts`, add
 the subclass in `MapClasses.ts`, switch on it in `GameEngine.buildMap()`,
 add per-map config in `constants.ts` (`PLAYER_MOVEMENT_CONFIG`,
-`MAP_POPULATION`), and add the menu button in `UIOverlay.tsx`.  To make
-it portal-reachable as well, add a `HUB_PORTAL_SITES` entry pointing at
-its descriptor id and call `this.addReturnPortal()` at the end of its
-`init()` — showcase maps skip both and stay menu-only.
+`MAP_POPULATION`), and add the button to `renderMapGroup` in
+`UIOverlay.tsx` (which now renders inside the main menu's DEBUG dropdown
+and the pause menu's Switch Map section — the front door offers no map
+choice).  To make it portal-reachable as well, add a `HUB_PORTAL_SITES`
+entry pointing at its descriptor id and call `this.addReturnPortal()` at
+the end of its `init()` — showcase maps skip both and stay debug-only.
 
 ---
 
@@ -1048,7 +1224,11 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   mirror is REMOVED (score stays the pure performance metric).  Each
   collected unit pays `SALVAGE_CONSTANTS.CREDITS_PER_DROP` (conversion
   happens once at collection; `dropValue` counts units so merges stay
-  value-conserving).  Pickup feedback: `player.salvagePickupFlash`
+  value-conserving).  Both drop paths credit through
+  `GameEngine.earnCredits()`, which also feeds the run summary's
+  "Salvage earned" counter — resale (sell/scrap) and the DBG grant
+  deliberately do NOT, since a refund of money already earned would
+  double-count.  Pickup feedback: `player.salvagePickupFlash`
   (accumulating "+N credits" window)
   → `EngineStats.salvageFlash` → the in-game HUD Salvage chip (silver,
   under the score chip in `UIOverlay`; credits are on `EngineStats` every
@@ -1215,10 +1395,21 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   cached in `loadMap` beside `stations`.  Two rules to keep:
   (1) **Destinations are descriptor IDS, not MapType values** —
   `portalTargetId` is what the future overworld phase will reuse.
-  (2) **Stations and portals share the E key**, so any new
-  proximity-interactable must join `updateInteractables`' nearest-wins
-  arbitration rather than adding a second E handler — otherwise two
-  affordances fight over one key.  The idle rift is pure render-side
+  (2) **Stations and portals share ONE trigger** — selecting the player's
+  own ship (tap/click, `INPUT_CONSTANTS.SHIP_SELECT_RADIUS`), plus E as
+  the keyboard equivalent — so any new proximity-interactable must join
+  `updateInteractables`' nearest-wins arbitration rather than adding a
+  second handler; otherwise two affordances fight over one gesture.  The
+  ship-select tap is CLAIMED from the fire queue before the weapon tick
+  drains it (sim step 5b runs ahead of step 7), which is why using a
+  portal doesn't also fire a shot.  There is NO HUD dock/enter button —
+  the ship prompt is the whole affordance (a pill on top of it was
+  redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
+  intended path and is deliberately NOT wired here — Pair C (c2) owns the
+  gamepad layer in InputSystem; OR its button into the `selected` flag
+  when it lands.  The prompt naming the control is drawn AT the ship
+  (`GameEntity.interactPrompt`, stamped per step, rendered via
+  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  The idle rift is pure render-side
   animation (zero particle cost); `openPortal` only fires on an actual
   transit.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
@@ -1245,13 +1436,68 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   distance falloff.  The kamikaze detonation and the (h) Bastion's siege
   shells are its two callers.  Landing it at the impact point also makes
   the shove instant instead of gated on the ring's wavefront arriving.
-- **A boss discount must price BOTH sides of the shop.**
-  `GameEngine.modulePrice(cost)` applies the (h) boss discount, and BOTH
-  `purchaseModule` and `resaleValue` (sell + scrap) go through it.  If
-  buying were discounted while sell-back stayed on full catalog cost,
-  buy-then-sell would net `discount - (1 - SELL_FRACTION)` of cost per
-  cycle — an infinite money pump above a 10% discount.  Any future price
-  modifier must join `modulePrice`, not add a second discount path.
+- **`modulePrice` is the ONE pricing seam.**  It is identity today (the
+  boss shop-discount that used to live there was removed — the capstone
+  drops a module instead), but `purchaseModule` and `resaleValue` (sell +
+  scrap) both still route through it.  Any future price modifier must
+  join it rather than add a second path: when buying was discounted and
+  sell-back was not, buy-then-sell netted `discount - (1 - SELL_FRACTION)`
+  of cost per cycle — an infinite money pump above a 10% discount.
+- **Off-screen indicators are EDGE-anchored, size-coded and typed.**
+  `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
+  INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
+  edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE
+  (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
+  ordinary enemies no longer print a distance number: a dozen little
+  "1234m" strings were most of the old clutter, and the glyph already says
+  it.  POIs keep the far-only readout; portals and bosses keep their
+  self-labels (an unlabelled arrow is ambiguous the moment a second one is
+  on the edge), and label LINES stack vertically — stacking them radially
+  puts line 2 on top of line 1 at a near-horizontal bearing.
+  COLOUR IS BY TYPE, never `entity.color` (`INDICATORS.COLORS`): red enemy
+  / indigo station / green portal / yellow rival / purple bubble, plus
+  slate for any other POI.  A rival or a bubble is only CONDITIONALLY
+  hostile, so those two cross-fade to red on `AGGRO_BLINK_HZ` while
+  hunting the PLAYER specifically — the bubble reads `provoked &&
+  aggroTargetId === 'player'`, the rival reads `GameEntity.huntingPlayer`
+  (a mirror of the `RivalInstance.disposition` logic stamped by
+  `updateRivals`, since disposition lives on the instance, not the hull).
+  Budgets are per type (`MAX_VISIBLE` / `MAX_VISIBLE_ENEMY` /
+  `MAX_VISIBLE_BUBBLE`, portals with their own) and the buffer is sorted
+  NEAREST-FIRST so a budget keeps the closest contacts.  Bubbles ARE
+  indicated now (they used to be excluded as clutter) — the small separate
+  budget is what keeps a bloom of fauna from starving the enemy arrows.
+  Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
+
+- **Wave banners FIT the viewport, they don't assume it.**  Banner text is
+  authored content — boss names, phase announcements, reward labels — so its
+  width isn't known at design time, and the game is played on a 390px-wide
+  phone where "WARDEN DESTROYED" at the 48px design size measures ~460px and
+  clips off BOTH edges.  `RenderSystem.fitFontPx` shrinks a line until it
+  measures inside `width - WAVE_ANNOUNCE_CONSTANTS.SIDE_MARGIN × 2`, floored
+  at the `*_MIN_PX` readability floor; monospace advance width is linear in
+  font size, so it's ONE `measureText`, not a binary search in a draw path.
+  Any new canvas string built from authored/variable content should go
+  through it rather than hardcoding a px size.
+- **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
+  `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
+  `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
+  death, stage-clear — so the game never has two ideas of how much world
+  shows through (user call: menus keep displaying the dynamic map).  Two
+  things about it are load-bearing rather than taste: the ALPHA is a
+  legibility floor (the map behind is arbitrary bright colour under
+  arbitrary text), and the BLUR is deliberately tiny — a heavy
+  `backdrop-blur` is the usual way to buy legibility but it turns motion
+  into a smear, which is the exact thing the transparency exists to show.
+  It is NOT coupled to whether the sim is running: the pause menu freezes
+  the world and still shows it.  Dense information panels that must stay
+  readable regardless of what is behind them use `PANEL_OPAQUE` instead
+  (today: the debug menu) — a panel ON the scrim, not more transparency
+  stacked on transparency.  And because the scrim no longer hides what is
+  under it, the DOM HUD is gated off while any overlay is up
+  (`overlayUp`): a score chip ghosting through a run summary reads as
+  double-vision, not depth.  The canvas-drawn minimap and loadout strip
+  stay — those are the game view, which is the point.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through

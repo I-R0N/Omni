@@ -737,3 +737,319 @@ module's exact effect shown in the detail strip.  Touch points:
 `applyModuleEffects` already sums ACTIVE effects — expose a per-module
 breakdown on `EngineStats.outfitting`; `UIOverlay` pause Ship Status +
 `renderModuleDetail`.
+
+---
+
+## Portal off-screen indicators behave unlike every other indicator (2026-08-05)
+
+**Context:** raised in playtest during the Phase 3 Pair A session, after the
+off-screen indicators were reworked (edge-anchored, size-coded, typed by
+colour).  The portal arrow now reads as an exception to the rules every other
+contact follows, and the exceptions compound at close range.
+
+Where a portal diverges today (all in `RenderSystem.renderIndicators` +
+`PORTAL_CONSTANTS`):
+
+- **Range-gated, not always-on.** Enemies are indicated at any distance and
+  fade toward an alpha floor; a portal shows NO arrow at all until the player
+  is inside `PORTAL_CONSTANTS.INDICATOR_RANGE`, then appears abruptly at full
+  strength.  Every other type fades in; this one pops.
+- **Exempt from offscreen-only suppression.** Every other contact's arrow
+  disappears once you can see the thing.  The portal's persists — so at close
+  range you get the rift ON SCREEN plus an edge arrow pointing at it.
+- **Carries the most text of any type.** Destination name AND a distance
+  readout, while ordinary enemies now print no number at all (their size
+  carries distance).  Stack that on the rift's own world-space tag and the
+  same destination is named two or three times at once.
+
+Net effect: approaching a portal, the arrow is redundant with the thing it
+points at; far from one, there is no arrow to find it by (the minimap anomaly
+blip is doing that job).  Neither end matches how the player has learned to
+read the other five contact types.
+
+**Candidate directions** (none chosen — this is a design call):
+
+1. **Make it obey the normal rules** — drop the suppression exemption and the
+   range gate, let it fade with distance like everything else, and lean on the
+   minimap blip for long-range discovery.  Cheapest; costs the guaranteed
+   labelled cue on approach.
+2. **Keep the exemption, drop the redundancy** — suppress the arrow once the
+   rift is on screen (the world-space tag takes over), keep it while the
+   portal is off screen and in range.  Preserves the navigation cue and kills
+   the double-labelling.
+3. **Promote portals to a separate NAVIGATION layer** rather than a contact
+   type — a distinct treatment (waypoint-style) that isn't competing with the
+   threat arrows at all, which is arguably what a fixed landmark wants.
+
+**Touch points:** `RenderSystem.renderIndicators` (the `isPortal` exemptions
+and the label block), `UI_CONSTANTS.INDICATORS`, `PORTAL_CONSTANTS`
+`INDICATOR_RANGE`, and `MINIMAP_CONSTANTS.PORTAL_BLIP` (which currently
+carries long-range discovery and would carry more under option 1).
+
+---
+
+## Portal persistence — stages that stay cleared, and enemies that creep back (2026-08-07)
+
+**Context:** raised in playtest while the stage-descent capstone was being
+built.  The session deliberately shipped the SHALLOW version (kill the boss →
+a descent rift opens → the next stage is a fresh arena, and wave progress is
+still fresh per entry).  The user does not want the deep layering handled in
+that session, but wants the direction recorded.
+
+The intent, in the user's framing: gameplay should eventually PERSIST to some
+degree.  Two shapes were described — they are not mutually exclusive, and the
+second is a superset of the first.
+
+**Shape 1 — cleared stages stay cleared, for a while.**
+After beating a stage the player can fly back to the Overworld where their
+own station lives, install newly-acquired modules, spend money at other
+stations, and then return to *the portal they already used* — and NOT face the
+same stage again.  The cleared state persists for some period before the
+arena repopulates with waves.  Today the opposite is true: `WaveSystem.init`
+zeroes `waveIndex` on every entry and there is no per-map run state, so
+re-entering any arena restarts its ladder from wave 1 (CLAUDE.md §6a states
+this invariant explicitly).
+
+**Shape 2 — a tree of sub-portals, with pressure that flows upward.**
+Each Overworld portal arena contains sub-portal arenas; those may contain
+further sub-portals.  An arena is only pacified once every sub-arena beneath
+it is cleared, so clearing an Overworld portal means clearing its whole
+subtree.  If enemies remain in a deep sub-arena they CREEP upward over time —
+into the sub-arena above, and eventually back out into the Overworld portal
+arena.  That gives the map a decay pressure: ignore a branch long enough and
+it re-contaminates everything above it.
+
+**What this collides with today** (all of it deliberate, all of it would have
+to move):
+- **No per-map state at all.** `transitionToMap` carries RUN state (credits,
+  score, outfit, hull) but every map is rebuilt from scratch; destroyed tiles
+  do not persist across re-entry either.
+- **`stageIndex` is linear depth**, not a position in a tree.  A tree needs
+  node identity (which sub-portal of which arena), not a counter.
+- **Descent targets are random arena descriptors** — a placeholder for
+  procedural areas.  Persistence needs STABLE node ids so a cleared node can
+  be recognised on return.
+- **The hub resets depth to 0**, which is exactly the behaviour Shape 1 wants
+  to remove.
+- This is the plan's deferred **waves-to-nodes** item (decision #37f), moved
+  to the Overworld plan, plus the parked **persistent state** entry — which
+  was itself gated on the economy tuning pass.
+
+**Sequencing note:** Shape 1 is the smaller, self-contained step (per-node
+cleared flag + a repopulation timer + stable node ids).  Shape 2 needs a
+graph model, an upward-creep tick, and a way to surface subtree state to the
+player — probably on the minimap or a map screen that does not exist yet.
+Doing Shape 1 first is what makes Shape 2 tractable.
+
+---
+
+## Area composition — material combinations + a real map graph (2026-08-08)
+
+**Context:** raised during the stage-descent session, as design notes for the
+procedural AREAS that will replace today's hand-built test arenas.  The
+descent portal currently picks a RANDOM arena descriptor as an explicit
+placeholder (`GameEngine.openDescentPortal`) — this entry is what should
+eventually sit behind that seam.  Not for that session; recorded for the
+Overworld / procedural-areas work.
+
+### 1. An area is a COMBINATION of materials
+
+Two independent axes, each drawn from the shard-family vocabulary that
+already exists (`ShardVariantId`, `SHARD_VARIANTS`):
+
+- **Tile material** (static hex terrain): rock, glass, nebula, metal, plastic.
+- **Asteroid material** (mobile shards): rock, glass, metal, plastic.
+  Nebula is deliberately absent here — nebula shards are cloud, not rubble.
+
+An area draws a SET from each axis, not a single value: "rock + glass tiles,
+rock asteroids" is one area; "metal + plastic + nebula tiles, metal
+asteroids" is another.
+
+### 2. Two independent rarity rules
+
+**(a) Fewer variants are common; more variants are rare.**  A single-material
+area is the baseline; each additional material in the combination makes it
+rarer.  This is what keeps most areas legible ("this is a glass field") while
+making a five-material area a genuine event.
+
+**(b) Within a combination, the materials themselves have a rarity order**,
+increasing:
+
+> Rock → Glass → Nebula → Metal → Plastic
+
+Rock is the common substrate; plastic is the rarest.  A plastic-bearing area
+should feel like a find.
+
+These compose: a two-material *rock + glass* area is far more likely than a
+two-material *metal + plastic* one, and both are more likely than any
+three-material set.
+
+### 3. Extensibility is a requirement, not a nicety
+
+More material types are already planned, so the rarity model must be DATA,
+not code.  The shape that fits the codebase: a per-material weight table
+(alongside or inside `SHARD_VARIANTS`, which is already the per-variant
+behaviour table) plus a per-combination-SIZE weight curve.  Adding a material
+should mean adding one row and picking where it sits in the rarity order —
+never touching the sampler.
+
+Deliberately excluded from the rarity table: `indestructible-tile`, which is
+structural furniture rather than an area's material identity.
+
+**Interaction with existing config:** `MAP_POPULATION` is currently a static
+`Record<MapType, …>` of per-variant counts.  A generated area needs the same
+shape produced at RUNTIME from the drawn combination — so either
+MAP_POPULATION grows a "generated" branch, or the generator emits a
+population record the existing `MapClasses.populate()` path consumes
+unchanged.  The latter is much less invasive and keeps one populate path.
+
+### 4. A real map GRAPH — nodes and edges
+
+The user wants an actual designed map structure: **nodes** (areas) and
+**edges** (portal links) rather than today's flat list of interchangeable
+arenas.
+
+The payoff is REGIONAL IDENTITY: clusters of adjacent nodes sharing similar
+material combinations, so travel reads as moving through different parts of a
+galaxy — a glass-and-nebula region, a metal belt — instead of a shuffle of
+unrelated rooms.  Material similarity should therefore be a property of
+NEIGHBOURHOODS in the graph, not rolled independently per node; a sensible
+model is to seed regions and let per-node draws perturb a regional base
+composition.
+
+**This is the same graph the portal-persistence entry needs** (see "Portal
+persistence — stages that stay cleared, and enemies that creep back"): its
+Shape 2 (sub-portal arenas, an unfinished branch letting enemies creep
+upward) is a tree/graph traversal problem, and its Shape 1 needs stable node
+ids so a cleared node is recognised on return.  Building the graph once
+serves both — **it should probably be the first piece built**, since
+composition-per-node and persistence-per-node both hang off node identity.
+
+**What it collides with today:** `MAP_DESCRIPTORS` is a flat registry of
+hand-authored maps with no adjacency; `stageIndex` is a linear depth counter,
+not a position in a graph; descent targets are random rather than stable
+node ids; and destroyed terrain does not persist across re-entry.
+
+### Open questions (not decided)
+
+- Are the two axes (tile / asteroid material) drawn INDEPENDENTLY, or should
+  asteroid material be correlated with tile material?  A rock field with
+  plastic asteroids may read as incoherent — or as interesting.
+- Does the regional base composition drift with DEPTH as well as position, so
+  deeper stages skew toward the rarer end of the order?
+- Do flow-field parameters, enemy mixes and ambient fauna cluster by region
+  too?  The user's original framing of an AREA included all of these, so the
+  material combination is likely one facet of a broader per-node profile.
+
+---
+
+## Automated test suite — investigate a real harness (2026-08-08)
+
+**Raised as a merge risk during the Phase 3 Pair A gauntlet.**  The project
+has, by design, no test runner and no lint step (CLAUDE.md §7: "Don't invent
+one unless the user asks").  Validation today is `npm run build` — which only
+type-checks — plus whatever headless Playwright smokes the session author
+happens to write.  Those smokes have proven genuinely valuable (the Pair A
+session ran 436 assertions across 7 suites and they caught real regressions:
+a wreck-state leak on restart, indicator budgets culling the nearest contacts,
+a stale-`dist` false pass), but they are **session-scoped scratchpad files**,
+not repo artifacts.  They evaporate with the session.  The next session
+re-derives them from scratch, and nothing prevents a later change from
+silently breaking behaviour an earlier session proved.
+
+That is the actual risk: **there is no regression net that outlives a
+session.**  Every guarantee this repo has is re-established by hand, per
+session, by whoever remembers to.
+
+**What to investigate** (roughly in order of value-per-effort):
+
+1. **Promote the smokes into the repo.**  The cheapest large win.  They
+   already drive the real engine in a real browser through
+   `window.__omniEngine` / `window.__omniStats` (CLAUDE.md §8), so there is
+   nothing to port — it is `npm i -D @playwright/test`, a `tests/` directory,
+   a `test` script, and a decision about where the preview server comes from.
+   The debug handles exist precisely for this and cost nothing per frame.
+2. **A type-check script.**  `tsc --noEmit` as its own npm script, so a type
+   error surfaces without a full Vite build.  Minutes of work.
+3. **Unit tests for the pure layer.**  Vitest over the genuinely pure,
+   dependency-free functions: `engine/toroidal.ts` (wrap math — the single
+   most invariant-critical code in the repo and the easiest to break
+   silently), the `constants.ts` pure helpers (`isBossWave`, `bossForWave`,
+   `buildWaveSpawnList`, `buildBossWaveSpawnList`, `enemyHpMult`,
+   `getWaveSpawnBudget`, `modulePrice`, `moduleFitsSlot`), and the module
+   adjacency fixpoint.  No DOM, no canvas, fast.
+4. **Headless SIM tests without a browser.**  The engine constructs a
+   `GameEngine` before `initCanvas`; a large amount of sim logic (waves,
+   physics stepping, module effects, death routing) may be drivable in Node
+   with a stub context.  Worth a spike — if it works it is far faster than
+   Playwright and covers the parts that actually carry the game.
+5. **Visual regression.**  Screenshot diffs for the HUD at 390×844 and the
+   station/pause panels.  This is where the "AAA test suite" framing points,
+   and it is also the flakiest and most maintenance-hungry tier — the Pair A
+   session already burned real time on canvas-sampling flakiness (the fix was
+   to PAUSE the sim and classify by dominant-hue histogram rather than
+   brightest pixel).  Do this LAST, and only for surfaces that are stable.
+6. **CI gating.**  Today's two workflows (`pr-preview`, `publish-standalone`)
+   gate nothing.  Once (1)–(3) exist, run them on PR.
+
+**Explicitly NOT decided:** whether the project wants this at all.  The
+no-test-runner stance is deliberate and has kept the repo light.  The
+counter-argument is that the codebase is now ~15k lines with a god-class
+orchestrator, three exotic engine-managed roamers, a boss phase machine and a
+module system, and the cost of a silent regression has grown a lot since that
+stance was set.  **Decide the stance first, then pick tiers** — a half-adopted
+harness that nobody runs is worse than none.
+
+---
+
+## Viewport coverage — test more than 390×844 (2026-08-08)
+
+**Raised as a merge risk during the Phase 3 Pair A gauntlet.**  Every UI
+assertion written in that session ran at a single viewport: **390×844**, the
+iPhone the game is actually played on.  That is the right primary target, and
+it is the *hard* one (it is where the death screen, the stage-clear screen,
+the boss HUD bar, the hex flowers and the wave banner all had to be made to
+fit).  But it is one point in a space, and several of this session's changes
+are **size-dependent by construction**:
+
+- `RenderSystem.fitFontPx` scales banner text off canvas width — its
+  behaviour at 1920px (never shrinks) and at 320px (shrinks hard, possibly to
+  the readability floor) is untested.
+- Off-screen indicators anchor to an INSET VIEWPORT RECT
+  (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) and ramp size by distance; the inset
+  is a fixed px value, so it is proportionally huge on a small screen and
+  negligible on a large one.
+- The boss HUD bar was explicitly "sized so all of it survives a 390px-wide
+  screen" — meaning it was tuned to a floor, not designed responsively.
+- The station and pause panels are honeycomb hex grids with drag-and-drop;
+  hex layout is computed, and both the drag ghost and the drop targets are
+  position-sensitive.
+- The minimap is a fixed `MINIMAP_CONSTANTS.SIZE` square with a fixed margin,
+  and the wave banner is positioned relative to it.
+
+**Viewports worth covering:**
+
+| Viewport | Why |
+|---|---|
+| 320×568 (iPhone SE, 1st gen) | the narrowest phone still in use — the real floor |
+| 390×844 (iPhone 12–15) | today's only target; keep it |
+| 430×932 (Pro Max) | the large-phone case |
+| 768×1024 (iPad portrait) | tablet portrait — tall, but wide enough to change layout |
+| 1024×768 (iPad landscape) | the first genuinely LANDSCAPE case |
+| 1440×900 / 1920×1080 (desktop) | where the game is developed and where nothing shrinks |
+
+**Also worth testing, and cheaper than it sounds:** a **mid-session resize**.
+Rotating a phone or resizing a desktop window is a real user action, and
+nothing in the current suites ever changes the viewport after load.  Caches
+keyed on canvas size (the nebula render fast-path, gradient caches, the
+minimap) are exactly the sort of thing that survives a resize incorrectly.
+
+**Cheapest path:** the existing smokes already take a viewport in
+`browser.newContext({ viewport })`; parameterising the DOM-layout assertions
+over a viewport list is a loop, not a rewrite.  The scroll-width check
+(`document.documentElement.scrollWidth <= width`) and the ≥40px tap-target
+check generalise directly.  The canvas-pixel assertions do not, and should
+stay pinned to one viewport.
+
+**Depends on** the test-suite entry above: this is only worth building on top
+of a harness that outlives a session.

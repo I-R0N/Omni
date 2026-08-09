@@ -104,6 +104,23 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.restartGame();
   };
 
+  // Death / run-summary screen actions (Phase 3 Pair A).
+  const handleRespawn = () => {
+      if (engineRef.current) engineRef.current.respawnFromDeath();
+  };
+
+  const handleRestartRun = () => {
+      if (engineRef.current) engineRef.current.restartRun();
+  };
+
+  const handleQuitToMenu = () => {
+      if (engineRef.current) engineRef.current.quitToMenu();
+  };
+
+  const handleDismissStageClear = () => {
+      if (engineRef.current) engineRef.current.dismissStageClear();
+  };
+
   const handleSetDifficulty = (level: number) => {
       setDifficulty(level);
       if (engineRef.current) {
@@ -369,16 +386,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.scrapModule(idx);
   };
 
-  const handleDock = () => {
-      if (engineRef.current) engineRef.current.dockAtStation();
-  };
-
   const handleUndock = () => {
       if (engineRef.current) engineRef.current.undock();
-  };
-
-  const handleEnterPortal = () => {
-      if (engineRef.current) engineRef.current.enterPortal();
   };
 
   const handleRepairHull = () => {
@@ -454,6 +463,10 @@ const App: React.FC = () => {
         onPause={handlePause}
         onResume={handleResume}
         onRestart={handleRestart}
+        onRespawn={handleRespawn}
+        onRestartRun={handleRestartRun}
+        onQuitToMenu={handleQuitToMenu}
+        onDismissStageClear={handleDismissStageClear}
         onToggleDebug={handleToggleDebug}
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}
@@ -516,8 +529,6 @@ const App: React.FC = () => {
         onPurchaseModule={handlePurchaseModule}
         onSellModule={handleSellModule}
         onScrapModule={handleScrapModule}
-        onDock={handleDock}
-        onEnterPortal={handleEnterPortal}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}
         onGrantWeapon={handleGrantWeapon}

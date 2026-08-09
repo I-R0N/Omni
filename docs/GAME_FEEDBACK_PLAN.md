@@ -1416,6 +1416,101 @@ k. After N waves, spawn a portal to a new map.
     batch's minimap-faithfulness item, which runs in the THIRD
     gauntlet together with Pair C.
 
+44. **Phase 3 Pair A SHIPPED, and then GREW (PR #78, Pair A
+    gauntlet, 2026-08-03 → 08).** Both Pair A rows —
+    (i) death/completion screen and stat-legibility
+    (#40b) — landed on the #41c process: 3 milestones, one
+    commit each, ledger at `docs/GAUNTLET_PAIR_A_LOG.md`.
+    The queue closed at 238 headless assertions / 3 suites.
+    **The user then playtested the branch and directed a
+    further batch of work onto it**, which is why this PR is
+    materially larger than a Pair A PR: final state is 436
+    assertions across 7 suites. Recorded here so the plan
+    does not disagree with the diff.
+    a. **Two of the gauntlet brief's hard constraints were
+       LIFTED by the user mid-session**, not drifted past:
+       (1) "death SEMANTICS do not change" → a salvage death
+       penalty was explicitly requested; (2) "do not modify
+       GAME_FEEDBACK_PLAN.md / PARKING_LOT.md" → both were
+       explicitly opened for edits. Everything else in the
+       brief held.
+    b. **Death now COSTS.** `max(25% of unspent credits,
+       12,500)`, clamped to holdings, charged ONCE on the
+       transition into `deathPending`. It taxes HOARDING,
+       not investment — money already spent on modules is
+       untouched. The summary reports a per-LIFE ledger
+       (earned since the last death → lost → held), because
+       the run gross was answering the wrong question at the
+       wreck. Both magnitudes are PROVISIONAL and route to
+       step 6, which already owned "the salvage death
+       penalty decision".
+    c. **Weight is a SHIP attribute** (user framing: "the
+       player may get different weight ships in the
+       future"). Every module carries a weight; the ship's
+       total drags thrust (`BASE_BOOST / (1 + DRAG × W)`)
+       and scales physical mass, so a heavy ship is shoved
+       less and plows debris. `SHIP_WEIGHT.HULL_BASE` is 0
+       today — the seam for SHIP CLASSES with no other code
+       moving. Guns therefore file under *Ship weight*, not
+       *Acceleration*: a gun does not make the ship
+       accelerate worse, it makes the ship heavier.
+    d. **STAGE DESCENT** — a boss capstone now PAUSES on a
+       stage-clear screen (the player is alive), halts that
+       arena's ladder, and opens an amber descent rift.
+       `stageIndex` is 0-based depth and drives
+       `WaveSystem.waveOffset`, so enemy growth and the boss
+       rotation continue across a descent. The descent
+       target is a RANDOM arena descriptor — deliberately
+       the placeholder seam for the procedural AREAS in the
+       parking lot's "area composition + map graph" entry;
+       swapping a generator in changes one line. Returning
+       home surfaces BESIDE the hub rift you came out of,
+       not at the base station.
+    e. **The boss shop discount was REMOVED** (user call)
+       and replaced with a RANDOM MODULE dropped into the
+       inventory. This reverses #42's "timed-not-permanent
+       discount" by removing the mechanic rather than
+       retuning it: a countdown you must be near a shop to
+       spend is worse than a thing you carry away, and
+       dropping it also removes the buy/sell money-pump
+       hazard entirely instead of pricing around it.
+       `modulePrice` stays the ONE pricing seam.
+    f. **Boss waves own their own wave.** A stage is
+       `WAVE_INTERVAL` ordinary waves PLUS a dedicated
+       capstone wave (`STAGE_WAVE_COUNT` = 6), so wave 5
+       must be fully cleared before the boss warps in. The
+       capstone wave streams the boss's OWN escort
+       (`BossDef.companions`) rather than the ordinary
+       weighted mix, and the capstone's death ROUTS the
+       field — every surviving enemy dies through the full
+       death path at FULL value, paying points and salvage,
+       while neutral third parties and rivals are spared.
+       This ALSO answers #42d's routed "boss cadence lands
+       on the Bulwark teaching wave" item: the capstone no
+       longer shares a wave with anything.
+    g. **Docs written, not just code.** `docs/AUDIO_PLAN.md`
+       (a ~90-cue inventory plus the three hard constraints
+       AAA sampled audio collides with: the 5.6 MB
+       single-file standalone build, the TORUS vs
+       `PannerNode`, and polyphony under this game's event
+       rate) — Pair B input, nothing implemented. Written
+       BEFORE #43 was recorded, so it OVERLAPS the
+       `SFX_INVENTORY.md` #43 makes Pair B's deliverable:
+       the inventories duplicate, SFX_INVENTORY ships, and
+       AUDIO_PLAN is read for the constraint + architecture
+       analysis it adds. Noted at the top of that file so
+       Pair B does not have to work the overlap out. Five
+       PARKING_LOT entries: portal indicator behaviour,
+       portal persistence, area composition + map graph, an
+       automated test harness, viewport coverage.
+    h. **Merge risks, ruled.** (1) plan/diff divergence →
+       fixed by this entry; (2) no regression net outlives a
+       session → parked ("Automated test suite"); (3)
+       provisional numbers → enumerated as step-6 tuning
+       metrics; (4) single 390×844 viewport → parked
+       ("Viewport coverage"); (5) scope growth past Pair A →
+       accepted by the user as a deliberate deviation.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1606,6 +1701,26 @@ observes the three strategy guardrails (decision #36e).
    stat-legibility (per-module attribution — parking-lot promotion,
    decision #40); B = (a) SFX → (b) explosion variety;
    C = (c2) controller/joystick → (c1) menu help.
+   - ~~**Pair A**~~ — **DONE** (PR #78, decision #44). Both rows
+     shipped, then the branch absorbed a user-directed playtest batch
+     (death penalty, ship weight, ship-select interaction, stage
+     descent, boss-wave rework). Ledger:
+     `docs/GAUNTLET_PAIR_A_LOG.md`.
+   - **Pair B** — running in parallel per #43, which makes
+     `docs/SFX_INVENTORY.md` its deliverable. Prior design input now
+     also exists: `docs/AUDIO_PLAN.md`, written independently in the
+     Pair A session (#44g) before #43 was recorded, so the two overlap
+     — AUDIO_PLAN's §4 cue inventory and SFX_INVENTORY cover the same
+     ground and **SFX_INVENTORY is the one that ships** (it carries the
+     per-effect generation parameters #43 asks for). What AUDIO_PLAN
+     adds beyond it is the CONSTRAINT analysis: its §6 open decisions —
+     chiefly the **standalone-build fork** — should be settled BEFORE
+     any audio asset is authored, since that decides the asset budget,
+     and its §2b torus note is a correctness requirement, not a
+     preference.
+   - **Pair C** — unchanged, and note that the ship-select interaction
+     (#44) left a deliberate hole for it: the controller BUTTON is the
+     third intended path into `updateInteractables`' `selected` flag.
 5. **Polish batch** — material-palette-residual + map-composition +
    minimap-faithfulness bundled into 1–2 small sessions (map-composition
    doubles as regional-identity groundwork per the strategy's
@@ -1629,6 +1744,30 @@ observes the three strategy guardrails (decision #36e).
    floor, and every provisional boss number (payout / discount
    rate+window / trait thresholds). Runs last so every system that
    shapes income has landed.
+
+   **Tuning metrics routed here by decision #44** (merge risk 3 — every
+   number below was invented in the Pair A session and is unverified by
+   construction: the smokes prove the systems AGREE with themselves,
+   never that the values are good):
+
+   | Metric | Today | The question |
+   |---|---|---|
+   | `SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION` | 0.25 | Does 25% of unspent credits sting without punishing a player who was saving for a Mk III? |
+   | `SALVAGE_CONSTANTS.DEATH_PENALTY_MIN` | 12,500 | The floor dominates early (a broke pilot is zeroed) and is noise late. Is a flat floor the right shape at all, or should it scale with stage depth? |
+   | `SHIP_WEIGHT.BASE_BOOST` / `DRAG_PER_WEIGHT` | 1.15 / 0.05 | The curve runs ×1.15 stripped → ×1.05 lean → ×0.92 fully outfitted with Thrusters Mk III. Is "a maxed ship is genuinely heavy" felt as a tradeoff or as a punishment for buying things? |
+   | `SHIP_WEIGHT.MASS_BASE` / `MASS_REFERENCE` | 4 / 2 | A full outfit is ≈3× the lean mass, so it plows debris and is shoved less. Is the collision feel worth the sluggishness? |
+   | `SHIP_WEIGHT.HULL_BASE` | 0 | Zero today by design (the ship-classes seam). Non-zero only when ship classes land. |
+   | Per-module `weight` values | see `MODULE_DEFS` | Armour heavy, electronics light, Mk III = 3× Mk I. The RELATIVE ordering is the design claim; the absolute magnitudes are guesses. |
+   | `BOSS_CONSTANTS.WAVE_INTERVAL` / `STAGE_WAVE_COUNT` | 5 / 6 | Is 5 ordinary waves + 1 capstone wave the right stage rhythm, or does the ladder drag before the payoff? |
+   | `BOSS_CONSTANTS.COMPANION_BUDGET_FRAC` | 0.55 | Now buys the boss's OWN escort rather than a slice of the ordinary mix, so the old sizing may no longer be right. |
+   | `BossDef.companions` (×3) | Warden armour / Reaver speed / Bastion emplacements | Each escort is meant to RESTATE its boss's problem. Does it, or does it just add HP? |
+   | Boss-death ROUT payout | full value | The rout pays 100% of every surviving enemy. Is that a satisfying capstone bonus or an income spike that trivialises the next shop run? (The snitch sweep pays 50% — the two should probably be reasoned about together.) |
+   | `BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC` | 1.9 | The beat between the killing blow and the screen. Feel-only. |
+   | `BOSS_CONSTANTS.SALVAGE_DROPS` | 12 (≈◈12,000) | Unchanged in value, but now the ONLY money the capstone pays directly (the discount is gone, decision #44e), so its weight in the economy went up. |
+   | Capstone MODULE drop | uniform over `cost > 0` | A uniform roll can pay a Mk I trinket or a top-tier core. Should it weight by stage depth? |
+   | `PORTAL_CONSTANTS.ARRIVAL_OFFSET` | 165 | Arrival distance from the rift mouth — must stay inside `USE_RANGE` so turning around is one tap. Geometry, not balance, but it is a tuned number. |
+   | `INPUT_CONSTANTS.SHIP_SELECT_RADIUS` | 46 | Too small and docking feels unresponsive; too large and it eats shots aimed near the hull. |
+   | `UI_CONSTANTS.INDICATORS` ramp | 11→5 px over 350→3500 | Whether size alone reads as distance now that the numeric readout is gone from ordinary enemies. |
 7. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
    → `main`, one deploy.
 
@@ -1652,8 +1791,16 @@ each pair.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| i | Death/completion screen | pending | `claude/death-screen-<suffix>` | UIOverlay + EngineStats fields (kills, time elapsed, wave). Independent. |
-| stat-legibility | Per-module effect attribution in the pause menu | pending | `claude/stat-legibility-<suffix>` | Parking-lot promotion (decision #40). Expand Ship Status to the full derived-stat set with per-module contribution breakdown; tapping a hex highlights the stats it feeds. `applyModuleEffects` already sums ACTIVE effects — expose the breakdown on `EngineStats.outfitting`. Near-necessary now that adjacency/OFFLINE states exist. |
+| i | Death/completion screen | **DONE** (PR #78) | `claude/gauntlet-pair-a-772nqe` | `deathPending` freezes the loop (the `dockedAtStation` precedent); `EngineStats.runSummary` drives a full-screen overlay; RESPAWN / RESTART RUN / MAIN MENU are three EXISTING engine paths. Six run-scoped counters, reset in `resetAndLoadSelectedMap()` and deliberately NOT in `loadMapFresh()`, so one summary spans every map a run visited. |
+| stat-legibility | Per-module effect attribution in the pause menu | **DONE** (PR #78) | `claude/gauntlet-pair-a-772nqe` | `EngineStats.outfitting.statLines` is built by `GameEngine.statBreakdown()` from the SAME slot walk `applyModuleEffects` folds — the UI renders, never recomputes, so the panel cannot disagree with the sim. OFFLINE modules and core-less plating report zero with the missing piece named. `renderShipStatus()` is shared verbatim by pause and station. |
+
+**Pair A also absorbed a user-directed playtest batch** (decision #44):
+the salvage death penalty, ship weight as a ship attribute,
+select-your-ship docking/portal entry, stage descent with an amber
+descent rift, and the boss-wave rework (own wave + own escort + a
+death that routs the field). Those are Pair-A-adjacent at best — they
+are recorded under #43 rather than as Pair A rows, and their
+provisional numbers are routed to step 6.
 
 ### Pair B — Audio/FX
 

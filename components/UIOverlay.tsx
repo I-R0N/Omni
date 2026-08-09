@@ -51,6 +51,16 @@ interface UIOverlayProps {
   onPause?: () => void;
   onResume?: () => void;
   onRestart?: () => void;
+  /** Death / run-summary screen (Phase 3 Pair A) — RESPAWN continues the run
+   *  from the current map's spawn (unchanged death semantics), RESTART RUN
+   *  wipes and replays the same map, MAIN MENU wipes and exits to the menu. */
+  onRespawn?: () => void;
+  onRestartRun?: () => void;
+  onQuitToMenu?: () => void;
+  /** Stage-clear screen: dismiss and resume the cleared arena.  There is no
+   *  "descend" action here on purpose — the choice is made by flying to a
+   *  rift, not by pressing a button. */
+  onDismissStageClear?: () => void;
   onToggleDebug?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
@@ -127,14 +137,11 @@ interface UIOverlayProps {
   // on the map (the pause-menu cargo panel's only cash-out).
   onSellModule?: (idx: number) => void;
   onScrapModule?: (idx: number) => void;
-  // Station docking (Overworld): dock from the in-range affordance, undock
-  // from the station UI, repair hull (pay-per-HP, pro-rated).
-  onDock?: () => void;
+  // Station docking (Overworld): undock from the station UI, repair hull
+  // (pay-per-HP, pro-rated).  There is no onDock — docking is the in-world
+  // ship-select interaction, not a HUD button.
   onUndock?: () => void;
   onRepairHull?: () => void;
-  // Map portals (roadmap step (k)): travel to the in-range rift's
-  // destination.  Shares the E key with docking — see stats.portal.
-  onEnterPortal?: () => void;
   // DBG: grant + equip a weapon (pause-menu debug Weapons rows) and
   // teleport the player to the station's doorstep (Overworld only).
   onGrantWeapon?: (id: string) => void;
@@ -159,6 +166,45 @@ interface UIOverlayProps {
   onSetForcedEnemy?: (subtype: string | null) => void;
 }
 
+/**
+ * Shared full-screen overlay scrim (user call: "all menus slightly
+ * transparent to continue displaying the dynamic map").
+ *
+ * ONE constant for all five overlays — main menu, pause, station, death,
+ * stage-clear — so the game never has two different ideas of how much world
+ * shows through.  Two deliberate choices:
+ *
+ * - **The alpha is a legibility floor, not a taste knob.**  The map behind is
+ *   a starfield with nebulae, salvage glints and explosions, i.e. arbitrary
+ *   bright colour under arbitrary text.  55% slate-950 is what keeps
+ *   `text-slate-500` body copy readable over the worst case (a lit nebula)
+ *   while still reading clearly as "the world is still there".
+ * - **The blur is SMALL on purpose.**  A heavy `backdrop-blur` is the usual
+ *   way to buy legibility, but it defeats the point — the ask is to SEE the
+ *   map move, and 12px of blur turns motion into a smear.  3px softens the
+ *   high-frequency starfield (which is what actually fights small text)
+ *   without hiding anything that moves.
+ *
+ * Note this does NOT track whether the sim is running: the pause menu freezes
+ * the world and still shows it, which is exactly what was asked for.
+ */
+const OVERLAY_SCRIM = 'bg-slate-950/55 backdrop-blur-[3px]';
+
+/**
+ * Backing for content that must stay readable REGARDLESS of what is on the
+ * map behind it — dense, small, information-bearing panels where the scrim's
+ * legibility floor isn't enough.  Today that is the debug menu (rows of 10px
+ * mono readouts, explicitly called out as needing to stay visible).  Nearly
+ * opaque plus its own blur, so it reads like a panel sitting ON the scrim
+ * rather than more transparency stacked on transparency.
+ */
+const PANEL_OPAQUE = 'bg-slate-950/95 backdrop-blur-md';
+
+/** The overlay fade-in.  Death and stage-clear both interrupt live play, so
+ *  both ease in rather than snapping over the frame the fight ended. */
+const OVERLAY_FADE_IN = { animation: 'omniFadeIn 420ms ease-out both' } as const;
+const OVERLAY_KEYFRAMES = '@keyframes omniFadeIn{from{opacity:0}to{opacity:1}}';
+
 const UIOverlay: React.FC<UIOverlayProps> = ({
   stats,
   onCycleWeapon,
@@ -166,6 +212,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPause,
   onResume,
   onRestart,
+  onRespawn,
+  onRestartRun,
+  onQuitToMenu,
+  onDismissStageClear,
   onToggleDebug,
   onCycleTrailShape,
   onCycleTrailEmitMode,
@@ -227,9 +277,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPurchaseModule,
   onSellModule,
   onScrapModule,
-  onDock,
   onUndock,
-  onEnterPortal,
   onRepairHull,
   onGrantWeapon,
   onTeleportStation,
@@ -266,7 +314,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
     // outer pause-only Switch Map / Test wrapper.  'debug' is the pause-menu
     // Debug Menu wrapper (the DBG panel's home since the station increment).
-    fieldmaps: true, switchmap: true, debug: true,
+    // 'menudebug' is the MAIN MENU's debug dropdown — the map / enemy-test
+    // buttons that used to sit on the front door.  Collapsed by default: the
+    // menu is difficulty + START, and everything else is a debug override.
+    fieldmaps: true, switchmap: true, debug: true, menudebug: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -294,6 +345,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // cargo panel).  'inventory' selections drive the sell/scrap strip; the
   // detail strip below the flowers acts on this slot.
   const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon' | 'inventory'; i: number } | null>(null);
+  // Which Ship Status stat row is expanded to its per-module contributors
+  // (A2).  Controlled so it survives the 60 Hz overlay re-render, same as the
+  // pause-menu section collapse state.
+  const [openStat, setOpenStat] = useState<string | null>(null);
   // Drag-and-drop outfitting (drydock only): pointer-based so touch and
   // mouse both work.  A press that never travels >8px falls through to
   // the normal click (hex selection); a real drag suppresses the click
@@ -421,6 +476,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             return (
               <button
                 key={i}
+                /* `data-tile` is the DRAG drop-target hook, so it only
+                   exists on interactive flowers; `data-hex` is a stable
+                   identity for every hex (read-only flowers included). */
+                data-hex={`${g}:${i}`}
                 data-tile={interactive ? `${g}:${i}` : undefined}
                 onPointerDown={interactive && m !== null ? beginDrag(g, i, m.label) : undefined}
                 onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
@@ -478,6 +537,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             return (
               <button
                 key={i}
+                data-hex={`inventory:${i}`}
                 data-tile={`inventory:${i}`}
                 onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
                 onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g: 'inventory', i }); }}
@@ -505,6 +565,97 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   )}
                 </span>
               </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  /** Ship Status — the full derived-stat set with per-module attribution
+   *  (Phase 3 Pair A).  Shared verbatim by the pause menu and the docked
+   *  station, like the hex widgets around it.
+   *
+   *  Every number is `EngineStats.outfitting.statLines`, which the engine
+   *  builds from the same slot walk `applyModuleEffects` folds — nothing is
+   *  recomputed here.  Tapping a row expands its contributors; tapping a hex
+   *  in the flowers highlights every stat that hex feeds (the shared
+   *  `selSlot` state), and OFFLINE modules are listed with their contribution
+   *  struck through plus the contact they are missing. */
+  const renderShipStatus = () => {
+    const lines = out?.statLines ?? [];
+    if (lines.length === 0) return null;
+    const selHex = selSlot && selSlot.g !== 'inventory'
+      ? { area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i } : null;
+    const feeds = (c: { area?: string; idx?: number }) =>
+      selHex !== null && c.area === selHex.area && c.idx === selHex.idx;
+    return (
+      <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+        <div className="flex items-baseline justify-between mb-2">
+          <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Ship Status</h3>
+          <span className="text-slate-500 text-[10px]">
+            {selHex ? 'highlighted: fed by the selected hex' : 'tap a stat for its modules'}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          {lines.map(l => {
+            const open = openStat === l.id;
+            const lit = selHex !== null && l.contributors.some(feeds);
+            const counted = l.contributors.filter(c => c.active).length;
+            return (
+              <div
+                key={l.id}
+                className={`rounded transition-colors ${lit ? 'bg-amber-500/10 ring-1 ring-amber-400/40' : ''}`}
+              >
+                <button
+                  data-testid={`stat-${l.id}`}
+                  onClick={() => setOpenStat(open ? null : l.id)}
+                  className="w-full flex items-baseline justify-between gap-2 px-1.5 py-1.5 text-left hover:bg-slate-700/30 rounded transition-colors"
+                >
+                  <span className="text-slate-400 text-xs flex items-baseline gap-1.5">
+                    {l.label}
+                    <span className="text-slate-600 text-[9px]">{open ? '▾' : '▸'}</span>
+                  </span>
+                  <span className="flex items-baseline gap-1.5">
+                    {counted > 0 && (
+                      <span className={`text-[9px] font-bold tabular-nums ${lit ? 'text-amber-300' : 'text-slate-600'}`}>
+                        {counted} mod{counted > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    <span className="text-white font-bold tabular-nums text-xs">{l.display}</span>
+                  </span>
+                </button>
+                {open && (
+                  <div
+                    data-testid={`stat-detail-${l.id}`}
+                    className="px-1.5 pb-2 pt-0.5 flex flex-col gap-0.5 text-[11px]"
+                  >
+                    <div className="flex justify-between gap-2 text-slate-500">
+                      <span>Base</span>
+                      <span className="tabular-nums">{l.baseDisplay}</span>
+                    </div>
+                    {l.contributors.map((c, i) => (
+                      <div
+                        key={i}
+                        className={`flex justify-between gap-2 ${feeds(c) ? 'text-amber-200' : c.active ? 'text-slate-300' : 'text-slate-600'}`}
+                      >
+                        <span className="truncate">
+                          {c.label}
+                          {!c.active && c.requires && (
+                            <span className="text-rose-400/80 ml-1.5 text-[9px] uppercase tracking-wide">
+                              offline · needs {c.requires}
+                            </span>
+                          )}
+                        </span>
+                        <span className={`tabular-nums shrink-0 ${c.active ? '' : 'line-through'}`}>{c.display}</span>
+                      </div>
+                    ))}
+                    {l.contributors.length === 0 && (
+                      <span className="text-slate-600">No modules feed this stat.</span>
+                    )}
+                    {l.note && <span className="text-slate-500 text-[10px] mt-0.5">{l.note}</span>}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -560,6 +711,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {selHexMod.active
               ? <span className="text-emerald-300 ml-2 font-bold text-[10px] uppercase">Online</span>
               : <span className="text-rose-400 ml-2 font-bold text-[10px] uppercase">Offline — must touch {selHexMod.requires}</span>}
+            {/* Exact effect (A2): every stat this hex feeds, with the amount
+                it contributes.  An OFFLINE module lists the same stats with
+                a zero contribution, so "what am I losing" reads directly. */}
+            {(() => {
+              const eff = (out?.statLines ?? []).flatMap(l =>
+                l.contributors
+                  .filter(c => c.area === selSlot.g && c.idx === selSlot.i)
+                  .map(c => ({ stat: l.label, display: c.display, active: c.active })));
+              if (eff.length === 0) {
+                return <div className="text-slate-500 text-[10px] mt-0.5">Contributes no ship stats.</div>;
+              }
+              return (
+                <div data-testid="detail-effects" className="text-[10px] mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5">
+                  {eff.map((e, i) => (
+                    <span key={i} className={e.active ? 'text-amber-200' : 'text-slate-600'}>
+                      {e.stat} <span className={`tabular-nums font-bold ${e.active ? '' : 'line-through'}`}>{e.display}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           {ctx === 'station' && canEditInstalled && (
             <button
@@ -1257,8 +1429,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     </div>
   );
 
+  // Is a full-screen overlay up?  The scrims are translucent now, so the HUD
+  // behind them is no longer hidden by opacity — and a score chip, wave
+  // counter and pause button ghosting through a run summary reads as
+  // double-vision, not as depth.  What the transparency is FOR is seeing the
+  // MAP, so the DOM HUD steps aside while a menu is open.  (The canvas-drawn
+  // minimap and loadout strip stay: those are part of the game view.)
+  const overlayUp =
+    stats.gameState === GameState.MENU ||
+    stats.gameState === GameState.PAUSED ||
+    stats.dock?.docked === true ||
+    !!stats.runSummary ||
+    !!stats.stageClear;
+
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+
+      {!overlayUp && (<>
 
       {/* ── Top Bar ── */}
       <div className="flex justify-between items-start">
@@ -1351,9 +1538,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
           )}
 
-          {/* Pause button — hidden while docked (the station UI already
-              freezes the sim and owns the screen) */}
-          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && (
+          {/* Pause button — hidden while docked or dead (the station UI and
+              the run-summary screen already freeze the sim and own the
+              screen) */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && (
             <button
               onClick={onPause}
               className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 shadow-lg border border-slate-600/60 transition-all active:scale-95"
@@ -1425,28 +1613,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* ── Interaction affordance (station dock / portal travel) ── */}
-      {/* Stations and portals share the E key; the engine arbitrates by
-          nearest-in-range, so at most one of these is ever offered and the
-          button names the action E will take. */}
-      {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && (
-        <button
-          onClick={onDock}
-          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
-        >
-          ⚓ Dock <span className="text-sky-200 text-[10px] font-mono normal-case">[E]</span>
-        </button>
-      )}
+      {/* No dock / portal BUTTON.  The interaction is selecting your own
+          ship (tap / click, or E), and the prompt naming that control is
+          drawn AT the ship by RenderSystem — one affordance, in the place the
+          player is already looking.  A HUD pill on top of it was redundant. */}
 
-      {stats.gameState === GameState.PLAYING && stats.portal && !stats.dock?.docked && (
-        <button
-          onClick={onEnterPortal}
-          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-violet-600/85 hover:bg-violet-500 border border-violet-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
-        >
-          ↝ {stats.portal.isReturn ? 'Return to' : 'Enter'} {stats.portal.name}{' '}
-          <span className="text-violet-200 text-[10px] font-mono normal-case">[E]</span>
-        </button>
-      )}
+      </>)}
 
       {/* ── Station UI (docked) ── */}
       {/* The sim is frozen while docked (loop short-circuit).  Panels are
@@ -1462,7 +1634,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1508,6 +1680,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 thrusters⇢engine, shield/plating⇢hull, capacitor⇢shield,
                 weapon-mods⇢gun; hull + guns are the roots).  Drag tiles
                 between the inventory and the flowers — drydock only. */}
+            {/* Full derived-stat set with per-module attribution (A2) — the
+                same shared widget the pause menu shows, so an outfitting
+                change here can be read back immediately. */}
+            {renderShipStatus()}
+
             {out && (
               <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3 flex flex-col gap-2">
                 {!canEdit && (
@@ -1534,14 +1711,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 a purchase lands in the inventory. */}
             {out && (svc?.shipShop || svc?.weaponShop) && (
               <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
-                {/* Boss bounty ((h) payout model (d)): a TIMED discount already
-                    baked into every price below — shown so the beat reads. */}
-                {stats.bossDiscount && (
-                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-rose-900/40 border border-rose-500/40 text-rose-200">
-                    <span>Boss bounty · {Math.round(stats.bossDiscount.fraction * 100)}% off</span>
-                    <span className="tabular-nums">{stats.bossDiscount.secondsLeft}s</span>
-                  </div>
-                )}
                 {(['ship', 'weapon'] as const).filter(g => (g === 'ship' ? svc?.shipShop : svc?.weaponShop)).map(g => (
                   <div key={g}>
                     <h3 className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
@@ -1579,55 +1748,290 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           pause cargo panel. */}
       {renderDragGhost()}
 
-      {/* ── Main Menu ── */}
-      {stats.gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto overscroll-contain py-8">
-          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
-            OMNIVERSE
-          </h1>
-          {/* Build version — short git SHA + UTC build time, baked in at
-              build time by vite.config.ts.  Lets you tell at a glance
-              whether a deployed preview is running the latest commit. */}
-          <div className="mb-8 font-mono text-[10px] tracking-widest text-slate-500">
-            build {__APP_VERSION__} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}Z
+      {/* ── Stage clear (boss capstone down) ── */}
+      {/* Sim frozen while up (loop short-circuit), but the player is ALIVE —
+          so this is a pause with a payoff report, not an ending.  Dismissing
+          returns to the cleared arena where two rifts are waiting. */}
+      {stats.stageClear && (() => {
+        // Fades in (the engine already held the screen back for
+        // BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC so the explosion could land).
+        const sc = stats.stageClear;
+        const row = (label: string, value: React.ReactNode, note?: string) => (
+          <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
+            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className="text-right">
+              <span className="text-white font-bold tabular-nums text-sm">{value}</span>
+              {note && <span className="text-slate-500 text-[10px] ml-1.5">{note}</span>}
+            </span>
           </div>
-          <p className="text-slate-400 mb-12 max-w-md text-center leading-relaxed">
-            Survive endless waves of escalating enemies across an infinite universe.
-          </p>
-          <div className="mb-8 flex flex-col items-center gap-3">
-            <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
-            <div className="flex gap-2">
-              {[0, 1, 2, 3].map(level => (
-                <button
-                  key={level}
-                  onClick={() => onSetDifficulty && onSetDifficulty(level)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
-                    difficulty === level
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
-                  }`}
-                >
-                  {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
-                </button>
-              ))}
+        );
+        return (
+          <div
+            style={OVERLAY_FADE_IN}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
+          >
+            <style>{OVERLAY_KEYFRAMES}</style>
+            <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
+
+              <div className="text-center">
+                <h2 className="text-4xl font-black text-amber-300 tracking-[0.2em]">STAGE {sc.stage}</h2>
+                <p className="text-emerald-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">Cleared</p>
+                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">
+                  {sc.bossName} destroyed · {sc.mapName}
+                </p>
+              </div>
+
+              {/* Salvage leads — it is the money, and it is what the shop
+                  speaks.  Score is a separate performance metric that buys
+                  nothing, so it is labelled as such and sits below. */}
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
+                {row('Salvage', `◈${sc.salvageCredits.toLocaleString()}`, 'sprayed on the wreck')}
+                {row('Score', `+${sc.scoreAwarded.toLocaleString()}`)}
+              </div>
+
+              {/* Capstone reward: a module you carry away. */}
+              {(sc.rewardLabel || sc.rewardCredits) && (
+                <div className="bg-emerald-950/40 border border-emerald-600/40 rounded-lg p-3">
+                  <p className="text-emerald-300 font-bold uppercase tracking-widest text-[10px] mb-1">
+                    Salvaged from the wreck
+                  </p>
+                  {sc.rewardLabel ? (
+                    <>
+                      <p className="text-white font-bold text-sm">{sc.rewardLabel}</p>
+                      {sc.rewardDesc && <p className="text-slate-400 text-[11px] mt-0.5">{sc.rewardDesc}</p>}
+                      <p className="text-slate-500 text-[10px] mt-1">In your cargo — install it at a drydock.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-white font-bold text-sm">◈{(sc.rewardCredits ?? 0).toLocaleString()}</p>
+                      <p className="text-slate-400 text-[11px] mt-0.5">Cargo was full — the module was scrapped for its value.</p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* The choice is IN THE WORLD, not on this screen — so the screen
+                  explains where the two rifts are rather than offering buttons
+                  that would bypass flying to them. */}
+              <div className="bg-slate-800/40 border border-amber-600/30 rounded-lg p-3 text-[11px] leading-relaxed text-slate-300">
+                <p className="text-amber-300 font-bold uppercase tracking-widest text-[10px] mb-1.5">A rift has opened</p>
+                <p>
+                  <span className="text-amber-300 font-bold">Descend</span> through the new amber rift to
+                  {' '}<span className="text-white font-bold">Stage {sc.nextStage}</span> — five more waves and a tougher capstone.
+                  Your hull carries through as-is.
+                </p>
+                <p className="mt-1.5">
+                  Or take the <span className="text-sky-300 font-bold">sky rift</span> home to repair, sell and refit — the
+                  ladder restarts at Stage 1 when you do.
+                </p>
+              </div>
+
+              <button
+                onClick={onDismissStageClear}
+                data-testid="stage-continue"
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest uppercase"
+              >
+                Continue
+              </button>
             </div>
           </div>
-          <div className="mb-8 flex flex-col items-center gap-5">
-            {renderTestPanel()}
+        );
+      })()}
+
+      {/* ── Death / run summary (Phase 3 Pair A) ── */}
+      {/* The sim is frozen while `runSummary` is present (loop short-circuit,
+          same as the docked station), so the wreck field stays drawn behind
+          this overlay.  Presentation only: RESPAWN is the auto-respawn that
+          used to fire on its own, so dying still costs nothing but time —
+          the death PENALTY question belongs to the economy tuning pass. */}
+      {stats.runSummary && (() => {
+        const rs = stats.runSummary;
+        const mm = Math.floor(rs.timeSec / 60);
+        const ss = rs.timeSec % 60;
+        const row = (label: string, value: React.ReactNode, note?: string) => (
+          <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
+            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className="text-right">
+              <span className="text-white font-bold tabular-nums text-sm">{value}</span>
+              {note && <span className="text-slate-500 text-[10px] ml-1.5">{note}</span>}
+            </span>
           </div>
-          <button
-            onClick={onStart}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 px-12 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"
+        );
+        return (
+          <div
+            style={OVERLAY_FADE_IN}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
           >
-            START
-          </button>
+            <style>{OVERLAY_KEYFRAMES}</style>
+            <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
+
+              <div className="text-center">
+                <h2 className="text-4xl font-black text-rose-400 tracking-[0.2em]">DESTROYED</h2>
+                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">{rs.mapName}</p>
+              </div>
+
+              {/* Headline — the run's performance metric, big. */}
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 text-center">
+                <div className="text-amber-300 text-[10px] font-bold uppercase tracking-widest">Score</div>
+                <div className="text-amber-200 text-4xl font-black tabular-nums leading-tight">
+                  {rs.score.toLocaleString()}
+                </div>
+                {rs.bestCombo > 1 && (
+                  <div className="text-slate-400 text-[11px] mt-0.5">
+                    best combo <span className="text-amber-300 font-bold tabular-nums">×{rs.bestCombo}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
+                {rs.wavesEnabled && row('Waves cleared', rs.wavesCleared, `high ${rs.highestWave}`)}
+                {row('Enemies destroyed', rs.kills.toLocaleString(), rs.bosses > 0 ? `${rs.bosses} boss${rs.bosses > 1 ? 'es' : ''}` : undefined)}
+                {/* Salvage reads as a ledger for THIS life: what the sortie
+                    brought in, what the wreck cost, what's left.  The run
+                    gross keeps climbing and isn't the question being asked at
+                    the wreck, so it's demoted to a note on the earned row. */}
+                {row('Salvage earned',
+                     `◈${rs.creditsEarnedLife.toLocaleString()}`,
+                     'since last death')}
+                {rs.creditsLost > 0 && (
+                  <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
+                    <span className="text-rose-400/90 text-[11px] uppercase tracking-widest">Salvage lost</span>
+                    <span className="text-right">
+                      <span className="text-rose-300 font-bold tabular-nums text-sm">−◈{rs.creditsLost.toLocaleString()}</span>
+                      {rs.creditsLostRun > rs.creditsLost && (
+                        <span className="text-slate-500 text-[10px] ml-1.5">◈{rs.creditsLostRun.toLocaleString()} this run</span>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'after loss')}
+                {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={onRespawn}
+                  data-testid="death-respawn"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest uppercase"
+                >
+                  Respawn
+                </button>
+                <p className="text-slate-500 text-[10px] text-center -mt-1">
+                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept
+                  {rs.creditsLost > 0
+                    ? `; the wreck cost you ◈${rs.creditsLost.toLocaleString()} of your unspent Salvage${rs.credits === 0 ? ' — all of it' : ''}.`
+                    : '.'}
+                </p>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    onClick={onRestartRun}
+                    data-testid="death-restart"
+                    className="bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg text-xs tracking-widest uppercase transition-all active:scale-95"
+                  >
+                    Restart Run
+                  </button>
+                  <button
+                    onClick={onQuitToMenu}
+                    data-testid="death-menu"
+                    className="bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg text-xs tracking-widest uppercase transition-all active:scale-95"
+                  >
+                    Main Menu
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Main Menu ── */}
+      {/* Condensed to exactly three controls (user call): DIFFICULTY, START,
+          and a collapsed debug dropdown holding the map / enemy-test buttons.
+          The run always begins on the OVERWORLD hub now — map choice is a
+          debug override, not a front-door decision, so the menu no longer
+          asks for one.
+
+          LAYOUT: a fixed-width column centred by `my-auto` inside a
+          scrollable flex column — NOT `justify-center`, which clips content
+          above the reachable scroll area once the debug dropdown is open (the
+          same trap the station and pause panels document).  So the two
+          controls that matter sit dead centre at every screen size, and an
+          expanded debug list scrolls instead of pushing START off-screen. */}
+      {stats.gameState === GameState.MENU && (
+        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6`}>
+          <div className="w-full max-w-xs flex flex-col items-center gap-8 my-auto">
+
+            <div className="text-center">
+              {/* Steps down on a 320px screen, where 48px monospace-ish
+                  display type runs edge to edge. */}
+              <h1 className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 tracking-tight drop-shadow-lg">
+                OMNIVERSE
+              </h1>
+              {/* Build version — short git SHA + UTC build time, baked in at
+                  build time by vite.config.ts.  Lets you tell at a glance
+                  whether a deployed preview is running the latest commit. */}
+              <div className="mt-2 font-mono text-[10px] tracking-widest text-slate-500">
+                build {__APP_VERSION__} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}Z
+              </div>
+            </div>
+
+            <div className="w-full flex flex-col items-center gap-3">
+              <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
+              {/* A 4-up grid rather than a flex row: the buttons then divide
+                  the column's width instead of setting it, so the row can
+                  never overflow a narrow screen. */}
+              <div className="w-full grid grid-cols-4 gap-2">
+                {[0, 1, 2, 3].map(level => (
+                  <button
+                    key={level}
+                    onClick={() => onSetDifficulty && onSetDifficulty(level)}
+                    className={`py-3 rounded-lg text-xs font-bold border transition-all ${
+                      difficulty === level
+                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
+                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
+                    }`}
+                  >
+                    {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              data-testid="menu-start"
+              onClick={onStart}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"
+            >
+              START
+            </button>
+
+            {/* Debug dropdown — the map picker and enemy test rows, collapsed
+                by default so they are reachable without being a front-door
+                choice.  Same PANEL_OPAQUE treatment as the pause menu's Debug
+                Menu, for the same reason: dense rows over a live map. */}
+            <div className="w-full text-center">
+              <button
+                data-testid="menu-debug-toggle"
+                onClick={() => toggleSection('menudebug')}
+                className="pointer-events-auto cursor-pointer text-amber-400/80 text-[11px] uppercase tracking-widest select-none hover:text-amber-300"
+              >
+                Debug Menu {collapsed.menudebug ? '▸' : '▾'}
+              </button>
+              {!collapsed.menudebug && (
+                <div className={`mt-3 w-full ${PANEL_OPAQUE} border border-amber-500/30 rounded-lg px-3 py-3 flex flex-col items-center gap-5`}>
+                  {renderTestPanel()}
+                </div>
+              )}
+            </div>
+
+          </div>
         </div>
       )}
 
       {/* ── Player Menu (pause) ── */}
       {stats.gameState === GameState.PAUSED && (() => {
         const ps = stats.playerStats;
-        const fmtMult = (m: number | undefined) => `×${(m ?? 1).toFixed(2)}`;
         const statLine = (label: string, value: React.ReactNode) => (
           <div className="flex justify-between gap-2">
             <span className="text-slate-400">{label}</span>
@@ -1639,7 +2043,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1664,17 +2068,29 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </button>
             </div>
 
-            {/* Ship status */}
+            {/* Live pools (the two stats that MOVE in flight) — the derived
+                per-module breakdown lives in the shared Ship Status widget
+                right below. */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
+              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Condition</h3>
               <div className="flex flex-col gap-1 text-xs">
                 {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
                 {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
-                {statLine('Damage', fmtMult(ps?.damageMult))}
-                {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
-                {statLine('Speed', fmtMult(ps?.speedMult))}
+                {statLine('Weight', `${(ps?.shipWeight ?? 0).toFixed(1)}`)}
+                {statLine('Location', (
+                  <>
+                    {stats.currentMapName}
+                    <span className="text-slate-500 font-normal ml-1.5 text-[10px]">
+                      {ps ? `${ps.position.x}, ${ps.position.y}` : ''}
+                    </span>
+                  </>
+                ))}
               </div>
             </div>
+
+            {/* Full derived-stat set with per-module attribution (A2) —
+                the SAME widget the docked station shows. */}
+            {renderShipStatus()}
 
             {/* Modules & cargo — the same hex-tile language as the station
                 UI, but the flowers are READ-ONLY (no drag source, no drop
@@ -1724,7 +2140,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 Debug Menu {collapsed.debug ? '▸' : '▾'}
               </button>
               {!collapsed.debug && (
-                <div className="mt-3 mx-auto w-full max-w-xs bg-slate-900/70 border border-amber-500/30 rounded-lg px-3 py-2 text-left">
+                <div className={`mt-3 mx-auto w-full max-w-xs ${PANEL_OPAQUE} border border-amber-500/30 rounded-lg px-3 py-2 text-left`}>
                   {debugSections}
                 </div>
               )}

@@ -776,26 +776,70 @@ export const COLLISION_CONFIG = {
 };
 
 export const UI_CONSTANTS = {
+  // Beat between the WRECK finishing and the run-summary screen appearing
+  // (seconds).  The same reward-moment pacing as the boss capstone's
+  // BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC, applied to the player's own death:
+  // let the kill land — explosion, debris, the field still fighting — before
+  // a menu takes the screen.  Unlike every other full-screen overlay, the sim
+  // does NOT freeze through this beat OR through the screen that follows it,
+  // so the map behind stays alive; the overlay then FADES in rather than
+  // snapping.  Sits on top of EXPLOSION_CONSTANTS.DURATION, not inside it.
+  DEATH_SCREEN_DELAY_SEC: 1.6,
   HEALTH_BAR: {
     PLAYER_WIDTH: 44, PLAYER_HEIGHT: 5,
     ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,
     OFFSET_MODIFIER: 0.85, // Multiplier of entity size
     OFFSET_BASE: 10 // Pixel padding
   },
+  // Off-screen indicators.  Arrows ride the SCREEN EDGE (an inset viewport
+  // rect) rather than a fixed centre ring, and their SIZE carries distance:
+  // a closing threat grows, a far straggler shrinks to a small tick.  That
+  // is what lets the whole layer be smaller than the old fixed-size ring
+  // while reading MORE clearly — proximity is in the glyph, not in a number.
+  //
+  // Colour is BY TYPE, never the entity's own colour (user call): one look
+  // tells you what a contact IS.  A rival or a bubble that is hunting the
+  // PLAYER blinks red on top of its type colour — those two are the only
+  // contacts whose hostility is conditional, so the blink is exactly the
+  // "it's coming for you" signal.
   INDICATORS: {
-    RADIUS: 120, // Distance from center of screen
-    TEXT_THRESHOLD_ENEMY: 250000, // Distance sq to show text
+    EDGE_INSET: 26,          // px in from the viewport edge the arrows ride
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5, // Max arrows for POIs
     // Enemy chevrons are range-unlimited (maps are big and live wave
     // enemies are capped at TIMED_WAVE_CONFIG.MAX_CONCURRENT_ENEMIES),
     // so every live enemy is always findable.  The cap here only guards
     // pathological counts; alpha fades with distance to a floor so far
-    // chevrons read as "out there" without shouting.
+    // chevrons read as "out there" without shouting.  The budget keeps the
+    // NEAREST contacts (renderIndicators selects nearest-first).
     MAX_VISIBLE_ENEMY: 12,
+    // Ambient bubbles get their own small budget: they are fauna, not wave
+    // threats, so a bloom of them must never crowd out the enemy arrows.
+    MAX_VISIBLE_BUBBLE: 4,
     ENEMY_FADE_START: 800,   // world units — full opacity inside this
     ENEMY_FADE_END: 4000,    // world units — alpha floor from here out
     ENEMY_MIN_ALPHA: 0.35,
+    // Proximity size ramp — the arrow's half-length in px, interpolated on
+    // distance.  NEAR is deliberately close to the old fixed size and FAR is
+    // roughly half of it, so a screen full of distant contacts costs far less
+    // real estate than before while a closing one is MORE prominent.
+    SIZE_NEAR: 11,           // px at/inside NEAR_DIST
+    SIZE_FAR: 5,             // px at/beyond FAR_DIST
+    NEAR_DIST: 350,          // world units
+    FAR_DIST: 3500,          // world units
+    BOSS_SCALE: 1.7,         // boss arrows stay oversized (never lose the boss)
+    AGGRO_BLINK_HZ: 2.5,     // red-blink rate for a rival/bubble hunting you
+    // Type → colour.  Bosses share the enemy red; their SIZE and self-label
+    // are what set them apart, so the palette stays a clean type legend.
+    COLORS: {
+      ENEMY:   '#ef4444',    // red-500
+      STATION: '#6366f1',    // indigo-500
+      PORTAL:  '#22c55e',    // green-500
+      RIVAL:   '#eab308',    // yellow-500
+      BUBBLE:  '#a855f7',    // purple-500
+      AGGRO:   '#ef4444',    // blink colour for a provoked rival / bubble
+      OTHER:   '#94a3b8',    // slate-400 — any POI without a type of its own
+    },
   }
 };
 
@@ -872,6 +916,11 @@ export const MINIMAP_CONSTANTS = {
 };
 
 export const INPUT_CONSTANTS = {
+  // Tap/click radius (CSS px) around the player's SHIP that counts as
+  // "selecting" it to use an in-range station or portal.  Generous enough for
+  // a thumb on glass, and only ever consulted while something IS in range —
+  // outside that, a tap on the ship is just a shot.
+  SHIP_SELECT_RADIUS: 46,
   // Charge-to-fire model (post-d2): tap (release before CHARGE_FULL) =
   // normal shot via fireEvents; hold for the full CHARGE_FULL duration
   // and release = charged shot via chargeReleaseEvents.  The ring HUD
@@ -2085,6 +2134,18 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
   FADEIN: 0.3,
   HOLD: 1.0,
   FADEOUT: 0.5,
+  // Banner type sizes.  These are the DESIGN sizes on a roomy viewport;
+  // RenderSystem.fitFontPx shrinks a line that would overflow (banner text is
+  // authored content — boss names, reward labels — so its width isn't known
+  // at design time, and the game is played on a 390px-wide phone).  The MIN
+  // sizes are the readability floor: below them, clipping is the better
+  // failure, but in practice no shipped string reaches them.
+  TEXT_PX: 48,
+  TEXT_MIN_PX: 18,
+  SUBTEXT_PX: 24,
+  SUBTEXT_MIN_PX: 11,
+  /** Clear space kept at each edge when fitting a banner line. */
+  SIDE_MARGIN: 16,
 };
 
 // Glitter trail — bright points trailing behind the player along travel path.
@@ -2491,7 +2552,7 @@ export const SCORE_CONSTANTS = {
 // the docking UI; raising the limit is a future ship purchase — see the
 // ship-catalog entry in docs/PARKING_LOT.md).  Going WEAPONLESS is
 // allowed — every gun carries a WEIGHT, and a light ship accelerates
-// harder (WEAPON_WEIGHT below).
+// harder (SHIP_WEIGHT below).
 //
 // ADJACENCY REQUIREMENTS (MODULE_REQUIREMENTS): an installed module only
 // FUNCTIONS while it touches an ACTIVE module of its required family —
@@ -2535,8 +2596,9 @@ export interface ModuleDef {
   desc: string;
   cost: number;
   weapon?: WeaponType;     // family 'gun' only
-  // Gun mass (family 'gun'): mounted weight drags acceleration via the
-  // WEAPON_WEIGHT curve — no gun mounted = a slight accel boost.
+  // Module mass.  Adds to the SHIP's total weight, which drags acceleration
+  // via the SHIP_WEIGHT curve — no gun mounted = a slight accel boost.  Only
+  // guns set it today; the fold reads it off any module.
   weight?: number;
   effect?: ModuleEffect;
 }
@@ -2555,16 +2617,45 @@ export const MODULE_RESALE = {
 // Autoloader stack floor — cadence never drops below 40% of base.
 export const COOLDOWN_FLOOR = 0.4;
 
-// ── Weapon weight → acceleration ────────────────────────────────────────────
-// Every mounted gun weighs the ship down; thrust is scaled by
-//   BASE_BOOST / (1 + DRAG_PER_WEIGHT × Σ mounted-gun weight)
-// tuned so the starter Blaster (weight 1) is EXACTLY the old 1.0 baseline:
-// flying weaponless gives the +10% BASE_BOOST, heavy arsenals (Cannon +
-// Homing ≈ 4.5 weight) drag to ≈0.76×.  This is the gamification hook the
-// heavier gun unlocks trade against.  Numbers provisional pending playtest.
-export const WEAPON_WEIGHT = {
-  BASE_BOOST: 1.10,
-  DRAG_PER_WEIGHT: 0.10,
+// ── Ship weight → acceleration ──────────────────────────────────────────────
+// WEIGHT IS A SHIP ATTRIBUTE, not a property of any one module: the ship has
+// a HULL weight of its own, every mounted module adds to it, and the ship's
+// total weight is what drags thrust:
+//   BASE_BOOST / (1 + DRAG_PER_WEIGHT × ship weight)
+// where ship weight = HULL_BASE + Σ (weight of every ACTIVE module).
+//
+// `HULL_BASE` is 0 TODAY — the current hull contributes nothing, so the
+// arithmetic is unchanged (the starter Blaster, weight 1, is EXACTLY the 1.0
+// baseline; flying weaponless gives the +10% BASE_BOOST; heavy arsenals like
+// Cannon + Homing ≈ 4.5 weight drag to ≈0.76×).  It exists as the seam for
+// SHIP CLASSES: a heavier hull sets a higher HULL_BASE and starts the whole
+// curve further along, without any other code moving.  Numbers provisional
+// pending playtest.
+//
+// Only guns carry a `weight` in MODULE_DEFS today, but the fold is
+// module-agnostic — give any module a weight and it joins the ship's total.
+export const SHIP_WEIGHT = {
+  HULL_BASE: 0,
+  // Base thrust with an unladen ship, and how hard each unit of weight drags.
+  // EVERY module carries a weight now (user call), so a fully-outfitted ship
+  // is several times heavier than a lean one and DRAG_PER_WEIGHT was halved
+  // (0.10 -> 0.05) while BASE_BOOST was raised slightly (1.10 -> 1.15) to
+  // compensate.  Net effect at the two ends of the curve:
+  //   weaponless bare frame (w 1.0)  -> x1.10  (was x1.10 — the fly-light hook)
+  //   lean start, hull + Blaster (2.0) -> x1.05  (was x1.00 — the slight base bump)
+  //   fully outfitted (w ~13.9)      -> x0.68  (was x0.82 with guns only)
+  // So a maxed ship is now genuinely heavy and leans on Engine/Thrusters to
+  // stay nimble, which is the point of weighting every module.
+  BASE_BOOST: 1.15,
+  DRAG_PER_WEIGHT: 0.05,
+  // Weight is PHYSICAL, not just a thrust number: the player's collision mass
+  // scales with it, so a heavy ship shrugs off impacts and plows debris while
+  // a stripped one gets shoved around.  Normalised so the LEAN loadout
+  // (MASS_REFERENCE) is exactly today's PHYSICS_CONSTANTS.PLAYER_MASS; the
+  // MASS_BASE term is the hull's own inertia, which keeps the ratio finite
+  // when every module is stripped off.
+  MASS_BASE: 4,
+  MASS_REFERENCE: 2,
 };
 
 /** Which family an installed module must TOUCH (an ACTIVE module of any
@@ -2592,12 +2683,16 @@ export const HEX_ADJACENCY: readonly (readonly number[])[] = [
 // level (rounded) so the salvage economy is unchanged in total: reaching
 // "Mk III power" costs about what L3 used to.
 const MK = ['', ' Mk I', ' Mk II', ' Mk III'];
+/** `mk1Weight` is the Mk I mass; Mk II/III scale linearly with the mark, the
+ *  same way their effects and prices do — a bigger plate is a heavier plate. */
 const statMks = (
   family: ModuleFamily, group: ModuleGroup, kind: ModuleKind, label: string,
   descOf: (mk: number) => string, costs: number[], effOf: (mk: number) => ModuleEffect,
+  mk1Weight: number,
 ): ModuleDef[] => costs.map((cost, i) => ({
   id: `${family}_mk${i + 1}`, family, mark: i + 1, group, kind,
   label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost, effect: effOf(i + 1),
+  weight: +(mk1Weight * (i + 1)).toFixed(1),
 }));
 
 export const MODULE_DEFS: readonly ModuleDef[] = [
@@ -2606,13 +2701,13 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // hex (mirror of the starter Blaster on gun hex W1): it adds no stats
   // but is the adjacency ROOT the whole ship-module tree chains from, so
   // bought modules work out of the box.  cost 0 keeps it out of the shop.
-  { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0 },
-  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk })),
-  { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true } },
-  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk })),
-  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk })),
-  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk })),
-  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk })),
+  { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
+  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
+  { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
+  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
+  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
+  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
+  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk }), 0.4),
   // ── Weapon group: guns (gun hexes only) ──
   { id: 'wpn_blaster',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm',   cost: 0, weight: 1.0 },
   { id: 'wpn_burst',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000, weight: 1.3 },
@@ -2624,9 +2719,9 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000, weight: 2.0 },
   { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000, weight: 2.5 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
-  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk })),
-  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk })),
-  { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true } },
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
+  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
+  { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 
 export function moduleDef(id: string): ModuleDef | undefined {
@@ -2827,6 +2922,23 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
   CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
+  // Death penalty (interim, user call): dying forfeits this fraction of the
+  // player's UNSPENT Salvage, charged once when the run-summary screen is
+  // raised so the summary can report exactly what it cost.  0.25 is
+  // PROVISIONAL — big enough that a death stings, small enough that it never
+  // wipes a run — and is placeholder for the dynamic system the economy
+  // tuning pass (roadmap step 6) will design.  Money already SPENT on modules
+  // is untouched: the penalty taxes hoarding, not investment.
+  DEATH_PENALTY_FRACTION: 0.25,
+  // ...and a FLOOR, so death still costs something at a low balance where a
+  // percentage rounds to pocket change.  The charge is
+  //   min(balance, max(fraction × balance, MIN))
+  // — whichever of the two is higher, but never more than the player has, so
+  // it can bring them to zero and never below.  12 500 ≈ 12–13 salvage drops
+  // (CREDITS_PER_DROP 1000), i.e. roughly two waves of combat income, and it
+  // is the binding term below a 50 000 balance.  PROVISIONAL like the
+  // fraction: both are placeholders for the economy tuning pass (step 6).
+  DEATH_PENALTY_MIN: 12500,
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)
@@ -2931,6 +3043,16 @@ export const PORTAL_CONSTANTS = {
                              // a landmark at gameplay zoom, like the station)
   COLOR: '#a855f7',          // violet — the established rift language (dragon/rival warps)
   RETURN_COLOR: '#38bdf8',   // sky — return rifts match the hub/station palette
+  // DESCENT rift (boss capstone → next stage).  Its own AMBER reads as neither
+  // the violet way-out nor the sky way-home: "deeper".  DESCENT_OFFSET is how
+  // far from the fallen boss it opens, so it isn't buried in the wreck debris.
+  DESCENT_COLOR: '#f59e0b',
+  DESCENT_OFFSET: 190,
+  // How far from a rift's mouth the player surfaces when a transition puts
+  // them BESIDE it (coming home from an arena arrives at that arena's hub
+  // rift, not at the player's base).  Just clear of the mouth — the rift stays
+  // on screen and still in USE_RANGE, so turning around is one tap.
+  ARRIVAL_OFFSET: 165,
   // Interaction proximity.  Slightly under the station's DOCK_RANGE so that
   // when a portal and a station overlap in range the nearest-wins arbiter
   // has a clear winner rather than a coin flip at the boundary.
@@ -3806,35 +3928,40 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
 // never a script (strategy guardrail #36e).  GameEngine.updateBosses applies a
 // phase once, on the health-fraction transition.
 //
-// PAYOUT — model (d) (WEAPONS_AMMO_PLAN §6 / decision #37e, settled): a boss
-// pays SALVAGE and a timed SHOP DISCOUNT.  There is deliberately NO
-// weapon-unlock plumbing: weapons stay purely purchased and the boss is an
-// income accelerator.
+// PAYOUT: a boss pays SALVAGE plus a RANDOM MODULE dropped into the inventory
+// (GameEngine.grantBossModule).  The module replaced a timed SHOP DISCOUNT
+// (user call, playtest): a countdown you must be near a shop to spend is worse
+// than a thing you carry away, and removing it also removed the buy/sell
+// money-pump the discount created.  There is still deliberately NO
+// weapon-unlock plumbing: weapons stay purely purchased.
 export const BOSS_CONSTANTS = {
-  /** A boss wave every Nth wave (0-based index where (index + 1) % N === 0).
-   *  PROVISIONAL: 5 puts the first capstone on wave 5, which is currently the
-   *  Bulwark intro — see the log's FOR-USER-REVIEW item 1. */
+  /** NORMAL waves per stage, BEFORE the capstone.  The boss then gets its OWN
+   *  wave on top (user call) — a stage is `WAVE_INTERVAL` ordinary waves and
+   *  then wave `WAVE_INTERVAL + 1`, which is the boss wave and nothing else.
+   *  A capstone therefore never lands inside a normal wave's stream, and the
+   *  stage cannot clear until wave 5 is fully cleared.  See STAGE_WAVE_COUNT. */
   WAVE_INTERVAL: 5,
   /** The normal spawn budget of a boss wave, scaled down — the boss IS most of
-   *  the wave, so a capstone isn't also a crowd.  PROVISIONAL. */
+   *  the wave, so a capstone isn't also a crowd.  Now that the boss owns its
+   *  own wave, this budget buys the boss's OWN ESCORT (BossDef.companions),
+   *  not a slice of the ordinary wave mix.  PROVISIONAL. */
   COMPANION_BUDGET_FRAC: 0.55,
   /** Score paid on a boss kill, on top of the normal tier kill points. */
   SCORE: 2500,
+  // Beat before the stage-clear screen (seconds).  Standard reward-moment
+  // pacing: let the KILL land first — explosion, debris, shake, the salvage
+  // spray converging — and only then take control away for the summary.
+  // Cutting straight to a menu on the killing blow throws away the payoff the
+  // fight was for.  ~1.9s covers the explosion (EXPLOSION_CONSTANTS.DURATION)
+  // plus a short quiet beat; the overlay then FADES in rather than snapping.
+  STAGE_CLEAR_DELAY_SEC: 1.9,
   /** Salvage units sprayed on a boss kill — the model-(d) income accelerator.
    *  PROVISIONAL sizing against today's economy: combat income runs ≈5–7
    *  units/wave and a snitch catch pays 8, so 12 (≈12,000 credits) is worth
-   *  roughly two waves of fighting without trivialising a 25k–60k module. */
+   *  roughly two waves of fighting without trivialising a 25k–60k module.
+   *  The stage-clear screen reports this in CREDITS (× CREDITS_PER_DROP), not
+   *  as a drop count — 12 rendered with a money glyph read as 12 credits. */
   SALVAGE_DROPS: 12,
-  /** Timed shop discount earned per boss kill: `fraction` off every catalog
-   *  price for `seconds` of sim time, capped at FRACTION_MAX.  Killing another
-   *  boss inside the window stacks the fraction and refreshes the clock.
-   *  TIMED rather than run-permanent so it reads as a beat ("cash in now")
-   *  rather than a silent permanent buff — and see MODULE_RESALE: resale is
-   *  priced off the SAME discounted number, or buy-low/sell-high is a pump.
-   *  PROVISIONAL. */
-  DISCOUNT_FRACTION: 0.15,
-  DISCOUNT_FRACTION_MAX: 0.35,
-  DISCOUNT_SECONDS: 180,
   /** Debris particles thrown on the death payoff beat (on top of the normal
    *  enemy explosion).  Matches the dragon's scale — a capstone should read
    *  as an event, not as a big drone popping. */
@@ -3878,6 +4005,12 @@ export interface BossDef {
   name: string;
   /** Phases, descending by `atHealthFrac`; index 0 must be 1. */
   phases: BossPhaseDef[];
+  /** The boss's OWN ESCORT — the only enemies its dedicated wave streams in
+   *  (cycled to fill the COMPANION_BUDGET_FRAC budget).  A boss wave is not an
+   *  ordinary wave with a boss bolted on: the escort is chosen to state the
+   *  same problem the boss states, so the wave reads as one encounter.  Omit
+   *  and the boss fights alone. */
+  companions?: EnemySubtype[];
 }
 
 export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
@@ -3890,6 +4023,10 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
   //          whether you can out-damage the escort.
   [EnemySubtype.BOSS_WARDEN]: {
     name: 'WARDEN',
+    // Escort: an ARMOURED honour guard that restates the boss's own lesson —
+    // a Bulwark's arc shield and a Tank's armor both punish chip fire, so the
+    // whole wave asks the same question the Warden asks.
+    companions: [EnemySubtype.BULWARK, EnemySubtype.RAMMER_3, EnemySubtype.SHOOTER_2],
     phases: [
       {
         atHealthFrac: 1,
@@ -3918,6 +4055,9 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
   //          (dodge) to a big-hit weapon (chip-resist) mid-fight.
   [EnemySubtype.BOSS_SCATTER]: {
     name: 'REAVER',
+    // Escort: a FAST pack.  The Reaver's problem is hitting something that
+    // jukes; the escort makes standing still to line a shot up expensive.
+    companions: [EnemySubtype.RAMMER_1, EnemySubtype.SWARM, EnemySubtype.KAMIKAZE],
     phases: [
       {
         atHealthFrac: 1,
@@ -3956,6 +4096,9 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
   //          a pure damage race in the open.
   [EnemySubtype.BOSS_SIEGE]: {
     name: 'BASTION',
+    // Escort: EMPLACEMENTS.  The Bastion's answer is to flank it; turrets and
+    // a nest make the flanking lane the thing you have to earn.
+    companions: [EnemySubtype.TURRET, EnemySubtype.NEST, EnemySubtype.SHOOTER_3],
     phases: [
       {
         atHealthFrac: 1,
@@ -3993,16 +4136,35 @@ export const BOSS_ROTATION: EnemySubtype[] = [
   EnemySubtype.BOSS_SIEGE,    // then plate + regen — flank it, and burst it
 ];
 
-/** True when the 0-based wave index is a boss-capstone wave. */
+/** Waves in ONE STAGE: `WAVE_INTERVAL` ordinary waves plus the boss's own
+ *  dedicated wave.  This is the stride the boss rotation, the boss test, and
+ *  `WaveSystem.waveOffset` all step by — keep them reading THIS constant so a
+ *  stage-length change stays one edit. */
+export const STAGE_WAVE_COUNT = BOSS_CONSTANTS.WAVE_INTERVAL + 1;
+
+/** True when the 0-based wave index is a boss-capstone wave.  The capstone is
+ *  the LAST wave of the stage and carries nothing but the boss and its own
+ *  escort — so wave `WAVE_INTERVAL` must be fully cleared before it starts. */
 export function isBossWave(index: number): boolean {
   return BOSS_ROTATION.length > 0
-    && (index + 1) % BOSS_CONSTANTS.WAVE_INTERVAL === 0;
+    && (index + 1) % STAGE_WAVE_COUNT === 0;
 }
 
 /** The boss subtype for a given 0-based boss-wave index (cycles the rotation). */
 export function bossForWave(index: number): EnemySubtype {
-  const n = Math.floor((index + 1) / BOSS_CONSTANTS.WAVE_INTERVAL) - 1;
+  const n = Math.floor((index + 1) / STAGE_WAVE_COUNT) - 1;
   return BOSS_ROTATION[Math.max(0, n) % BOSS_ROTATION.length];
+}
+
+/** The spawn list for a BOSS wave: the boss's own escort, cycled to fill the
+ *  budget.  Deliberately NOT `buildWaveSpawnList` — a capstone wave is a
+ *  designed encounter, not the ordinary weighted mix with a boss added. */
+export function buildBossWaveSpawnList(boss: EnemySubtype, budget: number): EnemySubtype[] {
+  const escort = BOSS_DEFS[boss]?.companions;
+  if (!escort || escort.length === 0) return [];
+  const list: EnemySubtype[] = [];
+  for (let i = 0; i < budget; i++) list.push(escort[i % escort.length]);
+  return list;
 }
 
 // ── Wave definitions ──────────────────────────────────────────────────────────

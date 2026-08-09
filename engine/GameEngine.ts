@@ -17,11 +17,11 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
-import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapDescriptors';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -129,6 +129,70 @@ export class GameEngine {
   // window lapses.  Ship kills only; shard/tile kills don't touch it.
   private comboCount: number = 0;
   private comboTimer: number = 0;
+
+  // ── Run-summary counters (Phase 3 Pair A, milestone A1) ─────────────────
+  // Everything the death/run-summary overlay reports that no other system
+  // already tracks.  RUN-scoped, so they are zeroed in
+  // resetAndLoadSelectedMap() and deliberately NOT in loadMapFresh() — a
+  // portal excursion is the same run, so its kills and seconds carry.
+  private runKills: number = 0;          // enemy ships downed BY THE PLAYER
+  private runCreditsEarned: number = 0;  // salvage income only (see earnCredits)
+  // Salvage collected since the LAST DEATH.  The death screen reports this
+  // rather than the run gross: what the player wants to know at the wreck is
+  // "what did I bring back from THIS sortie", not a number that has been
+  // climbing since the run began.  Snapshotted into `lastLifeCreditsEarned`
+  // and zeroed at each death, so the next life starts its own tally.
+  private lifeCreditsEarned: number = 0;
+  private lastLifeCreditsEarned: number = 0;
+  private runTimeSec: number = 0;        // SIM seconds — pauses/docks don't count
+  private runWavesCleared: number = 0;   // clears across every arena this run
+  private runHighestWave: number = 0;    // best wave NUMBER reached (1-based)
+  private runBestCombo: number = 1;      // highest combo multiplier reached
+  // Death beat: set when the player's explosion finishes instead of
+  // respawning straight away.  While set the loop short-circuits (the
+  // dockedAtStation precedent) and UIOverlay shows the run summary.  Death
+  // SEMANTICS are unchanged — RESPAWN still calls respawnPlayer().
+  private deathPending: boolean = false;
+  // Counts down AFTER the wreck's explosion finishes and BEFORE the summary
+  // appears — the boss stage-clear beat applied to the player's own death
+  // (user call).  The sim keeps running through it AND through the screen
+  // itself: unlike pause/dock/stage-clear, death does NOT freeze the world,
+  // so the field stays alive behind the (semi-transparent) summary.
+  private deathDelay: number = 0;
+  // The summary is SNAPSHOTTED at the moment of death rather than rebuilt per
+  // frame, precisely because the sim keeps running behind it — otherwise the
+  // run clock would tick and stray kills would score while the player reads
+  // their own obituary.
+  private deathSummary: ReturnType<GameEngine['runSummarySnapshot']> | null = null;
+  // ── Stage descent (boss capstone → deeper stage) ────────────────────────
+  // A STAGE is one arena's ladder: BOSS_CONSTANTS.WAVE_INTERVAL ordinary waves
+  // and then the boss's OWN capstone wave (STAGE_WAVE_COUNT waves in all), so
+  // the capstone never lands inside a normal wave and cannot start until wave
+  // WAVE_INTERVAL is cleared.  Killing that boss freezes the loop on a
+  // STAGE-CLEAR screen
+  // (the player is alive, so this pauses rather than ends) and opens a DESCENT
+  // rift beside them.  From there the choice is in-world: down the new rift to
+  // stage N+1, or back through the arena's return rift to the hub.
+  //
+  // `stageIndex` is 0-based DEPTH.  It drives WaveSystem.waveOffset, so enemy
+  // growth and the boss rotation continue across a descent instead of
+  // restarting with the arena's wave counter.  Returning to the HUB resets it
+  // — the hub is the surface.
+  private stageIndex: number = 0;
+  private stageClearPending: boolean = false;
+  // Counts down AFTER the capstone dies and BEFORE the screen appears, so the
+  // explosion, debris and salvage spray all land first.  The sim keeps running
+  // during it — that is the point.
+  private stageClearDelay: number = 0;
+  private lastStageClear: {
+    stage: number; bossName: string; nextStage: number;
+    scoreAwarded: number; salvageDrops: number;
+    discountFraction: number; discountSeconds: number;
+  } | null = null;
+  // Salvage forfeited to the CURRENT death (shown on the summary) and across
+  // the whole run (so repeated deaths read as a running cost).
+  private lastDeathCreditsLost: number = 0;
+  private runCreditsLost: number = 0;
   // ── Progression ─────────────────────────────────────────────────────────
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
@@ -321,8 +385,6 @@ export class GameEngine {
   // the TIMED shop discount from the model-(d) payout (salvage + discount, no
   // unlock plumbing).  All three are run-scoped — reset with credits/score.
   private liveBoss: GameEntity | null = null;
-  private bossDiscount = 0;        // 0..BOSS_CONSTANTS.DISCOUNT_FRACTION_MAX
-  private bossDiscountTimer = 0;   // seconds left on the discount window
   private bossesKilled = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
@@ -1411,7 +1473,6 @@ export class GameEngine {
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
       boss: this.bossStatsSnapshot(),
-      bossDiscount: this.bossDiscountSnapshot(),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -1502,9 +1563,11 @@ export class GameEngine {
   }
 
   public pauseGame() {
-    // The docked station UI already freezes the sim; stacking the pause
-    // menu on top of it would double up two full-screen overlays.
-    if (this.gameState === GameState.PLAYING && !this.dockedAtStation) {
+    // The docked station UI and the death/run-summary screen already freeze
+    // the sim; stacking the pause menu on top would double up two
+    // full-screen overlays.
+    if (this.gameState === GameState.PLAYING && !this.dockedAtStation
+        && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
     }
   }
@@ -1560,8 +1623,8 @@ export class GameEngine {
   /** Park the player (and the camera) at the freshly-loaded map's declared
    *  spawn point, dropping the motion state that belongs to the old map.
    *  Hull / shield / outfit are untouched — the callers decide those. */
-  private placePlayerAtSpawn() {
-      const spawn = this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
+  private placePlayerAtSpawn(override?: Vector2) {
+      const spawn = override ?? this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
       this.player.position = { ...spawn };
       this.player.velocity = { x: 0, y: 0 };
       this.player.trail = [];
@@ -1589,16 +1652,44 @@ export class GameEngine {
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
       // Boss payouts ((h) model (d)) are run-scoped like the credits they
       // discount — a new run starts at full price with no boss in the world.
-      this.bossDiscount = 0;
-      this.bossDiscountTimer = 0;
       this.bossesKilled = 0;
       this.liveBoss = null;
+
+      // Run-summary counters (A1) — the whole point of resetting them HERE is
+      // that a portal excursion (transitionToMap) leaves them alone, so one
+      // run's summary spans every map it visited.
+      this.runKills = 0;
+      this.runCreditsEarned = 0;
+      this.lifeCreditsEarned = 0;
+      this.lastLifeCreditsEarned = 0;
+      this.runTimeSec = 0;
+      this.runWavesCleared = 0;
+      this.runHighestWave = 0;
+      this.runBestCombo = 1;
+      this.deathPending = false;
+      this.deathDelay = 0;
+      this.deathSummary = null;
+      this.stageIndex = 0;
+      this.stageClearPending = false;
+      this.stageClearDelay = 0;
+      this.lastStageClear = null;
+      this.lastDeathCreditsLost = 0;
+      this.runCreditsLost = 0;
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
       this.resetOutfit(); // back to lean (bare hexes, empty inventory, Blaster on W1)
 
+      // Clear the WRECK state too (A1).  Before the run-summary screen the
+      // player could never be mid-explosion at a run reset — the auto-respawn
+      // always cleared it first.  Now RESTART RUN / MAIN MENU are reachable
+      // from the death screen, so a reset that left `isExploding` set would
+      // re-raise the death screen on the next step (explosionTimer is already 0).
+      this.player.isExploding = false;
+      this.player.explosionTimer = undefined;
+      this.player.active = true;
+      this.player.sprite = ASSETS.PLAYER_SHIP;
       this.player.health = this.player.maxHealth;
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
@@ -1637,7 +1728,7 @@ export class GameEngine {
    * `WaveSystem.init` zeroes waveIndex, so leaving an arena abandons the
    * ladder and re-entering starts at wave 1.  No per-map run state exists.
    */
-  public transitionToMap(descriptorId: string): boolean {
+  public transitionToMap(descriptorId: string, opts?: { descend?: boolean }): boolean {
       const dest = mapDescriptor(descriptorId);
       if (!dest) return false;
       // Transit is a live-flight action: not from the menu, not while the
@@ -1658,8 +1749,32 @@ export class GameEngine {
       // portal is travel within a run, not a new selection.  So restarting
       // after a portal trip returns to the player's chosen start map (the
       // hub by default) rather than stranding the next run in an arena.
+      // DEPTH.  Descending a boss rift goes one stage deeper; arriving at the
+      // HUB surfaces (the hub is stage 0), so a trip home genuinely restarts
+      // the ladder rather than banking progress.  Any other transition keeps
+      // the current depth.  Set BEFORE loadMapFresh so initWaveSystem, which
+      // runs below, reads the new value.
+      // Where the player is coming FROM, resolved before the map is swapped —
+      // used below to put them at the matching rift MOUTH on arrival.
+      const fromId = descriptorForMapType(this.currentMap?.type)?.id;
+
+      if (opts?.descend) this.stageIndex++;
+      else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
+      // The stage-clear screen belongs to the arena being left.
+      this.stageClearPending = false;
+      this.stageClearDelay = 0;
+
       this.loadMapFresh(dest.mapType);
-      this.placePlayerAtSpawn();
+      // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
+      // back at the map just left — which is exactly the hub's per-arena
+      // portal — surface beside that rift rather than at the map's declared
+      // spawn.  Coming home from an arena used to dump the player at their
+      // base station on the far side of the hub, which threw away the trip.
+      // Looked up from the LIVE portal entities (not the placement table), so
+      // it keeps working if placement changes, and it silently falls back to
+      // the spawn when there is no matching rift (a descent into a fresh
+      // arena has none).
+      this.placePlayerAtSpawn(this.arrivalBesideRift(fromId));
       // Combat state belongs to the fight left behind: shield resumes its
       // normal recharge and lingering debuffs (corrosion DoT / EMP) drop.
       // Hull damage does NOT — that's the carry.
@@ -1698,13 +1813,67 @@ export class GameEngine {
   public enterPortal(): boolean {
       const p = this.nearestPortal;
       if (!p || !p.active || !p.portalTargetId) return false;
-      return this.transitionToMap(p.portalTargetId);
+      return this.transitionToMap(p.portalTargetId, { descend: p.isDescent === true });
   }
 
   public restartGame() {
+      // Returning to the main menu returns to the DEFAULT map: a run always
+      // begins on the OVERWORLD hub (user call).  The menu no longer offers a
+      // map choice — picking one is a DEBUG override that lasts for the run it
+      // starts, not a preference that sticks to the front door.  Reset before
+      // the load so the menu backdrop is the hub too.
+      this.selectedMapType = HUB_DESCRIPTOR.mapType;
       this.resetAndLoadSelectedMap();
       this.gameState = GameState.MENU;
       this.prepareFrameEntities();
+  }
+
+  // ── Death / run-summary screen actions (A1) ──────────────────────────────
+  // Three buttons, three EXISTING engine paths — nothing here invents a new
+  // consequence for dying.  The death penalty question is owned by the
+  // economy tuning pass (roadmap step 6), so RESPAWN is byte-for-byte the
+  // auto-respawn that used to fire when the wreck finished.
+
+  /** Primary action: continue the run from the current map's spawn. */
+  public respawnFromDeath() {
+      if (!this.deathPending) return;
+      this.deathPending = false;
+      this.deathDelay = 0;
+      this.deathSummary = null;
+      this.respawnPlayer();
+      this.prepareFrameEntities();
+  }
+
+  /** Wipe the run and drop straight back into play on the same map — the
+   *  main menu's START path (resetAndLoadSelectedMap + startGame) without the
+   *  round trip through the menu. */
+  public restartRun() {
+      this.deathPending = false;
+      this.deathDelay = 0;
+      this.deathSummary = null;
+      this.resetAndLoadSelectedMap();
+      this.startGame();
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
+      this.prepareFrameEntities();
+  }
+
+  /** Dismiss the stage-clear screen and resume the fight-cleared arena.  The
+   *  descent rift and the return rift are both in the world; the player picks
+   *  one by flying to it, which is why this needs no destination argument. */
+  public dismissStageClear() {
+      if (!this.stageClearPending) return;
+      this.stageClearPending = false;
+      // Same stale-time hygiene resumeGame() uses after a freeze.
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
+      this.prepareFrameEntities();
+  }
+
+  /** Wipe the run and return to the main menu — restartGame() verbatim; the
+   *  flag clear rides along inside resetAndLoadSelectedMap(). */
+  public quitToMenu() {
+      this.restartGame();
   }
 
   private selectWeapon(wType: WeaponType) {
@@ -1789,7 +1958,6 @@ export class GameEngine {
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
       boss: this.bossStatsSnapshot(),
-      bossDiscount: this.bossDiscountSnapshot(),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -1807,8 +1975,17 @@ export class GameEngine {
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.moduleSpeedMult,
+        shipWeight: this.shipWeight,
+        position: {
+          x: Math.round(this.player.position.x),
+          y: Math.round(this.player.position.y),
+        },
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
+      runSummary: this.deathPending ? (this.deathSummary ?? undefined) : undefined,
+      stageClear: this.stageClearPending && this.lastStageClear
+          ? { ...this.lastStageClear, mapName: this.currentMap?.name ?? '' }
+          : undefined,
       dock: this.dockStatsSnapshot(),
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
@@ -1910,6 +2087,25 @@ export class GameEngine {
         return;
     }
 
+    // Stage cleared: the player is ALIVE, so this PAUSES rather than ends —
+    // same freeze as the death screen, dismissed by CONTINUE, after which the
+    // choice (descend / go home) is made in the world by flying to a rift.
+    if (this.stageClearPending) {
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // NOTE — deliberately NO `deathPending` short-circuit here.  Death is the
+    // one full-screen overlay that does NOT freeze the sim (user call): the
+    // field keeps moving behind the semi-transparent summary, so the player
+    // watches the fight carry on without them.  The dead player is already
+    // inert — `updateGameLogic` returns early while `isExploding`, so no
+    // input, weapons, docking, drop-collection or wave progress happens —
+    // and the summary itself is a SNAPSHOT taken at the moment of death, so
+    // nothing behind the screen can move the numbers on it.
+
     // ── Fixed-timestep accumulator (Phase 1) ─────────────────────────────────
     // Drain the accumulator at a fixed simulation rate regardless of the
     // render frame rate.  Any leftover time carries to the next frame.
@@ -1925,6 +2121,11 @@ export class GameEngine {
     let steps = 0;
     let frameSimMs = 0; // raw per-frame sim total (summed across substeps)
     while (this.simAccumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
+        // Stage-clear raised mid-frame: stop draining immediately and drop the
+        // leftover time, so the screen freezes on the frame the capstone died
+        // rather than a few substeps later.  (Death is NOT here — it no longer
+        // freezes the sim.)
+        if (this.stageClearPending) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -2328,6 +2529,10 @@ export class GameEngine {
           // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
           // A rival-killed enemy (killedByRival) pays the player NOTHING — the
           // rival stole it (Stage 7); the theft is shown by the rival's popup.
+          // Run summary (A1): this branch is exactly "an enemy ship the
+          // PLAYER downed" — rival-stolen kills are filtered out above, so
+          // the counter matches the points the player was actually paid.
+          this.runKills++;
           const mult = this.registerComboKill();
           const scale = opts?.scoreScale ?? 1;
           this.awardScore(
@@ -2658,6 +2863,38 @@ export class GameEngine {
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
 
+    // Run clock (A1) — SIM seconds, so time spent paused or docked is
+    // excluded for free (both freeze the loop).  DEATH no longer freezes it
+    // (the field stays alive behind the summary), so the dead window is
+    // excluded EXPLICITLY here — reading your own obituary is not play time.
+    // The highest wave reached is sampled here rather than at wave start so a
+    // wave-free hub visit can't stomp the arena high-water mark.
+    if (!this.deathPending && this.deathDelay <= 0) this.runTimeSec += dt;
+    // Death beat: the wreck has finished and the sim is STILL running so the
+    // field keeps moving; when it expires the summary fades in over a live
+    // map.  Ticked here (before the isExploding early-return below) because
+    // the player stays flagged exploding for the whole of it.
+    if (this.deathDelay > 0) {
+        this.deathDelay -= dt;
+        if (this.deathDelay <= 0) {
+            this.deathDelay = 0;
+            this.deathPending = true;
+        }
+    }
+    // Stage-clear beat: the capstone is down and the sim is still running so
+    // the explosion plays out; when it expires the screen takes over.
+    if (this.stageClearDelay > 0) {
+        this.stageClearDelay -= dt;
+        if (this.stageClearDelay <= 0) {
+            this.stageClearDelay = 0;
+            if (this.lastStageClear && !this.player.isExploding) this.stageClearPending = true;
+        }
+    }
+    if (this.wavesEnabled) {
+        const n = this.waveIndex + 1;
+        if (n > this.runHighestWave) this.runHighestWave = n;
+    }
+
     // Kill-combo window — lapses if no ship dies for COMBO_WINDOW_SEC.
     if (this.comboTimer > 0) {
         this.comboTimer -= dt;
@@ -2781,10 +3018,44 @@ export class GameEngine {
     }
 
     if (this.player.isExploding) {
-        if (this.player.explosionTimer !== undefined) {
+        // `> 0` is load-bearing, not defensive: the sim keeps running after
+        // death now, so without it this branch would re-fire (and re-charge
+        // the penalty) on every subsequent step.
+        if (this.player.explosionTimer !== undefined && this.player.explosionTimer > 0) {
             this.player.explosionTimer -= dt;
             if (this.player.explosionTimer <= 0) {
-                this.respawnPlayer();
+                // A1: the wreck finishing no longer respawns on its own — it
+                // arms the beat that raises the run-summary screen.
+                this.player.explosionTimer = 0;
+                // Death penalty (user call): forfeit a fraction of UNSPENT
+                // Salvage, charged HERE — once, on the transition into the
+                // summary — so the screen can report exactly what it cost and
+                // so neither respawning nor restarting can double-charge.
+                // Money already spent on modules is untouched.
+                // Whichever is HIGHER — the percentage or the flat floor —
+                // clamped to what the player actually holds, so a broke pilot
+                // is zeroed rather than driven negative.
+                const lost = Math.min(
+                    this.credits,
+                    Math.max(
+                        Math.floor(this.credits * SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION),
+                        SALVAGE_CONSTANTS.DEATH_PENALTY_MIN,
+                    ),
+                );
+                this.credits -= lost;
+                this.lastDeathCreditsLost = lost;
+                this.runCreditsLost += lost;
+                // Close out this life's income tally for the summary, then
+                // start the next life at zero.
+                this.lastLifeCreditsEarned = this.lifeCreditsEarned;
+                this.lifeCreditsEarned = 0;
+                // Freeze the numbers HERE — the world keeps simulating behind
+                // the screen, so a summary read live would drift.
+                this.deathSummary = this.runSummarySnapshot();
+                // Arm the beat instead of raising the screen on the frame the
+                // wreck finished: the same reward-moment pacing the boss
+                // capstone uses, applied to the player's own death.
+                this.deathDelay = UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC;
             }
         }
         this.camera.position.x = this.player.position.x;
@@ -3264,6 +3535,10 @@ export class GameEngine {
   // per-frame movement line alongside the DBG thrust/speed cycles.
   private moduleSpeedMult = 1;
   private moduleThrustMult = 1;
+  // Total SHIP weight (hull + every active module).  A first-class ship
+  // attribute — the acceleration curve reads it, and the Ship Status panel
+  // reports it as its own stat rather than blaming individual guns.
+  private shipWeight = SHIP_WEIGHT.HULL_BASE;
 
   /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
    *  when its family has no requirement (hull / gun roots) or it touches
@@ -3304,13 +3579,16 @@ export class GameEngine {
       this.computeActiveSlots(this.weaponSlots, this.activeWeapon);
       let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
       let shieldCore = false, overcharge = false;
-      let gunWeight = 0;
+      // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
+      // module's weight is a contribution to the SHIP's attribute, not an
+      // effect the module has on acceleration — see SHIP_WEIGHT.
+      let shipWeight = SHIP_WEIGHT.HULL_BASE;
       const fold = (slots: (string | null)[], active: boolean[]) => {
           for (let i = 0; i < slots.length; i++) {
               const id = slots[i];
               if (id === null || !active[i]) continue;
               const d = moduleDef(id);
-              gunWeight += d?.weight ?? 0;
+              shipWeight += d?.weight ?? 0;
               const e = d?.effect;
               if (!e) continue;
               maxHp += e.maxHp ?? 0;
@@ -3327,10 +3605,19 @@ export class GameEngine {
       fold(this.shipSlots, this.activeShip);
       fold(this.weaponSlots, this.activeWeapon);
       this.moduleSpeedMult = 1 + speed;
-      // Weapon weight: flying light is faster — no gun mounted earns the
-      // BASE_BOOST, heavier arsenals drag (Blaster-only ≈ the 1.0 baseline).
+      // Ship weight: flying light is faster — an unladen ship earns the
+      // BASE_BOOST, a heavy one drags (Blaster-only ≈ the 1.0 baseline).
+      this.shipWeight = shipWeight;
       this.moduleThrustMult = (1 + accel)
-          * (WEAPON_WEIGHT.BASE_BOOST / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight));
+          * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));
+      // Weight is PHYSICAL too (user call): the player's collision mass scales
+      // with it, so PhysicsSystem's impulse solver (which divides by mass)
+      // shoves a heavy ship less and lets it plow through debris, while a
+      // stripped hull gets knocked around.  Normalised so the LEAN loadout is
+      // exactly the old constant — no change to the feel a run starts with.
+      this.player.mass = PHYSICS_CONSTANTS.PLAYER_MASS
+          * ((SHIP_WEIGHT.MASS_BASE + shipWeight)
+             / (SHIP_WEIGHT.MASS_BASE + SHIP_WEIGHT.MASS_REFERENCE));
       const newMaxHp = 100 + maxHp;
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
@@ -3527,8 +3814,40 @@ export class GameEngine {
     if (station) station.stationDockReady = true;
     if (portal) portal.portalReady = true;
 
+    // ── Trigger: SELECT YOUR SHIP, or press E ────────────────────────────
+    // The primary gesture is tapping/clicking the ship itself — it works the
+    // same on touch and mouse, needs no HUD button under the thumb, and puts
+    // the control where the player is already looking.  The tap is CLAIMED
+    // out of the fire queue (see InputSystem.claimTapNear) so using a portal
+    // never also fires a shot; claiming only happens while something is
+    // actually in range, so tapping the ship in open space still shoots.
+    // E stays as the keyboard equivalent.
+    //
+    // A CONTROLLER button is the third path the user asked for; it is
+    // deliberately NOT wired here because Pair C (c2) owns the gamepad layer
+    // in InputSystem, and adding a second polling path would collide with it.
+    // When c2 lands, OR its button into `selected` below — nothing else moves.
+    // Prompt AT the ship — the control lives there now, so the instruction
+    // does too.  Cleared whenever nothing is in range.
+    this.player.interactPrompt = portal
+        ? (portal.isDescent ? 'TAP SHIP TO DESCEND'
+           : portal.portalTargetId === HUB_DESCRIPTOR.id ? 'TAP SHIP TO RETURN'
+           : 'TAP SHIP TO ENTER')
+        : station ? 'TAP SHIP TO DOCK'
+        : undefined;
+
+    let selected = false;
+    if (station || portal) {
+        const screen = this.renderer.worldToScreen(this.camera, this.player.position);
+        if (screen) {
+            selected = this.input.claimTapNear(
+                screen.x, screen.y,
+                INPUT_CONSTANTS.SHIP_SELECT_RADIUS,
+            );
+        }
+    }
     const eDown = this.input.isKeyDown('KeyE');
-    if (eDown && !this.dockKeyHeld) {
+    if (selected || (eDown && !this.dockKeyHeld)) {
         if (portal) this.enterPortal();
         else if (station) this.dockAtStation();
     }
@@ -3571,6 +3890,29 @@ export class GameEngine {
     this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
     this.pushPlayerMessage(`+${heal} hull`, '#4ade80');
     return true;
+  }
+
+  /** Run summary for EngineStats (A1) — built ONCE, at the moment of death,
+   *  and then republished verbatim while `deathPending` (the sim keeps running
+   *  behind the screen, so a live rebuild would drift).  Every field is a
+   *  counter that already exists on the engine; nothing is recomputed here. */
+  private runSummarySnapshot() {
+    return {
+      score: this.score,
+      bestCombo: this.runBestCombo,
+      kills: this.runKills,
+      bosses: this.bossesKilled,
+      wavesCleared: this.runWavesCleared,
+      highestWave: this.runHighestWave,
+      wavesEnabled: this.wavesEnabled,
+      credits: this.credits,
+      creditsEarned: this.runCreditsEarned,
+      creditsEarnedLife: this.lastLifeCreditsEarned,
+      creditsLost: this.lastDeathCreditsLost,
+      creditsLostRun: this.runCreditsLost,
+      timeSec: Math.floor(this.runTimeSec),
+      mapName: this.currentMap?.name ?? '',
+    };
   }
 
   /** Dock state for EngineStats: in-range/docked + the station's name and
@@ -3807,7 +4149,7 @@ export class GameEngine {
    *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
    *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
   private modulePrice(cost: number): number {
-      return Math.max(0, Math.round(cost * (1 - this.bossDiscount)));
+      return Math.max(0, Math.round(cost));
   }
 
   /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
@@ -3856,6 +4198,138 @@ export class GameEngine {
   }
 
   /** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
+  /** Per-stat module attribution for the Ship Status panel (A2).
+   *
+   *  Walks the two hex groups exactly the way `applyModuleEffects`'s `fold`
+   *  does — same slots, same `activeShip`/`activeWeapon` fixpoint — and files
+   *  each module's effect under the derived stat it feeds.  The HEADLINE
+   *  value of every line is read straight off the player entity / the module
+   *  multipliers, so the panel can never disagree with the simulation: the
+   *  breakdown explains the number, it does not derive it.
+   *
+   *  A contributor's `active` means "this amount is IN the total".  It is
+   *  false both for an adjacency-inactive module (`requires` names the family
+   *  it must touch) and for shield PLATING with no shield core installed —
+   *  plating that is perfectly well connected but has nothing to plate.
+   *
+   *  Menu-only (built with the rest of the outfitting snapshot while paused
+   *  or docked), so it costs nothing on a live frame. */
+  private statBreakdown() {
+      type Contrib = {
+          area?: 'ship' | 'weapon'; idx?: number; moduleId?: string;
+          label: string; display: string; active: boolean; requires?: string;
+      };
+      const pct = (f: number) => `${f >= 0 ? '+' : '−'}${Math.round(Math.abs(f) * 100)}%`;
+      const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
+      const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
+      const cool: Contrib[] = [], charge: Contrib[] = [], weight: Contrib[] = [];
+      let shipWeight = SHIP_WEIGHT.HULL_BASE, shieldCore = false;
+
+      const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
+          for (let i = 0; i < slots.length; i++) {
+              const id = slots[i];
+              if (id === null) continue;
+              const def = moduleDef(id);
+              if (!def) continue;
+              const on = active[i];
+              const req = MODULE_REQUIREMENTS[def.family];
+              const base: Contrib = {
+                  area, idx: i, moduleId: id, label: def.label, active: on,
+                  requires: on ? undefined : (req !== undefined ? (req[0] as string) : undefined),
+              };
+              // Weight is a contribution to the SHIP's weight, not to
+              // acceleration: a gun does not make the ship accelerate worse,
+              // it makes the ship HEAVIER, and weight is what drags thrust.
+              // So a weighted module files under `weight` and tapping it
+              // highlights Ship weight — Acceleration then carries ONE derived
+              // row for the whole ship's weight (below).  Read off any module,
+              // not just guns.
+              if (def.weight) {
+                  if (on) shipWeight += def.weight;
+                  weight.push({ ...base, display: `+${def.weight.toFixed(1)}` });
+              }
+              const e = def.effect;
+              if (!e) continue;
+              if (e.maxHp)           hull.push({ ...base, display: `+${e.maxHp} HP` });
+              if (e.maxShield)       shield.push({ ...base, display: `+${e.maxShield}` });
+              if (e.shieldCore)    { if (on) shieldCore = true;
+                                     shield.push({ ...base, display: `+${SHIELD_CONSTANTS.MAX_CHARGE} base` }); }
+              if (e.shieldRegenFrac) regen.push({ ...base, display: pct(e.shieldRegenFrac) });
+              if (e.speedFrac)       speed.push({ ...base, display: pct(e.speedFrac) });
+              if (e.accelFrac)       accel.push({ ...base, display: pct(e.accelFrac) });
+              if (e.damageFrac)      dmg.push({ ...base, display: pct(e.damageFrac) });
+              if (e.cooldownFrac)    cool.push({ ...base, display: pct(-e.cooldownFrac) });
+              if (e.overcharge)      charge.push({ ...base, display: on ? 'enabled' : 'offline' });
+          }
+      };
+      walk('ship', this.shipSlots, this.activeShip);
+      walk('weapon', this.weaponSlots, this.activeWeapon);
+
+      // Plating with no shield core is connected-but-pointless: `maxShield`
+      // is gated to 0 in applyModuleEffects, so report zero contribution and
+      // name the missing piece rather than showing a number that isn't real.
+      if (!shieldCore) {
+          for (const c of shield) {
+              if (c.moduleId === 'shield') continue;
+              c.active = false;
+              c.requires = 'shield core';
+          }
+      }
+
+      // Fire RATE is the inverse of the cooldown multiplier, so the per-module
+      // cooldown cuts above do not sum in rate space.  Same shape as the
+      // acceleration drag row: the hex contributions stay in the units the
+      // modules are actually specified in (−8% cooldown), and one derived row
+      // carries the cooldown total the headline rate inverts.
+      if (cool.length > 0) {
+          cool.push({
+              label: 'Resulting cooldown',
+              display: `×${(this.player.cooldownMult ?? 1).toFixed(2)}`,
+              active: true,
+          });
+      }
+
+      // Weight drag is MULTIPLICATIVE over the ship's TOTAL weight, so it
+      // belongs to the ship, not to any hex.  One derived row on Acceleration
+      // names the ship weight it came from; the modules that make up that
+      // weight live on the Ship weight line above.
+      const dragMult = SHIP_WEIGHT.BASE_BOOST
+          / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight);
+      accel.push({
+          label: shipWeight === 0 ? 'Unladen ship' : `Ship weight ${shipWeight.toFixed(1)}`,
+          display: `×${dragMult.toFixed(2)}`,
+          active: true,
+      });
+
+      const line = (id: string, label: string, display: string, baseDisplay: string,
+                    contributors: Contrib[], note?: string) =>
+          ({ id, label, display, baseDisplay, contributors, note });
+
+      return [
+          // "Max hull"/"Max shield", not "Hull"/"Shield": the Condition block
+          // shows the LIVE pools (87 / 150) under those names, and the same
+          // word against two different numbers reads as a contradiction.
+          line('hull', 'Max hull', `${this.player.maxHealth}`, '100', hull),
+          line('shield', 'Max shield', `${this.player.maxShield}`, '0', shield,
+               shieldCore ? undefined : 'no shield core installed'),
+          line('shieldRegen', 'Shield regen',
+               `${(this.player.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE).toFixed(1)}/s`,
+               `${SHIELD_CONSTANTS.RECHARGE_RATE.toFixed(1)}/s`, regen),
+          line('damage', 'Damage', `×${(this.player.damageMult ?? 1).toFixed(2)}`, '×1.00', dmg),
+          line('cooldown', 'Fire rate',
+               `×${(1 / (this.player.cooldownMult ?? 1)).toFixed(2)}`, '×1.00', cool,
+               'modules cut cooldown; the rate is its inverse'),
+          line('speed', 'Top speed', `×${this.moduleSpeedMult.toFixed(2)}`, '×1.00', speed),
+          line('accel', 'Acceleration', `×${this.moduleThrustMult.toFixed(2)}`, '×1.00', accel,
+               'a heavier ship accelerates worse'),
+          line('weight', 'Ship weight', shipWeight.toFixed(1),
+               SHIP_WEIGHT.HULL_BASE.toFixed(1), weight,
+               'hull + everything mounted; drags Acceleration'),
+          line('overcharge', 'Charged shots',
+               this.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
+      ];
+  }
+
   private outfittingSnapshot() {
       const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
           if (id === null) return null;
@@ -3886,6 +4360,10 @@ export class GameEngine {
                   scrapValue: Math.round(price * MODULE_RESALE.SCRAP_FRACTION),
               };
           }),
+          // Per-module stat attribution (Pair A, A2).  Built from the SAME
+          // slot walk applyModuleEffects folds, so the UI never recomputes a
+          // derived stat — it only renders what the sim is already using.
+          statLines: this.statBreakdown(),
           // Catalog prices are the DISCOUNTED prices the shop will actually
           // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
           catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
@@ -3915,7 +4393,21 @@ export class GameEngine {
   private registerComboKill(): number {
       this.comboCount++;
       this.comboTimer = SCORE_CONSTANTS.COMBO_WINDOW_SEC;
-      return this.comboMultiplier();
+      const mult = this.comboMultiplier();
+      // Run summary (A1): the best multiplier the run ever reached.
+      if (mult > this.runBestCombo) this.runBestCombo = mult;
+      return mult;
+  }
+
+  /** Salvage income — the ONE way credits are earned in the field.  Wraps the
+   *  `this.credits += n` the drop paths used to do inline so the run-summary
+   *  "earned this run" counter can't drift from the balance.  Deliberately
+   *  NOT used by resale (sell/scrap is a refund of money already earned, so
+   *  routing it here would double-count) nor by the DBG credit grant. */
+  private earnCredits(n: number) {
+      this.credits += n;
+      this.runCreditsEarned += n;
+      this.lifeCreditsEarned += n;
   }
 
   /** Style a gold "+N" points popup: text + magnitude-tiered colour/size
@@ -5336,11 +5828,6 @@ export class GameEngine {
 
   /** Timed boss shop-discount readout — undefined when no window is running,
    *  so the shop UI can show the beat only while it is live. */
-  private bossDiscountSnapshot(): EngineStats['bossDiscount'] {
-      if (this.bossDiscount <= 0 || this.bossDiscountTimer <= 0) return undefined;
-      return { fraction: this.bossDiscount, secondsLeft: Math.ceil(this.bossDiscountTimer) };
-  }
-
   /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
    *  the same `openPortal` abstraction the dragon and the rivals use. */
   private handleBossSpawn = (boss: GameEntity) => {
@@ -5371,13 +5858,6 @@ export class GameEngine {
   private updateBosses(dt: number) {
       // Timed shop discount (payout model (d)) — run-scoped, ticks on sim time
       // so it doesn't drain while docked or paused.
-      if (this.bossDiscountTimer > 0) {
-          this.bossDiscountTimer -= dt;
-          if (this.bossDiscountTimer <= 0) {
-              this.bossDiscountTimer = 0;
-              this.bossDiscount = 0;
-          }
-      }
       if (!this.currentMap) return;
       const enemies = this.entityIndex.enemies;
       let live: GameEntity | null = null;
@@ -5518,11 +5998,6 @@ export class GameEngine {
       this.bossesKilled++;
       this.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
       // Stack the discount fraction (capped) and refresh the window.
-      this.bossDiscount = Math.min(
-          BOSS_CONSTANTS.DISCOUNT_FRACTION_MAX,
-          this.bossDiscount + BOSS_CONSTANTS.DISCOUNT_FRACTION,
-      );
-      this.bossDiscountTimer = BOSS_CONSTANTS.DISCOUNT_SECONDS;
       // The money is PHYSICAL — the same salvage drops every other source pays,
       // sprayed off the corpse so it converges and merges normally.
       for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
@@ -5556,16 +6031,167 @@ export class GameEngine {
       // Name the kill and its payout — the banner is what tells the player the
       // capstone is DOWN and that the shop just got cheaper, which is
       // otherwise only legible by opening a station menu.
+      // The DROP-COUNT payout in real money, so the banner and the screen
+      // speak the same units the shop does.
+      const salvageCredits = BOSS_CONSTANTS.SALVAGE_DROPS * SALVAGE_CONSTANTS.CREDITS_PER_DROP;
+      // Capstone reward (user call, replaces the timed shop discount): a
+      // RANDOM module item — something you carry away and install, rather than
+      // a countdown you may not be near a shop to spend.
+      const reward = this.grantBossModule();
       const def = boss.enemySubtype ? BOSS_DEFS[boss.enemySubtype] : undefined;
       const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
       this.waves.announcements.push({
           text: `${def?.name ?? 'BOSS'} DESTROYED`,
-          subtext: `+${BOSS_CONSTANTS.SALVAGE_DROPS} SALVAGE  ·  ${Math.round(this.bossDiscount * 100)}% OFF FOR ${Math.round(BOSS_CONSTANTS.DISCOUNT_SECONDS)}S`,
+          subtext: reward.label
+              ? `+◈${salvageCredits.toLocaleString()}  ·  ${reward.label.toUpperCase()}`
+              : `+◈${salvageCredits.toLocaleString()} SALVAGE`,
           color: boss.color || '#f87171',
           lifetime: life,
           maxLifetime: life,
       });
       if (this.liveBoss === boss) this.liveBoss = null;
+
+      // ── The capstone's death ROUTS its forces ──────────────────────────
+      // Killing the boss wipes every enemy still standing, each through the
+      // FULL death path at FULL value (user call) — so the escort explodes,
+      // pays its kill points and sprays its salvage rather than being
+      // silently deleted or left to be mopped up after the fight is over.
+      // Mechanically this is the snitch board-clear (catchSnitch), minus the
+      // half-value scale.  NEUTRAL third parties (bubbles, dragons) and
+      // RIVALS are spared: they are not the boss's forces, and a capstone
+      // should not vacuum the ambient fauna off the map.  Snapshot the count
+      // first so the shards/particles those deaths append aren't re-scanned.
+      if (this.currentMap) {
+          const ents = this.currentMap.entities;
+          const n = ents.length;
+          for (let i = 0; i < n; i++) {
+              const e = ents[i];
+              if (e !== boss && e.type === EntityType.ENEMY && e.active && !e.isExploding
+                  && !e.thirdParty && !e.isRival) {
+                  this.handleEntityDeath(e);
+              }
+          }
+      }
+
+      // ── Stage cleared ──────────────────────────────────────────────────
+      // Open the DESCENT rift beside the wreck and raise the stage-clear
+      // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
+      // (or any wave-free map) has no ladder to descend from.
+      if (this.wavesEnabled) {
+          // The stage's ladder is FINISHED — no further wave starts in this
+          // arena.  Whatever is still on the field stays (the player mops up),
+          // but the arena stops feeding the fight so the choice between the
+          // two rifts is made in quiet.
+          this.waves.halted = true;
+          this.openDescentPortal(boss.position);
+          this.lastStageClear = {
+              stage: this.stageIndex + 1,
+              bossName: def?.name ?? 'Boss',
+              nextStage: this.stageIndex + 2,
+              scoreAwarded: BOSS_CONSTANTS.SCORE,
+              salvageCredits,
+              rewardLabel: reward.label,
+              rewardDesc: reward.desc,
+              rewardCredits: reward.credits,
+          };
+          // Arm the beat rather than freezing on the killing blow.
+          this.stageClearDelay = BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC;
+      }
+  }
+
+  /** Arrival point beside the rift that leads back to `fromId`, or undefined
+   *  when the freshly-loaded map has no such rift.  Offset clear of the mouth
+   *  so the player emerges NEXT TO the rift (it stays visible, and the ship
+   *  isn't sitting inside the thing it just came out of) while still being in
+   *  USE_RANGE, so turning straight around is one tap. */
+  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+      if (!fromId) return undefined;
+      const mouth = this.portals.find(p => p.portalTargetId === fromId);
+      if (!mouth) return undefined;
+      const pos = {
+          x: mouth.position.x + PORTAL_CONSTANTS.ARRIVAL_OFFSET,
+          y: mouth.position.y,
+      };
+      wrapPosition(pos);
+      return pos;
+  }
+
+  /** Capstone reward: one RANDOM purchasable module dropped straight into the
+   *  inventory (user call — it replaced the timed shop discount, which asked
+   *  the player to be near a shop within a countdown to collect anything).
+   *
+   *  Uniform over the catalog, which is PROVISIONAL: it can hand a Mk III on
+   *  stage 1.  Weighting by stage depth is a tuning-pass question.
+   *
+   *  If the inventory is full there is nowhere to put it, so the reward pays
+   *  its catalog value in Salvage instead — the player is never simply denied
+   *  the drop for having full cargo. */
+  private grantBossModule(): { label?: string; desc?: string; credits?: number } {
+      const catalog = MODULE_DEFS.filter(d => d.cost > 0);
+      if (catalog.length === 0) return {};
+      const def = catalog[Math.floor(Math.random() * catalog.length)];
+      const slot = this.inventory.indexOf(null);
+      if (slot === -1) {
+          const paid = this.modulePrice(def.cost);
+          this.earnCredits(paid);
+          return { credits: paid };
+      }
+      this.inventory[slot] = def.id;
+      return { label: def.label, desc: def.desc };
+  }
+
+  /** The way DOWN: a descent rift beside the fallen boss, targeting a fresh
+   *  arena for the next stage.
+   *
+   *  The destination is a RANDOM arena descriptor (user call).  The existing
+   *  maps are test terrain and effectively interchangeable — this is a
+   *  placeholder for the procedural areas that will eventually pick terrain,
+   *  enemies and flow parameters per AREA.  What matters structurally is that
+   *  the target is a descriptor id, exactly like every other portal, so
+   *  swapping in a generator later changes this one line.
+   *
+   *  Marked `isDescent` so `enterPortal` knows to increment the depth; the
+   *  arena's own return rift is untouched, which is what makes the choice
+   *  in-world rather than a menu button. */
+  private openDescentPortal(pos: Vector2) {
+      if (!this.currentMap) return;
+      const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled
+          && HUB_PORTAL_SITES.some(site => site.targetId === d.id));
+      if (arenas.length === 0) return;
+      const dest = arenas[Math.floor(Math.random() * arenas.length)];
+
+      // Offset from the corpse so the rift doesn't sit under the debris.
+      const a = Math.random() * Math.PI * 2;
+      const p = {
+          x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+          y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+      };
+      wrapPosition(p);
+      const portal: GameEntity = {
+          id: nextId('portal'),
+          type: EntityType.INTERACTABLE,
+          isPortal: true,
+          isDescent: true,
+          portalTargetId: dest.id,
+          name: `Stage ${this.stageIndex + 2}`,
+          position: p,
+          velocity: { x: 0, y: 0 },
+          size: { x: PORTAL_CONSTANTS.SIZE, y: PORTAL_CONSTANTS.SIZE },
+          rotation: 0,
+          color: PORTAL_CONSTANTS.DESCENT_COLOR,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          mass: Infinity,
+      };
+      this.currentMap.entities.push(portal);
+      this.portals.push(portal);
+      // Arrival flourish so the rift reads as something that just OPENED.
+      this.openPortal(p, {
+          color: PORTAL_CONSTANTS.DESCENT_COLOR,
+          radius: PORTAL_CONSTANTS.BURST_RADIUS,
+          duration: PORTAL_CONSTANTS.BURST_DURATION,
+      });
   }
 
   /** DBG: warp a boss in near the player, phases and all.  `id` is an
@@ -5602,6 +6228,10 @@ export class GameEngine {
     // Par = the wave's spawn-stream window; clearing at/under par pays the
     // full speed bonus, decaying to 0 by 2× par.
     const waveNum = clearedIndex + 1;
+    // Run summary (A1): clears accumulate across every arena the run visits
+    // (wave progress itself is fresh per portal entry), so the summary reports
+    // total clears alongside the best single-arena wave reached.
+    this.runWavesCleared++;
     const par = Math.max(1, getWaveDurationSec(clearedIndex));
     const speedFrac = Math.max(0, Math.min(1, 1 - Math.max(0, elapsedSec - par) / par));
     const bonus = SCORE_CONSTANTS.WAVE_COMPLETE_BASE
@@ -6377,6 +7007,10 @@ export class GameEngine {
           if (doScan) {
               const huntsPlayer = inst.disposition === 'hostile'
                   || (inst.disposition === 'neutral' && s.provoked === true);
+              // Publish it on the ENTITY so the renderer's off-screen indicator
+              // can blink a hunting rival red without reaching into the
+              // RivalInstance (disposition lives on the instance, not the hull).
+              s.huntingPlayer = huntsPlayer;
               target = null;
               let acqD2 = R.VISION * R.VISION;
               for (let i = 0; i < enemies.length; i++) {
@@ -6588,6 +7222,9 @@ export class GameEngine {
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
+    // Depth carries the difficulty curve and the boss rotation forward; the
+    // arena's own wave counter still restarts at 1 for the HUD.
+    this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
     this.waves.init(ctx, this.wavesEnabled);
   }
 
@@ -6602,7 +7239,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
-      (credits) => { this.credits += credits; },
+      (credits) => { this.earnCredits(credits); },
     );
   }
 
@@ -6614,7 +7251,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
-      (credits) => { this.credits += credits; },
+      (credits) => { this.earnCredits(credits); },
     );
   }
 

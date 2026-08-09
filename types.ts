@@ -629,6 +629,20 @@ export interface GameEntity {
   // AISystem skips it.  Renders from `sprite` (an old enemy PNG) with a
   // disposition-coloured ring.
   isRival?: boolean;
+  // True while this roamer is actively hunting the PLAYER (as opposed to the
+  // wave enemies it normally fights).  Stamped by GameEngine.updateRivals on
+  // the rivalScan cadence — the rival's DISPOSITION lives on RivalInstance,
+  // not the hull, so the renderer needs this mirror to blink the off-screen
+  // indicator red.  Unset on every other entity.
+  huntingPlayer?: boolean;
+  // Interaction prompt drawn under the PLAYER's hull while a station/portal is
+  // in range — names the control ("TAP SHIP TO ENTER").  Stamped per sim step
+  // by GameEngine.updateInteractables and cleared when nothing is in range.
+  interactPrompt?: string;
+  // Portal opened by a boss capstone that leads DEEPER (stage N -> N+1) rather
+  // than to a fixed destination.  Entering one increments GameEngine.stageIndex,
+  // which carries the enemy-growth curve and the boss rotation forward.
+  isDescent?: boolean;
   // Projectile flags for rival fire: `hitsEnemies` lets an ENEMY-owned shot
   // damage other ENEMY targets (so a rival can shoot the wave enemies), and
   // `sparesPlayer` makes an ENEMY-owned shot pass THROUGH the player (so an
@@ -1354,10 +1368,6 @@ export interface EngineStats {
     phaseCount: number;
     color: string;
   };
-  /** Live boss shop discount ((h) payout model (d)): the fraction taken off
-   *  every catalog price and every resale value, plus the seconds left on the
-   *  timed window.  Undefined when no window is running. */
-  bossDiscount?: { fraction: number; secondsLeft: number };
   /** Run score — animated integer ticker toward the true run total. */
   score?: number;
   /** Kill-combo readout: active multiplier (1 = no combo), the kill
@@ -1376,6 +1386,11 @@ export interface EngineStats {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
     damageMult: number; cooldownMult: number; speedMult: number;
+    /** Total SHIP weight (hull + every ACTIVE module) — a ship attribute that
+     *  drags acceleration AND scales the player's collision mass. */
+    shipWeight: number;
+    /** Rounded world position, for the pause menu's Condition readout. */
+    position: { x: number; y: number };
   };
   /** Hex-slot outfitting snapshot (built while paused OR docked).
    *  `ship` / `weapon` are the two 7-hex groups (index 0 = center tile;
@@ -1396,10 +1411,93 @@ export interface EngineStats {
     /** `sellValue`/`scrapValue` are the rounded MODULE_RESALE payouts —
      *  sell-back needs a station (any), scrap works anywhere. */
     inventory: ({ id: string; label: string; kind: string; family: string; group: string; sellValue: number; scrapValue: number } | null)[];
+    /** Per-stat module attribution for the Ship Status panel (Phase 3 Pair
+     *  A).  Built from the SAME slot walk `applyModuleEffects` folds, so the
+     *  UI renders rather than recomputes: `display` is the derived value the
+     *  sim is actually using and `contributors` explains how it got there.
+     *
+     *  A contributor's `active` means "this amount is IN the total" — false
+     *  both for an adjacency-OFFLINE module (`requires` names the family it
+     *  must touch) and for shield plating with no shield core.  A contributor
+     *  with no `area`/`idx` is a DERIVED row with no hex behind it (today:
+     *  the weapon-weight drag factor), so it highlights nothing. */
+    statLines: {
+      id: string;
+      label: string;
+      display: string;
+      baseDisplay: string;
+      note?: string;
+      contributors: {
+        area?: 'ship' | 'weapon';
+        idx?: number;
+        moduleId?: string;
+        label: string;
+        display: string;
+        active: boolean;
+        requires?: string;
+      }[];
+    }[];
     catalog: {
       id: string; group: string; kind: string; label: string; desc: string;
       cost: number; affordable: boolean;
     }[];
+  };
+  /** Death / run-summary screen (Phase 3 Pair A).  Present ONLY while the
+   *  player is dead and the summary overlay is up — the sim is frozen while
+   *  set, exactly like `dock.docked`.  Death SEMANTICS are unchanged: the
+   *  screen's RESPAWN button performs the refill-at-spawn that used to fire
+   *  automatically, and the run continues.  `credits` is the current balance
+   *  (which purchases have already drawn down); `creditsEarned` is gross
+   *  salvage income for the run, so the two read differently on purpose. */
+  runSummary?: {
+    score: number;
+    bestCombo: number;
+    kills: number;
+    bosses: number;
+    wavesCleared: number;
+    highestWave: number;
+    /** False on the wave-free hub — the wave rows are hidden rather than
+     *  reported as zero when the run never touched an arena. */
+    wavesEnabled: boolean;
+    credits: number;
+    creditsEarned: number;
+    /** Salvage collected since the LAST DEATH — what this sortie brought
+     *  back.  The screen leads with this rather than the run gross, which
+     *  keeps climbing and answers a question the player isn't asking at the
+     *  wreck.  `credits` is the balance AFTER the loss below. */
+    creditsEarnedLife: number;
+    /** Salvage forfeited to THIS death (SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION
+     *  of the unspent balance, charged once as the summary is raised), and the
+     *  running total across the whole run. */
+    creditsLost: number;
+    creditsLostRun: number;
+    /** SIM seconds; time paused / docked / on this screen is excluded. */
+    timeSec: number;
+    mapName: string;
+  };
+  /** Stage-clear screen: present only while a boss capstone has just fallen
+   *  and the summary is up.  The sim is FROZEN while set — the same freeze the
+   *  death screen and the docked station use — but the player is ALIVE, so
+   *  this pauses the fight rather than ending it.  Dismissing resumes the
+   *  cleared arena, where the choice is in-world: the newly-opened DESCENT
+   *  rift (stage `nextStage`) or the arena's return rift home. */
+  stageClear?: {
+    stage: number;
+    nextStage: number;
+    bossName: string;
+    mapName: string;
+    /** Performance SCORE paid for the kill.  Score is a separate metric from
+     *  Salvage — it buys nothing; Salvage is the money. */
+    scoreAwarded: number;
+    /** The capstone's salvage payout in CREDITS (drop count × CREDITS_PER_DROP),
+     *  so the screen speaks the same units the shop does. */
+    salvageCredits: number;
+    /** Capstone module reward: the item's label + description when one landed
+     *  in the inventory, or `rewardCredits` when the inventory was full and it
+     *  paid out its catalog value in Salvage instead. */
+    rewardLabel?: string;
+    rewardDesc?: string;
+    rewardCredits?: number;
   };
   /** Station docking state (Overworld only).  `inRange` drives the DOCK
    *  affordance; `docked` opens the station UI (the sim is frozen while

@@ -214,6 +214,33 @@ export class InputSystem {
     return this.mousePosition;
   }
 
+  /**
+   * Claim a queued TAP that landed within `radius` CSS px of (x, y), removing
+   * it from the fire queue so it does NOT also shoot.  Returns true if one was
+   * claimed.
+   *
+   * This is how "tap your own ship to use the thing you're next to" works
+   * without inventing a second gesture: a canvas tap is already the fire
+   * gesture, so the interaction has to take the tap BEFORE the weapon does.
+   * GameEngine calls this from updateInteractables (sim step 5b), which runs
+   * ahead of the weapon tick (step 7) that drains the rest of the queue.
+   *
+   * Only ONE event is claimed per call, and only when something is actually
+   * in range — so a tap on the ship in open space still fires normally.
+   */
+  public claimTapNear(x: number, y: number, radius: number): boolean {
+    const r2 = radius * radius;
+    for (let i = 0; i < this.fireEvents.length; i++) {
+      const dx = this.fireEvents[i].x - x;
+      const dy = this.fireEvents[i].y - y;
+      if (dx * dx + dy * dy <= r2) {
+        this.fireEvents.splice(i, 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
   public getFireEvents(): Vector2[] {
     const events = [...this.fireEvents];
     this.fireEvents = [];
