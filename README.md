@@ -1,27 +1,53 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # Omni
 
-A modular 2D game engine featuring a multi-layered universe map system
-(Universe → Solar → Local → Sub), dynamic rendering, and structured
-subsystems.
+A 2D top-down space arena game on a bespoke TypeScript engine: a
+toroidal world of destructible materials — glass, rock, metal, plastic,
+nebula — simulated as physical tiles and shards, with a salvage-driven
+outfitting economy layered on top.
 
-## Run Locally
+Launch from the Overworld hub, dock at stations to outfit a hex-grid
+ship, take portals into wave arenas, fight escalating waves and boss
+capstones, and haul the salvage home.
 
-**Prerequisites:**  Node.js
+## Tech
 
-1. Install dependencies:
-   `npm install`
-2. Run the app:
-   `npm run dev`
+Bespoke fixed-timestep engine · Canvas2D renderer · React HUD shell ·
+Vite · TypeScript. Single-page app, no backend.
 
-## Deploying to Netlify
+## Quickstart
 
-1. Use the CLI via npx (no install needed): `npx netlify-cli login`
-2. Optional: `npx netlify-cli init` to link the repo (or use the Netlify UI and connect the Git repo).
-3. Build locally: `npm run build`
-4. Deploy: `npx netlify-cli deploy --prod --dir=dist`
+Prerequisite: Node.js.
 
-The included `netlify.toml` already sets the build command (`npm run build`) and publish directory (`dist`). In the Netlify UI, set Build command = `npm run build` and Publish directory = `dist`. For dev preview, `npx netlify-cli dev` will proxy Vite (configured on port 8888).
+```
+npm install
+npm run dev        # dev server on port 3000
+npm run build      # production build to dist/
+```
+
+Optional single-file build (inlines all assets into one HTML file):
+
+```
+npm run build && node scripts/inline-build.mjs
+```
+
+## Documentation
+
+- `CLAUDE.md` — engine architecture ground truth. Start here.
+- `docs/GAME_FEEDBACK_PLAN.md` — the maintained plan of record:
+  roadmap, decisions log, and process conventions for contributors.
+- `docs/PARKING_LOT.md` — deferred ideas. A scrapbook, not a
+  commitment; some entries are stale by design.
+
+There is no test runner or linter; `npm run build` is the validation
+gate. Headless Playwright smokes drive the real engine via the
+`window.__omniEngine` debug handle when a change warrants it.
+
+## Deploying
+
+`netlify.toml` is configured (build `npm run build`, publish `dist/`);
+pushes to `main` deploy.
+
+## License
+
+All rights reserved — the source is public for reference and
+collaboration, not for reuse. See `LICENSE`.
