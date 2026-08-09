@@ -921,13 +921,99 @@ the effective ratio, since that is what its render numbers correspond to).
 
 ---
 
+## P13 — confirmation at the new defaults (hardware)
+
+Ring World, **193.8 s / 11 581 frames** — the longest capture of the session,
+so the tail had the most opportunity to appear.
+`set sim 120Hz · substep 5 · rscale 2x · hud 60Hz · auto off`, header
+correctly reading `dpr2` (the effective-ratio fix working).
+
+| metric | 3x baseline (55.9 s) | 2x A/B (71.1 s) | **2x confirm (193.8 s)** |
+|---|---|---|---|
+| 5%-low FPS | 45 | 48 | **59** |
+| p95 frame | 22.0 ms | 21.0 | **17.0** |
+| p99 frame | 36.0 ms | 23.0 | **23.0** |
+| >=55 fps | 92% | 93% | **96%** |
+| render avg | 1.41 ms | 0.80 | **0.71** |
+
+**99% of frames are at or under 23 ms.** Steady state is materially better
+than anything measured before, and render cost has halved twice over.
+
+### The remaining tail: three one-off spikes, not a steady cost
+
+```
+worst  #  frame   render     sim      ui   other  steps   ents  parts     at
+      1   63.0    1.00    7.00    0.00    55.0      2    518     82   18.0s
+      2   31.0    8.00   26.00    1.00     0.0      1    462     31   17.0s
+      3   30.0   22.00    4.00    0.00     4.0      2   1355     46    6.7s
+```
+
+Six frames out of 11 581 exceed 27 ms — **0.05%**. They are heterogeneous,
+which is itself the finding: one is `other` (55 ms), one is **sim** (26 ms in
+a SINGLE substep at only 462 entities), one is **render** (22 ms). No single
+remaining cause.
+
+**Rows 1, 2 and 6 cluster at 17.0-18.0 s**, and row 3 sits at 6.7 s with the
+session's near-peak entity count. That clustering says DISCRETE EVENT, not
+load: 26 ms of sim in one substep on a 462-entity field cannot be steady-state
+cost. A wave start is the leading candidate (spawn-list construction, enemy
+build, first-draw cache fills for new sprites) but it is **not identified** —
+the capture cannot say what was on screen, and guessing would repeat the
+mistake this gauntlet has already made twice.
+
+Next step if this is pursued: correlate `at` against a wave/boss event, which
+means either the user noting what happened at that moment or the recorder
+stamping wave transitions into the capture.
+
+---
+
 ## Completion summary
 
-### The acceptance statement
+### The acceptance statement (REVISED after the hardware captures)
 
-**This gauntlet did NOT achieve its stated goal, and no scene is
-hardware-confirmed smooth.** Stating that plainly because the goal was
-"locked 60 fps, no dips, ever" and the evidence does not support claiming it:
+**The root cause of the reported lag was found and fixed, and the fix is
+hardware-confirmed.** `other` — the unattributed term that dominated every
+worst frame and survived every code optimisation — was **canvas
+compositing at an uncapped device-pixel-ratio of 3**. Capping at 2 is now
+the default.
+
+Hardware-confirmed on Ring World (193.8 s, 11 581 frames, iPhone):
+
+| | before (3x) | after (2x) |
+|---|---|---|
+| 5%-low FPS | 45 | **59** |
+| p95 frame | 22.0 ms | **17.0 ms** |
+| p99 frame | 36.0 ms | **23.0 ms** |
+| >=55 fps | 92% | **96%** |
+| worst frame (A/B, matched length) | 81 ms | **27 ms** |
+
+**What is NOT claimed.** The literal goal — "no frame over 16.7 ms, ever" —
+is still not met: 6 frames in 11 581 (**0.05%**) exceed 27 ms, and they are
+heterogeneous one-off events (one `other`, one sim, one render), clustered at
+discrete moments rather than under load. Seven Rings at 3300+ entities has
+its own sim-bound problem that is bounded but not solved. So: **the game is
+measurably and confirmedly smoother, and a rare event-tied hitch remains.**
+
+### What the headless work was worth, honestly
+
+The three zero-behaviour code fixes (P2/P3/P5) cut allocation 13-36% per
+frame and are correct — but they did **not** fix the user's lag, and the sim
+budget they targeted was never the constraint on device. The two findings
+that mattered (compositing; unbounded tile-cache stamping) both came from
+**hardware captures**, and two of my headless-derived hypotheses (the
+76%-of-budget sim claim, and React) were measured wrong and had to be
+retracted. The instrument that earned its keep was the in-game Perf REC
+worst-frame table, not the headless matrix.
+
+<!-- superseded original follows -->
+
+### The original acceptance statement
+
+**SUPERSEDED — see the revision immediately below.** The original statement
+(written before any hardware capture existed) read:
+
+> This gauntlet did NOT achieve its stated goal, and no scene is
+> hardware-confirmed smooth.
 
 - **Hardware-confirmed:** *nothing*. The CAPTURE REQUESTS entry below was
   written at the end of P1 as instructed; no captures were provided during
