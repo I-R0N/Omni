@@ -1627,6 +1627,37 @@ k. After N waves, spawn a portal to a new map.
        **damage-triggered health/shield bars** as an optional
        candidate.
 
+48. **5b test-harness bootstrap SHIPPED (PR #80,
+    2026-08-09).** Reviewed + verified locally (typecheck
+    green; boot suite passes from a clean install). The
+    "no test runner" era is over at tiers 1–2: 38 Playwright
+    tests / 6 suites (boot, loop, economy, attribution
+    refold, traits, screens), zero flakes ×3 runs, driving
+    the real engine via the debug handles; `npm run
+    typecheck` added. Ledger: `docs/GAUNTLET_5B_LOG.md`.
+    a. **The typecheck immediately paid for itself**: SIX
+       type errors were live on the base (vite build never
+       type-checks), and two were REAL BUGS shipping wrong
+       payloads to the UI — the stage-clear screen's reward
+       fields still spoke the removed shop-discount shape,
+       and `skipWave` pushed a drifted EngineStats literal.
+       Both fixed in-PR.
+    b. **Coverage gaps are explicit, not hidden** (ledger):
+       the canvas pixel-sampling indicator suite was
+       deliberately NOT re-derived (flakiest tier + the 5d
+       UI gauntlet is about to rework that surface) and
+       ship-select pointer synthesis is future work.
+    c. **Step-6 charter addition**: the suites HARD-CODE the
+       economy constants they assert (by design — importing
+       a constant to check itself proves nothing), so the
+       tuning pass MUST update tests/ alongside constants.ts
+       — that is the alarm working, not breakage.
+    d. **OPEN (user call): CI gating (tier 6).** Parked by
+       #46a, but this PR is a concrete argument: nothing
+       runs the three gates unless someone remembers, and a
+       collaborator is now committing. A minimal workflow
+       (build + typecheck + test on PR) is cheap.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1852,7 +1883,9 @@ observes the three strategy guardrails (decision #36e).
    between Overworld stations reusing rival sprites + openPortal;
    parking-lot promotion, decision #40).
 
-5b. **Test-harness bootstrap** (decision #46a — its own small session
+5b. ~~**Test-harness bootstrap**~~ — **DONE** (PR #80, decision #48).
+   38 tests / 6 suites + typecheck; found 2 real bugs on day one.
+   Original item text kept below. (decision #46a — its own small session
    + PR, before or alongside the step-5 gauntlet; additive surface, so
    parallel is safe): promote the session-scratchpad Playwright smokes
    into a repo `tests/` directory (`@playwright/test` dev-dep + `test`
