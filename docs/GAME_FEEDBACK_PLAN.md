@@ -1569,6 +1569,30 @@ k. After N waves, spawn a portal to a new map.
        config audited clean — no API-key plumbing, no env
        files.
 
+46. **Pre-merge parking-lot promotions (user, 2026-08-09).**
+    Reviewed the full parking lot before merging PR #51 (the
+    going-public deploy). Two promotions into the remaining
+    roadmap; everything else stays parked as inventoried:
+    a. **Test-harness bootstrap** → new roadmap item 5b, its
+       own small session + PR on the successor branch, before
+       or alongside the Pair C + polish gauntlet. Scope is
+       TIERS 1–2 ONLY of the parking lot's "Automated test
+       suite" entry: promote the session-scratchpad Playwright
+       smokes into a repo `tests/` directory with
+       `@playwright/test` + a `test` script, and add a
+       `typecheck` (`tsc --noEmit`) script. STANCE DECIDED:
+       the no-test-runner era ends at this tier — the
+       going-public collaborator changes the calculus (no
+       session history, needs a regression net + a "did I
+       break it" answer). Tiers 3–6 (unit tests, Node sim
+       tests, visual regression, CI gating) stay parked —
+       revisit CI gating once tiers 1–2 exist.
+    b. **Portal off-screen indicator behaviour** (parking-lot
+       entry 2026-08-05) → folded into the Pair C + polish
+       gauntlet scope, alongside the minimap directives it
+       neighbours. The gauntlet picks one of the entry's
+       three candidate directions and records the choice.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1785,11 +1809,25 @@ observes the three strategy guardrails (decision #36e).
    "maps become known for characteristics"). **Minimap directives
    (user, decision #43): remove nebula from the minimap entirely, and
    explore replacing the per-shard dots with a flow-field path/
-   streamline rendering instead.** Runs in the THIRD gauntlet together
+   streamline rendering instead.** ALSO IN SCOPE (decision #46b): the
+   parking-lot "Portal off-screen indicators behave unlike every other
+   indicator" entry — pick one of its three candidate directions and
+   record the choice. Runs in the THIRD gauntlet together
    with Pair C (accepted recommendation, decision #42 turn). Optional,
    FIRST TO CUT: NPC station traffic, cheap version (1–2 shuttles
    between Overworld stations reusing rival sprites + openPortal;
    parking-lot promotion, decision #40).
+
+5b. **Test-harness bootstrap** (decision #46a — its own small session
+   + PR, before or alongside the step-5 gauntlet; additive surface, so
+   parallel is safe): promote the session-scratchpad Playwright smokes
+   into a repo `tests/` directory (`@playwright/test` dev-dep + `test`
+   script; the `window.__omniEngine` / `__omniStats` handles exist for
+   exactly this) and add a `typecheck` script (`tsc --noEmit` — which
+   also means fixing or explicitly suppressing the two known
+   pre-existing type errors it flags). Tiers 1–2 of the parking-lot
+   entry ONLY; tiers 3–6 stay parked. This ends the "no test runner"
+   stance at that tier — CLAUDE.md §7 must be updated by that session.
 6. **Economy & progression tuning pass** (parking-lot promotion,
    decision #40) — one playtest-driven session tuning together:
    Overworld income pacing, per-wave enemy growth vs discrete module
