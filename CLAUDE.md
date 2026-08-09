@@ -127,11 +127,24 @@ engine/
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
                           projectiles)
+    CellBuckets.ts        Allocation-free spatial-hash bucket store —
+                          flat array indexed by DENSE cell index, with
+                          recycled bucket arrays.  Backs the two
+                          per-substep broadphase grids (gauntlet 5c)
     PerfRecorder.ts       DBG in-game FPS/perf capture harness — records
                           the per-frame timing + PerfSnapshot stream over a
                           window and exports a copy-paste report (DBG panel
                           "Perf REC" section; iPhone-friendly, no devtools)
 
+perf/                     Headless capture harness (gauntlet 5c) —
+                          capture.mjs (scene matrix: worst-frame / p99 /
+                          allocation attribution), simbench.mjs (low-noise
+                          ms-per-sim-substep), probe.mjs (targeted in-page
+                          micro-probes), scenes.mjs, README.md.
+                          Deliberately NOT part of `npm test`: runs take
+                          minutes and are noise-prone; the test suite is a
+                          merge gate.  Read perf/README.md before quoting
+                          any number out of it
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
 .github/workflows/        pr-checks (the merge gate: typecheck + build +
@@ -393,7 +406,15 @@ Key invariants:
   PhysicsSystem, not the subsystem that set it.
 - **Optional fields are optional on purpose** — follow the existing "set
   the field when needed; check before use" pattern rather than widening
-  the interface for one-off feature state.
+  the interface for one-off feature state.  This has been MEASURED and it
+  is the fast option, which is worth knowing because the opposite is the
+  intuitive conclusion: gauntlet 5c tested normalising every entity to a
+  single hidden class (to avoid megamorphic inline caches) and it came out
+  **1.9× SLOWER** on the real entity population — the union of keys across
+  one map's shards is ~41 properties, and an object that wide spills out of
+  V8's in-object slots, which costs more than the megamorphic access does.
+  Do not "fix" this pattern for performance without re-running
+  `perf/probe.mjs`.
 
 Notable existing field categories on `GameEntity`:
 
@@ -1192,9 +1213,28 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pre-allocated `Vector2` buffers and `Float64Array` ring buffers.
   Allocating `{x,y}` inside per-frame loops is the #1 perf-regression
   pattern in this codebase.
-- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (built
-  once on map load) and a `dynamicGrid` (rebuilt every frame). Cell
-  size is `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
+- **The REFILL IDIOM (gauntlet 5c).**  `arr.length = 0` followed by
+  `push` is NOT a free way to refill a per-frame list: setting the
+  length down shrinks the backing store and the pushes re-grow it,
+  allocating on every refill.  Index-fill instead and truncate only
+  when the count actually shrank:
+  `for (…) arr[n++] = x;  if (arr.length !== n) arr.length = n;`
+  Measured 2.6× faster and 11× less heap churn over a 1300-element
+  list, and this idiom was the single largest allocator in the engine
+  before it was fixed (see `GameEngine.prepareFrameEntities`, which
+  carries the canonical comment, plus `EntityIndex.rebuild`).  Same
+  rule for per-frame closures: a function CONSTRUCTED inside a
+  per-substep path is rebuilt 120×/s — hoist it to a method and pass
+  its captures as parameters (`GameEngine.applyFlowTo`).
+- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (a `Map`,
+  built once on map load) and two per-substep `CellBuckets` grids
+  (`dynamicGrid`, `shardGrid`) — a FLAT ARRAY indexed by the dense cell
+  index `cx * SPATIAL_ROWS + cy`, with pooled bucket arrays, so a
+  steady-state field rebuilds them without allocating and every lookup
+  is an array index rather than a hash (the 3×3 neighbour scan does
+  nine per entity per substep).  All three are keyed on the same dense
+  index, so they agree cell for cell.  Cell size is
+  `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
   by `mass`: `Infinity` → static grid, finite → dynamic grid.  Don't
   branch on `EntityType` inside the broadphase.
 - **Static vs dynamic via mass.** Setting a tile's mass to a finite

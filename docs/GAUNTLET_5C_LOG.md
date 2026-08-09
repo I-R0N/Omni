@@ -29,8 +29,11 @@ Working rules for this branch:
 ## Checklist
 
 - [x] **P1** — Baseline + attribution (no fixes)
-- [ ] **P2** — Fix, worst spike first; loop until dry
-- [ ] **P-final** — Validation + report
+- [x] **P2** — Array-refill churn (shipped)
+- [x] **P3** — Per-substep closure hoisting (shipped, partial)
+- [x] **P4** — Entity-shape normalisation (**measured and rejected**)
+- [x] **P5** — Flat-array spatial grid + sim benchmark (shipped)
+- [x] **P-final** — Validation + report
 
 ---
 
@@ -397,6 +400,201 @@ asteroid-6k after P2. But the key space is already dense and bounded —
 `cellKey` wraps both axes into `[0, SPATIAL_COLS) × [0, SPATIAL_ROWS)` — so
 the hash map is buying nothing a flat array indexed by cell would not.
 
+Cell identity became the dense index `cx * SPATIAL_ROWS + cy`, and
+`CellBuckets` holds a flat array instead of a `Map`. `beginPass` clears only
+the occupied cells (tracked alongside the recycled buckets) so the reset
+stays O(occupied), not O(grid).
+
+| scene | alloc B/frame | Δ vs P3 | sim/stp p99 | Δ vs P3 |
+|---|---|---|---|---|
+| asteroid-6k | 1,453k → 1,238k | **−15%** | 6.68 → 5.85 | **−12%** |
+| mass-death | 2,436k → 2,184k | −10% | 6.03 → 6.54 | +8% |
+| boss-capstone | 1,285k → 1,208k | −6% | 3.32 → 3.34 | flat |
+| roamer-stack | 1,302k → 1,249k | −4% | 3.15 → 3.53 | +12% |
+| hub-idle | 410k → 429k | +5% | 1.35 → 1.45 | +7% |
+| tile-shatter-storm | 816k → 880k | +8% | 2.75 → 2.93 | +7% |
+
+`Map.set` disappeared from the attribution entirely (was 35–40 MB). The
+densest scene — the one where the 3×3 scan dominates — improved clearly on
+both axes; the rest is inside the spread.
+
+### Iteration 8 — a better instrument, and an honest cumulative result
+
+That "inside the spread" qualifier had appeared three milestones running, so
+the spread became the problem. `perf/simbench.mjs` drives N sim substeps
+back to back inside one frame with nothing rendering, amortising scheduling
+noise across the batch. Best-to-worst spread drops to 5–8%, which finally
+makes sim-time A/B resolvable.
+
+Benchmarked against the pre-gauntlet baseline commit (`a071930`), same host,
+same session, ms per sim substep:
+
+| scene | baseline | after P5 | Δ |
+|---|---|---|---|
+| hub-idle | 0.821 | 0.789 | −3.9% |
+| asteroid-6k | 1.837 | 1.769 | −3.7% |
+| glass-field | 0.913 | 1.000 | +9.5% |
+| roamer-stack | 2.324 | 2.431 | +4.6% |
+
+**So the honest cumulative result is: allocation is down substantially and
+TYPICAL SIM COST IS FLAT.** Three milestones aimed at the sim's hot paths
+produced a large, consistent, two-independently-measured reduction in
+allocation (−13% to −36% per frame, every scene) and no reliable change in
+median sim time. That is a real outcome on the goal — GC pauses are dips,
+and there is now materially less GC pressure — but it is **not** the
+"sim got faster" story the intermediate p99 numbers suggested, and it is
+recorded as what it is.
+
+### Iteration 9 — the residual allocation resists attribution (STOP)
+
+After P5 the top allocation sites on asteroid-6k are `applyFlowTo` (147 MB),
+`handleEntityCollisions` (116 MB), `PhysicsSystem.update` (76 MB) and
+`nearestEatableShard` (49 MB) — 388 of 573 MB, all loops of pure double
+arithmetic with no visible allocation. Two genuine fix attempts have now
+been made against this cluster (closure hoisting: −17% on the biggest site;
+shape normalisation: measured and rejected).
+
+**The third finding is about the instrument, and it changes how this data
+should be read.** The `--ablate flowoff` run skipped `applyFlow`'s ENTIRE
+body, leaving only `if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt`
+— and the site still attributed **80 MB**. That works out to ~40 bytes per
+call for one conditional double-add, against the 1.4 bytes/op the probe
+measures for exactly that statement. Those cannot both be true.
+
+The reading: V8's sampling heap profiler charges an allocation to whichever
+frame is executing when the sampling threshold is crossed, which biases
+attribution toward the **hottest-running** frames rather than the actual
+allocator. The TOTALS are trustworthy — they agree with the independent heap
+trace to ~1.3% — but the **per-frame ranking is not reliable for small,
+diffuse allocations in very hot loops**. Every ranking in this ledger should
+be read with that caveat; the ones acted on (P2's array refill, P5's
+`Map.set`) were confirmed by an independent mechanism test or by the site
+disappearing after the fix, which is the bar a future session should hold to.
+
+Per the gauntlet's stop condition (three genuine attempts), this cluster is
+handed to FOR-USER-REVIEW rather than attacked further.
+
+---
+
+## P-final — validation
+
+### Before / after, whole matrix (median of 3, same host)
+
+Allocated bytes per frame — the metric this gauntlet actually moved:
+
+| scene | BASELINE | after P5 | Δ |
+|---|---|---|---|
+| hub-idle | 532,250 | 428,964 | **−19%** |
+| asteroid-6k | 1,941,790 | 1,238,274 | **−36%** |
+| tile-shatter-storm | 1,008,999 | 879,505 | **−13%** |
+| boss-capstone | 1,569,310 | 1,207,548 | **−23%** |
+| roamer-stack | 1,488,122 | 1,249,078 | **−16%** |
+| mass-death | 2,819,842 | 2,183,667 | **−23%** |
+
+Down in every scene, by both measurement methods, with the two agreeing to
+~1.3%. Net heap growth over a capture window collapsed alongside it
+(+17/+23/+32 MB → +0.4/+7.6/−0.8 MB).
+
+Worst-frame in-code sim (p99 per substep; ×2 is the budget-relevant figure
+for a device holding 60 fps):
+
+| scene | BASELINE | after P5 | Δ |
+|---|---|---|---|
+| asteroid-6k | 6.33 | 5.85 | −8% |
+| boss-capstone | 3.85 | 3.34 | −13% |
+| hub-idle | 1.50 | 1.45 | −3% |
+| tile-shatter-storm | 2.85 | 2.93 | +3% |
+| mass-death | 6.22 | 6.54 | +5% |
+| roamer-stack | 3.25 | 3.53 | +9% |
+
+Mixed, and the low-noise `simbench` cumulative comparison (iteration 8) is
+the one to believe: **typical sim cost is flat**.
+
+### Long soak (5 minutes, Universe, waves running)
+
+`8351 frames · heapΔ +3.0 MB · 1.6 GC/s · sim/stp p99 4.27 ms`
+
+**Memory is flat over five minutes** — +3 MB net, no sawtooth from our
+allocations. That satisfies the soak criterion. One `sim max` spike of
+64.2 ms occurred in the window; with attribution unreliable at that
+granularity (iteration 9), it is called out rather than explained.
+
+### Gates
+
+`npm run typecheck`, `npm run build`, `npm test` green at every milestone
+commit, and three consecutive clean `npm test` runs at the final commit
+(38 tests each).
+
+---
+
+## Completion summary
+
+### The acceptance statement
+
+**This gauntlet did NOT achieve its stated goal, and no scene is
+hardware-confirmed smooth.** Stating that plainly because the goal was
+"locked 60 fps, no dips, ever" and the evidence does not support claiming it:
+
+- **Hardware-confirmed:** *nothing*. The CAPTURE REQUESTS entry below was
+  written at the end of P1 as instructed; no captures were provided during
+  the session, so every number here is headless. Acceptance requires those
+  captures — the harness explicitly cannot render a verdict on smoothness.
+- **Headless A/B only, and solid:** allocation is down 13–36% per frame in
+  every scene, measured two independent ways that agree to 1.3%, and memory
+  is flat over a 5-minute soak.
+- **Headless A/B only, and null:** typical sim cost is unchanged. The sim
+  still measures ~76% of the 16.7 ms budget on the shard-dense Asteroid
+  Field (2 × p99 per substep) and ~74% on a mass-death frame. **The
+  budget problem identified in P1 is not fixed.**
+- **Not established at all:** whether any of this is perceptible on device.
+
+The defensible claim is narrow: *GC pressure — one named cause of stutter —
+is materially reduced, and nothing regressed.* Everything beyond that is
+open.
+
+### What shipped
+
+| milestone | change | evidence |
+|---|---|---|
+| P2 | index-fill refill idiom in 4 hot sites; `CellBuckets` pooling | alloc −8…−23%; mechanism verified standalone (2.6× / 11×) |
+| P3 | `applyFlow` closure → `applyFlowTo` method; `forEach` → indexed loop | site −17%; hub-idle −13% both axes |
+| P5 | dense flat-array spatial grid replacing the hash | asteroid-6k −15% alloc, −12% sim p99; `Map.set` gone from attribution |
+
+### Behaviour-flagged changes
+
+**None.** Every change shipped in this gauntlet is zero-behaviour: same
+entity lists, same bucket contents and order, same arithmetic, same
+`length` semantics. No DBG toggle was needed because nothing was traded.
+The parked shard-broadphase PAIR BUDGET was **not** built — the numbers
+never indicted the O(k²) cell cost (`Map.set`/hashing and refill churn
+dominated instead), and it stays parked as a behaviour-adjacent lever.
+
+### External-stall attribution record
+
+Not established this session. PR #70 documented residual ~80 ms hitches
+with 3 ms sim + 3 ms render on the worst frame and attributed them to
+browser/OS stalls; that attribution needs the worst-frame render/sim split
+from a hardware capture to confirm or refute, which is capture request #1.
+No in-code spike in this session was excused as external.
+
+### Remaining risks and open questions
+
+1. **The sim budget is unaddressed** — the P1 headline finding stands.
+2. **Allocation attribution is unreliable per-frame** (iteration 9), so the
+   remaining 388 MB "invisible" cluster cannot currently be targeted.
+   A future session should reach for a **CPU** profile (`Profiler.start`)
+   rather than more heap attribution.
+3. **GC events/second rose** while bytes fell (P2). Inferred as V8 shrinking
+   the young generation — cheaper, more frequent scavenges — but unproven,
+   and if wrong it would mean more pauses rather than fewer.
+4. **The per-frame React re-render** (`App` re-renders 60×/s, ~90 handler
+   closures, unmemoized 2157-line `UIOverlay`) is real but measured at only
+   ~10% of allocation. It is untouched, and it is invisible to the engine's
+   own timers — a plausible contributor to hitches a hardware capture would
+   show as "external".
+5. **Container noise** (±10% on the matrix) means single-milestone sim
+   deltas below ~10% are not resolvable there; use `simbench.mjs`.
+
 ## DECISIONS TAKEN
 
 **D1 — The harness lives in `perf/`, outside `tests/`, and is not wired
@@ -423,6 +621,35 @@ profiler, and their agreement is the trust signal.**
 *Why:* calibration 2 was only detectable because the two disagreed. Keeping
 both means the next person to change the profiler configuration finds out
 immediately instead of silently measuring retention again.
+
+**D4 — The entity-shape normalisation was measured before being built, and
+then not built.**
+*Alternatives:* trust the 15× synthetic result and refactor every entity
+creation site; or skip the idea on the grounds that it contradicts a
+documented convention.
+*Why:* the synthetic number was large enough to justify a big refactor and
+the convention is exactly the kind that gets treated as a performance bug.
+Measuring the payoff on the real entity population took one probe and
+returned the opposite sign (1.9× slower). CLAUDE.md §4 now records the
+measurement so the next session does not re-derive it the expensive way.
+
+**D5 — The parked shard-broadphase PAIR BUDGET was not built.**
+*Alternative:* build it behind a DBG toggle, since it is the parking lot's
+named next lever and the scenes are available.
+*Why:* its stated trigger is "`resolveShardPairs` dominates a sim spike".
+It never did in this matrix — refill churn and hash lookups dominated, and
+`resolveShardPairs` sat well below both. Building a behaviour-adjacent
+lever the numbers do not ask for is how a feel change gets shipped for no
+measured gain.
+
+**D6 — The gauntlet stops without the goal met, rather than continuing.**
+*Alternative:* keep looping on the sim budget.
+*Why:* the two remaining levers both need something this session cannot
+get — the residual allocation needs a CPU profile rather than more heap
+attribution (three attempts spent, per the stop condition), and the
+acceptance claim needs hardware captures that have not arrived. Continuing
+to shave headless numbers that `simbench` says are flat would add risk
+without adding evidence.
 
 ---
 
@@ -459,3 +686,51 @@ any single capture.
 
 I am **not blocking on these** — headless work continues, and this section
 will be updated with the attribution for whatever you paste.
+
+**Status at the end of the session: no captures were provided, so the
+acceptance claim is unmade.** The requests above are still the shortest path
+to closing it, and the PR says so plainly.
+
+### The residual allocation cluster — three attempts, handed back
+
+`applyFlowTo`, `handleEntityCollisions`, `PhysicsSystem.update` and
+`nearestEatableShard` together attribute ~388 MB per 12 s capture on the
+Asteroid Field, and none of them contains a visible allocation. Attempts:
+
+1. **Closure hoisting** (shipped) — the biggest site dropped 17%, so
+   per-substep closure construction was a real component but not the cause.
+2. **Entity-shape normalisation** (measured, rejected) — 1.9× slower on the
+   real population; see D4.
+3. **Instrument audit** (the useful one) — an ablation that removed
+   `applyFlow`'s entire body still attributed 80 MB to it, for a single
+   conditional double-add that the probe measures at 1.4 bytes/op. Those
+   cannot both be true, so **the per-frame attribution is biased toward
+   hot-running frames** and is not a reliable target list for small diffuse
+   allocations.
+
+**Recommendation:** the next attempt should be a **CPU profile**
+(`Profiler.start`/`stop` over a scene) rather than more heap attribution.
+That answers "where does the 16.7 ms go", which is the primary metric
+anyway, and it is not subject to the bias above. I did not start it here
+because it is a new instrument and this session had already spent its three
+attempts on the cluster.
+
+### Parallel-work note (SFX session, PR #79)
+
+Per the session's parallel-work rule I did not touch the audio system or its
+event wiring. **Nothing in the audio path profiled hot enough to appear in
+any scene's top-20 allocation sites**, so there is nothing to hand over. If
+the SFX work lands per-frame audio scheduling, the `perf/` harness will pick
+it up: `node perf/capture.mjs --scene boss-capstone` is the cheapest check.
+
+### One thing I'd flag as a design question, not a perf finding
+
+`SIMULATION_CONSTANTS.FIXED_DT` is **1/120**, so the sim runs at twice the
+render rate and a 60 fps frame pays for **two** full sim steps. Every sim
+number in this ledger is doubled by that choice, and it is the single
+largest lever on the sim budget that exists — halving the sim rate to 60 Hz
+would roughly halve sim cost outright. That is emphatically a FEEL decision
+(collision resolution quality, shard settling, small-projectile tunnelling
+all depend on it) and therefore yours, not a perf change I should make. But
+if the sim budget is the thing that has to come down, this is the lever with
+the most in it, and no amount of micro-optimisation will match it.
