@@ -1556,12 +1556,18 @@ k. After N waves, spawn a portal to a new map.
        ships as the deliverable; AUDIO_PLAN's constraint
        analysis (standalone-build fork, torus vs PannerNode,
        polyphony) governs the architecture.
-    b. Pre-public checklist (user-owned): LICENSE decision
-       (unlicensed = all-rights-reserved; fine with the
-       collaborator added to the repo, but decide
-       deliberately), minimal README pointing newcomers at
-       CLAUDE.md + this doc, and awareness that the merge
-       deploys the current state to Netlify.
+    b. Pre-public checklist — DONE (commit 64c156a):
+       LICENSE added (ALL RIGHTS RESERVED, source-available
+       for collaboration — user decision; keeps commercial
+       rights for the future multiplayer plan); README
+       rewritten (accurate description, quickstart, doc
+       pointers — replaces the stale AI Studio scaffold text
+       + banner); index.html retitled "Omni" + meta
+       description (flows into the Netlify deploy);
+       metadata.json (unreferenced Google AI Studio scaffold
+       file) deleted. vite.config / package.json / netlify
+       config audited clean — no API-key plumbing, no env
+       files.
 
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
