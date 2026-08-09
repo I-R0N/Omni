@@ -867,6 +867,60 @@ warm-up spreads out, and at 24/frame a full map catches up in under a second.
 
 ---
 
+## P12 — RENDER SCALE IS THE ANSWER (and the star bug it exposed)
+
+First verifiable A/Bs, with the `set` line proving the settings. Ring World,
+same map, `auto off` throughout.
+
+| metric | 3x baseline | 3x + substep 3 | **2x** |
+|---|---|---|---|
+| **worst frame** | 81.0 ms | 70.0 ms | **27.0 ms** |
+| frame p99 | 36.0 | 36.0 | **23.0** |
+| 1%-low FPS | 28 | 28 | **43** |
+| min FPS | 12 | 14 | **37** |
+| render avg | 1.41 | 1.08 | **0.80** |
+| `other` on worst frames | 47-78 ms | 47-55 ms | **20-25 ms** |
+
+**This closes the question that ran the whole gauntlet.** `other` — the
+unattributed term that survived every other fix, and that the P9 captures
+showed dominating a frame in which the engine did literally nothing — **was
+canvas compositing.** Halving the rasterised pixel count (3.0M -> 1.3M)
+roughly halved it, and took the worst frame down **67%**.
+
+`2` is now the default (user call). 3x stays one tap away.
+
+### Substep 3: no effect, and the reason matters
+
+Worst frame 81 -> 70 ms is inside variance, and `other` still dominated
+(47-55 ms). That is not a refutation: **Ring World's worst frames are
+compositing-bound, not sim-bound**, so the substep cap had nothing to bite
+on. It was tested on the wrong scene. The clamp still has a case to answer on
+a Seven-Rings-scale field (3359 entities, `sim 44 ms`, `steps` pegged at 5),
+which remains untested. Default left at 5.
+
+### The star-density bug this exposed
+
+The user's report — "I like the 2x render look but the stars become a bit
+overpowering" — was **not a tuning issue. It was a bug in the render-scale
+change itself**, and their eye caught what the numbers could not.
+
+`BackgroundManager.render` still read the RAW `window.devicePixelRatio`; the
+`effectiveDpr()` sweep covered `RenderSystem` and `App.tsx` but missed this
+file. So with a 2x cap on a dpr-3 phone it computed the scene as
+`canvas.width / 3` instead of `/ 2` — **2/3 of the true CSS viewport**. The
+star bands are generated to fill exactly that size with a fixed 60 x 400 =
+24 000 stars, so the field was packed into 4/9 of the area: **2.25x the
+intended density.**
+
+Fixed at the cause, so the sky is now identical at every render scale rather
+than retuned per scale. **The lesson is the generalisable part: an
+`effectiveDpr()` that is not read EVERYWHERE is worse than not having one**,
+because the canvas and the code drawing into it silently disagree. Both
+remaining raw reads are now gone (the perf report's header deliberately shows
+the effective ratio, since that is what its render numbers correspond to).
+
+---
+
 ## Completion summary
 
 ### The acceptance statement

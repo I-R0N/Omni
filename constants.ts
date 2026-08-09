@@ -1044,7 +1044,14 @@ export function cycleSubstepCap(): number {
 // Capping the ratio at 2 cuts the pixel count by ~2.3x (3.0M -> 1.3M).  It is a
 // SHARPNESS trade, which is why it is a toggle and not an edit: 3 is index 0
 // and stays the default until someone chooses otherwise.
-export const RENDER_SCALE_CYCLE: ReadonlyArray<number> = [3, 2, 1.5] as const;
+// 2 IS THE DEFAULT (user call, 2026-08-09, on the evidence below).  Measured
+// on Ring World against an otherwise identical 3x run: worst frame 81ms ->
+// 27ms, p99 36 -> 23ms, 1%-low 28 -> 43fps, min 12 -> 37fps, and the
+// unattributed `other` term — the one that had resisted every other fix this
+// session — fell from 47-78ms to 20-25ms.  That is the single largest
+// smoothness result of the gauntlet, and it confirms `other` was compositing.
+// 3x remains one tap away in the cycle.
+export const RENDER_SCALE_CYCLE: ReadonlyArray<number> = [2, 3, 1.5] as const;
 let activeRenderScaleIndex = 0;
 export function getActiveRenderScaleCap(): number { return RENDER_SCALE_CYCLE[activeRenderScaleIndex]; }
 export function getActiveRenderScaleName(): string {
