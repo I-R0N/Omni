@@ -106,7 +106,56 @@ const out = await page.evaluate(() => {
   const shapes = new Set();
   for (let i = 0; i < N; i++) shapes.add(Object.keys(ents[i]).join(','));
 
-  return { N, results, distinctKeySignatures: shapes.size, sinkGuard: sink[0] === -1 ? 1 : 0 };
+  // ── Shape-normalisation payoff, measured on the REAL entities ──────────
+  //
+  // A synthetic test says hidden-class diversity costs ~15x on hot field
+  // access. Before refactoring every entity creation site in the engine on
+  // the strength of that, measure the prize HERE: build shape-normalised
+  // COPIES of the live entities (every key the population uses, assigned in
+  // one fixed order, so all copies share one hidden class) and run the same
+  // loop over both. The gap is the payoff actually available.
+  const allKeys = [];
+  const seen = new Set();
+  for (let i = 0; i < N; i++) {
+    const k = Object.keys(ents[i]);
+    for (let j = 0; j < k.length; j++) if (!seen.has(k[j])) { seen.add(k[j]); allKeys.push(k[j]); }
+  }
+  allKeys.sort();
+  const norm = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const src = ents[i];
+    const o = {};
+    for (let j = 0; j < allKeys.length; j++) o[allKeys[j]] = src[allKeys[j]];
+    norm[i] = o;
+  }
+  const normShapes = new Set();
+  for (let i = 0; i < N; i++) normShapes.add(Object.keys(norm[i]).join(','));
+
+  // The access pattern the engine's hot loops actually run: a handful of
+  // optional-field reads, a guard, and a nested-vector write.
+  const hotLoop = (arr) => () => {
+    for (let i = 0; i < arr.length; i++) {
+      const t = arr[i];
+      if (t.shardVariant === 'nebula-shard') { sink[0] += 1; continue; }
+      if (t.mass === Infinity) { sink[0] += 2; continue; }
+      const m = t.mass, r = t.rotationSpeed;
+      if (r) sink[1] += r * 0.008;
+      sink[2] += m + t.position.x + t.velocity.y;
+      t.velocity.x += 1e-12;
+    }
+  };
+  const shapeCmp = [
+    run(`hot loop / live (${shapes.size} shapes)`, hotLoop(ents)),
+    run(`hot loop / normalised (${normShapes.size} shape)`, hotLoop(norm)),
+  ];
+
+  return {
+    N, results, shapeCmp,
+    distinctKeySignatures: shapes.size,
+    normalisedSignatures: normShapes.size,
+    unionKeyCount: allKeys.length,
+    sinkGuard: sink[0] === -1 ? 1 : 0,
+  };
 });
 
 console.log(`\n### PROBE · ${map} · ${out.N} asteroid-class entities`);
@@ -115,6 +164,13 @@ console.log('probe'.padEnd(30) + 'bytes/op'.padStart(10) + 'ns/op'.padStart(10))
 console.log('-'.repeat(50));
 for (const r of out.results) {
   console.log(r.name.padEnd(30) + String(r.bytesPerOp).padStart(10) + String(r.nsPerOp).padStart(10));
+}
+console.log(`\nshape-normalisation payoff (union of ${out.unionKeyCount} keys):`);
+for (const r of out.shapeCmp) {
+  console.log(r.name.padEnd(30) + String(r.bytesPerOp).padStart(10) + String(r.nsPerOp).padStart(10));
+}
+if (out.shapeCmp.length === 2 && out.shapeCmp[1].nsPerOp > 0) {
+  console.log(`\n  => ${(out.shapeCmp[0].nsPerOp / out.shapeCmp[1].nsPerOp).toFixed(2)}x speedup available on this access pattern`);
 }
 console.log('');
 

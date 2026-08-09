@@ -351,10 +351,51 @@ past 4. Every hot loop in the engine — `applyFlowTo`,
 `handleEntityCollisions`, `nearestEatableShard`, `PhysicsSystem.update` — is
 reading and writing entity fields through megamorphic ICs.
 
-That makes entity-shape normalisation the highest-value remaining lever, and
-it is the P4 milestone. It is also the first change in this gauntlet that
-touches a documented architectural convention, so it needs its own careful
-treatment rather than being folded in here.
+That looked like the highest-value remaining lever, and it would have been
+the first change in this gauntlet to touch a documented architectural
+convention — so before refactoring every entity creation site in the engine,
+the payoff was measured on the REAL entities.
+
+### Iteration 6 — entity-shape normalisation: MEASURED, REJECTED
+
+`perf/probe.mjs` now builds shape-normalised COPIES of the live entities
+(union of every key the population uses, assigned in one fixed order, so all
+copies share a single hidden class) and runs the same hot access loop over
+the live objects and the copies:
+
+| population | ns/op |
+|---|---|
+| live entities (16 hidden classes) | **46.5** |
+| normalised copies (1 hidden class) | **88.0** |
+
+**Normalising made it 1.9× SLOWER.** The synthetic 15× result does not
+transfer, and the reason is visible in the numbers: the union of keys across
+one map's asteroids is **41 properties**. V8 keeps only a handful of fields
+in-object; an object carrying 41 own properties spills into an out-of-object
+properties store (and risks dictionary mode), and that indirection costs more
+than megamorphic ICs do. The synthetic test's "uniform" objects had five
+fields, all inline — it was comparing the wrong thing.
+
+**So CLAUDE.md §4's "set the field when needed" pattern is not a performance
+bug, and this gauntlet should not touch it.** The sparse-optional-field
+convention is, on this workload, actively faster than the "normalise
+everything" alternative. Logged prominently because the opposite conclusion
+is the intuitive one and a future session will be tempted by it.
+
+This is the value of measuring before refactoring: the change would have been
+a large, invasive, convention-breaking regression.
+
+### Iteration 7 — the spatial grids: hashing, not allocating
+
+Redirecting to a target with a mechanism that is understood rather than
+inferred, and that hits SIM TIME (the primary metric) rather than allocation.
+
+Both per-substep broadphase grids are `Map<number, GameEntity[]>` keyed on a
+packed `(cx << 16) | cy`. The 3×3 neighbour scan does **9 hash lookups per
+entity per substep**, and `Map.set` alone still attributes 35 MB on
+asteroid-6k after P2. But the key space is already dense and bounded —
+`cellKey` wraps both axes into `[0, SPATIAL_COLS) × [0, SPATIAL_ROWS)` — so
+the hash map is buying nothing a flat array indexed by cell would not.
 
 ## DECISIONS TAKEN
 

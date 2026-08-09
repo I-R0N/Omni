@@ -36,7 +36,20 @@ import { GameEntity } from '../../types';
  * nothing.
  */
 export class CellBuckets {
-  private buckets: Map<number, GameEntity[]> = new Map();
+  /**
+   * Buckets indexed by DENSE CELL INDEX, not hashed.
+   *
+   * This was a `Map<number, GameEntity[]>` keyed on a packed `(cx << 16) | cy`.
+   * But the key space is already dense and bounded — the cell coordinates are
+   * wrapped into `[0, cols) x [0, rows)` before packing — so the hash was
+   * buying nothing an array index would not, while costing a hash lookup on
+   * every access.  The 3x3 neighbour scan does NINE lookups per entity per
+   * substep, at 120 Hz; that is the single most-executed lookup in the engine.
+   *
+   * `undefined` means the cell is empty.  Sized by `resize()` from the map
+   * dimensions.
+   */
+  private cells: (GameEntity[] | undefined)[] = [];
 
   // Free list of emptied bucket arrays, and the buckets handed out this
   // pass.  Both are index-filled with an explicit count rather than
@@ -47,40 +60,55 @@ export class CellBuckets {
   private poolN = 0;
   private live: GameEntity[][] = [];
   private liveN = 0;
+  /** Parallel to `live`: the cell index each live bucket sits at, so
+   *  `beginPass` can clear exactly the occupied cells instead of walking the
+   *  whole (mostly empty) grid. */
+  private liveIdx: number[] = [];
 
   /** Peak bucket population seen during the last fill pass.  The 3x3
    *  neighbour scan is O(k^2) in this, so it is the direct signal for
    *  dense-cluster stalls; callers surface it in the perf overlay. */
   public maxDensity = 0;
 
-  /** Empty every bucket and start a fresh fill pass. */
+  /** Grow the grid to `nCells`.  Called when the map dimensions change; a
+   *  no-op when the grid is already big enough, so a shrink keeps the larger
+   *  backing array rather than reallocating it. */
+  public resize(nCells: number): void {
+    if (nCells <= this.cells.length) return;
+    const cells = this.cells;
+    for (let i = cells.length; i < nCells; i++) cells[i] = undefined;
+  }
+
+  /** Empty every occupied bucket and start a fresh fill pass. */
   public beginPass(): void {
-    const live = this.live;
+    const live = this.live, liveIdx = this.liveIdx, cells = this.cells;
     for (let i = 0; i < this.liveN; i++) {
       const cell = live[i];
       cell.length = 0;
       this.pool[this.poolN++] = cell;
+      cells[liveIdx[i]] = undefined;
     }
     this.liveN = 0;
-    this.buckets.clear();
     this.maxDensity = 0;
   }
 
-  /** Append `e` to `key`'s bucket, creating (or recycling) it as needed. */
-  public push(key: number, e: GameEntity): void {
-    let cell = this.buckets.get(key);
+  /** Append `e` to cell `idx`, creating (or recycling) the bucket as needed. */
+  public push(idx: number, e: GameEntity): void {
+    let cell = this.cells[idx];
     if (cell === undefined) {
       cell = this.poolN > 0 ? this.pool[--this.poolN] : [];
-      this.buckets.set(key, cell);
-      this.live[this.liveN++] = cell;
+      this.cells[idx] = cell;
+      this.live[this.liveN] = cell;
+      this.liveIdx[this.liveN] = idx;
+      this.liveN++;
     }
     cell.push(e);
     if (cell.length > this.maxDensity) this.maxDensity = cell.length;
   }
 
-  /** The bucket at `key`, or undefined when the cell is empty. */
-  public get(key: number): GameEntity[] | undefined {
-    return this.buckets.get(key);
+  /** The bucket at cell `idx`, or undefined when the cell is empty. */
+  public get(idx: number): GameEntity[] | undefined {
+    return this.cells[idx];
   }
 
   /** Drop every bucket AND the free list — for map load / teardown, where
@@ -91,5 +119,6 @@ export class CellBuckets {
     this.pool.length = 0;
     this.poolN = 0;
     this.live.length = 0;
+    this.liveIdx.length = 0;
   }
 }

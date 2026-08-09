@@ -8,10 +8,10 @@ import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 import { CellBuckets } from './CellBuckets';
 
-// Number of spatial-hash cells along each axis of the toroidal map.  The
-// broadphase keys pack (col, row) into a single int using `(cx << 16) |
-// (cy & 0xFFFF)`, and cell indices are wrapped into [0, SPATIAL_COLS) so
-// neighbour queries near a seam land on the same bucket as the entities
+// Number of spatial-grid cells along each axis of the toroidal map.  The
+// broadphase identifies a cell by the dense index `cx * SPATIAL_ROWS + cy`,
+// with both coordinates wrapped into [0, SPATIAL_COLS) / [0, SPATIAL_ROWS)
+// so neighbour queries near a seam land on the same bucket as the entities
 // they should collide with on the opposite side.
 //
 // `let` + dimension listener so per-map size changes rebuild the cell
@@ -29,13 +29,24 @@ function wrapCellX(cx: number): number {
 function wrapCellY(cy: number): number {
     return ((cy % SPATIAL_ROWS) + SPATIAL_ROWS) % SPATIAL_ROWS;
 }
+// Cell identity is a DENSE INDEX (`cx * SPATIAL_ROWS + cy`), not a packed
+// `(cx << 16) | cy` hash key.  Both axes are already wrapped into
+// [0, SPATIAL_COLS) x [0, SPATIAL_ROWS) here, so the index space is exactly
+// the grid — which lets CellBuckets be a flat array instead of a Map and
+// turns every lookup (nine per entity per substep, in the 3x3 neighbour
+// scan) from a hash into an array index.  The static grid keeps a Map, but
+// it is keyed on the same dense index, so the two agree cell for cell.
 function cellKey(x: number, y: number): number {
     const cx = wrapCellX(Math.floor(x / SPATIAL_GRID_SIZE));
     const cy = wrapCellY(Math.floor(y / SPATIAL_GRID_SIZE));
-    return (cx << 16) | (cy & 0xFFFF);
+    return cx * SPATIAL_ROWS + cy;
 }
 function cellKeyFromCell(cx: number, cy: number): number {
-    return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
+    return wrapCellX(cx) * SPATIAL_ROWS + wrapCellY(cy);
+}
+/** Total cells in the current grid — the size CellBuckets must cover. */
+function cellCount(): number {
+    return SPATIAL_COLS * SPATIAL_ROWS;
 }
 
 // Parametric hex-colour lerp.  Used by applyDentStep to fade
@@ -824,6 +835,10 @@ export class PhysicsSystem {
   ) {
     // 1. Reset ONLY the Dynamic Grid (Static Grid is persistent).  beginPass
     // empties the buckets and recycles their arrays — see CellBuckets.
+    // `resize` is a single compare once the grid is big enough; calling it
+    // here rather than only at map load means no path can change the map
+    // dimensions and leave the grid undersized.
+    this.dynamicGrid.resize(cellCount());
     this.dynamicGrid.beginPass();
 
     // 2. Populate Dynamic Grid with moving entities.  While we're walking
@@ -1679,6 +1694,7 @@ export class PhysicsSystem {
     const vl = this.viewportLeft, vr = this.viewportRight;
     const vt = this.viewportTop, vb = this.viewportBottom;
 
+    this.shardGrid.resize(cellCount());
     this.shardGrid.beginPass();
     let asleepCount = 0;
     let offscreenCount = 0;
