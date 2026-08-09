@@ -1655,6 +1655,8 @@ export interface EngineStats {
   snitchSpeedName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
+  /** DBG: active simulation rate label ('120Hz' / '60Hz'). */
+  simRateName?: string;
   enemyScaleInfo?: string;
   swarmMoveName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.

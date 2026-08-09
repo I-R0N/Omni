@@ -104,6 +104,7 @@ interface UIOverlayProps {
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
+  onCycleSimRate?: () => void;
   onCycleSwarmMove?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
@@ -259,6 +260,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCycleEnemyScale,
+  onCycleSimRate,
   onCycleSwarmMove,
   onApplyCorrosion,
   onApplyDisable,
@@ -1000,6 +1002,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
+                {ctrlRow('Sim rate', onCycleSimRate, stats.simRateName ?? '120Hz',
+                  'Simulation rate: 120Hz (default) or 60Hz. At 120Hz a 60fps frame runs TWO full sim steps, so this is the single biggest lever on sim cost — but it is a TRADE, not a free win: collision resolution is iterative, so half the steps means half the passes untangling dense shard piles. Rate-dependent constants are converted exactly, and the frame delta is vsync-snapped so 60Hz does not judder. Judge it by FEEL in a shard field.')}
                 {ctrlRow('Gnat move', onCycleSwarmMove, stats.swarmMoveName ?? 'boids',
                   'Cycle the Swarm gnat movement: boids (flock) → vortex (orbit + dart) → weave (serpentine) → burst (coast + telegraphed dash). Applies live to all gnats.')}
                 {ctrlRow('Corrode', onApplyCorrosion, 'Apply',

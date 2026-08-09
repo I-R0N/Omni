@@ -527,6 +527,72 @@ commit, and three consecutive clean `npm test` runs at the final commit
 
 ---
 
+## P6 — the sim-rate toggle (user-requested, post-review)
+
+Raised in review: the FOR-USER-REVIEW note flagged `FIXED_DT = 1/120` as the
+largest lever on the sim budget. The user asked for it as a **toggle** so the
+feel could be judged by hand.
+
+### The trap that had to be handled first
+
+`SIMULATION_CONSTANTS` carries a comment recording that **1/60 was already
+tried and reverted**: on a 60 Hz display a 60 Hz sim step makes the
+accumulator drift a hair either side of exactly one step, so frames alternate
+1-step / 2-step and the world judders. 1/120 was chosen for *divisibility*.
+
+A naive toggle would have walked straight back into that bug, and the user
+would have rejected 60 Hz for a reason unrelated to physics quality. So the
+toggle ships with a **vsync snap**: a frame delta landing within a
+quarter-step of a whole number of steps is snapped to it
+(`VSYNC_SNAP_FRACTION`), which removes the alternation at its source.
+
+**This is the one behaviour-affecting change in the gauntlet, and it affects
+the DEFAULT path.** It is flagged rather than hidden. Two reasons it is worth
+it: it is what makes the toggle a fair test at all, and — more importantly —
+the divisibility argument has a hole. On a **120 Hz ProMotion display** (the
+target device) the 1/120 step is *also* one-step-per-frame, which is exactly
+the fragile case the original comment warns about. The snap protects the
+shipping 120 Hz path on the actual target hardware.
+
+### Rate-dependent constants
+
+Only **two** constants are authored per-substep rather than per-second, both
+in `DROP_PULL`. Everything else already multiplies by `dt` (including the
+shard cohesion blend and the shard gravity pull, which were checked
+specifically because they shape shard-field feel), and velocity itself is
+rate-independent — `PhysicsSystem` integrates with `timeScale = dt * 60`.
+
+Conversions are derived from the existing 120 Hz numbers rather than
+re-authored, so **the 120 Hz path is bit-for-bit unchanged**:
+
+| kind | conversion | exact? |
+|---|---|---|
+| `DAMP_PER_STEP` (exponential decay) | `d ** stepScale` (0.97 → 0.9409) | **exact** |
+| `STRENGTH` (linear accumulation) | `s * stepScale` (0.08 → 0.16) | **exact** |
+| decay and accumulation interleaved in one step | — | second-order difference |
+| **iterative collision resolution** | **does not convert** | **this is where the feel change lives** |
+
+`MAX_SUBSTEPS` scales with the rate (5 @120 Hz → 3 @60 Hz) so the
+spiral-of-death clamp covers the same wall time.
+
+### Measured (asteroid-6k, median of 3)
+
+| metric | 120 Hz | 60 Hz | Δ |
+|---|---|---|---|
+| sim p99 **per frame** | 24.10 ms | **9.20 ms** | **−62%** |
+| substeps/frame | 3.22 | 1.29 | −60% |
+| allocation per frame | 1,293,343 | **648,419** | **−50%** |
+| GC/s | 4.0 | 2.9 | −28% |
+| **frames rendered in the same 12 s** | 445 | **561** | **+26%** |
+
+**This single toggle beats P2 + P3 + P5 combined**, which is what the P1
+analysis predicted and what makes it the right thing to have surfaced rather
+than quietly optimised around. The cost side is now measured; the **feel side
+is explicitly unmeasured and belongs to the user** — the thing to judge is a
+dense shard pile settling, not a number.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement

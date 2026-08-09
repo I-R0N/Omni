@@ -951,7 +951,71 @@ export const SIMULATION_CONSTANTS = {
   FIXED_DT: 1 / 120,       // Deterministic simulation timestep (seconds)
   MAX_SUBSTEPS: 5,         // Spiral-of-death clamp: max sim steps per rendered frame
   MAX_FRAME_TIME: 0.25,    // Safety clamp on raw frame delta before accumulating (s)
+  /** Frame-delta snapping tolerance, as a FRACTION of one sim step.
+   *
+   *  This is what makes a 60 Hz sim rate viable at all.  The comment above
+   *  records why 1/60 was rejected the first time: on a 60 Hz display the
+   *  accumulator drifts a hair either side of exactly one step, so frames
+   *  alternate 1-step / 2-step and the world visibly judders.  Snapping the
+   *  frame delta to the nearest whole number of steps when it lands within
+   *  this tolerance removes the alternation at its source — a standard
+   *  fixed-timestep technique, and cheaper than the divisibility trick it
+   *  replaces.  At the 120 Hz default it is a no-op in practice (a 60 Hz
+   *  frame is already almost exactly 2 steps), so it cannot regress the
+   *  shipping path.  0.25 = snap when within a quarter-step. */
+  VSYNC_SNAP_FRACTION: 0.25,
 };
+
+// ─── DBG: simulation rate (gauntlet 5c follow-up) ────────────────────────────
+//
+// The sim rate is the single largest lever on sim cost that exists: at 120 Hz
+// a 60 fps frame pays for TWO full sim steps, so every millisecond of sim work
+// is doubled by this one number.  60 Hz is the industry-mainstream rate (Unity
+// ships 50, Box2D recommends 60); 120 is on the high end, reserved for
+// sub-frame precision.
+//
+// It is exposed as a DBG cycle rather than simply lowered because dropping it
+// is a TRADE, not a free win: collision resolution is iterative, so half the
+// steps means half the passes untangling a dense shard pile, and the shard
+// fields will settle differently.  That is a FEEL judgement and belongs to the
+// player, not to a perf measurement.
+//
+// 120 is index 0 and stays the default, so the shipping path is unchanged.
+export const SIM_RATE_CYCLE: ReadonlyArray<number> = [120, 60] as const;
+let activeSimRateIndex = 0;
+/** The sim rate currently selected, in Hz. */
+export function getActiveSimRate(): number { return SIM_RATE_CYCLE[activeSimRateIndex]; }
+export function getActiveSimRateName(): string { return `${SIM_RATE_CYCLE[activeSimRateIndex]}Hz`; }
+/** The live fixed timestep.  Read this instead of SIMULATION_CONSTANTS.FIXED_DT
+ *  anywhere the rate must be honoured (the accumulator loop). */
+export function getSimDt(): number { return 1 / SIM_RATE_CYCLE[activeSimRateIndex]; }
+/**
+ * How many BASELINE (1/120 s) steps one current step covers: 1 at 120 Hz,
+ * 2 at 60 Hz.
+ *
+ * Constants tuned PER STEP rather than per second have to be rescaled by this
+ * or they silently change meaning with the rate.  Deriving the scale from the
+ * existing 120 Hz numbers — rather than re-authoring them as per-second rates
+ * — is deliberate: it guarantees the 120 Hz path is bit-for-bit what it is
+ * today, so the toggle is a clean A/B rather than a retune of both branches.
+ *
+ * Two conversions are EXACT:
+ *   - exponential decay:   d_eff = d ** stepScale   (0.97 -> 0.9409)
+ *   - linear accumulation: s_eff = s * stepScale    (0.08 -> 0.16)
+ * Anything that INTERLEAVES the two in one step differs by a second-order
+ * term, and the iterative collision solver does not convert at all — that is
+ * where the real feel change lives, and why this is a toggle and not an edit.
+ */
+export function simStepScale(): number { return 120 / SIM_RATE_CYCLE[activeSimRateIndex]; }
+/** Substep clamp scaled to the rate, so the spiral-of-death guard covers the
+ *  same amount of WALL TIME at either rate (5 steps @120Hz ≈ 3 @60Hz). */
+export function getMaxSubsteps(): number {
+  return Math.max(2, Math.round(SIMULATION_CONSTANTS.MAX_SUBSTEPS / simStepScale()));
+}
+export function cycleSimRate(): number {
+  activeSimRateIndex = (activeSimRateIndex + 1) % SIM_RATE_CYCLE.length;
+  return SIM_RATE_CYCLE[activeSimRateIndex];
+}
 
 export const LOCAL_GRAVITY_CONSTANTS = {
   RANGE: 400,          // Pixel radius where gravity takes effect

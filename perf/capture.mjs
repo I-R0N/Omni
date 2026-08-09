@@ -73,6 +73,10 @@ const ABLATIONS = {
   // payload, but nothing re-renders.  Difference = the cost of the per-frame
   // setState + full HUD reconciliation.
   react: `() => { const e = window.__omniEngine; e.onStatsUpdate = () => {}; }`,
+  // Sim rate at 60Hz instead of the 120Hz default — the DBG "Sim rate"
+  // toggle, driven headlessly so the cost side of the trade can be measured
+  // while the feel side is judged by hand.
+  simrate60: `() => { window.__omniEngine.cycleSimRate(); }`,
   // applyFlow bisect: the flow body vs. the bare `e.rotation +=` tail that
   // runs even when asteroid flow is off. Splits "the arithmetic allocates"
   // from "writing a double field on a GameEntity allocates".

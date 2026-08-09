@@ -313,6 +313,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleEnemyScale();
   };
 
+  const handleCycleSimRate = () => {
+      if (engineRef.current) engineRef.current.cycleSimRate();
+  };
+
   const handleCycleSwarmMove = () => {
       if (engineRef.current) engineRef.current.cycleSwarmMove();
   };
@@ -511,6 +515,7 @@ const App: React.FC = () => {
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCycleEnemyScale={handleCycleEnemyScale}
+        onCycleSimRate={handleCycleSimRate}
         onCycleSwarmMove={handleCycleSwarmMove}
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
