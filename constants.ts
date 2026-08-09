@@ -982,6 +982,33 @@ export const SIMULATION_CONSTANTS = {
 //
 // 120 is index 0 and stays the default, so the shipping path is unchanged.
 
+// ─── DBG: substep cap (frame-pacing) ─────────────────────────────────────────
+//
+// MAX_SUBSTEPS is the spiral-of-death clamp, but set too HIGH it feeds the
+// spiral instead of stopping it.  A device capture (Seven Rings, 3359
+// entities, 2026-08-09) showed every worst frame pegged at steps = 5 with
+// sim = 36-44ms of a 56-60ms frame: the frame ran long, the accumulator
+// pulled in more substeps, those substeps made the frame longer still.
+// Positive feedback.
+//
+// A 60fps display with a 120Hz sim only NEEDS 2 substeps per frame; 5 allows
+// 2.5x real-time catch-up, and that headroom is what let one slow frame
+// snowball.  Capping lower converts a judder into a brief, smooth
+// slow-motion — and the engine ALREADY discards the excess time at the clamp
+// (`simAccumulator %= FIXED_DT`), so that cost is being paid either way; the
+// cap only decides at what point it is paid.
+//
+// Values are the cap at the 120Hz baseline; getMaxSubsteps() rescales them
+// for the active sim rate.  5 is index 0 and stays the default.
+export const SUBSTEP_CAP_CYCLE: ReadonlyArray<number> = [5, 3, 2] as const;
+let activeSubstepCapIndex = 0;
+export function getActiveSubstepCap(): number { return SUBSTEP_CAP_CYCLE[activeSubstepCapIndex]; }
+export function getActiveSubstepCapName(): string { return `${SUBSTEP_CAP_CYCLE[activeSubstepCapIndex]}`; }
+export function cycleSubstepCap(): number {
+  activeSubstepCapIndex = (activeSubstepCapIndex + 1) % SUBSTEP_CAP_CYCLE.length;
+  return SUBSTEP_CAP_CYCLE[activeSubstepCapIndex];
+}
+
 // ─── DBG: render scale (device-pixel-ratio cap) ──────────────────────────────
 //
 // The canvas backing store is sized by devicePixelRatio, and on an iPhone that
@@ -1072,7 +1099,7 @@ export function simStepScale(): number { return 120 / SIM_RATE_CYCLE[activeSimRa
 /** Substep clamp scaled to the rate, so the spiral-of-death guard covers the
  *  same amount of WALL TIME at either rate (5 steps @120Hz ≈ 3 @60Hz). */
 export function getMaxSubsteps(): number {
-  return Math.max(2, Math.round(SIMULATION_CONSTANTS.MAX_SUBSTEPS / simStepScale()));
+  return Math.max(2, Math.round(getActiveSubstepCap() / simStepScale()));
 }
 export function cycleSimRate(): number {
   activeSimRateIndex = (activeSimRateIndex + 1) % SIM_RATE_CYCLE.length;

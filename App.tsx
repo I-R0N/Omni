@@ -323,6 +323,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleEnemyScale();
   };
 
+  const handleCycleSubstepCap = () => {
+      if (engineRef.current) engineRef.current.cycleSubstepCap();
+  };
+
   const handleCycleRenderScale = () => {
       cycleRenderScale();
       setRenderScaleName(getActiveRenderScaleName());
@@ -538,6 +542,7 @@ const App: React.FC = () => {
         onCycleSimRate={handleCycleSimRate}
         onCycleHudRate={handleCycleHudRate}
         onCycleRenderScale={handleCycleRenderScale}
+        onCycleSubstepCap={handleCycleSubstepCap}
         renderScaleName={renderScaleName}
         onCycleSwarmMove={handleCycleSwarmMove}
         onApplyCorrosion={handleApplyCorrosion}

@@ -1659,6 +1659,8 @@ export interface EngineStats {
   simRateName?: string;
   /** DBG: active HUD (React) update rate label. */
   hudRateName?: string;
+  /** DBG: active substep cap (spiral-of-death clamp). */
+  substepCapName?: string;
   enemyScaleInfo?: string;
   swarmMoveName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.

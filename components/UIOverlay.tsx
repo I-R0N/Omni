@@ -106,6 +106,7 @@ interface UIOverlayProps {
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
+  onCycleSubstepCap?: () => void;
   onCycleRenderScale?: () => void;
   renderScaleName?: string;
   onCycleSwarmMove?: () => void;
@@ -265,6 +266,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
+  onCycleSubstepCap,
   onCycleRenderScale,
   renderScaleName,
   onCycleSwarmMove,
@@ -1010,6 +1012,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
                 {ctrlRow('Sim rate', onCycleSimRate, stats.simRateName ?? '120Hz',
                   'Simulation rate: 120Hz (default) or 60Hz. At 120Hz a 60fps frame runs TWO full sim steps, so this is the single biggest lever on sim cost — but it is a TRADE, not a free win: collision resolution is iterative, so half the steps means half the passes untangling dense shard piles. Rate-dependent constants are converted exactly, and the frame delta is vsync-snapped so 60Hz does not judder. Judge it by FEEL in a shard field.')}
+                {ctrlRow('Substep cap', onCycleSubstepCap, stats.substepCapName ?? '5',
+                  'Max sim substeps one frame may drain (5 / 3 / 2) — the spiral-of-death clamp. Set too HIGH it feeds the spiral: a device capture showed every worst frame pegged at 5 steps with 36-44ms of sim in a 60ms frame, because a long frame pulls in more substeps which make it longer still. A 60fps display with a 120Hz sim only NEEDS 2. Lower caps convert a judder into a brief smooth slow-motion; the excess time is discarded either way.')}
                 {ctrlRow('Render scale', onCycleRenderScale, renderScaleName ?? '3x',
                   'Cap on the canvas device-pixel-ratio (3 / 2 / 1.5). At dpr 3 a 440x756 phone viewport rasterises ~3.0 MILLION pixels every frame; capping at 2 cuts that to ~1.3M. This cost is INVISIBLE to the render timer — that measures our JS issuing canvas calls, while rasterisation and compositing happen in the browser compositor afterwards, which is exactly where device captures show the missing 25-36ms going. Trade: a softer image.')}
                 {ctrlRow('HUD rate', onCycleHudRate, stats.hudRateName ?? '60Hz',

@@ -740,6 +740,76 @@ softer image, so it is a toggle, not an edit.
 
 ---
 
+## P10 — Seven Rings: the OTHER failure mode, and the clamp that feeds it
+
+Seven Rings, 154.7 s / 7738 frames, dpr3, AUTO off. Note this is a different
+map and 4x the entity count of the Pocket captures, so it is not the
+controlled render-scale A/B that was asked for — and it is more valuable
+than one, because it exposes a **second, unrelated failure mode**.
+
+```
+FPS avg 50 · median 59 · 5%-low 24 · 1%-low 21 · min 17 · >=55: 76%
+frame avg 20.0 · median 17.0 · p95 42.0 · p99 47.0
+cost  render avg 0.78 · sim avg 4.93 · ui avg 0.04
+sim   updPhys 1.92 · updLogic 3.01 · physics 1.66 · shardSys 2.61 · ai 0.11
+perf  tier avg 3.29 (med 25% / heavy 22% / max 54%) · load peak 1.00
+peak  entities 3359
+worst  #  frame   render     sim      ui   other  steps   ents  parts     at
+      1   60.0    1.00   44.00    0.00    15.0      5   3212    255  140.5s
+      2   57.0    1.00   38.00    1.00    17.0      5   3103    164  137.1s
+      4   57.0    1.00   40.00    0.00    16.0      5   3090    135  140.6s
+```
+
+### There are TWO problems, not one
+
+| | Pocket (789 ents) | Seven Rings (3359 ents) |
+|---|---|---|
+| worst frame | 38 ms | **60 ms** |
+| sim on it | 2 ms | **44 ms** |
+| `other` on it | 36 ms | 15 ms |
+| `steps` | 0-1 | **5 (pegged)** |
+| diagnosis | compositing / GC | **our sim, amplified by the clamp** |
+
+The Pocket conclusion ("not our JS") was correct **for Pocket** and does not
+generalise. At high entity counts the sim genuinely dominates, and this is
+the in-charter spike the gauntlet was chartered to find. `other` is still
+15-19 ms here, so the compositing/GC cost is present in both — it is simply
+no longer the biggest term.
+
+### The clamp is feeding the spiral it exists to stop
+
+Every worst frame is pegged at `steps = 5`. `MAX_SUBSTEPS = 5` at a 120 Hz
+sim permits **5 x 8.8 ms = 44 ms of sim in a single frame** — which is
+exactly the sim figure observed, and is what makes the frame 60 ms. The
+feedback loop: a long frame accumulates more time, the accumulator drains
+more substeps, the extra substeps make the frame longer still.
+
+A 60 fps display with a 120 Hz sim only **needs 2** substeps per frame. Five
+allows 2.5x real-time catch-up, and that headroom is what let one slow frame
+snowball. Capping lower converts a judder into a brief, smooth slow-motion —
+and the engine **already** discards the excess at the clamp
+(`simAccumulator %= FIXED_DT`), so that cost is paid either way; the cap only
+decides where.
+
+Shipped: **`Substep cap` DBG cycle (5 default / 3 / 2)**, read through
+`getMaxSubsteps()` so it composes with the sim-rate toggle. Default unchanged
+pending a device A/B.
+
+### The root cause underneath it
+
+**3359 entities.** `shardSys` is the largest sim sub-timer (2.61 ms) and the
+PerfController is pegged (`tier max 54%`, `load peak 1.00`) and still cannot
+keep up. All six worst frames cluster in a 4-second window at 137-141 s of a
+155 s session — i.e. **the shard population grew over the session** until the
+sim could not fit in a frame.
+
+Capping substeps bounds the SYMPTOM. The population growth is the disease,
+and it is behaviour-adjacent (shard lifetime, merge rate, graceful cleanup),
+so it belongs to the user rather than to a zero-behaviour perf pass. Flagged
+in FOR-USER-REVIEW.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement
@@ -927,6 +997,23 @@ That answers "where does the 16.7 ms go", which is the primary metric
 anyway, and it is not subject to the bias above. I did not start it here
 because it is a new instrument and this session had already spent its three
 attempts on the cluster.
+
+### Shard population growth (Seven Rings) — a design question, not a perf fix
+
+The Seven Rings capture's worst frames all sit at ~3100-3200 entities, four
+times the Pocket scene, clustered in the last 20 seconds of a 155-second
+session. The PerfController is saturated (`tier max 54%`, `load peak 1.00`)
+and the sim still misses frame budget.
+
+Substep capping bounds the symptom, and the P2/P3/P5 work makes each entity
+cheaper, but neither addresses the cause: **the shard population grows during
+play faster than merging and cleanup retire it.** The levers are all
+behaviour-affecting — shard lifetime, merge rate under load, a hard
+population ceiling, or more aggressive offscreen retirement — so which one to
+pull is a FEEL decision and belongs to you, most naturally in the step-6
+tuning pass. My recommendation if you want a number to aim at: the scene is
+comfortable below roughly 1500 entities on this hardware and falls apart
+above ~3000.
 
 ### Parallel-work note (SFX session, PR #79)
 
