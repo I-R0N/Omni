@@ -1903,7 +1903,16 @@ observes the three strategy guardrails (decision #36e).
    real-hardware Perf REC captures requested from the user via
    FOR-USER-REVIEW; the parked implementation sketches
    (shard-broadphase pair budget, exotic perf ideas) built only if
-   measurement says so.
+   measurement says so. **GOAL (user, 2026-08-09): locked smooth 60
+   fps on the target device under ALL gameplay conditions — no dips,
+   no stutter.** Operationally: WORST-FRAME is the metric (not
+   averages); the gauntlet loops until the capture matrix shows no
+   in-code frame over the 16.7 ms budget; steady-state allocation →
+   zero (GC hitches count as stutter); frame-PACING sources (substep
+   bunching, one-frame work bursts) are in scope, not just raw
+   compute; acceptance is confirmed on user hardware captures.
+   External browser/OS stalls (the PR #70 caveat) are attributed and
+   documented, never used to excuse an in-code spike.
 
 5d. **UI gauntlet** (decision #47b) — runs AFTER the step-5 Pair C +
    polish gauntlet and BEFORE the step-6 tuning pass: one coherence /
