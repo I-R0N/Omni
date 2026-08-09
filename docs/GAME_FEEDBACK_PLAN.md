@@ -13,41 +13,60 @@ session re-reads it on cold start and updates it as PRs land.
 
 ## How this works
 
-- **Orchestration session** (planning branch
-  `claude/game-feedback-plan-UN3MV`): owns this file, drafts task
-  prompts, sequences work. Does not write code.
-- **Task sessions** (one per task by default): branch off the latest
-  tip of `claude/game-feedback-plan-UN3MV`, implement one task, open
-  a PR **against `claude/game-feedback-plan-UN3MV`** (NOT `main`),
-  merge, end.
+> **BRANCH TRANSITION (2026-08-08, decision #45).** The original
+> integration branch `claude/game-feedback-plan-UN3MV` was merged to
+> `main` ahead of plan completion so the repo could go PUBLIC for a
+> second developer. The remaining roadmap (Pair B finish, Pair C +
+> polish gauntlet, tuning pass, final playtest) continues on the
+> SUCCESSOR integration branch **`claude/plan-completion`**, cut from
+> `main` at that merge. Everything below reads with that substitution:
+> where process text says the plan branch, the successor branch is now
+> meant. `main` still deploys to Netlify — never target it directly.
+
+- **Orchestration session**: owns this file, drafts task prompts,
+  sequences work, reviews merged PRs. Does not write code.
+- **Task sessions** (one per task by default; larger steps run as
+  looped single-step "gauntlet" sessions per decision #41c): branch
+  off the latest tip of the integration branch, implement one roadmap
+  step, open a PR **against the integration branch** (NOT `main`),
+  merge, end. Each gauntlet keeps a ledger doc
+  (`docs/GAUNTLET_*_LOG.md`) — decisions with alternatives,
+  FOR-USER-REVIEW items, validation record.
 - **Same-session bundling** is allowed when a task is small enough that
   spinning up a fresh session is more overhead than the work. When
   bundled, both tasks land on the same branch in the same PR — note
   this in the Status field of both tasks.
+- **New contributors: start here.** Read CLAUDE.md first (engine
+  ground truth), then this file's Completion roadmap + decisions log
+  (newest entries first). `docs/PARKING_LOT.md` holds deferred ideas;
+  it is a scrapbook, not a commitment.
 
 ### Branch strategy
 
 To minimize Netlify deploy triggers (only `main` pushes deploy),
-`claude/game-feedback-plan-UN3MV` is the **long-lived integration
-branch** for all feedback work:
+**`claude/plan-completion`** is the long-lived integration branch for
+the remaining feedback work (successor to
+`claude/game-feedback-plan-UN3MV`, which is merged and retired):
 
-- Every feature task PRs into this branch, never directly into `main`.
+- Every feature task PRs into the integration branch, never directly
+  into `main`.
 - After each feature PR merges in, the orchestration session pulls,
   updates this doc to reflect new state, and commits.
-- A single final PR from `claude/game-feedback-plan-UN3MV` → `main`
-  ships the entire feedback plan in one deploy.
-- Feature sessions branch off the tip of this plan branch, so each
-  picks up prior shipped work automatically.
+- A final PR from the integration branch → `main` ships the remaining
+  roadmap in one deploy (the plan's second and last deploy; the first
+  was the 2026-08-08 going-public merge).
+- Feature sessions branch off the tip of the integration branch, so
+  each picks up prior shipped work automatically.
 
 ### PR conventions
 
 - Standard PRs (no drafts, no special labels, no required reviewers
   beyond repo defaults).
-- **Base branch: `claude/game-feedback-plan-UN3MV`** (until the final
-  ship-it PR, which targets `main`).
+- **Base branch: `claude/plan-completion`** (until the final ship-it
+  PR, which targets `main`).
 - Branch naming: `claude/<short-feature>-<suffix>`.
-- Each task session pulls the latest plan-branch tip first so prior
-  merged tasks are already present.
+- Each task session pulls the latest integration-branch tip first so
+  prior merged tasks are already present.
 
 ### Phase rules
 
@@ -1511,6 +1530,39 @@ k. After N waves, spawn a portal to a new map.
        ("Viewport coverage"); (5) scope growth past Pair A →
        accepted by the user as a deliberate deviation.
 
+45. **Going public: early merge to main + successor branch
+    (user direction, 2026-08-08).** The repo goes PUBLIC to
+    onboard a second developer, which needs `main` to carry
+    the current state. Sequence: PR #78 (Pair A+) merged into
+    the plan branch → this doc updated (this entry) → the
+    plan branch merges to `main` (the plan's FIRST deploy —
+    the original one-deploy intent is now two) → successor
+    integration branch **`claude/plan-completion`** cut from
+    `main` → the plan branch is RETIRED. Remaining roadmap
+    (finish Pair B, Pair C + polish gauntlet, tuning pass,
+    final playtest + second deploy) continues on the
+    successor per the rewritten "How this works" above.
+    a. **PR #79 (Pair B SFX gauntlet, IN FLIGHT, incomplete)
+       deliberately does NOT merge before main** — half-wired
+       audio doesn't belong in the going-public deploy. The
+       session stays open; after the successor branch exists
+       it rebases `claude/gauntlet-pair-b-*` onto it,
+       retargets PR #79 to `claude/plan-completion`, re-runs
+       its smokes, and continues its milestone queue. On
+       rebase it must RECONCILE its `SFX_INVENTORY.md` work
+       with `docs/AUDIO_PLAN.md` (which arrived via PR #78
+       after the gauntlet branched) per the rule already
+       recorded in the roadmap's Pair B note: SFX_INVENTORY
+       ships as the deliverable; AUDIO_PLAN's constraint
+       analysis (standalone-build fork, torus vs PannerNode,
+       polyphony) governs the architecture.
+    b. Pre-public checklist (user-owned): LICENSE decision
+       (unlicensed = all-rights-reserved; fine with the
+       collaborator added to the repo, but decide
+       deliberately), minimal README pointing newcomers at
+       CLAUDE.md + this doc, and awareness that the merge
+       deploys the current state to Netlify.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1768,8 +1820,10 @@ observes the three strategy guardrails (decision #36e).
    | `PORTAL_CONSTANTS.ARRIVAL_OFFSET` | 165 | Arrival distance from the rift mouth — must stay inside `USE_RANGE` so turning around is one tap. Geometry, not balance, but it is a tuned number. |
    | `INPUT_CONSTANTS.SHIP_SELECT_RADIUS` | 46 | Too small and docking feels unresponsive; too large and it eats shots aimed near the hull. |
    | `UI_CONSTANTS.INDICATORS` ramp | 11→5 px over 350→3500 | Whether size alone reads as distance now that the numeric readout is gone from ordinary enemies. |
-7. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
-   → `main`, one deploy.
+7. **Final playtest + ship-it PR** — now the SECOND deploy
+   (decision #45): `claude/plan-completion` → `main` after steps 4–6
+   complete. The first deploy was the 2026-08-08 going-public merge of
+   `claude/game-feedback-plan-UN3MV`.
 
 Explicitly OUT of this plan (moved to the Overworld plan): continuous
 overworld, multi-station networks / NPC traffic / civilizations
