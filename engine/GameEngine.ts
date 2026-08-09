@@ -2269,6 +2269,99 @@ export class GameEngine {
       this.perfCounts.interactableCount = this.entityIndex.interactableCount;
   }
 
+  /** Baseline flow-correction rate, shared by the shard pass
+   *  (`applyFlowTo`) and the collectible-drop pass that mirrors it. */
+  private static readonly FLOW_CORRECTION = 0.08;
+
+  /**
+   * Steer one shard toward the local flow-field direction.
+   *
+   * CLOSURE HOISTING (gauntlet 5c, P3) — this used to be a `const applyFlow =
+   * (e) => {…}` declared inside `updatePhysics`, i.e. a function object
+   * CONSTRUCTED FRESH on every sim substep, 120 times a second.  That is not
+   * just the cost of the allocation: a function re-created that often never
+   * settles into V8's optimised tier, and in the unoptimised tier every
+   * intermediate double is boxed on the heap.  The site measured ~98 bytes of
+   * allocation per shard per substep — 175 MB over a 12 s capture on the
+   * Asteroid Field, the single largest allocator in the engine after P2 —
+   * while `perf/probe.mjs` showed the exact same operations allocating ZERO
+   * when run from a stable, optimisable loop.
+   *
+   * The body below is byte-for-byte the old closure's; only its home changed.
+   * Everything it used to capture is now an explicit parameter, which is what
+   * lets it be a plain method.
+   *
+   * The collectible-drop pass in `updatePhysics` deliberately keeps its own
+   * copy of this arithmetic rather than calling through here: drops carry a
+   * `rotationSpeed`, so routing them through this method would start
+   * integrating their rotation and that is a behaviour change, not a perf fix.
+   */
+  private applyFlowTo(
+      e: GameEntity,
+      dt: number,
+      flowTargetSpeed: number,
+      flowEnabled: boolean,
+      laneJitter: number,
+  ): void {
+      // Nebula shards anchor in place — flow correction is
+      // skipped so the field can't drag them around the map.
+      // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
+      // shard's velocity decays to zero after any kick (shatter,
+      // gravity pull, impact) and stays there.  Rotation still
+      // integrates so spinning shards keep tumbling visually.
+      if (e.shardVariant === 'nebula-shard') {
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+          return;
+      }
+      // DBG: when the asteroid-flow toggle is OFF, skip the
+      // velocity nudge entirely.  Rotation still integrates so
+      // existing tumble is preserved; existing velocity is left
+      // untouched (only damping + collisions modify it).
+      if (!flowEnabled) {
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+          return;
+      }
+      const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
+      // Per-shard lane jitter: nudge the target slightly
+      // perpendicular to the flow by a STABLE per-shard amount so
+      // shards ride parallel lanes instead of collapsing onto one
+      // streamline.  Lazily seeded once per entity (stable
+      // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
+      let fxDir = flow.x, fyDir = flow.y;
+      if (laneJitter > 0) {
+          if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+          const off = e.flowLane * laneJitter;
+          const px = -flow.y, py = flow.x;
+          const nx = flow.x + px * off;
+          const ny = flow.y + py * off;
+          const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
+          fxDir = nx / nmag;
+          fyDir = ny / nmag;
+      }
+      // Inverse-mass scaling — heavier shards lock on slower AND
+      // cruise at a lower terminal speed.  Plastic's 5× boost is
+      // multiplied BEFORE the mass scale so heavy plastic blobs
+      // are diluted along with everything else; the boost shows
+      // primarily on light plastic.
+      const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
+          / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
+      const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
+      const correctionMul = plasticBoost * massScale;
+      const targetSpeed = flowTargetSpeed * massScale;
+      const tx = fxDir * targetSpeed;
+      const ty = fyDir * targetSpeed;
+      const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
+      const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
+      const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
+      const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
+      const perpDeficit     = Math.min(1, vPerp / targetSpeed);
+      const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
+      const alpha           = Math.min(0.8, GameEngine.FLOW_CORRECTION * dt * urgency * correctionMul);
+      e.velocity.x += (tx - e.velocity.x) * alpha;
+      e.velocity.y += (ty - e.velocity.y) * alpha;
+      if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+  }
+
   private handleEnemyShooting(dt: number) {
       if (!this.currentMap) return;
       this.weapons.updateEnemyShooting(this.currentMap.entities, this.entityIndex.enemies, this.player, dt);
@@ -2341,14 +2434,20 @@ export class GameEngine {
         this.handleProjectileHit
       );
 
-      this.currentMap.entities.forEach(e => {
+      // Indexed loop, not `forEach(e => …)`: the callback would be a fresh
+      // closure on every substep (120 Hz).  See the CLOSURE HOISTING note on
+      // applyFlowTo below — a function re-created per substep never settles
+      // into optimised code.
+      const mapEnts = this.currentMap.entities;
+      for (let i = 0; i < mapEnts.length; i++) {
+          const e = mapEnts[i];
           if (e.isExploding && e.explosionTimer !== undefined) {
               e.explosionTimer -= dt;
               if (e.explosionTimer <= 0) {
                   e.active = false;
               }
           }
-      });
+      }
 
       // Asteroid census + shard generation.  EntityIndex only contains
       // active asteroids, so we still need a master-list scan to catch
@@ -2394,71 +2493,14 @@ export class GameEngine {
       //   it had accumulated.  Keeping the perp-deficit hot makes the
       //   correction actively damp sideways motion, so packs spread back
       //   out onto the flow lines.
-      const FLOW_CORRECTION  = 0.08;
+      const FLOW_CORRECTION = GameEngine.FLOW_CORRECTION;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
       const flowEnabled = this.asteroidFlowEnabled;
       const laneJitter = this.ffLaneJitter;
-      const applyFlow = (e: GameEntity) => {
-          // Nebula shards anchor in place — flow correction is
-          // skipped so the field can't drag them around the map.
-          // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
-          // shard's velocity decays to zero after any kick (shatter,
-          // gravity pull, impact) and stays there.  Rotation still
-          // integrates so spinning shards keep tumbling visually.
-          if (e.shardVariant === 'nebula-shard') {
-              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-              return;
-          }
-          // DBG: when the asteroid-flow toggle is OFF, skip the
-          // velocity nudge entirely.  Rotation still integrates so
-          // existing tumble is preserved; existing velocity is left
-          // untouched (only damping + collisions modify it).
-          if (!flowEnabled) {
-              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-              return;
-          }
-          const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
-          // Per-shard lane jitter: nudge the target slightly
-          // perpendicular to the flow by a STABLE per-shard amount so
-          // shards ride parallel lanes instead of collapsing onto one
-          // streamline.  Lazily seeded once per entity (stable
-          // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
-          let fxDir = flow.x, fyDir = flow.y;
-          if (laneJitter > 0) {
-              if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
-              const off = e.flowLane * laneJitter;
-              const px = -flow.y, py = flow.x;
-              let nx = flow.x + px * off;
-              let ny = flow.y + py * off;
-              const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
-              fxDir = nx / nmag;
-              fyDir = ny / nmag;
-          }
-          // Inverse-mass scaling — heavier shards lock on slower AND
-          // cruise at a lower terminal speed.  Plastic's 5× boost is
-          // multiplied BEFORE the mass scale so heavy plastic blobs
-          // are diluted along with everything else; the boost shows
-          // primarily on light plastic.
-          const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
-              / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
-          const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
-          const correctionMul = plasticBoost * massScale;
-          const targetSpeed = FLOW_TARGET_SPEED * massScale;
-          const tx = fxDir * targetSpeed;
-          const ty = fyDir * targetSpeed;
-          const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
-          const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-          const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
-          const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
-          const perpDeficit     = Math.min(1, vPerp / targetSpeed);
-          const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
-          const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * correctionMul);
-          e.velocity.x += (tx - e.velocity.x) * alpha;
-          e.velocity.y += (ty - e.velocity.y) * alpha;
-          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-      };
-      for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
+      for (let i = 0; i < asteroids.length; i++) {
+          this.applyFlowTo(asteroids[i], dt, FLOW_TARGET_SPEED, flowEnabled, laneJitter);
+      }
 
       // Collectible drops (salvage + health) follow the same asteroid flow
       // field — the wind that catches loose shards also drags drops along,

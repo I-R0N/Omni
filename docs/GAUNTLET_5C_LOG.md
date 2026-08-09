@@ -299,6 +299,63 @@ not.
 
 Fix in iteration 4: hoist the per-substep closures out of the hot path.
 
+### Iteration 4 — hoist per-substep closures (P3), and what it did NOT explain
+
+Two closures in `updatePhysics` were being constructed on every substep:
+`applyFlow` (now the private method `applyFlowTo`, body unchanged, captures
+turned into parameters) and the `entities.forEach(e => …)` explosion-timer
+tick (now an indexed loop). The collectible-drop pass deliberately keeps its
+own copy of the flow arithmetic rather than routing through `applyFlowTo`:
+drops carry a `rotationSpeed`, so sharing the method would start integrating
+their rotation — a behaviour change, not a perf fix.
+
+| scene | alloc B/frame | Δ vs P2 | sim/stp p99 | Δ vs P2 |
+|---|---|---|---|---|
+| hub-idle | 474k → 410k | **−13%** | 1.55 → 1.35 | **−13%** |
+| tile-shatter-storm | 901k → 816k | −9% | 2.35 → 2.75 | +17% |
+| asteroid-6k | 1,495k → 1,453k | −3% | 5.47 → 6.68 | +22% |
+| boss-capstone | 1,256k → 1,285k | +2% | 3.22 → 3.32 | +3% |
+| roamer-stack | 1,291k → 1,302k | +1% | 3.58 → 3.15 | −12% |
+| mass-death | 2,190k → 2,436k | +11% | 6.57 → 6.03 | −8% |
+
+**A partial win, and the hypothesis was only partly right.** The site itself
+went from 175 MB to 145 MB (**−17%**) on asteroid-6k — real, but it did not
+disappear the way "an unoptimisable closure" would predict. Only hub-idle
+moved cleanly on both axes; the rest is inside this container's spread.
+
+So the "invisible allocation" is still unexplained, and the honest state is:
+closure re-creation was *a* cause worth removing, not *the* cause. Recorded
+as such rather than dressed up.
+
+### Iteration 5 — the finding that reframes the sim cost
+
+Chasing the same question produced a different and larger answer. Test
+(`node --expose-gc`, 20 000 passes over 1300 objects, writing one double
+field per object — the exact shape of the engine's hot loops):
+
+| object population | time | allocation |
+|---|---|---|
+| all one hidden class | **76 ms** | 0.0 bytes/op |
+| 24 divergent hidden classes | **1131 ms** | 0.1 bytes/op |
+
+**15× slower, and neither allocates.** Hidden-class diversity is not an
+allocation problem at all — it is a *throughput* problem, and it lands
+squarely on the metric that actually matters: sim time inside the 16.7 ms
+budget.
+
+This is a direct consequence of CLAUDE.md §4's documented pattern — "set the
+field when needed; check before use" — over a `GameEntity` with ~150 optional
+fields. `perf/probe.mjs` counts **12 distinct own-key signatures among the
+asteroid-class entities of a single map**; V8's inline caches go megamorphic
+past 4. Every hot loop in the engine — `applyFlowTo`,
+`handleEntityCollisions`, `nearestEatableShard`, `PhysicsSystem.update` — is
+reading and writing entity fields through megamorphic ICs.
+
+That makes entity-shape normalisation the highest-value remaining lever, and
+it is the P4 milestone. It is also the first change in this gauntlet that
+touches a documented architectural convention, so it needs its own careful
+treatment rather than being folded in here.
+
 ## DECISIONS TAKEN
 
 **D1 — The harness lives in `perf/`, outside `tests/`, and is not wired
