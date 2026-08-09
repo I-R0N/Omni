@@ -5041,6 +5041,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       attractedTo: { include: ['metal-shard'] },
       pullRange: 140, pullStrength: 120, pullMinDist: 12,
       bondsWith: 'none',
+      // Unreachable while bondsWith is 'none' — no bond ever forms, so no
+      // outcome is ever resolved.  Present because the schema requires it,
+      // and 'compose' is what metal WOULD do if the assembly pass ever
+      // handed the close-range case back to bonds.
+      defaultOutcome: 'compose',
     },
     // Metal shards are dent-driven: deform per hit, destroyed cleanly
     // on health = 0 with drops + particles.  No recursive sub-shards.

@@ -184,10 +184,14 @@ export class GameEngine {
   // explosion, debris and salvage spray all land first.  The sim keeps running
   // during it — that is the point.
   private stageClearDelay: number = 0;
+  // Shape mirrors `EngineStats.stageClear` minus `mapName`, which the
+  // snapshot fills from the live map.  (The `discountFraction` /
+  // `discountSeconds` pair this used to carry died with the boss shop
+  // discount; the capstone drops a module now — see §5 payout.)
   private lastStageClear: {
     stage: number; bossName: string; nextStage: number;
-    scoreAwarded: number; salvageDrops: number;
-    discountFraction: number; discountSeconds: number;
+    scoreAwarded: number; salvageCredits: number;
+    rewardLabel?: string; rewardDesc?: string; rewardCredits?: number;
   } | null = null;
   // Salvage forfeited to the CURRENT death (shown on the summary) and across
   // the whole run (so repeated deaths read as a running cost).
@@ -1490,6 +1494,11 @@ export class GameEngine {
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.moduleSpeedMult,
+        shipWeight: this.shipWeight,
+        position: {
+          x: Math.round(this.player.position.x),
+          y: Math.round(this.player.position.y),
+        },
       } : undefined,
       outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
       debugMode: this.debugMode,
@@ -4233,7 +4242,10 @@ export class GameEngine {
               if (!def) continue;
               const on = active[i];
               const req = MODULE_REQUIREMENTS[def.family];
-              const base: Contrib = {
+              // Template for this module's rows — every push below spreads it
+              // and supplies the stat-specific `display`, so the template
+              // itself deliberately has none.
+              const base: Omit<Contrib, 'display'> = {
                   area, idx: i, moduleId: id, label: def.label, active: on,
                   requires: on ? undefined : (req !== undefined ? (req[0] as string) : undefined),
               };

@@ -1121,9 +1121,28 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - `node scripts/inline-build.mjs` after a build → writes
   `omniverse-standalone.html`, a single-file portable build with CSS, JS,
   and referenced PNGs inlined as data URIs.
-- **No test runner or linter is configured.** Don't invent one unless the
-  user asks. There is no standalone `tsc --noEmit` script either; type
-  errors surface during `vite build`.
+- **THREE validation gates, and all three are expected to be green
+  before a commit** (roadmap 5b, decision #46a — this REPLACES the old
+  "no test runner is configured; don't invent one" stance, which held
+  until the repo went public and gained a collaborator with no session
+  history):
+  - `npm run build` — the bundle. Still the last-mile check.
+  - `npm run typecheck` — `tsc --noEmit`. Note that **`vite build` does
+    NOT type-check** (esbuild strips types without checking them), which
+    is how six type errors accumulated unseen before 5b; the build being
+    green says nothing about the types.
+  - `npm test` — `playwright test`. The suites in `tests/` drive the
+    REAL engine in a REAL browser through the `window.__omniEngine` /
+    `window.__omniStats` debug handles; nothing is stubbed. The config's
+    `webServer` block runs `npm run build` itself and previews the
+    result, so `npm test` is one command from a clean clone — but it
+    means the browser must be present: `npx playwright install chromium`
+    once. See `tests/README.md` for the suite map and the harness rules.
+- **Still no linter**, and no CI gating — the two workflows
+  (`pr-preview`, `publish-standalone`) gate nothing. Tiers 3–6 of the
+  parking lot's "Automated test suite" entry (unit tests, Node sim
+  tests, visual regression, CI gating) remain parked deliberately; 5b
+  adopted tiers 1–2 only.
 
 ---
 
