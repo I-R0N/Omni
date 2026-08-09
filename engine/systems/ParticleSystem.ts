@@ -1,6 +1,7 @@
 import { GameEntity, EntityType, Vector2 } from '../../types';
 import { GLITTER_TRAIL_CONSTANTS, MAX_PARTICLES } from '../../constants';
 import { nextId } from './IdAllocator';
+import { enforceTypeCap } from './enforceCap';
 
 /**
  * ParticleSystem — spawns and manages decorative particle entities.
@@ -12,6 +13,48 @@ import { nextId } from './IdAllocator';
  * so FIFO dropping is safe.
  */
 export class ParticleSystem {
+  // Object pool — particles churn through tens of thousands of spawn/
+  // despawn cycles per minute on active play.  Reusing entity objects
+  // here eliminates ~all transient GC pressure for particles, which
+  // smooths out frame times (no periodic 1-2 ms GC pauses) and saves
+  // the literal-allocation cost on every spawn.  Pool is bounded so a
+  // long quiet period after a burst doesn't pin a huge heap.
+  private _pool: GameEntity[] = [];
+  private readonly POOL_CAP = 512;
+
+  /**
+   * Return a deactivated particle entity to the pool for later reuse.
+   * Called by the GameEngine compaction pass when it would otherwise
+   * have left an inactive particle for the GC.  Type-checked here so a
+   * mistaken call on a non-particle is a silent no-op.
+   *
+   * Special-subtype particles (explosion-ring spawned by GameEngine
+   * .spawnExplosionRingParticle, lightning-arc spawned by the chain
+   * routing) ride on EntityType.PARTICLE but carry render flags
+   * (`isExplosionRing`, `isLightningArc`, `arcPoints`, …) that the
+   * renderer dispatches on.  Without clearing those flags here, the
+   * next normal particle that reuses this slot would render as an
+   * explosion ring or arc — visible as stray annular shapes wherever
+   * sparkle / glitter / debris bursts spawn.
+   */
+  public releaseToPool(e: GameEntity): void {
+    if (e.type !== EntityType.PARTICLE) return;
+    if (this._pool.length >= this.POOL_CAP) return;
+    // Clear special-subtype flags so the next reuse starts as a plain
+    // particle.  Cheap (~6 undefined writes) compared to the dispatch
+    // cost of one frame's mis-render.
+    e.isExplosionRing = undefined;
+    e.isLightningArc = undefined;
+    e.arcPoints = undefined;
+    e.explosionRadius = undefined;
+    e.explosionDamage = undefined;
+    e.explosionKnockback = undefined;
+    e.ownerType = undefined;
+    e.hitEntityIds = undefined;
+    e.validHitIds = undefined;
+    this._pool.push(e);
+  }
+
   /**
    * Push `count` particle entities into `entities` around `position`.
    * Options mirror the previous GameEngine helper so all existing call sites
@@ -65,27 +108,52 @@ export class ParticleSystem {
         py += Math.sin(jAngle) * jDist;
       }
 
-      entities.push({
-        id: nextId('part'),
-        type: EntityType.PARTICLE,
-        position: { x: px, y: py },
-        velocity: {
-          x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
-          y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
-        },
-        size:      { x: size, y: size },
-        rotation:  0,
-        color,
-        active:    true,
-        health:    1,
-        maxHealth: 1,
-        lifetime:  life,
-        maxLifetime: life,
-        mass:      0.1,
-      });
+      const vx = Math.cos(angle) * speed + (baseVelocity?.x ?? 0);
+      const vy = Math.sin(angle) * speed + (baseVelocity?.y ?? 0);
+      const pooled = this._pool.pop();
+      if (pooled) {
+        // Reuse path: mutate the pooled entity in place.  Field order
+        // and set is identical to the literal path below so v8 keeps
+        // the hidden class stable across both forms.
+        pooled.id = nextId('part');
+        pooled.type = EntityType.PARTICLE;
+        pooled.position.x = px; pooled.position.y = py;
+        pooled.velocity.x = vx; pooled.velocity.y = vy;
+        pooled.size.x = size; pooled.size.y = size;
+        pooled.rotation = 0;
+        pooled.color = color;
+        pooled.active = true;
+        pooled.health = 1;
+        pooled.maxHealth = 1;
+        pooled.lifetime = life;
+        pooled.maxLifetime = life;
+        pooled.mass = 0.1;
+        entities.push(pooled);
+      } else {
+        entities.push({
+          id: nextId('part'),
+          type: EntityType.PARTICLE,
+          position: { x: px, y: py },
+          velocity: { x: vx, y: vy },
+          size:      { x: size, y: size },
+          rotation:  0,
+          color,
+          active:    true,
+          health:    1,
+          maxHealth: 1,
+          lifetime:  life,
+          maxLifetime: life,
+          mass:      0.1,
+        });
+      }
     }
-
-    this.enforceCap(entities);
+    // NOTE: the particle hard-cap is enforced ONCE per sim step by the engine
+    // loop (GameEngine.updateGameLogic → particles.enforceCap), not here.
+    // enforceTypeCap is O(all entities), so calling it inside every spawn()
+    // made a mass-death frame (≈38 death-burst spawn calls × ~6k entities × 2
+    // passes ≈ 456k iterations) the dominant spawn-frame cost.  Batching to
+    // once/step is visually identical (the cap is applied before the frame
+    // draws) and drops that to a single O(N) pass.
   }
 
   /**
@@ -129,24 +197,41 @@ export class ParticleSystem {
       const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
       const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
 
-      entities.push({
-        id: nextId('glit'),
-        type: EntityType.PARTICLE,
-        position: {
-          x: cx + fx * along + perpX * jitter,
-          y: cy + fy * along + perpY * jitter,
-        },
-        velocity: { x: 0, y: 0 },
-        size: { x: size, y: size },
-        rotation: 0,
-        color,
-        active: true,
-        health: 1,
-        maxHealth: 1,
-        lifetime: life,
-        maxLifetime: life,
-        mass: 0.01,
-      });
+      const gpx = cx + fx * along + perpX * jitter;
+      const gpy = cy + fy * along + perpY * jitter;
+      const pooled = this._pool.pop();
+      if (pooled) {
+        pooled.id = nextId('glit');
+        pooled.type = EntityType.PARTICLE;
+        pooled.position.x = gpx; pooled.position.y = gpy;
+        pooled.velocity.x = 0; pooled.velocity.y = 0;
+        pooled.size.x = size; pooled.size.y = size;
+        pooled.rotation = 0;
+        pooled.color = color;
+        pooled.active = true;
+        pooled.health = 1;
+        pooled.maxHealth = 1;
+        pooled.lifetime = life;
+        pooled.maxLifetime = life;
+        pooled.mass = 0.01;
+        entities.push(pooled);
+      } else {
+        entities.push({
+          id: nextId('glit'),
+          type: EntityType.PARTICLE,
+          position: { x: gpx, y: gpy },
+          velocity: { x: 0, y: 0 },
+          size: { x: size, y: size },
+          rotation: 0,
+          color,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: life,
+          maxLifetime: life,
+          mass: 0.01,
+        });
+      }
     }
   }
 
@@ -154,21 +239,9 @@ export class ParticleSystem {
    * Hard cap on live particles.  If exceeded, deactivates the oldest
    * particles first (FIFO by entity-list order).  Safe because particles are
    * purely decorative — dropping old ones has no gameplay effect.
+   * Implementation in `enforceCap.ts` — shared with ProjectileSystem.
    */
   public enforceCap(entities: GameEntity[]) {
-    let count = 0;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (e.active && e.type === EntityType.PARTICLE) count++;
-    }
-    if (count <= MAX_PARTICLES) return;
-    let toDrop = count - MAX_PARTICLES;
-    for (let i = 0; i < entities.length && toDrop > 0; i++) {
-      const e = entities[i];
-      if (e.active && e.type === EntityType.PARTICLE) {
-        e.active = false;
-        toDrop--;
-      }
-    }
+    enforceTypeCap(entities, EntityType.PARTICLE, MAX_PARTICLES);
   }
 }

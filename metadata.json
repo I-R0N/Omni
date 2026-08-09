@@ -1,5 +1,0 @@
-{
-  "name": "Omni",
-  "description": "A modular 2D game engine featuring a multi-layered universe map system (Universe -> Solar -> Local -> Sub), dynamic rendering, and structured subsystems.",
-  "requestFramePermissions": []
-}

@@ -12,36 +12,53 @@
 // (Stage 4), then the EntityType collapse + cross-variant absorb
 // (Stage 5).  See docs/SHARD_SYSTEM.md.
 
-import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry } from '../../types';
+import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry, NebulaColorStop } from '../../types';
+import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import {
   SHARD_VARIANTS,
   REGEN_POP_CONSTANTS,
   COLORS,
   NEBULA_CONSTANTS,
-  WEAPONS,
-  WEAPON_LIST,
+  CLEANUP_CONSTANTS,
+  LOCAL_MERGE_CONSTANTS,
+  ROCK_CONDENSE,
+  rockHitCeiling,
+  StructureVariant,
   getRockShardFreeSpawn,
   nebulaFadeRateScale,
+  randomPlasticShardShade,
+  PLASTIC_SHARD_AUTOMATA,
+  TILE_SNAP,
+  PLASTIC_DENT_RECOVERY,
+  HOTSPOT_COLLAPSE,
+  METAL_ASSEMBLY,
+  METAL_MAX_DENSITY_TIER,
+  getActiveShatterGraceDelay,
+  nebulaHueToShardVariant,
+  NEBULA_CONDENSE,
+  NEBULA_CONDENSE_STALL_BONDS,
 } from '../../constants';
-import { HEX_AREA } from '../maps/TileGenerator';
+import { EntityIndex } from './EntityIndex';
+import type { PerfController } from './PerfController';
+import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
 import {
-  wrapDeltaX, wrapDeltaY, wrapPosition,
+  wrapDeltaX, wrapDeltaY, wrapPosition, wrapX, wrapY,
   MAP_WIDTH, MAP_HEIGHT,
 } from '../toroidal';
 import {
   blendCompositionToHex,
   blendCompositions,
   cloneComposition,
+  hexToHueDeg,
 } from '../NebulaColor';
 import { ParticleSystem } from './ParticleSystem';
-import { PhysicsSystem } from './PhysicsSystem';
+import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
 import {
   ShardVariantId,
   ShardVariantDef,
   VariantSelector,
   MergeRule,
-  MergeOutcome,
   ShardAdapter,
 } from './ShardSystem.types';
 
@@ -66,6 +83,17 @@ export function shardVariantOf(entity: GameEntity): ShardVariantId | null {
   }
 }
 
+// Odd-r offset hex neighbour deltas (must match TileGenerator.getNeighbors),
+// hoisted to module scope as flat [dc, dr] pairs so the per-destroy
+// neighbour-count recompute walks them with zero per-tile allocation
+// (getHexNeighbors allocates 12 objects + arrays per call).
+const HEX_NEIGHBOR_DELTAS_EVEN: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1],
+];
+const HEX_NEIGHBOR_DELTAS_ODD: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1],
+];
+
 /**
  * Per-entity regen entry.  `delaySeconds` is captured from the
  * variant config at queue time so the per-tick progress calculation
@@ -78,22 +106,152 @@ interface RegenEntry {
   variantId: ShardVariantId;
 }
 
+// Hard cap on a shatter fragment's outward scatter speed (units/substep).
+// Keeps an asteroid break a gentle outward spread even when struck by a
+// fast projectile — pieces pop apart and drift rather than launching.
+const SHATTER_SCATTER_SPEED_CAP = 2.5;
+
+// Tile-equivalent diameter — the size at which a glass-shard is
+// considered "tile-sized" and triggers the tier-transition roll
+// (glass-tile vs. smaller rock-shard).  Matches the diameter of a
+// circle whose area equals one hex tile.
+const GLASS_TIER_DIAMETER = Math.sqrt(HEX_AREA);
+// Rock-shard "grow into a tile" threshold.  Unlike glass (which condenses
+// at exactly hex-area), rocks are allowed to grow LARGER before they
+// transmute, so a dense cluster forms a visible big rock that keeps
+// absorbing chips before snapping to a static rock-tile.  Set as a
+// multiple of the hex-area diameter; raise/lower to tune how big rocks
+// get before they tile.  At ×1.8 the rock reaches ≈ 3.2× hex area (many
+// absorbed chips) before transmuting.
+// ── Rock condensation grid helpers (see ROCK_CONDENSE in constants) ──
+const ROCK_MAX_DIAMETER  = ROCK_CONDENSE.DIAMETERS[ROCK_CONDENSE.DIAMETERS.length - 1];
+/** Nominal mass of grid cell (sizeTier, densityTier), tiers 1-indexed. */
+function rockCellMass(s: number, d: number): number {
+  return ROCK_CONDENSE.MASS_COEFF
+    * ROCK_CONDENSE.DIAMETERS[s - 1] * ROCK_CONDENSE.DIAMETERS[s - 1]
+    * ROCK_CONDENSE.DENSITY_MULT[d - 1];
+}
+const ROCK_MAX_CELL_MASS = rockCellMass(ROCK_CONDENSE.DIAMETERS.length, ROCK_CONDENSE.DENSITY_MULT.length);
+/** Nearest size tier (1..5) for an arbitrary diameter (snaps spawned /
+ *  legacy rocks onto the grid). */
+function nearestRockSizeTier(diam: number): number {
+  const D = ROCK_CONDENSE.DIAMETERS;
+  let best = 1, bestErr = Infinity;
+  for (let i = 0; i < D.length; i++) {
+    const e = Math.abs(diam - D[i]);
+    if (e < bestErr) { bestErr = e; best = i + 1; }
+  }
+  return best;
+}
+/** Denser-first placement of mass M onto the grid, starting at size tier
+ *  s0 (the larger input's size — never shrink below it): pick the
+ *  smallest density tier that holds M at the current size, growing size
+ *  only when density caps.  Returns null when M exceeds the top cell
+ *  (→ condense into a static rock-tile). */
+function deriveRockCell(s0: number, M: number): { s: number; d: number } | null {
+  const nS = ROCK_CONDENSE.DIAMETERS.length;
+  const nD = ROCK_CONDENSE.DENSITY_MULT.length;
+  let s = Math.max(1, Math.min(nS, s0));
+  while (s <= nS) {
+    for (let d = 1; d <= nD; d++) {
+      if (rockCellMass(s, d) >= M - 1e-6) return { s, d };
+    }
+    s++; // density maxed at this size — grow size
+  }
+  return null; // overflow → tile
+}
+
+/** Local-density boost for the merge/absorption rate: 1.0× in sparse
+ *  areas, ramping to MAX_BOOST in dense pockets (a shard's merge-grid
+ *  cell occupancy).  Focuses the acceleration on the hotspots that
+ *  actually drive collision cost. */
+function localDensityBoost(cellCount: number): number {
+  const { DENSITY_LO, DENSITY_HI, MAX_BOOST } = LOCAL_MERGE_CONSTANTS;
+  if (cellCount <= DENSITY_LO) return 1;
+  if (cellCount >= DENSITY_HI) return MAX_BOOST;
+  return 1 + (MAX_BOOST - 1) * (cellCount - DENSITY_LO) / (DENSITY_HI - DENSITY_LO);
+}
+
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
- * `timer` accumulates contact dt; when it reaches `threshold` AND
- * the rule's gate (requirePartnerSizeFraction) is met, the resolved
- * outcome fires.
+ * `timer` accumulates contact dt; when it reaches `threshold` the
+ * pair composes — unless `cohesionOnly` is set, in which case the
+ * bond never matures into compose (it just persists for cohesion +
+ * threshold-pull).  `cohesionMul` and `breakFactorMul` are
+ * per-partner multipliers stored at bond formation: 'strong' tier
+ * partners use a higher cohesion blend rate and a larger break
+ * factor (slower to detach).
  */
 interface BondEntry {
   a: GameEntity;
   b: GameEntity;
   timer: number;
   threshold: number;
-  outcome: MergeOutcome;
-  /** Optional gate for cross-variant absorbs (today: glass-shard
-   *  must reach sizeMax * gate before absorb fires).  When unmet,
-   *  the bond persists but the merge doesn't trigger. */
-  requirePartnerSizeFraction?: number;
+  cohesionOnly?: boolean;
+  cohesionMul?: number;
+  breakFactorMul?: number;
+}
+
+// 'strong' bond-tier multipliers (plastic-shard ↔ glass / rock /
+// metal / indestructible today).  cohesionMul scales the velocity-
+// blend rate (base COHESION 4.0/s in tickBonds) so a strong pair
+// locks to a shared velocity faster — reads as a rigid grip.
+// breakFactorMul scales the break distance (base BREAK_FACTOR 1.5 ×
+// contactDist) so a strong bond stretches much further before it
+// snaps — reads as hard to pull apart.  Both bond-formation sites
+// (runMergeBroadphase mobile↔mobile + runShardTileBondFormation
+// shard↔tile) read these constants so the two paths can't drift.
+const STRONG_COHESION_MUL = 3.0;
+const STRONG_BREAK_FACTOR_MUL = 4.0;
+
+// ── Metal triangular-lattice constants ──────────────────────────────────
+// An UP cell (apex toward local -y) shares its 3 edges with DOWN cells at
+// these integer key offsets; a DOWN cell mirrors them.  Cell key (ix,iy)
+// maps to lattice-frame centroid (ix·R·√3/2, iy·R/2).  Neighbours always
+// flip orientation, so the lattice is bipartite and every key has a fixed
+// up/down parity once a seed is placed.
+const METAL_UP_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [[0, 2], [-1, -1], [1, -1]];
+const METAL_DOWN_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [[0, -2], [-1, 1], [1, 1]];
+
+// The 6 cells of the single hexagon every composite builds, centred on the
+// lattice vertex (1,1).  formMetalComposite seeds the canonical rhombus
+// (0,0)+(0,2) — both members of this set — so every composite shares this
+// frame: it fills these 6 slots, and the hexagon centroid is the vertex
+// (1,1) → lattice point (R·√3/2, R/2), which is also the mass centroid once
+// all 6 are present (so a completed composite's `position` IS the hexagon
+// centre).  METAL_HEX_SIZE = 6 is "complete".
+const METAL_HEX_SIZE = 6;
+const METAL_HEX_CELLS: ReadonlyArray<{ ix: number; iy: number; up: boolean }> = [
+  { ix: 0, iy: 0, up: true },
+  { ix: 2, iy: 0, up: true },
+  { ix: 1, iy: 3, up: true },
+  { ix: 0, iy: 2, up: false },
+  { ix: 2, iy: 2, up: false },
+  { ix: 1, iy: -1, up: false },
+];
+
+// Andrew's monotone-chain convex hull (CCW).  Used to give a metal
+// composite a convex collision polygon (SAT) that bounds its triangle
+// cells — render uses the exact cells, collision uses this hull.
+function metalConvexHull(points: Vector2[]): Vector2[] {
+  if (points.length < 3) return points.slice();
+  const pts = points.slice().sort((p, q) => (p.x === q.x ? p.y - q.y : p.x - q.x));
+  const cross = (o: Vector2, a: Vector2, b: Vector2) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Vector2[] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: Vector2[] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
 }
 
 export class ShardSystem {
@@ -105,11 +263,52 @@ export class ShardSystem {
   private pending: RegenEntry[] = [];
 
   /**
+   * DBG toggle — gates the gravity-pull pass inside
+   * runMergeBroadphase.  When false, no shard accelerates toward
+   * another shard regardless of `attractedTo`.  Only nebula-shard
+   * has non-'none' attractedTo today, so flipping this off mainly
+   * stops nebula self-coalesce gravity and any cross-variant pull.
+   */
+  public shardGravityEnabled: boolean = true;
+  /**
+   * DBG toggle — gates bond formation in runMergeBroadphase AND
+   * drops all existing bonds at the top of update().  When false,
+   * shards never stick on contact; nebula self-compose (which fires
+   * via the zero-time bond) stops too.
+   */
+  public shardBondingEnabled: boolean = true;
+  /**
+   * DBG toggle (Pl shade) — gates the plastic-shard neighbour-contact
+   * count computed in runMergeBroadphase.  When false, the count
+   * isn't refreshed (RenderSystem then falls back to per-instance
+   * shades), saving the extra plastic-only neighbour scan.  Default
+   * OFF — matches the renderer default; toggled in sync via
+   * GameEngine.togglePlasticAutomata.
+   */
+  public plasticAutomataEnabled: boolean = false;
+  /**
+   * DBG toggle (Tile shade) — master gate for the material-tile
+   * neighbour-brightness automata (glass / metal / rock STATIC tiles).
+   * When false, RenderSystem draws tiles at their base colour.  Default
+   * ON.  Neighbour counts are baked once at map load and frozen, so
+   * this only gates the render-side read, not any recompute.
+   */
+  public materialAutomataEnabled: boolean = true;
+  /** Reused occupancy index for the one-time material-tile neighbour
+   *  bake — hex-cell key → variant id, so neighbour counting stays
+   *  same-variant (a metal tile abutting a rock tile is an edge for
+   *  both). */
+  private materialGridIndex: Map<number, ShardVariantId> = new Map();
+  /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
-   * accumulates a contact timer; when timer >= threshold the bond's
-   * resolved outcome ('compose' today, 'absorb' in Stage 5) fires.
+   * accumulates a contact timer; when timer >= threshold the pair
+   * composes.
    */
   private bonds: BondEntry[] = [];
+  // Peak per-bond local merge-rate multiplier applied last tickBonds —
+  // exposed for the DBG "merge rate" readout (replaces the old global
+  // count-driven multiplier).  1.0 = no local acceleration this frame.
+  public lastMergeRatePeak: number = 1;
 
   /**
    * Optional adapter providing variant-specific completion hooks.
@@ -121,15 +320,6 @@ export class ShardSystem {
   private adapter: ShardAdapter | null = null;
 
   /**
-   * Active drops cache (set by GameEngine).  Used by the merge
-   * broadphase as additional candidates: today's stick-bond logic
-   * pairs ammo / health drops with each other and with asteroids,
-   * forming composite asteroids on cross-type drop merges.  The
-   * dropComposition payload threading lives in composeEntities.
-   */
-  private activeDrops: GameEntity[] = [];
-
-  /**
    * Caller-provided lookup for the current map type.  Used inside
    * composeEntities to read the asteroid-size cap from
    * MAP_POPULATION (today's mergeEntities call site
@@ -137,7 +327,64 @@ export class ShardSystem {
    */
   private currentMapType: MapType = MapType.UNIVERSE;
 
+  /**
+   * Optional viewport-aware EntityIndex.  Null in headless tests / pre-
+   * map-load; once wired, the large-shard-collapse pass uses it to
+   * prefer offscreen candidates so collapses never pop on the player.
+   */
+  private entityIndex: EntityIndex | null = null;
+
+  /**
+   * Central performance controller.  Drives the plastic-cosmetic skip
+   * gate (PAuto count + reach) and the entity-count merge/eat RATE
+   * multiplier.  Null only pre-wire; GameEngine sets it at construction.
+   */
+  private perfController: PerfController | null = null;
+
+  /**
+   * Per-merge-pass counter for the plastic cosmetic sub-gate (PAuto
+   * count + reach).  These passes are NESTED inside runMergeBroadphase,
+   * which itself only runs on shard-pair steps — so they can't use the
+   * controller's global-tick `shouldRun` (its phase might never coincide
+   * with merge-pass steps, starving the gate forever).  Instead the
+   * controller supplies the effective INTERVAL and we apply it against a
+   * counter that ticks once per merge pass, so the gate fires every Nth
+   * merge pass exactly like the old SHPAIR-paced cadence.
+   */
+  private plasticCosmeticTick: number = 0;
+
+  // ── Per-merge-pass scratch buffers ──────────────────────────────────────
+  // runMergeBroadphase() used to instantiate a fresh Set + Map per call;
+  // both are cleared in place each pass now so the only persistent cost
+  // is the inner number[] cell arrays themselves.  At 60 fps on a dense
+  // shard map that saves ~120 allocations / sec without any change to the
+  // broadphase's behaviour.
+  private _mergeBondedScratch: Set<GameEntity> = new Set();
+  private _mergeGridScratch: Map<number, number[]> = new Map();
+
+  // ── Per-shatter scratch buffers (allocation discipline) ─────────────────
+  // shatterAsteroidStyle used to allocate the size / raw-area / density-tier
+  // temp arrays (via Array.from / map / filter) every shatter, and
+  // generateShardPolygon allocated an intermediate {angle,r}[] + sort/map
+  // closures per polygon.  A mass-shatter frame (a cluster crushed at once)
+  // fired hundreds of these, driving the GC stalls + sim spikes the Perf REC
+  // captures flagged.  These are reused in place — values are copied into the
+  // spawned children (never held by reference), so sharing one buffer across
+  // the synchronous, non-reentrant shatter loop is safe.  The final held
+  // allocations (child GameEntity + its polygon {x,y}[]) are untouched here
+  // (they need pooling — a separate, more invasive step).
+  private _shSizes: number[] = [];
+  private _shRaw: number[] = [];
+  private _shDensity: number[] = [];
+  private _polyAngle: number[] = [];
+  private _polyRadius: number[] = [];
+  private _polyIdx: number[] = [];
+
   constructor(private particles: ParticleSystem) {}
+
+  public setPerfController(pc: PerfController): void {
+    this.perfController = pc;
+  }
 
   /** Wire the variant-specific completion adapter.  Called once at
    *  GameEngine construction after NebulaSystem is built. */
@@ -150,25 +397,83 @@ export class ShardSystem {
     this.setAdapter(adapter);
   }
 
-  /** Inject the active-drops cache + map type each frame.  Must be
-   *  called before update() so the merge broadphase sees the right
-   *  candidate set.  Cheap — passes a reference to the caller's
-   *  array, not a copy. */
-  public setMergeContext(activeDrops: GameEntity[], mapType: MapType): void {
-    this.activeDrops = activeDrops;
+  /** Inject the current map type each frame.  Must be called before
+   *  update() so the merge broadphase / free-spawn sizing read the
+   *  right per-map config. */
+  public setMergeContext(mapType: MapType): void {
     this.currentMapType = mapType;
   }
 
   /**
+   * Wire the per-frame viewport-aware EntityIndex used by the
+   * graceful-cleanup paths (large-shard collapse, post-merge
+   * fade-out).  Called once at GameEngine construction; the index
+   * is then consulted each tick via `isOffscreen(entity)`.
+   */
+  public setEntityIndex(index: EntityIndex): void {
+    this.entityIndex = index;
+  }
+
+  /** Wire the shard→tile blow-back hook.  Invoked with the new tile's
+   *  centre whenever a shard cluster condenses into a static tile
+   *  (glass / rock); GameEngine emits the merge shockwave there. */
+  public setTileFormedHandler(fn: (x: number, y: number) => void): void {
+    this.onTileFormed = fn;
+  }
+  private onTileFormed: ((x: number, y: number) => void) | null = null;
+
+  /**
    * Per-frame tick.  Called from GameEngine.updateGameLogic at the
    * fixed-step dt.  Stage 4: ticks regens + merges (existing bonds +
-   * new gravity-pull / bond-formation pass).
+   * new gravity-pull / bond-formation pass).  The density-compaction
+   * passes (large-shard collapse + paced cleanup) run last so any
+   * candidates that were just merged this frame don't get double-
+   * processed.
    */
-  public update(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
+  public update(
+    entities: GameEntity[],
+    dt: number,
+    physics: PhysicsSystem,
+    runMergePass: boolean = true,
+  ): void {
+    const t0 = performance.now();
+    // DBG bonding toggle is destructive — when off, any bonds left
+    // over from the previous frame are dropped here so cohesion
+    // stops dragging shards together as soon as the user flips it.
+    if (!this.shardBondingEnabled && this.bonds.length > 0) {
+      this.bonds.length = 0;
+    }
+    // Material-tile automata neighbour counts are baked once at map load
+    // (ensureMaterialNeighbors) and frozen — destroying tiles does NOT
+    // re-tint the survivors.  No per-frame or per-destroy recompute.
     this.tickRegens(entities, dt, physics);
-    this.tickBonds(entities, dt, physics);
-    this.runMergeBroadphase(entities, dt, physics);
+    // tickBonds always runs to advance bond timers, break bonds
+    // whose parties have separated, and compose pairs when timers
+    // mature.  The cohesion velocity-blend inside
+    // tickBonds is gated by runMergePass so it doesn't drag bonded
+    // shards together on frames when separation is skipped — that
+    // imbalance is what collapsed clusters to a single point on
+    // high-N ShPair settings.
+    this.tickBonds(entities, dt, physics, runMergePass);
+    if (runMergePass) {
+      this.runMergeBroadphase(entities, dt, physics);
+      this.runLargeShardCollapse(entities);
+      if (METAL_ASSEMBLY.ENABLED) this.tickMetalAssembly(entities, physics);
+    }
+    // Plastic-shard dent recovery is unconditional (runMergePass
+    // gates the broadphase passes; recovery is independent of that
+    // cadence and runs every sim step so the lerp is smooth).
+    this.tickPlasticDentRecovery(entities, dt);
+    this.lastUpdateMs = performance.now() - t0;
   }
+
+  /**
+   * Wall time (ms) of the most recent update() call.  Read by
+   * GameEngine for the dev perf overlay so the cost of merge
+   * broadphase + bond ticks + density compaction is visible
+   * outside the main physics / collisions buckets.
+   */
+  public lastUpdateMs: number = 0;
 
   /**
    * Death-routing entry point.  Stage 1–2: returns false (existing
@@ -186,6 +491,89 @@ export class ShardSystem {
   public reset(): void {
     this.pending.length = 0;
     this.bonds.length = 0;
+    this.plasticCosmeticTick = 0;
+  }
+
+  /**
+   * Bake every material tile's same-variant neighbour count ONCE.
+   * Called from GameEngine.loadMap (before the static-tile world canvas
+   * is stamped) and on Tile-shade enable.  The counts are then frozen —
+   * destroying / regenerating tiles does not re-tint survivors — which
+   * is what keeps the automata free of any per-frame or per-destroy
+   * recompute cost.
+   */
+  public ensureMaterialNeighbors(entities: GameEntity[]): void {
+    if (!this.materialAutomataEnabled) return;
+    this.recomputeMaterialNeighbors(entities);
+  }
+
+  /**
+   * Bake every material tile's same-variant hex-neighbour count
+   * (`materialNeighborCount`) for the brightness/opacity automata.  Two
+   * passes: build a hex-cell→variant occupancy index of the active
+   * automata tiles, then for each tile count the neighbours whose stored
+   * variant matches its own.  Same shape as
+   * NebulaSystem.recomputeNeighborCounts but spans every variant carrying
+   * an `automata` config.  Runs ONCE per map (via ensureMaterialNeighbors)
+   * — the counts are frozen thereafter.
+   */
+  private recomputeMaterialNeighbors(entities: GameEntity[]): void {
+    const index = this.materialGridIndex;
+    index.clear();
+    // Pass 1 — occupancy of active automata-bearing static tiles.
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e.active || e.mass !== Infinity) continue;
+      const v = e.shardVariant;
+      if (v === undefined || SHARD_VARIANTS[v].automata === undefined) continue;
+      if (e.tileGridCol === undefined || e.tileGridRow === undefined) continue;
+      const key = (e.tileGridCol << 16) | (e.tileGridRow & 0xFFFF);
+      index.set(key, v);
+    }
+    // Pass 2 — same-variant neighbour count per tile (active or not, so a
+    // tile that just died resets to 0 and a reviving ghost stays current).
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (e.mass !== Infinity) continue;
+      const v = e.shardVariant;
+      if (v === undefined || SHARD_VARIANTS[v].automata === undefined) continue;
+      if (e.tileGridCol === undefined || e.tileGridRow === undefined) continue;
+      let count = 0;
+      if (e.active) {
+        // Allocation-free hex-neighbour walk (no getHexNeighbors array).
+        const deltas = (e.tileGridRow % 2 === 0)
+          ? HEX_NEIGHBOR_DELTAS_EVEN
+          : HEX_NEIGHBOR_DELTAS_ODD;
+        for (let d = 0; d < deltas.length; d++) {
+          const nc = e.tileGridCol + deltas[d][0];
+          const nr = e.tileGridRow + deltas[d][1];
+          const key = (nc << 16) | (nr & 0xFFFF);
+          if (index.get(key) === v) count++;
+        }
+      }
+      if (e.materialNeighborCount !== count) {
+        e.materialNeighborCount = count;
+        // The neighbour count drives the render tint/alpha, so invalidate
+        // the cached automata colour (metal/rock string tint) and force a
+        // re-stamp for cache-eligible variants (glass / indestructible bake
+        // their tint into the static-tile world canvas).
+        e.materialAutomataCachedColor = undefined;
+        if (e._staticCached === true) e._staticCached = false;
+      }
+      // Metal unifies on densityTier: a natural map-load tile seeds its
+      // initial tier from cluster neighbour count (denser cluster = higher
+      // tier = lighter + tougher + more break-shards), once.  Guarded on
+      // densityTier === undefined so a re-run can't compound the HP scale.
+      if (v === 'metal-tile' && e.densityTier === undefined) {
+        const tier = Math.max(1, Math.min(METAL_MAX_DENSITY_TIER, count));
+        e.densityTier = tier;
+        e.materialAutomataCachedColor = undefined;
+        if (tier > 1) {
+          e.maxHealth = (e.maxHealth ?? 1) * tier;
+          e.health = e.maxHealth;
+        }
+      }
+    }
   }
 
   // ── Regen queue ───────────────────────────────────────────────────
@@ -253,13 +641,16 @@ export class ShardSystem {
     // + cache invalidation + neighbour-counts dirty bookkeeping +
     // grid-index update).  Adapter no-ops gracefully when not set.
     if (variant.regen.rewriteColor === 'neighborhood-blend') {
-      this.regenAdapter?.onNeighborhoodBlendRegen(entity, entities);
+      this.adapter?.onNeighborhoodBlendRegen(entity, entities);
     }
 
     // Re-register in the static grid so collisions hit again.  Both
     // STRUCTURE and NEBULA tiles need this — today both code paths
     // call physics.addStaticEntity at completion.
     physics.addStaticEntity(entity);
+
+    // Automata neighbour counts are frozen at map-load bake, so a
+    // reviving tile keeps whatever count it had — no recompute here.
 
     // Variant-driven pop animation: STRUCTURE tiles emit a chip
     // burst of tile-coloured particles; nebula tiles use the
@@ -305,6 +696,24 @@ export class ShardSystem {
     const variantId = shardVariantOf(parent);
     if (variantId === null) return;
     const variant = SHARD_VARIANTS[variantId];
+
+    // Metal-composite decomposition — metal-shard.shatter.kind is
+    // 'none', so by default a dying metal entity just disappears.
+    // But a composite (metalCells.length >= 2) is conceptually N
+    // bonded triangles, and the user expects it to fragment back
+    // into those triangles on destruction.  decomposeMetalComposite
+    // walks the lattice, spawns one loose triangle per cell at the
+    // cell's world position, and returns — bypassing the powerlaw
+    // pipeline entirely so we don't double-spawn.  Single-cell
+    // metal-shards still fall through to the kind-check below and
+    // die cleanly without children.
+    if (parent.shardVariant === 'metal-shard'
+     && parent.metalCells !== undefined
+     && parent.metalCells.length >= 2) {
+      this.decomposeMetalComposite(parent, entities);
+      return;
+    }
+
     if (variant.shatter.kind !== 'powerlaw') return;
 
     if (variant.shatter.style === 'nebula') {
@@ -327,17 +736,37 @@ export class ShardSystem {
     angleJitter: number,
     radiusMin: number,
     radiusRange: number,
+    polyVerticesOptions?: number[],
   ): Vector2[] {
-    const verticesRange = polyVerticesMax - polyVerticesMin + 1;
-    const numPoints = polyVerticesMin + Math.floor(Math.random() * verticesRange);
-    const rawPts: { angle: number; r: number }[] = [];
+    // Discrete options take priority over the continuous Min/Max range
+    // (used by rock-shard / metal-shard to snap to specific counts).
+    const numPoints = polyVerticesOptions !== undefined && polyVerticesOptions.length > 0
+      ? polyVerticesOptions[Math.floor(Math.random() * polyVerticesOptions.length)]
+      : polyVerticesMin + Math.floor(Math.random() * (polyVerticesMax - polyVerticesMin + 1));
+    // Fill reused numeric scratch (no intermediate {angle,r} objects) then
+    // sort indices by angle in place — an insertion sort (numPoints is ~6-8)
+    // that reproduces the old `.sort((a,b)=>a.angle-b.angle)` order exactly.
+    // Only the returned {x,y}[] (held by the entity) is freshly allocated.
+    const ang = this._polyAngle, rad = this._polyRadius, idx = this._polyIdx;
     for (let j = 0; j < numPoints; j++) {
-      const baseAngle  = (j / numPoints) * Math.PI * 2;
-      const jitterAmt  = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitter;
-      rawPts.push({ angle: baseAngle + jitterAmt, r: baseR * (radiusMin + Math.random() * radiusRange) });
+      const baseAngle = (j / numPoints) * Math.PI * 2;
+      const jitterAmt = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitter;
+      ang[j] = baseAngle + jitterAmt;
+      rad[j] = baseR * (radiusMin + Math.random() * radiusRange);
+      idx[j] = j;
     }
-    rawPts.sort((a, b) => a.angle - b.angle);
-    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+    for (let a = 1; a < numPoints; a++) {
+      const key = idx[a]; const ka = ang[key];
+      let b = a - 1;
+      while (b >= 0 && ang[idx[b]] > ka) { idx[b + 1] = idx[b]; b--; }
+      idx[b + 1] = key;
+    }
+    const out: Vector2[] = new Array(numPoints);
+    for (let k = 0; k < numPoints; k++) {
+      const i = idx[k];
+      out[k] = { x: Math.cos(ang[i]) * rad[i], y: Math.sin(ang[i]) * rad[i] };
+    }
+    return out;
   }
 
   /**
@@ -354,10 +783,25 @@ export class ShardSystem {
   ): void {
     const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
     const MIN_SIZE = childVariant.spawn.sizeMin;
-    const parentArea = parent.size.x * parent.size.x;
 
-    // If parent is too small to yield two valid fragments, stop.
-    if (parentArea < MIN_SIZE * MIN_SIZE * 2) return;
+    // Fraction-sized override (today: plastic-shard).  When both
+    // childSizeFractionMin and childSizeFractionMax are set, sizes
+    // are picked as `parent.size × random(fMin, fMax)` per child
+    // — no area conservation, no MIN_SIZE filter on outputs — so a
+    // fixed count of visible-sized children spawns regardless of
+    // parent area math.  Termination: parent below MIN_SIZE
+    // doesn't shatter, so shrinking generations die cleanly.
+    const fMin = parentVariant.shatter.childSizeFractionMin;
+    const fMax = parentVariant.shatter.childSizeFractionMax;
+    const useFraction = fMin !== undefined && fMax !== undefined;
+
+    if (useFraction) {
+      if (parent.size.x < MIN_SIZE) return;
+    } else {
+      // Area-conservative mode: parent needs enough area for at
+      // least two MIN_SIZE children.
+      if (parent.size.x * parent.size.x < MIN_SIZE * MIN_SIZE * 2) return;
+    }
 
     // Damage scales both count and size distribution.  damageNorm 0
     // → countMin pieces, mostly large (alphaMin); damageNorm 1 →
@@ -365,17 +809,91 @@ export class ShardSystem {
     const damage     = parent.lastImpactDamage ?? 1;
     const damageNorm = Math.min(1, (damage - 1) / 4);
     const { countMin, countMax, alphaMin, alphaMax } = parentVariant.shatter;
-    const count = countMin + Math.round(damageNorm * (countMax - countMin));
+
+    // Merge-count override — when the parent was built up by self-
+    // merge (mergeCount > 1), break it back into roughly the same
+    // number of base-sized fragments that composed it.  Damage-norm
+    // and size-keyed count are ignored so the invariant "N base
+    // shards in, N fragments out" holds regardless of how hard the
+    // killing hit was.  A small ±1 wobble keeps the fragment count
+    // from feeling mechanically uniform on repeated breaks.  Applies
+    // to every variant going through shatterAsteroidStyle (rock-
+    // shard / glass-shard / plastic-shard); base shards (mergeCount
+    // === 1 or undefined) fall through to the existing size-keyed
+    // and damage-based formulas.
+    //
+    // Rock-shard override — large rocks ALWAYS break into a
+    // satisfying swarm regardless of merge history.  Count is the
+    // MAX of (merges ± wobble) and (size / 40), so even a base
+    // rock that condensed through ROCK_CONDENSE without going
+    // through compose ends up with proportional debris instead of
+    // 2-3 chunks.  Capped at 30 so top-tier boulders don't flood
+    // the field.
+    let count: number;
+    const sizeLevels = parentVariant.shatter.shatterCountBySize;
+    const merges = parent.mergeCount ?? 1;
+    const isRockShatter = parent.shardVariant === 'rock-shard';
+    if (isRockShatter) {
+      const sizeBased = Math.min(30, Math.max(2, Math.floor(parent.size.x / 40)));
+      const wobble = merges > 1 ? Math.floor(Math.random() * 3) - 1 : 0;
+      const mergeBased = merges > 1 ? Math.max(2, merges + wobble) : 2;
+      count = Math.max(mergeBased, sizeBased);
+    } else if (merges > 1) {
+      const wobble = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
+      count = Math.max(2, merges + wobble);
+    } else if (sizeLevels && sizeLevels.length > 0) {
+      const parentSize = parent.size.x;
+      let chosen = sizeLevels[sizeLevels.length - 1].count;
+      for (let i = 0; i < sizeLevels.length; i++) {
+        if (parentSize < sizeLevels[i].maxSize) { chosen = sizeLevels[i].count; break; }
+      }
+      count = chosen;
+    } else {
+      count = countMin + Math.round(damageNorm * (countMax - countMin));
+    }
     if (count < 2) return;
 
-    const alpha = alphaMin + damageNorm * (alphaMax - alphaMin);
-    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-
-    const sizes: number[] = rawAreas
-      .map(a => Math.sqrt((a / rawSum) * parentArea))
-      .filter(s => s >= MIN_SIZE);
-    if (sizes.length < 2) return;
+    // Reused scratch (see field decl) — cleared per shatter, values copied
+    // into the spawned children below, never held by reference.
+    const sizes = this._shSizes;
+    sizes.length = 0;
+    if (merges > 1 || isRockShatter) {
+      // Merged shard OR rock-shatter — even area-per-fragment so
+      // every child lands at roughly base-shard size, regardless of
+      // how many merges or how big the parent is.  Area-conserving
+      // composes (glass-self, plastic-self) recover the base
+      // diameter directly via sqrt(parentArea / N); rock-condense
+      // merges shrink the survivor via density tiers, so its
+      // parentArea / N is smaller than the original base —
+      // fragments come out slightly under base size, which reads
+      // correctly for a "denser cluster bursting apart."  No MIN_
+      // SIZE filter pass since the invariant guarantees fragments
+      // sit at roughly base size.
+      const parentArea = parent.size.x * parent.size.x;
+      const childSize = Math.sqrt(parentArea / count);
+      for (let i = 0; i < count; i++) sizes.push(childSize);
+    } else if (useFraction) {
+      const span = fMax! - fMin!;
+      for (let i = 0; i < count; i++) {
+        sizes.push(parent.size.x * (fMin! + Math.random() * span));
+      }
+    } else {
+      const parentArea = parent.size.x * parent.size.x;
+      const alpha = alphaMin + damageNorm * (alphaMax - alphaMin);
+      const rawAreas = this._shRaw;
+      rawAreas.length = 0;
+      let rawSum = 0;
+      for (let i = 0; i < count; i++) {
+        const a = Math.pow(Math.random(), alpha);
+        rawAreas.push(a);
+        rawSum += a;
+      }
+      for (let i = 0; i < count; i++) {
+        const s = Math.sqrt((rawAreas[i] / rawSum) * parentArea);
+        if (s >= MIN_SIZE) sizes.push(s);
+      }
+      if (sizes.length < 2) return;
+    }
 
     // Resolve impact direction.
     const iv = parent.lastImpactVelocity;
@@ -387,20 +905,65 @@ export class ShardSystem {
     const isTile = childVariant.id === 'glass-shard'; // colour fallback distinguishes blocky vs jagged
     const childSpawn = childVariant.spawn;
 
+    // Rock-only: pre-compute per-child density tiers as a mix around
+    // the parent's tier (random ±2 clamped to valid range), then
+    // scale each child's mass and HP by the chosen tier.  Reads as
+    // "the parent's density distributes unevenly across fragments"
+    // — some chunks are softer than the parent, some denser, and
+    // the denser ones take more hits to crack open.  Non-rock
+    // children leave densityTier undefined and use the standard
+    // sizeToMass formula unchanged.
+    let childDensityTiers: number[] | null = null;
+    if (isRockShatter) {
+      const parentTier = parent.densityTier ?? 0;
+      const maxTier = ROCK_CONDENSE.DENSITY_MULT.length - 1;
+      childDensityTiers = this._shDensity; // reused scratch (values copied below)
+      childDensityTiers.length = 0;
+      for (let i = 0; i < sizes.length; i++) {
+        const offset = Math.floor(Math.random() * 5) - 2; // -2..+2
+        childDensityTiers.push(Math.max(0, Math.min(maxTier, parentTier + offset)));
+      }
+    }
+
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
-      const hp      = newSize > 30 ? 2 : 1;
+      const isRockChild = childVariant.id === 'rock-shard';
+      // Density-aware mass: dense fragments feel heavy on impact and resist
+      // push.  HP is resolved per-family below.
+      let childMass = childSpawn.sizeToMass(newSize);
+      let densityTier: number | undefined = undefined;
+      if (childDensityTiers !== null) {
+        densityTier = childDensityTiers[i];
+        childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
+      }
+      let hp: number;
+      if (isRockChild) {
+        // Rock children follow the same probabilistic crack→break model as
+        // free-spawn asteroids and rock tiles: maxHealth is the size/density
+        // hit ceiling (ROCK_BREAK), not a flat HP.
+        hp = rockHitCeiling(newSize, densityTier);
+      } else {
+        // glass / plastic / metal debris keep the original brittle 1-2 HP,
+        // gently scaled by density (sqrt) when condensed.
+        const baseHp = newSize > 30 ? 2 : 1;
+        hp = densityTier !== undefined
+          ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
+          : baseHp;
+      }
 
       let scatterAngle: number;
       let scatterSpeed: number;
       if (impactAngle !== null) {
         scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-        scatterSpeed = impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2;
+        // Cap the impactor-speed contribution so a fast weapon (Sniper /
+        // Lightning at speed 30) can't fling the fragments — pieces should
+        // pop apart and drift, not launch.  forwardDrag already damps it.
+        scatterSpeed = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
       } else {
         scatterAngle = Math.random() * Math.PI * 2;
         scatterSpeed = 1 + Math.random() * 2;
       }
-
       const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
       const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
 
@@ -412,6 +975,7 @@ export class ShardSystem {
         childSpawn.angleJitter,
         childSpawn.radiusMin,
         childSpawn.radiusRange,
+        childSpawn.polyVerticesOptions,
       );
 
       const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
@@ -422,6 +986,13 @@ export class ShardSystem {
       // (STRUCTURE), with shardVariant declaring the variant id.
       // PhysicsSystem dispatches by mass (∞ → static grid, finite →
       // dynamic) and per-variant passThrough flag.
+      // Plastic-shard sub-shards re-roll their shade per-instance so
+      // each generation has visible variation; everything else
+      // inherits the parent's colour.
+      const childColor = childVariant.id === 'plastic-shard'
+        ? randomPlasticShardShade()
+        : (isTile ? parent.color : (parent.color || COLORS.ASTEROID));
+
       entities.push({
         id:           nextId('shard'),
         type:          EntityType.STRUCTURE,
@@ -431,13 +1002,29 @@ export class ShardSystem {
         size:         { x: newSize, y: newSize },
         rotation:      Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-        color:         isTile ? parent.color : COLORS.ASTEROID,
+        color:         childColor,
         active:        true,
         health:        hp,
         maxHealth:     hp,
         polygonPoints: points,
-        mass:          childSpawn.sizeToMass(newSize),
+        mass:          childMass,
+        // Rock children only: densityTier carries the chosen mix
+        // tier so the renderer picks up the density tint and any
+        // future merge / shatter respects the inherited density.
+        // densityCachedTint left undefined so the renderer
+        // recomputes on first draw.
+        densityTier,
         sprite:        parent.sprite,
+        // Optional per-entity damping from the variant's spawn shape
+        // — undefined for variants that drift naturally; metal-
+        // assembly uses these.
+        linearDamping:  childSpawn.linearDamping,
+        angularDamping: childSpawn.angularDamping,
+        restSpeed:      childSpawn.restSpeed,
+        restSpin:       childSpawn.restSpin,
+        // Let the shatter debris fly apart before the overlap-collapse
+        // pass can re-condense it into a tile (DBG-cyclable delay).
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
 
@@ -525,7 +1112,7 @@ export class ShardSystem {
     const fan  = parentVariant.shatter.scatterHalfCone;
     const shardCount = radii.length;
     const step = shardCount > 1 ? (2 * fan) / (shardCount - 1) : 0;
-    const parentRadius = Math.max(parent.size.x, parent.size.y) / 2;
+    const parentRadius = getCollisionR(parent);
     const offsetMag = parentRadius * NEBULA_CONSTANTS.SHARD_SPAWN_OFFSET_RATIO;
 
     const childSpawn = childVariant.spawn;
@@ -543,6 +1130,7 @@ export class ShardSystem {
         childSpawn.angleJitter,
         childSpawn.radiusMin,
         childSpawn.radiusRange,
+        childSpawn.polyVerticesOptions,
       );
       const size = radius * 4; // diameter with a bit of slack for physics feel
 
@@ -575,8 +1163,6 @@ export class ShardSystem {
       const velX = fx * parallelSpeed + perpX;
       const velY = fy * parallelSpeed + perpY;
 
-      const effectiveAreaPerShard = HEX_AREA / shardCount;
-
       entities.push({
         id:              nextId('nebula_shard'),
         // Stage 5: unified carrier with mass-based dispatch.  Mass
@@ -598,7 +1184,6 @@ export class ShardSystem {
         polygonPoints:   points,
         sprite:          parent.sprite,
         nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-        nebulaTileArea:  effectiveAreaPerShard,
         nebulaGridCol:   parent.nebulaGridCol,
         nebulaGridRow:   parent.nebulaGridRow,
         linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
@@ -650,6 +1235,7 @@ export class ShardSystem {
     return { partner: 'self', outcome: pullerVariant.merge.defaultOutcome };
   }
 
+
   /**
    * Tick existing stick-bonds: cohesion velocity blend + timer
    * accumulation + merge-fire when threshold is met.  Bonds whose
@@ -660,11 +1246,30 @@ export class ShardSystem {
    * GameEngine.handleEntitySticking.  The new-contacts-detection
    * half lives in `runMergeBroadphase` below.
    */
-  private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
+  private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem, applyCohesion: boolean = true): void {
     if (this.bonds.length === 0) return;
+
+    // Merge RATE is now computed LOCALLY per bond (see below): a bond in
+    // a dense pocket matures faster, focusing the cull on hotspots.
+    // Big-shard slowdown is handled by the bond *threshold* (per-variant
+    // bondTimeSizePower), not the rate.  The DBG MrgRt gate
+    // (perfController.mergeRateEnabled) holds the rate at a neutral 1.0×
+    // when off.  tickBonds runs EVERY sim step, so the bond timer needs
+    // no skip compensation.
+    const rateEnabled = this.perfController ? this.perfController.mergeRateEnabled : true;
+    let ratePeak = 1;
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
     const BREAK_FACTOR = 1.5;   // bond breaks when dist > contactDist * this
+    // Per-frame merge budget — caps how many merges may fire this tick so
+    // a freshly-shattered or hotspot cluster (whose bond timers elapse
+    // together) compacts over several frames instead of one spike.  Once
+    // exhausted, surplus bonds defer (timer = threshold - dt) to next
+    // tick.  Boosted by LOCAL_MERGE.BUDGET_MULT when the rate feature is
+    // on so dense fields consolidate at a useful throughput; base budget
+    // when off.
+    const budgetMult = rateEnabled ? LOCAL_MERGE_CONSTANTS.BUDGET_MULT : 1;
+    let mergeBudget = Math.max(1, Math.round(CLEANUP_CONSTANTS.MAX_REMOVALS_PER_FRAME * budgetMult));
 
     let writeIdx = 0;
     for (let bi = 0; bi < this.bonds.length; bi++) {
@@ -678,48 +1283,87 @@ export class ShardSystem {
       const dist = Math.sqrt(dx * dx + dy * dy);
       const contactDist = (a.size.x + b.size.x) * 0.5;
 
-      if (dist > contactDist * BREAK_FACTOR) continue; // bond broken
+      // Per-bond break-factor multiplier — 'strong' tier partners
+      // (set at formation time) tolerate larger separation before
+      // the bond snaps.
+      const breakFactor = BREAK_FACTOR * (bond.breakFactorMul ?? 1);
+      if (dist > contactDist * breakFactor) continue; // bond broken
 
       // Velocity cohesion: nudge both toward shared momentum centre.
-      const totalMass = a.mass + b.mass;
-      const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
-      const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
-      const blend     = Math.min(1, COHESION * dt);
-      a.velocity.x   += (sharedVx - a.velocity.x) * blend;
-      a.velocity.y   += (sharedVy - a.velocity.y) * blend;
-      b.velocity.x   += (sharedVx - b.velocity.x) * blend;
-      b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+      // Gated by applyCohesion so the blend runs only on the same
+      // cadence as separation — without that pacing, cohesion locks
+      // bonded shards to a shared velocity / position while
+      // separation is skipped, and clusters collapse to a point.
+      //
+      // Static-partner case (a.mass === Infinity or b.mass === Infinity):
+      // the tile acts as an anchor — only the dynamic side's velocity
+      // bleeds toward zero (the tile's "shared velocity").  The
+      // mass-weighted formula would NaN with ∞, so we branch.
+      if (applyCohesion) {
+        const cohesionRate = COHESION * (bond.cohesionMul ?? 1);
+        const blend        = Math.min(1, cohesionRate * dt);
+        if (a.mass === Infinity && b.mass !== Infinity) {
+          b.velocity.x += (0 - b.velocity.x) * blend;
+          b.velocity.y += (0 - b.velocity.y) * blend;
+        } else if (b.mass === Infinity && a.mass !== Infinity) {
+          a.velocity.x += (0 - a.velocity.x) * blend;
+          a.velocity.y += (0 - a.velocity.y) * blend;
+        } else {
+          const totalMass = a.mass + b.mass;
+          const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+          const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+          a.velocity.x   += (sharedVx - a.velocity.x) * blend;
+          a.velocity.y   += (sharedVy - a.velocity.y) * blend;
+          b.velocity.x   += (sharedVx - b.velocity.x) * blend;
+          b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+        }
+      }
 
-      bond.timer += dt;
+      // Cohesion-only bonds (today: plastic-shard) skip the merge
+      // pipeline entirely — no timer accumulation, no compose call.
+      // Re-push and continue.
+      if (bond.cohesionOnly) {
+        this.bonds[writeIdx++] = bond;
+        continue;
+      }
+
+      // Per-bond local rate: density boost (denser pocket → faster),
+      // neutral 1.0× when the DBG gate is off.  Big-shard slowdown is NOT
+      // applied here — it lives solely in the bond *threshold* via the
+      // per-variant bondTimeSizePower (avoids double-counting size).  The
+      // boost is then lerped DOWN toward MERGE_LOAD_SCALE_MIN as global
+      // load climbs (scaledMergeRate), so a heavy field stops merging
+      // itself back to comfort — keeping the high-load state alive for
+      // perf testing.  No-op at idle.
+      let bondRate = 1;
+      if (rateEnabled) {
+        const cell = Math.max(a.mergeCellCount ?? 0, b.mergeCellCount ?? 0);
+        bondRate = localDensityBoost(cell);
+        if (bondRate > ratePeak) ratePeak = bondRate;
+        if (this.perfController) bondRate = this.perfController.scaledMergeRate(bondRate);
+      }
+      bond.timer += dt * bondRate;
 
       if (bond.timer >= bond.threshold) {
-        // Stage 5b: requirePartnerSizeFraction gate.  If unmet, the
-        // bond persists with cohesion active but the merge doesn't
-        // fire — useful for "rare-event" cross-variant outcomes
-        // (e.g. nebula absorbed only into max-size glass-shards).
-        const gate = bond.requirePartnerSizeFraction;
-        let gateMet = true;
-        if (gate !== undefined && gate > 0) {
-          // Evaluate the gate against the LARGER side (the absorb host).
-          const host = a.size.x >= b.size.x ? a : b;
-          const hostVariant = shardVariantOf(host);
-          if (hostVariant !== null) {
-            const sizeMax = SHARD_VARIANTS[hostVariant].spawn.sizeMax;
-            gateMet = host.size.x >= sizeMax * gate;
-          }
+        // Per-frame merge budget — surplus bonds defer to next tick
+        // so a cluster of bonds whose timers all elapse in the same
+        // frame compacts visibly over several frames instead of in
+        // one.  Defer by clamping timer just below threshold so the
+        // bond stays alive and re-checks next tick.
+        if (mergeBudget <= 0) {
+          bond.timer = bond.threshold - dt;
+          this.bonds[writeIdx++] = bond;
+          continue;
         }
-        if (gateMet) {
-          this.composeEntities(a, b, entities, physics, bond.outcome);
-          continue; // bond resolved — drop
-        }
-        // Gate unmet — cap the timer at threshold and keep the bond
-        // alive.  Cohesion stays active; next frame re-checks gate.
-        bond.timer = bond.threshold;
+        this.composeEntities(a, b, entities, physics);
+        mergeBudget--;
+        continue; // bond resolved — drop
       }
 
       this.bonds[writeIdx++] = bond;
     }
     this.bonds.length = writeIdx;
+    this.lastMergeRatePeak = ratePeak;
   }
 
   /**
@@ -749,13 +1393,31 @@ export class ShardSystem {
    *  104-unit max contact distance.
    */
   private runMergeBroadphase(entities: GameEntity[], dt: number, _physics: PhysicsSystem): void {
+    // PerfController-driven gate for the cosmetic plastic scans (PAuto
+    // count + reach).  This broadphase already runs at the shard-pair
+    // cadence; the controller's `plasticCosmetic` task supplies an extra
+    // effective interval that throttles these two passes further (its
+    // higher cost weight backs off harder under load) while the eat /
+    // bonding work keeps the merge cadence.  Applied against a per-
+    // merge-pass counter (not the controller's global-tick gate) so the
+    // nested sub-pass can't be starved by phase misalignment.  When the
+    // skip is active, plasticNeighborCount is left stale (the renderer
+    // keeps the last brightness) — no flicker, no snap.
+    const cosmeticInterval = Math.max(1, this.perfController
+        ? this.perfController.effectiveInterval('plasticCosmetic') | 0
+        : 1);
+    const runCosmetic = (this.plasticCosmeticTick % cosmeticInterval) === 0;
+    this.plasticCosmeticTick++;
     // Track which entities are currently in active stick-bonds so
-    // the bond-formation pass doesn't double-bond.
-    const bonded = new Set<GameEntity>();
+    // the bond-formation pass doesn't double-bond.  Scratch Set is reused
+    // across passes — cleared in place — to skip a per-frame allocation.
+    const bonded = this._mergeBondedScratch;
+    bonded.clear();
     for (let i = 0; i < this.bonds.length; i++) {
       bonded.add(this.bonds[i].a);
       bonded.add(this.bonds[i].b);
     }
+
 
     // Candidate set: every mobile shard-family entity + eligible drops.
     // Stage 5: shards live on EntityType.STRUCTURE with finite mass
@@ -768,13 +1430,22 @@ export class ShardSystem {
       const e = entities[i];
       if (!e.active) continue;
       if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
-      if (e.nebulaFadeTimer !== undefined) continue;
+      // Once a shard is in its graceful retire window (merge fade-
+      // out) it must not pull, bond, or get pulled.  Otherwise its
+      // velocity blends with surviving partners and the dissolve
+      // looks chaotic.
+      if (e.mergeFadeTimer !== undefined) continue;
+      if (e.shardVariant === 'plastic-shard') {
+        // Reset the plastic neighbour-contact count up front so the
+        // count pass below only ever increments, and lone shards (or
+        // the candidates.length < 2 early-return path) read 0.
+        if (this.plasticAutomataEnabled && runCosmetic) e.plasticNeighborCount = 0;
+      }
       candidates.push(e);
     }
-    for (let i = 0; i < this.activeDrops.length; i++) {
-      const d = this.activeDrops[i];
-      if (d.active && d.dropType !== 'glass' && d.dropType !== 'health') candidates.push(d);
-    }
+    // Ammo drops are no longer merge candidates — they're inert
+    // collectibles (magnet-pull + proximity-collect only), so they
+    // neither bond with each other nor get absorbed by asteroids.
     if (candidates.length < 2) return;
 
     // Spatial hash — cell size matches the widest pull range across
@@ -789,7 +1460,13 @@ export class ShardSystem {
       const wy = ((cy % ROWS) + ROWS) % ROWS;
       return (wx << 16) | (wy & 0xFFFF);
     };
-    const grid = new Map<number, number[]>();
+    // Scratch grid is reused across passes.  Inner cell arrays are
+    // cleared in place rather than dropped so successive frames retain
+    // their array backing storage — the Map only carries the dense
+    // header.  At ~1k cells/frame on the densest tile maps this skips
+    // ~1k inner-array allocations per call.
+    const grid = this._mergeGridScratch;
+    for (const cell of grid.values()) cell.length = 0;
     for (let i = 0; i < candidates.length; i++) {
       const c  = candidates[i];
       const cx = Math.floor(c.position.x / CELL);
@@ -798,6 +1475,49 @@ export class ShardSystem {
       let cell = grid.get(key);
       if (!cell) { cell = []; grid.set(key, cell); }
       cell.push(i);
+    }
+    // Stamp each candidate's local-crowd signal: the occupancy of its
+    // merge-grid cell.  Cheap O(k); read by tickBonds to focus the
+    // absorption-rate boost on dense pockets (hotspots).
+    for (const cell of grid.values()) {
+      for (let k = 0; k < cell.length; k++) candidates[cell[k]].mergeCellCount = cell.length;
+    }
+
+    // ── Plastic neighbour-contact count (PAuto automata) ───────────
+    // Reuses the grid above (no second build).  For each plastic-
+    // shard, count other plastic-shards whose centres fall within
+    // CONTACT_BUFFER × (rA + rB) — i.e. touching or near-touching.
+    // Runs before the gated pull/bond loop so every plastic-shard is
+    // counted regardless of merge cooldown.  Drives RenderSystem's
+    // brightness automata.  SHPAIR-paced (runCosmetic).
+    if (this.plasticAutomataEnabled && runCosmetic) {
+      const buf = PLASTIC_SHARD_AUTOMATA.CONTACT_BUFFER;
+      for (let i = 0; i < candidates.length; i++) {
+        const a = candidates[i];
+        if (a.shardVariant !== 'plastic-shard' || !a.active) continue;
+        const acx = Math.floor(a.position.x / CELL);
+        const acy = Math.floor(a.position.y / CELL);
+        const aR = getCollisionR(a);
+        let count = 0;
+        for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+          for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+            const cell = grid.get(keyFor(ncx, ncy));
+            if (!cell) continue;
+            for (let k = 0; k < cell.length; k++) {
+              const j = cell[k];
+              if (j === i) continue;
+              const b = candidates[j];
+              if (b.shardVariant !== 'plastic-shard' || !b.active) continue;
+              const dx = wrapDeltaX(a.position.x, b.position.x);
+              const dy = wrapDeltaY(a.position.y, b.position.y);
+              const bR = getCollisionR(b);
+              const reach = (aR + bR) * buf;
+              if (dx * dx + dy * dy <= reach * reach) count++;
+            }
+          }
+        }
+        a.plasticNeighborCount = count;
+      }
     }
 
     const CONTACT_BUFFER = 4;
@@ -828,7 +1548,7 @@ export class ShardSystem {
       // ── Pull pass: find nearest larger qualifying neighbour ────
       let bestPullTarget: GameEntity | null = null;
       let bestPullDistSq = Infinity;
-      const aR = Math.max(a.size.x, a.size.y) / 2;
+      const aR = getCollisionR(a);
 
       // ── Bond formation pass ────────────────────────────────────
       const aBondedAlready = bonded.has(a) || bondedThisFrame.has(a);
@@ -841,7 +1561,9 @@ export class ShardSystem {
       // both sides eventually share via cohesion, accelerating the
       // pair indefinitely.  Asteroid stick-bonds today have no
       // gravity at all, so this matches their behaviour.
-      const wantsPull = aVariant && aVariant.merge.attractedTo !== 'none' && !aBondedAlready;
+      const wantsPull = this.shardGravityEnabled
+                     && aVariant && aVariant.merge.attractedTo !== 'none'
+                     && !aBondedAlready;
 
       for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
         for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
@@ -866,16 +1588,22 @@ export class ShardSystem {
             // process this pair even when j < i.  Cooldowns on the
             // target are honoured.
             if (wantsPull && bVariantId !== null) {
-              const bR = Math.max(b.size.x, b.size.y) / 2;
               const pullRange  = aVariant!.merge.pullRange ?? CELL;
               const pullRangeSq = pullRange * pullRange;
+              const pullInner    = aVariant!.merge.pullInnerRange ?? 0;
+              const pullInnerSq  = pullInner * pullInner;
               const targetCooldownOk = (b.nebulaMergeCooldown ?? 0) <= 0;
               const matchesPull = aVariant!.merge.attractedTo !== 'none'
                 && this.selects(aVariant!.merge.attractedTo, bVariantId, aVariantId!);
-              // Today's nebula gravity targets nearest LARGER-OR-EQUAL
-              // neighbour.  Preserve.
-              if (matchesPull && targetCooldownOk && bR >= aR
-                  && distSq <= pullRangeSq && distSq < bestPullDistSq) {
+              // Annular gate: pull is suppressed below pullInnerRange so
+              // the gravity hands off to bond cohesion at close range
+              // instead of fighting it.  Outer cap stays at pullRange.
+              // pullInnerRange undefined → 0 → today's behaviour (full
+              // range from contact to outer).
+              if (matchesPull && targetCooldownOk
+                  && distSq >= pullInnerSq
+                  && distSq <= pullRangeSq
+                  && distSq < bestPullDistSq) {
                 bestPullDistSq = distSq;
                 bestPullTarget = b;
               }
@@ -883,6 +1611,9 @@ export class ShardSystem {
 
             // Bond formation: only consider each unordered pair once
             // (j > i), and skip if either party is already bonded.
+            // DBG-gated — when shardBondingEnabled is false, skip
+            // the entire formation block.
+            if (!this.shardBondingEnabled) continue;
             if (j <= i) continue;
             if (aBondedAlready) continue;
             if (bonded.has(b) || bondedThisFrame.has(b)) continue;
@@ -900,21 +1631,6 @@ export class ShardSystem {
             } else if (bVariant && bVariant.merge.bondsWith !== 'none' && aVariantId !== null
                 && this.selects(bVariant.merge.bondsWith, aVariantId, bVariantId)) {
               pullerVariant = bVariant;
-            } else if (a.type !== EntityType.STRUCTURE && b.type !== EntityType.STRUCTURE
-                && a.dropType && b.dropType) {
-              // Drop+drop bonding is variant-less today; preserve via
-              // a synthetic threshold (same-type 10s, cross-type 20s).
-              const sameType = a.dropType === b.dropType;
-              if (!sameType && Math.random() > 0.5) continue;
-              const SIZE_REF = 20, SIZE_POWER = 1.5;
-              const avgSize  = (a.size.x + b.size.x) * 0.5;
-              const sizeRatio = Math.max(1, avgSize / SIZE_REF);
-              const baseTime  = sameType ? 10.0 : 20.0;
-              const threshold = baseTime * Math.pow(sizeRatio, SIZE_POWER);
-              this.bonds.push({ a, b, timer: 0, threshold, outcome: 'compose' });
-              bondedThisFrame.add(a);
-              bondedThisFrame.add(b);
-              continue;
             } else {
               continue; // neither side wants the bond
             }
@@ -926,41 +1642,53 @@ export class ShardSystem {
             if (partnerId === null) continue;
             const rule = this.resolveRule(pullerVariant, partnerId);
 
-            // Both 'compose' and 'absorb' outcomes are supported in
-            // Stage 5b.  Other outcomes (none yet) skip the bond.
-            if (rule.outcome !== 'compose' && rule.outcome !== 'absorb') continue;
+            // Optional size-disparity gate (today: plastic-shard).
+            // Skip the bond when the pair is too close in size —
+            // forces "smaller merges into larger" by refusing equal
+            // pairs.  Symmetric: applies regardless of which side
+            // is the puller.
+            const reqDelta = pullerVariant.merge.requireSizeDeltaFraction;
+            if (reqDelta !== undefined && reqDelta > 0) {
+              const larger  = Math.max(a.size.x, b.size.x);
+              const smaller = Math.min(a.size.x, b.size.x);
+              if (larger <= 0 || (larger - smaller) / larger < reqDelta) continue;
+            }
 
             // Threshold: pullerVariant.merge.bondTimeSeconds, scaled
-            // by size and the rule's thresholdScale.  For absorb
-            // rules with bondTimeSeconds=0 (nebula → glass-shard) we
-            // bump the base to MERGE_COOLDOWN so thresholdScale is
-            // meaningful; the size-fraction gate is the dominant
-            // gate anyway.
-            let baseTime  = pullerVariant.merge.bondTimeSeconds ?? 10;
-            if (rule.outcome === 'absorb' && baseTime <= 0) {
-              baseTime = pullerVariant.merge.postMergeCooldown ?? 1.0;
-            }
-            const sizeRef   = pullerVariant.merge.bondTimeSizeRef   ?? 20;
-            const sizePower = pullerVariant.merge.bondTimeSizePower ?? 1.5;
-            const avgSize   = (a.size.x + b.size.x) * 0.5;
-            const sizeRatio = sizeRef > 0 ? Math.max(1, avgSize / sizeRef) : 1;
+            // by size and the rule's thresholdScale.
+            const baseTime   = pullerVariant.merge.bondTimeSeconds ?? 10;
+            const sizeRef    = pullerVariant.merge.bondTimeSizeRef   ?? 20;
+            const sizePower  = pullerVariant.merge.bondTimeSizePower ?? 1.5;
+            const avgSize    = (a.size.x + b.size.x) * 0.5;
+            const sizeRatio  = sizeRef > 0 ? Math.max(1, avgSize / sizeRef) : 1;
             const baseScaled = baseTime * Math.pow(sizeRatio, sizePower);
             const threshold  = baseScaled * (rule.thresholdScale ?? 1);
 
+            // Per-partner config (today: plastic-shard with cohesion-
+            // only bonds and 'strong' tier for glass).  When set, the
+            // entry overrides the bond's compose path + cohesion /
+            // break factor.  Lookup is O(N) over the partner list but
+            // N is small (≤10 typical) and only walked on formation.
+            const partnerCfg = pullerVariant.merge.bondPartners
+              ?.find(e => e.partner === partnerId);
+            const cohesionOnly = partnerCfg?.cohesionOnly === true;
+            const strong       = partnerCfg?.strength === 'strong';
+
             this.bonds.push({
               a, b, timer: 0, threshold,
-              outcome: rule.outcome,
-              requirePartnerSizeFraction: rule.requirePartnerSizeFraction,
+              cohesionOnly: cohesionOnly || undefined,
+              cohesionMul:    strong ? STRONG_COHESION_MUL : undefined,
+              breakFactorMul: strong ? STRONG_BREAK_FACTOR_MUL : undefined,
             });
             bondedThisFrame.add(a);
             bondedThisFrame.add(b);
 
-            // bondTimeSeconds === 0 (nebula's instant-merge case) →
-            // fire compose immediately so today's same-frame nebula
-            // merge timing is preserved.  Absorb rules don't take
-            // this path (their effective baseTime is bumped above).
-            if (threshold <= 0 && rule.outcome === 'compose') {
-              this.composeEntities(a, b, entities, _physics, 'compose');
+            // Zero-threshold guard: a variant configured with
+            // bondTimeSeconds 0 composes on contact in the same frame
+            // — unless cohesionOnly, which never composes.  No variant
+            // sets bondTimeSeconds 0 today.
+            if (threshold <= 0 && !cohesionOnly) {
+              this.composeEntities(a, b, entities, _physics);
               // Drop the just-pushed bond (it's already resolved).
               this.bonds.pop();
             }
@@ -968,8 +1696,20 @@ export class ShardSystem {
         }
       }
 
-      // Apply pull force toward the chosen target (if any).
-      if (bestPullTarget && wantsPull) {
+      // Apply pull force toward the chosen target (if any).  Both loose
+      // triangles AND composites seek now that composite ↔ composite merging
+      // exists: the pull target rule (bR ≥ aR) makes each piece drift toward
+      // a larger-or-equal metal body, so the biggest local cluster acts as an
+      // anchor and smaller pieces/clusters accrete onto it.  A COMPLETED
+      // hexagon (6 cells) stops actively seeking — it's floating toward its
+      // grid snap, not still assembling, which also keeps it eligible to
+      // settle/sleep out of the dynamic-load signal.  Metal triangles still in
+      // their post-break grace aren't pulled, so they float free for the delay
+      // before assembly.
+      const metalInGrace = a.shardVariant === 'metal-shard' && (a.collapseGraceTimer ?? 0) > 0;
+      const completedHexagon = a.metalCells !== undefined
+        && a.metalCells.length >= METAL_HEX_SIZE;
+      if (bestPullTarget && wantsPull && !metalInGrace && !completedHexagon) {
         const dx = wrapDeltaX(a.position.x, bestPullTarget.position.x);
         const dy = wrapDeltaY(a.position.y, bestPullTarget.position.y);
         const dist = Math.sqrt(bestPullDistSq);
@@ -983,6 +1723,320 @@ export class ShardSystem {
           a.velocity.y += dy * invDist * accel;
         }
       }
+    }
+
+    // ── Shard ↔ static-tile bond formation ────────────────────────
+    // The main bond loop above only walks mobile-shard candidates, so
+    // a variant whose bondsWith includes tile partners (today: plastic-
+    // shard, which sticks to glass/rock/metal/indestructible/plastic
+    // tiles) needs a side-channel scan against the static grid.  Only
+    // variants that actually list tiles in bondPartners benefit, so
+    // the outer check short-circuits when no bond candidate is present.
+    if (this.shardBondingEnabled) {
+      this.runShardTileBondFormation(candidates, bonded, bondedThisFrame, _physics);
+    }
+
+    // Hot-spot collapse: snap overlapping glass-shard stacks (which
+    // the throttled separation can't disperse) into static tiles.  Runs
+    // last so shards consumed by the pull/bond passes above are already
+    // excluded.
+    if (HOTSPOT_COLLAPSE.ENABLED) this.collapseHotspots(entities, _physics, candidates);
+  }
+
+  /**
+   * Form cohesion bonds between mobile shards and static tiles.  Walks
+   * each mobile candidate whose variant has a `bondPartners` entry for
+   * a tile variant; queries the static grid for nearby tiles via
+   * `PhysicsSystem.forEachStaticTileNear`; forms a bond when contact
+   * distance is hit.  Per-partner config (cohesionOnly / strength) is
+   * applied the same way as the mobile-mobile path.  Today only
+   * plastic-shard uses this — for every variant else the inner loop
+   * short-circuits on the bondPartners lookup.
+   */
+  private runShardTileBondFormation(
+    candidates: GameEntity[],
+    bonded: Set<GameEntity>,
+    bondedThisFrame: Set<GameEntity>,
+    _physics: PhysicsSystem,
+  ): void {
+    const CONTACT_BUFFER = 4;
+    for (let i = 0; i < candidates.length; i++) {
+      const a = candidates[i];
+      if (!a.active) continue;
+      const aVariantId = shardVariantOf(a);
+      if (aVariantId === null) continue;
+      const aVariant = SHARD_VARIANTS[aVariantId];
+      // Cheap gate: skip variants with no per-partner tile entries.
+      // For the only consumer today (plastic-shard) this still walks
+      // every plastic-shard, but stops here for every other variant.
+      if (!aVariant.merge.bondPartners) continue;
+      if (aVariant.merge.bondsWith === 'none') continue;
+      if (bonded.has(a) || bondedThisFrame.has(a)) continue;
+      if ((a.nebulaMergeCooldown ?? 0) > 0) continue;
+
+      const aR = getCollisionR(a);
+      _physics.forEachStaticTileNear(a.position.x, a.position.y, (tile) => {
+        if (bondedThisFrame.has(a)) return;
+        if (tile.mass !== Infinity) return;             // dynamic — handled by main loop
+        const tileVariantId = shardVariantOf(tile);
+        if (tileVariantId === null) return;
+        // bondsWith gate (variant selector).
+        if (!this.selects(aVariant.merge.bondsWith, tileVariantId, aVariantId)) return;
+        // Per-partner config.  Lack of an entry → no bond for this pair.
+        const cfg = aVariant.merge.bondPartners!.find(e => e.partner === tileVariantId);
+        if (!cfg) return;
+        // Contact check.  Tile collision radius approximated from size.x.
+        const dx = wrapDeltaX(a.position.x, tile.position.x);
+        const dy = wrapDeltaY(a.position.y, tile.position.y);
+        const tR = getCollisionR(tile);
+        const contactDist = aR + tR + CONTACT_BUFFER;
+        if (dx * dx + dy * dy > contactDist * contactDist) return;
+
+        const baseTime   = aVariant.merge.bondTimeSeconds ?? 10;
+        const cohesionOnly = cfg.cohesionOnly === true;
+        const strong       = cfg.strength === 'strong';
+        this.bonds.push({
+          a, b: tile, timer: 0, threshold: baseTime,
+          cohesionOnly: cohesionOnly || undefined,
+          cohesionMul:    strong ? STRONG_COHESION_MUL : undefined,
+          breakFactorMul: strong ? STRONG_BREAK_FACTOR_MUL : undefined,
+        });
+        bondedThisFrame.add(a);
+        bondedThisFrame.add(tile);
+      });
+    }
+  }
+
+  /**
+   * Hot-spot collapse — cure for overlapping shard piles the throttled
+   * shard-pair separation can't keep apart (they stack and pulse in phase
+   * with the skip interval).  Buckets active glass-shards into a fine,
+   * tile-sized grid; any cell with >= MIN_COUNT shards of a material is
+   * a real overlap stack (self-gating: at low load separation keeps cells
+   * from filling).  Each stack condenses into ONE static tile at the
+   * nearest free hex (surplus shards fade out).  Capped at MAX_TILES_PER
+   * _PASS per pass.  Rock-shards stay shards forever (ROCK_CONDENSE grid);
+   * plastic-shards opted out with the plastic-revert; metal triangles
+   * reassemble via tickMetalAssembly instead.
+   */
+  private collapseHotspots(
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+    candidates: GameEntity[],
+  ): void {
+    const { CELL, MIN_COUNT, MAX_TILES_PER_PASS,
+            METAL_ENABLED, METAL_MIN_COUNT } = HOTSPOT_COLLAPSE;
+    const COLS = Math.ceil(MAP_WIDTH  / CELL);
+    const ROWS = Math.ceil(MAP_HEIGHT / CELL);
+    const keyFor = (cx: number, cy: number) => {
+      const wx = ((cx % COLS) + COLS) % COLS;
+      const wy = ((cy % ROWS) + ROWS) % ROWS;
+      return (wx << 16) | (wy & 0xFFFF);
+    };
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      if (!c.active || c.mergeFadeTimer !== undefined) continue;
+      // Freshly-shattered shards are off-limits until their grace timer
+      // expires — gives a destroyed tile's debris time to scatter.
+      if ((c.collapseGraceTimer ?? 0) > 0) continue;
+      const v = c.shardVariant;
+      const isGlass = v === 'glass-shard';
+      // Metal triangles reassemble into a metal-tile once enough pack a cell.
+      const isMetal = METAL_ENABLED && v === 'metal-shard';
+      if (!isGlass && !isMetal) continue;
+      const key = keyFor(Math.floor(c.position.x / CELL), Math.floor(c.position.y / CELL));
+      let cell = grid.get(key);
+      if (!cell) { cell = []; grid.set(key, cell); }
+      cell.push(i);
+    }
+
+    let minAny = MIN_COUNT;
+    if (METAL_ENABLED) minAny = Math.min(minAny, METAL_MIN_COUNT);
+    let tilesMade = 0;
+    for (const idxs of grid.values()) {
+      if (tilesMade >= MAX_TILES_PER_PASS) break;
+      if (idxs.length < minAny) continue;
+      let glassCount = 0, metalCount = 0;
+      let glassHost = -1, metalHost = -1;
+      for (let k = 0; k < idxs.length; k++) {
+        const e = candidates[idxs[k]];
+        const sv = e.shardVariant;
+        if (sv === 'glass-shard') {
+          glassCount++;
+          if (glassHost < 0 || e.size.x > candidates[glassHost].size.x) glassHost = idxs[k];
+        } else if (sv === 'metal-shard') {
+          metalCount++;
+          if (metalHost < 0 || e.size.x > candidates[metalHost].size.x) metalHost = idxs[k];
+        }
+      }
+      if (METAL_ENABLED && metalCount >= METAL_MIN_COUNT &&
+          this.collapseStack(candidates, idxs, metalHost, 'metal-shard', 'metal', entities, physics)) {
+        tilesMade++;
+      }
+      if (tilesMade >= MAX_TILES_PER_PASS) break;
+      if (glassCount >= MIN_COUNT &&
+          this.collapseStack(candidates, idxs, glassHost, 'glass-shard', 'glass', entities, physics)) {
+        tilesMade++;
+      }
+    }
+  }
+
+  /** Condense one material's stack inside a fine cell into a single tile:
+   *  transmute the largest shard (host) to a tile at the nearest free hex,
+   *  then fade out the rest of that material in the cell.  Returns true
+   *  only when a tile was actually placed (a free hex was available). */
+  private collapseStack(
+    candidates: GameEntity[],
+    idxs: number[],
+    hostIdx: number,
+    variant: ShardVariantId,
+    material: StructureVariant,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): boolean {
+    const host = hostIdx >= 0 ? candidates[hostIdx] : null;
+    if (!host || !host.active || host.mergeFadeTimer !== undefined) return false;
+    // Hot-spot collapse (a dense PILE of shards in one cell, bypassing the
+    // floating-hexagon assembly) forms a tier-1 / base tile — minimal
+    // density.  Tiered (lighter) metal tiles come from the proper assembly
+    // snap (snapHexagonToGrid), where shard layers accumulate.
+    if (!this.tryTransmuteShardToTile(host, variant, material, entities, physics)) return false;
+    for (let k = 0; k < idxs.length; k++) {
+      if (idxs[k] === hostIdx) continue;
+      const e = candidates[idxs[k]];
+      if (e.shardVariant !== variant || !e.active || e.mergeFadeTimer !== undefined) continue;
+      this.startMergeFadeOut(e);
+    }
+    return true;
+  }
+
+  /**
+   * Begin a graceful retire on a shard that's been merged out.
+   * Replaces today's instant `b.active = false` so the smaller
+   * party of a density-compaction merge dissolves over a short
+   * window instead of popping.  PhysicsSystem ticks
+   * `mergeFadeTimer` each substep; on reaching 0 the entity
+   * goes inactive and the in-place compaction in
+   * GameEngine.updatePhysics drops it from the master list.
+   *
+   * For nebula entities the same field covers impact-driven
+   * fade (PhysicsSystem scales the duration by impact speed) and
+   * non-impact retires (here).  Nebula uses a longer base
+   * duration to read as "dissolving into the cloud"; non-nebula
+   * shards use the crisper CLEANUP_CONSTANTS.MERGE_FADE_DURATION.
+   */
+  private startMergeFadeOut(entity: GameEntity): void {
+    // Skip if entity is already fading out (avoid retriggering the
+    // timer mid-fade, which would extend the dissolve).
+    if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) return;
+
+    const variantId = shardVariantOf(entity);
+    const duration = (variantId === 'nebula-shard' || variantId === 'nebula-tile')
+      ? NEBULA_CONSTANTS.FADE_DURATION
+      : CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+    entity.mergeFadeTimer    = duration;
+    entity.mergeFadeDuration = duration;
+  }
+
+  // ── Large-shard collapse ──────────────────────────────────────────
+  // Shards whose diameter meets a variant's `density.largeShardCollapseSize`
+  // contract inward in the next tick: replaced with a smaller, denser
+  // version of themselves (single-input merge).  Reuses the same
+  // shrink path as compose so the visual reads identical to a
+  // multi-shard density merge — just with a single source.
+  //
+  // Per-frame budget (`CLEANUP_CONSTANTS.LARGE_COLLAPSE_BUDGET_PER_FRAME`)
+  // caps the cascade so a giant freshly-spawned field doesn't all snap
+  // to the dense baseline in one frame.  Offscreen candidates are
+  // preferred — collapses never pop on the player's view.
+
+  private runLargeShardCollapse(entities: GameEntity[]): void {
+    let budget = CLEANUP_CONSTANTS.LARGE_COLLAPSE_BUDGET_PER_FRAME;
+    if (budget <= 0) return;
+
+    // Two-pass selection: prefer offscreen candidates first, then
+    // onscreen if budget remains.  Both passes share the same
+    // qualification check (variant has density, size >= threshold,
+    // not at max tier, not already fading).  Avoid allocating a
+    // candidate list — direct-walk the master entity array twice.
+    for (let onscreen = 0; onscreen <= 1 && budget > 0; onscreen++) {
+      for (let i = 0; i < entities.length && budget > 0; i++) {
+        const e = entities[i];
+        if (!e.active) continue;
+        if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
+        if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
+
+        const variantId = shardVariantOf(e);
+        if (variantId === null) continue;
+        const variant = SHARD_VARIANTS[variantId];
+        const density = variant.density;
+        if (!density?.enabled) continue;
+
+        // Threshold gate — diameter must be at/above the collapse
+        // size, and below max tier.
+        if (e.size.x < density.largeShardCollapseSize) continue;
+        const tier = e.densityTier ?? 0;
+        if (tier >= density.maxSteps) continue;
+
+        // First pass picks only offscreen entities; second pass
+        // picks anything still qualifying.  When the EntityIndex is
+        // unwired (no viewport rect) `isOffscreen` returns false for
+        // every entity, so the first pass is empty and the second
+        // pass picks normally — keeps unit-test paths working.
+        const off = this.entityIndex?.isOffscreen(e) ?? false;
+        if (onscreen === 0 && !off) continue;
+        if (onscreen === 1 && off) continue; // already handled
+
+        this.collapseLargeShard(e, density, variantId);
+        budget--;
+      }
+    }
+  }
+
+  /**
+   * Single-input density step.  Replaces the entity in place with a
+   * smaller, denser version of itself: tier += 1, size *= shrink,
+   * mass preserved (already sums when shards merge; for single-input
+   * the mass stays put — the entity just compresses geometrically).
+   * Polygon regenerated at the new radius so SAT collisions track
+   * the new bounds.  Density tint cache invalidated so the renderer
+   * picks up the darker hue on next draw.
+   */
+  private collapseLargeShard(
+    entity: GameEntity,
+    density: NonNullable<typeof SHARD_VARIANTS[ShardVariantId]['density']>,
+    variantId: ShardVariantId,
+  ): void {
+    const newTier = (entity.densityTier ?? 0) + 1;
+    const newDiam = entity.size.x * density.shrinkFactor;
+
+    // Polygon regen — match the variant's spawn shape so the
+    // collapsed shard reads as the same kind of debris.
+    const variant = SHARD_VARIANTS[variantId];
+    const baseR = (newDiam / 2) * 0.82;
+    entity.polygonPoints = this.generateShardPolygon(
+      baseR,
+      variant.spawn.polyVerticesMin,
+      variant.spawn.polyVerticesMax,
+      variant.spawn.angleJitter,
+      variant.spawn.radiusMin,
+      variant.spawn.radiusRange,
+      variant.spawn.polyVerticesOptions,
+    );
+
+    entity.size.x = newDiam;
+    entity.size.y = newDiam;
+    invalidateCollisionR(entity);
+    entity.densityTier = newTier;
+    entity.densityCachedTint = undefined;
+    // Nebula fast-path cache lives on tiles (not shards), but the
+    // shard's tinted-key cache also encodes the resolved colour.
+    // Drop both so the next render reflects the darker tier.
+    if (variantId === 'nebula-shard') {
+      entity.nebulaTintedKey = undefined;
+      entity.nebulaCachedTinted = undefined;
     }
   }
 
@@ -1005,22 +2059,907 @@ export class ShardSystem {
    *  merges (today's behaviour).  Nebula-shard merges use the
    *  existing glimmer burst inside composeNebulaShards.
    */
+
+  /**
+   * Tier-transition router for a glass-shard that has grown to
+   * tile-equivalent diameter via the merge pipeline.  Rolls 50/50
+   * between:
+   *   - glass-tile:  condense at the nearest free hex cell.
+   *   - rock-shard:  downgrade in-place to a smaller, denser rock-
+   *                  shard (first leg of the planned material tier
+   *                  chain: nebula → glass → rock → metal → plastic).
+   *
+   * Glass-tile path can still fail if every candidate hex is
+   * occupied — in that case the shard stays a glass-shard and a
+   * later merge will retry.
+   */
+  /**
+   * Unified post-compose tile snap for plastic + glass.  Called at
+   * the end of every successful compose for the survivor.  Snaps
+   * when the survivor's diameter has grown past TILE_SNAP.DIAMETER_
+   * MULT × sqrt(HEX_AREA) AND its per-substep speed² has settled
+   * below TILE_SNAP.REST_SPEED_SQ.  On snap: spawns the static tile
+   * via buildTileAtNearestFreeHex and releases TILE_SNAP.DEBRIS_
+   * COUNT debris shards of the survivor's variant — at the 2× area
+   * threshold the merged shard carried roughly 4 × HEX_AREA worth
+   * of mass, so 75 % is overflow released as the debris burst.
+   */
+  private trySnapToTile(
+    survivor: GameEntity,
+    shardVariant: 'plastic-shard' | 'glass-shard',
+    material: 'plastic' | 'glass',
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): void {
+    if (survivor.shardVariant !== shardVariant) return;
+    if ((survivor.mergeFadeTimer ?? 0) > 0) return;
+    const minDiam = GLASS_TIER_DIAMETER * TILE_SNAP.DIAMETER_MULT;
+    if (survivor.size.x < minDiam) return;
+    const vx = survivor.velocity.x, vy = survivor.velocity.y;
+    if (vx * vx + vy * vy >= TILE_SNAP.REST_SPEED_SQ) return;
+    const snapPos = { x: survivor.position.x, y: survivor.position.y };
+    if (!this.tryTransmuteShardToTile(survivor, shardVariant, material, entities, physics)) return;
+    this.spawnSnapDebris(snapPos, shardVariant, entities);
+  }
+
+  /**
+   * Plastic dent recovery (tiles + shards) — per-dent snap-back.
+   * applyDentStep pushes one entry per hit onto e.plasticDentHistory
+   * holding the polygon delta that dent applied (post - pre, after
+   * the preserve-bounding-radius rescale).  Each entry ticks down
+   * its own timer; when one expires, the recovery pass subtracts
+   * its delta from polygonPoints and drops the entry.  Three hits
+   * in quick succession produce three snap-backs spaced DELAY_
+   * SECONDS apart — no smooth lerp, no per-entity lull.
+   *
+   * Polygon mutation invalidates the SAT cache so collision picks
+   * up the updated edge normals.  Static tiles also have a baked
+   * world-canvas stamp; flag _staticCached false so RenderSystem
+   * re-stamps with the recovered outline.
+   */
+  private tickPlasticDentRecovery(_entities: GameEntity[], dt: number): void {
+    if (dt <= 0) return;
+    if (pendingPlasticDentEntities.size === 0) return;
+    // Iterate the Set of entities with active dent history rather
+    // than the full entity list — applyDentStep adds entries when a
+    // dent fires; we remove an entry here once its history fully
+    // retires (or the entity dies / changes variant).  Set iteration
+    // is allocation-free and visits only the work that needs doing.
+    for (const e of pendingPlasticDentEntities) {
+      if (!e.active) { pendingPlasticDentEntities.delete(e); continue; }
+      if (e.shardVariant !== 'plastic-shard' && e.shardVariant !== 'plastic-tile') {
+        pendingPlasticDentEntities.delete(e);
+        continue;
+      }
+      const history = e.plasticDentHistory;
+      if (history === undefined || history.length === 0) {
+        pendingPlasticDentEntities.delete(e);
+        continue;
+      }
+      const pts = e.polygonPoints;
+      if (!pts) { pendingPlasticDentEntities.delete(e); continue; }
+      const isTile = e.shardVariant === 'plastic-tile';
+      let writeIdx = 0;
+      let mutated = false;
+      let healed  = 0;
+      const N = pts.length;
+      for (let h = 0; h < history.length; h++) {
+        const entry = history[h];
+        entry.timer -= dt;
+        // Delta is Float64Array(2N): index 2j = x, 2j+1 = y.
+        if (entry.timer <= 0 && entry.delta.length === 2 * N) {
+          for (let j = 0; j < N; j++) {
+            pts[j].x -= entry.delta[2 * j];
+            pts[j].y -= entry.delta[2 * j + 1];
+          }
+          mutated = true;
+          healed++;
+          // Skip writing — entry retires here.
+        } else {
+          history[writeIdx++] = entry;
+        }
+      }
+      history.length = writeIdx;
+      if (writeIdx === 0) pendingPlasticDentEntities.delete(e);
+      if (isTile && healed > 0) {
+        const maxHP = e.maxHealth ?? 1;
+        e.health = Math.min(maxHP, e.health + healed);
+        if (e.plasticTileOriginalColor !== undefined
+         && e.plasticTileTargetColor   !== undefined) {
+          const hpRatio = Math.max(0, Math.min(1, e.health / maxHP));
+          e.color = lerpHexColors(
+            e.plasticTileOriginalColor,
+            e.plasticTileTargetColor,
+            1 - hpRatio,
+          );
+        }
+      }
+      if (mutated) {
+        e._satCacheAxes = undefined;
+        if (e._staticCached === true) e._staticCached = false;
+      }
+    }
+  }
+
+  /**
+   * Spawn the surplus-material burst released when a merged shard
+   * snaps into a static tile.  TILE_SNAP.DEBRIS_COUNT shards of the
+   * supplied variant at DEBRIS_DIAMETER, spawned at the snap
+   * position with small outward velocities so they spray off the
+   * materialising tile.  Polygon + colour follow the variant's
+   * spawn config so plastic and glass debris read as base shards
+   * of their respective materials.
+   */
+  private spawnSnapDebris(
+    pos: Vector2,
+    variant: 'plastic-shard' | 'glass-shard',
+    entities: GameEntity[],
+  ): void {
+    const variantDef = SHARD_VARIANTS[variant];
+    const childSpawn = variantDef.spawn;
+    const size = TILE_SNAP.DEBRIS_DIAMETER;
+    const mass = childSpawn.sizeToMass(size);
+    const count = TILE_SNAP.DEBRIS_COUNT;
+    const baseR = (size / 2) * 0.8;
+    const idPrefix = variant === 'plastic-shard' ? 'plastic_snap_debris' : 'glass_snap_debris';
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const speed = 1.0 + Math.random() * 1.5;
+      const points = this.generateShardPolygon(
+        baseR,
+        childSpawn.polyVerticesMin,
+        childSpawn.polyVerticesMax,
+        childSpawn.angleJitter,
+        childSpawn.radiusMin,
+        childSpawn.radiusRange,
+        childSpawn.polyVerticesOptions,
+      );
+      entities.push({
+        id:            nextId(idPrefix),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  variant,
+        position:      { x: pos.x + Math.cos(angle) * size * 0.5, y: pos.y + Math.sin(angle) * size * 0.5 },
+        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        size:          { x: size, y: size },
+        rotation:      Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 2,
+        color:         variant === 'plastic-shard' ? randomPlasticShardShade() : COLORS.STRUCTURE,
+        active:        true,
+        health:        1,
+        maxHealth:     1,
+        polygonPoints: points,
+        mass,
+        collapseGraceTimer: getActiveShatterGraceDelay(),
+      });
+    }
+  }
+
+  /**
+   * Snap a grown mobile shard to the nearest free hex cell and replace
+   * it with a static tile of the given material (mass ∞).  Candidate
+   * cells are the shard's current hex + its 6 neighbours, sorted by
+   * distance; the first cell clear of static geometry wins.  If every
+   * candidate is occupied the shard stays a shard (returns false) and a
+   * later merge retries.  The source shard fades out as the tile
+   * materialises on top of it.
+   *
+   * Shared by the glass and rock tier transitions (and plastic, when
+   * re-enabled) — they differ only in the guard variant and the tile
+   * material.
+   */
+  private tryTransmuteShardToTile(
+    shard: GameEntity,
+    variant: ShardVariantId,
+    material: StructureVariant,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+    seedDensityTier?: number,
+  ): boolean {
+    if (shard.shardVariant !== variant) return false;
+
+    if (!this.buildTileAtNearestFreeHex(
+      shard.position.x, shard.position.y, material, entities, physics, seedDensityTier,
+    )) return false;
+
+    // Source shard fades out — the tile materialises while the shard
+    // dissolves on top of it.
+    this.startMergeFadeOut(shard);
+    return true;
+  }
+
+  /**
+   * Snap-and-build: place a static tile of `material` (mass ∞) on the
+   * nearest free hex cell to world `(wx, wy)` — the containing hex + its 6
+   * neighbours, sorted by distance, first cell clear of static geometry
+   * wins.  Returns false (and builds nothing) if every candidate is
+   * occupied, so callers can retry later.  Shared by the shard tier
+   * transitions and metal-hexagon crystallization.
+   */
+  private buildTileAtNearestFreeHex(
+    wx: number,
+    wy: number,
+    material: StructureVariant,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+    seedDensityTier?: number,
+  ): boolean {
+    const origin = pixelToHexCoord(wx, wy);
+    const candidates: { c: number; r: number; distSq: number }[] = [];
+    const pushCandidate = (c: number, r: number) => {
+      const p = hexCoordToPixel(c, r);
+      const dx = wrapDeltaX(wx, p.x);
+      const dy = wrapDeltaY(wy, p.y);
+      candidates.push({ c, r, distSq: dx * dx + dy * dy });
+    };
+    pushCandidate(origin.c, origin.r);
+    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+      pushCandidate(n.c, n.r);
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    let chosen: { c: number; r: number } | null = null;
+    for (const cand of candidates) {
+      const p = hexCoordToPixel(cand.c, cand.r);
+      // Block on any nearby static geometry (existing tiles incl.
+      // nebula-tiles in the same cell).  Radius slightly under
+      // HEX_SIZE so touching neighbours don't register as overlap.
+      if (!physics.isPositionClear(p.x, p.y, HEX_SIZE * 0.5)) continue;
+      chosen = cand;
+      break;
+    }
+    if (!chosen) return false;
+
+    const p = hexCoordToPixel(chosen.c, chosen.r);
+    // Hex dimensions match TileGenerator's tile build.  Width is
+    // sqrt(3)*HEX_SIZE; height is 2*HEX_SIZE.
+    const w = Math.sqrt(3) * HEX_SIZE;
+    const h = 2 * HEX_SIZE;
+    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, material);
+    // Carry a density tier onto the new tile (today: metal, from the
+    // crystallising composite's shard layers).  Drives brightness via
+    // metalDensityBrightness and, for metal, scales HP so a denser tile
+    // takes proportionally more damage to break.  Other materials pass
+    // undefined → tier 1 / base, unchanged.
+    if (seedDensityTier !== undefined && seedDensityTier > 0) {
+      tile.densityTier = seedDensityTier;
+      if (material === 'metal' && seedDensityTier > 1) {
+        tile.maxHealth = (tile.maxHealth ?? 1) * seedDensityTier;
+        tile.health = tile.maxHealth;
+      }
+    }
+    entities.push(tile);
+    physics.addStaticEntity(tile);
+
+    // Blow-back: the tile snapping into place shoves nearby loose shards
+    // clear (non-damaging shockwave — see MERGE_BLOWBACK).
+    this.onTileFormed?.(p.x, p.y);
+    return true;
+  }
+
+  // ── Metal rigid-composite assembly ──────────────────────────────────────
+  // Two passes per merge tick:
+  //   1. snap each loose triangle onto the nearest composite's empty
+  //      boundary cell (growing the composite);
+  //   2. fuse any remaining close loose-loose pairs into a fresh 2-cell
+  //      composite.
+  // The attraction pull (runMergeBroadphase, metal-shard.merge.attractedTo)
+  // brings pieces into range; this pass does the rigid locking.
+  private tickMetalAssembly(entities: GameEntity[], physics: PhysicsSystem): void {
+    const composites: GameEntity[] = [];
+    const loose: GameEntity[] = [];
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e.active || e.shardVariant !== 'metal-shard') continue;
+      if (e.metalCells !== undefined) composites.push(e); else loose.push(e);
+    }
+    if (loose.length === 0 && composites.length === 0) return;
+
+    const R = HEX_SIZE / Math.sqrt(3);
+    const SNAP = METAL_ASSEMBLY.SNAP_RANGE_R * R;
+    const FORM = METAL_ASSEMBLY.FORM_RANGE_R * R;
+
+    // Pass 1 — loose → composite.  A freshly-shattered triangle is left to
+    // float free until its post-break grace (collapseGraceTimer) expires —
+    // that's the delay before it starts snapping onto anything.  Composites
+    // with empty lattice slots take the triangle as a new visible cell
+    // (growMetalComposite); composites already at 6 cells but still under
+    // the TILE_SNAP.METAL_MAX_EXCESS_CELLS cap absorb the triangle as
+    // invisible "excess" mass (metalExcessCells counter), each +6 climbing
+    // one density tier until it settles and snaps.
+    for (let i = 0; i < loose.length; i++) {
+      const l = loose[i];
+      if (!l.active || l.metalCells !== undefined) continue;
+      if ((l.collapseGraceTimer ?? 0) > 0) continue;
+      let bestLattice: GameEntity | null = null;
+      let bestLatticeTarget: { ix: number; iy: number; up: boolean; d2: number } | null = null;
+      let bestExcess: GameEntity | null = null;
+      let bestExcessD2 = Infinity;
+      for (let c = 0; c < composites.length; c++) {
+        const comp = composites[c];
+        if (!comp.active) continue;
+        const cells = comp.metalCells!;
+        const dx = wrapDeltaX(comp.position.x, l.position.x);
+        const dy = wrapDeltaY(comp.position.y, l.position.y);
+        const reach = comp.size.x * 0.5 + SNAP;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > reach * reach) continue;
+        if (cells.length < METAL_HEX_SIZE) {
+          const t = this.nearestMetalHexSlot(comp, l.position.x, l.position.y);
+          if (t && (bestLatticeTarget === null || t.d2 < bestLatticeTarget.d2)) {
+            bestLattice = comp;
+            bestLatticeTarget = t;
+          }
+        } else if ((comp.metalExcessCells ?? 0) < TILE_SNAP.METAL_MAX_EXCESS_CELLS) {
+          // Full hexagon still drifting: keep soaking shards as excess mass,
+          // each +6 climbing one density tier, until the cap (top tier) or
+          // until it settles and snaps (Pass 3).
+          if (distSq < bestExcessD2) {
+            bestExcess = comp;
+            bestExcessD2 = distSq;
+          }
+        }
+      }
+      if (bestLattice && bestLatticeTarget) {
+        this.growMetalComposite(bestLattice, l, bestLatticeTarget);
+      } else if (bestExcess) {
+        bestExcess.metalExcessCells = (bestExcess.metalExcessCells ?? 0) + 1;
+        bestExcess.mass += l.mass;
+        l.active = false;
+      }
+    }
+
+    // Pass 2 — loose + loose → new composite, bucketed into a coarse grid
+    // so the pair search stays local.
+    const CELL = Math.max(FORM, 2 * R);
+    const COLS = Math.max(1, Math.ceil(MAP_WIDTH / CELL));
+    const ROWS = Math.max(1, Math.ceil(MAP_HEIGHT / CELL));
+    const gkey = (cx: number, cy: number) => {
+      const wx = ((cx % COLS) + COLS) % COLS;
+      const wy = ((cy % ROWS) + ROWS) % ROWS;
+      return wx * ROWS + wy;
+    };
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < loose.length; i++) {
+      const l = loose[i];
+      if (!l.active || l.metalCells !== undefined) continue;
+      if ((l.collapseGraceTimer ?? 0) > 0) continue;
+      const k = gkey(Math.floor(l.position.x / CELL), Math.floor(l.position.y / CELL));
+      let b = grid.get(k);
+      if (!b) { b = []; grid.set(k, b); }
+      b.push(i);
+    }
+    const FORM2 = FORM * FORM;
+    for (let i = 0; i < loose.length; i++) {
+      const a = loose[i];
+      if (!a.active || a.metalCells !== undefined) continue;
+      if ((a.collapseGraceTimer ?? 0) > 0) continue;
+      const cx = Math.floor(a.position.x / CELL);
+      const cy = Math.floor(a.position.y / CELL);
+      let partner = -1;
+      let bestD2 = FORM2;
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          const cell = grid.get(gkey(cx + ox, cy + oy));
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j <= i) continue;
+            const b2 = loose[j];
+            if (!b2.active || b2.metalCells !== undefined) continue;
+            const dx = wrapDeltaX(a.position.x, b2.position.x);
+            const dy = wrapDeltaY(a.position.y, b2.position.y);
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) { bestD2 = d2; partner = j; }
+          }
+        }
+      }
+      if (partner >= 0) {
+        this.formMetalComposite(a, loose[partner]);
+        composites.push(a);
+      }
+    }
+
+    // Pass 2b — composite + composite.  When two INCOMPLETE composites'
+    // bounds overlap, pour the smaller's triangles into the larger's empty
+    // hexagon slots (overflow released as loose), so partial hexagons snap
+    // together.  Completed hexagons (floating, about to snap) sit out.
+    // Coarse grid sized to the largest composite so the 3×3 neighbour scan
+    // can't miss an overlap.
+    let cMaxSize = 2 * R;
+    for (const c of composites) if (c.active && c.size.x > cMaxSize) cMaxSize = c.size.x;
+    const CCELL = cMaxSize;
+    const CCOLS = Math.max(1, Math.ceil(MAP_WIDTH / CCELL));
+    const CROWS = Math.max(1, Math.ceil(MAP_HEIGHT / CCELL));
+    const ckey = (cx: number, cy: number) => {
+      const x = ((cx % CCOLS) + CCOLS) % CCOLS;
+      const y = ((cy % CROWS) + CROWS) % CROWS;
+      return x * CROWS + y;
+    };
+    const incomplete = (e: GameEntity) =>
+      e.active && e.metalCells !== undefined && e.metalCells.length < METAL_HEX_SIZE;
+    const cgrid = new Map<number, number[]>();
+    for (let i = 0; i < composites.length; i++) {
+      const c = composites[i];
+      if (!incomplete(c)) continue;
+      const k = ckey(Math.floor(c.position.x / CCELL), Math.floor(c.position.y / CCELL));
+      let b = cgrid.get(k); if (!b) { b = []; cgrid.set(k, b); } b.push(i);
+    }
+    const OVERLAP = METAL_ASSEMBLY.MERGE_OVERLAP_FACTOR;
+    for (let i = 0; i < composites.length; i++) {
+      const a = composites[i];
+      if (!incomplete(a)) continue;
+      const acx = Math.floor(a.position.x / CCELL);
+      const acy = Math.floor(a.position.y / CCELL);
+      for (let oy = -1; oy <= 1 && incomplete(a); oy++) {
+        for (let ox = -1; ox <= 1 && incomplete(a); ox++) {
+          const cell = cgrid.get(ckey(acx + ox, acy + oy));
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j === i) continue;
+            const b = composites[j];
+            if (!incomplete(b)) continue;
+            const dx = wrapDeltaX(a.position.x, b.position.x);
+            const dy = wrapDeltaY(a.position.y, b.position.y);
+            const reach = (a.size.x + b.size.x) * 0.5 * OVERLAP;
+            if (dx * dx + dy * dy > reach * reach) continue;
+            // Larger is the host; smaller is absorbed.
+            if (a.metalCells!.length >= b.metalCells!.length) {
+              this.mergeMetalComposites(a, b, entities);
+            } else {
+              this.mergeMetalComposites(b, a, entities);
+              break; // `a` was consumed — stop scanning on its behalf
+            }
+          }
+        }
+      }
+    }
+
+    // Pass 3 — a composite that has completed its 6-cell lattice AND
+    // settled below the speed gate snaps to the nearest free grid hex at
+    // whatever density tier it has reached.  Rest speed is the SINGLE
+    // criterion (the old "must soak 6 excess first" gate is gone): a
+    // hexagon that keeps drifting keeps absorbing shards and climbing tiers
+    // (cap permitting); the moment it rests it crystallises at its current
+    // tier, releasing any partial-layer remainder (see snapHexagonToGrid).
+    for (let c = 0; c < composites.length; c++) {
+      const comp = composites[c];
+      if (!comp.active || comp.metalCells === undefined) continue;
+      if (comp.metalCells.length < METAL_HEX_SIZE) continue;
+      const vx = comp.velocity.x, vy = comp.velocity.y;
+      if (vx * vx + vy * vy >= TILE_SNAP.REST_SPEED_SQ) continue;
+      this.snapHexagonToGrid(comp, entities, physics);
+    }
+  }
+
+  /**
+   * Snap a settled composite onto the nearest free grid hex as a static
+   * metal tile at its DENSITY TIER.  The composite holds
+   * N = 6 lattice + metalExcessCells shards; tier = ⌊N / 6⌋ (capped),
+   * and the tile is built at that tier (lighter + tougher + more break-
+   * shards the denser it is).  The partial-layer remainder (N − tier×6
+   * shards that didn't complete the next layer) is released as loose
+   * triangles that re-enter the assembly cycle.  If every candidate grid
+   * cell is occupied the snap is deferred — the composite retries later.
+   */
+  private snapHexagonToGrid(
+    comp: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): void {
+    const total = comp.metalCells!.length + (comp.metalExcessCells ?? 0);
+    const tier = Math.max(1, Math.min(METAL_MAX_DENSITY_TIER, Math.floor(total / METAL_HEX_SIZE)));
+    if (!this.buildTileAtNearestFreeHex(
+      comp.position.x, comp.position.y, 'metal', entities, physics, tier,
+    )) return;
+    // Release the partial-layer remainder as loose triangles; the rest is
+    // consumed into the tile (mass conserved by the tier's break count).
+    const remainder = total - tier * METAL_HEX_SIZE;
+    const R = comp.metalLatticeR ?? (HEX_SIZE / Math.sqrt(3));
+    for (let i = 0; i < remainder; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const wx = comp.position.x + Math.cos(ang) * R;
+      const wy = comp.position.y + Math.sin(ang) * R;
+      this.spawnLooseMetalTriangle(
+        entities, wx, wy, comp.position.x, comp.position.y, R,
+        comp.color, comp.sprite, 1, comp.velocity.x, comp.velocity.y,
+      );
+    }
+    comp.active = false;
+  }
+
+  /** Spawn a single loose metal-shard triangle at world `(wx, wy)` drifting
+   *  away from `(fromX, fromY)`.  Used for triangles that overflow a hexagon
+   *  when two composites merge — they re-enter the assembly cycle. */
+  private spawnLooseMetalTriangle(
+    entities: GameEntity[],
+    wx: number, wy: number,
+    fromX: number, fromY: number,
+    R: number,
+    color: string | undefined,
+    sprite: string | undefined,
+    health: number,
+    vx: number, vy: number,
+  ): void {
+    const triSize = 2 * R;
+    const dx = wrapDeltaX(fromX, wx);
+    const dy = wrapDeltaY(fromY, wy);
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const POP = METAL_ASSEMBLY.RELEASE_POP_SPEED;
+    const pos = { x: wx, y: wy };
+    wrapPosition(pos);
+    entities.push({
+      id: nextId('metal_shard'),
+      type: EntityType.STRUCTURE,
+      shardVariant: 'metal-shard',
+      position: pos,
+      velocity: { x: vx + (dx / d) * POP, y: vy + (dy / d) * POP },
+      size: { x: triSize, y: triSize },
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 1.0,
+      color: color,
+      active: true,
+      health,
+      maxHealth: health,
+      mass: SHARD_VARIANTS['metal-shard'].spawn.sizeToMass(triSize),
+      polygonPoints: [
+        { x: R * Math.cos(-Math.PI / 2),                   y: R * Math.sin(-Math.PI / 2) },
+        { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+        { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+      ],
+      sprite,
+      collapseGraceTimer: getActiveShatterGraceDelay(),
+    });
+  }
+
+  /** Nearest EMPTY hexagon slot of `comp` to a piece at world `(wx, wy)` — or
+   *  null if the hexagon is already full.  Every composite fills the same 6
+   *  slots (METAL_HEX_CELLS), so growth is constrained to a single hexagon
+   *  rather than an open-ended polyiamond. */
+  private nearestMetalHexSlot(
+    comp: GameEntity,
+    wx: number,
+    wy: number,
+  ): { ix: number; iy: number; up: boolean; d2: number } | null {
+    const cells = comp.metalCells!;
+    if (cells.length >= METAL_HEX_SIZE) return null;
+    const R = comp.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const occ = new Set<string>();
+    let cmx = 0, cmy = 0;
+    for (const c of cells) { occ.add(c.ix + ',' + c.iy); cmx += c.ix * ux; cmy += c.iy * uy; }
+    cmx /= cells.length; cmy /= cells.length;
+
+    // Piece position in the composite's lattice frame (rotate the world
+    // delta by -rotation, then offset by the mass centroid).
+    const wdx = wrapDeltaX(comp.position.x, wx);
+    const wdy = wrapDeltaY(comp.position.y, wy);
+    const cos = Math.cos(comp.rotation);
+    const sin = Math.sin(comp.rotation);
+    const pieceLx = (wdx * cos + wdy * sin) + cmx;
+    const pieceLy = (-wdx * sin + wdy * cos) + cmy;
+
+    let best: { ix: number; iy: number; up: boolean; d2: number } | null = null;
+    let bestD2 = Infinity;
+    for (const s of METAL_HEX_CELLS) {
+      if (occ.has(s.ix + ',' + s.iy)) continue;
+      const dx = s.ix * ux - pieceLx;
+      const dy = s.iy * uy - pieceLy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; best = { ix: s.ix, iy: s.iy, up: s.up, d2 }; }
+    }
+    return best;
+  }
+
+  /** Append cell (ix, iy, up) to `comp`'s lattice, keeping the already-placed
+   *  cells fixed in the world (the entity origin tracks the shifting mass
+   *  centroid).  Geometry only — the caller blends mass/health and recomputes
+   *  bounds (batched so a multi-cell merge recomputes once). */
+  private addCellToComposite(comp: GameEntity, ix: number, iy: number, up: boolean): void {
+    const R = comp.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const cells = comp.metalCells!;
+
+    let cmx0 = 0, cmy0 = 0;
+    for (const c of cells) { cmx0 += c.ix * ux; cmy0 += c.iy * uy; }
+    cmx0 /= cells.length; cmy0 /= cells.length;
+
+    cells.push({ ix, iy, up });
+
+    let cmx1 = 0, cmy1 = 0;
+    for (const c of cells) { cmx1 += c.ix * ux; cmy1 += c.iy * uy; }
+    cmx1 /= cells.length; cmy1 /= cells.length;
+
+    const sx = cmx1 - cmx0;
+    const sy = cmy1 - cmy0;
+    const cos = Math.cos(comp.rotation);
+    const sin = Math.sin(comp.rotation);
+    comp.position.x += sx * cos - sy * sin;
+    comp.position.y += sx * sin + sy * cos;
+    wrapPosition(comp.position);
+  }
+
+  /** Lock loose triangle `l` into composite `comp` at lattice cell `target`. */
+  /**
+   * Decompose a dying metal composite into its constituent loose
+   * triangles.  Mirrors the lattice math in mergeMetalComposites:
+   * each cell's local centroid is (ix·R·√3/2, iy·R/2) relative to
+   * the composite's own centroid; rotate by the composite's
+   * rotation, add parent.position to get world coords.  Each loose
+   * triangle inherits parent's velocity plus a small outward
+   * scatter from the composite centroid so the cluster pops apart
+   * rather than overlapping perfectly at spawn.  Each triangle's
+   * polygon is the standard equilateral (matches DropSystem's
+   * metal-tile breakShards), with metalLatticeR carried over so a
+   * later re-assembly pass measures the same lattice size.
+   *
+   * Mass + HP are split evenly across the cells.  Mass per cell =
+   * SHARD_SPAWN_SHAPE_METAL.sizeToMass(2R) — same formula tile-
+   * break uses — so a decomposed triangle is interchangeable with
+   * one freshly broken off a tile.  collapseGraceTimer is stamped
+   * so the decomposed pieces float free for a moment before
+   * tickMetalAssembly can re-snap them onto other composites.
+   */
+  private decomposeMetalComposite(parent: GameEntity, entities: GameEntity[]): void {
+    const cells = parent.metalCells;
+    if (!cells || cells.length < 2) return;
+    const R = parent.metalLatticeR;
+    if (!R) return;
+
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    // Composite centroid in lattice frame (mean of cell coords) —
+    // matches how mergeMetalComposites + tickMetalAssembly compute
+    // the body's own (0, 0) anchor.
+    let cmx = 0, cmy = 0;
+    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+    cmx /= cells.length; cmy /= cells.length;
+    const cos = Math.cos(parent.rotation);
+    const sin = Math.sin(parent.rotation);
+
+    const triDiameter = 2 * R;
+    const variantDef = SHARD_VARIANTS['metal-shard'];
+    const triMass = variantDef.spawn.sizeToMass(triDiameter);
+    const hpEach = Math.max(1, Math.round((parent.health ?? cells.length) / cells.length));
+    const maxHpEach = Math.max(1, Math.round((parent.maxHealth ?? cells.length) / cells.length));
+
+    const baseEquilateral: Vector2[] = [
+      { x: R * Math.cos(-Math.PI / 2),                 y: R * Math.sin(-Math.PI / 2) },
+      { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+      { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+    ];
+
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      // Cell centroid in entity-local frame (lattice → composite frame).
+      const ex = c.ix * ux - cmx;
+      const ey = c.iy * uy - cmy;
+      // Composite frame → world.
+      const wx = parent.position.x + ex * cos - ey * sin;
+      const wy = parent.position.y + ex * sin + ey * cos;
+      // Outward scatter direction from composite centroid.
+      const dx = wx - parent.position.x;
+      const dy = wy - parent.position.y;
+      const scatterMag = Math.sqrt(dx * dx + dy * dy);
+      const scatterSpeed = 1.0 + Math.random() * 1.5;
+      const sx = scatterMag > 0.001 ? (dx / scatterMag) * scatterSpeed : Math.cos(i) * scatterSpeed;
+      const sy = scatterMag > 0.001 ? (dy / scatterMag) * scatterSpeed : Math.sin(i) * scatterSpeed;
+      // Clone the equilateral template so each loose triangle owns
+      // its own points (the dent pipeline mutates polygonPoints in
+      // place; shared references would deform every sibling).
+      const points: Vector2[] = baseEquilateral.map(p => ({ x: p.x, y: p.y }));
+
+      entities.push({
+        id:            nextId('metal_decomp'),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  'metal-shard',
+        position:      { x: wx, y: wy },
+        velocity:      { x: parent.velocity.x + sx, y: parent.velocity.y + sy },
+        size:          { x: triDiameter, y: triDiameter },
+        rotation:      parent.rotation,
+        rotationSpeed: (Math.random() - 0.5) * 2,
+        color:         parent.color,
+        active:        true,
+        health:        hpEach,
+        maxHealth:     maxHpEach,
+        polygonPoints: points,
+        mass:          triMass,
+        metalLatticeR: R,
+        collapseGraceTimer: getActiveShatterGraceDelay(),
+      });
+    }
+
+    // Dust puff matches metal-tile's slate colour — same particle
+    // tone whether you break a tile face or pop a composite.
+    const onParticles = variantDef.onShatterParticles;
+    if (onParticles && onParticles !== 'none' && onParticles !== 'inherit') {
+      const iv = parent.lastImpactVelocity;
+      const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+      const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : undefined;
+      const dustCount = 4 + cells.length;
+      this.particles.spawn(entities, parent.position, dustCount, onParticles.color, {
+        speedMin: 1, speedMax: impactSpeed * 0.4 + 2,
+        sizeMin: 1, sizeMax: 2.5,
+        lifetimeMin: 0.25, lifetimeMax: 0.55,
+        spreadAngle: impactAngle,
+        spreadCone: Math.PI,
+        baseVelocity: parent.velocity,
+      });
+    }
+  }
+
+  private growMetalComposite(
+    comp: GameEntity,
+    l: GameEntity,
+    target: { ix: number; iy: number; up: boolean },
+  ): void {
+    this.addCellToComposite(comp, target.ix, target.iy, target.up);
+
+    const tm = comp.mass + l.mass;
+    comp.velocity.x = (comp.velocity.x * comp.mass + l.velocity.x * l.mass) / tm;
+    comp.velocity.y = (comp.velocity.y * comp.mass + l.velocity.y * l.mass) / tm;
+    comp.mass = tm;
+    comp.health = (comp.health ?? 0) + (l.health ?? 0);
+    comp.maxHealth = (comp.maxHealth ?? 0) + (l.maxHealth ?? 0);
+
+    this.metalRecomputeBounds(comp);
+    l.active = false;
+  }
+
+  /** Pour composite `other`'s triangles into `host`'s empty hexagon slots
+   *  (host is the ≥-sized one).  Triangles that fit fill the hexagon
+   *  (nearest-to-host first); any that overflow the 6 slots are released as
+   *  loose metal-shards so they rejoin the assembly cycle.  This is the
+   *  composite ↔ composite "snap together", capped at one hexagon. */
+  private mergeMetalComposites(host: GameEntity, other: GameEntity, entities: GameEntity[]): void {
+    // World position of each of other's cells (its own lattice → world).
+    const R = other.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const ocells = other.metalCells!;
+    let ocmx = 0, ocmy = 0;
+    for (const c of ocells) { ocmx += c.ix * ux; ocmy += c.iy * uy; }
+    ocmx /= ocells.length; ocmy /= ocells.length;
+    const ocos = Math.cos(other.rotation);
+    const osin = Math.sin(other.rotation);
+    const placements = ocells.map(c => {
+      const ex = c.ix * ux - ocmx, ey = c.iy * uy - ocmy;
+      const pwx = other.position.x + ex * ocos - ey * osin;
+      const pwy = other.position.y + ex * osin + ey * ocos;
+      const dx = wrapDeltaX(host.position.x, pwx);
+      const dy = wrapDeltaY(host.position.y, pwy);
+      return { pwx, pwy, d2: dx * dx + dy * dy };
+    });
+    // Nearest-to-host first so cells pack inward against the existing body.
+    placements.sort((a, b) => a.d2 - b.d2);
+
+    const perOtherMass = other.mass / ocells.length;
+    const perOtherHealth = Math.max(1, Math.round((other.health ?? ocells.length) / ocells.length));
+    for (const p of placements) {
+      const slot = this.nearestMetalHexSlot(host, p.pwx, p.pwy);
+      if (slot) {
+        this.addCellToComposite(host, slot.ix, slot.iy, slot.up);
+        const tm = host.mass + perOtherMass;
+        host.velocity.x = (host.velocity.x * host.mass + other.velocity.x * perOtherMass) / tm;
+        host.velocity.y = (host.velocity.y * host.mass + other.velocity.y * perOtherMass) / tm;
+        host.mass = tm;
+        host.health = (host.health ?? 0) + perOtherHealth;
+        host.maxHealth = (host.maxHealth ?? 0) + perOtherHealth;
+      } else {
+        // Host hexagon is full — this triangle overflows back to loose.
+        this.spawnLooseMetalTriangle(
+          entities, p.pwx, p.pwy, host.position.x, host.position.y,
+          R, other.color, other.sprite, perOtherHealth,
+          other.velocity.x, other.velocity.y,
+        );
+      }
+    }
+    this.metalRecomputeBounds(host);
+    // Shape changed — wake so the float/snap checks re-run from awake.
+    host.asleep = false;
+    host.sleepTimer = 0;
+    other.active = false;
+  }
+
+  /** Fuse two loose triangles into a fresh 2-cell composite (rhombus).
+   *  `a` becomes the composite; `b` is consumed. */
+  private formMetalComposite(a: GameEntity, b: GameEntity): void {
+    const R = a.size.x / 2;
+    const wdx = wrapDeltaX(a.position.x, b.position.x);
+    const wdy = wrapDeltaY(a.position.y, b.position.y);
+
+    // Orient the lattice so cell (0,2) (local +y) lies along a→b, then drop
+    // the origin at the pair's mass centroid (midpoint of equal masses).
+    a.rotation = Math.atan2(wdy, wdx) - Math.PI / 2;
+
+    // Approximate angular-momentum transfer about the new centroid: an
+    // off-centre approach (the pair's relative velocity has a tangential
+    // component) spins the composite, so it rotates as one body.  Equal
+    // masses sit at ±(b-a)/2 from the centroid; L = Σ m(r × v), I = Σ m|r|².
+    const rax = -wdx * 0.5, ray = -wdy * 0.5;
+    const rbx = wdx * 0.5, rby = wdy * 0.5;
+    const L = a.mass * (rax * a.velocity.y - ray * a.velocity.x)
+            + b.mass * (rbx * b.velocity.y - rby * b.velocity.x);
+    const I = a.mass * (rax * rax + ray * ray) + b.mass * (rbx * rbx + rby * rby);
+    const momentumSpin = I > 1e-6 ? L / I : 0;
+    // Add a baseline random spin so every composite tumbles like a loose
+    // shard, not just off-centre merges.  Damping bleeds it off as the
+    // composite settles (see METAL_ASSEMBLY); the clamp caps total spin.
+    const spin = Math.max(-2.5, Math.min(2.5,
+      momentumSpin + (Math.random() - 0.5) * 2 * METAL_ASSEMBLY.SPAWN_SPIN));
+
+    a.position.x += wdx * 0.5;
+    a.position.y += wdy * 0.5;
+    wrapPosition(a.position);
+
+    const tm = a.mass + b.mass;
+    a.velocity.x = (a.velocity.x * a.mass + b.velocity.x * b.mass) / tm;
+    a.velocity.y = (a.velocity.y * a.mass + b.velocity.y * b.mass) / tm;
+    a.mass = tm;
+    a.health = (a.health ?? 0) + (b.health ?? 0);
+    a.maxHealth = (a.maxHealth ?? 0) + (b.maxHealth ?? 0);
+
+    a.metalLatticeR = R;
+    a.metalCells = [{ ix: 0, iy: 0, up: true }, { ix: 0, iy: 2, up: false }];
+    a.rotationSpeed = spin;
+    // Gentle free-floater: drifts/spins visibly, then bleeds to rest and
+    // sleeps — so settled composites drop out of the dynamic-load signal
+    // instead of throttling shared passes forever (see METAL_ASSEMBLY).
+    a.linearDamping = METAL_ASSEMBLY.LINEAR_DAMPING;
+    a.angularDamping = METAL_ASSEMBLY.ANGULAR_DAMPING;
+    a.restSpeed = METAL_ASSEMBLY.REST_SPEED;
+    a.restSpin = METAL_ASSEMBLY.REST_SPIN;
+    this.metalRecomputeBounds(a);
+    b.active = false;
+  }
+
+  /** Recompute a composite's bounding size + convex collision polygon from
+   *  its cells (all in the lattice frame, relative to the mass centroid). */
+  private metalRecomputeBounds(comp: GameEntity): void {
+    const R = comp.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const cells = comp.metalCells!;
+    let cmx = 0, cmy = 0;
+    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+    cmx /= cells.length; cmy /= cells.length;
+
+    const pts: Vector2[] = [];
+    let maxR2 = 0;
+    for (const c of cells) {
+      const ccx = c.ix * ux - cmx;
+      const ccy = c.iy * uy - cmy;
+      const verts: ReadonlyArray<readonly [number, number]> = c.up
+        ? [[0, -R], [ux, uy], [-ux, uy]]
+        : [[0, R], [ux, -uy], [-ux, -uy]];
+      for (const v of verts) {
+        const x = ccx + v[0];
+        const y = ccy + v[1];
+        pts.push({ x, y });
+        const r2 = x * x + y * y;
+        if (r2 > maxR2) maxR2 = r2;
+      }
+    }
+    const diam = 2 * Math.sqrt(maxR2);
+    comp.size = { x: diam, y: diam };
+
+    let hull = metalConvexHull(pts);
+    if (hull.length > 24) {
+      const out: Vector2[] = [];
+      const step = hull.length / 24;
+      for (let i = 0; i < 24; i++) out.push(hull[Math.floor(i * step)]);
+      hull = out;
+    }
+    comp.polygonPoints = hull;
+  }
+
   private composeEntities(
     a: GameEntity,
     b: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
-    outcome: MergeOutcome = 'compose',
   ): void {
     if (!a.active || !b.active) return;
-
-    // Stage 5b: 'absorb' — smaller fades, larger gains a glow tint
-    // mapped to the closest weapon-palette colour.  Used by nebula-
-    // shard absorbed into a max-size glass-shard.
-    if (outcome === 'absorb') {
-      this.applyAbsorb(a, b, entities);
-      return;
-    }
 
     // Stage 5: shard-family entities are now all EntityType.STRUCTURE.
     // Distinguish by variant id rather than the legacy EntityTypes.
@@ -1028,11 +2967,12 @@ export class ShardSystem {
     const bVariant = shardVariantOf(b);
     const aIsNebShard = aVariant === 'nebula-shard';
     const bIsNebShard = bVariant === 'nebula-shard';
-    // Mobile-shard family: rock-shard or glass-shard ride the asteroid
-    // accretion path.  Tile variants have shatter.kind=none here so
-    // they don't compose (only mobile shards merge).
-    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard';
-    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard';
+    // Mobile-shard family: rock-shard, glass-shard, and plastic-
+    // shard ride the asteroid accretion path.  Tile variants have
+    // shatter.kind=none here so they don't compose (only mobile
+    // shards merge).
+    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard' || aVariant === 'plastic-shard';
+    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard' || bVariant === 'plastic-shard';
 
     // Nebula-shard self-merge — own code path with composition blend +
     // transmutation hook.
@@ -1059,22 +2999,98 @@ export class ShardSystem {
     { const p = { x: nmx, y: nmy }; wrapPosition(p); nmx = p.x; nmy = p.y; }
 
     if (aIsAst && bIsAst) {
-      // Asteroid + Asteroid — area-conserving accretion.
+      // Asteroid + Asteroid — density compaction (smaller-but-denser).
+      // When the dominant variant has `density.enabled`, the surviving
+      // shard takes:
+      //   mass     = a.mass + b.mass        (sum, per task brief)
+      //   tier     = max(tiers) + 1, capped (per task brief)
+      //   diameter = max(inputs) × shrink   (per task brief)
+      // For variants without density (none today, kept defensive),
+      // the legacy area-conserving accretion remains.
       const MAX_HP = 6;
       const rA = a.size.x / 2;
       const rB = b.size.x / 2;
-      const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
+      const aDia = a.size.x;
+      const bDia = b.size.x;
 
-      // Size cap from MAP_POPULATION (Stage 5 will switch
-      // this read to MAP_POPULATION).  If the area-conserving merge
-      // would exceed the cap, skip the merge — pair stays separate.
-      const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
-      if (newDiam > sizeCap) return;
+      // Bonds are same-material only, so a and b share a variant; the
+      // larger by diameter is the survivor (carries variant id + glow).
+      const aIsLarger = aDia >= bDia;
+      const dominantVariant = (aIsLarger ? a.shardVariant : b.shardVariant) ?? 'rock-shard';
+      const dominantDef = SHARD_VARIANTS[dominantVariant];
+      const density = dominantDef.density;
 
-      // Larger entity by area dominates the surviving variant id;
-      // blend glow colors.  Today the only mobile variants that
-      // bond are rock-shard and glass-shard.
-      const dominantVariant = (rA >= rB ? a.shardVariant : b.shardVariant) ?? 'rock-shard';
+      // Density gate: refuse the merge if the dominant variant has
+      // hit max tier OR the combined area is below the variant's
+      // areaThreshold (skip trivial micro-shard merges).  Without
+      // density (or disabled), fall through to legacy accretion.
+      let newDiam: number;
+      let newMass: number;
+      let newTier: number | undefined = undefined;
+      // Glass-shard self-merges bypass density compaction — the
+      // tier-transition mechanic (glass→tile at GLASS_TIER_DIAMETER)
+      // wants the shards to *grow* visibly until they condense into a
+      // tile.  Density's shrinkFactor would have them shrinking
+      // instead.  Plastic-shard self-merge follows the same rule,
+      // though plastic.density is already disabled so this gate is
+      // double-defence.
+      const isGlassSelfMerge   = a.shardVariant === 'glass-shard'   && b.shardVariant === 'glass-shard';
+      const isPlasticSelfMerge = a.shardVariant === 'plastic-shard' && b.shardVariant === 'plastic-shard';
+      // Rock-dominant merges condense through the ROCK_CONDENSE grid
+      // (denser-first, CONTINUOUS — never refused, which was the old
+      // stall).  Any two rock(+absorbed) shards combine: mass is
+      // conserved, the survivor keeps the larger input's size and bumps
+      // DENSITY (smaller footprint per mass, darker, heavier), growing
+      // size only once density caps.  When the combined mass would exceed
+      // the top cell (largest size + max density) the shard condenses into
+      // a STATIC rock-tile — the only tile-forming event, so tiles are
+      // rare and appear only after a cluster is already consolidated
+      // (they don't get smashed by surrounding shards mid-process).
+      const isRockResult = dominantVariant === 'rock-shard';
+      if (isRockResult) {
+        newMass = a.mass + b.mass;
+        const startTier = Math.max(nearestRockSizeTier(aDia), nearestRockSizeTier(bDia));
+        const cell = deriveRockCell(startTier, newMass);
+        if (cell === null) {
+          // Overflow — both parties are already at the top of the
+          // ROCK_CONDENSE grid (max size + max density), and rock-
+          // shards no longer transmute into rock-tiles per user
+          // direction.  Refuse the merge so the pair stays as two
+          // separate top-tier shards.  Without this gate the pair
+          // would silently keep accumulating mass into a single
+          // entity that visually never changes — a sink that swallows
+          // every nearby shard without feedback.
+          return;
+        }
+        newDiam = ROCK_CONDENSE.DIAMETERS[cell.s - 1];
+        if (density) newTier = Math.min(density.maxSteps, cell.d - 1);
+      } else if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge) {
+        // Density-enabled self-merge compaction (shrink + tier).  With
+        // same-material-only bonds this is the metal-shard path; it
+        // refuses once the variant hits max tier.
+        const tierA = a.densityTier ?? 0;
+        const tierB = b.densityTier ?? 0;
+        const proposedTier = Math.max(tierA, tierB) + 1;
+        if (proposedTier > density.maxSteps) return; // capped — leave pair separate
+        const combinedArea = aDia * aDia + bDia * bDia;
+        if (combinedArea < density.areaThreshold) return; // micro-shards stay separate
+        newTier = proposedTier;
+        const largerDia = aIsLarger ? aDia : bDia;
+        newDiam = largerDia * density.shrinkFactor;
+        newMass = a.mass + b.mass;
+      } else {
+        // Glass-self / plastic-self growth (area-conserving).
+        newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
+        if (!isPlasticSelfMerge) {
+          // sizeCap avoids glass shards larger than the map's free-spawn
+          // maxSize.  Plastic self-merge grows indefinitely per user dir.
+          const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
+          if (newDiam > sizeCap) return;
+        }
+        // Mass follows the dominant variant's area-based curve.
+        newMass = dominantDef.spawn.sizeToMass(newDiam);
+      }
+
       const glowA = a.powerupGlowColor;
       const glowB = b.powerupGlowColor;
       const newGlow = glowA && glowB ? blendHex(glowA, glowB) : (glowA ?? glowB);
@@ -1084,71 +3100,112 @@ export class ShardSystem {
         ...(b.dropComposition ?? []),
       ];
 
-      // Regenerate polygon at new size; blocky for tile-derived
-      // glass-shard, jagged for rock-shard.
-      const isTile  = dominantVariant === 'glass-shard';
-      const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (7 + Math.floor(Math.random() * 4));
-      const jitterK = isTile ? 0.25 : 0.7;
-      const rMin    = isTile ? 0.60 : 0.60;
-      const rRange  = isTile ? 0.55 : 0.65;
+      // Regenerate polygon at new size — vertex count + jitter per
+      // dominant variant.  Glass: 4–6 verts, blocky panel shape.
+      // Plastic: pull straight from SHARD_SPAWN_SHAPE_PLASTIC so the
+      // merged shard reads as a bigger version of a base shard (4
+      // jittered verts) rather than the smooth near-circle it used
+      // to be.  Default (rock): 7–10 verts, jagged.
+      const isTile     = dominantVariant === 'glass-shard';
+      const isPlasticS = dominantVariant === 'plastic-shard';
+      let numPts: number;
+      let jitterK: number;
+      let rMin: number;
+      let rRange: number;
+      if (isTile) {
+        numPts = 4 + Math.floor(Math.random() * 3);
+        jitterK = 0.25; rMin = 0.60; rRange = 0.55;
+      } else if (isPlasticS) {
+        const ps = dominantDef.spawn;
+        numPts = ps.polyVerticesMin
+               + Math.floor(Math.random() * (ps.polyVerticesMax - ps.polyVerticesMin + 1));
+        jitterK = ps.angleJitter;
+        rMin    = ps.radiusMin;
+        rRange  = ps.radiusRange;
+      } else {
+        numPts = 7 + Math.floor(Math.random() * 4);
+        jitterK = 0.7; rMin = 0.60; rRange = 0.65;
+      }
       const baseR   = (newDiam / 2) * 0.82;
       a.polygonPoints = this.generateShardPolygon(baseR, numPts, numPts, jitterK, rMin, rRange);
 
       a.shardVariant     = dominantVariant;
       a.powerupGlowColor = newGlow;
-      if (a.shardVariant !== b.shardVariant) a.color = blendHex(a.color, b.color);
       a.size.x = newDiam; a.size.y = newDiam;
-      a.mass   = newDiam;
+      invalidateCollisionR(a);
+      a.mass   = newMass;
       a.position.x = nmx; a.position.y = nmy;
       a.velocity.x = nvx; a.velocity.y = nvy;
-      a.health     = Math.min(MAX_HP, a.health + b.health);
-      a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
-      a.dropComposition = composition.length > 0 ? composition : undefined;
-      b.active = false;
-    } else if (!aIsAst && !bIsAst) {
-      // Drop + Drop.
-      if (a.dropType === b.dropType) {
-        // Same type — grow (area-conserving).
-        a.dropValue  = (a.dropValue ?? 0) + (b.dropValue ?? 0);
-        const rda    = a.size.x / 2;
-        const rdb    = b.size.x / 2;
-        const newR   = Math.sqrt(rda * rda + rdb * rdb) * 2;
-        a.size.x     = newR; a.size.y = newR;
-        a.position.x = nmx;  a.position.y = nmy;
-        a.velocity.x = nvx;  a.velocity.y = nvy;
-        b.active = false;
+      // Rock follows the probabilistic break model (ROCK_BREAK): its
+      // maxHealth is the size/density HIT CEILING, not summed HP.  A merged
+      // rock is a fresh, bigger solid body, so recompute the ceiling from
+      // its new diameter + density tier (bounded to ROCK_BREAK.MAX_HITS) and
+      // refill it.  Other variants keep the flat summed MAX_HP model.
+      if (isRockResult) {
+        const ceiling = rockHitCeiling(newDiam, newTier);
+        a.health    = ceiling;
+        a.maxHealth = ceiling;
       } else {
-        // Different types — collapse into a composite asteroid.
-        this.spawnCompositeAsteroid(a, b, nmx, nmy, nvx, nvy, entities);
-        a.active = false;
-        b.active = false;
+        a.health     = Math.min(MAX_HP, a.health + b.health);
+        a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
       }
-    } else {
-      // Asteroid + Drop — asteroid absorbs drop payload + glow.
-      const ast  = aIsAst ? a : b;
-      const drop = aIsAst ? b : a;
-      const comp: DropCompositionEntry[] = [...(ast.dropComposition ?? [])];
-
-      if (drop.dropType === 'ammo' && drop.dropWeapon !== undefined) {
-        comp.push({ type: 'ammo', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
-        const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
-        ast.powerupGlowColor = ast.powerupGlowColor
-          ? blendHex(ast.powerupGlowColor, wColor)
-          : wColor;
-      } else if (drop.dropType === 'health') {
-        comp.push({ type: 'health', value: drop.dropValue ?? 1 });
-        const dColor = '#4ade80';
-        ast.powerupGlowColor = ast.powerupGlowColor
-          ? blendHex(ast.powerupGlowColor, dColor)
-          : dColor;
+      a.dropComposition = composition.length > 0 ? composition : undefined;
+      // Density bookkeeping — invalidate the per-entity tint cache so
+      // the renderer picks up the darker tier on its next draw, then
+      // commit the new tier.  Without the cache invalidation a freshly-
+      // merged shard would render at the previous tier's tint until
+      // some other path happened to clear the cache.
+      if (density?.enabled && newTier !== undefined) {
+        a.densityTier = newTier;
+        a.densityCachedTint = undefined;
       }
+      // Merge-count sum — tracks how many base shards composed this
+      // entity so shatterAsteroidStyle can fragment it back into the
+      // same count on death.  Applies to EVERY compose path (rock
+      // condense / glass-self / plastic-self) so the "N in, N out"
+      // invariant holds across all variants going through this
+      // function.  Undefined parents default to 1 each.
+      a.mergeCount = (a.mergeCount ?? 1) + (b.mergeCount ?? 1);
+      // Plastic-specific: clear dent-history because the polygon was
+      // regenerated at a new size and prior dent deltas tied to the
+      // OLD geometry would be wrong to subtract from the new polygon.
+      if (isPlasticSelfMerge) {
+        a.plasticDentHistory = undefined;
+        pendingPlasticDentEntities.delete(a);
+      }
+      // Graceful retire — fade the smaller party out instead of
+      // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`
+      // each substep and flips active=false on completion;
+      // RenderSystem multiplies alpha by the fraction remaining so
+      // the dissolve reads visibly across the field.
+      this.startMergeFadeOut(b);
 
-      ast.dropComposition = comp.length > 0 ? comp : undefined;
-      ast.velocity.x = nvx; ast.velocity.y = nvy;
-      drop.active = false;
+      // Post-compose tile-snap check — plastic + glass route to the
+      // shared TILE_SNAP path with 2 × tile-diameter threshold, speed
+      // gate, and overflow debris.  Polled here (not per-tick) so a
+      // newly-merged survivor either snaps immediately on this frame
+      // (if all gates pass) or waits until its next compose; in
+      // either case the snap is tied to a clear "I just grew" event.
+      if (a.shardVariant === 'plastic-shard') {
+        this.trySnapToTile(a, 'plastic-shard', 'plastic', entities, physics);
+      } else if (a.shardVariant === 'glass-shard') {
+        this.trySnapToTile(a, 'glass-shard', 'glass', entities, physics);
+      }
+      // Rock-shard tile transition — DISABLED per user direction.
+      // Rock-shards now merge into larger / denser rock-shards only;
+      // they cap out at the top ROCK_CONDENSE cell (refused merge
+      // gate above in the isRockResult branch) and never transmute
+      // into a static rock-tile.  To restore the old behaviour,
+      // uncomment the block below and the overflow path in the
+      // isRockResult merge branch:
+      //
+      // if (a.shardVariant === 'rock-shard' && a.mass > ROCK_MAX_CELL_MASS) {
+      //   this.tryTransmuteShardToTile(a, 'rock-shard', 'rock', entities, physics);
+      // }
+
     }
 
-    // Soft sparkle at the merge point for asteroid / drop merges.
+    // Soft sparkle at the merge point for shard merges.
     this.particles.spawn(entities, { x: nmx, y: nmy }, 5, '#fbbf24', {
       speedMin: 1, speedMax: 4, sizeMin: 1, sizeMax: 2.5,
       lifetimeMin: 0.2, lifetimeMax: 0.4,
@@ -1170,174 +3227,162 @@ export class ShardSystem {
    * brand-new tile at the nearest free hex cell and the host
    * dissolves.
    */
-  /**
-   * Apply the 'absorb' merge outcome.  Smaller entity goes inactive
-   * (no shatter, no drop, no fade); larger entity's
-   * `powerupGlowColor` is set to the nearest weapon-palette colour
-   * to the absorbed entity's blended hex.  If a glow is already
-   * present, the two are blended via the existing blendHex.  A
-   * small glimmer particle burst plays at the absorption point.
-   *
-   * Used today by nebula-shard absorbed into a max-size glass-shard
-   * (the only absorb rule).  Future variants opt in by adding an
-   * absorb rule to their merge.rules.
-   */
-  private applyAbsorb(a: GameEntity, b: GameEntity, entities: GameEntity[]): void {
-    // Larger entity is the host; smaller is consumed.
-    const aR = Math.max(a.size.x, a.size.y);
-    const bR = Math.max(b.size.x, b.size.y);
-    const host = aR >= bR ? a : b;
-    const consumed = host === a ? b : a;
-
-    // Map the consumed entity's colour (or composition blend) to the
-    // closest weapon-palette colour, then blend onto the host's glow.
-    const consumedHex = consumed.nebulaColorComposition
-      ? blendCompositionToHex(consumed.nebulaColorComposition)
-      : (consumed.color || '#ffffff');
-    const tint = closestPowerupHex(consumedHex);
-    host.powerupGlowColor = host.powerupGlowColor
-      ? blendHex(host.powerupGlowColor, tint)
-      : tint;
-
-    // Glimmer at the absorption point — softer than the merge
-    // sparkle so a "rare" absorb event still reads as distinct.
-    this.particles.spawn(entities, consumed.position, 4, '#ffffff', {
-      speedMin: 0.1, speedMax: 0.5,
-      sizeMin: 0.3, sizeMax: 0.9,
-      lifetimeMin: 0.4, lifetimeMax: 0.8,
-      positionJitter: Math.max(consumed.size.x, consumed.size.y) * 0.4,
-    });
-    this.particles.spawn(entities, consumed.position, 5, tint, {
-      speedMin: 0.1, speedMax: 0.4,
-      sizeMin: 0.4, sizeMax: 1.1,
-      lifetimeMin: 0.5, lifetimeMax: 1.0,
-      positionJitter: Math.max(consumed.size.x, consumed.size.y) * 0.5,
-    });
-
-    consumed.active = false;
-  }
-
   private composeNebulaShards(
-    larger: GameEntity,
-    smaller: GameEntity,
+    a: GameEntity,
+    b: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    const largeR = Math.max(larger.size.x, larger.size.y) / 2;
-    const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
-    const largeArea = Math.PI * largeR * largeR;
-    const smallArea = Math.PI * smallR * smallR;
-    const newArea = largeArea + smallArea;
-    const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
+    // Pair-consuming transmute — both source shards retire and a
+    // single tile-equivalent output materialises (50/50 nebula-tile
+    // vs glass-shard, routed inside the adapter).  No area-
+    // accumulator any more: every successful nebula self-bond
+    // triggers a transmute attempt.
+    const aR = getCollisionR(a);
+    const bR = getCollisionR(b);
+    const aArea = Math.PI * aR * aR;
+    const bArea = Math.PI * bR * bR;
 
-    larger.size.x = newDiameter;
-    larger.size.y = newDiameter;
-    larger.mass   = newDiameter;
-
-    // Accumulate effective area carried by both shards onto the
-    // larger.  Decoupled from physical disc area so shards can stay
-    // glass-style small while still transmuting back to tiles at a
-    // 1-tile-in → 1-tile-out rate.
-    larger.nebulaTileArea = (larger.nebulaTileArea ?? 0) + (smaller.nebulaTileArea ?? 0);
-
-    // Arm a fresh merge cooldown on the grown shard so it doesn't
-    // immediately chain-merge with another neighbour the same frame.
-    larger.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
-
-    // Regenerate polygon at the new size — uses the same 4–6 vertex
-    // power-law math as nebula-shard spawn.
-    const polyRadius = newDiameter / 2 * 0.5;
-    larger.polygonPoints = this.generateShardPolygon(polyRadius, 4, 6, 0.25, 0.6, 0.55);
-
-    // Blend colour compositions weighted by area; larger dominates.
-    larger.nebulaColorComposition = blendCompositions(
-      larger.nebulaColorComposition, largeArea,
-      smaller.nebulaColorComposition, smallArea,
+    // Area-weighted color blend so the output inherits the pair's
+    // combined palette rather than picking one side arbitrarily.
+    const composition = blendCompositions(
+      a.nebulaColorComposition, aArea,
+      b.nebulaColorComposition, bArea,
     );
-    larger.color = blendCompositionToHex(larger.nebulaColorComposition);
-    larger.nebulaBlendedHex = larger.color;
-    larger.nebulaTintedKey = undefined;
-    larger.nebulaCachedTinted = undefined;
 
-    // Glittery glimmer burst scattered within a radius matching the
-    // smaller shard — the subtle merge feedback (white motes + tinted).
-    const tint = larger.color;
-    const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
-    this.particles.spawn(entities, smaller.position, 3, '#ffffff', {
+    // Mass-weighted midpoint position — wrap-aware so a torus-
+    // crossing pair doesn't transmute on the wrong side of the
+    // seam.  Nebula shards share the same low mass; this is
+    // effectively the geometric midpoint.
+    const totalMass = a.mass + b.mass;
+    const bShiftX = a.position.x + wrapDeltaX(a.position.x, b.position.x);
+    const bShiftY = a.position.y + wrapDeltaY(a.position.y, b.position.y);
+    let mx = (a.position.x * a.mass + bShiftX * b.mass) / totalMass;
+    let my = (a.position.y * a.mass + bShiftY * b.mass) / totalMass;
+    { const p = { x: mx, y: my }; wrapPosition(p); mx = p.x; my = p.y; }
+
+    const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+    const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+
+    const tint = blendCompositionToHex(composition);
+    const midpoint: Vector2 = { x: mx, y: my };
+
+    // ── Conservation of mass: commit → accumulate → crystallise ────────
+    // LOCK-IN: the bigger party's committed target carries forward; if
+    // neither has committed yet, commit to the blended hue's material now
+    // (rock-derived dust always commits to rock).  The crystallise gate
+    // uses the COMMITTED material's cost, so a later off-hue bond can't
+    // drag the cloud into a cheaper material mid-accumulation.
+    const fromRock = !!(a.fromRock || b.fromRock);
+    const committed = a.nebulaTargetMaterial ?? b.nebulaTargetMaterial;
+    const material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard' =
+      committed ?? (fromRock ? 'rock-shard' : nebulaHueToShardVariant(hexToHueDeg(tint)));
+    const combinedUnits = (a.nebulaCondenseUnits ?? 1) + (b.nebulaCondenseUnits ?? 1);
+    const requiredUnits = NEBULA_CONDENSE[material].units;
+
+    // ANTI-STUCK: count coalescences spent waiting on this target; past the
+    // patience cap, force-crystallise with whatever mass we have so an
+    // expensive target can't balloon forever in a thin field.
+    const stall = Math.max(a.nebulaStallCount ?? 0, b.nebulaStallCount ?? 0) + 1;
+    const stalledOut = stall >= NEBULA_CONDENSE_STALL_BONDS;
+
+    if (combinedUnits < requiredUnits && !stalledOut) {
+      // Not enough nebula yet — coalesce the pair into ONE larger nebula-
+      // shard that carries the summed units + committed target, and wait
+      // for more.  Only the smaller retires; mass is conserved, nothing
+      // crystallises.  A small glimmer marks the coalescence.
+      this.particles.spawn(entities, midpoint, 2, tint, {
+        speedMin: 0.1, speedMax: 0.4,
+        sizeMin: 0.3, sizeMax: 0.9,
+        lifetimeMin: 0.4, lifetimeMax: 0.8,
+        positionJitter: Math.max(a.size.x, b.size.x) * 0.5,
+      });
+      this.growNebulaShard(a, b, composition, combinedUnits, material, stall, midpoint, { x: nvx, y: nvy });
+      return;
+    }
+
+    // Crystallise.  Glittery glimmer burst at the merge point — same visual
+    // feedback the old grow-larger path had.
+    const glimmerR = Math.max(a.size.x, b.size.x) * 0.6;
+    this.particles.spawn(entities, midpoint, 3, '#ffffff', {
       speedMin: 0.1, speedMax: 0.5,
       sizeMin: 0.3, sizeMax: 0.9,
       lifetimeMin: 0.4, lifetimeMax: 0.8,
       positionJitter: glimmerR,
     });
-    this.particles.spawn(entities, smaller.position, 4, tint, {
+    this.particles.spawn(entities, midpoint, 4, tint, {
       speedMin: 0.1, speedMax: 0.4,
       sizeMin: 0.4, sizeMax: 1.1,
       lifetimeMin: 0.5, lifetimeMax: 1.0,
       positionJitter: glimmerR * 1.2,
     });
 
-    // Smaller fades out over top of the already-grown larger — the
-    // eye reads the smaller dissolving INTO the new combined shard
-    // rather than popping out with the result flashing in from
-    // alpha 0.  Compaction removes it once the fade completes.
-    smaller.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-    smaller.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
+    // Both source shards retire — the adapter spawns the output
+    // (tile or material shard) as a brand-new entity.
+    this.startMergeFadeOut(a);
+    this.startMergeFadeOut(b);
 
-    // Adapter hook: if the grown shard now carries enough effective
-    // area, transmute to a fresh tile.  NebulaSystem implements this
-    // (depends on hex coords + tile creation + static grid).
-    this.adapter?.onComposeNebulaShard(larger, entities, physics);
+    // EXCESS-SPLIT: mass over the committed cost is handed back to the
+    // adapter so it can release a leftover nebula-shard carrying the
+    // off-target "remainder" colours (conserves mass + colour).  Clamped
+    // at 0 when we force-crystallised under the target cost.
+    const excessUnits = Math.max(0, combinedUnits - requiredUnits);
+
+    // Adapter hook routes the 50/50 tile-vs-material outcome.  Position is
+    // the pair's midpoint; velocity is the mass-weighted average so a
+    // resulting shard inherits the cloud's drift.  Material is the COMMITTED
+    // target (honouring fromRock).
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock, material, excessUnits);
   }
 
   /**
-   * Composite-asteroid spawn — port of GameEngine.spawnCompositeAsteroid.
-   * Fires only on cross-type drop+drop merges (e.g. ammo + health).
-   * Result is a rock-shard with a packed dropComposition
-   * carrying both drops' payloads.
+   * Conservation-of-mass coalescence: fold the smaller nebula-shard into
+   * the larger one instead of crystallising, accumulating mass toward the
+   * material's NEBULA_CONDENSE threshold.  Area-conserving size growth
+   * (so the cloud visibly fattens), composition blended, units summed,
+   * render caches invalidated.  Only `consumed` retires.
    */
-  private spawnCompositeAsteroid(
-    dropA: GameEntity, dropB: GameEntity,
-    mx: number, my: number, mvx: number, mvy: number,
-    entities: GameEntity[],
+  private growNebulaShard(
+    survivor: GameEntity,
+    consumed: GameEntity,
+    composition: NebulaColorStop[] | undefined,
+    units: number,
+    target: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+    stall: number,
+    position: Vector2,
+    velocity: Vector2,
   ): void {
-    const ra      = dropA.size.x / 2;
-    const rb      = dropB.size.x / 2;
-    // Area-conserving: new area = area_A + area_B → new_radius = sqrt(ra² + rb²)
-    const newSize = Math.sqrt(ra * ra + rb * rb) * 2;
-    const hp      = Math.max(1, Math.round(newSize / 20));
-
-    // Irregular polygon (same approach as normal asteroids).
-    const baseR   = (newSize / 2) * 0.82;
-    const points  = this.generateShardPolygon(baseR, 9, 12, 0.65, 0.75, 0.5);
-
-    entities.push({
-      id:            nextId('composite'),
-      type:          EntityType.STRUCTURE,
-      shardVariant:  'rock-shard',
-      position:      { x: mx, y: my },
-      velocity:      { x: mvx, y: mvy },
-      size:          { x: newSize, y: newSize },
-      rotation:      Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * (1.5 / (newSize / 20)),
-      color:         blendHex(dropA.color, dropB.color),
-      active:        true,
-      health:        hp,
-      maxHealth:     hp,
-      mass:          newSize,
-      polygonPoints: points,
-      dropComposition: [
-        ...(dropA.dropType === 'ammo' && dropA.dropWeapon
-          ? [{ type: 'ammo' as const, value: dropA.dropValue ?? 1, weapon: dropA.dropWeapon }]
-          : dropA.dropType === 'health'
-          ? [{ type: 'health' as const, value: dropA.dropValue ?? 1 }]
-          : []),
-        ...(dropB.dropType === 'ammo' && dropB.dropWeapon
-          ? [{ type: 'ammo' as const, value: dropB.dropValue ?? 1, weapon: dropB.dropWeapon }]
-          : dropB.dropType === 'health'
-          ? [{ type: 'health' as const, value: dropB.dropValue ?? 1 }]
-          : []),
-      ],
-    });
+    const sR = getCollisionR(survivor);
+    const cR = getCollisionR(consumed);
+    const newDiam = 2 * Math.sqrt(sR * sR + cR * cR); // area-conserving
+    const ratio = survivor.size.x > 0 ? newDiam / survivor.size.x : 1;
+    survivor.size.x = newDiam;
+    survivor.size.y = newDiam;
+    invalidateCollisionR(survivor);
+    if (survivor.polygonPoints && ratio !== 1) {
+      for (let i = 0; i < survivor.polygonPoints.length; i++) {
+        survivor.polygonPoints[i].x *= ratio;
+        survivor.polygonPoints[i].y *= ratio;
+      }
+    }
+    survivor.position.x = position.x;
+    survivor.position.y = position.y;
+    survivor.velocity.x = velocity.x;
+    survivor.velocity.y = velocity.y;
+    survivor.nebulaCondenseUnits = units;
+    survivor.nebulaTargetMaterial = target;   // lock-in carries forward
+    survivor.nebulaStallCount = stall;         // patience carries forward
+    survivor.fromRock = (survivor.fromRock || consumed.fromRock) || undefined;
+    if (composition) survivor.nebulaColorComposition = composition;
+    survivor.color = blendCompositionToHex(survivor.nebulaColorComposition);
+    // Composition + size changed — drop the nebula render caches so the
+    // grown shard repaints with the new blend and dimensions.
+    survivor.nebulaBlendedHex = undefined;
+    survivor.nebulaTintedKey = undefined;
+    // Throttle the next coalescence so accumulation reads as discrete
+    // steps rather than collapsing a whole cluster in one frame.
+    survivor.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
+    this.startMergeFadeOut(consumed);
   }
 }
 
@@ -1352,50 +3397,16 @@ function blendHex(hexA: string, hexB: string): string {
   return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
 }
 
-/**
- * Pre-tabulated weapon palette for the absorb side-effect.  Computed
- * once at module init from WEAPON_LIST + WEAPONS — zero per-call
- * allocation.  closestPowerupHex picks the nearest entry by squared-
- * Euclidean RGB distance.
- */
-const POWERUP_PALETTE: Array<{ r: number; g: number; b: number; hex: string }> = (() => {
-  const out: Array<{ r: number; g: number; b: number; hex: string }> = [];
-  for (let i = 0; i < WEAPON_LIST.length; i++) {
-    const hex = WEAPONS[WEAPON_LIST[i]].color;
-    if (!hex || !hex.startsWith('#') || hex.length < 7) continue;
-    out.push({
-      r: parseInt(hex.slice(1, 3), 16),
-      g: parseInt(hex.slice(3, 5), 16),
-      b: parseInt(hex.slice(5, 7), 16),
-      hex,
-    });
-  }
-  return out;
-})();
-
-/**
- * Map an arbitrary hex colour to the nearest weapon-palette colour.
- * Used by the 'absorb' merge outcome (today: nebula-shard absorbed
- * into a glass-shard).  Plain Euclidean distance in RGB space — no
- * perceptual weighting; the user signed off on "keep the math
- * simple".
- */
-function closestPowerupHex(targetHex: string): string {
-  if (!targetHex || !targetHex.startsWith('#') || targetHex.length < 7) {
-    return POWERUP_PALETTE[0]?.hex ?? '#ffffff';
-  }
-  const tr = parseInt(targetHex.slice(1, 3), 16);
-  const tg = parseInt(targetHex.slice(3, 5), 16);
-  const tb = parseInt(targetHex.slice(5, 7), 16);
-  let bestHex = POWERUP_PALETTE[0]?.hex ?? '#ffffff';
-  let bestDist = Infinity;
-  for (let i = 0; i < POWERUP_PALETTE.length; i++) {
-    const e = POWERUP_PALETTE[i];
-    const dr = e.r - tr;
-    const dg = e.g - tg;
-    const db = e.b - tb;
-    const d = dr * dr + dg * dg + db * db;
-    if (d < bestDist) { bestDist = d; bestHex = e.hex; }
-  }
-  return bestHex;
+// Parametric hex-colour lerp.  Mirrors lerpHexColors in PhysicsSystem
+// (kept duplicated rather than cross-imported — the two systems don't
+// share a colour helpers module today and the function is 8 lines).
+// Used by tickPlasticDentRecovery to walk the plastic-tile colour
+// back toward its original as HP recovers.
+function lerpHexColors(a: string, b: string, t: number): string {
+  const rA = parseInt(a.slice(1, 3), 16), gA = parseInt(a.slice(3, 5), 16), bA = parseInt(a.slice(5, 7), 16);
+  const rB = parseInt(b.slice(1, 3), 16), gB = parseInt(b.slice(3, 5), 16), bB = parseInt(b.slice(5, 7), 16);
+  const r = Math.round(rA + (rB - rA) * t);
+  const g = Math.round(gA + (gB - gA) * t);
+  const c = Math.round(bA + (bB - bA) * t);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${c.toString(16).padStart(2, '0')}`;
 }

@@ -1,15 +1,78 @@
-import { GameEntity, EntityType, EnemyRole, Vector2, WeaponType, WeaponConfig } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig } from '../../types';
 import {
   WEAPONS,
   WEAPON_LIST,
   ENEMY_WEAPON,
-  ENEMY_BURST_CONFIG,
   ENEMY_CONSTANTS,
-  ENEMY_ROLE,
+  ENEMY_VARIANTS,
+  ENEMY_ATTACK_EFFECTS,
+  CORROSION,
   COLLISION_CONFIG,
+  LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+
+/**
+ * Build the per-weapon config used for a charged-shot trigger.  The base
+ * config is shallow-copied and the relevant fields are overridden.  Each
+ * weapon owns its own thematic charge effect (see docs/GAME_FEEDBACK_PLAN.md
+ * d2 design notes):
+ *   - BLASTER: 5× damage slug, pierces 3, no recoil
+ *   - BURST:   5-shot piercing burst (vs 3) with pierce 3
+ *   - SHOTGUN: 12-pellet wide cone (50°), each pellet pierces 2
+ *   - BOUNCER: 3-beam fan (±15°) — beams keep their per-shot pierce/bounce
+ *   - LIGHTNING: chain doubles to 4 hops over 2× range (read on the projectile)
+ *   - HOMING:  4-missile volley with weaker tracking (homingStrength 0.5),
+ *              each missile pierces 1
+ *   - CANNON:  2× explosion radius, 1.5× explosion damage + knockback
+ */
+function chargedConfigOf(config: WeaponConfig): WeaponConfig {
+  switch (config.type) {
+    case WeaponType.BLASTER:
+      // Larger fireball-style projectile; RenderSystem picks the red+orange
+      // two-tone gradient when isCharged is set.
+      return {
+        ...config,
+        damage: config.damage * 5,
+        pierce: 3,
+        recoil: 0,
+        size: config.size * 2.6,  // 6 → ~16
+        isCharged: true,
+      };
+    case WeaponType.BURST:
+      return { ...config, pierce: 3, burstCount: 5 };
+    case WeaponType.SHOTGUN:
+      return { ...config, count: 12, spread: 25, pierce: 2 };
+    case WeaponType.BOUNCER:
+      // Omnidirectional nova — 8 beams equally spaced around 360°
+      // (every 45°).  ProjectileSystem.spawn handles the equal-angle
+      // ring layout when omniDirectional is set.  Recoil zeroed since
+      // forces cancel in all directions.
+      return { ...config, count: 8, spread: 360, omniDirectional: true, recoil: 0 };
+    case WeaponType.LIGHTNING:
+      // Lightning's charge is read off the projectile by GameEngine.fireLightningChainFromImpact.
+      // ProjectileSystem.spawn copies these onto the projectile at spawn.
+      // Charged variant adds one extra simultaneous jump per node — saturated
+      // tree grows from 1+2+4+8=15 (base) to 1+3+9+27=40.  Depth and range
+      // are kept identical to base so the charge premium is purely "wider"
+      // rather than "further".
+      return {
+        ...config,
+        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2
+      };
+    case WeaponType.HOMING:
+      return { ...config, count: 4, spread: 30, pierce: 1, homingStrength: 0.5 };
+    case WeaponType.CANNON:
+      return {
+        ...config,
+        explosionRadius:    (config.explosionRadius    ?? 0) * 2,
+        explosionDamage:    (config.explosionDamage    ?? 0) * 1.5,
+        explosionKnockback: (config.explosionKnockback ?? 0) * 1.5,
+      };
+  }
+  return config;
+}
 
 /**
  * WeaponSystem — owns shooting behavior for both players and enemies.
@@ -25,9 +88,8 @@ export class WeaponSystem {
   /**
    * Fire the player's currently-selected weapon at a world-space target.
    * Handles:
-   *   - cooldown gating
-   *   - ammo deduction (non-blaster weapons)
-   *   - auto-fallback to blaster when selected weapon is empty
+   *   - cooldown gating (the only in-combat brake — ammo is deleted, 1b)
+   *   - charged shots (Overcharge unlock; cost = the charge-time hold only)
    *   - burst-fire state setup
    *   - screen shake
    *   - projectile spawning via ProjectileSystem
@@ -37,41 +99,51 @@ export class WeaponSystem {
     entities: GameEntity[],
     player: GameEntity,
     target: Vector2,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    charged: boolean = false,
   ): boolean {
+    // Weaponless flight (no gun mounted) is a legal outfit — nothing to
+    // fire.  The weight system pays this back as an acceleration boost.
+    if (player.currentWeapon === undefined) return false;
     if (player.weaponCooldown && player.weaponCooldown > 0) return false;
 
-    let weaponType = player.currentWeapon || WeaponType.BLASTER;
+    const weaponType = player.currentWeapon;
+    const baseConfig = WEAPONS[weaponType];
 
-    // If non-blaster and out of ammo, auto-fallback to blaster
-    if (weaponType !== WeaponType.BLASTER && (player.ammo?.[weaponType] ?? 0) <= 0) {
-      weaponType = WeaponType.BLASTER;
-      player.currentWeapon = WeaponType.BLASTER;
-      player.burstQueue = 0;
+    // Charged shots require the Overcharge unlock; there is no resource
+    // cost — the 1.0s hold IS the price (by design, WEAPONS_AMMO_PLAN §2.3).
+    const isCharged = charged && (player.overchargeUnlocked ?? false);
+
+    let config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    // Progression: Gunnery scales damage (incl. cannon AoE), Autoloader
+    // scales fire cadence.  Copy the config before scaling so the shared
+    // WEAPONS table is never mutated.
+    const dmgMult = player.damageMult ?? 1;
+    if (dmgMult !== 1) {
+      config = {
+        ...config,
+        damage: config.damage * dmgMult,
+        explosionDamage: config.explosionDamage !== undefined ? config.explosionDamage * dmgMult : config.explosionDamage,
+      };
     }
-
-    const config = WEAPONS[weaponType];
-    player.weaponCooldown = config.cooldown;
-
-    // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
-    if (weaponType !== WeaponType.BLASTER && player.ammo) {
-      const before = player.ammo[weaponType] ?? 0;
-      player.ammo[weaponType] = Math.max(0, before - 1);
-    }
+    player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
 
     if (onShake) {
       if (config.type === WeaponType.SHOTGUN) {
-        onShake(5);
+        onShake(isCharged ? 8 : 5);
       } else if (config.type === WeaponType.CANNON) {
-        onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+        onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM);
       } else if (config.type === WeaponType.BURST) {
         onShake(3);
+      } else if (config.type === WeaponType.BLASTER && isCharged) {
+        onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
       }
     }
 
     if (config.type === WeaponType.BURST && config.burstCount) {
       player.burstQueue = config.burstCount - 1;
       player.burstTimer = config.burstDelay;
+      player.burstCharged = isCharged || undefined;
     }
 
     this.projectiles.spawn(entities, player, target, config, EntityType.PLAYER);
@@ -99,12 +171,21 @@ export class WeaponSystem {
     if (player.burstTimer > 0) return;
 
     player.burstQueue--;
-    const config = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
+    const baseConfig = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
+    let config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    const dmgMult = player.damageMult ?? 1;
+    if (dmgMult !== 1) {
+      config = { ...config, damage: config.damage * dmgMult };
+    }
     player.burstTimer = config.burstDelay || 0.1;
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;
     this.projectiles.spawn(entities, player, { x: targetX, y: targetY }, config, EntityType.PLAYER);
     if (onShake && config.type === WeaponType.BURST) onShake(3);
+
+    // Clear the charged flag once the burst fully drains so the next
+    // trigger pull starts fresh.
+    if (player.burstQueue === 0) player.burstCharged = undefined;
   }
 
   /**
@@ -122,80 +203,112 @@ export class WeaponSystem {
     player: GameEntity,
     dt: number,
   ) {
-    const weapon = ENEMY_WEAPON;
     const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
-      if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
+      const arch = enemy.enemySubtype ? ENEMY_VARIANTS[enemy.enemySubtype] : undefined;
+      if (!arch || !arch.shoots) continue; // every shooting enemy fires its archetype weapon
 
       // Cooldown management
       enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
-      if (enemy.weaponCooldown > 0) continue;
 
       const dx = wrapDeltaX(enemy.position.x, player.position.x);
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const distSq = dx * dx + dy * dy;
-      if (distSq > rangeSq) continue;
+      const inRange = distSq <= rangeSq;
 
-      // Lazily init burst state — first trigger starts a fresh burst
-      if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
+      // Attack telegraph: ramp aimCharge 0→1 over the archetype's window as
+      // the cooldown winds down, but only while engaged (in range).  Cleared
+      // otherwise so idle / out-of-range enemies show no tell.  (Computed
+      // before the fire early-outs so the wind-up renders even mid-cooldown.)
+      const tw = arch.telegraph;
+      if (tw && inRange && enemy.weaponCooldown <= tw) {
+        enemy.aimCharge = 1 - enemy.weaponCooldown / tw;
+        // Laser snipers track the player's live distance so the sight reaches
+        // them; refreshed every charging frame (the sniper rotates to track).
+        if (arch.aimLaser) enemy.aimDist = Math.sqrt(distSq);
+      } else if (enemy.aimCharge) {
+        enemy.aimCharge = 0;
+      }
 
-      // Slight inaccuracy
-      const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+      if (enemy.weaponCooldown > 0) continue;
+      if (!inRange) continue;
+
+      // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides, then
+      // the per-entity override on top ((h) boss phases re-tune the same gun
+      // through the same Partial<WeaponConfig> pattern the archetypes use).
+      const weapon = enemy.weaponOverride
+        ? { ...ENEMY_WEAPON, ...arch.weapon, ...enemy.weaponOverride }
+        : arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
+
+      // Laser snipers fire EXACTLY down the rendered lock-on line (= the ship's
+      // facing) with no spread — the sight is a promise.  Everyone else aims at
+      // the player's current position with the weapon's slight inaccuracy.
+      const aimAngle = arch.aimLaser
+        ? enemy.rotation
+        : Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
       const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
       const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
-      this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+      // Per-wave damage scaling + the Orbiter's corrosion payload.
+      const dmgMult = enemy.damageMult ?? 1;
+      const fx = enemy.enemySubtype ? ENEMY_ATTACK_EFFECTS[enemy.enemySubtype] : undefined;
+      let shot = weapon;
+      if (dmgMult !== 1 || fx) {
+        shot = { ...weapon };
+        if (dmgMult !== 1) shot.damage = weapon.damage * dmgMult;
+        if (fx) { shot.appliesEffect = fx; shot.color = CORROSION.COLOR; }
+      }
+      this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
 
-      // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
-      // then wait BURST_RELOAD before starting the next burst.
-      if (enemy.burstQueue > 1) {
-        enemy.burstQueue--;
-        enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
+      // Cadence: archetypes with a `burst` fire `size` shots `gap` apart then
+      // reload for the weapon's full `cooldown`; everyone else fires one shot
+      // per `cooldown`.  The per-archetype cooldown IS the fire rate.
+      const burst = arch.burst;
+      if (burst) {
+        if (enemy.burstQueue === undefined || enemy.burstQueue <= 0) enemy.burstQueue = burst.size;
+        if (enemy.burstQueue > 1) {
+          enemy.burstQueue--;
+          enemy.weaponCooldown = burst.gap;
+        } else {
+          enemy.burstQueue = burst.size;
+          enemy.weaponCooldown = weapon.cooldown;
+        }
       } else {
-        enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-        enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
+        enemy.weaponCooldown = weapon.cooldown;
       }
     }
   }
 
   /**
-   * Weapon selection semantics for the player's ammo HUD:
-   * - Tapping an unowned / empty slot does nothing.
-   * - Tapping the active non-blaster weapon toggles it off (→ blaster).
-   * - Tapping any other owned weapon switches to it.
+   * Weapon selection semantics (2-slot loadout model, pivot 1b):
+   * - Only an EQUIPPED weapon can be selected — the loadout is the in-field
+   *   commitment; ownership alone isn't enough (swap at the Drydock).
+   * - Selecting the already-active weapon is a no-op.
    * Returns the new currentWeapon index in WEAPON_LIST for UI state.
    */
   public selectWeapon(player: GameEntity, wType: WeaponType): number {
-    const isBlaster = wType === WeaponType.BLASTER;
-    const ammo = player.ammo?.[wType] ?? 0;
-    if (!isBlaster && ammo <= 0) return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
-
-    if (!isBlaster && player.currentWeapon === wType) {
-      // Toggle off: deselect and fall back to blaster
-      player.currentWeapon = WeaponType.BLASTER;
-      player.burstQueue = 0;
-      return WEAPON_LIST.indexOf(WeaponType.BLASTER);
+    const equipped = player.equippedWeapons ?? [WeaponType.BLASTER, null];
+    if (!equipped.includes(wType)) {
+      return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
     }
-
-    player.currentWeapon = wType;
-    player.burstQueue = 0;
+    if (player.currentWeapon !== wType) {
+      player.currentWeapon = wType;
+      player.burstQueue = 0;
+    }
     return WEAPON_LIST.indexOf(wType);
   }
 
   /**
-   * Cycle to the next owned weapon (blaster is always owned; other weapons
-   * are only cycled through if they have ammo > 0).  Returns the new index.
+   * Cycle between the (at most 2) equipped loadout slots.  With one slot
+   * filled this is a no-op.
    */
   public cycleWeapon(player: GameEntity): number {
-    const owned = WEAPON_LIST.filter(w =>
-      w === WeaponType.BLASTER ||
-      ((player.ammo?.[w] ?? 0) > 0)
-    );
-    if (owned.length <= 1) return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
-    const currentIdx = owned.indexOf(player.currentWeapon || WeaponType.BLASTER);
-    const nextIdx = (currentIdx + 1) % owned.length;
-    player.currentWeapon = owned[nextIdx];
+    const equipped = (player.equippedWeapons ?? [WeaponType.BLASTER, null])
+      .filter((w): w is WeaponType => w !== null);
+    if (equipped.length <= 1) return WEAPON_LIST.indexOf(player.currentWeapon || equipped[0] || WeaponType.BLASTER);
+    const currentIdx = equipped.indexOf(player.currentWeapon || equipped[0]);
+    player.currentWeapon = equipped[(currentIdx + 1) % equipped.length];
     player.burstQueue = 0;
     return WEAPON_LIST.indexOf(player.currentWeapon);
   }

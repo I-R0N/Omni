@@ -73,8 +73,8 @@ branches in the engine.
 export type ShardVariantId =
   // ── STRUCTURE-tile variants (static, hex-clustered, mass = ∞) ───────
   | 'glass-tile'           // single-shot
-  | 'reinforced-tile'      // 3 hp
-  | 'heavy-tile'           // 5 hp
+  | 'plastic-tile'      // 3 hp
+  | 'metal-tile'           // 5 hp
   | 'indestructible-tile'  // never breaks
   | 'rock-tile'            // NEW — clustered like glass / nebula tiles
   | 'nebula-tile'          // hex-grid, passThrough (see §6.C)
@@ -360,7 +360,7 @@ borderColor / damage states) keep living in `STRUCTURE_VARIANTS`
 since they're also read by RenderSystem's damage-state sprite
 picker; the ShardSystem entry covers regen + merge + shatter only.
 
-### glass-tile / reinforced-tile / heavy-tile / indestructible-tile
+### glass-tile / plastic-tile / metal-tile / indestructible-tile
 
 ```ts
 'glass-tile': {
@@ -391,8 +391,8 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
   passThrough: false,
   spawnsDropsOnDeath: true,                     // delegates to GameEngine.spawnDrops
 },
-'reinforced-tile':     { ...glass-tile, id: 'reinforced-tile' },
-'heavy-tile':          { ...glass-tile, id: 'heavy-tile' },
+'plastic-tile':     { ...glass-tile, id: 'plastic-tile' },
+'metal-tile':          { ...glass-tile, id: 'metal-tile' },
 'indestructible-tile': {
   ...glass-tile,
   id: 'indestructible-tile',
@@ -855,7 +855,7 @@ Why one carrier works:
   directly: reflect iff
   `SHARD_VARIANTS[shardVariantOf(target)].carrier === STRUCTURE &&
    isReflectiveVariant(target)` — concretely, glass-tile /
-  reinforced-tile / heavy-tile / indestructible-tile / glass-shard.
+  plastic-tile / metal-tile / indestructible-tile / glass-shard.
   Rock and nebula variants are not reflective; bouncers pass
   through them (matching today: bouncers reflect off STRUCTURE
   tiles + tile-shards, pass through asteroids and nebula).
@@ -1048,8 +1048,8 @@ new entries for rock-tile clusters):
 [MapType.UNIVERSE]: {
   'rock-shard':     { freeSpawn: { count: 60, minSize: 24, maxSize: 120, speedMultiplier: 1.0 } },
   'glass-tile':     { tileCluster: { clusterCount: 22, minClusterSize: 3, maxClusterSize: 9 } },
-  'reinforced-tile':{ tileCluster: { clusterCount: 8,  minClusterSize: 2, maxClusterSize: 5 } },
-  'heavy-tile':     { tileCluster: { clusterCount: 4,  minClusterSize: 2, maxClusterSize: 4 } },
+  'plastic-tile':{ tileCluster: { clusterCount: 8,  minClusterSize: 2, maxClusterSize: 5 } },
+  'metal-tile':     { tileCluster: { clusterCount: 4,  minClusterSize: 2, maxClusterSize: 4 } },
   'rock-tile':      { tileCluster: { clusterCount: 12, minClusterSize: 3, maxClusterSize: 7 } },
   'nebula-tile':    { tileCluster: {
                        clusterCount: 65, minClusterSize: 14, maxClusterSize: 42,
@@ -1062,8 +1062,8 @@ new entries for rock-tile clusters):
 [MapType.GLASS_FIELD]: {
   'glass-tile':     { tileCluster: { clusterCount: /* tuned to ≈1200 tiles */ ... } },
 },
-[MapType.HARD_TILE_FIELD]: {
-  'heavy-tile':     { tileCluster: { ... } },
+[MapType.METAL_FIELD]: {
+  'metal-tile':     { tileCluster: { ... } },
 },
 [MapType.INDESTRUCTIBLE_FIELD]: {
   'indestructible-tile': { tileCluster: { ... } },
@@ -1077,8 +1077,8 @@ new entries for rock-tile clusters):
   // POCKET is the "every-element sandbox" — small counts of each.
   'rock-shard':     { freeSpawn:   { count: 6, ... } },
   'glass-tile':     { tileCluster: { clusterCount: 3, ... } },
-  'reinforced-tile':{ tileCluster: { clusterCount: 2, ... } },
-  'heavy-tile':     { tileCluster: { clusterCount: 2, ... } },
+  'plastic-tile':{ tileCluster: { clusterCount: 2, ... } },
+  'metal-tile':     { tileCluster: { clusterCount: 2, ... } },
   'rock-tile':      { tileCluster: { clusterCount: 3, ... } },
   'indestructible-tile': { tileCluster: { clusterCount: 1, ... } },
   'nebula-tile':    { tileCluster: { clusterCount: 4, ... } },
@@ -1181,7 +1181,7 @@ Per-file move plan (Phase 2 staging is in §9 — this section is just
   (`mass = 0.01` → negligible striker impulse).
 - **Bouncer reflect at `:932`** rewrites to a variant filter:
   reflect iff the target's variant is in
-  `{glass-tile, reinforced-tile, heavy-tile, indestructible-tile,
+  `{glass-tile, plastic-tile, metal-tile, indestructible-tile,
    glass-shard}`. Today's behaviour preserved — bouncers reflect
   off STRUCTURE tiles + tile-shards (now glass-shards), pass
   through asteroids (now rock-shards) and nebula entities. The
@@ -1279,7 +1279,7 @@ behaviour the variant table can't generically express:
 ### `types.ts`
 
 - `ShardType` (`:143`) is **renamed to `ShardVariantId`** with the
-  new full member list: glass-tile / reinforced-tile / heavy-tile /
+  new full member list: glass-tile / plastic-tile / metal-tile /
   indestructible-tile / rock-tile / nebula-tile / rock-shard /
   glass-shard / nebula-shard. The `shardType` field on
   `GameEntity` is renamed to `shardVariant`. A `ShardType` type

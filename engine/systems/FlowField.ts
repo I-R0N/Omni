@@ -61,9 +61,125 @@ onMapDimensionsChanged((w, h) => {
  * so the field has no stagnation points — no region where asteroids
  * can pile up or stall out.
  */
+// Module-level scratch — sampleFlow / samplePattern return THIS
+// object (mutated each call) instead of allocating a fresh literal.
+// Callers must use the result synchronously; storing it across a
+// later sample call is undefined behaviour.  Eliminates ~one
+// allocation per shard + drop per sim step on the hot path.
+const _flowScratch: FlowVector = { x: 0, y: 0 };
+
 export function sampleFlow(wx: number, wy: number): FlowVector {
   const theta = BASE_ANGLE
               + AMP_X * Math.sin(TWO_PI_OVER_W * wx)
               + AMP_Y * Math.cos(TWO_PI_OVER_H * wy);
-  return { x: Math.cos(theta), y: Math.sin(theta) };
+  _flowScratch.x = Math.cos(theta);
+  _flowScratch.y = Math.sin(theta);
+  return _flowScratch;
+}
+
+// ─── selectable flow patterns (DBG) ─────────────────────────────────────────
+//
+// A bank of analytical unit-vector fields the DBG "FF Pattern" cycle can
+// swap in over a map's own flow.  All are pure functions of world position
+// (no time/state), so the baked grid can sample them exactly like the map
+// sampler.  DEFAULT is sentinel-only — GameEngine routes it to the active
+// map's own sampleFlow() rather than this function.
+//
+// Gravity-well / spiral / outward patterns reference the map centre (0,0)
+// and are NOT seam-continuous (opposite sides of the wrap point opposite
+// ways); that's inherent to a radial field on a torus and acceptable for a
+// debug pattern.  The directional + wavy-directional patterns use an
+// integer number of waves per axis so they DO stay continuous across the
+// seam.
+
+export enum FlowPattern {
+  DEFAULT           = 'DEFAULT',            // map's own sampleFlow()
+  MEANDER           = 'MEANDER',            // golden-ratio meander (universe default)
+  CIRCULAR          = 'CIRCULAR',           // CCW vortex about centre
+  SPIRAL            = 'SPIRAL',             // inward + CCW swirl
+  GRAVITY_WELL      = 'GRAVITY_WELL',       // radial inward to centre
+  WAVY_GRAVITY_WELL = 'WAVY_GRAVITY_WELL',  // inward + radial-wave wobble
+  OUTWARD           = 'OUTWARD',            // radial outward (source)
+  HORIZONTAL        = 'HORIZONTAL',         // constant +x
+  VERTICAL          = 'VERTICAL',           // constant +y
+  WAVY_HORIZONTAL   = 'WAVY_HORIZONTAL',    // +x snaking with y
+  WAVY_VERTICAL     = 'WAVY_VERTICAL',      // +y snaking with x
+}
+
+// Angle swing (radians) for the "wavy" variants, and the number of full
+// wave cycles across each map axis.  Integer wave count keeps the wavy-
+// directional fields continuous across the wrap seam.
+const PATTERN_WAVE_AMP = 0.6;   // ≈ 34°
+const PATTERN_WAVES    = 2;
+
+/**
+ * Sample one of the selectable DBG flow patterns at world position
+ * (wx, wy).  Always returns a unit vector.  DEFAULT falls back to the
+ * meander here, but callers should special-case it to the map sampler.
+ */
+export function samplePattern(pattern: FlowPattern, wx: number, wy: number): FlowVector {
+  // Same scratch-return idiom as sampleFlow.  All branches mutate
+  // _flowScratch in place; callers consume synchronously.
+  switch (pattern) {
+    case FlowPattern.HORIZONTAL:
+      _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch;
+
+    case FlowPattern.VERTICAL:
+      _flowScratch.x = 0; _flowScratch.y = 1; return _flowScratch;
+
+    case FlowPattern.WAVY_HORIZONTAL: {
+      const a = PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_H * PATTERN_WAVES * wy);
+      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
+    }
+
+    case FlowPattern.WAVY_VERTICAL: {
+      const a = Math.PI / 2 + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * wx);
+      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
+    }
+
+    case FlowPattern.CIRCULAR: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
+      const inv = 1 / Math.sqrt(r2);
+      _flowScratch.x = -wy * inv; _flowScratch.y = wx * inv; return _flowScratch;
+    }
+
+    case FlowPattern.SPIRAL: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
+      const inv = 1 / Math.sqrt(r2);
+      const sx = (-wy * inv) * 0.7 + (-wx * inv) * 0.3;
+      const sy = ( wx * inv) * 0.7 + (-wy * inv) * 0.3;
+      const m = Math.sqrt(sx * sx + sy * sy) || 1;
+      _flowScratch.x = sx / m; _flowScratch.y = sy / m; return _flowScratch;
+    }
+
+    case FlowPattern.GRAVITY_WELL: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
+      const inv = 1 / Math.sqrt(r2);
+      _flowScratch.x = -wx * inv; _flowScratch.y = -wy * inv; return _flowScratch;
+    }
+
+    case FlowPattern.WAVY_GRAVITY_WELL: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
+      const r = Math.sqrt(r2);
+      const baseA = Math.atan2(-wy, -wx);
+      const a = baseA + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * r);
+      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
+    }
+
+    case FlowPattern.OUTWARD: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
+      const inv = 1 / Math.sqrt(r2);
+      _flowScratch.x = wx * inv; _flowScratch.y = wy * inv; return _flowScratch;
+    }
+
+    case FlowPattern.MEANDER:
+    case FlowPattern.DEFAULT:
+    default:
+      return sampleFlow(wx, wy);
+  }
 }

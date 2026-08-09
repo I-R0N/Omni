@@ -19,11 +19,11 @@ export type AssetManifest = {
   PLANET_ICE: string;
   PORTAL: string;
   HEX_STRUCTURE: string;
-  // One sprite per tile variant — reinforced, heavy, indestructible.
+  // One sprite per tile variant — plastic, metal, indestructible.
   // Damage state is drawn procedurally via renderCracks (same as asteroids),
   // so variants don't need per-tier atlases.
-  HEX_STRUCTURE_REINFORCED: string;
-  HEX_STRUCTURE_HEAVY: string;
+  HEX_STRUCTURE_PLASTIC: string;
+  HEX_STRUCTURE_METAL: string;
   HEX_STRUCTURE_INDESTRUCTIBLE: string;
   NEBULA_PUFF: string;
 };
@@ -105,7 +105,7 @@ export const ASSETS: AssetManifest = {
   PLANET_ICE:     PLACEHOLDER,
   PORTAL:                       PLACEHOLDER,
   HEX_STRUCTURE:                PLACEHOLDER,
-  HEX_STRUCTURE_REINFORCED:     PLACEHOLDER,
-  HEX_STRUCTURE_HEAVY:          PLACEHOLDER,
+  HEX_STRUCTURE_PLASTIC:        PLACEHOLDER,
+  HEX_STRUCTURE_METAL:          PLACEHOLDER,
   HEX_STRUCTURE_INDESTRUCTIBLE: PLACEHOLDER,
 };

@@ -1,7 +1,7 @@
 
 
-import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
+import { GameEntity, EnemySubtype, EnemyRole, EntityType, Vector2 } from '../../types';
+import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
@@ -17,9 +17,32 @@ export class AISystem {
   private stuckTimers: Map<string, number> = new Map();
   private lastPositions: Map<string, Vector2> = new Map();
 
+  // Reused scratch buffer for the 5%-frame GC sweep that drops aim/reaction
+  // state for dead enemies.  Cleared and refilled in-place each sweep so we
+  // don't allocate a fresh Set per call.
+  private _liveIdScratch: Set<string> = new Set();
+
   // Perf instrumentation — wall-time (ms) of the most recent update() call.
   // Written by update() and read by GameEngine for the dev perf overlay.
   public lastUpdateMs: number = 0;
+  /** DBG "Traits" master toggle ((h)) — mirrors PhysicsSystem.traitsEnabled so
+   *  the AI-side counterplay trait (evasive) switches off with the damage-side
+   *  ones (armor).  GameEngine.toggleTraits flips both together. */
+  public traitsEnabled: boolean = true;
+
+  // Behavior-dispatch table (Stage 2a): maps a movement-strategy id (from
+  // ENEMY_BEHAVIOR) to the routine that implements it.  Adding a new behavior
+  // is a new entry here + a row in ENEMY_BEHAVIOR — no growing if/else.  The
+  // two current strategies are the original RAMMING/SHOOTING routines, so the
+  // existing roster dispatches identically.  Class-field arrows so `this` binds.
+  private readonly moveStrategies: Record<EnemyMovement,
+    (dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, enemies: GameEntity[], shards: GameEntity[]) => void> = {
+    dogfighter: (dt, enemy, player, flowField) => this.updateBasicDogfighter(dt, enemy, player, flowField),
+    skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
+    swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
+    bubble:     (dt, enemy, player, flowField, enemies, shards) => this.updateBubble(dt, enemy, player, flowField, shards, enemies),
+    dragon:     () => { /* engine-managed (GameEngine.updateDragon) — no AI here */ },
+  };
 
   /**
    * Advance every enemy's AI by one sim step.
@@ -31,10 +54,14 @@ export class AISystem {
    * full-entity scans) into an O(enemies²) walk on a handful of entries
    * instead of O(allEntities²) with filtering.
    */
-  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
+  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[] = [], projectiles: GameEntity[] = []) {
     const t0 = performance.now();
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
+
+      // Rival ships (Stage 7) are EntityType.ENEMY but engine-managed
+      // (GameEngine.updateRivals) — skip the enemy AI entirely.
+      if (enemy.isRival) continue;
 
       // Default initialization
       if (!enemy.aiState) {
@@ -45,7 +72,7 @@ export class AISystem {
       // Init Reaction Timer if missing
       if (!this.reactionTimers.has(enemy.id)) {
           this.reactionTimers.set(enemy.id, 0);
-          this.laggedTargets.set(enemy.id, { ...player.position });
+          this.laggedTargets.set(enemy.id, { x: player.position.x, y: player.position.y });
       }
 
       // Decay aggro boost each frame
@@ -53,12 +80,42 @@ export class AISystem {
           enemy.aggroTimer = Math.max(0, enemy.aggroTimer - dt);
       }
 
-      // Route by role — add new roles here as needed
-      const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
-      if (role === EnemyRole.SHOOTING) {
-          this.updateSkirmisher(dt, enemy, player);
-      } else {
-          this.updateBasicDogfighter(dt, enemy, player, flowField);
+      // Hit-stagger: tick down; while > 0 the movement routines apply no
+      // force (the knockback carries it), so a hit reads as a brief reel.
+      if (enemy.hitStun && enemy.hitStun > 0) {
+          enemy.hitStun = Math.max(0, enemy.hitStun - dt);
+      }
+
+      // Route through the behavior-dispatch table (Stage 2a).  Defaults to the
+      // dogfighter (matches the old "no subtype → RAMMING" fallback).
+      const move: EnemyMovement = enemy.enemySubtype ? ENEMY_BEHAVIOR[enemy.enemySubtype].move : 'dogfighter';
+      this.moveStrategies[move](dt, enemy, player, flowField, enemies, shards);
+
+      // Evasive trait ((h) bosses): juke sideways out of an incoming straight
+      // shot.  Gated on the trait being present, so the projectile scan only
+      // runs for the handful of enemies that actually evade.
+      if (enemy.evasive && this.traitsEnabled) this.applyEvasiveDodge(dt, enemy, projectiles);
+
+      // Directional arc shield (Bulwark): slew the covered sector toward the
+      // player at a capped rate so it ATTEMPTS to face the threat — flank it
+      // faster than it can turn and the hull is exposed.  Toroidal bearing.
+      if (enemy.shieldArcHalfWidth !== undefined && enemy.shieldArcSpin !== undefined) {
+          const want = Math.atan2(
+              wrapDeltaY(enemy.position.y, player.position.y),
+              wrapDeltaX(enemy.position.x, player.position.x),
+          );
+          const cur = enemy.shieldArcAngle ?? want;
+          let d = want - cur;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          const step = enemy.shieldArcSpin * dt;
+          if (Math.abs(d) <= step) {
+              enemy.shieldArcAngle = want;
+          } else {
+              let a = cur + Math.sign(d) * step;
+              if (a > Math.PI) a -= Math.PI * 2; else if (a < -Math.PI) a += Math.PI * 2;
+              enemy.shieldArcAngle = a;
+          }
       }
     }
 
@@ -93,8 +150,10 @@ export class AISystem {
 
     // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically.
     // `enemies` only contains live entities, so build the live set directly.
+    // Scratch Set is reused across sweeps to avoid per-frame allocation.
     if (Math.random() < 0.05) {
-        const liveIds = new Set<string>();
+        const liveIds = this._liveIdScratch;
+        liveIds.clear();
         for (let i = 0; i < enemies.length; i++) {
             liveIds.add(enemies[i].id);
         }
@@ -125,23 +184,75 @@ export class AISystem {
       const maxSpeed = aggroed ? baseMaxSpeed * AI_CONFIG.AGGRO_SPEED_MULT : baseMaxSpeed;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
+      // Stationary emplacements (Turret, maxSpeed 0) take the NO-MOVE path:
+      // apply no movement force, bleed any residual velocity (e.g. from being
+      // rammed) to a stop, and fall straight through to the rotate-to-aim block
+      // so they still track the player and telegraph.
+      const stationary = config.maxSpeed === 0;
 
       const dx = wrapDeltaX(enemy.position.x, player.position.x);
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const dist = Math.sqrt(dx*dx + dy*dy);
 
-      const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
+      const { DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
+      // Per-archetype stand-off overrides the shared default — this is what
+      // gives an archetype its own RANGE BAND ((h): the siege boss stands well
+      // back and lobs).  Absent → the shared constant, so every rank-and-file
+      // skirmisher is unchanged.
+      const PREFERRED_DIST = config.preferredDistance ?? AI_CONFIG.SKIRMISHER.PREFERRED_DIST;
 
       // Aim-lead: predict where the player will be when the projectile arrives.
       // Movement still tracks the real player position for responsive seek/flee/strafe.
       // Use toroidal delta so enemies near a seam aim at the nearest wrapped
       // copy of the player instead of firing across the entire map.
-      const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
-      const aimX = dx + player.velocity.x * leadTime;
-      const aimY = dy + player.velocity.y * leadTime;
-      let targetAngle = Math.atan2(aimY, aimX);
-      
-      if (dist < PREFERRED_DIST - DEADZONE) {
+      // EXCEPTION: laser snipers aim straight at the player (no lead) so the
+      // rendered lock-on line points exactly where the shot will go — the
+      // WeaponSystem fires down this same facing.
+      let targetAngle: number;
+      if (enemy.aimLaser) {
+          targetAngle = Math.atan2(dy, dx);
+      } else {
+          const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
+          targetAngle = Math.atan2(dy + player.velocity.y * leadTime, dx + player.velocity.x * leadTime);
+      }
+
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      // Laser snipers plant themselves while locked on (aimCharge > 0) so the
+      // shot is a deliberate, telegraphed event from a stationary camper —
+      // brake hard to a stop instead of strafing.
+      const locked = !!enemy.aimLaser && (enemy.aimCharge ?? 0) > 0;
+      const isOrbiter = enemy.enemySubtype === EnemySubtype.SHOOTER_2;
+      if (stationary) {
+          // No-move: bleed residual velocity, never apply thrust.
+          enemy.velocity.x *= 0.6;
+          enemy.velocity.y *= 0.6;
+      } else if (stunned) {
+          // Staggered — apply no movement force this step (the knockback rides).
+      } else if (locked) {
+          enemy.velocity.x *= 0.8;
+          enemy.velocity.y *= 0.8;
+      } else if (isOrbiter && dist > 1) {
+          // TRUE ORBIT: hold a fixed radius and circle the player.  A radial
+          // term (toward/away) corrects back to ORBITER.RADIUS; a tangential
+          // term drives the actual orbit.  Stable per-entity handedness so a
+          // pack of orbiters fans out instead of stacking on one circle.
+          if (enemy.orbitSpin === undefined) {
+              let h = 0; const id = enemy.id;
+              for (let i = 0; i < id.length; i++) h += id.charCodeAt(i);
+              enemy.orbitSpin = (h & 1) ? 1 : -1;
+          }
+          const { RADIUS, RADIAL_DEADZONE, RADIAL_GAIN, TANGENTIAL } = AI_CONFIG.ORBITER;
+          const inX = dx / dist, inY = dy / dist;   // unit vector toward player
+          // Radial pull: + error (too far) steers toward the player, - error
+          // (too close) steers away; saturates over RADIAL_DEADZONE.
+          let radial = (dist - RADIUS) / RADIAL_DEADZONE;
+          if (radial > 1) radial = 1; else if (radial < -1) radial = -1;
+          enemy.velocity.x += inX * radial * accel * RADIAL_GAIN * dt;
+          enemy.velocity.y += inY * radial * accel * RADIAL_GAIN * dt;
+          // Tangential drive: perpendicular to the player vector, signed by spin.
+          enemy.velocity.x += -inY * enemy.orbitSpin * accel * TANGENTIAL * dt;
+          enemy.velocity.y +=  inX * enemy.orbitSpin * accel * TANGENTIAL * dt;
+      } else if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)
           const fleeX = -dx / dist;
           const fleeY = -dy / dist;
@@ -161,9 +272,11 @@ export class AISystem {
           enemy.velocity.y += strafeY * (accel * STRAFE_MODIFIER) * dt;
       }
 
-      // Cap Speed
+      // Cap Speed — suspended while staggered so the hit knockback carries
+      // the enemy back instead of being clamped to cruise.  Skipped for
+      // stationary turrets (the no-move bleed above handles their velocity).
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (speed > maxSpeed) {
+      if (!stationary && !stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
@@ -179,6 +292,333 @@ export class AISystem {
       } else {
           enemy.rotation += Math.sign(angleDiff) * turnStep;
       }
+  }
+
+  /**
+   * Swarm AI (Stage 4): a light flock whose base steer is DBG-selectable
+   * (`getActiveSwarmMove`) — 'boids' (seek), 'vortex' (orbit + dart), 'weave'
+   * (serpentine approach), 'burst' (coast + telegraphed dash).  Separation from
+   * nearby swarm units + a little jitter apply in EVERY mode, so the cloud never
+   * stacks.  Cheap and (mostly) stateless; the neighbour scan is over the
+   * already-filtered `enemies` list, limited to other SWARM units (population
+   * hard-capped by the nest's maxBrood).  Toroidal.
+   */
+  private updateSwarm(dt: number, enemy: GameEntity, player: GameEntity, enemies: GameEntity[]) {
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SWARM];
+      const aggroed = (enemy.aggroTimer ?? 0) > 0;
+      const baseMaxSpeed = (enemy.maxSpeed ?? config.maxSpeed ?? 9) * (aggroed ? AI_CONFIG.AGGRO_SPEED_MULT : 1);
+      const accel = config.accel || 8;
+      const turnRate = config.turnRate || 4;
+      const stunned = (enemy.hitStun ?? 0) > 0;
+
+      const dx = wrapDeltaX(enemy.position.x, player.position.x);
+      const dy = wrapDeltaY(enemy.position.y, player.position.y);
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const toX = dx / dist, toY = dy / dist; // unit toward player
+
+      // ── Base steer by mode ──
+      let ax = 0, ay = 0;
+      let speedCap = baseMaxSpeed;
+      const mode = getActiveSwarmMove();
+      const S = AI_CONFIG.SWARM;
+      if (mode === 'vortex') {
+          // Orbit at a radius (radial correction + tangential swirl), darting
+          // inward on a per-gnat cadence to bite then peeling back out.
+          if (enemy.orbitSpin === undefined) {
+              let h = 0; const id = enemy.id;
+              for (let i = 0; i < id.length; i++) h += id.charCodeAt(i);
+              enemy.orbitSpin = (h & 1) ? 1 : -1;
+          }
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * S.VORTEX.DART_INTERVAL;
+          enemy.swarmTimer -= dt;
+          const darting = enemy.swarmTimer <= 0;
+          if (enemy.swarmTimer <= -S.VORTEX.DART_DURATION) {
+              enemy.swarmTimer = S.VORTEX.DART_INTERVAL + Math.random() * S.VORTEX.DART_VAR;
+          }
+          const targetR = darting ? S.VORTEX.RADIUS * S.VORTEX.DART_RADIUS_FRAC : S.VORTEX.RADIUS;
+          let radial = (dist - targetR) / S.VORTEX.DEADZONE;
+          if (radial > 1) radial = 1; else if (radial < -1) radial = -1;
+          // Kill the swirl during a dart so it's a clean inward lunge.
+          const tang = darting ? 0 : S.VORTEX.TANGENTIAL;
+          ax = toX * radial * accel * S.VORTEX.RADIAL_GAIN - toY * enemy.orbitSpin * accel * tang;
+          ay = toY * radial * accel * S.VORTEX.RADIAL_GAIN + toX * enemy.orbitSpin * accel * tang;
+      } else if (mode === 'weave') {
+          // Seek, but offset perpendicular by a sine so the approach serpentines.
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * Math.PI * 2;
+          enemy.swarmTimer += dt * S.WEAVE.FREQ;
+          const amp = S.WEAVE.AMP * Math.min(1, dist / S.WEAVE.CLOSE_DAMP); // straighten out up close
+          const w = Math.sin(enemy.swarmTimer) * amp;
+          let mx = toX - toY * w; // perpendicular = (-toY, toX)
+          let my = toY + toX * w;
+          const mmag = Math.sqrt(mx * mx + my * my) || 1;
+          ax = (mx / mmag) * accel;
+          ay = (my / mmag) * accel;
+      } else if (mode === 'burst') {
+          // Coast slowly, then fire a quick telegraphed dash at the player.
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * S.BURST.COAST_INTERVAL;
+          enemy.swarmTimer -= dt;
+          const dashing = enemy.swarmTimer <= 0 && enemy.swarmTimer > -S.BURST.DASH_DURATION;
+          if (enemy.swarmTimer <= -S.BURST.DASH_DURATION) {
+              enemy.swarmTimer = S.BURST.COAST_INTERVAL + Math.random() * S.BURST.COAST_VAR;
+          }
+          if (dashing) {
+              ax = toX * accel * S.BURST.DASH_ACCEL_MULT;
+              ay = toY * accel * S.BURST.DASH_ACCEL_MULT;
+              speedCap = baseMaxSpeed * S.BURST.DASH_SPEED_MULT;
+          } else {
+              ax = toX * accel * 0.2; // gentle drift toward
+              ay = toY * accel * 0.2;
+              speedCap = baseMaxSpeed * S.BURST.COAST_SPEED_MULT;
+              if (!stunned) { enemy.velocity.x *= S.BURST.COAST_DAMP; enemy.velocity.y *= S.BURST.COAST_DAMP; }
+              // Pre-dash wind-up flash (telegraph) in the last moments of coast.
+              if (enemy.swarmTimer < S.BURST.TELEGRAPH) enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.12);
+          }
+      } else {
+          // 'boids' (default): straight seek.
+          ax = toX * accel;
+          ay = toY * accel;
+      }
+
+      // ── Separation (all modes): push away from nearby swarm units, stronger
+      // the closer they are, so the flock fans out instead of stacking.
+      const sepSq = S.SEPARATION_RANGE * S.SEPARATION_RANGE;
+      let sx = 0, sy = 0;
+      for (let i = 0; i < enemies.length; i++) {
+          const o = enemies[i];
+          if (o === enemy || o.enemySubtype !== EnemySubtype.SWARM) continue;
+          const ox = wrapDeltaX(enemy.position.x, o.position.x);
+          const oy = wrapDeltaY(enemy.position.y, o.position.y);
+          const d2 = ox * ox + oy * oy;
+          if (d2 > sepSq || d2 < 1e-3) continue;
+          const d = Math.sqrt(d2);
+          const w = (1 - d / S.SEPARATION_RANGE) / d;
+          sx -= ox * w;
+          sy -= oy * w;
+      }
+      ax += sx * accel * S.SEPARATION_STRENGTH;
+      ay += sy * accel * S.SEPARATION_STRENGTH;
+
+      // A little jitter so the cloud shimmers (framerate-stable accel).
+      ax += (Math.random() - 0.5) * S.JITTER_ACCEL;
+      ay += (Math.random() - 0.5) * S.JITTER_ACCEL;
+
+      if (!stunned) {
+          enemy.velocity.x += ax * dt;
+          enemy.velocity.y += ay * dt;
+          const speed = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+          if (speed > speedCap) {
+              enemy.velocity.x = (enemy.velocity.x / speed) * speedCap;
+              enemy.velocity.y = (enemy.velocity.y / speed) * speedCap;
+          }
+      }
+
+      // Face travel direction.
+      const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      let angleDiff = targetAngle - enemy.rotation;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      const turnStep = turnRate * dt;
+      enemy.rotation = Math.abs(angleDiff) < turnStep ? targetAngle : enemy.rotation + Math.sign(angleDiff) * turnStep;
+  }
+
+  /**
+   * Bubble AI (Stage 5): ambient soft-body fauna with three regimes.
+   *  - DRIFT (passive, no shard near): ride the asteroid flow field — steer the
+   *    velocity toward the local current so a field of them streams along the
+   *    same lanes as the asteroids.
+   *  - CHASE (passive, a shard within SHARD_VISION): peel off the flow and seek
+   *    the nearest eatable (finite-mass) shard; the consume pass eats it on
+   *    contact and it resumes drifting.
+   *  - SEEK (provoked): floaty pursuit of its AGGRO TARGET — whoever last
+   *    attacked it (the player OR an enemy), resolved from `aggroTargetId`; a
+   *    true third party.  If that target is gone it calms back to passive.
+   * While LATCHED (attachedToId set) movement is skipped — GameEngine.update-
+   * Attachments owns the position.  Toroidal.
+   */
+  private updateBubble(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[], enemies: GameEntity[]) {
+      // Latched onto a target → the attach pass drives position; don't fight it.
+      if (enemy.attachedToId !== undefined) return;
+
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.BUBBLE];
+      const B = AI_CONFIG.BUBBLE;
+      const accel = config.accel || 3;
+      const turnRate = config.turnRate || 1.6;
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 4.5;
+
+      const sick = (enemy.bubbleSickTimer ?? 0) > 0; // queasy: sluggish, no hunt
+      let aggro = (!sick && enemy.provoked) ? this.resolveBubbleTarget(enemy, player, enemies) : null;
+      // Aggro leash: give up on a target that has fled out of the local area.
+      if (aggro) {
+          const lx = wrapDeltaX(enemy.position.x, aggro.position.x);
+          const ly = wrapDeltaY(enemy.position.y, aggro.position.y);
+          if (lx * lx + ly * ly > BUBBLE_CONSTANTS.AGGRO_LOSE_RANGE * BUBBLE_CONSTANTS.AGGRO_LOSE_RANGE) {
+              this.clearBubbleAggro(enemy);
+              aggro = null;
+          }
+      }
+
+      // Burst/coast cadence — ONLY while hunting (aggro).  A provoked bubble
+      // coasts fast and periodically LUNGES to run a target down; passive
+      // bubbles never burst, so they stay slow and easy to ignore until shot.
+      let acc = accel, sBoost = 1;
+      if (aggro) {
+          if (enemy.bubbleBurstTimer === undefined) enemy.bubbleBurstTimer = Math.random() * B.BURST_INTERVAL;
+          enemy.bubbleBurstTimer -= dt;
+          const bursting = enemy.bubbleBurstTimer <= 0 && enemy.bubbleBurstTimer > -B.BURST_DURATION;
+          if (enemy.bubbleBurstTimer <= -B.BURST_DURATION) {
+              enemy.bubbleBurstTimer = B.BURST_INTERVAL + Math.random() * B.BURST_VAR;
+          }
+          acc = accel * (bursting ? B.BURST_ACCEL_MULT : 1);
+          sBoost = bursting ? B.BURST_SPEED_MULT : 1;
+      } else {
+          enemy.bubbleBurstTimer = undefined; // reset so the next hunt opens on a coast
+      }
+
+      if (stunned) {
+          // A hit reels it; the knockback carries — no thrust this step.
+      } else if (sick) {
+          // ── Sick: sluggish drift only (can't hunt or chase while queasy) ──
+          const ds = B.DRIFT_SPEED * BUBBLE_CONSTANTS.SICK_SPEED_MULT;
+          const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+          const tx = flow.x * ds, ty = flow.y * ds;
+          const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
+          enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
+          enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
+          this.capSpeed(enemy, ds);
+      } else if (aggro) {
+          // ── Hunt the aggro target: fast seek + lunges so it can catch it ──
+          const dx = wrapDeltaX(enemy.position.x, aggro.position.x);
+          const dy = wrapDeltaY(enemy.position.y, aggro.position.y);
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          enemy.velocity.x += (dx / dist) * acc * B.SEEK_ACCEL_MULT * dt;
+          enemy.velocity.y += (dy / dist) * acc * B.SEEK_ACCEL_MULT * dt;
+          this.capSpeed(enemy, maxSpeed * B.PROVOKED_SPEED_MULT * sBoost);
+      } else {
+          // ── Passive (slow): chase the nearest eatable shard, else ride flow ──
+          const target = this.nearestEatableShard(enemy, shards, B.SHARD_VISION);
+          if (target) {
+              const dx = wrapDeltaX(enemy.position.x, target.position.x);
+              const dy = wrapDeltaY(enemy.position.y, target.position.y);
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+              enemy.velocity.x += (dx / dist) * accel * dt;
+              enemy.velocity.y += (dy / dist) * accel * dt;
+              this.capSpeed(enemy, maxSpeed * B.CHASE_SPEED_MULT);
+          } else {
+              // Drift: lerp velocity toward the local flow current.
+              const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+              const tx = flow.x * B.DRIFT_SPEED, ty = flow.y * B.DRIFT_SPEED;
+              const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
+              enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
+              enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
+              this.capSpeed(enemy, B.DRIFT_SPEED);
+          }
+      }
+
+      // Face travel direction (the membrane highlight tracks heading).
+      const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      let angleDiff = targetAngle - enemy.rotation;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      const turnStep = turnRate * dt;
+      enemy.rotation = Math.abs(angleDiff) < turnStep ? targetAngle : enemy.rotation + Math.sign(angleDiff) * turnStep;
+  }
+
+  /** Nearest active finite-mass (mobile) shard within `range` of the bubble, or
+   *  null.  Toroidal.  O(shards) — the bubble count is tiny so this stays cheap. */
+  private nearestEatableShard(bubble: GameEntity, shards: GameEntity[], range: number): GameEntity | null {
+      const rangeSq = range * range;
+      let best: GameEntity | null = null;
+      let bestSq = rangeSq;
+      for (let i = 0; i < shards.length; i++) {
+          const s = shards[i];
+          if (!s.active || s.isExploding || s.mass === Infinity) continue;
+          const dx = wrapDeltaX(bubble.position.x, s.position.x);
+          const dy = wrapDeltaY(bubble.position.y, s.position.y);
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestSq) { bestSq = d2; best = s; }
+      }
+      return best;
+  }
+
+  /**
+   * EVASIVE counterplay trait ((h) bosses, WEAPONS_AMMO_PLAN §7).
+   *
+   * Scans player-owned projectiles inside the trait's `sense` radius for one
+   * that is CLOSING and aimed to pass within `missRadius` of the enemy, then
+   * kicks the enemy perpendicular to that shot's travel — a REAL dodge, not a
+   * damage-reduction fudge.  Three deliberate blind spots keep the §7 answers
+   * honest:
+   *   - HOMING shots are ignored: the Seeker re-acquires mid-juke, so it is
+   *     the designated answer.
+   *   - Lightning arcs never exist as travelling projectiles, so chains hit.
+   *   - One juke per `cooldown`: a Shotgun cone or a Cannon splash still lands
+   *     because the enemy can only step out of the way once.
+   * O(projectiles) and ONLY for enemies carrying the trait; the whole pass
+   * already rides the PerfController `ai` task cadence, and it allocates
+   * nothing.  Toroidal.
+   */
+  private applyEvasiveDodge(dt: number, enemy: GameEntity, projectiles: GameEntity[]) {
+      const cfg = enemy.evasive!;
+      const t = (enemy.dodgeTimer ?? 0) - dt;
+      if (t > 0) { enemy.dodgeTimer = t; return; }
+      enemy.dodgeTimer = 0;
+      if ((enemy.hitStun ?? 0) > 0) return; // staggered — can't juke
+
+      const senseSq = cfg.sense * cfg.sense;
+      for (let i = 0; i < projectiles.length; i++) {
+          const p = projectiles[i];
+          if (p.ownerType !== EntityType.PLAYER || p.homing) continue;
+          const dx = wrapDeltaX(enemy.position.x, p.position.x); // enemy → shot
+          const dy = wrapDeltaY(enemy.position.y, p.position.y);
+          const d2 = dx * dx + dy * dy;
+          if (d2 > senseSq) continue;
+          const vx = p.velocity.x, vy = p.velocity.y;
+          const vmag = Math.sqrt(vx * vx + vy * vy);
+          if (vmag < 1e-3) continue;
+          // Closing check: the shot must be travelling TOWARD the enemy
+          // (enemy→shot points opposite to the shot's velocity).
+          const closing = -(dx * vx + dy * vy) / vmag;
+          if (closing <= 0) continue;
+          // Perpendicular miss distance of the shot's line from the enemy.
+          const perp = Math.abs(dx * vy - dy * vx) / vmag;
+          if (perp > cfg.missRadius) continue;
+          // Juke perpendicular to the shot, away from the side the shot is
+          // offset to — the shortest way out of the line.
+          const nx = -vy / vmag, ny = vx / vmag;
+          const sign = (dx * nx + dy * ny) >= 0 ? -1 : 1;
+          enemy.velocity.x += nx * sign * cfg.impulse;
+          enemy.velocity.y += ny * sign * cfg.impulse;
+          enemy.dodgeTimer = cfg.cooldown;
+          return;
+      }
+  }
+
+  /** Clamp an entity's speed to `cap` in place (no-op when under). */
+  private capSpeed(e: GameEntity, cap: number) {
+      const spd = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
+      if (spd > cap && spd > 0) { e.velocity.x = (e.velocity.x / spd) * cap; e.velocity.y = (e.velocity.y / spd) * cap; }
+  }
+
+  /** Resolve a provoked bubble's `aggroTargetId` to a live entity to chase — the
+   *  player or an enemy by id — for the SEEK regime.  If the attacker is gone,
+   *  clear the aggro so the bubble calms back to passive (drift / breeding).  An
+   *  unknown/unset id while provoked falls back to the player. */
+  private resolveBubbleTarget(bubble: GameEntity, player: GameEntity, enemies: GameEntity[]): GameEntity | null {
+      const id = bubble.aggroTargetId;
+      if (!id || id === 'player') return player;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.id === id) return (e.active && !e.isExploding) ? e : this.clearBubbleAggro(bubble);
+      }
+      return this.clearBubbleAggro(bubble);
+  }
+
+  /** Drop a bubble's aggro (attacker gone) → back to passive.  Returns null. */
+  private clearBubbleAggro(bubble: GameEntity): null {
+      bubble.aggroTargetId = undefined;
+      bubble.provoked = false;
+      return null;
   }
 
   /**
@@ -204,7 +644,12 @@ export class AISystem {
       reaction -= dt;
 
       if (reaction <= 0) {
-          this.laggedTargets.set(enemy.id, { ...player.position });
+          // Mutate the existing Vector2 in place — the laggedTargets entry
+          // is created once at enemy init (above) and lives for the enemy's
+          // lifetime, so we never need to allocate a fresh object here.
+          const lt = this.laggedTargets.get(enemy.id)!;
+          lt.x = player.position.x;
+          lt.y = player.position.y;
           reaction = AI_CONFIG.REACTION_TIME_BASE + Math.random() * AI_CONFIG.REACTION_TIME_VAR;
       }
       this.reactionTimers.set(enemy.id, reaction);
@@ -253,7 +698,9 @@ export class AISystem {
 
       // At long range always seek regardless of idle state, so waves never
       // stall when the player moves away from the initial spawn location.
-      if (enemy.aiState === 'chase' || longRange) {
+      // Skip while staggered — the hit knockback carries the enemy briefly.
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      if ((enemy.aiState === 'chase' || longRange) && !stunned) {
           // ENGAGE: Fly toward the lagged target, blended with the pursuit
           // flow field so enemies navigate around tile clusters.
           // The flow field uses the player's *current* cell as its goal —
@@ -293,9 +740,20 @@ export class AISystem {
       }
       // Note: In 'idle' state, no force is applied, friction naturally slows the ship (drifting)
 
-      // Cap Speed
+      // Drone (RAMMER_1) nervous jitter — a constant low-amplitude random
+      // velocity buzz so the frantic peashooter shimmies instead of tracking a
+      // clean line.  Applied as an accel (×dt) for framerate stability; small
+      // enough not to derail the dive, suspended while staggered.
+      if (enemy.enemySubtype === EnemySubtype.RAMMER_1 && !stunned) {
+          const j = AI_CONFIG.DRONE_JITTER_ACCEL;
+          enemy.velocity.x += (Math.random() - 0.5) * j * dt;
+          enemy.velocity.y += (Math.random() - 0.5) * j * dt;
+      }
+
+      // Cap Speed — suspended while staggered so the hit knockback carries
+      // the enemy back instead of being clamped to cruise.
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (speed > maxSpeed) {
+      if (!stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
@@ -317,7 +775,15 @@ export class AISystem {
                   enemy.velocity.y += Math.sin(nudgeAngle) * maxSpeed * 0.8;
               }
           }
-          this.lastPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+          // Reuse the existing Vector2 when one already exists for this
+          // enemy; only allocate on first sample.
+          const existing = this.lastPositions.get(enemy.id);
+          if (existing) {
+              existing.x = enemy.position.x;
+              existing.y = enemy.position.y;
+          } else {
+              this.lastPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+          }
           stuckTimer = AI_CONFIG.STUCK_CHECK_INTERVAL;
       }
       this.stuckTimers.set(enemy.id, stuckTimer);

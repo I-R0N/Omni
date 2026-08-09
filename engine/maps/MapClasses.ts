@@ -1,7 +1,8 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, RETURN_PORTAL_OFFSET } from '../../constants';
+import { mapDescriptor, HUB_DESCRIPTOR } from './MapDescriptors';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -36,6 +37,50 @@ export abstract class BaseMapLayer {
   }
 
   abstract init(): void;
+
+  /**
+   * Spawn a traversable rift leading to the map descriptor `targetId`
+   * (roadmap step (k)).  The entity recipe is the space station's exactly
+   * — EntityType.INTERACTABLE + mass ∞ + no dropType — so the physics
+   * broadphase skips every pair it is in, the static grid and the
+   * flow-field obstacle bake exclude it, and the existing POI paths hand
+   * it a minimap dot, an off-screen chevron, and asteroid-respawn
+   * avoidance for free.  The destination's display name rides on `name`.
+   */
+  protected addPortal(targetId: string, pos: Vector2, color: string) {
+    this.entities.push({
+      id: nextId('portal'),
+      type: EntityType.INTERACTABLE,
+      isPortal: true,
+      portalTargetId: targetId,
+      name: mapDescriptor(targetId)?.name ?? targetId,
+      position: { x: pos.x, y: pos.y },
+      velocity: { x: 0, y: 0 },
+      size: { x: PORTAL_CONSTANTS.SIZE, y: PORTAL_CONSTANTS.SIZE },
+      rotation: 0,
+      color,
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+    });
+  }
+
+  /**
+   * The way home: one ALWAYS-ACTIVE return rift beside this arena's
+   * player spawn.  Called by the four portal-linked arena maps (the
+   * showcase field maps stay menu-only and carry no portals).  The
+   * offset lands inside the spawn safe zone those maps already clear,
+   * so no extra terrain filtering is needed.
+   */
+  protected addReturnPortal() {
+    const pos = {
+      x: this.playerSpawn.x + RETURN_PORTAL_OFFSET.x,
+      y: this.playerSpawn.y + RETURN_PORTAL_OFFSET.y,
+    };
+    wrapPosition(pos);
+    this.addPortal(HUB_DESCRIPTOR.id, pos, PORTAL_CONSTANTS.RETURN_COLOR);
+  }
 
   /**
    * Per-map flow sampler.  Default is the global analytical meander used
@@ -125,20 +170,26 @@ export abstract class BaseMapLayer {
       speedMultiplier: number = 1.0,
       allowedSprites: string[] = []
     ): GameEntity {
-    // Irregular convex-ish polygon: 9-12 points with varied radius and
-    // slight angular jitter.  Variation is capped at ±25 % of base radius
-    // so the shape stays approximately convex (safe for SAT collision).
-    // Points are generated in angular order and sorted to guarantee correct
-    // polygon winding regardless of jitter direction.
-    const numPoints = 9 + Math.floor(Math.random() * 4); // 9–12
-    const baseR    = (size / 2) * 0.82;
+    // Free-spawned rock-shards use the variant's spawn config so the
+    // free-floating rocks read the same as tile-detached rock-shards
+    // (5 / 7 / 9 verts, organic / irregular silhouette).  Vertex count,
+    // angle jitter, and radius variance all come from
+    // SHARD_VARIANTS['rock-shard'].spawn — see constants.ts.  Discrete
+    // polyVerticesOptions (when set) takes priority over Min/Max.
+    const spawn = SHARD_VARIANTS['rock-shard'].spawn;
+    const numPoints = spawn.polyVerticesOptions
+      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      : spawn.polyVerticesMin
+        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    const baseR = (size / 2) * 0.82;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
         const baseAngle   = (i / numPoints) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.65;
+        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
+        const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
         rawPts.push({
             angle: baseAngle + angleJitter,
-            r:     baseR * (0.75 + Math.random() * 0.5), // 75 %–125 % of base
+            r:     baseR * radiusFrac,
         });
     }
     rawPts.sort((a, b) => a.angle - b.angle);
@@ -154,7 +205,11 @@ export abstract class BaseMapLayer {
     }
 
     const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
-    const hp = size > 30 ? 2 : 1;
+    // maxHealth is the size-scaled hit ceiling for the probabilistic break
+    // model (ROCK_BREAK): the asteroid cracks on hit 1 and from hit 2 on
+    // rolls an early break that's guaranteed by the ceiling.  Bigger rocks
+    // get a higher ceiling, so they resist longer.
+    const hp = rockHitCeiling(size);
 
     // Blend flow direction (70%) with random drift (30%) for the initial velocity.
     // This seeds the asteroid into the vortex streamlines from spawn.
@@ -186,7 +241,7 @@ export abstract class BaseMapLayer {
         health: hp,
         maxHealth: hp,
         polygonPoints: points,
-        mass: size,
+        mass: SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(size),
         sprite: randomSprite
     };
   }
@@ -201,8 +256,8 @@ export class UniverseMap extends BaseMapLayer {
   // per axis gives room for many landmark clusters before the player
   // meets the wrap seam.  Other maps override this with their own
   // constants.
-  public static readonly WIDTH  = 8000;
-  public static readonly HEIGHT = 8000;
+  public static readonly WIDTH  = 16000;
+  public static readonly HEIGHT = 16000;
 
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
@@ -264,34 +319,28 @@ export class UniverseMap extends BaseMapLayer {
 
     // Glass landmark clusters — uniform distribution across the 95 %
     // zone.  Most clusters are stock glass (single-hit) to preserve the
-    // original destructible feel; a smaller share rolls as reinforced or
-    // heavy tiles, plus a few rare indestructible landmarks that never
-    // break or regenerate.  Cluster counts roughly split:
-    //   glass       ~60 %
-    //   reinforced  ~22 %
-    //   heavy       ~12 %
-    //   indestructible ~6 %
-    const GLASS_CLUSTERS          = Math.round(GLASS_COUNT * 0.60);
-    const REINFORCED_CLUSTERS     = Math.round(GLASS_COUNT * 0.22);
-    const HEAVY_CLUSTERS          = Math.round(GLASS_COUNT * 0.12);
-    const INDESTRUCTIBLE_CLUSTERS = GLASS_COUNT - GLASS_CLUSTERS - REINFORCED_CLUSTERS - HEAVY_CLUSTERS;
+    // original destructible feel; a smaller share rolls as plastic or
+    // metal tiles.  Per decision #6, indestructible-tile is reserved
+    // for deliberate border placement (e.g. SevenRingsMap's outer
+    // ring) and is not spawned in random clusters here — its share is
+    // redistributed across the destructible variants below.
+    //   glass       ~64 %
+    //   plastic     ~23 %
+    //   metal       ~13 %
+    const GLASS_CLUSTERS   = Math.round(GLASS_COUNT * 0.64);
+    const PLASTIC_CLUSTERS = Math.round(GLASS_COUNT * 0.23);
+    const METAL_CLUSTERS   = GLASS_COUNT - GLASS_CLUSTERS - PLASTIC_CLUSTERS;
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
         GLASS_CLUSTERS, 10, 34, occupied, 'glass'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
-        REINFORCED_CLUSTERS, 8, 22, occupied, 'reinforced'
+        PLASTIC_CLUSTERS, 8, 22, occupied, 'plastic'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
-        HEAVY_CLUSTERS, 6, 14, occupied, 'heavy'
-    ));
-    // Indestructible landmarks are small (3-8 tiles) so they read as
-    // permanent obstacles rather than large impassable walls.
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, 22,
-        INDESTRUCTIBLE_CLUSTERS, 3, 8, occupied, 'indestructible'
+        METAL_CLUSTERS, 6, 14, occupied, 'metal'
     ));
 
     // Nebula cloud clusters — same 95 %-zone uniform distribution.
@@ -320,6 +369,117 @@ export class UniverseMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 350 * 350;
     });
+
+    // The way home — added AFTER the spawn-clearance filter so the rift
+    // isn't swept up by it.
+    this.addReturnPortal();
+  }
+}
+
+/**
+ * Overworld — the wave-free home map (economy-pivot increment 1e).
+ * Standard mixed terrain (asteroids + glass/plastic/metal clusters +
+ * nebulae, counts read from MAP_POPULATION[OVERWORLD]) with the space
+ * station POI at map center.  WaveSystem never starts a wave here; the
+ * living-world population is the ambient systems (bubbles, rivals, the
+ * engine-respawned roaming dragon).  The player spawns just beside the
+ * station — inside dock range, so a fresh run opens with the DOCK
+ * affordance visible.
+ */
+export class OverworldMap extends BaseMapLayer {
+  public static readonly WIDTH  = 12000;
+  public static readonly HEIGHT = 12000;
+
+  constructor() {
+    super('overworld_01', 'Overworld', MapType.OVERWORLD);
+    this.width  = OverworldMap.WIDTH;
+    this.height = OverworldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: STATION_CONSTANTS.DOCK_RANGE * 0.8 };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const gen = getRockShardFreeSpawn(MapType.OVERWORLD);
+    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    for (const e of this.entities) wrapPosition(e.position);
+
+    // Same 95 %-of-map cluster zone as the UniverseMap (5 % dead ring at
+    // the wrap seam); counts come straight from MAP_POPULATION.
+    const CLUSTER_W = MAP_WIDTH  * 0.95;
+    const CLUSTER_H = MAP_HEIGHT * 0.95;
+    const occupied = new Set<string>();
+    const pop = MAP_POPULATION[MapType.OVERWORLD];
+    const cluster = (variant: StructureVariant, key: 'glass-tile' | 'plastic-tile' | 'metal-tile') => {
+      const c = pop[key]?.tileCluster;
+      if (!c) return;
+      this.entities.push(...TileGenerator.generateClusteredMesh(
+          CLUSTER_W, CLUSTER_H, 22,
+          c.clusterCount, c.minClusterSize, c.maxClusterSize, occupied, variant
+      ));
+    };
+    cluster('glass', 'glass-tile');
+    cluster('plastic', 'plastic-tile');
+    cluster('metal', 'metal-tile');
+
+    const neb = pop['nebula-tile']?.tileCluster;
+    if (neb) {
+      this.entities.push(...TileGenerator.generateNebulaClusters(
+          CLUSTER_W, CLUSTER_H, 22,
+          neb.clusterCount, neb.minClusterSize, neb.maxClusterSize,
+          occupied,
+          this.nebulaClusterCenters
+      ));
+    }
+
+    // Clear every station's and every portal's home patch: nothing
+    // generates on top of them (the home station's clearance doubles as
+    // the spawn-safe bubble — the player spawns just off it).
+    const clear2 = STATION_CONSTANTS.CLEARANCE ** 2;
+    const portalClear2 = PORTAL_CONSTANTS.CLEARANCE ** 2;
+    this.entities = this.entities.filter(e =>
+        OVERWORLD_STATIONS.every(st => {
+            const dx = e.position.x - st.x, dy = e.position.y - st.y;
+            return dx * dx + dy * dy > clear2;
+        })
+        && HUB_PORTAL_SITES.every(p => {
+            const dx = e.position.x - p.x, dy = e.position.y - p.y;
+            return dx * dx + dy * dy > portalClear2;
+        })
+    );
+
+    // The stations — indestructible, non-colliding INTERACTABLEs (mass ∞
+    // + no dropType: skipped by the broadphase, the static grid, and the
+    // flow-field obstacle bake).  Each carries its variant kind; the
+    // SERVICES mix (drydock / repair / shops) lives in STATION_VARIANTS.
+    // GameEngine collects them by the isStation flag at map load.
+    for (const st of OVERWORLD_STATIONS) {
+      const variant = STATION_VARIANTS[st.kind];
+      this.entities.push({
+        id: nextId('station'),
+        type: EntityType.INTERACTABLE,
+        isStation: true,
+        stationKind: st.kind,
+        name: variant.name,
+        position: { x: st.x, y: st.y },
+        velocity: { x: 0, y: 0 },
+        size: { x: STATION_CONSTANTS.SIZE, y: STATION_CONSTANTS.SIZE },
+        rotation: 0,
+        color: variant.color,
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        mass: Infinity,
+      });
+    }
+
+    // The rifts out to the wave arenas — one per full-game arena, spread
+    // clear of the stations and each other.  Destinations are descriptor
+    // ids; GameEngine.transitionToMap resolves them at entry time.
+    for (const p of HUB_PORTAL_SITES) {
+      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
+    }
   }
 }
 
@@ -333,9 +493,9 @@ export class RingMap extends BaseMapLayer {
   // Radius of the tile ring in world units.  Sized so it's clearly
   // visible from spawn (well inside the half-map) and leaves a large
   // safe zone at the centre.
-  private static readonly RING_TILE_RADIUS = 700;
-  public  static readonly WIDTH  = 6000;
-  public  static readonly HEIGHT = 6000;
+  private static readonly RING_TILE_RADIUS = 1400;
+  public  static readonly WIDTH  = 12000;
+  public  static readonly HEIGHT = 12000;
 
   constructor() {
     super('ring_01', 'Ring World', MapType.RING);
@@ -365,7 +525,9 @@ export class RingMap extends BaseMapLayer {
     for (const e of this.entities) wrapPosition(e.position);
 
     // Glass tile ring at the featured radius.
-    emitGlassTileRing(this.entities, RingMap.RING_TILE_RADIUS, HEX_SIZE);
+    // keepEvery = 2: ring radius doubled to track the 2× map, so thin
+    // to half the tiles to preserve the original ring tile count.
+    emitGlassTileRing(this.entities, RingMap.RING_TILE_RADIUS, HEX_SIZE, 'glass', 2);
 
     // Clear a safe open area around spawn (same rule as UniverseMap so
     // the player never spawns inside an asteroid).
@@ -373,6 +535,9 @@ export class RingMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 350 * 350;
     });
+
+    // The way home — added AFTER the spawn-clearance filter.
+    this.addReturnPortal();
   }
 }
 
@@ -385,10 +550,10 @@ export class RingMap extends BaseMapLayer {
  */
 export class SevenRingsMap extends BaseMapLayer {
   private static readonly RING_COUNT = 7;
-  private static readonly INNER_RADIUS = 400;
-  private static readonly OUTER_RADIUS = 2200;
-  public  static readonly WIDTH  = 6000;
-  public  static readonly HEIGHT = 6000;
+  private static readonly INNER_RADIUS = 800;
+  private static readonly OUTER_RADIUS = 4400;
+  public  static readonly WIDTH  = 12000;
+  public  static readonly HEIGHT = 12000;
 
   constructor() {
     super('seven_rings_01', 'Seven Rings', MapType.SEVEN_RINGS);
@@ -412,22 +577,24 @@ export class SevenRingsMap extends BaseMapLayer {
     // Evenly-spaced radii from inner to outer.  Division by (COUNT - 1)
     // places the first and last rings exactly at the declared bounds.
     // Each ring rolls a variant based on index so the player can visually
-    // read difficulty: inner = glass, mid = reinforced, outer reinforced
-    // is punctuated by heavy rings, and the outermost is indestructible.
+    // read difficulty: inner = glass, mid = plastic, outer plastic
+    // is punctuated by metal rings, and the outermost is indestructible.
     const RING_VARIANTS: StructureVariant[] = [
         'glass',        // ring 0 — soft inner
         'glass',        // ring 1
-        'reinforced',   // ring 2
-        'reinforced',   // ring 3
-        'heavy',        // ring 4
-        'heavy',        // ring 5
+        'plastic',      // ring 2
+        'plastic',      // ring 3
+        'metal',        // ring 4
+        'metal',        // ring 5
         'indestructible', // ring 6 — outer wall
     ];
     const step = (SevenRingsMap.OUTER_RADIUS - SevenRingsMap.INNER_RADIUS) /
                  (SevenRingsMap.RING_COUNT - 1);
     for (let i = 0; i < SevenRingsMap.RING_COUNT; i++) {
       const r = SevenRingsMap.INNER_RADIUS + step * i;
-      emitGlassTileRing(this.entities, r, HEX_SIZE, RING_VARIANTS[i] ?? 'glass');
+      // keepEvery = 2: ring radii doubled to track the 2× map, so thin
+      // each ring to half its tiles to preserve the original counts.
+      emitGlassTileRing(this.entities, r, HEX_SIZE, RING_VARIANTS[i] ?? 'glass', 2);
     }
 
     // Keep a spawn bubble clear — use a radius slightly smaller than the
@@ -438,6 +605,9 @@ export class SevenRingsMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > safeClearSq;
     });
+
+    // The way home — added AFTER the spawn-clearance filter.
+    this.addReturnPortal();
   }
 }
 
@@ -449,17 +619,16 @@ export class SevenRingsMap extends BaseMapLayer {
  * having to fly around a full-size map to find each element.
  */
 export class PocketMap extends BaseMapLayer {
-  public static readonly WIDTH  = 2000;
-  public static readonly HEIGHT = 2000;
+  public static readonly WIDTH  = 4000;
+  public static readonly HEIGHT = 4000;
 
   // Cluster counts — the sandbox is a showcase so population leans
   // heavy on tiles / nebulae and light on asteroids.  Background nebula
   // puffs match `NEBULA_CLUSTERS` 1:1 via nebulaClusterCenters, so
   // bumping this also densifies the backdrop.
   private static readonly GLASS_CLUSTERS          = 8;
-  private static readonly REINFORCED_CLUSTERS     = 5;
-  private static readonly HEAVY_CLUSTERS          = 3;
-  private static readonly INDESTRUCTIBLE_CLUSTERS = 2;
+  private static readonly PLASTIC_CLUSTERS        = 5;
+  private static readonly METAL_CLUSTERS          = 3;
   private static readonly NEBULA_CLUSTERS         = 12;
 
   constructor() {
@@ -484,23 +653,21 @@ export class PocketMap extends BaseMapLayer {
     const CLUSTER_H = PocketMap.HEIGHT * 0.9;
     const occupied = new Set<string>();
 
-    // Tile variants — every flavour, in mid-sized clusters so each
-    // variant reads as a distinct landmark rather than a stray hex.
+    // Tile variants — destructible flavours, in mid-sized clusters so
+    // each variant reads as a distinct landmark rather than a stray
+    // hex.  Per decision #6, indestructible-tile is reserved for
+    // deliberate border placement and is not spawned here.
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
         PocketMap.GLASS_CLUSTERS, 6, 14, occupied, 'glass'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.REINFORCED_CLUSTERS, 5, 10, occupied, 'reinforced'
+        PocketMap.PLASTIC_CLUSTERS, 5, 10, occupied, 'plastic'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.HEAVY_CLUSTERS, 4, 8, occupied, 'heavy'
-    ));
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.INDESTRUCTIBLE_CLUSTERS, 3, 5, occupied, 'indestructible'
+        PocketMap.METAL_CLUSTERS, 4, 8, occupied, 'metal'
     ));
 
     // Nebula clusters — same shared occupancy so tiles and nebulae
@@ -518,6 +685,9 @@ export class PocketMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 120 * 120;
     });
+
+    // The way home — added AFTER the spawn-clearance filter.
+    this.addReturnPortal();
   }
 }
 
@@ -649,18 +819,38 @@ export class GlassFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
- * Hard-damageable field — 5-HP heavy tiles spread across the map.  The
- * hardest destructible variant; every cluster requires sustained fire
- * (or a high-momentum asteroid crash) to break.
+ * Plastic-only field — 3-HP plastic tiles spread across the map.  The
+ * mid-tier destructible: harder than glass, softer than metal; useful
+ * for tuning damage feel and crack visuals against the matte polymer
+ * aesthetic in isolation.
  */
-export class HardTileFieldMap extends SingleVariantTileFieldMap {
-  protected readonly variant: StructureVariant = 'heavy';
+export class PlasticFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'plastic';
   protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
   protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
   protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
 
   constructor() {
-    super('hard_tile_field_01', 'Hard Tile Field', MapType.HARD_TILE_FIELD);
+    super('plastic_field_01', 'Plastic Field', MapType.PLASTIC_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Metal-only field — 5-HP metal tiles spread across the map.  The
+ * hardest destructible variant; every cluster requires sustained fire
+ * (or a high-momentum asteroid crash) to break.
+ */
+export class MetalFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'metal';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('metal_field_01', 'Metal Field', MapType.METAL_FIELD);
     this.width  = SingleVariantTileFieldMap.WIDTH;
     this.height = SingleVariantTileFieldMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
@@ -707,6 +897,67 @@ export class RockFieldMap extends SingleVariantTileFieldMap {
     this.width  = SingleVariantTileFieldMap.WIDTH;
     this.height = SingleVariantTileFieldMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Tile-heavy stress map — dense clusters of every destructible /
+ * permanent tile variant packed across the 6 k × 6 k playfield.  Used
+ * for evaluating tile-glow render cost (`·tLit` in the F3 overlay)
+ * with a representative on-screen tile count.  No asteroid free-spawn
+ * and no nebulae so the scene is purely tiles.
+ */
+export class TileHeavyMap extends BaseMapLayer {
+  public static readonly WIDTH  = SINGLE_ELEMENT_MAP_SIZE;
+  public static readonly HEIGHT = SINGLE_ELEMENT_MAP_SIZE;
+
+  constructor() {
+    super('tile_heavy_01', 'Tile Heavy', MapType.TILE_HEAVY);
+    this.width  = TileHeavyMap.WIDTH;
+    this.height = TileHeavyMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const CLUSTER_W = MAP_WIDTH  * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const CLUSTER_H = MAP_HEIGHT * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const occupied = new Set<string>();
+
+    // ~5 × the single-variant showcase density: each destructible
+    // variant gets ~80 clusters × ~14 tiles = ~1 100 tiles, plus
+    // ~40 small indestructible clusters.  Total ≈ 4 700 tiles, which
+    // gives the player ~300-500 visible at default zoom — enough to
+    // exercise the per-frame tile-bloom loop under realistic load.
+    const PERVAR_CLUSTERS  = 80;
+    const PERVAR_MIN_SIZE  = 12;
+    const PERVAR_MAX_SIZE  = 16;
+    const INDESTR_CLUSTERS = 40;
+    const INDESTR_MIN_SIZE = 5;
+    const INDESTR_MAX_SIZE = 10;
+
+    for (const variant of ['glass', 'plastic', 'metal', 'rock'] as const) {
+        this.entities.push(...TileGenerator.generateClusteredMesh(
+            CLUSTER_W, CLUSTER_H, HEX_SIZE,
+            PERVAR_CLUSTERS, PERVAR_MIN_SIZE, PERVAR_MAX_SIZE,
+            occupied, variant
+        ));
+    }
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        INDESTR_CLUSTERS, INDESTR_MIN_SIZE, INDESTR_MAX_SIZE,
+        occupied, 'indestructible'
+    ));
+
+    // Keep the spawn point clear so the player doesn't materialise
+    // inside a wall (mirrors the SingleVariantTileFieldMap pattern).
+    const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > clearSq;
+    });
   }
 }
 
@@ -771,26 +1022,38 @@ function emitGlassTileRing(
     entities: GameEntity[],
     radius: number,
     band: number,
-    variant: StructureVariant = 'glass'
+    variant: StructureVariant = 'glass',
+    // Thin the ring: keep 1 of every `keepEvery` candidate tiles
+    // (evenly by angle).  A solid hex ring's tile count scales with
+    // radius, so when the ring radius is scaled up to track a larger
+    // map we pass keepEvery = scale factor to preserve the original
+    // tile count with proportionally wider spacing.  Default 1 = solid.
+    keepEvery: number = 1,
 ): void {
   const maxCol = Math.ceil((radius + HEX_SIZE) / HEX_WIDTH) + 1;
   const maxRow = Math.ceil((radius + HEX_SIZE) / HEX_V_SPACING) + 1;
   const w = HEX_WIDTH;
   const h = 2 * HEX_SIZE;
-  const pts: Vector2[] = [
-    { x: 0, y: -h/2 },
-    { x: w/2, y: -h/4 },
-    { x: w/2, y: h/4 },
-    { x: 0, y: h/2 },
-    { x: -w/2, y: h/4 },
-    { x: -w/2, y: -h/4 },
-  ];
+  // NOTE: no hoisted points array here.  buildStructureTile mints each
+  // tile its own polygon; tile geometry is mutated in place by the dent
+  // path, so one shared array would make the whole ring deform as a unit.
+  const stride = Math.max(1, Math.round(keepEvery));
+  // Collect ring candidates so they can be thinned evenly by angle.
+  // Tiles stay on their hex-grid coords (c, r) — only which ones are
+  // kept changes — so the position === hexCoord invariant holds.
+  const cand: { c: number; r: number; x: number; y: number; a: number }[] = [];
   for (let r = -maxRow; r <= maxRow; r++) {
     for (let c = -maxCol; c <= maxCol; c++) {
       const { x, y } = hexCoordToPixel(c, r);
       const d = Math.sqrt(x * x + y * y);
       if (Math.abs(d - radius) > band) continue;
-      entities.push(TileGenerator.buildStructureTile(c, r, x, y, w, h, pts, variant));
+      cand.push({ c, r, x, y, a: Math.atan2(y, x) });
     }
+  }
+  if (stride > 1) cand.sort((p, q) => p.a - q.a);
+  for (let i = 0; i < cand.length; i++) {
+    if (stride > 1 && (i % stride) !== 0) continue;
+    const t = cand[i];
+    entities.push(TileGenerator.buildStructureTile(t.c, t.r, t.x, t.y, w, h, variant));
   }
 }

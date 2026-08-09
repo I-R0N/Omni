@@ -1,8 +1,11 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS } from '../../constants';
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, onMapDimensionsChanged } from '../toroidal';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage } from '../../constants';
+
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
+import { getCollisionR, invalidateCollisionR } from '../entityCache';
+import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
 // broadphase keys pack (col, row) into a single int using `(cx << 16) |
@@ -34,12 +37,61 @@ function cellKeyFromCell(cx: number, cy: number): number {
     return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
 }
 
+// Parametric hex-colour lerp.  Used by applyDentStep to fade
+// plastic-tile colour toward its sticky shard-shade target as
+// damage accumulates.  Inputs expected as #RRGGBB.
+function lerpHexColors(a: string, b: string, t: number): string {
+    const rA = parseInt(a.slice(1, 3), 16), gA = parseInt(a.slice(3, 5), 16), bA = parseInt(a.slice(5, 7), 16);
+    const rB = parseInt(b.slice(1, 3), 16), gB = parseInt(b.slice(3, 5), 16), bB = parseInt(b.slice(5, 7), 16);
+    const r = Math.round(rA + (rB - rA) * t);
+    const g = Math.round(gA + (gB - gA) * t);
+    const c = Math.round(bA + (bB - bA) * t);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${c.toString(16).padStart(2, '0')}`;
+}
+
+// Precompute the squared "still-settled" distance multiplier:
+// pair is considered stable when distSq > sumRSq × STABLE_DIST_FACTOR_SQ.
+// Derived from `dist > sumR × (1 − STABLE_OVERLAP_FRACTION)`, i.e. the
+// overlap is below the configured fraction of contact distance.
+const STABLE_DIST_FACTOR_SQ = (1 - SHARD_PAIR_CONSTANTS.STABLE_OVERLAP_FRACTION) ** 2;
+
+// Scratch buffer for applyDentStep's pre-dent vertex snapshot — sized
+// to the largest variant polygon (hex tiles have 6 vertices; plastic
+// shards have 4).  Reused across calls so each dent event makes ZERO
+// allocations for the snapshot pass.  Layout: alternating x, y per
+// vertex (so index 2i = x, 2i+1 = y).  Sized at 12 (6 verts × 2)
+// with a small safety margin.
+const _dentPreSnapshot: Float64Array = new Float64Array(16);
+
+// Registry of plastic entities with at least one entry in their
+// plasticDentHistory.  Populated by applyDentStep when it pushes a
+// dent delta; consumed by ShardSystem.tickPlasticDentRecovery, which
+// iterates this set INSTEAD of walking the full entity list every
+// step.  When an entity's history empties (or it gets transmuted /
+// composed / dies) the recovery pass / clear sites remove it.
+export const pendingPlasticDentEntities: Set<GameEntity> = new Set();
+
 export class PhysicsSystem {
   // Dual-grid system:
   // staticGrid stores immovable geometry (Tiles) and is calculated ONLY on map load.
   // dynamicGrid stores moving entities (Player, Enemies, Projectiles) and is cleared every frame.
   private staticGrid: Map<number, GameEntity[]> = new Map();
   private dynamicGrid: Map<number, GameEntity[]> = new Map();
+  // Separate spatial hash for shard ↔ shard pair resolution.
+  // Walked only on Nth physics steps per the ShPair pacing —
+  // skipping the rebuild + walk entirely on off-frames is the
+  // savings the DBG slider was missing when shard-shard pairs
+  // were inline in the main collision pass.
+  private shardGrid: Map<number, GameEntity[]> = new Map();
+
+  // True if any static tile on the current map emits a repel field
+  // (glass-tile / metal-tile today).  Set in initializeStaticGrid by
+  // walking the entity list once.  When false, the 5×5 repel-cell scan
+  // inside handleEntityCollisions can short-circuit entirely — saves
+  // ~25 Map lookups per dynamic entity per frame on maps with no repel
+  // emitters (most showcase maps, plus any natural map composed only of
+  // indestructible / plastic / rock / nebula tiles).
+  private _anyRepelTilesPresent: boolean = false;
 
   // Cached list of gravitational attractors (planets/stars — entities with
   // `gravityRange > 0`).  Populated once per map via initializeAttractors()
@@ -56,10 +108,130 @@ export class PhysicsSystem {
   public lastGravityMs: number = 0;      // applyGravity scan + pair loop
   public lastLocalGravityMs: number = 0; // applyLocalGravity scan
   public lastCollisionsMs: number = 0;   // handleEntityCollisions broadphase + SAT
+
+  // Debug toggle — flips the player↔asteroid mutual-gravity scan on/off.
+  // GameEngine sets this from the DBG panel for A/B perf testing.
+  // Default true matches today's production behaviour.
+  public localGravityEnabled: boolean = true;
+  // Debug toggle — flips applyGravity (POI/attractor scan over the
+  // master entity list) on/off.  When false the pass returns
+  // immediately and lastGravityMs reads zero.
+  public attractorGravityEnabled: boolean = true;
+  // Debug toggle — flips handleEntityCollisions on/off.  When false
+  // the entire broadphase + SAT pass is skipped (game-breaking;
+  // strictly for measuring the isolated cost in the perf overlay).
+  public collisionsEnabled: boolean = true;
+  // Debug toggle — gates the enemy counterplay traits (armor chip-resist,
+  // etc.).  Default ON; flip OFF to A/B the soft-counter engine.
+  public traitsEnabled: boolean = true;
+  // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
+  // collision scan (resolveShardTilePairs).  Default OFF: the main
+  // broadphase already skips this pair (shards are excluded from
+  // the outer loop), so today's behaviour is "shards drift through
+  // tiles' geometry, only the repel field pushes them away."  Flip
+  // ON to add the missing scan — bringing back the dead asteroid-
+  // crash branch in resolveCollision (asteroid-pressure damage +
+  // elastic bounce off the tile face).
+  public shardTileCollisionsEnabled: boolean = true;
+  // Debug toggle — when true, nebula-shard ↔ nebula-shard pairs
+  // ignore the per-variant passThrough flag and take a normal
+  // elastic collision impulse.  Default OFF preserves today's
+  // behaviour (nebula shards intentionally pass through each
+  // other so the cloud reads continuous).  Flip ON to A/B-test
+  // whether hard collisions break up the "one big pile" symptom
+  // when many nebula shards converge.  Scope is intentionally
+  // narrow: nebula-vs-striker and nebula-vs-tile still honour
+  // passThrough — only the same-variant pair is affected.
+  public nebulaShardCollisionsEnabled: boolean = true;
+  // Debug toggle — PLAYER ↔ nebula-shard HARD collision.  When true, the
+  // player↔nebula-shard pair bypasses the nebula passThrough gate in
+  // resolveCollision and takes the standard SAT impulse, so the ship physically
+  // shoves / parts the nebula cloud (the light 0.01-mass shards scatter).
+  // Default OFF: the near-massless (0.01) shards take huge velocity kicks off
+  // the impulse and cascade energy through the field, dropping frames at high
+  // shard density.  The default interaction is instead the cheap pass-through +
+  // rotation swirl in applyNebulaPlayerPull (mirrors player↔nebula-TILE), which
+  // this flag suppresses when on so the two don't compound.  Flip on for the
+  // "part the cloud" look.
+  public playerNebulaCollisionEnabled: boolean = false;
+  // Debug toggle — collision-sleep for mobile shards.  When true,
+  // resolveShardPairs skips the SAT+impulse math for asleep↔asleep
+  // pairs (the bulk of a settled field).  Flip OFF to A/B-test the
+  // win and confirm sleeping never freezes a shard through a real
+  // collision.  Sleep bookkeeping in the integration loop still runs
+  // when off (the flag is just ignored by the pair skip), so toggling
+  // back on takes effect immediately without a settle delay.
+  public shardSleepEnabled: boolean = true;
+  // Count of shards flagged asleep as of the last resolveShardPairs
+  // call — exposed for the DBG perf readout so the win is visible.
+  public lastAsleepCount: number = 0;
+  // Debug toggle — viewport-gated shard-pair cadence.  When true,
+  // both-offscreen shard pairs resolve only on the catch-up phase
+  // (every OFFSCREEN_RESOLVE_DIVISOR passes); on/near-screen pairs
+  // always resolve.  Off restores resolving every pair regardless of
+  // visibility.
+  public shardViewportCullEnabled: boolean = true;
+  // Debug toggle — the tile repel PUSH (glass-tile + metal-tile, the only
+  // variants with a `repel` config).  When false, the repel scan still runs and
+  // still lights the tile/scanner glow (repelImpulse), but the outward VELOCITY
+  // impulse is not applied — so tiles react/light up to a nearby player/enemy
+  // yet no longer physically shove them.  Default OFF (glow only).
+  public repelPushEnabled: boolean = false;
+  // Camera-aligned viewport rect (world coords, CULL_MARGIN-padded),
+  // set per sim frame by GameEngine.  Null until the first set — then
+  // resolveShardPairs treats all shards as on-screen (conservative).
+  private viewportLeft: number = 0;
+  private viewportRight: number = 0;
+  private viewportTop: number = 0;
+  private viewportBottom: number = 0;
+  private hasViewportRect: boolean = false;
+  // Monotonic resolveShardPairs call counter — drives the off-screen
+  // catch-up phase (every OFFSCREEN_RESOLVE_DIVISOR-th call resolves
+  // both-offscreen pairs too).
+  private shardPairCallCount: number = 0;
+  // Count of shards flagged offscreen in the last resolveShardPairs
+  // grid build — exposed for the DBG perf readout.
+  public lastOffscreenShardCount: number = 0;
+  // Shard ↔ shard pair resolution runs every Nth physics step.
+  // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
+  // Cycled via DBG panel; default from constants.
+  public shardPairFrameInterval: number = SHARD_PAIR_CONSTANTS.FRAME_INTERVAL;
+  // Effective interval used by the most recent
+  // handleEntityCollisions call — exposed so the DBG panel can
+  // render "auto/3" while the slider value stays at 0.  Mirrors
+  // the manual value when not in AUTO mode.
+  public lastEffectiveShardPairInterval: number = 1;
+  // Whether the most recent shouldRunShardPairsThisStep() call
+  // returned true.  Read by GameEngine.updateGameLogic to gate the
+  // ShardSystem merge / cohesion passes to the same cadence as the
+  // SAT pair pass — without this, bonds + cohesion run every frame
+  // while separation runs only every Nth, and dense clusters
+  // collapse to a single point.
+  public lastRunShardPair: boolean = true;
+  // Shard ↔ static-tile pair resolution interval.  Mirrors the
+  // shard-pair knobs above but gates resolveShardTilePairs.  Only
+  // meaningful when shardTileCollisionsEnabled is true; cycled via
+  // the DBG `Sh↔Tl int` button.
+  public shardTilePairFrameInterval: number = SHARD_TILE_PAIR_CONSTANTS.FRAME_INTERVAL;
+  public lastEffectiveShardTilePairInterval: number = 1;
+  public lastRunShardTilePair: boolean = true;
+  // Central performance controller (engine/systems/PerfController.ts).
+  // The shard-pair / shard-tile-pair gates delegate to it; the per-step
+  // run decision + effective interval are precomputed there each substep.
+  // Null only in the (unused) bare-instantiation path; GameEngine always
+  // wires it before the first update.
+  private perfController: PerfController | null = null;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
   public lastMaxCellDensity: number = 0;
+  // Count of entities inserted into the dynamic grid this step — i.e. the
+  // exact set the collision broadphase outer loop iterates (mobile shards,
+  // projectiles, enemies, drops, player; particles + mass=∞ tiles
+  // excluded).  This is the true per-frame collision cost driver, unlike
+  // total entity count which is dominated by inert static tiles.  Read by
+  // PerfController as the throttle's entity-load signal.
+  public lastDynamicCount: number = 0;
 
   // HOT MEMORY BUFFERS (Pre-allocated to prevent GC)
   //
@@ -78,9 +250,20 @@ export class PhysicsSystem {
   // produces exactly one console entry instead of spamming every frame.
   private warnedVertexOverflow = false;
 
+  // Scratch outputs for the parametric SAT test (satTest) — avoids
+  // allocating a result object on the per-cell composite collision path.
+  private satOverlap = 0;
+  private satAxisX = 0;
+  private satAxisY = 0;
+
+  public setPerfController(pc: PerfController) {
+      this.perfController = pc;
+  }
+
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
       this.staticGrid.clear();
+      this._anyRepelTilesPresent = false;
 
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
@@ -94,6 +277,14 @@ export class PhysicsSystem {
                    this.staticGrid.set(key, cell);
                }
                cell.push(e);
+               // While we're walking the static set anyway, note whether
+               // any tile emits a repel field — used to short-circuit the
+               // 5×5 repel-cell scan in handleEntityCollisions on maps
+               // where no tile pushes back.
+               if (e.shardVariant !== undefined
+                   && SHARD_VARIANTS[e.shardVariant].repel !== undefined) {
+                   this._anyRepelTilesPresent = true;
+               }
           }
       }
   }
@@ -116,13 +307,24 @@ export class PhysicsSystem {
       }
   }
 
+  /** Per-frame camera-aligned viewport rect (world coords, already
+   *  CULL_MARGIN-padded by the caller).  Drives the both-offscreen
+   *  shard-pair cadence gate in resolveShardPairs. */
+  public setViewportRect(left: number, right: number, top: number, bottom: number): void {
+      this.viewportLeft = left;
+      this.viewportRight = right;
+      this.viewportTop = top;
+      this.viewportBottom = bottom;
+      this.hasViewportRect = true;
+  }
+
   public update(
     entities: GameEntity[],
     asteroids: GameEntity[],
     player: GameEntity,
     mapType: MapType,
     dt: number,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -138,15 +340,29 @@ export class PhysicsSystem {
     const timeScale = dt * 60;
     const friction = Math.pow(baseFriction, timeScale);
 
-    // Apply Planetary/Stellar Gravity (Scaled by time)
+    // Apply Planetary/Stellar Gravity (Scaled by time).
+    // DBG-toggleable: when attractorGravityEnabled is false the scan
+    // is skipped entirely and lastGravityMs reads zero.
     const tGrav = performance.now();
-    this.applyGravity(entities, timeScale, onDamage);
+    if (this.attractorGravityEnabled) {
+      this.applyGravity(entities, timeScale, onDamage);
+    }
     this.lastGravityMs = performance.now() - tGrav;
 
-    // Apply Player-Asteroid Mutual Gravity (Scaled by time)
+    // Apply Player-Asteroid Mutual Gravity (Scaled by time).
+    // DBG-toggleable: when localGravityEnabled is false, the scan is
+    // skipped entirely and lastLocalGravityMs reads zero — letting the
+    // perf overlay show the cost dropping to baseline in real time.
     const tLocal = performance.now();
-    this.applyLocalGravity(asteroids, player, timeScale);
+    if (this.localGravityEnabled) {
+      this.applyLocalGravity(asteroids, player, timeScale);
+    }
     this.lastLocalGravityMs = performance.now() - tLocal;
+
+    // Player → nebula-shard pull (independent of local gravity toggle
+    // — this is the only interaction the player gets with nebula
+    // shards now that SAT impulse is gated off by passThrough).
+    this.applyNebulaPlayerPull(entities, player, timeScale);
 
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -168,10 +384,11 @@ export class PhysicsSystem {
           if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
               entity.nebulaImpactCooldown -= dt;
           }
-          if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
-              entity.nebulaFadeTimer -= dt;
-              if (entity.nebulaFadeTimer <= 0) {
-                  entity.nebulaFadeTimer = undefined;
+          if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
+              entity.mergeFadeTimer -= dt;
+              if (entity.mergeFadeTimer <= 0) {
+                  entity.mergeFadeTimer = undefined;
+                  entity.mergeFadeDuration = undefined;
                   entity.active = false;
               }
           }
@@ -217,14 +434,18 @@ export class PhysicsSystem {
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
       }
-      // Nebula shard fade — shattered shards stay active+rendered while
-      // this counts down, then deactivate and get compacted out.  Tiles
-      // already had their fade ticked above inside the mass=Infinity
-      // branch, so this path only fires for dynamic (shard) entities.
-      if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
-          entity.nebulaFadeTimer -= dt;
-          if (entity.nebulaFadeTimer <= 0) {
-              entity.nebulaFadeTimer = undefined;
+      // Merge fade-out — both nebula AND non-nebula shard families
+      // ride the same `mergeFadeTimer` field; the value differs by
+      // variant (nebula longer, ~1 s; others crisp, ~0.5 s).  The
+      // entity stays active+rendered with multiplied alpha while
+      // the timer counts down, then flips inactive so the in-place
+      // compaction in GameEngine.updatePhysics drops it.  Tiles
+      // share this tick — see the mass=Infinity branch above.
+      if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
+          entity.mergeFadeTimer -= dt;
+          if (entity.mergeFadeTimer <= 0) {
+              entity.mergeFadeTimer = undefined;
+              entity.mergeFadeDuration = undefined;
               entity.active = false;
           }
       }
@@ -248,6 +469,16 @@ export class PhysicsSystem {
               entity.nebulaMergeCooldown = undefined;
           }
       }
+      // Hot-spot-collapse grace — freshly-shattered rock/glass shards hold
+      // off the overlap-collapse pass while this counts down, so a
+      // destroyed tile's debris gets to scatter instead of snapping back
+      // into a tile on the next merge frame.
+      if (entity.collapseGraceTimer !== undefined && entity.collapseGraceTimer > 0) {
+          entity.collapseGraceTimer -= dt;
+          if (entity.collapseGraceTimer <= 0) {
+              entity.collapseGraceTimer = undefined;
+          }
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;
@@ -257,9 +488,13 @@ export class PhysicsSystem {
       }
       if (entity.shield !== undefined && entity.maxShield !== undefined
           && entity.shield < entity.maxShield
-          && (entity.shieldRechargeTimer ?? 0) <= 0) {
-          entity.shield = Math.min(entity.maxShield, entity.shield + SHIELD_CONSTANTS.RECHARGE_RATE * dt);
+          && (entity.shieldRechargeTimer ?? 0) <= 0
+          && !entity.systemsDisabled) { // EMP-disabled shield doesn't recharge (Stage 3c)
+          entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
+      // The directional arc-shield angle (Bulwark) is steered toward the
+      // player by AISystem (it has the player reference) — not auto-rotated
+      // here.
 
       // ORBITAL PHYSICS
       if (entity.orbitCenter && entity.orbitRadius && entity.orbitSpeed !== undefined && entity.orbitAngle !== undefined) {
@@ -296,18 +531,21 @@ export class PhysicsSystem {
           if (entity.linearDamping !== undefined) {
             // Custom heavy linear & angular damping (nebula-shards
             // today, future variants opt in via the same per-entity
-            // field at spawn time).
+            // field at spawn time).  Falls back to NEBULA_CONSTANTS
+            // values for entities that don't set them.
             const linearD = entity.linearDamping;
             const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
+            const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
+            const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;
             const lin = Math.pow(linearD, timeScale);
             const ang = Math.pow(angularD, timeScale);
             entity.velocity.x *= lin;
             entity.velocity.y *= lin;
-            if (Math.abs(entity.velocity.x) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.x = 0;
-            if (Math.abs(entity.velocity.y) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.y = 0;
+            if (Math.abs(entity.velocity.x) < restSpeed) entity.velocity.x = 0;
+            if (Math.abs(entity.velocity.y) < restSpeed) entity.velocity.y = 0;
             if (entity.rotationSpeed !== undefined) {
                 entity.rotationSpeed *= ang;
-                if (Math.abs(entity.rotationSpeed) < NEBULA_CONSTANTS.REST_SPIN) entity.rotationSpeed = 0;
+                if (Math.abs(entity.rotationSpeed) < restSpin) entity.rotationSpeed = 0;
                 entity.rotation += entity.rotationSpeed * dt;
             }
           } else if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY
@@ -324,11 +562,69 @@ export class PhysicsSystem {
             if (Math.abs(entity.velocity.y) < 0.01) entity.velocity.y = 0;
           }
       }
+
+      // Collision-sleep bookkeeping — mobile shard-family entities only.
+      // Velocity / spin are final for this step here, so this is the one
+      // place that decides the sleep flag (resolveShardPairs reads it).
+      // Above-epsilon motion resets the dwell timer and wakes; otherwise
+      // the timer accrues until DELAY_SECONDS, then the shard sleeps.
+      // Collision wakes are stamped directly at the impulse sites, which
+      // also reset sleepTimer so a grazed shard re-earns its dwell.
+      if (entity.shardVariant !== undefined && entity.mass !== Infinity) {
+          const vsq = entity.velocity.x * entity.velocity.x
+                    + entity.velocity.y * entity.velocity.y;
+          const spin = entity.rotationSpeed ?? 0;
+          if (vsq > SHARD_SLEEP_CONSTANTS.SPEED_EPSILON_SQ
+              || (spin < 0 ? -spin : spin) > SHARD_SLEEP_CONSTANTS.SPIN_EPSILON) {
+              entity.sleepTimer = 0;
+              entity.asleep = false;
+          } else if (entity.asleep !== true) {
+              const t = (entity.sleepTimer ?? 0) + dt;
+              entity.sleepTimer = t;
+              if (t >= SHARD_SLEEP_CONSTANTS.DELAY_SECONDS) entity.asleep = true;
+          }
+      }
     }
 
-    // Optimized Entity-Entity Collision (Spatial Hash Grid)
+    // Optimized Entity-Entity Collision (Spatial Hash Grid).
+    // DBG-toggleable: when collisionsEnabled is false the broadphase +
+    // SAT pass is skipped entirely (game-breaking — projectiles fly
+    // through, tiles are inert).  Strictly a perf measurement aid.
+    //
+    // Shard ↔ shard pairs run as a separate dedicated pass at the
+    // ShPair-paced cadence — skipping the entire build + walk on
+    // off-frames is what makes the slider visibly move `coll` ms.
+    // Both passes share the same `tCol` window so the perf timer
+    // reports total collision cost (main + shard-pair).
     const tCol = performance.now();
-    this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+    if (this.collisionsEnabled) {
+      this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
+      if (this.shouldRunShardPairsThisStep()) {
+        this.resolveShardPairs(asteroids, onDeath);
+      }
+      if (this.shardTileCollisionsEnabled && this.shouldRunShardTilePairsThisStep()) {
+        this.resolveShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
+      }
+      // Unconditional nebula-shard ↔ nebula-tile pass.  The main
+      // broadphase skips STRUCTURE outers entirely and the wider
+      // Sh↔Tl scan is opt-in via toggle — without this dedicated
+      // pass nebula shards drift through nebula tiles' geometry.
+      // Cheap: only iterates nebula-shards (a small fraction of
+      // the asteroid list on most maps) and short-circuits inside
+      // checkAndResolveCollision when the inner cell holds no
+      // nebula-tile.
+      this.resolveNebulaShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
+      // Unconditional passthroughShatter pass — for variants whose
+      // SHARD_VARIANTS entry sets `passthroughShatter.targets`
+      // (today: metal-shard targeting glass-tile + glass-shard).
+      // Mirrors the nebula-tile pass: gets the dynamic-vs-static
+      // pair in front of resolveCollision so the passthroughShatter
+      // branch there can fire even when shardTileCollisionsEnabled
+      // is off.  Dynamic-vs-dynamic pairs (metal-shard ↔ glass-
+      // shard) flow through resolveAsteroidPair, which calls the
+      // same helper inline.
+      this.resolvePassthroughShatterPairs(asteroids, onDamage, onDeath, onShake, onHit);
+    }
     this.lastCollisionsMs = performance.now() - tCol;
 
     this.lastUpdateMs = performance.now() - t0;
@@ -344,6 +640,77 @@ export class PhysicsSystem {
    * Each asteroid still gets an `isExploding` skip since the index is
    * filtered by `active` alone and can hold mid-explosion entries.
    */
+  /**
+   * Player → nebula-shard swirl.  Nebula shards keep their passThrough
+   * flag so the player ship glides THROUGH them with no SAT impulse —
+   * the same pass-through the player gets against nebula TILES.  In
+   * place of a bounce this pass applies a soft ROTATION push: a
+   * tangential velocity swirl (perpendicular to the ship→shard line)
+   * plus a rotation-rate ramp, so the cloud swirls in the ship's wake
+   * instead of sliding past inertly.  Cheap by construction — no SAT,
+   * no near-massless energy cascade, just a per-shard velocity/spin
+   * nudge — which is why it stays smooth at high shard density where
+   * the hard-collision path drops frames.
+   *
+   * - Applied CONTINUOUSLY every substep (no cooldown gate) so the
+   *   swirl reads as a smooth wake, not a once-a-second jerk.  Terminal
+   *   swirl speed is bounded by NEBULA_CONSTANTS.LINEAR_DAMPING; the
+   *   ship passes through fast enough that shards get a transient kick,
+   *   then settle.
+   * - Tangential (not radial): the swirl is perpendicular to the
+   *   ship→shard vector, so shards orbit the ship rather than collapsing
+   *   into the hull or blowing outward.
+   * - Spin sign is deterministic per shard (id last-char parity) so a
+   *   given shard always swirls the same way; the field as a whole reads
+   *   as varied vortices rather than a uniform pinwheel.
+   * - rotationSpeed is capped at NEBULA_CONSTANTS.MAX_SPIN.
+   *
+   * Skipped entirely when the DBG hard-collision toggle is on
+   * (playerNebulaCollisionEnabled) — that path routes the pair through
+   * the SAT impulse instead, and the two shouldn't compound.  The
+   * nebula-shard shatter path is unchanged: shards never shatter on
+   * player contact (pure pass-through); only nebula TILES do.
+   */
+  private applyNebulaPlayerPull(entities: GameEntity[], player: GameEntity, timeScale: number) {
+      if (!player.active || player.isExploding) return;
+      // Hard-collision toggle owns the interaction when on — don't
+      // double up the swirl on top of the SAT bounce.
+      if (this.playerNebulaCollisionEnabled) return;
+      const range = NEBULA_CONSTANTS.PLAYER_PULL_RANGE;
+      const rangeSq = range * range;
+      const strength = NEBULA_CONSTANTS.PLAYER_PULL_STRENGTH;
+      const spinKick = NEBULA_CONSTANTS.PLAYER_PULL_SPIN;
+      const maxSpin = NEBULA_CONSTANTS.MAX_SPIN;
+      const px = player.position.x;
+      const py = player.position.y;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.shardVariant !== 'nebula-shard') continue;
+          const dx = wrapDeltaX(e.position.x, px);
+          const dy = wrapDeltaY(e.position.y, py);
+          const distSq = dx * dx + dy * dy;
+          if (distSq > rangeSq || distSq < 1) continue;
+          const dist = Math.sqrt(distSq);
+          const fall = 1 - dist / range; // 1 at centre → 0 at edge
+          const invDist = 1 / dist;
+          // Normalised radial (shard → player).
+          const rx = dx * invDist;
+          const ry = dy * invDist;
+          // Stable per-shard spin direction → varied vortices.
+          const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
+          const spinSign = (lastChar & 1) ? 1 : -1;
+          // Tangential swirl: perpendicular to the radial, signed per
+          // shard.  perp(rx,ry) = (-ry, rx); flip by spinSign.
+          const swirl = strength * fall * timeScale;
+          e.velocity.x += -ry * spinSign * swirl;
+          e.velocity.y += rx * spinSign * swirl;
+          // Rotation push, capped.
+          const nextSpin = (e.rotationSpeed ?? 0) + spinSign * spinKick * fall * timeScale;
+          e.rotationSpeed = Math.max(-maxSpin, Math.min(maxSpin, nextSpin));
+      }
+  }
+
   private applyLocalGravity(asteroids: GameEntity[], player: GameEntity, timeScale: number) {
       if (!player.active) return;
 
@@ -360,24 +727,26 @@ export class PhysicsSystem {
           const distSq = dx*dx + dy*dy;
 
           if (distSq < rangeSq && distSq > minDistSq) {
-              const dist = Math.sqrt(distSq);
-              const forceMag = (STRENGTH / dist) * timeScale; // Normalize force by time
-              const ndx = dx / dist;
-              const ndy = dy / dist;
+              // Fold the 1/dist normalisation into the force scalar so
+              // each velocity axis is one mul instead of one div + one mul.
+              const invDist = 1 / Math.sqrt(distSq);
+              const forceMag = (STRENGTH * invDist) * timeScale; // Normalize force by time
+              const kx = dx * invDist * forceMag;
+              const ky = dy * invDist * forceMag;
 
               // Pull Asteroid
-              e.velocity.x += ndx * forceMag;
-              e.velocity.y += ndy * forceMag;
+              e.velocity.x += kx;
+              e.velocity.y += ky;
 
               // Pull Player
-              const accelPlayer = forceMag * (e.mass / player.mass) * PLAYER_INFLUENCE;
-              player.velocity.x -= ndx * accelPlayer;
-              player.velocity.y -= ndy * accelPlayer;
+              const playerScale = (e.mass / player.mass) * PLAYER_INFLUENCE;
+              player.velocity.x -= kx * playerScale;
+              player.velocity.y -= ky * playerScale;
           }
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void) {
     // Phase 2: use the attractors cache populated on map load instead of
     // re-scanning the full entity array every substep.  Individual dead
     // attractors are skipped at access time by the `active` check below so
@@ -413,18 +782,17 @@ export class PhysicsSystem {
             }
 
             if (distSq < rangeSq) {
-                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000); 
+                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
                 const maxAccel = entity.type === EntityType.PLAYER ? 0.2 : 5.0;
-                
+
                 // Scale force by time step so higher framerates don't increase gravity strength
                 const clampedForce = Math.min(force, maxAccel) * timeScale;
 
-                const dist = Math.sqrt(distSq);
-                const ax = (dx / dist) * clampedForce;
-                const ay = (dy / dist) * clampedForce;
-
-                entity.velocity.x += ax;
-                entity.velocity.y += ay;
+                // One reciprocal-sqrt for two normalised axes — one div instead
+                // of two.  Same math, half the per-pair division cost.
+                const k = clampedForce / Math.sqrt(distSq);
+                entity.velocity.x += dx * k;
+                entity.velocity.y += dy * k;
             }
         }
     }
@@ -432,7 +800,8 @@ export class PhysicsSystem {
 
   private handleEntityCollisions(
     entities: GameEntity[],
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    timeScale: number,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -450,13 +819,37 @@ export class PhysicsSystem {
     // so inserting them wastes grid memory and forces O(particles) extra
     // inner-loop iterations on every neighbour scan for no effect.
     let maxDensity = 0;
+    // Awake-only count drives the PerfController throttle: an asleep shard
+    // skips pair-resolution math (resolveShardPairs bails on asleep↔asleep),
+    // so a field of settled bodies costs almost nothing and must NOT pin the
+    // load — same principle as the collectible-drop exclusion below.  Without this,
+    // never-sleeping metal composites accumulate on mixed maps and throttle
+    // shared passes (shardPair/colorBlend/…), starving nebula collisions.
+    let awakeCount = 0;
     const dynamicEntities: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         if (!e.active || e.isExploding) continue;
 
+        // Reset per-substep repel-impulse accumulator BEFORE the
+        // static-grid skip — repel-emitting tiles (mass=∞) also
+        // accumulate on the emitter side so RenderSystem can drive
+        // glow off impulse and light up for any nearby repellable
+        // body, not just the player.
+        if (e.repelImpulse !== 0) e.repelImpulse = 0;
+
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
+
+        // Collectible drops (salvage / health / any future pickup) are non-physics
+        // bodies: magnet-pulled + proximity-collected only (see GameEngine drop
+        // scan).  Keeping them out of the dynamic grid removes their collision
+        // cost AND their contribution to lastMaxCellDensity / lastDynamicCount,
+        // so a lingering drop pile no longer pins the PerfController load — and,
+        // crucially, means projectiles pass THROUGH them (they can't be shot).
+        // Routed through the DROP_TYPES registry so new pickup types are covered
+        // automatically.
+        if (isCollectibleDrop(e)) continue;
 
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;
@@ -464,13 +857,14 @@ export class PhysicsSystem {
         // Fading nebulas (tiles and shards alike) are in their death
         // animation — drop them out of broadphase so they can't be
         // re-shattered mid-fade even after the striker's cooldown expires.
-        if (e.nebulaFadeTimer !== undefined) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
 
         // Nebula shards re-enter the dynamic grid so player/enemy contact
         // can trigger a shatter.  The nebula branch in resolveCollision is
         // still pass-through (no impulse), so they never exchange momentum
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
+        if (!e.asleep) awakeCount++;
 
         const key = cellKey(e.position.x, e.position.y);
 
@@ -483,13 +877,112 @@ export class PhysicsSystem {
         if (cell.length > maxDensity) maxDensity = cell.length;
     }
     this.lastMaxCellDensity = maxDensity;
+    this.lastDynamicCount = awakeCount;
 
-    // 3. Check Collisions: Only iterate DYNAMIC entities as primary subjects
+    // 3. Check Collisions: Only iterate DYNAMIC entities as primary
+    //    subjects, AND skip shards as outer-loop subjects entirely.
+    //    Shards stay in dynamicGrid so non-shard outer loops still
+    //    catch them in 3×3 scans (covers shard ↔ projectile / player /
+    //    enemy pairs once each via id ordering).  Shard ↔ shard pairs
+    //    are handled by resolveShardPairs() at the ShPair cadence.
+    //    Removing shard outer loops cuts the per-frame pair-enum
+    //    work by roughly the shard:non-shard ratio — a major win on
+    //    populated maps where shards dominate.
     for (let i = 0; i < dynamicEntities.length; i++) {
         const a = dynamicEntities[i];
 
         const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
         const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+        // ── Repel-field scan (static tiles only) ─────────────────────
+        // Hoisted: dynamic-side immunity — projectiles and particles
+        // bypass repel unconditionally, and mobile-shard variants
+        // marked `repelImmune` (today: glass-shard, plastic-shard —
+        // same substance as their parent tile) drift through every
+        // field unimpeded.  Per-emitter immunity via
+        // `repelImmuneFrom` checked inside the inner loop (today
+        // metal-shard ignores glass-tile only).  Computed once per
+        // scanner; static-side emitter check (variant.repel) still
+        // varies per pair.
+        //
+        // The walk runs for EVERY repellable scanner, including
+        // mobile shards (which the SAT outer loop below skips).  That
+        // way a rock-shard or nebula-shard inside a glass / metal
+        // field still gets pushed.  Per cell: a Map lookup + a
+        // variant-emitter check; per repel-emitting tile: a single
+        // distance compare and (when in range) one sqrt + one
+        // velocity nudge.  No allocations on the hot path.
+        const aVariantDef = a.shardVariant !== undefined ? SHARD_VARIANTS[a.shardVariant] : undefined;
+        // Map-level short-circuit: when the current map has zero static
+        // tiles emitting a repel field, the 5×5 cell scan below will
+        // find no emitters in any cell, so skip the walk entirely.
+        const aRepellable =
+            this._anyRepelTilesPresent
+            && a.type !== EntityType.PROJECTILE
+            && a.type !== EntityType.PARTICLE
+            && aVariantDef?.repelImmune !== true;
+        // Hoisted per-emitter immunity list — metal-shard ignores
+        // glass-tile repel but feels every other field.  Undefined
+        // for the common case (no per-emitter filtering).
+        const aImmuneFrom = aVariantDef?.repelImmuneFrom;
+        if (aRepellable) {
+            for (let x = -2; x <= 2; x++) {
+                for (let y = -2; y <= 2; y++) {
+                    const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                    if (!cell) continue;
+                    for (let j = 0; j < cell.length; j++) {
+                        const b = cell[j];
+                        if (!b.active || b.shardVariant === undefined) continue;
+                        if (aImmuneFrom !== undefined && aImmuneFrom.indexOf(b.shardVariant) !== -1) continue;
+                        const repel = SHARD_VARIANTS[b.shardVariant].repel;
+                        if (repel === undefined) continue;
+                        // Torus-correct delta so a tile near one
+                        // seam still pushes a player on the other.
+                        const dx = wrapDeltaX(b.position.x, a.position.x);
+                        const dy = wrapDeltaY(b.position.y, a.position.y);
+                        const distSq = dx * dx + dy * dy;
+                        const rangeSq = repel.range * repel.range;
+                        if (distSq > 1 && distSq < rangeSq) {
+                            const dist = Math.sqrt(distSq);
+                            // Quadratic falloff — peaks at centre,
+                            // zero at the range edge.  Steeper outer
+                            // ramp than linear (force ~0.25 at half-
+                            // range vs 0.5 linear) so the outer field
+                            // is a soft hint and most of the push
+                            // comes near the tile.
+                            const t = 1 - dist / repel.range;
+                            const accel = repel.strength * t * t * timeScale;
+                            const inv = 1 / dist;
+                            // The PUSH (outward velocity impulse) is DBG-gated;
+                            // the glow feedback below (repelImpulse) still runs
+                            // so tiles light up to a nearby body even with the
+                            // push off.
+                            if (this.repelPushEnabled) {
+                                a.velocity.x += dx * inv * accel;
+                                a.velocity.y += dy * inv * accel;
+                            }
+                            // Scanner reads its own accumulator for fade fx.
+                            a.repelImpulse = (a.repelImpulse ?? 0) + accel;
+                            // The tile's glow tracks ONLY the player / enemies,
+                            // not the many mobile shards drifting through its
+                            // field — otherwise ambient shard contact keeps the
+                            // glow lit constantly.  Lighting up to the player's
+                            // repel field is the primary intent.
+                            if (a.type === EntityType.PLAYER || a.type === EntityType.ENEMY) {
+                                b.repelImpulse = (b.repelImpulse ?? 0) + accel;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mobile shards (STRUCTURE finite mass) are SKIPPED as
+        // outer-loop subjects — non-shard outer loops cover their
+        // pairs via 3x3 mutual scan, and shard ↔ shard runs in
+        // resolveShardPairs.  The repel walk above already ran for
+        // them when applicable.
+        if (a.type === EntityType.STRUCTURE) continue;
 
         // Check 3x3 neighbor cells — cell coords wrap across the seam so
         // entities near the edge see their counterparts on the opposite
@@ -509,8 +1002,15 @@ export class PhysicsSystem {
                         const b = dynamicCandidates[j];
                         if (a === b) continue;
                         if (!b.active || b.isExploding) continue;
-                        // Avoid double checking dynamic pairs
-                        if (a.id > b.id) continue;
+                        // Avoid double-processing: id ordering is only
+                        // needed when BOTH parties may iterate the pair
+                        // from their own outer loop.  Shards are
+                        // skipped from outer-loop iteration above, so
+                        // when b is a shard the pair can ONLY be hit
+                        // from a's (non-shard) outer loop — process it
+                        // regardless of id ordering.  For non-shard
+                        // pairs the id check still dedupes.
+                        if (b.type !== EntityType.STRUCTURE && a.id > b.id) continue;
 
                         // ── Type-pair filter: skip pairs that resolve-
                         // Collision always discards BEFORE the expensive
@@ -523,27 +1023,10 @@ export class PhysicsSystem {
                         // immediately (no proj-proj interaction).
                         if (ta === EntityType.PROJECTILE && tb === EntityType.PROJECTILE) continue;
 
-                        // Asteroid-asteroid: route through a dedicated
-                        // circle-only resolver instead of the full SAT +
-                        // resolveCollision path.  Full SAT is too expensive
-                        // for dense clusters (O(k²) pairs per cell × O(v²)
-                        // per pair), so the previous build skipped this
-                        // pair type entirely — but that let shards stack
-                        // at the same centre, where mutual gravity trapped
-                        // them and the flow field couldn't budge the pile.
-                        // The cheap resolver still physically separates
-                        // overlapping shards and applies an elastic bounce
-                        // so they can't share a position, while costing a
-                        // few mul/sqrt per pair instead of a full polygon
-                        // projection.
-                        // Mobile-shard pair (post-Stage-5: ASTEROID
-                        // The dynamic grid already excludes
-                        // mass=Infinity tiles, so any STRUCTURE entry
-                        // here is a mobile shard.
-                        if (ta === EntityType.STRUCTURE && tb === EntityType.STRUCTURE) {
-                            this.resolveAsteroidPair(a, b);
-                            continue;
-                        }
+                        // Note: shard ↔ shard is unreachable here
+                        // because shards are skipped from the outer
+                        // loop above.  Those pairs run in
+                        // resolveShardPairs() at the ShPair cadence.
 
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
@@ -563,7 +1046,7 @@ export class PhysicsSystem {
     }
   }
 
-  private removeStaticEntity(entity: GameEntity) {
+  public removeStaticEntity(entity: GameEntity) {
       const key = cellKey(entity.position.x, entity.position.y);
       const cell = this.staticGrid.get(key);
       if (cell) {
@@ -586,8 +1069,406 @@ export class PhysicsSystem {
       }
   }
 
+  // Apply one dent step to a tile whose variant declares a `dent` policy.
+  // Called immediately after each damage event (projectile hit, player
+  // crash, asteroid crash) and short-circuits for variants without a
+  // dent policy.  Mutates only the single polygon vertex closest to
+  // the impactor's world position — pulled inward by a random fraction
+  // in [0, vertexJitter] of its current radius from the polygon
+  // centroid (entity-local origin).  Other vertices stay put so the
+  // edges shared with neighbouring tiles don't separate.  No
+  // allocation in the hot path.
+  //
+  // Deliberately does NOT touch entity.size: the collision footprint
+  // stays stable so AABB broadphase keeps working unchanged.  The
+  // visible silhouette crumples asymmetrically on the hit side as
+  // vertices accumulate inward pulls; the shard spawned at detach
+  // time reads its size from the dented polygon's bounding extent
+  // (see DropSystem.spawnDentShard).
+  /**
+   * Probabilistic early break for rock tiles / asteroids / rock-shards.
+   * Their `maxHealth` is the size/density hit ceiling (ROCK_BREAK), not a
+   * flat HP: the rock always survives (cracks) on the first hit, and from
+   * the second hit on each hit rolls an early break whose odds climb to a
+   * guaranteed break once the ceiling is reached.  Bigger / denser rocks
+   * have a higher ceiling, so the same hit number is a smaller fraction and
+   * they resist longer.  Zeroes `health` on a successful roll so the
+   * caller's `health <= 0` death path shatters it on this hit.  No-op for
+   * non-rock variants and already-dead entities.
+   */
+  public static maybeRockEarlyBreak(target: GameEntity): void {
+      if (target.health === undefined || target.health <= 0) return;
+      if (target.shardVariant !== 'rock-tile' && target.shardVariant !== 'rock-shard') return;
+      const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
+      const hitsTaken = ceiling - target.health;
+      if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
+  }
+
+  /**
+   * Directional arc-shield gate.  Returns true if the shield should absorb a
+   * hit from projectile `proj` — always true for a full bubble (no
+   * shieldArcHalfWidth), and true for an arc shield only when the shot's
+   * INCOMING bearing falls within ±halfWidth of the sweeping shieldArcAngle.
+   *
+   * The incoming bearing is taken from the projectile's reversed velocity (the
+   * side it came FROM), not its current position: a fast shot can overshoot
+   * deep past the shield in one step, so its position at the collision frame
+   * may sit on the far side of the hull and give the wrong side — the travel
+   * direction does not.  Falls back to the position bearing only if the
+   * projectile has no usable velocity.  Toroidal.
+   */
+  public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
+      const half = target.shieldArcHalfWidth;
+      if (half === undefined) return true; // full bubble
+      return PhysicsSystem.sectorCoversHit(target, proj, target.shieldArcAngle ?? 0, half);
+  }
+
+  /**
+   * Shared directional-cover test: does `proj` arrive inside the sector of
+   * half-width `half` centred on `center` (world radians) around `target`?
+   *
+   * Gated on the shot's TRAVEL direction, not its position, so a fast bolt that
+   * overshoots the hull can't tunnel in from the covered side and count as an
+   * open-side hit.  Falls back to the relative bearing for shots with no
+   * velocity.  Toroidal.  Used by BOTH the Bulwark's arc shield (a depleting
+   * pool centred on `shieldArcAngle`) and the (h) `front-shield` trait (a
+   * permanent plate centred on the entity's FACING).
+   */
+  public static sectorCoversHit(target: GameEntity, proj: GameEntity, center: number, half: number): boolean {
+      let bearing: number;
+      const vx = proj.velocity?.x ?? 0, vy = proj.velocity?.y ?? 0;
+      if (vx * vx + vy * vy > 1e-6) {
+          bearing = Math.atan2(-vy, -vx); // direction the shot came from
+      } else {
+          bearing = Math.atan2(
+              wrapDeltaY(target.position.y, proj.position.y),
+              wrapDeltaX(target.position.x, proj.position.x),
+          );
+      }
+      let d = bearing - center;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return Math.abs(d) <= half;
+  }
+
+  /** (h) `front-shield` trait: is this hit landing on the plate?  The plate is
+   *  centred on the entity's FACING and never depletes — so the counterplay is
+   *  geometric (flank / ricochet in from behind) or path-based (chains and
+   *  shockwave rings damage outside this projectile path entirely). */
+  public static frontShieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
+      const cfg = target.frontShield;
+      if (!cfg) return false;
+      return PhysicsSystem.sectorCoversHit(target, proj, target.rotation, (cfg.deg * Math.PI / 180) / 2);
+  }
+
+  /** World-unit radius of an arc shield's interception ring (matches the
+   *  rendered ring).  Used by the broadphase reach + tryArcShieldIntercept. */
+  public static arcShieldReach(e: GameEntity): number {
+      return Math.max(e.size.x, e.size.y) * SHIELD_CONSTANTS.ARC_REACH_FACTOR;
+  }
+
+  /**
+   * Directional arc-shield interception (Bulwark).  When an incoming hostile
+   * projectile crosses the shield ring within the covered sector, the shield
+   * DEFLECTS it off the ring surface (reflects its velocity about the radial
+   * normal) and drains by the shot's damage — so the bolt ricochets away
+   * (readable, and a hazard to other enemies) instead of vanishing, while the
+   * shield still wears down.  Returns true if the pair was handled (caller
+   * skips the body SAT).  Returns false — letting the shot proceed to the
+   * hull — when:
+   *   - the pair isn't projectile-vs-arc-shield,
+   *   - the shot is outside the ring or on an UNCOVERED bearing (flank the gap),
+   *   - the shot's damage exceeds the remaining shield (it punches through; the
+   *     body-SAT path drains the remaining shield and lands the remainder).
+   */
+  private tryArcShieldIntercept(
+      a: GameEntity,
+      b: GameEntity,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): boolean {
+      let proj: GameEntity, shielded: GameEntity;
+      if (a.type === EntityType.PROJECTILE && b.shieldArcHalfWidth !== undefined) { proj = a; shielded = b; }
+      else if (b.type === EntityType.PROJECTILE && a.shieldArcHalfWidth !== undefined) { proj = b; shielded = a; }
+      else return false;
+      if ((shielded.shield ?? 0) <= 0) return false;
+      // Don't let the shield deflect its owner's own fire (same-team projectile).
+      if (proj.ownerType === shielded.type) return false;
+
+      const reach = PhysicsSystem.arcShieldReach(shielded);
+      const dx = wrapDeltaX(shielded.position.x, proj.position.x);
+      const dy = wrapDeltaY(shielded.position.y, proj.position.y);
+      const distSq = dx * dx + dy * dy;
+      if (distSq > reach * reach) return false;                  // not at the ring yet
+      if (!PhysicsSystem.shieldCoversHit(shielded, proj)) return false; // open side → hull
+
+      // A shot bigger than the remaining shield punches through — let the body
+      // SAT path do the existing partial absorb so the shield isn't double-
+      // counted.
+      const projDmg = proj.damage || 1;
+      if (projDmg > shielded.shield!) return false;
+
+      // Radial normal at the impact (outward from the shield centre).  Only
+      // deflect shots actually travelling INTO the shield; an outward-moving
+      // bolt (already deflected) falls through harmlessly.
+      const dist = Math.sqrt(distSq) || 1;
+      const nx = dx / dist, ny = dy / dist;
+      const vdotn = proj.velocity.x * nx + proj.velocity.y * ny;
+      if (vdotn >= 0) return false;
+
+      // Reflect velocity about the normal: v' = v − 2(v·n)n, then snap the bolt
+      // to the ring surface so it rides outward and can't re-trigger / SAT the
+      // hull on the next step.
+      proj.velocity.x -= 2 * vdotn * nx;
+      proj.velocity.y -= 2 * vdotn * ny;
+      proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+      proj.position.x = shielded.position.x + nx * (reach + 1);
+      proj.position.y = shielded.position.y + ny * (reach + 1);
+
+      shielded.shield! -= projDmg;
+      shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+      shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+      if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
+      return true;
+  }
+
+  public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
+      if (tile.shardVariant === undefined) return;
+      const dent = SHARD_VARIANTS[tile.shardVariant].dent;
+      if (dent === undefined) return;
+      // Triangle-delete variants do their polygon mutation + shard
+      // spawn in GameEngine.spawnDamageText (it needs entities-array
+      // access for the spawn).  Skip the in-place vertex pull here so
+      // the two paths don't fight over the same polygon.
+      if (dent.kind !== undefined && dent.kind !== 'pull') return;
+
+      const pts = tile.polygonPoints;
+      if (!pts || pts.length === 0) return;
+
+      // Plastic dent recovery: snapshot the polygon BEFORE this dent
+      // into the module-level _dentPreSnapshot scratch buffer (zero
+      // per-dent allocation), then compute the post-dent delta after
+      // the pull + preserve rescale.  Delta is stored on plasticDent
+      // History as a Float64Array (one typed-array allocation per
+      // dent instead of N+1 Vector2 objects).  Layout: 2i = x, 2i+1
+      // = y.
+      const isPlasticDent = tile.shardVariant === 'plastic-shard'
+                         || tile.shardVariant === 'plastic-tile';
+      const ptsLen = pts.length;
+      if (isPlasticDent) {
+          // Snapshot is bounded by the scratch buffer size (16 = 8
+          // verts).  Variants with bigger polygons would silently
+          // truncate here — bump _dentPreSnapshot if that ever
+          // becomes a concern.
+          for (let i = 0; i < ptsLen; i++) {
+              _dentPreSnapshot[2 * i]     = pts[i].x;
+              _dentPreSnapshot[2 * i + 1] = pts[i].y;
+          }
+      }
+
+      // Capture pre-dent max vertex radius for preserveBoundingRadius
+      // variants (today: plastic-shard).  Scaled below so the post-
+      // dent bounding circle matches.
+      let preMaxR2 = 0;
+      if (dent.preserveBoundingRadius) {
+          for (let i = 0; i < pts.length; i++) {
+              const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+              if (r2 > preMaxR2) preMaxR2 = r2;
+          }
+      }
+
+      // Impact in entity-local coords (centroid at origin), with
+      // toroidal wrap so impacts across the seam pick the right side.
+      // wrapDeltaX(from, to) returns (to - from), so pass tile first
+      // to get (impact - tile) — i.e. the impact's offset from the
+      // tile centre.
+      let dirX = wrapDeltaX(tile.position.x, impactWorldPos.x);
+      let dirY = wrapDeltaY(tile.position.y, impactWorldPos.y);
+
+      // Optional rotation of the impact direction before the closest-
+      // vertex search.  Rock uses Math.PI/2 so the dent appears on a
+      // side perpendicular to the impact — reads as "a chunk pinches
+      // off the side while the tile stays in the grid."  Plastic and
+      // metal leave this 0 (dent where hit).
+      const angleOffset = dent.dentVertexAngleOffset;
+      if (angleOffset !== undefined && angleOffset !== 0) {
+          const cosA = Math.cos(angleOffset);
+          const sinA = Math.sin(angleOffset);
+          const rx = dirX * cosA - dirY * sinA;
+          const ry = dirX * sinA + dirY * cosA;
+          dirX = rx;
+          dirY = ry;
+      }
+
+      let bestIdx = 0;
+      let bestD2 = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+          const dx = pts[i].x - dirX;
+          const dy = pts[i].y - dirY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+              bestD2 = d2;
+              bestIdx = i;
+          }
+      }
+
+      // Pull N adjacent vertices symmetrically around the closest
+      // one (rock uses 3 to deform a wider region per hit; plastic /
+      // metal default to 1 for a single-vertex pinch).  Of these
+      // pulled vertices, `deepCount` get the centerVertexJitterMul
+      // boost (rock uses 2 — the closest vertex plus one randomly-
+      // chosen neighbour — for a chaotic two-notch fracture).  The
+      // closest-to-impact vertex (offset 0, loop index `half`) is
+      // always one of the deep slots; remaining deep slots are
+      // sampled uniformly without replacement from the rest of the
+      // pulled set via the standard reservoir-style pass below.
+      // Each pulled vertex still draws its own random magnitude so
+      // pulls aren't uniform within either subset.
+      //
+      // The per-vertex multiplicative factor k is clamped to a small
+      // positive floor (0.05) so high-jitter rolls don't pull a
+      // vertex past the polygon centroid and flip it through the
+      // origin — that would invert winding and break SAT collision.
+      // With the clamp, an "infinitely deep" pull bottoms out at 5 %
+      // of the vertex's current radius.
+      const pullCount = Math.max(1, dent.pullVertexCount ?? 1);
+      const centerMul = dent.centerVertexJitterMul ?? 1;
+      const deepCount = Math.min(pullCount, Math.max(1, dent.deepVertexCount ?? 1));
+      const N = pts.length;
+      const half = Math.floor(pullCount / 2);
+      const K_MIN = 0.05;
+
+      // Bitmask of loop indices marked as deep.  Closest vertex
+      // (offset 0, index `half`) is always deep; remaining slots
+      // chosen via a reservoir pass over the non-centre indices.
+      let deepMask = 1 << half;
+      if (deepCount > 1) {
+          let remaining = deepCount - 1;
+          let available = pullCount - 1;
+          for (let i = 0; i < pullCount && remaining > 0; i++) {
+              if (i === half) continue;
+              if (Math.random() * available < remaining) {
+                  deepMask |= 1 << i;
+                  remaining--;
+              }
+              available--;
+          }
+      }
+
+      for (let i = 0; i < pullCount; i++) {
+          const offset = i - half;
+          const idx = ((bestIdx + offset) % N + N) % N;
+          const isDeep = (deepMask & (1 << i)) !== 0;
+          const jitterMag = dent.vertexJitter * (isDeep ? centerMul : 1);
+          const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
+          pts[idx].x *= k;
+          pts[idx].y *= k;
+      }
+
+      // preserveBoundingRadius rescale (today: plastic-shard).  After
+      // pulling, find the new max radius and scale every vertex by
+      // preMaxR / postMaxR so the bounding circle holds at its pre-
+      // dent extent.  The pulled vertex is now at a smaller radius
+      // than its neighbours after the scale — visible asymmetric
+      // deformation, no overall shrink.
+      if (dent.preserveBoundingRadius && preMaxR2 > 0) {
+          let postMaxR2 = 0;
+          for (let i = 0; i < pts.length; i++) {
+              const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+              if (r2 > postMaxR2) postMaxR2 = r2;
+          }
+          if (postMaxR2 > 0 && postMaxR2 < preMaxR2) {
+              const scale = Math.sqrt(preMaxR2 / postMaxR2);
+              for (let i = 0; i < pts.length; i++) {
+                  pts[i].x *= scale;
+                  pts[i].y *= scale;
+              }
+          }
+      }
+
+      // Plastic dent recovery: push this hit's per-vertex delta onto
+      // plasticDentHistory with its own timer.  Delta is a flat
+      // Float64Array (2N: alternating x,y) — one typed-array
+      // allocation per dent instead of an Array + N {x,y} objects.
+      // When the timer expires, ShardSystem.tickPlasticDentRecovery
+      // subtracts the delta from polygonPoints and removes the
+      // entity from pendingPlasticDentEntities once history empties.
+      if (isPlasticDent) {
+          const delta = new Float64Array(2 * ptsLen);
+          for (let i = 0; i < ptsLen; i++) {
+              delta[2 * i]     = pts[i].x - _dentPreSnapshot[2 * i];
+              delta[2 * i + 1] = pts[i].y - _dentPreSnapshot[2 * i + 1];
+          }
+          if (!tile.plasticDentHistory) tile.plasticDentHistory = [];
+          tile.plasticDentHistory.push({
+              timer: PLASTIC_DENT_RECOVERY.DELAY_SECONDS,
+              delta,
+          });
+          // Register for the recovery pass — the Set short-circuits
+          // tickPlasticDentRecovery's full-entity walk.
+          pendingPlasticDentEntities.add(tile);
+      }
+
+      // Plastic-tile damage colour shift toward the shard palette.
+      // Lazy-init the original + target on first dent (target picks
+      // one random shard shade and stays sticky), then lerp tile.
+      // color from original to target by (1 - hpRatio).  At HP=0 the
+      // colour equals the full shard shade and the existing break
+      // path fires.
+      if (tile.shardVariant === 'plastic-tile') {
+          if (tile.plasticTileOriginalColor === undefined) {
+              tile.plasticTileOriginalColor = tile.color;
+          }
+          if (tile.plasticTileTargetColor === undefined) {
+              tile.plasticTileTargetColor = randomPlasticShardShade();
+          }
+          const maxHP = tile.maxHealth ?? 1;
+          const hpRatio = Math.max(0, Math.min(1, tile.health / maxHP));
+          const t = 1 - hpRatio;
+          tile.color = lerpHexColors(
+              tile.plasticTileOriginalColor!,
+              tile.plasticTileTargetColor!,
+              t,
+          );
+      }
+
+      // polygonPoints mutated → invalidate any cached SAT axes (the
+      // edge normals derived from those points are now stale) AND the
+      // static-tile world-canvas stamp (which baked the old polygon
+      // outline).  Both caches re-populate lazily on next use.
+      tile._satCacheAxes = undefined;
+      if (tile._staticCached === true) tile._staticCached = false;
+
+      // Damage cracks are no longer appended here.  Rock / metal tiles
+      // and shards now share the seeded, HP-driven crack overlay in
+      // RenderSystem.drawDamageCracks (keyed off health/maxHealth), so
+      // the fracture pattern is deterministic per entity and accrues as
+      // HP drops rather than spawning fresh random segments per hit.
+  }
+
   // Returns true if world-space point (x, y) with radius r is clear of all
   // static tiles — used for safe spawn-point validation.
+  /** Visit every active static tile whose centre is within `r` (toroidal) of
+   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
+   *  Used by the dragon to devour tiles in its path (Stage 6). */
+  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
+      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
+      const rSq = r * r;
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  const tdx = wrapDeltaX(t.position.x, x);
+                  const tdy = wrapDeltaY(t.position.y, y);
+                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
+              }
+          }
+      }
+  }
+
   public isPositionClear(x: number, y: number, r: number): boolean {
       const cx = Math.floor(x / SPATIAL_GRID_SIZE);
       const cy = Math.floor(y / SPATIAL_GRID_SIZE);
@@ -610,6 +1491,60 @@ export class PhysicsSystem {
           }
       }
       return true;
+  }
+
+  // Returns true if an active static tile's centre lies within `radius` of
+  // world-space point (x, y), ignoring the tile whose id matches `ignoreId`
+  // (so a tile can probe for its own neighbours without finding itself).
+  // Used by RenderSystem to suppress outline strokes on edges that are
+  // cleanly butted against a neighbour tile.  Wraps the probe coordinates
+  // so callers probing across the toroidal seam still find neighbours on
+  // the opposite side.
+  public hasStaticTileNear(x: number, y: number, radius: number, ignoreId?: string): boolean {
+      const wx = wrapX(x);
+      const wy = wrapY(y);
+      const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
+      const rSq = radius * radius;
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  if (ignoreId !== undefined && t.id === ignoreId) continue;
+                  const tdx = wrapDeltaX(t.position.x, wx);
+                  const tdy = wrapDeltaY(t.position.y, wy);
+                  if (tdx * tdx + tdy * tdy < rSq) return true;
+              }
+          }
+      }
+      return false;
+  }
+
+  /**
+   * Iterate every active static tile in the 3x3 spatial cells around
+   * (x, y) and invoke `cb` for each.  Used by ShardSystem's plastic-
+   * shard ↔ tile bond formation pass to find candidate tile partners
+   * — the merge broadphase only walks the dynamic candidates set, so
+   * static tiles need this side-channel.  Callbacks return early if
+   * they want to break out of the inner loop.
+   */
+  public forEachStaticTileNear(x: number, y: number, cb: (tile: GameEntity) => void): void {
+      const cx = Math.floor(wrapX(x) / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(wrapY(y) / SPATIAL_GRID_SIZE);
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  cb(t);
+              }
+          }
+      }
   }
 
   /**
@@ -637,20 +1572,444 @@ export class PhysicsSystem {
    * applied every frame regardless so separation velocity builds up
    * quickly.
    */
-  private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
-      // Stage 5 fix: respect per-variant passThrough on the dynamic-
-      // grid fast-path.  Without this, nebula-shards (passThrough=
-      // true, mass=0.01) get an elastic bounce here that gives them a
-      // huge velocity kick (invMassA = 100), and the bond-cohesion
-      // pass smears that energy onto the glass partner.  The full
-      // resolveCollision path already honours passThrough; the fast-
-      // path needs the same gate.
-      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
-      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+
+  /**
+   * Resolve the effective shard-pair frame interval, tick the
+   * counter, and return whether the shard-pair pass should fire on
+   * this physics substep.  Pulled out of handleEntityCollisions so
+   * physics.update can decide whether to call resolveShardPairs at
+   * all — skipping the function entirely (build + walk) is what
+   * makes the DBG slider meaningfully move `coll` ms.
+   *
+   * N=0 (AUTO) selects the interval from the previous step's
+   * `lastMaxCellDensity` per SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS.
+   * Light fields keep N=1 (every-frame resolution); dense fields
+   * climb so settled piles don't eat the frame budget.
+   */
+  public shouldRunShardPairsThisStep(): boolean {
+    const pc = this.perfController;
+    if (pc) {
+        // The controller already folded `lastMaxCellDensity` (+ entity
+        // count + sim time) into the load level and precomputed this
+        // task's interval / run flag in beginStep().  The manual DBG
+        // override (shardPairFrameInterval) was synced into the
+        // controller before beginStep, so 0 = AUTO delegates here and
+        // a manual pin still wins.
+        this.lastEffectiveShardPairInterval = pc.effectiveInterval('shardPair');
+        this.lastRunShardPair = pc.shouldRun('shardPair');
+        return this.lastRunShardPair;
+    }
+    // Fallback (no controller wired): run every step.
+    this.lastEffectiveShardPairInterval = 1;
+    this.lastRunShardPair = true;
+    return true;
+  }
+
+  /**
+   * Symmetric gate for resolveShardTilePairs — same shape as
+   * shouldRunShardPairsThisStep but with its own counter, interval,
+   * and AUTO threshold table.  Both passes share the same density
+   * signal (lastMaxCellDensity is a proxy for shard count, which
+   * sets the outer-loop size for either scan).  Counter ticks only
+   * when the parent toggle is on, so flipping the toggle doesn't
+   * leave a half-cycled phase that desyncs the first post-enable
+   * frame.
+   */
+  public shouldRunShardTilePairsThisStep(): boolean {
+    const pc = this.perfController;
+    if (pc) {
+        this.lastEffectiveShardTilePairInterval = pc.effectiveInterval('shardTilePair');
+        this.lastRunShardTilePair = pc.shouldRun('shardTilePair');
+        return this.lastRunShardTilePair;
+    }
+    this.lastEffectiveShardTilePairInterval = 1;
+    this.lastRunShardTilePair = true;
+    return true;
+  }
+
+  /**
+   * Dedicated shard ↔ shard pair-resolution pass.  Builds a fresh
+   * shard-only spatial hash from the caller-supplied list of mobile
+   * shards (typically `entityIndex.shardCandidates`), then walks
+   * each shard's 3×3 cell neighbourhood for pairs and dispatches to
+   * `resolveAsteroidPair`.
+   *
+   * Called from physics.update gated by `shouldRunShardPairsThisStep()`,
+   * so on skip-frames the entire build + walk are bypassed (this is
+   * the savings the inline branch in handleEntityCollisions was
+   * missing).  Fading shards (mergeFadeTimer set) are filtered
+   * out — they shouldn't pull or push other shards during their
+   * death animation.
+   */
+  private resolveShardPairs(
+      shards: GameEntity[],
+      onDeath?: (entity: GameEntity) => void,
+  ): void {
+    if (shards.length < 2) return;
+
+    // Build the shard-only grid.  Same SPATIAL_GRID_SIZE as the main
+    // dynamic grid so cell math and 3×3 scan radius are consistent
+    // with everything else in the broadphase.  Asleep shards stay in
+    // the grid (an awake neighbour must still find and resolve against
+    // them); only the asleep↔asleep pair body is skipped below.
+    // Viewport-gated cadence: this pass resolves both-offscreen pairs
+    // only on the catch-up phase (every Nth call); on/near-screen pairs
+    // resolve every call.  Compute the flags here (once per shard) so
+    // the inner pair loop is a single bool read.  When no rect is set
+    // or the gate is off, treat every shard as on-screen (offscreen=
+    // false) so behaviour is identical to ungated resolution.
+    this.shardPairCallCount++;
+    const viewportGate = this.shardViewportCullEnabled && this.hasViewportRect;
+    const catchUpPhase = (this.shardPairCallCount
+        % SHARD_PAIR_CONSTANTS.OFFSCREEN_RESOLVE_DIVISOR) === 0;
+    const vl = this.viewportLeft, vr = this.viewportRight;
+    const vt = this.viewportTop, vb = this.viewportBottom;
+
+    this.shardGrid.clear();
+    let asleepCount = 0;
+    let offscreenCount = 0;
+    for (let i = 0; i < shards.length; i++) {
+        const e = shards[i];
+        if (!e.active || e.isExploding) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
+        if (e.asleep === true) asleepCount++;
+        if (viewportGate) {
+            const r = (e.size.x > e.size.y ? e.size.x : e.size.y) * 0.5;
+            e.offscreen = !isVisibleOnTorus(e.position.x, e.position.y, r, vl, vr, vt, vb);
+            if (e.offscreen) offscreenCount++;
+        } else {
+            e.offscreen = false;
+        }
+        e._pairSeq = i; // pass-local numeric dedup index (see pair loop below)
+        const key = cellKey(e.position.x, e.position.y);
+        let cell = this.shardGrid.get(key);
+        if (!cell) { cell = []; this.shardGrid.set(key, cell); }
+        cell.push(e);
+    }
+    this.lastAsleepCount = asleepCount;
+    this.lastOffscreenShardCount = offscreenCount;
+
+    // Walk the shard list and resolve pairs.  j > i ordering via
+    // id comparison ensures each unordered pair is processed once.
+    // The inner pair body is identical in spirit to the main loop's
+    // shard-shard branch (now removed), but iterates a much smaller
+    // set since non-shard entities aren't here.
+    for (let i = 0; i < shards.length; i++) {
+        const a = shards[i];
+        if (!a.active || a.isExploding) continue;
+        if (a.mergeFadeTimer !== undefined) continue;
+
+        const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+        const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+        for (let x = -1; x <= 1; x++) {
+            for (let y = -1; y <= 1; y++) {
+                const cell = this.shardGrid.get(cellKeyFromCell(cx + x, cy + y));
+                if (!cell) continue;
+                for (let j = 0; j < cell.length; j++) {
+                    const b = cell[j];
+                    if (a === b) continue;
+                    // Process each unordered pair once.  Numeric dedup on the
+                    // pass-local _pairSeq (set in the grid build above) — cheaper
+                    // than the old `a.id > b.id` string compare, run per candidate
+                    // over dense piles.  resolveAsteroidPair + its delegates are
+                    // fully order-independent, so which side is the representative
+                    // doesn't change the outcome.
+                    if (a._pairSeq! > b._pairSeq!) continue;
+                    // Sleep skip: two resting shards in contact are
+                    // stable — no separation or bounce to apply, so
+                    // skip the SAT+impulse math entirely.  A pair with
+                    // either party awake still resolves (and the
+                    // resolution wakes both), so a disturbance ripples
+                    // through the island over successive substeps.
+                    if (this.shardSleepEnabled
+                        && a.asleep === true && b.asleep === true) continue;
+                    // Viewport gate: both shards offscreen → resolve
+                    // only on the catch-up phase.  Either shard on/near
+                    // screen → resolve every pass (full fidelity where
+                    // the player can see it).  Bounded catch-up keeps
+                    // off-screen piles from interpenetrating without
+                    // limit; entering the padded viewport restores full
+                    // rate before the shard is visible.
+                    if (viewportGate && !catchUpPhase
+                        && a.offscreen === true && b.offscreen === true) continue;
+                    this.resolveAsteroidPair(a, b, onDeath);
+                }
+            }
+        }
+    }
+  }
+
+  /**
+   * Mobile-shard ↔ static-tile pass for variants that declare
+   * `passthroughShatter.targets` (today: metal-shard targeting
+   * glass-tile + glass-shard).  Unconditional — does NOT require
+   * `shardTileCollisionsEnabled` — because the rule is a gameplay
+   * mechanic, not a debug aid.  Cheap: only iterates shards whose
+   * variant has the field set (today just metal-shard), and the
+   * inner cell short-circuits if the static cell holds nothing.
+   *
+   * Dispatches through checkAndResolveCollision → resolveCollision,
+   * where the inline passthroughShatter branch flips the target's
+   * active flag and fires onDeath (which routes through GameEngine
+   * .handleEntityDeath → spawnDrops → spawnGlassShards for tiles,
+   * and ShardSystem.shatter for shards via the existing tier chain).
+   * The carrier shard takes no impulse — its trajectory and HP are
+   * unchanged.
+   */
+  private resolvePassthroughShatterPairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+          if (a.shardVariant === undefined) continue;
+          const aVariant = SHARD_VARIANTS[a.shardVariant];
+          if (aVariant.passthroughShatter === undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (!b.active) continue;
+                      if (b.shardVariant === undefined) continue;
+                      if (aVariant.passthroughShatter.targets.indexOf(b.shardVariant) === -1) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
+  }
+
+  /**
+   * Pass-through-and-shatter rule (g3 material-interactions).  Called
+   * from the impulse-resolution sites (resolveAsteroidPair fast-path
+   * and resolveCollision full-path) before any bounce math runs.
+   * Returns true when the pair matches the rule and the target has
+   * been routed through its death pipeline; callers should bail
+   * immediately on true (no positional correction, no impulse, no
+   * bounce).  The carrier's HP and trajectory are unchanged.
+   *
+   * Target dispatch mirrors the standard health-zero death path:
+   * health = 0, active = false, removeStaticEntity for static tiles,
+   * then onDeath().  GameEngine.handleEntityDeath fans out from
+   * there (DropSystem.spawnGlassShards for glass-tile, ShardSystem
+   * .shatter tier chain for glass-shard).
+   */
+  private tryPassthroughShatter(
+      a: GameEntity,
+      b: GameEntity,
+      onDeath?: (entity: GameEntity) => void,
+  ): boolean {
+      if (a.shardVariant === undefined || b.shardVariant === undefined) return false;
+      const aVar = SHARD_VARIANTS[a.shardVariant];
+      const bVar = SHARD_VARIANTS[b.shardVariant];
+      let target: GameEntity | null = null;
+      if (aVar.passthroughShatter !== undefined
+          && aVar.passthroughShatter.targets.indexOf(b.shardVariant) !== -1) {
+          target = b;
+      } else if (bVar.passthroughShatter !== undefined
+          && bVar.passthroughShatter.targets.indexOf(a.shardVariant) !== -1) {
+          target = a;
+      }
+      if (target === null) return false;
+
+      // Stamp impact velocity / damage so the target's shatter
+      // pipeline (asteroid-style tier chain for glass-shard, glass-
+      // shard fan for glass-tile) gets a sensible scatter direction.
+      const carrier = target === a ? b : a;
+      if (carrier.velocity) {
+          target.lastImpactVelocity = { x: carrier.velocity.x, y: carrier.velocity.y };
+      }
+      target.lastImpactDamage = Math.max(1, target.lastImpactDamage ?? 1);
+
+      target.health = 0;
+      target.active = false;
+      if (target.mass === Infinity) {
+          this.removeStaticEntity(target);
+      }
+      if (onDeath) onDeath(target);
+      return true;
+  }
+
+  /**
+   * Plastic-shard cross-material transmute on contact.  When a
+   * plastic-shard collides with a strictly larger non-plastic non-
+   * nebula shard (mobile or static tile), the plastic-shard adopts
+   * the partner's material at the plastic-shard's current size +
+   * polygon shape.  Reads as plastic absorbing the surface character
+   * of whatever it touches; once converted the entity behaves as a
+   * normal shard of the new variant for all subsequent passes
+   * (bonds, repel immunity, density, render).  Tile partners
+   * (glass-tile / rock-tile / metal-tile) map to the matching
+   * SHARD variant — the plastic becomes a shard of that material,
+   * not another tile.  Partners listed in PLASTIC_TRANSMUTE_EXCLUDE
+   * (plastic-*, nebula-*, indestructible-tile) are no-ops.
+   */
+  private tryPlasticTransmuteOnContact(a: GameEntity, b: GameEntity): void {
+      let plastic: GameEntity, other: GameEntity;
+      if (a.shardVariant === 'plastic-shard') { plastic = a; other = b; }
+      else if (b.shardVariant === 'plastic-shard') { plastic = b; other = a; }
+      else return;
+      const oVar = other.shardVariant;
+      if (oVar === undefined) return;
+      if (PLASTIC_TRANSMUTE_EXCLUDE.indexOf(oVar) !== -1) return;
+
+      // Tile → matching shard variant; shard variants pass through.
+      let targetVariant: string;
+      switch (oVar) {
+          case 'glass-tile':  targetVariant = 'glass-shard';  break;
+          case 'rock-tile':   targetVariant = 'rock-shard';   break;
+          case 'metal-tile':  targetVariant = 'metal-shard';  break;
+          default:            targetVariant = oVar;           break;
+      }
+      const newVariantDef = SHARD_VARIANTS[targetVariant as keyof typeof SHARD_VARIANTS];
+      if (newVariantDef === undefined) return;
+
+      plastic.shardVariant     = targetVariant as typeof plastic.shardVariant;
+      plastic.color            = other.color || plastic.color;
+      plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
+      plastic.mergeCount         = undefined;
+      plastic.plasticDentHistory = undefined;
+      pendingPlasticDentEntities.delete(plastic);
+      invalidateCollisionR(plastic);
+  }
+
+  /**
+   * Mobile-shard ↔ static-tile collision pass — debug-gated by
+   * `shardTileCollisionsEnabled`.  The main broadphase skips
+   * STRUCTURE entities as outer-loop subjects (commit cf69102),
+   * which leaves shard-vs-tile pairs un-iterated.  This pass closes
+   * that gap when the toggle is on: each mobile shard does a 3×3
+   * staticGrid lookup and routes any overlapping tile through
+   * checkAndResolveCollision — the same SAT + resolveCollision
+   * path projectiles / players use.  Re-activates the dead
+   * `aIsMobileShard && bIsStaticTile` branch in resolveCollision
+   * (asteroid-pressure crash + indestructible bounce + elastic
+   * impulse).
+   */
+  private resolveShardTilePairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (!b.active) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
+  }
+
+  /**
+   * Nebula-shard ↔ nebula-tile collision pass.  Runs every frame
+   * regardless of the Sh↔Tl toggle.  Mirrors resolveShardTilePairs
+   * but filtered to nebula variants — nebula shards should bounce
+   * off cloud tiles even though the wider shard-tile pass is opt-
+   * in.  The passThrough bypass in resolveCollision handles the
+   * actual impulse path; this method just gets the pair in front
+   * of it.
+   */
+  private resolveNebulaShardTilePairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (a.shardVariant !== 'nebula-shard') continue;
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (b.shardVariant !== 'nebula-tile') continue;
+                      if (!b.active) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
+  }
+
+  private resolveAsteroidPair(
+      a: GameEntity,
+      b: GameEntity,
+      onDeath?: (entity: GameEntity) => void,
+  ) {
+      // Non-nebula shards (metal / rock / glass, loose or composite) never
+      // collide with nebula shards — skip before any routing / SAT work.
+      if (this.nebulaPassThroughPair(a, b)) return;
+
+      // Cheapest possible early-outs first — most pair calls discard
+      // here before paying any further work.
 
       const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
-      const rA = a.size.x * 0.42;
-      const rB = b.size.x * 0.42;
+
+      // Metal assembly: don't bounce metal triangles off each other when a
+      // loose piece is involved — the ShardSystem assembly pass needs them
+      // to interpenetrate so a loose triangle can reach a composite's free
+      // face (or another loose triangle) and snap/lock.  Two formed
+      // composites DO collide (so they rest against each other rather than
+      // overlapping).  Metal-vs-other-shard falls through normally.
+      const aMetal = a.shardVariant === 'metal-shard';
+      const bMetal = b.shardVariant === 'metal-shard';
+      if (aMetal && bMetal) {
+          const bothComposite = a.metalCells !== undefined && b.metalCells !== undefined;
+          if (!bothComposite) return;
+      }
+
+      // A metal composite collides by its actual assembled shape (per-cell
+      // SAT), not a bounding circle — route any composite-involving pair to
+      // the polygon resolver and skip the circle math below.
+      if ((a.metalCells !== undefined && a.metalCells.length > 0)
+          || (b.metalCells !== undefined && b.metalCells.length > 0)) {
+          this.resolveCompositeShardPair(a, b, onDeath);
+          return;
+      }
+
+      // Collision radius factor: a loose metal triangle uses its INSCRIBED
+      // circle (size.x is the circumdiameter → 0.25 = inradius, so two
+      // triangles touch at the edge-sharing distance); other shards keep the
+      // 0.42 near-circumradius factor.  (Composites never reach here — they
+      // resolve per-cell above.)
+      const rA = a.size.x * (aMetal ? 0.25 : 0.42);
+      const rB = b.size.x * (bMetal ? 0.25 : 0.42);
       const sumR = rA + rB;
       const sumRSq = sumR * sumR;
 
@@ -658,6 +2017,53 @@ export class PhysicsSystem {
       const dy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = dx * dx + dy * dy;
       if (distSq > sumRSq) return;
+
+      // Passthrough-and-shatter (today: metal-shard → glass-shard).
+      // Skips impulse / positional correction entirely and routes
+      // the target through its death pipeline.  Checked before the
+      // settled-pair skip so a metal-shard sliding past a glass-
+      // shard still triggers the shatter on first overlap.
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
+
+      // Settled-pair skip: when the pair is barely overlapping AND
+      // already drifting at almost the same velocity, separation /
+      // bounce produces an imperceptible nudge while costing the
+      // full impulse + mass-correction math.  Bail before any of
+      // it.  Overlap test stays squared by comparing distSq to
+      //   sumR² × (1 − STABLE_OVERLAP_FRACTION)²
+      // which is the largest distance² that still counts as
+      // "settled".  Active collisions (overlap > fraction × sumR or
+      // rel-vel above threshold) skip the early-out and resolve
+      // normally.
+      const rvx0 = b.velocity.x - a.velocity.x;
+      const rvy0 = b.velocity.y - a.velocity.y;
+      const relVelSq = rvx0 * rvx0 + rvy0 * rvy0;
+      const stableMinDistSq = sumRSq * STABLE_DIST_FACTOR_SQ;
+      if (relVelSq < SHARD_PAIR_CONSTANTS.STABLE_REL_VEL_SQ
+          && distSq > stableMinDistSq) {
+          return;
+      }
+
+      // Stage 5 fix: respect per-variant passThrough on the dynamic-
+      // grid fast-path.  Without this, nebula-shards (passThrough=
+      // true, mass=0.01) get an elastic bounce here that gives them a
+      // huge velocity kick (invMassA = 100), and the bond-cohesion
+      // pass smears that energy onto the glass partner.  The full
+      // resolveCollision path already honours passThrough; the fast-
+      // path needs the same gate.  Moved past the early-outs above
+      // so most pair calls (no overlap, or settled) skip the dict
+      // lookup entirely.
+      //
+      // DBG override: when `nebulaShardCollisionsEnabled` is on AND
+      // both sides are nebula-shards, the passThrough gate is
+      // bypassed and the pair takes the standard elastic bounce.
+      const nebPairCollidesFast = this.nebulaShardCollisionsEnabled
+        && a.shardVariant === 'nebula-shard'
+        && b.shardVariant === 'nebula-shard';
+      if (!nebPairCollidesFast) {
+        if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+        if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+      }
 
       let nx: number;
       let ny: number;
@@ -680,8 +2086,27 @@ export class PhysicsSystem {
 
       const overlap = sumR - dist;
       const { CORRECTION_PERCENT, SLOP, ELASTICITY } = COLLISION_CONFIG;
-      const invMassA = 1 / a.mass;
-      const invMassB = 1 / b.mass;
+      // Memoised 1/mass + pow(1/mass, MASS_BIAS_EXPONENT), keyed on the mass
+      // value.  Mass is constant per shard between merges, so this is computed
+      // ~once per shard per mass-epoch and reused across ALL its pairs —
+      // removing 2 divisions + 2 Math.pow from every resolved pair in a dense
+      // pile.  Self-invalidating: any mass change (merge / density retier)
+      // makes `_massCacheKey !== mass` and recomputes.  Bit-identical to the
+      // old inline math.
+      if (a._massCacheKey !== a.mass) {
+          const im = 1 / a.mass;
+          a._invMassCache = im;
+          a._effInvMassCache = Math.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+          a._massCacheKey = a.mass;
+      }
+      if (b._massCacheKey !== b.mass) {
+          const im = 1 / b.mass;
+          b._invMassCache = im;
+          b._effInvMassCache = Math.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+          b._massCacheKey = b.mass;
+      }
+      const invMassA = a._invMassCache!;
+      const invMassB = b._invMassCache!;
       const totalInvMass = invMassA + invMassB;
       if (totalInvMass <= 0) return;
 
@@ -700,43 +2125,120 @@ export class PhysicsSystem {
       b.position.x += nx * pushB;
       b.position.y += ny * pushB;
 
+      // Wake both ends.  Reaching here means a genuine contact cleared
+      // the passthrough + settled-pair early-outs, so neither shard is
+      // truly at rest any more — clear the flag and reset the dwell so
+      // they must re-earn sleep.  This is what propagates a disturbance
+      // through a resting island: an awake shard wakes the sleeper it
+      // hits, which next step wakes its own neighbours.
+      a.asleep = false; a.sleepTimer = 0;
+      b.asleep = false; b.sleepTimer = 0;
+
       // Velocity resolution — elastic bounce along the contact normal.
+      // The impulse split uses mass-bias-compressed inverse masses
+      // (COLLISION_CONFIG.MASS_BIAS_EXPONENT) so a light fast shard
+      // visibly shoves a heavy slow one; the positional correction
+      // above keeps the true mass split.
       const rvx = b.velocity.x - a.velocity.x;
       const rvy = b.velocity.y - a.velocity.y;
       const velAlongNormal = rvx * nx + rvy * ny;
       if (velAlongNormal > 0) return; // already moving apart
 
+      const effInvMassA = a._effInvMassCache!; // memoised above (mass-keyed)
+      const effInvMassB = b._effInvMassCache!;
       const j = -(1 + ELASTICITY) * velAlongNormal;
-      const impulse = j / totalInvMass;
+      const impulse = j / (effInvMassA + effInvMassB);
       const ix = nx * impulse;
       const iy = ny * impulse;
-      a.velocity.x -= ix * invMassA;
-      a.velocity.y -= iy * invMassA;
-      b.velocity.x += ix * invMassB;
-      b.velocity.y += iy * invMassB;
+      a.velocity.x -= ix * effInvMassA;
+      a.velocity.y -= iy * effInvMassA;
+      b.velocity.x += ix * effInvMassB;
+      b.velocity.y += iy * effInvMassB;
+  }
+
+  /**
+   * Nebula isolation rule: a nebula tile/shard physically interacts ONLY with
+   * nebula shards (nebula-shard ↔ nebula-shard and nebula-shard ↔ nebula-tile)
+   * plus player/enemy/projectile strikers (which shatter tiles / fly through).
+   * Every other shard family — metal / rock / glass, loose OR composite —
+   * passes through nebula entirely.  Returns true when the pair must be
+   * skipped (no collision response).  This is the single explicit gate for
+   * the rule; the per-variant passThrough flag still backs it up.
+   */
+  private nebulaPassThroughPair(a: GameEntity, b: GameEntity): boolean {
+      const av = a.shardVariant;
+      const bv = b.shardVariant;
+      const aNeb = av === 'nebula-tile' || av === 'nebula-shard';
+      const bNeb = bv === 'nebula-tile' || bv === 'nebula-shard';
+      // Both nebula → allowed (handled by the nebula pair paths).  Neither
+      // nebula → not our concern.
+      if (aNeb === bNeb) return false;
+      // Exactly one side is nebula.  The OTHER side passes through unless it
+      // is itself a shard/tile (has a shardVariant) — strikers have none, so
+      // the tile-shatter path keeps working for player/enemy/projectiles.
+      return (aNeb ? bv : av) !== undefined;
   }
 
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
+      // Non-nebula shards (metal / rock / glass) never collide with nebula.
+      if (this.nebulaPassThroughPair(a, b)) return;
+
+      // Swarm gnats (diesOnContact) now take STANDARD enemy collisions — they
+      // bounce off terrain (tiles / asteroids) and each other instead of
+      // phasing through, so a flock reads as physical.  The Stage-4 perf
+      // early-out that skipped every non-player pair is removed; the gnat still
+      // POPS only on player contact (the resolveCollision ENEMY-vs-PLAYER
+      // branch is gated on the target being the player), so hitting a tile
+      // bounces rather than kills it.  (The boids separation already keeps a
+      // flock spaced, so actual overlaps — the only pairs that reach SAT past
+      // the circle broadphase — stay bounded.)
+      // Phase-through (Stage 6 dragon): glides through terrain/enemies and eats
+      // tiles via the consume pass; only collides with the player (contact) and
+      // player projectiles (to take damage).  Same gate as the gnat.
+      if (a.phasesTerrain === true || b.phasesTerrain === true) {
+          const other = a.phasesTerrain === true ? b : a;
+          const ok = other.type === EntityType.PLAYER
+              || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
+          if (!ok) return;
+      }
+
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.
-      let rA = Math.max(a.size.x, a.size.y) / 2;
-      let rB = Math.max(b.size.x, b.size.y) / 2;
+      // Cached bounding-radius lookup — getCollisionR() is a 1-field read
+      // on cache hit (vast majority of frames) vs. Math.max + division.
+      let rA = getCollisionR(a);
+      let rB = getCollisionR(b);
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      // Extend reach to the arc-shield ring (Bulwark) so an incoming shot is
+      // considered out to the visible ring — tryArcShieldIntercept then absorbs
+      // a covered shot there instead of letting it tunnel to the hull.
+      if ((a.shield ?? 0) > 0 && a.shieldArcHalfWidth !== undefined) rA = Math.max(rA, PhysicsSystem.arcShieldReach(a));
+      if ((b.shield ?? 0) > 0 && b.shieldArcHalfWidth !== undefined) rB = Math.max(rB, PhysicsSystem.arcShieldReach(b));
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;
 
       if (distSq > (rA + rB + 10)**2) return;
+
+      // Terrain slam (Stage 5): the player hitting a tile / asteroid fast stamps
+      // a short window GameEngine.updateBubbles reads to shake a latched bubble
+      // free.  STRUCTURE covers static tiles + mobile shards.
+      if (a.type === EntityType.STRUCTURE || b.type === EntityType.STRUCTURE) {
+          const ply = a.id === 'player' ? a : (b.id === 'player' ? b : null);
+          if (ply && Math.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
+              ply.terrainSlamTimer = 0.12;
+          }
+      }
 
       // SAT works on absolute vertex positions.  If A and B sit on
       // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
@@ -752,8 +2254,24 @@ export class PhysicsSystem {
           b.position.y += offsetY;
       }
 
-      // 1. SAT Collision Detection (Alloc-Free)
-      if (this.checkCollisionSAT(a, b)) {
+      // Arc-shield interception: a covered enemy shot is absorbed at the ring
+      // (before SAT), so it visibly stops at the shield instead of reaching the
+      // hull.  Open-side shots fall through to the normal SAT body hit.
+      if (this.tryArcShieldIntercept(a, b, onHit)) {
+          if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
+          return;
+      }
+
+      // 1. SAT Collision Detection (Alloc-Free).  A metal composite collides
+      // by its actual assembled shape (per-cell SAT) rather than its convex-
+      // hull polygon, so contacts/hits match the connected triangles.
+      const composite = (a.metalCells !== undefined && a.metalCells.length > 0)
+                     || (b.metalCells !== undefined && b.metalCells.length > 0);
+      const hit = composite ? this.compositeSAT(a, b) : this.checkCollisionSAT(a, b);
+      if (hit) {
+          // A moderate body collision aggros a passive bubble onto the collider
+          // (before resolve, so we read the true impact velocities).
+          PhysicsSystem.maybeBubbleCollisionAggro(a, b);
           this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
       }
 
@@ -763,6 +2281,24 @@ export class PhysicsSystem {
           wrapPosition(a.position);
           wrapPosition(b.position);
       }
+  }
+
+  /** Stage 5: a MODERATE body collision (relative impact speed ≥
+   *  COLLIDE_AGGRO_SPEED) between a passive third-party bubble and the player /
+   *  an enemy aggros the bubble onto the collider.  A light graze (slow drift
+   *  contact) is below threshold and ignored.  Skipped while the bubble is
+   *  latched or sick.  Bubble↔bubble is ignored. */
+  private static maybeBubbleCollisionAggro(a: GameEntity, b: GameEntity) {
+      const bubble = a.thirdParty ? a : (b.thirdParty ? b : null);
+      if (!bubble || bubble.attachedToId !== undefined || (bubble.bubbleSickTimer ?? 0) > 0) return;
+      const other = bubble === a ? b : a;
+      if (other.thirdParty) return; // bubble ↔ bubble
+      if (other.type !== EntityType.PLAYER && other.type !== EntityType.ENEMY) return;
+      const rvx = a.velocity.x - b.velocity.x;
+      const rvy = a.velocity.y - b.velocity.y;
+      if (rvx * rvx + rvy * rvy < BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED * BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED) return;
+      bubble.provoked = true;
+      bubble.aggroTargetId = other.id; // 'player' for the player, else the enemy id
   }
 
   /**
@@ -776,8 +2312,9 @@ export class PhysicsSystem {
       const countA = this.fillVertices(a, this.bufferVerticesA);
       const countB = this.fillVertices(b, this.bufferVerticesB);
       
-      // Calculate Axes into buffer
-      const axesCount = this.fillAxes(this.bufferVerticesA, countA, this.bufferVerticesB, countB, this.bufferAxes);
+      // Calculate Axes into buffer.  Pass entity refs so static-entity
+      // axes are pulled from cache instead of recomputed every pair.
+      const axesCount = this.fillAxes(this.bufferVerticesA, countA, this.bufferVerticesB, countB, this.bufferAxes, a, b);
 
       let minOverlap = Infinity;
       let smallestAxisX = 0;
@@ -831,32 +2368,239 @@ export class PhysicsSystem {
       return true;
   }
 
+  // ── Metal composite per-cell collision ──────────────────────────────────
+  // A metal composite is a rigid union of triangle cells on a shared
+  // lattice; the union can be concave, so it can't be one SAT polygon.
+  // Instead each cell is treated as its own convex collider and the body
+  // collides as the union of cells — collision matches the actual connected
+  // shape rather than a convex hull or bounding circle.
+
+  /** Parametric SAT between two world-space vertex sets.  On overlap returns
+   *  true and writes penetration depth + axis into satOverlap / satAxis{X,Y}
+   *  (the minimum-translation axis); on a separating axis returns false. */
+  private satTest(vA: Vector2[], cA: number, vB: Vector2[], cB: number): boolean {
+      const axesCount = this.fillAxes(vA, cA, vB, cB, this.bufferAxes);
+      let minOverlap = Infinity, axX = 0, axY = 0;
+      for (let i = 0; i < axesCount; i++) {
+          const axis = this.bufferAxes[i];
+          let minA = Infinity, maxA = -Infinity;
+          for (let j = 0; j < cA; j++) {
+              const p = vA[j];
+              const proj = p.x * axis.x + p.y * axis.y;
+              if (proj < minA) minA = proj;
+              if (proj > maxA) maxA = proj;
+          }
+          let minB = Infinity, maxB = -Infinity;
+          for (let j = 0; j < cB; j++) {
+              const p = vB[j];
+              const proj = p.x * axis.x + p.y * axis.y;
+              if (proj < minB) minB = proj;
+              if (proj > maxB) maxB = proj;
+          }
+          if (maxA < minB || maxB < minA) return false;
+          const o = Math.min(maxA, maxB) - Math.max(minA, minB);
+          if (o < minOverlap) { minOverlap = o; axX = axis.x; axY = axis.y; }
+      }
+      this.satOverlap = minOverlap;
+      this.satAxisX = axX;
+      this.satAxisY = axY;
+      return true;
+  }
+
+  /** Fill `buffer` with the 3 world-space vertices of composite cell `idx`
+   *  (lattice-frame triangle → rotate by composite.rotation → translate). */
+  private fillMetalCellVerts(comp: GameEntity, idx: number, cmx: number, cmy: number, buffer: Vector2[]): number {
+      const R = comp.metalLatticeR!;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const c = comp.metalCells![idx];
+      const ccx = c.ix * ux - cmx;
+      const ccy = c.iy * uy - cmy;
+      const cos = Math.cos(comp.rotation);
+      const sin = Math.sin(comp.rotation);
+      const px = comp.position.x;
+      const py = comp.position.y;
+      const lx0 = ccx, ly0 = c.up ? ccy - R : ccy + R;
+      const lx1 = ccx + ux, ly1 = c.up ? ccy + uy : ccy - uy;
+      const lx2 = ccx - ux, ly2 = c.up ? ccy + uy : ccy - uy;
+      buffer[0].x = px + (lx0 * cos - ly0 * sin); buffer[0].y = py + (lx0 * sin + ly0 * cos);
+      buffer[1].x = px + (lx1 * cos - ly1 * sin); buffer[1].y = py + (lx1 * sin + ly1 * cos);
+      buffer[2].x = px + (lx2 * cos - ly2 * sin); buffer[2].y = py + (lx2 * sin + ly2 * cos);
+      return 3;
+  }
+
+  /** Mass centroid of a composite in its lattice frame. */
+  private metalCentroid(comp: GameEntity): { x: number; y: number } {
+      const R = comp.metalLatticeR!;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const cells = comp.metalCells!;
+      let cmx = 0, cmy = 0;
+      for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+      return { x: cmx / cells.length, y: cmy / cells.length };
+  }
+
+  /** Per-cell SAT between a and b where at least one is a metal composite.
+   *  Resolves against the deepest-penetrating cell pair; writes the MTV
+   *  (oriented a → b) into bufferMtv and returns true on contact. */
+  private compositeSAT(a: GameEntity, b: GameEntity): boolean {
+      const aComp = a.metalCells !== undefined && a.metalCells.length > 0;
+      const bComp = b.metalCells !== undefined && b.metalCells.length > 0;
+
+      let cmAx = 0, cmAy = 0, cmBx = 0, cmBy = 0;
+      let cA_poly = 0, cB_poly = 0;
+      if (aComp) { const c = this.metalCentroid(a); cmAx = c.x; cmAy = c.y; }
+      else cA_poly = this.fillVertices(a, this.bufferVerticesA);
+      if (bComp) { const c = this.metalCentroid(b); cmBx = c.x; cmBy = c.y; }
+      else cB_poly = this.fillVertices(b, this.bufferVerticesB);
+
+      const aSub = aComp ? a.metalCells!.length : 1;
+      const bSub = bComp ? b.metalCells!.length : 1;
+
+      let bestPen = -1, bestAxX = 0, bestAxY = 0;
+      for (let ai = 0; ai < aSub; ai++) {
+          const cA = aComp ? this.fillMetalCellVerts(a, ai, cmAx, cmAy, this.bufferVerticesA) : cA_poly;
+          for (let bi = 0; bi < bSub; bi++) {
+              const cB = bComp ? this.fillMetalCellVerts(b, bi, cmBx, cmBy, this.bufferVerticesB) : cB_poly;
+              if (this.satTest(this.bufferVerticesA, cA, this.bufferVerticesB, cB)
+                  && this.satOverlap > bestPen) {
+                  bestPen = this.satOverlap;
+                  bestAxX = this.satAxisX;
+                  bestAxY = this.satAxisY;
+              }
+          }
+      }
+      if (bestPen < 0) return false;
+
+      const dx = b.position.x - a.position.x;
+      const dy = b.position.y - a.position.y;
+      if (dx * bestAxX + dy * bestAxY < 0) { bestAxX = -bestAxX; bestAxY = -bestAxY; }
+      this.bufferMtv.x = bestAxX * bestPen;
+      this.bufferMtv.y = bestAxY * bestPen;
+      return true;
+  }
+
+  /** Shard-pair resolution where a metal composite is involved — per-cell
+   *  SAT bounce along the contact normal (replaces the bounding-circle path
+   *  in resolveAsteroidPair for composites). */
+  private resolveCompositeShardPair(a: GameEntity, b: GameEntity, onDeath?: (entity: GameEntity) => void): void {
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+
+      // Cheap bounding-circle reject (broadphase already culls roughly).
+      const rA = a.size.x / 2, rB = b.size.x / 2;
+      const wdx = wrapDeltaX(a.position.x, b.position.x);
+      const wdy = wrapDeltaY(a.position.y, b.position.y);
+      if (wdx * wdx + wdy * wdy > (rA + rB) * (rA + rB)) return;
+
+      // Shift b into a's frame so SAT (absolute vertices) is seam-correct.
+      const offX = (a.position.x + wdx) - b.position.x;
+      const offY = (a.position.y + wdy) - b.position.y;
+      const shifted = offX !== 0 || offY !== 0;
+      if (shifted) { b.position.x += offX; b.position.y += offY; }
+
+      if (this.compositeSAT(a, b)) {
+          const mx = this.bufferMtv.x, my = this.bufferMtv.y;
+          const overlap = Math.sqrt(mx * mx + my * my);
+          if (overlap > 1e-4) {
+              const nx = mx / overlap, ny = my / overlap; // a → b
+              const { CORRECTION_PERCENT, SLOP, ELASTICITY } = COLLISION_CONFIG;
+              const invMassA = 1 / a.mass, invMassB = 1 / b.mass;
+              const totalInvMass = invMassA + invMassB;
+              if (totalInvMass > 0) {
+                  const MAX_SEPARATION_STEP = 2;
+                  const correction = Math.max(0, overlap - SLOP) * CORRECTION_PERCENT / totalInvMass;
+                  let pushA = correction * invMassA, pushB = correction * invMassB;
+                  if (pushA > MAX_SEPARATION_STEP) pushA = MAX_SEPARATION_STEP;
+                  if (pushB > MAX_SEPARATION_STEP) pushB = MAX_SEPARATION_STEP;
+                  a.position.x -= nx * pushA; a.position.y -= ny * pushA;
+                  b.position.x += nx * pushB; b.position.y += ny * pushB;
+                  a.asleep = false; a.sleepTimer = 0;
+                  b.asleep = false; b.sleepTimer = 0;
+                  const rvx = b.velocity.x - a.velocity.x;
+                  const rvy = b.velocity.y - a.velocity.y;
+                  const van = rvx * nx + rvy * ny;
+                  if (van <= 0) {
+                      // Mass-bias-compressed impulse split — same policy
+                      // as resolveAsteroidPair / resolveCollision.
+                      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+                      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+                      const j = -(1 + ELASTICITY) * van / (effInvMassA + effInvMassB);
+                      a.velocity.x -= nx * j * effInvMassA; a.velocity.y -= ny * j * effInvMassA;
+                      b.velocity.x += nx * j * effInvMassB; b.velocity.y += ny * j * effInvMassB;
+                  }
+              }
+          }
+      }
+
+      if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
+  }
+
   private resolveCollision(
     a: GameEntity,
     b: GameEntity,
     mtv: Vector2,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
 
+      // ── Passthrough-and-shatter (g3 material-interactions) ────────────
+      // Variants whose SHARD_VARIANTS entry sets
+      // `passthroughShatter.targets` (today: metal-shard targeting
+      // glass-tile + glass-shard) skip impulse / positional
+      // correction entirely on contact and route the target through
+      // its standard death pipeline.  Checked before everything
+      // else so projectile / shake / drop branches don't bounce
+      // off a tile that's about to shatter from this contact.
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
+
+      // Plastic cross-material transmute — smaller plastic-shard
+      // adopts the partner's material at its current size + shape.
+      // Runs before nebula passThrough so the transmute fires on
+      // glass / rock / metal partners only (nebula partners are in
+      // PLASTIC_TRANSMUTE_EXCLUDE, so this is a fast no-op there);
+      // post-transmute the entity behaves as its new variant for the
+      // remainder of resolveCollision.
+      this.tryPlasticTransmuteOnContact(a, b);
+
       // ── NEBULA: pass-through with conditional shatter ──────────────────
-      // Stage 5: per-variant passThrough flag drives the impulse skip
-      // (only nebula-tile sets it today).  Nebula-shards now go
-      // through standard collision impulse; their mass = 0.01 keeps
-      // the striker velocity change negligible (~3 orders of
-      // magnitude smaller than today's mass=size shards) while the
-      // shard itself takes a strong kick that the existing
-      // linearDamping = 0.97 bleeds off in <1s — the same "cloud
-      // shoved aside" feel without a per-EntityType skip.
-      const aPassThrough = a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
-      const bPassThrough = b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
-      // Shatter trigger is independent of pass-through — a nebula
-      // tile shatters on PLAYER/ENEMY contact regardless.
-      const aIsNebulaTile = a.shardVariant === 'nebula-tile';
-      const bIsNebulaTile = b.shardVariant === 'nebula-tile';
+      // Stage 5: per-variant passThrough flag drives the impulse skip.
+      // Nebula tiles AND nebula shards both set passThrough=true, so
+      // strikers (player / enemy / projectile) glide through both with
+      // no SAT impulse.  Player→shard motion is instead driven by the
+      // PhysicsSystem.applyNebulaPlayerPull gravity field; contact
+      // still triggers a shatter via the path below.
+      //
+      // DBG override mirrors the fast-path gate above — nebula-pair
+      // hard collisions when the toggle is on.  Two cases skip the
+      // passThrough gate so the standard SAT impulse runs:
+      //   - nebula-shard ↔ nebula-shard, DBG-toggled by
+      //     nebulaShardCollisionsEnabled (A/B-test for the gather-
+      //     pile fix).
+      //   - nebula-shard ↔ nebula-tile, unconditional — shards
+      //     should bounce off cloud tiles instead of drifting
+      //     through them.
+      const aIsNebShard = a.shardVariant === 'nebula-shard';
+      const bIsNebShard = b.shardVariant === 'nebula-shard';
+      const aIsNebTile  = a.shardVariant === 'nebula-tile';
+      const bIsNebTile  = b.shardVariant === 'nebula-tile';
+      const nebShardPair = this.nebulaShardCollisionsEnabled && aIsNebShard && bIsNebShard;
+      const nebShardTilePair = (aIsNebShard && bIsNebTile) || (bIsNebShard && aIsNebTile);
+      // Player ↔ nebula-shard hard collision (DBG, default OFF) — the ship
+      // physically parts the cloud instead of gliding through.  Bypasses the
+      // passThrough gate so the pair below takes the normal SAT impulse.  Off
+      // by default; the pass-through swirl (applyNebulaPlayerPull) is the
+      // standard interaction.
+      const playerNebShardPair = this.playerNebulaCollisionEnabled
+          && ((aIsNebShard && b.type === EntityType.PLAYER)
+              || (bIsNebShard && a.type === EntityType.PLAYER));
+      const nebPairCollides = nebShardPair || nebShardTilePair || playerNebShardPair;
+      const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
+      const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
       if (aPassThrough || bPassThrough) {
           // Both sides pass-through (e.g. tile-vs-tile in some future
           // configuration) — no impulse, no shatter.
@@ -866,8 +2610,13 @@ export class PhysicsSystem {
           const other  = aPassThrough ? b : a;
 
           // Striker must be PLAYER or ENEMY to shatter, AND must not
-          // be in the post-shatter cooldown window.
-          const shatters = (aIsNebulaTile || bIsNebulaTile)
+          // be in the post-shatter cooldown window.  Only nebula-tiles
+          // shatter on contact — nebula-shards interact with the
+          // player exclusively through the applyNebulaPlayerPull
+          // gravity field; contact alone is a pure pass-through with
+          // no destruction.
+          const isShatterable = nebula.shardVariant === 'nebula-tile';
+          const shatters = isShatterable
                             && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
                             && (other.nebulaImpactCooldown ?? 0) <= 0;
           if (shatters) {
@@ -892,8 +2641,8 @@ export class PhysicsSystem {
                       : 0;
                   const rateScale = nebulaFadeRateScale(impactSpeed);
                   const scaledFadeDuration = NEBULA_CONSTANTS.FADE_DURATION / rateScale;
-                  nebula.nebulaFadeTimer = scaledFadeDuration;
-                  nebula.nebulaFadeDuration = scaledFadeDuration;
+                  nebula.mergeFadeTimer = scaledFadeDuration;
+                  nebula.mergeFadeDuration = scaledFadeDuration;
                   if (nebula.shardVariant === 'nebula-tile') {
                       // Tiles live in the static grid — pull them out so
                       // the player can drift through the fading cell.
@@ -901,7 +2650,7 @@ export class PhysicsSystem {
                   }
                   // Shards live in the dynamic grid which is rebuilt
                   // each frame; the populate loop below skips entities
-                  // with nebulaFadeTimer set, so fading shards drop out
+                  // with mergeFadeTimer set, so fading shards drop out
                   // of broadphase automatically on the next frame.
                   //
                   // Arm the striker's post-shatter cooldown.
@@ -918,10 +2667,12 @@ export class PhysicsSystem {
       // - Glass shards are full physics participants — they interact with everything
       //   (player, enemies, projectiles, asteroids, structures).  They are environmental
       //   debris and should deflect shots and bounce off ships.
-      // - Non-glass collectible drops: only physically collide with asteroids and
-      //   structures.  Player collection is handled by the magnetic logic in GameEngine,
-      //   not by physics contact, so we skip those pairs here to avoid accidental
-      //   collection via direct collision.
+      // - Collectible drops (salvage + health) are kept OUT of the dynamic grid
+      //   entirely (see the dropType skip in the grid build), so they never
+      //   reach this resolver — projectiles + ships pass through them and
+      //   collection is purely the GameEngine magnet/proximity scan.  The
+      //   non-glass branch below is a defensive guard in case one is ever
+      //   re-added to the grid.
       if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) {
           const dropA = a.type === EntityType.INTERACTABLE && !!a.dropType;
           const dropB = b.type === EntityType.INTERACTABLE && !!b.dropType;
@@ -946,10 +2697,21 @@ export class PhysicsSystem {
           const proj = a.type === EntityType.PROJECTILE ? a : b;
           const target = a.type === EntityType.PROJECTILE ? b : a;
 
-          // Ignore friendly fire and projectile-projectile
+          // Ignore friendly fire and projectile-projectile.  EXCEPTION: a
+          // third-party entity (the bubble) is fair game for everyone — enemy
+          // fire can hit it (Stage 5), so the enemy-vs-enemy filter is bypassed
+          // when the target is neutral.
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
-          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
+          // Ally/neutral rival fire passes through the player (Stage 7) — its
+          // shots are meant for the wave enemies, not the pilot.
+          if (target.type === EntityType.PLAYER && proj.sparesPlayer) return;
+          // Enemy-vs-enemy friendly fire, EXCEPT: a neutral third party (bubble)
+          // is fair game for all, and a rival's `hitsEnemies` shot is allowed to
+          // damage the wave enemies (Stage 7) — but never another rival.
+          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY
+              && !target.thirdParty && !proj.hitsEnemies) return;
+          if (proj.hitsEnemies && target.isRival) return;
 
           // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
           // (today's "tile shards"); they pass through every other shard
@@ -957,8 +2719,8 @@ export class PhysicsSystem {
           //
           // Stage 5: shard-family entities all share EntityType.STRUCTURE
           // now, so distinguishing static tiles vs glass-shards needs a
-          // variant check.  STRUCTURE-tile variants (glass / reinforced /
-          // heavy / indestructible) are mass=Infinity, so we can short-
+          // variant check.  STRUCTURE-tile variants (glass / plastic /
+          // metal / indestructible) are mass=Infinity, so we can short-
           // circuit on that for tile reflection.  Mobile shards then
           // need a per-variant check — only glass-shard reflects.
           if (proj.isBouncer) {
@@ -974,6 +2736,17 @@ export class PhysicsSystem {
                 }
               }
               const isTile = isReflective;
+              // Bounce-count gate: when bouncesRemaining is set (post-d2
+              // pierce-beam), the projectile dissipates after N reflections
+              // instead of bouncing forever inside its lifetime window.
+              // bouncesRemaining=0 means "no bounces left" → deactivate on
+              // the contact frame, fire onHit at the contact point, skip
+              // the reflection math.
+              if (isTile && proj.velocity && proj.bouncesRemaining !== undefined && proj.bouncesRemaining <= 0) {
+                  if (onHit) onHit(proj.position, proj, target);
+                  proj.active = false;
+                  return;
+              }
               if (isTile && proj.velocity) {
                   // Tiles are axis-aligned AABBs, and the projectile is thin and
                   // rotated along its travel direction — SAT's minimum-overlap axis
@@ -1043,6 +2816,15 @@ export class PhysicsSystem {
                   }
                   proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
 
+                  // Decrement remaining-bounces counter (set on bouncer
+                  // projectiles via WeaponConfig.bounceCount).  Counter is
+                  // checked at the top of the reflection branch on the
+                  // *next* tile contact; the projectile keeps moving on
+                  // this frame after the reflection.
+                  if (proj.bouncesRemaining !== undefined) {
+                      proj.bouncesRemaining -= 1;
+                  }
+
                   // Fire the impact callback AFTER the reflection so sparks spawn
                   // on the tile's surface and spray along the outgoing (reflected)
                   // velocity direction — away from the tile, not into it.
@@ -1053,37 +2835,163 @@ export class PhysicsSystem {
 
           let projDmg = proj.damage || 1;
 
-          // Shield absorbs damage for the player
-          if (target.id === 'player' && (target.shield ?? 0) > 0) {
+          // Shield absorbs damage — generalized from player-only to ANY
+          // shielded entity (Stage 0 Bulwark): the enemy shield soaks the hit
+          // and re-arms its recharge delay exactly like the player's.  Entities
+          // without a shield (shield undefined) fall straight through.  A
+          // directional arc shield only absorbs hits from the covered sector
+          // (PhysicsSystem.shieldCoversHit) — flank it and the shot lands.  An
+          // EMP-disabled shield (Stage 3c) is offline and absorbs nothing.
+          if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
+              && !target.systemsDisabled
+              && PhysicsSystem.shieldCoversHit(target, proj)) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               projDmg -= absorbed;
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
           }
+          // (h) front-shield: a permanent directional plate on the entity's
+          // FACING cuts covered hits.  Deliberately applied BEFORE the regen
+          // burst bucket below sees the damage — so bursting a plated target
+          // means bursting it FROM BEHIND, which is what makes the plate+regen
+          // phase the hard part of the Bastion fight.
+          if (this.traitsEnabled && target.frontShield && projDmg > 0
+              && PhysicsSystem.frontShieldCoversHit(target, proj)) {
+              projDmg *= (1 - target.frontShield.reduction);
+              target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+          }
+          // Armored enemies shrug off small per-hit "chip" damage — demands
+          // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
+          if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
+              projDmg *= (1 - target.armor.reduction);
+          }
+          // (h) regen: feed the APPLIED damage into the fixed burst bucket.
+          // No-op without the trait.
+          if (this.traitsEnabled) noteTraitDamage(target, projDmg);
           if (projDmg > 0) {
               // Indestructible tiles eat the projectile without losing
               // health — flash only, health stays pinned.  Everything
               // else takes the full projectile damage.
               const isIndestructibleTile = target.type === EntityType.STRUCTURE
                   && target.shardVariant === 'indestructible-tile';
+              // Dent-policy entities consume one HP per projectile
+              // regardless of the projectile's damage value — so "hits
+              // to break" tracks the player's mental model (each click
+              // is one hit, independent of weapon power).  Applies to
+              // both static dent tiles and mobile dent shards (plastic
+              // and metal share the policy).  A Cannon shot at damage=5
+              // costs the target 1 HP and runs one dent step, not five.
+              // Hardness scales via the entity's health alone.
+              const isDentEntity = target.shardVariant !== undefined
+                  && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
+              // Rock tiles / asteroids / rock-shards also count "hits, not
+              // damage": their maxHealth is a hit ceiling (ROCK_BREAK), so
+              // every shot costs exactly 1 HP regardless of weapon power and
+              // the probabilistic break rolls per hit.  (rock-tile is already
+              // a dent entity; rock-shard has no dent policy, so name it.)
+              const isHitCounted = isDentEntity
+                  || target.shardVariant === 'rock-shard';
               if (!isIndestructibleTile) {
-                  target.health -= projDmg;
+                  target.health -= isHitCounted ? 1 : projDmg;
+                  // Dent-policy entities deform on every damage event,
+                  // even the killing blow — the spawned mobile shard
+                  // inherits the dented polygon at the post-deformation
+                  // size.  Impact position is the projectile's current
+                  // world position; applyDentStep finds the closest
+                  // vertex.
+                  PhysicsSystem.applyDentStep(target, proj.position);
+                  // Stamp lastImpactVelocity on every dent hit (not
+                  // only the killing blow) so intermediate shard
+                  // spawns at HP thresholds know which direction to
+                  // launch the freed chunk.  This was previously
+                  // only set inside the `target.health <= 0` block
+                  // below.
+                  if (isDentEntity && target.type === EntityType.STRUCTURE && proj.velocity) {
+                      target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+                      target.lastImpactDamage = proj.damage ?? 1;
+                  }
+                  // Mobile dent shards (plastic-shard, metal-shard) get
+                  // a velocity kick from the projectile — they're free-
+                  // floating, so a hit should both deform AND push.
+                  // Push magnitude scales inversely with shard mass so
+                  // heavier metal shards take a smaller kick than the
+                  // lighter plastic.  Static tiles (mass = Infinity)
+                  // are filtered out by the finite-mass check.
+                  //
+                  if (isDentEntity && target.mass !== Infinity && proj.velocity) {
+                      const pushFactor = 0.20 / Math.max(1, target.mass / 10);
+                      target.velocity.x += proj.velocity.x * pushFactor;
+                      target.velocity.y += proj.velocity.y * pushFactor;
+                  }
+                  // Probabilistic early break for rock tiles / asteroids /
+                  // rock-shards (no-op for other variants).  Zeroes health
+                  // on a successful roll so the shared death check below
+                  // shatters it on this hit.
+                  PhysicsSystem.maybeRockEarlyBreak(target);
               }
               target.hitFlash = 0.1;
+              // Hit feedback — uncapped damage-scaled knockback + stagger so
+              // the hit reads (post-armor projDmg, so chip hits kick weakly).
+              if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
+                  const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                  // POISE ((h)): a heavy hull takes a scaled-down shove and only
+                  // staggers on a real hit, so a chip stream can neither push it
+                  // off its line nor hold it in permanent hit-stun.  Absent →
+                  // unchanged behaviour for every rank-and-file enemy.
+                  const poise = target.poise;
+                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG * (poise ? poise.knockScale : 1);
+                  target.velocity.x += (proj.velocity.x / vmag) * kick;
+                  target.velocity.y += (proj.velocity.y / vmag) * kick;
+                  if (!poise || projDmg >= poise.stunDamage) target.hitStun = HIT_FEEDBACK.STUN_SEC;
+                  target.hitFlash = 0.18; // bigger flash + scale-punch on impact
+                  // Scale-punch magnitude ∝ damage / maxHealth, so a chip on a
+                  // tanky beast barely flinches and a heavy hit on a frail enemy snaps.
+                  target.hitReact = hitReactStrength(projDmg, target.maxHealth ?? target.health);
+                  target.provoked = true; // Stage 3a: a hit aggros a passive enemy
+                  // Third-party retaliation (Stage 5): the bubble targets its
+                  // attacker (player or the firing enemy), retargeting on each
+                  // new hit.
+                  if (target.thirdParty && proj.ownerId) target.aggroTargetId = proj.ownerId;
+                  // A shot to a LATCHED bubble shakes it loose (→ sick) — read by
+                  // GameEngine.updateBubbles.
+                  if (target.attachedToId !== undefined) target.bubbleKnockFree = true;
+              }
           }
 
           if (onShake && target.type !== EntityType.STRUCTURE) {
-              const shakeAmount = target.type === EntityType.PLAYER
-                  ? COLLISION_CONFIG.SHAKE.MEDIUM
-                  : COLLISION_CONFIG.SHAKE.MICRO;
-              onShake(shakeAmount);
+              if (target.type === EntityType.PLAYER) {
+                  // Heavy shots wallop, chip shots barely register — scale the
+                  // shake AND shove the player along the shot direction by the
+                  // projectile's intrinsic damage (so a slug felt even through
+                  // the shield).
+                  const impactDmg = proj.damage || 1;
+                  onShake(Math.min(HIT_FEEDBACK.PLAYER_SHAKE_MAX,
+                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG));
+                  if (proj.velocity && !target.isExploding) {
+                      const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
+                      target.velocity.x += (proj.velocity.x / vmag) * kick;
+                      target.velocity.y += (proj.velocity.y / vmag) * kick;
+                      target.hitFlash = Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012));
+                  }
+              } else {
+                  onShake(COLLISION_CONFIG.SHAKE.MICRO);
+              }
           }
 
           if (onHit) onHit(proj.position, proj, target);
-          if (onDamage) onDamage(target.position, proj.damage || 1, target);
+          // Armored enemies show the REDUCED number (chip feedback); others
+          // show the raw projectile damage.
+          const shownDmg = target.armor ? projDmg : (proj.damage || 1);
+          if (onDamage) onDamage(target.position, shownDmg, target, proj.position);
 
           if (target.health <= 0) {
+              // Player-attributed kill stamp — handleEntityDeath awards
+              // shard/tile destruction points only when this is set.
+              if (proj.ownerType === EntityType.PLAYER) target.killedByPlayer = true;
+              // Rival kill (Stage 7): deny the player this enemy's points + combo.
+              else if (proj.hitsEnemies && target.type === EntityType.ENEMY && !target.isRival) target.killedByRival = true;
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
               if (target.type === EntityType.STRUCTURE) {
@@ -1135,18 +3043,43 @@ export class PhysicsSystem {
               const rdy = enemy.velocity.y - target.velocity.y;
               const ramImpact = Math.sqrt(rdx * rdx + rdy * rdy);
               // Below shield damage threshold: contact flash only, no damage
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD) {
+              // Per-archetype contact damage (rushers hurt; ranged enemies
+              // have 0).  No damage below the impact-speed threshold either.
+              const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+              // Die-on-contact gnats (Swarm): pop on the FIRST touch, dealing
+              // their small bite once (regardless of impact speed, so a clinging
+              // gnat can't friction-chip), then die — a discrete hit + visible
+              // pop instead of an endless cling, and it self-clears the cloud.
+              if (enemy.diesOnContact && !enemy.isExploding) {
+                  if (contact > 0) {
+                      let bite = contact * (enemy.damageMult ?? 1);
+                      if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
+                          const absorbed = Math.min(target.shield!, bite);
+                          target.shield! -= absorbed;
+                          bite -= absorbed;
+                          target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                          target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                      }
+                      if (bite > 0) { target.health -= bite; target.hitFlash = 0.2; }
+                      if (onShake) onShake(COLLISION_CONFIG.SHAKE.MICRO);
+                      if (target.health <= 0 && onDeath) onDeath(target);
+                  }
+                  enemy.health = 0;
+                  if (onDeath) onDeath(enemy); // pop (death FX + score)
+              } else if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding) {
                   // flash already handled by the general contact flash below
               } else {
-                  let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-                  if ((target.shield ?? 0) > 0) {
+                  // Per-wave enemy damage scaling rides enemy.damageMult.
+                  const ramBase = contact * (enemy.damageMult ?? 1);
+                  let ramDmg = ramBase;
+                  if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
                       ramDmg -= absorbed;
                       target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                       target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                   }
-                  if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
+                  if (onDamage) onDamage(target.position, ramBase, target);
                   if (ramDmg > 0) {
                       target.health -= ramDmg;
                       target.hitFlash = 0.2;
@@ -1155,6 +3088,15 @@ export class PhysicsSystem {
                   if (target.health <= 0 && onDeath) {
                       onDeath(target);
                   }
+              }
+              // Kamikaze detonation (Stage 0): a bomber that reaches the player
+              // detonates INSTANTLY at the contact point — flag it and route the
+              // death now (handleEntityDeath fires the AoE shockwave), so it
+              // never bounces away to explode at a distance.  explosionRadius is
+              // the bomber marker; the !isExploding guard fires this exactly once.
+              if (enemy.explosionRadius !== undefined && !enemy.isExploding) {
+                  enemy.detonateOnDeath = true;
+                  if (onDeath) onDeath(enemy);
               }
           }
       }
@@ -1220,9 +3162,11 @@ export class PhysicsSystem {
       // into glass shards (via onDeath → spawnDrops → spawnGlassShards)
       // and then regenerates on the normal 12 s timer (via onDeath → the
       // STRUCTURE branch of handleEntityDeath that queues pendingRegens).
-      // The player loses half its velocity to the tile break.
+      // Static tiles cost the player a fixed CRASH_VELOCITY_RETENTION
+      // cut per crash-hit; mobile shards cost a mass-scaled cut and
+      // receive the shed momentum (conserved hand-off, see below).
       //
-      // Tiered tiles (reinforced/heavy) with maxHealth > 1 consume one
+      // Tiered tiles (plastic/metal) with maxHealth > 1 consume one
       // health tier per above-threshold crash rather than shattering in
       // one hit — the tile only onDeath's when health hits 0.
       //
@@ -1236,20 +3180,49 @@ export class PhysicsSystem {
           const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
-              player.velocity.x *= 0.5;
-              player.velocity.y *= 0.5;
+              // Stamp the pre-retention crash velocity so the death
+              // pipeline (ShardSystem.shatter / spawnGlassShards)
+              // scatters debris along the player's heading — same
+              // contract as the projectile-hit stamp further down.
+              structure.lastImpactVelocity = { x: player.velocity.x, y: player.velocity.y };
+              // Mobile shards receive the momentum the player sheds.
+              // The player's speed loss scales with the mass ratio (a
+              // pebble barely slows the player; rocks at or above
+              // player mass cost the full retention cut), and the same
+              // Δp lands on the shard — so a killed rock's fragments
+              // inherit real forward velocity instead of scattering
+              // from rest, and a survivor gets knocked downrange.
+              let retention = STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
+              if (structure.mass !== Infinity) {
+                  const lossFrac = (1 - retention)
+                      * Math.min(1, structure.mass / player.mass);
+                  retention = 1 - lossFrac;
+                  const dvFactor = lossFrac * (player.mass / structure.mass);
+                  structure.velocity.x += player.velocity.x * dvFactor;
+                  structure.velocity.y += player.velocity.y * dvFactor;
+              }
+              player.velocity.x *= retention;
+              player.velocity.y *= retention;
               structure.hitFlash = 0.1;
-              if (isIndestructible) {
-                  // Permanent wall — signal the hit for SFX/shake but don't
-                  // touch health or queue destruction.
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+              if (isIndestructible || structure.dragonSegment === true) {
+                  // Permanent wall — OR a dragon body segment, which only breaks
+                  // when SHOT, not by crashing into it.  Signal the hit (flash /
+                  // shake / the player already shed velocity above) but leave its
+                  // health alone and queue no destruction.
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }
               structure.health -= 1;
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+              PhysicsSystem.applyDentStep(structure, player.position);
+              // A crash is a hit too — let rock break early on the same
+              // rising-odds roll as a blaster shot (no-op for other tiles).
+              PhysicsSystem.maybeRockEarlyBreak(structure);
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               if (structure.health <= 0) {
                   structure.health = 0;
                   structure.active = false;
+                  // Crash kills are player-attributed for scoring.
+                  structure.killedByPlayer = true;
                   if (structure.mass === Infinity) {
                       this.removeStaticEntity(structure);
                   }
@@ -1257,9 +3230,23 @@ export class PhysicsSystem {
               }
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
-              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
-              player.health -= envDmg;
-              player.hitFlash = 0.1;
+              // Light bump — tile doesn't break, but the player takes
+              // environmental damage proportional to the impact speed.
+              // Route through shield first (same model as enemy-ram
+              // damage above): absorb up to the current shield value,
+              // then bleed the remainder into health.
+              let envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              if ((player.shield ?? 0) > 0) {
+                  const absorbed = Math.min(player.shield!, envDmg);
+                  player.shield! -= absorbed;
+                  envDmg -= absorbed;
+                  player.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                  player.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+              }
+              if (envDmg > 0) {
+                  player.health -= envDmg;
+                  player.hitFlash = 0.1;
+              }
           }
       }
 
@@ -1305,11 +3292,12 @@ export class PhysicsSystem {
               structure.hitFlash = 0.1;
               if (isIndestructible) {
                   // Asteroid bounces off a permanent wall — no damage.
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
                   structure.health -= 1;
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  PhysicsSystem.applyDentStep(structure, asteroid.position);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
                       structure.health = 0;
                       structure.active = false;
@@ -1342,7 +3330,7 @@ export class PhysicsSystem {
                   structure.health -= 1;
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
                       structure.health = 0;
                       structure.active = false;
@@ -1372,19 +3360,26 @@ export class PhysicsSystem {
           }
       }
       
+      // Mass-bias-compressed impulse split (velocity step only — the
+      // positional correction above keeps the true mass split).  See
+      // COLLISION_CONFIG.MASS_BIAS_EXPONENT.  invMass = 0 for static
+      // entities survives the pow unchanged (0^k = 0), so infinite-
+      // mass behaviour is identical.
+      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
       const j = -(1 + ELASTICITY) * velAlongNormal;
-      const impulse = j / totalInvMass;
+      const impulse = j / (effInvMassA + effInvMassB);
 
       const ix = nx * impulse;
       const iy = ny * impulse;
 
       if (a.mass !== Infinity) {
-          a.velocity.x -= ix * invMassA;
-          a.velocity.y -= iy * invMassA;
+          a.velocity.x -= ix * effInvMassA;
+          a.velocity.y -= iy * effInvMassA;
       }
       if (b.mass !== Infinity) {
-          b.velocity.x += ix * invMassB;
-          b.velocity.y += iy * invMassB;
+          b.velocity.x += ix * effInvMassB;
+          b.velocity.y += iy * effInvMassB;
       }
   }
 
@@ -1396,8 +3391,23 @@ export class PhysicsSystem {
           ? SHIELD_CONSTANTS.COLLISION_MULTIPLIER : 1;
 
       if (e.polygonPoints && e.polygonPoints.length > 0) {
-          const cos = Math.cos(e.rotation);
-          const sin = Math.sin(e.rotation);
+          // Static entities (mass === Infinity) never rotate after spawn, so
+          // their cos/sin are cached on first use and re-used across every
+          // future collision pair the entity participates in.  Dynamic
+          // entities take the trig path normally — their rotation can change
+          // each substep so caching would be unsafe.
+          let cos: number, sin: number;
+          if (e.mass === Infinity && e._satCacheCos !== undefined) {
+              cos = e._satCacheCos;
+              sin = e._satCacheSin!;
+          } else {
+              cos = Math.cos(e.rotation);
+              sin = Math.sin(e.rotation);
+              if (e.mass === Infinity) {
+                  e._satCacheCos = cos;
+                  e._satCacheSin = sin;
+              }
+          }
 
           // Warn once if an entity ever exceeds the vertex cap — the break
           // below still protects against buffer overrun, but a truncated
@@ -1432,37 +3442,68 @@ export class PhysicsSystem {
       return count;
   }
 
-  private fillAxes(vertsA: Vector2[], countA: number, vertsB: Vector2[], countB: number, bufferAxes: Vector2[]): number {
+  private fillAxes(
+      vertsA: Vector2[], countA: number,
+      vertsB: Vector2[], countB: number,
+      bufferAxes: Vector2[],
+      eA?: GameEntity, eB?: GameEntity,
+  ): number {
       let axisIdx = 0;
-      
-      // Axes for A
-      for (let i = 0; i < countA; i++) {
-          if (axisIdx >= bufferAxes.length) break;
-          const p1 = vertsA[i];
-          const p2 = vertsA[(i + 1) % countA];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0.001) {
-              bufferAxes[axisIdx].x = -dy / len;
-              bufferAxes[axisIdx].y = dx / len;
-              axisIdx++;
-          }
-      }
-      // Axes for B
-      for (let i = 0; i < countB; i++) {
-          if (axisIdx >= bufferAxes.length) break;
-          const p1 = vertsB[i];
-          const p2 = vertsB[(i + 1) % countB];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0.001) {
-              bufferAxes[axisIdx].x = -dy / len;
-              bufferAxes[axisIdx].y = dx / len;
-              axisIdx++;
-          }
-      }
+      axisIdx = this.fillEntityAxes(vertsA, countA, bufferAxes, axisIdx, eA);
+      axisIdx = this.fillEntityAxes(vertsB, countB, bufferAxes, axisIdx, eB);
       return axisIdx;
+  }
+
+  /**
+   * Append normalised edge normals for ONE entity to bufferAxes.  Static
+   * entities (mass === Infinity) get a permanent cached axis list stamped
+   * onto the entity on first use — their polygon shape and rotation are
+   * frozen at spawn, so the world-space axes never change.  Subsequent
+   * collisions involving the same static entity skip the sqrt+inverse-
+   * multiply per edge entirely and only pay a memcpy.
+   *
+   * Dynamic entities (and callers that don't pass an entity ref) take the
+   * compute path, identical to the original fillAxes loop.
+   */
+  private fillEntityAxes(
+      verts: Vector2[], count: number,
+      bufferAxes: Vector2[], startIdx: number,
+      e: GameEntity | undefined,
+  ): number {
+      // Fast path: cached world-space axes for static entities.
+      if (e && e.mass === Infinity && e._satCacheAxes !== undefined) {
+          const cache = e._satCacheAxes;
+          let idx = startIdx;
+          for (let i = 0; i < cache.length && idx < bufferAxes.length; i++) {
+              bufferAxes[idx].x = cache[i].x;
+              bufferAxes[idx].y = cache[i].y;
+              idx++;
+          }
+          return idx;
+      }
+      const wantCache = e !== undefined && e.mass === Infinity;
+      const newCache: Vector2[] | null = wantCache ? [] : null;
+      let idx = startIdx;
+      for (let i = 0; i < count; i++) {
+          if (idx >= bufferAxes.length) break;
+          const p1 = verts[i];
+          const p2 = verts[(i + 1) % count];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              const ax = -dy * inv;
+              const ay = dx * inv;
+              bufferAxes[idx].x = ax;
+              bufferAxes[idx].y = ay;
+              idx++;
+              if (newCache) newCache.push({ x: ax, y: ay });
+          }
+      }
+      if (wantCache && e) {
+          e._satCacheAxes = newCache!;
+      }
+      return idx;
   }
 }

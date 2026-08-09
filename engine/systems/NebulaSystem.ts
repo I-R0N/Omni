@@ -1,5 +1,5 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
+import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, randomPlasticShardShade, nebulaHueToShardVariant, NEBULA_CONDENSE } from '../../constants';
 import {
     TileGenerator,
     HEX_SIZE,
@@ -23,12 +23,14 @@ import { nextId } from './IdAllocator';
 import { ParticleSystem } from './ParticleSystem';
 import { DropSystem } from './DropSystem';
 import { PhysicsSystem } from './PhysicsSystem';
+import type { PerfController } from './PerfController';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
+import { getCollisionR } from '../entityCache';
 
 /**
  * NebulaSystem — owns everything nebula-specific: shatter bursts, shard
  * gravity/merge dynamics, tile regeneration with rule-based colour,
- * shard→tile transmutation, and the low-frequency ammo drop roll.
+ * shard→tile transmutation, and the low-frequency salvage drop roll.
  *
  * Extracted from GameEngine as part of the Phase-2/3 style system split
  * introduced by the engine-upgrade PR.  Stage 2 of the shard-system
@@ -42,14 +44,14 @@ import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../
  *   - `neighborCountsDirty` flag for the interior-darken render rule
  *
  * State that stays on the entity itself (ticked by PhysicsSystem):
- *   - `nebulaFadeTimer`, `nebulaSpawnTimer`, `nebulaImpactCooldown`,
+ *   - `mergeFadeTimer`, `nebulaSpawnTimer`, `nebulaImpactCooldown`,
  *     `linearDamping`, `angularDamping` — per-entity fields.  PhysicsSystem
  *     still handles the per-tick decrement + damping pass for these,
  *     because they live alongside the standard velocity integration.
  *
  * Dependencies injected via constructor:
  *   - ParticleSystem for merge-event glimmer bursts.
- *   - DropSystem for ammo drops + wave-scaled ammo type lookup.
+ *   - DropSystem for salvage drops.
  */
 export class NebulaSystem {
     /**
@@ -72,10 +74,48 @@ export class NebulaSystem {
      */
     private neighborCountsDirty: boolean = true;
 
+    // DBG-toggleable per-frame lerp alphas for the continuous color
+    // equilibration pass.  Tiles drift toward their 6-hex-neighbour
+    // weighted average (anchor role); shards drift toward the
+    // nearest nebula-tile (catch-up role).  Both default 0 (off);
+    // cycled via the DBG TileBlend / ShardBlend buttons through
+    // NEBULA_CONSTANTS.BLEND_*_ALPHA_CYCLE.
+    public tileBlendAlpha: number = NEBULA_CONSTANTS.BLEND_TILE_ALPHA;
+    public shardBlendAlpha: number = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA;
+    /** DBG gate for the plastic-equilibration block at the end of
+     *  equilibrateColors.  Independent of the nebula tile/shard
+     *  alphas — plastic still uses the same `tileBlendAlpha` /
+     *  `shardBlendAlpha` for its lerp rate when enabled, but flipping
+     *  this off skips the plastic passes entirely so a dev can
+     *  isolate the nebula-only behaviour or freeze plastic colours
+     *  at their spawn values for a screenshot.  Default ON. */
+    public plasticBlendEnabled: boolean = true;
+
+    // Frame-skip cadence for the color-equilibration pass.  Same
+    // shape as PhysicsSystem.shardPairFrameInterval: cycled through
+    // NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE via the DBG
+    // ColorBlend int button.  0 = AUTO (selects from active-count
+    // thresholds).  Counter ticks once per equilibrate call
+    // regardless of whether the pass actually fires, so the phase
+    // is stable across cadence changes.
+    public colorBlendFrameInterval: number = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL;
+    public lastEffectiveColorBlendInterval: number = 1;
+
+    /**
+     * Central performance controller.  Drives the color-equilibration
+     * cadence gate (`colorBlend` task) and the neighbour-count recompute
+     * throttle (`nebulaNeighbors` task).  Null only pre-wire.
+     */
+    private perfController: PerfController | null = null;
+
     constructor(
         private particles: ParticleSystem,
         private drops: DropSystem,
     ) {}
+
+    public setPerfController(pc: PerfController): void {
+        this.perfController = pc;
+    }
 
     /**
      * Hard reset — called on game restart so a fresh run doesn't inherit
@@ -93,40 +133,35 @@ export class NebulaSystem {
      * NEBULA and NEBULA_SHARD entities here instead of the generic
      * drops / particle-burst path.  Nebulae are the only entity type
      * that doesn't spawn glass or asteroid shards on death — they
-     * produce polygonal nebula shards + an occasional ammo drop.
+     * produce polygonal nebula shards + an occasional salvage drop.
      *
      * @param entities     Current map's entities list (shards are appended).
-     * @param activeDrops  Drop-lookup cache (ammo drop registers here too).
+     * @param activeDrops  Drop-lookup cache (salvage drop registers here too).
      * @param entity       The NEBULA tile or NEBULA_SHARD that just died.
-     * @param waveIndex    Current wave number — used to pick the ammo tier.
      */
     public handleDeath(
         entities: GameEntity[],
         activeDrops: GameEntity[],
         entity: GameEntity,
-        waveIndex: number,
     ): void {
         // Stage 3: shatter is owned by ShardSystem and is invoked
         // directly from GameEngine.handleEntityDeath via
         // `this.shards.shatter(entity, entities)`.  This system
         // only handles the nebula-specific bookkeeping +
-        // ammo-drop roll.
+        // salvage-drop roll.
 
         // A destroyed tile removes itself from its neighbours' counts;
         // flag for recompute on the next frame.
         if (entity.shardVariant === 'nebula-tile') this.neighborCountsDirty = true;
 
-        // Low-frequency ammo drop — the ONLY standard drop nebulae produce.
+        // Low-frequency salvage drop — the ONLY standard drop nebulae produce.
         // Roll is independent of the shard math so shard count/size is
         // unaffected; the drop (if any) is a bonus alongside the shards.
-        if (Math.random() < NEBULA_CONSTANTS.AMMO_DROP_CHANCE) {
-            const ammoType = this.drops.getAsteroidAmmoType(waveIndex);
-            this.drops.spawnAmmoDrop(
+        if (Math.random() < NEBULA_CONSTANTS.SALVAGE_DROP_CHANCE) {
+            this.drops.spawnSalvageDrop(
                 entities,
                 activeDrops,
                 entity.position,
-                ammoType,
-                NEBULA_CONSTANTS.AMMO_PER_NEBULA,
                 entity.lastImpactVelocity,
             );
         }
@@ -163,12 +198,62 @@ export class NebulaSystem {
 
         // Refresh every tile's neighbour count if something changed
         // since last frame.  Cheap — O(N) over active tiles, no
-        // recompute when nothing moved.
-        if (this.neighborCountsDirty) {
+        // recompute when nothing moved.  The PerfController's
+        // `nebulaNeighbors` task throttles the recompute under load: the
+        // dirty flag stays set until an allowed step, so counts go stale
+        // (the interior-darken render rule holds its last value — no
+        // flicker) rather than recomputing every frame.
+        const neighborsAllowed = this.perfController
+            ? this.perfController.shouldRun('nebulaNeighbors')
+            : true;
+        if (this.neighborCountsDirty && neighborsAllowed) {
             if (this.recomputeNeighborCounts(entities) > 0) {
                 this.neighborCountsDirty = false;
             }
         }
+
+        // Continuous color equilibration — DBG-gated by per-alpha
+        // sliders (fully no-op when both are 0) and by the cadence
+        // interval (counter % interval === 0).  Tiles drift toward
+        // their 6-hex-neighbour weighted average; shards drift
+        // toward the nearest tile.  Tiles are anchors (shards have
+        // no influence on tiles), so the cluster's structural hue
+        // stays stable while transient shards visually catch up.
+        if ((this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)
+            && this.shouldRunColorBlendThisStep()) {
+            this.equilibrateColors(entities);
+        }
+    }
+
+    /**
+     * Cadence gate for the color-equilibration pass.  Mirrors
+     * PhysicsSystem.shouldRunShardPairsThisStep:
+     *   - Manual interval (≥1): use as-is.
+     *   - AUTO (0): re-select interval from the previous run's
+     *     entity count using BLEND_FRAME_INTERVAL_AUTO_THRESHOLDS.
+     * Counter ticks even on skip frames so changing the interval
+     * doesn't desync phase.  AUTO recompute is lazy — only walks
+     * the entity list on actual run-frames, so skip frames stay
+     * O(1).
+     */
+    private shouldRunColorBlendThisStep(): boolean {
+        // Delegated to the PerfController's `colorBlend` task.  The
+        // manual DBG override (colorBlendFrameInterval) is synced into
+        // the controller before beginStep, so 0 = AUTO delegates here
+        // and a manual pin still wins.  Note: the AUTO interval is now
+        // driven by the global load signal (total entities + cell
+        // density) rather than the old per-system active-nebula count —
+        // entity count is a sound proxy on nebula-heavy maps and the
+        // single-coordinator model is the point.  interval × alpha still
+        // sets the visual blend rate, so a higher interval intentionally
+        // slows equilibration (no skip-compensation here — equilibration
+        // is meant to ease off under load).
+        if (this.perfController) {
+            this.lastEffectiveColorBlendInterval = this.perfController.effectiveInterval('colorBlend');
+            return this.perfController.shouldRun('colorBlend');
+        }
+        this.lastEffectiveColorBlendInterval = 1;
+        return true;
     }
 
     /**
@@ -210,6 +295,253 @@ export class NebulaSystem {
         return tilesProcessed;
     }
 
+    /**
+     * Continuous color equilibration pass.  Called from update() at
+     * the fixed-step sim cadence whenever either alpha is non-zero.
+     *
+     * Tile path (anchor):
+     *   - For each active nebula-tile, gather 6-hex-neighbour
+     *     tile hues weighted by disc area.
+     *   - Circular-lerp the tile's own hue toward the neighbour
+     *     average by tileBlendAlpha.
+     *   - Reuses circularHueAverage / circularLerpHue — same
+     *     primitives as computeRegeneratedComposition.
+     *
+     * Shard path (catch-up toward anchors):
+     *   - For each active nebula-shard, find the nearest active
+     *     nebula-tile in the 6-hex neighbourhood of its current
+     *     position (origin cell + neighbours).
+     *   - Circular-lerp the shard's hue toward that tile's hue by
+     *     shardBlendAlpha.  Skip if no tile is nearby.
+     *
+     * Shards do NOT influence tiles — anchors stay stable.  Single-
+     * stop compositions are produced (matching today's regen
+     * behaviour); the renderer's cached blends are invalidated only
+     * when the hue actually changes by more than QUANTIZE_EPSILON.
+     */
+    private equilibrateColors(entities: GameEntity[]): void {
+        // Ensure the hex-keyed tile index is built — `update()`
+        // resets it to null at the top of the frame; if neighbour-
+        // counts didn't run (nothing dirty) we build it ourselves.
+        if (!this.nebulaGridIndex) {
+            this.nebulaGridIndex = this.buildNebulaGridIndex(entities);
+        }
+        const index = this.nebulaGridIndex;
+
+        // Quantization gate — hue changes below ~0.1° are imperceptible
+        // and not worth the string format + cache invalidation.
+        const QUANTIZE_EPSILON = 0.1;
+
+        // ── Tile → tile ─────────────────────────────────────────────
+        if (this.tileBlendAlpha > 0) {
+            const alpha = this.tileBlendAlpha;
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if (e.shardVariant !== 'nebula-tile') continue;
+                if (!e.active) continue;
+                if (e.mergeFadeTimer !== undefined) continue;
+                if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
+                if (!e.nebulaColorComposition || !e.nebulaColorComposition[0]) continue;
+
+                const oldHue = clampHueToPalette(hexToHueDeg(e.nebulaColorComposition[0].hex));
+
+                // Gather neighbour hues with area weights.
+                const neighborEntries: Array<{ hue: number; weight: number }> = [];
+                const neighbors = TileGenerator.getHexNeighbors(e.nebulaGridCol, e.nebulaGridRow);
+                for (const n of neighbors) {
+                    const key = (n.c << 16) | (n.r & 0xFFFF);
+                    const nTile = index.get(key);
+                    if (!nTile || !nTile.active || nTile.mergeFadeTimer !== undefined) continue;
+                    if (!nTile.nebulaColorComposition || !nTile.nebulaColorComposition[0]) continue;
+                    const nHue = clampHueToPalette(hexToHueDeg(nTile.nebulaColorComposition[0].hex));
+                    const r = getCollisionR(nTile);
+                    neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
+                }
+                if (neighborEntries.length === 0) continue; // isolated tile keeps its hue
+
+                const avgHue = circularHueAverage(neighborEntries);
+                if (avgHue === null) continue;
+
+                const newHue = circularLerpHue(oldHue, 1 - alpha, avgHue, alpha);
+                if (circularHueDistance(newHue, oldHue) < QUANTIZE_EPSILON) continue;
+
+                const newHex = paletteHueToHex(newHue);
+                e.nebulaColorComposition = [{ hex: newHex, weight: 1 }];
+                e.color = newHex;
+                e.nebulaBlendedHex = newHex;
+                e.nebulaTintedKey = undefined;
+                e.nebulaCachedTinted = undefined;
+            }
+        }
+
+        // ── Shard → nearest tile ────────────────────────────────────
+        if (this.shardBlendAlpha > 0) {
+            const alpha = this.shardBlendAlpha;
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if (e.shardVariant !== 'nebula-shard') continue;
+                if (!e.active) continue;
+                if (e.mergeFadeTimer !== undefined) continue;
+                if (!e.nebulaColorComposition || !e.nebulaColorComposition[0]) continue;
+
+                // Probe origin cell + 6 neighbours for the nearest active tile.
+                const origin = pixelToHexCoord(e.position.x, e.position.y);
+                let bestTile: GameEntity | null = null;
+                let bestDistSq = Infinity;
+
+                const probeCell = (c: number, r: number) => {
+                    const key = (c << 16) | (r & 0xFFFF);
+                    const t = index.get(key);
+                    if (!t || !t.active || t.mergeFadeTimer !== undefined) return;
+                    if (!t.nebulaColorComposition || !t.nebulaColorComposition[0]) return;
+                    const dx = wrapDeltaX(e.position.x, t.position.x);
+                    const dy = wrapDeltaY(e.position.y, t.position.y);
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < bestDistSq) { bestDistSq = d2; bestTile = t; }
+                };
+                probeCell(origin.c, origin.r);
+                for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+                    probeCell(n.c, n.r);
+                }
+                if (!bestTile) continue;
+
+                const oldHue = clampHueToPalette(hexToHueDeg(e.nebulaColorComposition[0].hex));
+                const targetHue = clampHueToPalette(hexToHueDeg(bestTile!.nebulaColorComposition![0].hex));
+
+                const newHue = circularLerpHue(oldHue, 1 - alpha, targetHue, alpha);
+                if (circularHueDistance(newHue, oldHue) < QUANTIZE_EPSILON) continue;
+
+                const newHex = paletteHueToHex(newHue);
+                e.nebulaColorComposition = [{ hex: newHex, weight: 1 }];
+                e.color = newHex;
+                e.nebulaBlendedHex = newHex;
+                e.nebulaTintedKey = undefined;
+                e.nebulaCachedTinted = undefined;
+            }
+        }
+
+        // ── Plastic equilibration ────────────────────────────────────
+        // Plastic tiles and shards participate in the same continuous-
+        // blending pipeline as nebula, but use RGB lerp instead of
+        // HSL/hue arithmetic — plastic colours live within a narrow
+        // palette family (amber / blue / etc.) and routing them
+        // through paletteHueToHex would drift them out of the palette
+        // into nebula's fixed saturation/lightness.  Direct RGB lerp
+        // keeps each palette's character intact while smoothing
+        // neighbour-to-neighbour variation over time.
+        //
+        // Gate: independent DBG toggle (plasticBlendEnabled) lets a
+        // dev freeze plastic colours at spawn values while leaving
+        // nebula blending running, useful for isolating nebula-only
+        // behaviour or capturing screenshots before plastic
+        // homogenises.
+        if (this.plasticBlendEnabled && (this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)) {
+            // Build per-call hex-coord index of plastic-tiles.  Reused
+            // by both the tile-pass and shard-pass below.  Cheap —
+            // plastic-tile counts are bounded by MAP_POPULATION
+            // cluster sizes (~50-150 typical).  Bail when empty so
+            // non-plastic maps pay zero cost after the walk.
+            const plasticTileIndex = new Map<number, GameEntity>();
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if (e.shardVariant !== 'plastic-tile') continue;
+                if (!e.active) continue;
+                if (e.mergeFadeTimer !== undefined) continue;
+                const hc = pixelToHexCoord(e.position.x, e.position.y);
+                const key = (hc.c << 16) | (hc.r & 0xFFFF);
+                plasticTileIndex.set(key, e);
+            }
+
+            if (plasticTileIndex.size > 0) {
+                // ── Plastic-tile → plastic-tile neighbours ───────────
+                if (this.tileBlendAlpha > 0) {
+                    const alpha = this.tileBlendAlpha;
+                    for (const tile of plasticTileIndex.values()) {
+                        const hc = pixelToHexCoord(tile.position.x, tile.position.y);
+                        const neighbors = TileGenerator.getHexNeighbors(hc.c, hc.r);
+                        let sumR = 0, sumG = 0, sumB = 0, cnt = 0;
+                        for (let ni = 0; ni < neighbors.length; ni++) {
+                            const n = neighbors[ni];
+                            const key = (n.c << 16) | (n.r & 0xFFFF);
+                            const nTile = plasticTileIndex.get(key);
+                            if (!nTile) continue;
+                            const c = nTile.color;
+                            sumR += parseInt(c.slice(1, 3), 16);
+                            sumG += parseInt(c.slice(3, 5), 16);
+                            sumB += parseInt(c.slice(5, 7), 16);
+                            cnt++;
+                        }
+                        if (cnt === 0) continue;
+                        const avgR = sumR / cnt, avgG = sumG / cnt, avgB = sumB / cnt;
+                        const c0 = tile.color;
+                        const r0 = parseInt(c0.slice(1, 3), 16);
+                        const g0 = parseInt(c0.slice(3, 5), 16);
+                        const b0 = parseInt(c0.slice(5, 7), 16);
+                        const r1 = Math.round(r0 * (1 - alpha) + avgR * alpha);
+                        const g1 = Math.round(g0 * (1 - alpha) + avgG * alpha);
+                        const b1 = Math.round(b0 * (1 - alpha) + avgB * alpha);
+                        // Skip the write when the per-channel change is
+                        // below 1 — matches the nebula QUANTIZE_EPSILON
+                        // role (avoid pointless string allocations).
+                        if (r1 === r0 && g1 === g0 && b1 === b0) continue;
+                        tile.color = '#'
+                          + r1.toString(16).padStart(2, '0')
+                          + g1.toString(16).padStart(2, '0')
+                          + b1.toString(16).padStart(2, '0');
+                    }
+                }
+
+                // ── Plastic-shard → nearest plastic-tile ─────────────
+                if (this.shardBlendAlpha > 0) {
+                    const alpha = this.shardBlendAlpha;
+                    for (let i = 0; i < entities.length; i++) {
+                        const e = entities[i];
+                        if (e.shardVariant !== 'plastic-shard') continue;
+                        if (!e.active) continue;
+                        if (e.mergeFadeTimer !== undefined) continue;
+
+                        const origin = pixelToHexCoord(e.position.x, e.position.y);
+                        let bestTile: GameEntity | null = null;
+                        let bestDistSq = Infinity;
+                        const probeCell = (c: number, r: number) => {
+                            const key = (c << 16) | (r & 0xFFFF);
+                            const t = plasticTileIndex.get(key);
+                            if (!t) return;
+                            const dx = wrapDeltaX(e.position.x, t.position.x);
+                            const dy = wrapDeltaY(e.position.y, t.position.y);
+                            const d2 = dx * dx + dy * dy;
+                            if (d2 < bestDistSq) { bestDistSq = d2; bestTile = t; }
+                        };
+                        probeCell(origin.c, origin.r);
+                        const ns = TileGenerator.getHexNeighbors(origin.c, origin.r);
+                        for (let ni = 0; ni < ns.length; ni++) {
+                            probeCell(ns[ni].c, ns[ni].r);
+                        }
+                        if (!bestTile) continue;
+                        // Cast: bestTile is set inside the closure but
+                        // TS's flow narrowing can't see through it.
+                        const target = (bestTile as GameEntity).color;
+                        const tR = parseInt(target.slice(1, 3), 16);
+                        const tG = parseInt(target.slice(3, 5), 16);
+                        const tB = parseInt(target.slice(5, 7), 16);
+                        const c0 = e.color;
+                        const r0 = parseInt(c0.slice(1, 3), 16);
+                        const g0 = parseInt(c0.slice(3, 5), 16);
+                        const b0 = parseInt(c0.slice(5, 7), 16);
+                        const r1 = Math.round(r0 * (1 - alpha) + tR * alpha);
+                        const g1 = Math.round(g0 * (1 - alpha) + tG * alpha);
+                        const b1 = Math.round(b0 * (1 - alpha) + tB * alpha);
+                        if (r1 === r0 && g1 === g0 && b1 === b0) continue;
+                        e.color = '#'
+                          + r1.toString(16).padStart(2, '0')
+                          + g1.toString(16).padStart(2, '0')
+                          + b1.toString(16).padStart(2, '0');
+                    }
+                }
+            }
+        }
+    }
+
     // spawnShards moved to ShardSystem.shatter (Stage 3 of shard-system
     // overhaul).  See engine/systems/ShardSystem.ts.
 
@@ -227,31 +559,28 @@ export class NebulaSystem {
      * neighbours are occupied), the transmutation aborts and the shard
      * stays as a shard — a later frame may find a clear cell as it drifts.
      */
-    private tryTransmuteShardToTile(
+    /**
+     * Tile-outcome of the nebula pair-transmute.  Looks for the
+     * nearest free hex cell starting from `position` (the pair's
+     * midpoint) — origin cell + 6 neighbours, sorted by distance.
+     * If every candidate is occupied the call no-ops: the two
+     * source shards have already faded, so net effect is "the pair
+     * dissolved without producing anything" — acceptable fallback
+     * for a 50/50 roll where the shard side always succeeds.
+     */
+    private transmuteToTileAt(
         entities: GameEntity[],
-        shard: GameEntity,
+        position: Vector2,
+        composition: NebulaColorStop[] | undefined,
+        fallbackColor: string,
         physics: PhysicsSystem,
     ): boolean {
-        if (shard.shardVariant !== 'nebula-shard') return false;
-
-        // Effective-area threshold.  Each shard carries a
-        // `nebulaTileArea` set at spawn (= HEX_AREA / shardCount) that
-        // accumulates through merges.  Transmutation fires when a
-        // shard's accumulated effective area reaches HEX_AREA — i.e.
-        // one full tile's worth of shatter mass has coalesced back
-        // together.  Decoupled from physical disc area so shards can
-        // stay small and glass-style without blocking the cycle.
-        const effectiveArea = shard.nebulaTileArea ?? 0;
-        if (effectiveArea < HEX_AREA) return false;
-
-        // Candidate cells: the shard's current hex cell + 6 neighbours,
-        // sorted by distance so we snap to the nearest free slot.
-        const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+        const origin = pixelToHexCoord(position.x, position.y);
         const candidates: { c: number; r: number; distSq: number }[] = [];
         const pushCandidate = (c: number, r: number) => {
             const p = hexCoordToPixel(c, r);
-            const dx = wrapDeltaX(shard.position.x, p.x);
-            const dy = wrapDeltaY(shard.position.y, p.y);
+            const dx = wrapDeltaX(position.x, p.x);
+            const dy = wrapDeltaY(position.y, p.y);
             candidates.push({ c, r, distSq: dx * dx + dy * dy });
         };
         pushCandidate(origin.c, origin.r);
@@ -269,33 +598,104 @@ export class NebulaSystem {
         }
         if (!chosen) return false;
 
-        // Create the new tile at the chosen grid cell, carrying over
-        // the shard's colour composition as the tile's palette.
-        const composition = shard.nebulaColorComposition
-            ? cloneComposition(shard.nebulaColorComposition)
-            : undefined;
+        const paletteComp = composition
+            ? cloneComposition(composition)
+            : [{ hex: fallbackColor, weight: 1 }];
         const tile = TileGenerator.createNebulaTileEntity(
-            chosen.c,
-            chosen.r,
-            composition ?? [{ hex: shard.color || NEBULA_CONSTANTS.DEFAULT_HEX, weight: 1 }],
-            HEX_AREA,
+            chosen.c, chosen.r, paletteComp, HEX_AREA,
         );
-
         entities.push(tile);
         physics.addStaticEntity(tile);
-
-        // A newly-transmuted tile adds itself to its neighbours' counts.
         this.neighborCountsDirty = true;
-
-        // New tile appears immediately at full opacity — the parent
-        // shard fades out over top of it, so the eye reads the shard
-        // dissolving INTO an already-present tile rather than a flash
-        // where both source and destination cross through zero alpha.
-        // Shard collapses into the new tile — fade it out instead of
-        // instant-deactivating so the hand-off is a smooth dissolve.
-        shard.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-        shard.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
         return true;
+    }
+
+    /**
+     * Glass-shard outcome of the nebula pair-transmute.  Spawns a
+     * brand-new mobile glass-shard at the supplied midpoint, sized
+     * to sqrt(HEX_AREA) so the visible mass roughly matches what
+     * the tile outcome would have produced.  The new glass-shard
+     * enters the ShardSystem merge cycle and may itself transmute
+     * to a glass-tile (or downgrade to a rock-shard) once it
+     * reaches GLASS_TIER_DIAMETER.  Both source nebula-shards are
+     * already fading by the time we get here (ShardSystem armed
+     * their mergeFadeTimers in composeNebulaShards).
+     */
+    private spawnCondensedShardAt(
+        entities: GameEntity[],
+        position: Vector2,
+        velocity: Vector2,
+        variantId: 'glass-shard' | 'rock-shard' | 'plastic-shard' | 'metal-shard',
+    ): void {
+        const variant = SHARD_VARIANTS[variantId];
+        const spawn = variant.spawn;
+        // Rock-derived dust condenses into a SMALL rock-shard; the other
+        // materials keep the tile-equivalent size they always had.
+        const targetSize = variantId === 'rock-shard'
+            ? Math.sqrt(HEX_AREA) * 0.6
+            : Math.sqrt(HEX_AREA);
+
+        const baseR = (targetSize / 2) * 0.8;
+        const verts = spawn.polyVerticesOptions
+            ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+            : spawn.polyVerticesMin + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+        const raw: { angle: number; r: number }[] = [];
+        for (let i = 0; i < verts; i++) {
+            const baseAngle   = (i / verts) * Math.PI * 2;
+            const angleJitter = (Math.random() - 0.5) * (Math.PI / verts) * spawn.angleJitter * 2;
+            const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
+            raw.push({ angle: baseAngle + angleJitter, r: baseR * radiusFrac });
+        }
+        raw.sort((a, b) => a.angle - b.angle);
+        const polygonPoints = raw.map(p => ({
+            x: Math.cos(p.angle) * p.r,
+            y: Math.sin(p.angle) * p.r,
+        }));
+
+        // Per-variant durability + colour.  HP comes from NEBULA_CONDENSE
+        // (conservation of energy: what it cost in nebula to build ≈ what
+        // it takes to destroy), so tougher materials that cost more nebula
+        // are also harder to break.  Colour reads as the material so a
+        // freshly condensed shard is legible before it aggregates (plastic
+        // re-rolls a palette shade; metal takes its gunmetal body; rock /
+        // glass keep the slate dust look).
+        const hp = NEBULA_CONDENSE[variantId].hp;
+        let color: string;
+        // Rock condenses at the LOWEST density tier (the cheapest, least
+        // dense solid the cloud can form).
+        let densityTier: number | undefined;
+        switch (variantId) {
+            case 'rock-shard':
+                color = COLORS.ASTEROID;
+                densityTier = 0;
+                break;
+            case 'glass-shard':
+                color = COLORS.ASTEROID;
+                break;
+            case 'plastic-shard':
+                color = randomPlasticShardShade();
+                break;
+            case 'metal-shard':
+                color = COLORS.STRUCTURE_METAL;
+                break;
+        }
+        entities.push({
+            id:            nextId('shard'),
+            type:          EntityType.STRUCTURE,
+            shardVariant:  variantId,
+            position:     { x: position.x, y: position.y },
+            velocity:     { x: velocity.x, y: velocity.y },
+            size:         { x: targetSize, y: targetSize },
+            rotation:      Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 1.0,
+            color,
+            active:        true,
+            health:        hp,
+            maxHealth:     hp,
+            densityTier,
+            polygonPoints,
+            mass:          spawn.sizeToMass(targetSize),
+        });
     }
 
     /**
@@ -374,7 +774,7 @@ export class NebulaSystem {
                 const hex = nTile.nebulaColorComposition[0]?.hex;
                 if (!hex) continue;
                 const nHue = clampHueToPalette(hexToHueDeg(hex));
-                const r = Math.max(nTile.size.x, nTile.size.y) / 2;
+                const r = getCollisionR(nTile);
                 neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
             }
         }
@@ -417,18 +817,97 @@ export class NebulaSystem {
      *   - Flag neighbour-counts dirty for the next update() pass
      */
     /**
-     * ShardAdapter hook (Stage 4).  Called after a nebula-shard
-     * self-compose merge fires inside ShardSystem.composeEntities.
-     * Delegates straight to the existing transmutation logic; the
-     * compose math itself (area accumulate, composition blend,
-     * polygon regen, fade smaller) lives in ShardSystem.
+     * ShardAdapter pair-transmute hook.  Called after a nebula-shard
+     * ↔ nebula-shard bond resolves AND the cloud has accumulated enough
+     * mass to crystallise (ShardSystem owns the commit/accumulate gate).
+     * Rolls 50/50 between:
+     *   - nebula-tile   at the nearest free hex cell (cloud thickening;
+     *                   skipped for rock-derived dust).
+     *   - the COMMITTED material shard at the midpoint, plus — when the
+     *     cloud overshot the material's cost — a leftover nebula-shard
+     *     carrying the off-target "remainder" colours (excess-split), so
+     *     surplus mass + colour are conserved and re-seed other materials.
      */
-    public onComposeNebulaShard(
-        host: GameEntity,
+    public onComposeNebulaShardPair(
+        composition: NebulaColorStop[] | undefined,
+        position: Vector2,
+        velocity: Vector2,
         entities: GameEntity[],
         physics: PhysicsSystem,
+        fromRock: boolean,
+        material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+        excessUnits: number,
     ): void {
-        this.tryTransmuteShardToTile(entities, host, physics);
+        const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
+
+        // Tile outcome — the cloud thickens back into a nebula-tile.  Skipped
+        // for rock-derived dust (it returns to rock, never a nebula tile).
+        // May no-op if every candidate hex is occupied; acceptable (both
+        // source shards are already fading).
+        if (!fromRock && Math.random() < 0.5) {
+            this.transmuteToTileAt(entities, position, composition, blendHex, physics);
+            return;
+        }
+
+        // Material outcome — crystallise the COMMITTED material (lock-in:
+        // ShardSystem already resolved which material this cloud is destined
+        // for, so a late hue drift can't change it here).
+        this.spawnCondensedShardAt(entities, position, velocity, material);
+
+        // Excess-split: hand surplus mass back as a leftover nebula-shard
+        // carrying the off-target remainder colours.
+        if (excessUnits >= 1 && composition && composition.length > 0) {
+            const remainder = this.remainderComposition(composition, material);
+            this.spawnLeftoverNebulaShard(entities, position, velocity, remainder, excessUnits);
+        }
+    }
+
+    /**
+     * The "remainder colours" of a composition relative to a crystallised
+     * material: the stops whose hue does NOT map to that material's band,
+     * renormalised.  When the cloud was hue-pure (every stop in-band) there
+     * is no off-band remainder, so the full composition is returned (the
+     * leftover is then genuine same-colour excess).
+     */
+    private remainderComposition(
+        composition: NebulaColorStop[],
+        material: string,
+    ): NebulaColorStop[] {
+        const off = composition.filter(
+            s => nebulaHueToShardVariant(hexToHueDeg(s.hex)) !== material,
+        );
+        const src = off.length > 0 ? off : composition;
+        const total = src.reduce((sum, s) => sum + s.weight, 0) || 1;
+        return src.map(s => ({ hex: s.hex, weight: s.weight / total }));
+    }
+
+    /**
+     * Release the excess-split leftover as a fresh nebula-shard carrying the
+     * remainder colours + the surplus condense-units, so it re-enters the
+     * coalescence cycle and seeds a (usually different) material.  Size is
+     * area-scaled by the surplus so mass reads conserved.
+     */
+    private spawnLeftoverNebulaShard(
+        entities: GameEntity[],
+        position: Vector2,
+        velocity: Vector2,
+        composition: NebulaColorStop[],
+        excessUnits: number,
+    ): void {
+        // ~20px reference diameter per unit, area-scaled by the surplus.
+        const baseSize = 20 * Math.sqrt(Math.max(1, excessUnits));
+        this.drops.spawnColoredNebulaShard(
+            entities,
+            position,
+            baseSize,
+            blendCompositionToHex(composition),
+            1,                  // sizeFraction — baseSize already final
+            velocity,
+            composition,
+            0.5,                // wispy puff, matching the other condense dust
+            false,              // not rock-origin — these are remainder colours
+            excessUnits,        // carries the surplus condense-units forward
+        );
     }
 
     public onNeighborhoodBlendRegen(entity: GameEntity, entities: GameEntity[]): void {
@@ -514,7 +993,7 @@ export class NebulaSystem {
             const e = entities[k];
             if (e.shardVariant !== 'nebula-tile') continue;
             if (!e.active) continue;
-            if (e.nebulaFadeTimer !== undefined) continue;
+            if (e.mergeFadeTimer !== undefined) continue;
             if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
             const key = (e.nebulaGridCol << 16) | (e.nebulaGridRow & 0xFFFF);
             index.set(key, e);

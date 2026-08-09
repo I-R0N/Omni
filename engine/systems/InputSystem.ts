@@ -8,10 +8,16 @@ export class InputSystem {
   private mousePosition: Vector2;
   private mouseDown: boolean;
   
-  // Tap detection
+  // Tap / charge detection
   private touchStartTime: number = 0;
   private touchStartPos: Vector2 = { x: 0, y: 0 };
+  // Tap (release before INPUT_CONSTANTS.CHARGE_FULL, no drag): normal shot.
   private fireEvents: Vector2[] = [];
+  // Charge release (held for the full CHARGE_FULL duration then released):
+  // charged shot.  Drag-cancel does NOT apply — the same gesture doubles
+  // as the movement input, so a long held + dragged release should still
+  // fire the charged shot.
+  private chargeReleaseEvents: Vector2[] = [];
   
   constructor() {
     this.keys = new Set();
@@ -53,14 +59,17 @@ export class InputSystem {
     this.mousePosition = { x: e.clientX, y: e.clientY };
   };
 
-  // Helper to detect if we should ignore input (e.g. clicking UI buttons)
+  // Game input engages ONLY when the gesture starts on the game CANVAS.
+  // Everything else is the React overlay (menus, buttons, scroll panes):
+  // skipping those events entirely — instead of only skipping <button>
+  // targets, as before — leaves native behaviour intact, most importantly
+  // TOUCH SCROLLING inside the overlay menus (the window-level
+  // preventDefault below was eating every scroll gesture on touch
+  // devices).  Touch events retarget to the element the touch STARTED
+  // on, so a game drag that began on the canvas keeps driving movement
+  // even when the finger crosses a HUD element.
   private shouldIgnoreEvent(e: Event): boolean {
-    const target = e.target as HTMLElement;
-    // Check if clicking on a button or inside a button (e.g. span inside button)
-    if (target && (target.tagName === 'BUTTON' || target.closest('button'))) {
-      return true;
-    }
-    return false;
+    return !(e.target instanceof HTMLCanvasElement);
   }
 
   private handleMouseDown = (e: MouseEvent) => {
@@ -125,21 +134,26 @@ export class InputSystem {
   };
 
   private checkTap(x: number, y: number) {
-    const duration = performance.now() - this.touchStartTime;
-    
-    // Calculate distance moved during the hold
-    const dist = Math.sqrt(
-        Math.pow(x - this.touchStartPos.x, 2) +
-        Math.pow(y - this.touchStartPos.y, 2)
-    );
+    const duration = (performance.now() - this.touchStartTime) / 1000; // seconds
 
-    // It is a tap if held for short time AND didn't drag far
-    // OR if ZERO_DELAY_SHOOTING is on, we allow "taps" even if they took longer, provided distance is short
-    if (dist < INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) {
-        if (INPUT_CONSTANTS.ZERO_DELAY_SHOOTING || duration < INPUT_CONSTANTS.TAP_THRESHOLD) {
-             this.fireEvents.push({ x, y });
-        }
+    // Charged shot path: only fires when the player has held for the full
+    // CHARGE_FULL window (the visible ring is also complete at this
+    // point, so what they see and what fires match exactly).  Drag is
+    // not a cancel signal — the mouse hold + drag gesture also drives
+    // movement, so gating on drag would break charging while moving.
+    if (duration >= INPUT_CONSTANTS.CHARGE_FULL) {
+        this.chargeReleaseEvents.push({ x, y });
+        return;
     }
+
+    // Tap-shot path: any release before full charge.  Keep the drag-
+    // cancel so a fast swipe doesn't accidentally tap-fire.
+    const dx = x - this.touchStartPos.x;
+    const dy = y - this.touchStartPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return;
+
+    this.fireEvents.push({ x, y });
   }
 
   public isKeyDown(code: string): boolean {
@@ -200,10 +214,57 @@ export class InputSystem {
     return this.mousePosition;
   }
 
+  /**
+   * Claim a queued TAP that landed within `radius` CSS px of (x, y), removing
+   * it from the fire queue so it does NOT also shoot.  Returns true if one was
+   * claimed.
+   *
+   * This is how "tap your own ship to use the thing you're next to" works
+   * without inventing a second gesture: a canvas tap is already the fire
+   * gesture, so the interaction has to take the tap BEFORE the weapon does.
+   * GameEngine calls this from updateInteractables (sim step 5b), which runs
+   * ahead of the weapon tick (step 7) that drains the rest of the queue.
+   *
+   * Only ONE event is claimed per call, and only when something is actually
+   * in range — so a tap on the ship in open space still fires normally.
+   */
+  public claimTapNear(x: number, y: number, radius: number): boolean {
+    const r2 = radius * radius;
+    for (let i = 0; i < this.fireEvents.length; i++) {
+      const dx = this.fireEvents[i].x - x;
+      const dy = this.fireEvents[i].y - y;
+      if (dx * dx + dy * dy <= r2) {
+        this.fireEvents.splice(i, 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
   public getFireEvents(): Vector2[] {
     const events = [...this.fireEvents];
     this.fireEvents = [];
     return events;
+  }
+
+  /** Drain queued charge-release events (held for the full CHARGE_FULL window). */
+  public getChargeReleaseEvents(): Vector2[] {
+    const events = [...this.chargeReleaseEvents];
+    this.chargeReleaseEvents = [];
+    return events;
+  }
+
+  /**
+   * Live hold duration (seconds) of the current mouse/touch press.  Returns
+   * 0 only when the press isn't active.  Drag distance is intentionally
+   * NOT a cancel signal here: in this game the same mouse-hold gesture
+   * doubles as the movement input (held + dragged from screen centre),
+   * so cancelling on drag would break charging while moving.  Used by
+   * GameEngine to drive `player.chargeProgress` for the charge-ring HUD.
+   */
+  public getMouseHoldDuration(): number {
+    if (!this.mouseDown) return 0;
+    return (performance.now() - this.touchStartTime) / 1000;
   }
 
   public cleanup() {
