@@ -630,3 +630,30 @@ suites green across consecutive rounds (**113 assertions** total).
 **Rebase.** `origin/claude/game-feedback-plan-UN3MV` was still at
 `73a86c2` — the base commit — so there was nothing to rebase onto.  The
 smokes were re-run against the final tree anyway.
+
+---
+
+## Handoff (final entry)
+
+**`scripts/smoke/` was committed.** The six suites had lived only in the
+session's scratch directory — 165 assertions that nothing in the repo
+could re-run. They are now plain Node scripts under `scripts/smoke/`
+with a README, parameterised by two env vars (`SMOKE_URL`,
+`CHROME_PATH`) instead of the hardcoded paths they carried.
+*Recorded because* this is a scope call: the project has no test runner
+and roadmap item 5b (test-harness bootstrap, parallel session) may
+absorb or relocate them. Committing them anyway is the cheaper mistake —
+an unused directory is recoverable, re-deriving 165 assertions is not.
+
+**`docs/HANDOFF_PR79.md` was written** for whoever takes PR #79 next:
+what the PR is, the reading order, branch state with commit ids, the
+remaining work as a checklist with files and a validation step each, the
+working agreement, and what audio validation is possible headless versus
+what needs a human with headphones. It is deliberately harness-generic —
+no tooling assumptions, so it reads the same to a person or to another
+agent.
+
+**The milestone queue stops here.** B1–B5 are complete, playtest feedback
+through five rounds is folded in, and the branch is retargeted onto
+`claude/plan-completion`. Everything still open is in the handoff's §4
+and in the FOR-USER-REVIEW block at the top of this file.
