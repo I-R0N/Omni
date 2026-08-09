@@ -107,10 +107,14 @@ export class EntityIndex {
    * `active` on the fast path.
    */
   public rebuild(entities: GameEntity[]) {
-    this.enemies.length = 0;
-    this.asteroids.length = 0;
-    this.projectiles.length = 0;
-    this.shardCandidates.length = 0;
+    // Index-filled with explicit counters rather than `length = 0` + push —
+    // see the REFILL IDIOM note in GameEngine.prepareFrameEntities for why
+    // that idiom allocates.  Four lists rebuilt once per sim substep (120 Hz)
+    // made this the fifth-largest allocator in the engine.  Same contents,
+    // same lengths, same order.
+    const enemies = this.enemies, asteroids = this.asteroids;
+    const projectiles = this.projectiles, shardCandidates = this.shardCandidates;
+    let nEne = 0, nAst = 0, nPrj = 0, nShard = 0;
     this.particleCount = 0;
     this.interactableCount = 0;
     this.activeCount = 0;
@@ -121,7 +125,7 @@ export class EntityIndex {
       this.activeCount++;
       switch (e.type) {
         case EntityType.ENEMY:
-          this.enemies.push(e);
+          enemies[nEne++] = e;
           break;
         case EntityType.STRUCTURE:
           // Mobile shards only — static tiles (mass = Infinity) live
@@ -129,12 +133,12 @@ export class EntityIndex {
           // body segments (Stage 6) are chain-controlled, so they're kept OUT of
           // the shard indices (ShardSystem / flow-drift / consume ignore them).
           if (e.mass !== Infinity && e.dragonSegment !== true) {
-            this.asteroids.push(e);
-            this.shardCandidates.push(e);
+            asteroids[nAst++] = e;
+            shardCandidates[nShard++] = e;
           }
           break;
         case EntityType.PROJECTILE:
-          this.projectiles.push(e);
+          projectiles[nPrj++] = e;
           break;
         case EntityType.PARTICLE:
           this.particleCount++;
@@ -144,6 +148,12 @@ export class EntityIndex {
           break;
       }
     }
+
+    // Truncate only on an actual shrink; in steady state these are no-ops.
+    if (enemies.length !== nEne) enemies.length = nEne;
+    if (asteroids.length !== nAst) asteroids.length = nAst;
+    if (projectiles.length !== nPrj) projectiles.length = nPrj;
+    if (shardCandidates.length !== nShard) shardCandidates.length = nShard;
   }
 
   /** Clear all lists — used when loading a map / restarting. */

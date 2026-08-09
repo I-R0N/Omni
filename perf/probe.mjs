@@ -44,14 +44,19 @@ const out = await page.evaluate(() => {
   const e = window.__omniEngine;
   const ents = e.entityIndex.asteroids.slice();
   const N = ents.length;
-  const ITER = 400;
+  const ITER = 600;
+
+  // CONTAMINATION WARNING, learned the hard way: accumulating into a
+  // captured `let sink` makes the probe allocate on its OWN account — a
+  // double written to a closure Context slot is boxed, so every probe reads
+  // ~29 bytes/op regardless of what it is measuring. Accumulate into a
+  // Float64Array element instead: typed-array stores are unboxed, so the
+  // sink costs nothing and the number is the subject's.
+  const sink = new Float64Array(4);
 
   const heap = () => performance.memory.usedJSHeapSize;
-  // Each probe runs the same shape of loop over the same objects; the only
-  // difference is WHAT it touches. Bytes are per (entity x iteration), which
-  // is the same unit the capture matrix reports for applyFlow.
   const run = (name, fn) => {
-    fn(); // warm up / let V8 settle on a shape for this loop
+    for (let w = 0; w < 3; w++) fn(); // let V8 optimise this exact loop shape
     const h0 = heap();
     const t0 = performance.now();
     for (let k = 0; k < ITER; k++) fn();
@@ -61,43 +66,47 @@ const out = await page.evaluate(() => {
   };
 
   const results = [];
-  // 1. Read-only doubles off the entity — baseline for "touching entities".
-  let sink = 0;
-  results.push(run('read e.position.x/y', () => {
-    for (let i = 0; i < N; i++) { const t = ents[i]; sink += t.position.x + t.position.y; }
+  results.push(run('empty loop (control)', () => {
+    for (let i = 0; i < N; i++) sink[0] += 1;
   }));
-  // 2. Write a double back into a nested Vector2 (what applyFlow does most).
+  results.push(run('read e.position.x/y', () => {
+    for (let i = 0; i < N; i++) { const t = ents[i]; sink[0] += t.position.x + t.position.y; }
+  }));
   results.push(run('write e.velocity.x/y', () => {
     for (let i = 0; i < N; i++) { const t = ents[i]; t.velocity.x += 1e-9; t.velocity.y += 1e-9; }
   }));
-  // 3. Write a double into a DIRECT optional field on the entity.
-  results.push(run('write e.rotation', () => {
+  results.push(run('write e.rotation (direct fld)', () => {
     for (let i = 0; i < N; i++) { ents[i].rotation += 1e-9; }
   }));
-  // 4. The arithmetic applyFlow does, with no entity write at all.
-  results.push(run('pure arithmetic (no write)', () => {
+  results.push(run('Math.sqrt/min arithmetic', () => {
     for (let i = 0; i < N; i++) {
       const t = ents[i];
       const m = Math.sqrt(7 / Math.max(t.mass, 0.7));
-      sink += Math.min(0.8, 0.08 * m) + Math.sqrt(Math.max(0, t.velocity.x * t.velocity.x));
+      sink[1] += Math.min(0.8, 0.08 * m);
     }
   }));
-  // 5. The real flow sample (scratch-returning) with no write.
-  results.push(run('sampleAsteroidFlow only', () => {
+  results.push(run('sampleAsteroidFlow', () => {
     for (let i = 0; i < N; i++) {
       const t = ents[i];
       const f = e.flowField.sampleAsteroidFlow(t.position.x, t.position.y);
-      sink += f.x + f.y;
+      sink[2] += f.x + f.y;
+    }
+  }));
+  // The suspected mechanism for the "invisible" allocation in the hot scan
+  // loops: passing doubles across a call the compiler does not inline.
+  results.push(run('wrapDeltaX/Y cross-call', () => {
+    const w = window.__omniWrap;
+    if (!w) return;
+    for (let i = 0; i < N; i++) {
+      const t = ents[i];
+      sink[3] += w.dx(0, t.position.x) + w.dy(0, t.position.y);
     }
   }));
 
-  // How many distinct hidden classes (shapes) are these entities in? V8 gives
-  // no direct API, so approximate by the distinct own-key signature — the
-  // thing that drives shape divergence in the first place.
   const shapes = new Set();
   for (let i = 0; i < N; i++) shapes.add(Object.keys(ents[i]).join(','));
 
-  return { N, sink: sink === Infinity ? 1 : 0, results, distinctKeySignatures: shapes.size };
+  return { N, results, distinctKeySignatures: shapes.size, sinkGuard: sink[0] === -1 ? 1 : 0 };
 });
 
 console.log(`\n### PROBE · ${map} · ${out.N} asteroid-class entities`);

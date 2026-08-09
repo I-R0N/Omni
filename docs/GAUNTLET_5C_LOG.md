@@ -219,7 +219,85 @@ truncate-only-when-shrinking → **153.4 ms vs 58.2 ms (2.6× faster)** and
 **11× less heap growth**. The idiom shrinks the backing store and then
 re-grows it through the push growth policy every single rebuild.
 
----
+### Iteration 2 — kill the array-refill churn (P2)
+
+Four sites, one idiom, zero behaviour change:
+
+- `GameEngine.prepareFrameEntities` → index-fill + truncate-on-shrink
+  (carries the canonical REFILL IDIOM comment).
+- `EntityIndex.rebuild` → same, over its four lists.
+- `PhysicsSystem.handleEntityCollisions` → the per-substep
+  `dynamicEntities` working set became a persistent field; the dynamic grid
+  became a `CellBuckets`.
+- `PhysicsSystem.resolveShardPairs` → shard grid became a `CellBuckets`.
+
+New file `engine/systems/CellBuckets.ts`: a bucket store that recycles its
+bucket arrays across passes instead of allocating a fresh `[]` per occupied
+cell per substep. At 120 Hz with ~500 occupied cells that was ~60 000 array
+allocations/second **per grid**. Same keys, same bucket contents, same
+in-bucket order. The static grid deliberately stays a plain `Map` — it is
+built once on map load, so there is nothing to recycle.
+
+**A/B (median of 3, same host, same session):**
+
+| scene | alloc B/frame | Δ | sim/stp p99 | Δ |
+|---|---|---|---|---|
+| hub-idle | 532k → 474k | −11% | 1.50 → 1.55 | +3% |
+| asteroid-6k | 1,942k → 1,495k | **−23%** | 6.33 → 5.47 | **−14%** |
+| tile-shatter-storm | 1,009k → 901k | −11% | 2.85 → 2.35 | **−18%** |
+| boss-capstone | 1,569k → 1,256k | **−20%** | 3.85 → 3.22 | **−16%** |
+| roamer-stack | 1,488k → 1,291k | −13% | 3.25 → 3.58 | +10% |
+| mass-death | 2,820k → 2,190k | **−22%** | 6.22 → 6.57 | +6% |
+| stage-descent | 899k → 828k | −8% | 2.15 → 2.07 | −4% |
+
+Allocation is down in every scene. Sim/substep is down 14–18% on four
+scenes and up 3–10% on three; those three are within the run-to-run spread
+this container shows even at median-of-3, so **the sim claim is "down on the
+scenes where it moved, flat elsewhere"** — not a clean 15% across the board.
+Allocation is the solid result here.
+
+Also worth recording honestly: **GC events/second went UP** (1.4→3.2,
+2.3→4.3, 2.0→4.4) while allocated bytes went DOWN and net heap growth over
+the window collapsed (+17/+23/+32 MB → −4/+5/+2 MB). The likely reading is
+V8 adaptively shrinking the young generation once the allocation rate drops,
+giving more frequent but much cheaper scavenges — which is better for frame
+time, since pause LENGTH is what shows up as a dip. But it is an inference,
+not something this harness measures, so it is logged as an open question
+rather than claimed as a win.
+
+### Iteration 3 — the "invisible" allocation in hot numeric loops
+
+After P2 the top allocator on the worst scene is `applyFlow` at 175 MB
+(27% of that scene's total), unchanged — plus residual allocation inside
+`handleEntityCollisions`, `PhysicsSystem.update` and
+`AISystem.nearestEatableShard` that the array fix did not touch. All of
+these are loops of pure double arithmetic with no visible allocation.
+
+`perf/probe.mjs` was rewritten (the first version was contaminated: it
+accumulated into a captured `let`, and a double written to a closure context
+slot is boxed, so every probe read ~29 bytes/op on its own account —
+accumulating into a `Float64Array` element fixed it). Against the REAL live
+entity objects, with a 0 bytes/op control:
+
+| operation | bytes/op |
+|---|---|
+| empty loop (control) | 0 |
+| read `e.position.x/y` | 0 |
+| write `e.velocity.x/y` | 0 |
+| write `e.rotation` (direct optional field) | 1.3 |
+| `Math.sqrt`/`Math.min` arithmetic | ~0 |
+| `flowField.sampleAsteroidFlow` | 1.4 |
+
+**None of applyFlow's operations allocate when run in a stable loop.** That
+retires the P1 "boxed doubles on GameEntity" hypothesis — it was wrong, and
+the ablation evidence that suggested it is explained instead by what the two
+situations do NOT share: in the engine, `applyFlow` is a **closure
+constructed fresh on every substep**, so V8 is re-creating the function 120
+times a second and it never settles into optimised code, where doubles are
+unboxed. The probe's loop is stable and gets optimised; the engine's does
+not.
+
+Fix in iteration 4: hoist the per-substep closures out of the hot path.
 
 ## DECISIONS TAKEN
 
