@@ -134,7 +134,9 @@ engine/
 
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
-.github/workflows/        pr-preview, publish-standalone
+.github/workflows/        pr-checks (the merge gate: typecheck + build +
+                          Playwright on every PR), pr-preview,
+                          publish-standalone
 ```
 
 ---
@@ -1147,11 +1149,33 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     result, so `npm test` is one command from a clean clone — but it
     means the browser must be present: `npx playwright install chromium`
     once. See `tests/README.md` for the suite map and the harness rules.
-- **Still no linter**, and no CI gating — the two workflows
-  (`pr-preview`, `publish-standalone`) gate nothing. Tiers 3–6 of the
-  parking lot's "Automated test suite" entry (unit tests, Node sim
-  tests, visual regression, CI gating) remain parked deliberately; 5b
-  adopted tiers 1–2 only.
+- **The same three gates run in CI on EVERY pull request, and they are the
+  LAST STEP BEFORE A MERGE** — `.github/workflows/pr-checks.yml`, job
+  `validate`, in this order: typecheck → build → `npx playwright install
+  --with-deps chromium` → test.  Running them locally is still expected
+  (a red CI run is a slow way to learn something `npm run typecheck`
+  would have told you in five seconds); CI is the backstop that makes
+  green non-optional rather than remembered.  Rules that go with it:
+  - **Do not merge a PR while `PR checks` is pending or red.**  The
+    workflow is the merge gate; "it passed locally" does not substitute,
+    because local runs skip the clean-clone `npm ci` and the CI browser.
+  - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
+    on fork PRs.  Keep it that way — a merge gate that silently skips for
+    outside contributors is not a gate.
+  - It also runs on pushes to `main`, so a bad merge is visible
+    immediately instead of at the next PR.
+  - On failure the Playwright HTML report uploads as a run artifact
+    (`playwright-report-<run id>`, 7-day retention) — read that before
+    re-running, since the suites are timing-sensitive and the report
+    carries the trace.
+  - Making the check *blocking* at the GitHub level is a REPO SETTING,
+    not a file in this tree: branch protection on `main` must list
+    `typecheck · build · test` as a required status check.  The workflow
+    alone reports; branch protection is what refuses the merge button.
+- **Still no linter.**  Tiers 3–5 of the parking lot's "Automated test
+  suite" entry (unit tests, Node sim tests, visual regression) remain
+  parked deliberately; 5b adopted tiers 1–2, and tier 6 (CI gating) is
+  now the workflow above.
 
 ---
 
@@ -1550,12 +1574,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 
 - Default branch: `main`.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
-- Two GitHub Actions: `pr-preview.yml` (Netlify deploy previews),
+- Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
+  build + Playwright on every PR and on pushes to `main`),
+  `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
-- No CI type-check or test gates today — the two workflows gate nothing.
-  Validation is LOCAL and is three commands: `npm run build`,
-  `npm run typecheck`, `npm test` (§7).  Wiring them into CI is tier 6 of
-  the parking lot's "Automated test suite" entry and is still parked.
+- **`PR checks` is the default gate on every PR and the final step before
+  a merge.**  Run the same three commands locally first (`npm run
+  typecheck`, `npm run build`, `npm test` — §7); merge only once the CI
+  run on the PR's CURRENT head is green.  Never merge past a pending or
+  failing `typecheck · build · test`.  The other two workflows still gate
+  nothing — a preview build or a standalone release is not validation.
 
 ---
 

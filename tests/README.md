@@ -6,8 +6,15 @@ same public methods the React shell calls, then reads the same `EngineStats`
 payload the HUD renders from. If a suite can observe it, the UI can too.
 
 This is tiers 1–2 of the parking lot's "Automated test suite" entry (roadmap
-5b, decision #46a). Tiers 3–6 — unit tests, Node sim tests, visual
-regression, CI gating — stay parked deliberately.
+5b, decision #46a). Tiers 3–5 — unit tests, Node sim tests, visual
+regression — stay parked deliberately.
+
+Tier 6 is no longer parked: **these suites run in CI on every pull request**
+as the last gate before a merge (`.github/workflows/pr-checks.yml`, job
+`typecheck · build · test`; see CLAUDE.md §7). A red run uploads the
+Playwright HTML report as a run artifact — read the trace in it before
+re-running, because everything here is timing-sensitive and a re-run that
+happens to pass has told you nothing.
 
 ## Running
 
