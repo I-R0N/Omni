@@ -1593,6 +1593,34 @@ k. After N waves, spawn a portal to a new map.
        neighbours. The gauntlet picks one of the entry's
        three candidate directions and records the choice.
 
+47. **Two more gauntlets slotted: performance (5c) + UI (5d)
+    (user, 2026-08-09).** Placement reasoning, so it isn't
+    re-litigated:
+    a. **Performance gauntlet runs AFTER the 5b test-harness
+       bootstrap** — a perf pass is a stream of
+       zero-behaviour claims, and those are only checkable
+       against a regression net; 5b is day-scale, so the
+       delay is negligible. It runs IN PARALLEL with the
+       collaborator's SFX session (moderate conflict surface
+       at the GameEngine event-wiring sites; second to land
+       rebases). Scope: headless same-harness A/B
+       measurement + the parked perf implementation sketches
+       (shard-broadphase pair budget etc.) IF measurement
+       justifies them; real-hardware Perf REC captures come
+       from the user mid-gauntlet (the harness is
+       copy-paste-from-iPhone by design) via FOR-USER-REVIEW
+       requests.
+    b. **UI gauntlet runs AFTER the Pair C + polish gauntlet
+       and BEFORE the tuning pass** — a coherence pass wants
+       the COMPLETE surface (SFX settings row, controller
+       bindings + help, minimap rework must exist first),
+       and the tuning pass should judge feel on final
+       presentation. Absorbs the parked **viewport coverage**
+       item (parameterize the 5b suites over the viewport
+       list, incl. a mid-session resize case) and offers
+       **damage-triggered health/shield bars** as an optional
+       candidate.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1828,6 +1856,27 @@ observes the three strategy guardrails (decision #36e).
    pre-existing type errors it flags). Tiers 1–2 of the parking-lot
    entry ONLY; tiers 3–6 stay parked. This ends the "no test runner"
    stance at that tier — CLAUDE.md §7 must be updated by that session.
+
+5c. **Performance gauntlet** (decision #47a) — runs AFTER 5b (the
+   regression net makes zero-behaviour claims checkable) and IN
+   PARALLEL with the collaborator's SFX session. Measure-first per the
+   PR #69/#70 methodology: headless same-harness A/B for every change;
+   real-hardware Perf REC captures requested from the user via
+   FOR-USER-REVIEW; the parked implementation sketches
+   (shard-broadphase pair budget, exotic perf ideas) built only if
+   measurement says so.
+
+5d. **UI gauntlet** (decision #47b) — runs AFTER the step-5 Pair C +
+   polish gauntlet and BEFORE the step-6 tuning pass: one coherence /
+   legibility sweep over the COMPLETE UI surface (menus, HUD, station,
+   death/stage screens, indicators, settings). Absorbs the parked
+   viewport-coverage item (parameterize the 5b suites over the
+   viewport list + a mid-session resize case); optional candidate:
+   damage-triggered health/shield bars (parking lot).
+
+   **Remaining-roadmap order** (decision #47): SFX (PR #79,
+   collaborator) ∥ [5b → 5c] → 5 (Pair C + polish) → 5d → 6 (tuning)
+   → 7 (final playtest + second deploy).
 6. **Economy & progression tuning pass** (parking-lot promotion,
    decision #40) — one playtest-driven session tuning together:
    Overworld income pacing, per-wave enemy growth vs discrete module
