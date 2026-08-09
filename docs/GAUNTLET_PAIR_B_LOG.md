@@ -203,6 +203,83 @@ returning both the profile and the sound so they cannot drift apart.
 
 ---
 
+## Retarget + AUDIO_PLAN reconciliation (2026-08-08, plan decision #45a)
+
+The plan branch `claude/game-feedback-plan-UN3MV` merged to main (PR #51)
+and was retired.  This branch was rebased onto
+**`claude/plan-completion`** (cut from main) and PR #79 retargeted there.
+
+**Rebase.** 11 commits replayed; five conflicts, all mechanical and all
+resolved by KEEPING BOTH sides:
+
+| File | Conflict | Resolution |
+|---|---|---|
+| `engine/GameEngine.ts` | `transitionToMap` gained a `descend` option upstream | upstream signature + this branch's doc comment |
+| `engine/GameEngine.ts` | constants import — upstream renamed `WEAPON_WEIGHT`→`SHIP_WEIGHT` and added `UI_CONSTANTS` / `HUB_PORTAL_SITES` / `STAGE_WAVE_COUNT` | upstream's import line, with `AUDIO_CONSTANTS` / `EXPLOSION_PROFILES` / `ExplosionProfile` grafted on |
+| `engine/GameEngine.ts` | death branch — upstream added a `> 0` re-fire guard (the sim keeps running after death now) | guard kept AND the engine-loop cut kept |
+| `CLAUDE.md` | UIOverlay description — Pair A added the death/run-summary screen | both listed |
+
+**Validation after rebase.** `npm run build` green.  `npx tsc --noEmit`
+produces the EXACT SAME six errors as `origin/claude/plan-completion`
+does on a clean worktree — verified by diffing the two error sets, which
+are identical.  This branch introduces no type errors.  All six smoke
+suites green (B2 28, B3 49, B4 28, B5 27, iOS 12, tone 21 = **165**).
+B5's perf A/B failed once at +23% and passed at +6.7% / +1.4% on
+immediate re-runs; the `play()` microbenchmark held at 0.1–0.2 µs, which
+is the load-insensitive evidence.
+
+### Reconciliation with `docs/AUDIO_PLAN.md`
+
+`AUDIO_PLAN.md` arrived via PR #78, written independently in the Pair A
+session before decision #43 made `SFX_INVENTORY.md` the Pair B
+deliverable.  Its own header already states the division: **SFX_INVENTORY
+is the one that ships** (it carries the per-effect generation parameters),
+and AUDIO_PLAN is read for what it adds on top — §2's hard constraints,
+§3's architecture, §5's music beds, §6's open decisions.  That division
+is adopted unchanged.  AUDIO_PLAN's §2 is treated as **architecture
+requirements**, not suggestions.  Status of each:
+
+| AUDIO_PLAN requirement | Status | Where |
+|---|---|---|
+| **§2a** standalone-build fork | **SIDESTEPPED, not resolved** — see below | — |
+| **§2b** torus, not `PannerNode` Euclidean space | **MET** | `AudioSystem.play`/`loop` use `wrapDeltaX`/`wrapDeltaY`, listener-first, and pan via `StereoPannerNode` on the wrapped delta. An inverted-pan bug from getting the argument order backwards was caught by smoke and is now called out in CLAUDE.md §8. |
+| **§2c** voice pool + hard cap, FIFO/priority eviction | **MET** | `AUDIO_CONSTANTS.MAX_VOICES` (24) with tier thinning: tier 3 stops being admitted at 14, tier 2 at 20, tier 1 always plays. |
+| **§2c** distance culling — no voice allocated beyond audible radius | **MET** | `attenuation() <= 0` drops before any node is created; positional LOOPS out of earshot are treated as off so they hold no oscillators. |
+| **§2c** same-step coalescing — N identical cues become one with a level bump | **MET** | Per-id retrigger window with `collapse`, which bumps the live voice's gain with saturation. Exactly the "shard shatters and gnat pops" case the plan names. |
+| **§2c** per-cue cooldowns | **MET** | `SfxDef.minInterval`, per id, transcribed from the inventory. |
+| **§2d** iOS gesture unlock | **MET, and extended** | Own capture-phase window listeners (NOT `once`), plus the ring/silent-switch fix (`navigator.audioSession` → `playback`, with a silent-WAV element fallback) and recovery from iOS's non-standard `'interrupted'` state. The plan did not anticipate the silent switch; it was the first thing playtest hit. |
+| **§2e** trigger from the sim, SCHEDULE on the audio clock | **PARTIAL** | Cues are triggered from sim paths and scheduled against `ctx.currentTime` at call time. The retrigger collapse absorbs the machine-gun case the plan is worried about, but there is no explicit per-FRAME schedule time, so several sim steps in one rAF frame can schedule a few ms apart. Listed as remaining work. |
+| **§3** not via `EngineStats` | **MET** | Cues fire from `handleEntityDeath`, the PhysicsSystem damage paths, `WeaponSystem`, `ShardSystem`, `transitionToMap`, `dockAtStation`. `EngineStats.audio` carries ONLY the settings-row state (volume / muted / context state), which is UI data and belongs there. |
+| **§3** bus structure (music / sfx / ui / ambience) + ducking | **NOT DONE** | One master gain today. Remaining work. |
+| **§5** music beds, music director | **NOT STARTED** | Out of scope as this pass ran; the inventory covers SFX only. |
+
+**§2a is the one that matters for what happens next.**  The plan calls the
+standalone-build fork "a real fork, not a detail" and the decision that
+should be settled first, because it sets the asset budget.  This
+implementation makes it *temporarily* moot: every sound is PROCEDURAL, so
+there are zero audio assets, `scripts/inline-build.mjs` is untouched, and
+the standalone build is a faithful copy of the game.  That is not the same
+as answering the question — AUDIO_PLAN §1's stated direction is **sampled,
+AAA**, and the moment a real asset lands the fork is live again.
+
+What this pass contributes to that decision is the **migration path**: the
+inventory id is the contract, and a synth draft is replaced by a sample by
+re-registering the same id in `SfxRegistry` — no trigger site changes.
+So the fork can be decided later without re-plumbing, and inventory §9
+ranks which cues are worth an external generation budget first.  It
+remains OPEN and is the first thing the next person should raise with the
+repo owner.
+
+**§6 open decisions, as they now stand:** (1) standalone fork — still
+open, above.  (4) HRTF vs equal-power — decided as equal-power
+`StereoPannerNode` + linear distance attenuation, on the plan's own
+reasoning that HRTF is indistinguishable for a top-down 2D game and costs
+per voice.  (5) listener at ship or camera — decided as **camera**
+(`audio.setListener(camera.position)`).  (6) settings home — done, one
+row in the pause menu; per-bus sliders await the bus structure.
+
+---
+
 ## Per-iteration log
 
 ### Iteration 0 — B1: the SFX inventory
