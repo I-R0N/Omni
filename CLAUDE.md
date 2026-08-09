@@ -41,9 +41,18 @@ constants.ts              ~1000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
-package.json              Scripts: dev, build, preview (no lint/test script)
+package.json              Scripts: dev, build, preview, typecheck, test
+                          (no lint script)
+playwright.config.ts      Test harness: one 390×844 project, a webServer
+                          that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
+
+tests/                    Playwright smoke suites (roadmap 5b) — boot,
+                          loop, economy, attribution, traits, screens,
+                          plus helpers.ts (the shared harness over the
+                          debug handles) and README.md (suite map +
+                          the anti-flake rules).  38 tests
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
@@ -125,7 +134,9 @@ engine/
 
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
-.github/workflows/        pr-preview, publish-standalone
+.github/workflows/        pr-checks (the merge gate: typecheck + build +
+                          Playwright on every PR), pr-preview,
+                          publish-standalone
 ```
 
 ---
@@ -1121,9 +1132,50 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - `node scripts/inline-build.mjs` after a build → writes
   `omniverse-standalone.html`, a single-file portable build with CSS, JS,
   and referenced PNGs inlined as data URIs.
-- **No test runner or linter is configured.** Don't invent one unless the
-  user asks. There is no standalone `tsc --noEmit` script either; type
-  errors surface during `vite build`.
+- **THREE validation gates, and all three are expected to be green
+  before a commit** (roadmap 5b, decision #46a — this REPLACES the old
+  "no test runner is configured; don't invent one" stance, which held
+  until the repo went public and gained a collaborator with no session
+  history):
+  - `npm run build` — the bundle. Still the last-mile check.
+  - `npm run typecheck` — `tsc --noEmit`. Note that **`vite build` does
+    NOT type-check** (esbuild strips types without checking them), which
+    is how six type errors accumulated unseen before 5b; the build being
+    green says nothing about the types.
+  - `npm test` — `playwright test`. The suites in `tests/` drive the
+    REAL engine in a REAL browser through the `window.__omniEngine` /
+    `window.__omniStats` debug handles; nothing is stubbed. The config's
+    `webServer` block runs `npm run build` itself and previews the
+    result, so `npm test` is one command from a clean clone — but it
+    means the browser must be present: `npx playwright install chromium`
+    once. See `tests/README.md` for the suite map and the harness rules.
+- **The same three gates run in CI on EVERY pull request, and they are the
+  LAST STEP BEFORE A MERGE** — `.github/workflows/pr-checks.yml`, job
+  `validate`, in this order: typecheck → build → `npx playwright install
+  --with-deps chromium` → test.  Running them locally is still expected
+  (a red CI run is a slow way to learn something `npm run typecheck`
+  would have told you in five seconds); CI is the backstop that makes
+  green non-optional rather than remembered.  Rules that go with it:
+  - **Do not merge a PR while `PR checks` is pending or red.**  The
+    workflow is the merge gate; "it passed locally" does not substitute,
+    because local runs skip the clean-clone `npm ci` and the CI browser.
+  - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
+    on fork PRs.  Keep it that way — a merge gate that silently skips for
+    outside contributors is not a gate.
+  - It also runs on pushes to `main`, so a bad merge is visible
+    immediately instead of at the next PR.
+  - On failure the Playwright HTML report uploads as a run artifact
+    (`playwright-report-<run id>`, 7-day retention) — read that before
+    re-running, since the suites are timing-sensitive and the report
+    carries the trace.
+  - Making the check *blocking* at the GitHub level is a REPO SETTING,
+    not a file in this tree: branch protection on `main` must list
+    `typecheck · build · test` as a required status check.  The workflow
+    alone reports; branch protection is what refuses the merge button.
+- **Still no linter.**  Tiers 3–5 of the parking lot's "Automated test
+  suite" entry (unit tests, Node sim tests, visual regression) remain
+  parked deliberately; 5b adopted tiers 1–2, and tier 6 (CI gating) is
+  now the workflow above.
 
 ---
 
@@ -1423,10 +1475,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pattern).
 - **`window.__omniEngine` / `window.__omniStats` are debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so headless
-  Playwright smokes can drive the real engine in a real browser without a
-  test runner being added to the project (§7).  Two assignments, no
-  per-frame cost beyond the stats one already happening.
+  `window`.  NOTHING in the game reads them — they exist so the headless
+  Playwright suites in `tests/` can drive the real engine in a real browser
+  (§7; the "without a test runner being added" rationale is superseded —
+  roadmap 5b adopted one, and these handles are what it drives).  Two
+  assignments, no per-frame cost beyond the stats one already happening.
+  Note that `private` is compile-time only: at runtime a suite can read
+  engine internals (`runTimeSec`, `waves.waveOffset`) and call private
+  methods (`physics.resolveCollision`) straight off the handle.  That is
+  intended, and is what lets a test measure damage arithmetic in situ
+  instead of reimplementing it.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk
@@ -1516,10 +1574,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 
 - Default branch: `main`.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
-- Two GitHub Actions: `pr-preview.yml` (Netlify deploy previews),
+- Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
+  build + Playwright on every PR and on pushes to `main`),
+  `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
-- No CI type-check or test gates today — local `npm run build` is the
-  last-mile validation.
+- **`PR checks` is the default gate on every PR and the final step before
+  a merge.**  Run the same three commands locally first (`npm run
+  typecheck`, `npm run build`, `npm test` — §7); merge only once the CI
+  run on the PR's CURRENT head is green.  Never merge past a pending or
+  failing `typecheck · build · test`.  The other two workflows still gate
+  nothing — a preview build or a standalone release is not validation.
 
 ---
 

@@ -177,6 +177,16 @@ export interface ShardMergePolicy {
    *  rest = default). */
   bondPartners?: ReadonlyArray<BondPartnerConfig>;
 
+  /** Size-disparity gate on bond FORMATION.  When set (> 0), a pair
+   *  whose radii differ by less than this fraction of the larger radius
+   *  refuses to bond — forcing "smaller merges into larger" by rejecting
+   *  near-equal pairs.  Symmetric: applied regardless of which side is
+   *  the puller.  Read by ShardSystem's bond-formation pass; NO variant
+   *  sets it today (the plastic-shard use the reader's comment names was
+   *  tuned away), so the gate is inert until one does.  Declared here
+   *  rather than deleted so the lever stays available and typed. */
+  requireSizeDeltaFraction?: number;
+
   /** Per-pair outcome; falls back to defaultOutcome if no rule matches. */
   rules?: MergeRule[];
   defaultOutcome: MergeOutcome;

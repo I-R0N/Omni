@@ -1,0 +1,67 @@
+name: PR checks
+
+# The merge gate.  CLAUDE.md §7 names three local validation commands —
+# `npm run typecheck`, `npm run build`, `npm test` — and this workflow is the
+# same three, run on every PR so nothing merges without them being green.
+# Deliberately secret-free so it also runs on fork PRs (unlike pr-preview).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Also guard the default branch itself, so a bad merge is visible immediately.
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: typecheck · build · test
+    runs-on: ubuntu-latest
+    # The Playwright suites drive a real browser on a fixed-timestep sim with
+    # software canvas rendering; they are slow by nature.  Room, not a squeeze.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Gate 1 — `vite build` strips types without checking them, so the build
+      # being green says nothing about the types.  This is the only type gate.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Gate 2 — the bundle.  Also what `npm test`'s webServer will rebuild;
+      # running it standalone keeps a build break from reading as a test flake.
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Gate 3 — the smoke suites.  playwright.config.ts's webServer builds and
+      # previews `dist/` itself, so this needs no separate serve step.
+      - name: Test
+        run: npm test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
