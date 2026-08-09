@@ -79,6 +79,32 @@ export class PerfRecorder {
   private worstFrameMs = 0;
   private worstFrameRender = 0;
   private worstFrameSim = 0;
+  // ── Worst-frame table (gauntlet 5c P7) ────────────────────────────────
+  //
+  // Aggregates answer "is it smooth on average"; they cannot answer "why did
+  // it hitch when I killed that enemy", which is the question a player
+  // actually asks.  A spike tied to an EVENT is invisible in a 12-second p99
+  // and obvious in a list of the worst individual frames.
+  //
+  // So keep the WORST_N frames by frame time, each with the split that
+  // attributes it: render, sim, how many substeps the accumulator drained,
+  // and the live entity/particle counts at that moment.  Reading it:
+  //   frame ~= render + sim          -> our compute, and it says which half
+  //   frame >> render + sim          -> GC pause or a browser/OS stall
+  //   substeps high + sim high       -> substep bunching after a long frame
+  //   particles/entities spiking     -> a spawn burst (death, wave, boss)
+  // Insertion is a linear scan over a 6-slot array on a new maximum only —
+  // free in the common case, which is what lets it live in the hot path.
+  private static readonly WORST_N = 6;
+  private readonly worstMs = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstRender = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstSim = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstSteps = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstEnts = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstParts = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstAtSec = new Float64Array(PerfRecorder.WORST_N);
+  private elapsedMs = 0;
+
   // Tier histogram (index = PerfController tier; small fixed span covers all).
   private readonly tierHist = new Int32Array(8);
   private maxTier = 0;
@@ -138,6 +164,41 @@ export class PerfRecorder {
     this.tierHist.fill(0);
     this.maxTier = 0;
     this.peakLoad = 0;
+    this.worstMs.fill(0);
+    this.worstRender.fill(0);
+    this.worstSim.fill(0);
+    this.worstSteps.fill(0);
+    this.worstEnts.fill(0);
+    this.worstParts.fill(0);
+    this.worstAtSec.fill(0);
+    this.elapsedMs = 0;
+  }
+
+  /** Insert a frame into the worst-N table, keeping it sorted descending.
+   *  Called only when the frame beats the current slowest entry. */
+  private noteWorst(
+    ms: number, render: number, sim: number, steps: number,
+    ents: number, parts: number, atSec: number,
+  ): void {
+    const N = PerfRecorder.WORST_N;
+    let slot = N - 1;
+    while (slot > 0 && this.worstMs[slot - 1] < ms) {
+      this.worstMs[slot] = this.worstMs[slot - 1];
+      this.worstRender[slot] = this.worstRender[slot - 1];
+      this.worstSim[slot] = this.worstSim[slot - 1];
+      this.worstSteps[slot] = this.worstSteps[slot - 1];
+      this.worstEnts[slot] = this.worstEnts[slot - 1];
+      this.worstParts[slot] = this.worstParts[slot - 1];
+      this.worstAtSec[slot] = this.worstAtSec[slot - 1];
+      slot--;
+    }
+    this.worstMs[slot] = ms;
+    this.worstRender[slot] = render;
+    this.worstSim[slot] = sim;
+    this.worstSteps[slot] = steps;
+    this.worstEnts[slot] = ents;
+    this.worstParts[slot] = parts;
+    this.worstAtSec[slot] = atSec;
   }
 
   /**
@@ -153,10 +214,20 @@ export class PerfRecorder {
     loadLevel: number,
     rawRenderMs: number,
     rawSimMs: number,
+    substeps: number = 0,
   ): void {
     if (!this.recording) return;
     if (this.count >= this.cap) { this.full = true; this.recording = false; return; }
     this.frameMs[this.count++] = frameMs;
+    this.elapsedMs += frameMs;
+    // Worst-frame table: only pay the insert when the frame actually beats
+    // the slowest entry currently held.
+    if (frameMs > this.worstMs[PerfRecorder.WORST_N - 1]) {
+      this.noteWorst(
+        frameMs, rawRenderMs, rawSimMs, substeps,
+        perf.totalEntities, perf.particleCount, this.elapsedMs / 1000,
+      );
+    }
     if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
     if (rawSimMs > this.maxRawSim) this.maxRawSim = rawSimMs;
     if (frameMs > this.worstFrameMs) {
@@ -245,6 +316,27 @@ export class PerfRecorder {
       `perf  tier avg ${r2(avgTier)} (${tierParts.join(' / ')}) · load peak ${r2(this.peakLoad)}`,
       `peak  entities ${this.maxEntities} · enemies ${this.maxEnemies} · particles ${this.maxParticles}`,
     ];
+
+    // Worst individual frames.  This is the section that answers "why did it
+    // hitch when I killed that thing" — an event-tied spike is invisible in
+    // the aggregates above and plain here.  `at` is seconds into the capture,
+    // so a spike can be matched against what was happening on screen.
+    if (this.worstMs[0] > 0) {
+      lines.push(`worst  #  frame   render     sim  steps   ents  parts    at`);
+      for (let i = 0; i < PerfRecorder.WORST_N; i++) {
+        if (this.worstMs[i] <= 0) break;
+        lines.push(
+          `      ${i + 1}  ${r1(this.worstMs[i]).padStart(5)}  ` +
+          `${r2(this.worstRender[i]).padStart(6)}  ${r2(this.worstSim[i]).padStart(6)}  ` +
+          `${String(this.worstSteps[i]).padStart(5)}  ${String(this.worstEnts[i]).padStart(5)}  ` +
+          `${String(this.worstParts[i]).padStart(5)}  ${r1(this.worstAtSec[i]).padStart(5)}s`,
+        );
+      }
+      lines.push(
+        `      (frame ≈ render+sim → our compute · frame ≫ both → GC/browser stall` +
+        ` · steps high → substep bunching · parts/ents high → spawn burst)`,
+      );
+    }
     return lines.join('\n');
   }
 }

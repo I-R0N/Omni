@@ -76,6 +76,14 @@ interface RivalInstance {
   target?: GameEntity | null;
 }
 
+/** Shared empty snapshot for COSMETIC explosion rings (damage 0 +
+ *  knockback 0).  They never apply anything, so they never read it —
+ *  `updateExplosionRings` early-outs on an empty set.  Sharing one frozen
+ *  instance means an ordinary enemy death (which spawns two cosmetic rings)
+ *  allocates no Sets at all.  Never mutated; the damaging path builds its
+ *  own real Set. */
+const EMPTY_HIT_IDS: Set<string> = new Set<string>();
+
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
@@ -1974,6 +1982,7 @@ export class GameEngine {
         this.perfController.loadLevel,
         this.renderer.lastRenderMs,
         this.lastFrameSimMs,
+        this.lastFrameSteps,
       );
     }
     this.onStatsUpdate({
@@ -5738,10 +5747,14 @@ export class GameEngine {
       // used to walk the whole map per ring on the single spawn frame, which
       // is the bulk of the "spawn-burst hitch".  Damaging rings (cannon AoE,
       // kamikaze, merge blow-back) still snapshot exactly as before.
-      const validHitIds = new Set<string>();
       const ents = this.currentMap.entities;
       const cosmeticRing = opts.damage <= 0 && opts.knockback <= 0;
+      // Allocate the snapshot Set only for rings that can actually use it.
+      // An ordinary enemy death spawns TWO cosmetic rings, so on a
+      // kill-heavy frame this was two dead Sets per kill.
+      let validHitIds = EMPTY_HIT_IDS;
       if (!cosmeticRing) {
+          validHitIds = new Set<string>();
           for (let i = 0; i < ents.length; i++) {
               const e = ents[i];
               if (!e.active || e.isExploding) continue;
