@@ -982,6 +982,24 @@ export const SIMULATION_CONSTANTS = {
 //
 // 120 is index 0 and stays the default, so the shipping path is unchanged.
 
+/** Max static-tile cache stamps allowed in ONE render frame.
+ *
+ *  The static-tile layer stamps tiles into a map-sized offscreen canvas
+ *  lazily, and the loop had no budget: whenever a lot of tiles became
+ *  cacheable at once — the hex sprite finishing loading after map build, or
+ *  a wave of tile regen — every one of them stamped in a single frame.  A
+ *  device capture (Ring World, 2026-08-09) caught it twice: `render 45.00`
+ *  at 12.6s with 1357 entities, and `render 40.00` at 29.9s, against a
+ *  1.41ms average.  Those were the only frames all session where OUR render
+ *  was the spike.
+ *
+ *  Capping is visually identical rather than a trade: a tile that does not
+ *  get its stamp this frame simply renders through the normal per-entity
+ *  path, which is exactly what it does today until it is stamped.  Only the
+ *  cache WARM-UP spreads out — at 24/frame a full map catches up in well
+ *  under a second. */
+export const STATIC_TILE_STAMPS_PER_FRAME = 24;
+
 // ─── DBG: substep cap (frame-pacing) ─────────────────────────────────────────
 //
 // MAX_SUBSTEPS is the spiral-of-death clamp, but set too HIGH it feeds the

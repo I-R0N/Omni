@@ -810,6 +810,63 @@ in FOR-USER-REVIEW.
 
 ---
 
+## P11 — a real RENDER spike, and an instrument gap that cost two captures
+
+### The instrument gap (my fault)
+
+Two captures were requested as A/Bs (`Substep cap = 3`, `Render scale = 2`)
+and **neither can be verified**, because the report never recorded which
+toggles were active. One came back on a different map than requested, the
+other showed `render avg` moving the wrong way — and there is no way to tell
+whether the setting was applied.
+
+Fixed: the report now carries a `set` line —
+`sim 120Hz · substep 5 · rscale 3x · hud 60Hz · auto on`. A capture used as
+evidence has to say what produced it. Both of those captures are logged
+below for what they DO show, and neither is treated as an A/B result.
+
+### The new finding: our render CAN spike, by 40-45 ms
+
+Ring World, 55.9 s, 1385 peak entities:
+
+```
+worst  #  frame   render     sim      ui   other  steps   ents  parts    at
+      1   81.0    1.00    2.00    0.00    78.0      1    762    153   32.6s
+      2   51.0   40.00    5.00    0.00     6.0      2    718    149   29.9s
+      3   49.0   45.00    3.00    0.00     1.0      3   1357     36   12.6s
+```
+
+Rows 2 and 3 are the **first frames all session where OUR render is the
+spike** — 40 and 45 ms against a 1.41 ms average, with `other` at 1-6 ms.
+Everything else in every capture so far pointed away from render.
+
+**Cause: the static-tile cache stamps without a per-frame budget.**
+`prepareStaticTileTransitions` walks the visible list and stamps every tile
+that has become cacheable, and each stamp is a `clearRect` + `drawImage` on
+a map-sized offscreen canvas. Normally a trickle — but when many tiles become
+cacheable at once (the hex sprite finishing loading AFTER `buildStaticTileLayer`
+already ran, which the code explicitly anticipates, or a wave of tile regen)
+they all stamp in one frame. Row 3 at 12.6 s with the session's highest entity
+count is the sprite-load catch-up; row 2 is a regen wave.
+
+Fixed with `STATIC_TILE_STAMPS_PER_FRAME = 24`. This is **not a trade**:
+a tile that misses its stamp renders through the normal per-entity path that
+frame — exactly what it already does until it is stamped. Only the cache
+warm-up spreads out, and at 24/frame a full map catches up in under a second.
+
+### What the two captures still tell us
+
+- **`other` remains the dominant term** on light scenes: 78 ms of an 81 ms
+  frame (Ring World row 1), 25-30 ms of every Pocket worst frame. Unmoved by
+  everything shipped so far, and still not our JS.
+- **Pocket got no better** across the session (1%-low 42 vs 56 previously),
+  but with settings unrecorded and different session lengths this is not
+  evidence about render scale either way.
+- A cosmetic report bug: `FPS max 0` appears when two rAF callbacks share a
+  timestamp (`toFps(0)`). Harmless, noted.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement

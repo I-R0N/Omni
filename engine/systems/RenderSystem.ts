@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1286,6 +1286,7 @@ export class RenderSystem {
   private prepareStaticTileCacheForFrame(playerPos: Vector2 | undefined): void {
       if (!this._staticTileCanvas) return;
       const entries = this._visibleEntities;
+      let stampBudget = STATIC_TILE_STAMPS_PER_FRAME;
       for (let i = 0; i < entries.length; i++) {
           const entity = entries[i].entity;
           if (!this.isStaticTileCacheable(entity)) continue;
@@ -1310,12 +1311,23 @@ export class RenderSystem {
               && entity.regenPopTimer === undefined
               && !inGlowRange;
           if (wantsCache && entity._staticCached !== true) {
-              // Pre-scrub the stamp area in case polygonPoints was
-              // mutated since the last stamp (rock-tile dent) — without
-              // this the new (smaller) polygon paints inside the old
-              // outline, leaving a halo of stale pixels around the dent.
-              this.eraseStaticTileFromCache(entity);
-              this.stampStaticTileToCache(entity);
+              // BUDGETED (see STATIC_TILE_STAMPS_PER_FRAME): stamping is a
+              // clearRect + drawImage on a map-sized offscreen canvas, and
+              // this loop used to do as many as were pending — so a moment
+              // where many tiles became cacheable at once (sprite load, a
+              // wave of regen) cost 40-45ms of render in ONE frame.  Skipping
+              // a stamp is not a visual change: the tile just renders through
+              // the normal per-entity path this frame, exactly as it does
+              // until it gets stamped.
+              if (stampBudget > 0) {
+                  stampBudget--;
+                  // Pre-scrub the stamp area in case polygonPoints was
+                  // mutated since the last stamp (rock-tile dent) — without
+                  // this the new (smaller) polygon paints inside the old
+                  // outline, leaving a halo of stale pixels around the dent.
+                  this.eraseStaticTileFromCache(entity);
+                  this.stampStaticTileToCache(entity);
+              }
           } else if (!wantsCache && entity._staticCached === true) {
               this.eraseStaticTileFromCache(entity);
           }

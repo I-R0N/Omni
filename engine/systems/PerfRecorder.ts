@@ -29,6 +29,11 @@ export interface PerfReportContext {
   difficulty: number;
   /** Short build/branch tag so a pasted block is self-identifying. */
   buildTag: string;
+  /** Active DBG toggle states.  Load-bearing, not decoration: these
+   *  captures are used as A/B evidence, and a capture that does not record
+   *  which settings produced it cannot be compared to another one.  Two
+   *  captures in this gauntlet were ambiguous for exactly that reason. */
+  settings: string;
 }
 
 /** Cyclable scene labels so each capture is self-describing on the paste. */
@@ -309,6 +314,7 @@ export class PerfRecorder {
     const lines = [
       `### PERF ${ctx.buildTag} · ${this.sceneTag} · ${ctx.mapName} · diff ${ctx.difficulty}`,
       `viewport ${ctx.viewportW}×${ctx.viewportH} dpr${ctx.dpr} zoom${r2(ctx.zoom)} · ${r1(durSec)}s · ${n} frames${this.full ? ' (capped)' : ''}`,
+      `set   ${ctx.settings}`,
       `FPS   avg ${fpsR(avgFps)} · median ${fpsR(toFps(medianFrame))} · 5%-low ${fpsR(toFps(p95Frame))} · 1%-low ${fpsR(toFps(p99Frame))} · min ${fpsR(toFps(maxFrame))} · max ${fpsR(toFps(minFrame))} · ≥55: ${Math.round((ge55 / n) * 100)}% · ≥30: ${Math.round((ge30 / n) * 100)}%`,
       `frame avg ${r1(sumFrame / n)}ms · median ${r1(medianFrame)}ms · p95 ${r1(p95Frame)}ms · p99 ${r1(p99Frame)}ms`,
       `cost  render avg ${r2(this.sumRender / n)}ms · sim avg ${r2(this.sumSim / n)}ms · collisions avg ${r2(this.sumCollisions / n)}ms · ui avg ${r2(this.sumUi / n)}ms`,
