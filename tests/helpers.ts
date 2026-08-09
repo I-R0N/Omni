@@ -151,6 +151,12 @@ export async function waitForEngine(
 
 /** Advance the world by `seconds` of SIM time (not wall time).
  *
+ *  NOT USED by any suite today — the suites all have a specific condition to
+ *  poll for, which is strictly better than waiting a fixed amount. Kept
+ *  because "let the world run for a bit" is a real need the moment a suite
+ *  tests something time-driven, and re-deriving the runTimeSec trick below is
+ *  exactly the kind of wheel this harness exists to stop being reinvented.
+ *
  *  `runTimeSec` is the engine's own sim-second accumulator — the one the run
  *  summary reports — so it already excludes paused, docked and dead time,
  *  which is exactly the definition a test wants for "let the world run".
@@ -171,7 +177,13 @@ export async function advanceSim(page: Page, seconds: number, timeoutMs = 120_00
 
 /** Watch `read` for `windowMs` of wall time and return the LARGEST value
  *  seen.  For transient state (hit stun, a flash timer, a peak count) that a
- *  single read will usually miss. */
+ *  single read will usually miss.
+ *
+ *  NOT USED by any suite today, for the same reason as `advanceSim`: nothing
+ *  in the current net measures a transient.  Kept because the flake it
+ *  prevents — a 0.12s hit-stun read 200 ms after the shot, which comes back
+ *  zero and reads as a product bug — cost a previous session real time, and
+ *  the fix should not have to be rediscovered. */
 export async function samplePeak(
   page: Page,
   read: (e: Engine) => number,

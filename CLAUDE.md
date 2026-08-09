@@ -41,9 +41,18 @@ constants.ts              ~1000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
-package.json              Scripts: dev, build, preview (no lint/test script)
+package.json              Scripts: dev, build, preview, typecheck, test
+                          (no lint script)
+playwright.config.ts      Test harness: one 390×844 project, a webServer
+                          that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
+
+tests/                    Playwright smoke suites (roadmap 5b) — boot,
+                          loop, economy, attribution, traits, screens,
+                          plus helpers.ts (the shared harness over the
+                          debug handles) and README.md (suite map +
+                          the anti-flake rules).  38 tests
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
@@ -1442,10 +1451,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pattern).
 - **`window.__omniEngine` / `window.__omniStats` are debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so headless
-  Playwright smokes can drive the real engine in a real browser without a
-  test runner being added to the project (§7).  Two assignments, no
-  per-frame cost beyond the stats one already happening.
+  `window`.  NOTHING in the game reads them — they exist so the headless
+  Playwright suites in `tests/` can drive the real engine in a real browser
+  (§7; the "without a test runner being added" rationale is superseded —
+  roadmap 5b adopted one, and these handles are what it drives).  Two
+  assignments, no per-frame cost beyond the stats one already happening.
+  Note that `private` is compile-time only: at runtime a suite can read
+  engine internals (`runTimeSec`, `waves.waveOffset`) and call private
+  methods (`physics.resolveCollision`) straight off the handle.  That is
+  intended, and is what lets a test measure damage arithmetic in situ
+  instead of reimplementing it.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk
@@ -1537,8 +1552,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
 - Two GitHub Actions: `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
-- No CI type-check or test gates today — local `npm run build` is the
-  last-mile validation.
+- No CI type-check or test gates today — the two workflows gate nothing.
+  Validation is LOCAL and is three commands: `npm run build`,
+  `npm run typecheck`, `npm test` (§7).  Wiring them into CI is tier 6 of
+  the parking lot's "Automated test suite" entry and is still parked.
 
 ---
 
