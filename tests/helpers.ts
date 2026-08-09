@@ -206,12 +206,30 @@ export async function startRun(page: Page, mapType?: string) {
   await waitForStats(page, s => s.gameState === 'PLAYING', 'game to reach PLAYING');
 }
 
-/** Put the player next to a station and dock.  Uses the engine's own debug
- *  teleport + dock rather than flying, because "can the ship fly there" is
- *  not what any suite using this is testing. */
-export async function dockAtStation(page: Page) {
-  await engine(page, e => e.debugTeleportToStation());
-  await waitForStats(page, s => !!s.dock?.inRange, 'dock range');
+/** Put the player next to a station of `kind` and dock.  Flies nothing —
+ *  "can the ship reach it" is not what any suite using this is testing.
+ *
+ *  Defaults to the TRADE HUB, the one station carrying BOTH shops: most
+ *  callers want to buy something, and `purchaseModule` gates on the docked
+ *  station's services, so docking at HOME (drydock only) silently returns
+ *  false on every purchase. */
+export async function dockAtStation(page: Page, kind = 'tradehub') {
+  const found = await engine(
+    page,
+    (e, k: string) => {
+      const st = e.stations.find((s: any) => s.stationKind === k);
+      if (!st) return false;
+      // Just inside DOCK_RANGE, mirroring debugTeleportToStation's offset.
+      e.player.position.x = st.position.x;
+      e.player.position.y = st.position.y + 40;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      return true;
+    },
+    kind,
+  );
+  if (!found) throw new Error(`no station of kind "${kind}" on this map`);
+  await waitForStats(page, s => !!s.dock?.inRange, `dock range at the ${kind}`);
   await engine(page, e => e.dockAtStation());
-  await waitForStats(page, s => !!s.station, 'station UI');
+  await waitForStats(page, s => !!s.station, 'the station UI');
 }
