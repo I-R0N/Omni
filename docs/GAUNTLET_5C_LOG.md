@@ -666,6 +666,80 @@ device value is likewise smaller than the headless numbers implied — though
 
 ---
 
+## P9 — two more captures: React ruled OUT, and 120Hz beats 60Hz
+
+Pocket, iPhone 440x756 dpr3, diff 3, PerfController AUTO **off** in both.
+
+| metric | 60 Hz sim (74.2 s) | 120 Hz sim (63.7 s) |
+|---|---|---|
+| 1%-low FPS | 40 | **56** |
+| min FPS | 26 | **34** |
+| frame p99 | 25.0 ms | **18.0 ms** |
+| worst frame | 38.0 ms | **29.0 ms** |
+| >=55 fps | 98% | **99%** |
+| render avg | 1.82 ms | 1.02 ms |
+| sim avg | 1.98 ms | 1.57 ms |
+| **ui avg** | **0.01 ms** | **0.01 ms** |
+| tier avg | 1.63 | 1.16 |
+
+### 1. The React hypothesis is DEAD
+
+`ui avg 0.01 ms`, and `ui = 0.00` on **every** worst frame in both captures.
+The per-frame `setState` + reconciliation costs nothing measurable on device.
+
+That closes a hypothesis this ledger had been carrying since P1 and had just
+promoted to "prime suspect" in P8. It was wrong. Recorded as a negative
+result because the reasoning that produced it was sound and the next session
+should not re-run it: allocation share (~10%, P1) said nothing about time,
+and timing it was the only way to know.
+
+### 2. `other` is the whole story, and it is not our JS
+
+```
+worst  #  frame   render     sim      ui   other  steps   ents  parts    at
+      3   35.0    0.00    0.00    0.00    35.0      0    592    217   25.6s
+```
+
+**A frame in which the engine did nothing at all — zero render, zero sim,
+zero substeps — still took 35 ms.** No amount of JS optimisation can move
+that. Across both captures `other` is 21-36 ms of every worst frame while
+our measured work is 0-4 ms.
+
+### 3. 120 Hz is measurably SMOOTHER than 60 Hz
+
+This inverts the expectation the sim-rate toggle was built on. Halving the
+sim rate halved the sim work and made the **tail worse on every metric** —
+1%-low 40 vs 56, p99 25 vs 18 ms. The likely mechanism: at 60 Hz the sim
+rate equals the display rate, so the accumulator has coarse granularity to
+absorb jitter (a late frame drains one BIG step); at 120 Hz it drains two to
+four small ones and re-phases smoothly. The captures are separate play
+sessions and not perfectly matched (tier avg 1.63 vs 1.16), so this is
+indicative rather than controlled — but the gap is large and consistent.
+
+**Recommendation: keep 120 Hz as the default.** The sim-rate toggle stays as
+a diagnostic; its headless value (-62% sim p99) was real and irrelevant,
+because sim was never the constraint on device.
+
+### 4. Next lever: canvas FILL RATE
+
+With React and our JS excluded, the remaining candidates for `other` are GC
+and compositing. Compositing is the stronger one and had never been examined:
+`dpr` was **uncapped**, so a 440x756 viewport rasterises `1320 x 2268` =
+**~3.0 million pixels every frame**, with heavy `globalCompositeOperation =
+'lighter'` and radial-gradient overdraw on top.
+
+Crucially this is invisible to `renderMs`, which times our JS ISSUING canvas
+calls; rasterisation and compositing happen in the browser compositor after
+the rAF callback returns — exactly where the missing milliseconds are.
+
+Shipped: **`Render scale` DBG cycle (3 / 2 / 1.5)** capping the pixel ratio.
+Capping at 2 cuts the pixel count ~2.3x. `effectiveDpr()` is now the single
+accessor — RenderSystem and the canvas sizing in `App.tsx` both read it, so
+the backing store and the logical viewport can never disagree. Trade: a
+softer image, so it is a toggle, not an edit.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement

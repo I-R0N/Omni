@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1360,7 +1360,7 @@ export class RenderSystem {
     const t0 = performance.now();
     if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
     const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = effectiveDpr();
     const width = (ctx.canvas.width || 0) / dpr;
     const height = (ctx.canvas.height || 0) / dpr;
 
@@ -1688,8 +1688,8 @@ export class RenderSystem {
       // viewports.  Half-extents include a one-cell margin so cells
       // straddling the edge still draw.
       const zoom = camera.zoom || 1;
-      const halfW = (ctx.canvas.width  / (window.devicePixelRatio || 1)) / 2 / zoom;
-      const halfH = (ctx.canvas.height / (window.devicePixelRatio || 1)) / 2 / zoom;
+      const halfW = (ctx.canvas.width  / effectiveDpr()) / 2 / zoom;
+      const halfH = (ctx.canvas.height / effectiveDpr()) / 2 / zoom;
       const viewMargin = cellSize;
       const viewLeft   = camX - halfW - viewMargin;
       const viewRight  = camX + halfW + viewMargin;
@@ -5261,7 +5261,7 @@ export class RenderSystem {
   public worldToScreen(camera: CameraState, pos: Vector2): Vector2 | null {
       const ctx = this.ctx;
       if (!ctx) return null;
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = effectiveDpr();
       const width = (ctx.canvas.width || 0) / dpr;
       const height = (ctx.canvas.height || 0) / dpr;
       const shake = camera.shakeOffset ?? { x: 0, y: 0 };

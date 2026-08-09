@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState } from './types';
+import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
 import UIOverlay from './components/UIOverlay';
 
 const App: React.FC = () => {
@@ -25,6 +26,11 @@ const App: React.FC = () => {
   // read the latest value without closing over stale state.
   const difficultyRef = useRef(difficulty);
   difficultyRef.current = difficulty;
+  // The canvas resize routine, exposed so the render-scale DBG toggle can
+  // re-run it: changing the pixel-ratio cap has to resize the backing store,
+  // and only this effect owns the canvas element.
+  const resizeRef = useRef<() => void>(() => {});
+  const [renderScaleName, setRenderScaleName] = useState<string>(getActiveRenderScaleName());
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -46,7 +52,10 @@ const App: React.FC = () => {
     const handleResize = () => {
       if (canvasRef.current) {
         const canvas = canvasRef.current;
-        const dpr = window.devicePixelRatio || 1;
+        // Capped device pixel ratio — see RENDER_SCALE_CYCLE.  RenderSystem
+        // reads the SAME accessor, so the canvas it draws into and the logical
+        // viewport it computes always agree.
+        const dpr = effectiveDpr();
         const width = window.innerWidth;
         const height = window.innerHeight;
 
@@ -67,6 +76,7 @@ const App: React.FC = () => {
       }
     };
 
+    resizeRef.current = handleResize;
     const ctx = canvasRef.current.getContext('2d')!;
     engine.initCanvas(ctx);
     handleResize(); // Set initial size before first frame
@@ -313,6 +323,12 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleEnemyScale();
   };
 
+  const handleCycleRenderScale = () => {
+      cycleRenderScale();
+      setRenderScaleName(getActiveRenderScaleName());
+      resizeRef.current();
+  };
+
   const handleCycleHudRate = () => {
       if (engineRef.current) engineRef.current.cycleHudRate();
   };
@@ -521,6 +537,8 @@ const App: React.FC = () => {
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSimRate={handleCycleSimRate}
         onCycleHudRate={handleCycleHudRate}
+        onCycleRenderScale={handleCycleRenderScale}
+        renderScaleName={renderScaleName}
         onCycleSwarmMove={handleCycleSwarmMove}
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}

@@ -982,6 +982,45 @@ export const SIMULATION_CONSTANTS = {
 //
 // 120 is index 0 and stays the default, so the shipping path is unchanged.
 
+// ─── DBG: render scale (device-pixel-ratio cap) ──────────────────────────────
+//
+// The canvas backing store is sized by devicePixelRatio, and on an iPhone that
+// is 3 — so a 440x756 viewport rasterises ~3.0 MILLION pixels every frame, with
+// a lot of `globalCompositeOperation = 'lighter'` and radial gradients on top.
+//
+// That fill-rate cost is invisible to every timer in this engine: `renderMs`
+// measures the time our JS spends ISSUING canvas calls, while the actual
+// rasterisation and compositing happen in the browser compositor after the rAF
+// callback returns.  Device captures (2026-08-09) showed frames of 35-38ms
+// carrying 0-1ms render and 0-2ms sim — one of them with the engine doing
+// literally nothing — so the whole cost is outside our JS, and fill rate is the
+// leading candidate.
+//
+// Capping the ratio at 2 cuts the pixel count by ~2.3x (3.0M -> 1.3M).  It is a
+// SHARPNESS trade, which is why it is a toggle and not an edit: 3 is index 0
+// and stays the default until someone chooses otherwise.
+export const RENDER_SCALE_CYCLE: ReadonlyArray<number> = [3, 2, 1.5] as const;
+let activeRenderScaleIndex = 0;
+export function getActiveRenderScaleCap(): number { return RENDER_SCALE_CYCLE[activeRenderScaleIndex]; }
+export function getActiveRenderScaleName(): string {
+  const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  return dpr <= cap ? `${cap}x (native)` : `${cap}x`;
+}
+/** The device pixel ratio ACTUALLY in use, after the cap.  Every site that
+ *  converts between canvas pixels and CSS pixels must read this, not
+ *  `window.devicePixelRatio` — mixing the two makes the renderer compute a
+ *  logical viewport that does not match the canvas it is drawing into. */
+export function effectiveDpr(): number {
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+  return dpr < cap ? dpr : cap;
+}
+export function cycleRenderScale(): number {
+  activeRenderScaleIndex = (activeRenderScaleIndex + 1) % RENDER_SCALE_CYCLE.length;
+  return RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+}
+
 // ─── DBG: HUD (React) update rate ────────────────────────────────────────────
 //
 // `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.
