@@ -31,3 +31,6 @@ test-results
 playwright-report
 blob-report
 playwright/.cache
+
+# Gauntlet 5c capture outputs — regenerable, machine-specific, and noisy.
+perf/out/

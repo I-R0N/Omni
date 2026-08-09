@@ -1,0 +1,285 @@
+# Gauntlet 5c — the performance gauntlet
+
+Roadmap item **5c** of `docs/GAME_FEEDBACK_PLAN.md` (decision #47a, goal
+amended by the user 2026-08-09).
+
+> **GOAL.** Smooth, locked 60 fps under ALL gameplay conditions — no dips,
+> no stutter. **Worst frame is the metric**; averages are vanity numbers
+> here, because one 80 ms frame in a smooth minute IS the failure.
+
+Working rules for this branch:
+
+- **Budget: 16.7 ms** for sim + render together, on the target device
+  (iPhone). Absolute frame time cannot be measured in this container
+  (software rasterizer), so headless work is done in **same-harness A/B
+  deltas** and **in-code ms attribution**; ACCEPTANCE evidence is the
+  user's Perf REC hardware captures.
+- **GC hitches count as stutter.** Steady-state allocation in hot paths
+  must reach zero.
+- **Frame PACING is in scope**, not just raw compute: substep bunching
+  after a long frame, one-frame work bursts (mass death, wave spawn,
+  boss phase), map-load residue.
+- **Zero-behaviour is the default.** Every exception is flagged in
+  FOR-USER-REVIEW, logged here, and DBG-toggleable.
+- Three gates green (`npm run typecheck`, `npm run build`, `npm test`)
+  before every milestone commit.
+
+---
+
+## Checklist
+
+- [x] **P1** — Baseline + attribution (no fixes)
+- [ ] **P2** — Fix, worst spike first; loop until dry
+- [ ] **P-final** — Validation + report
+
+---
+
+## The instrument
+
+`perf/capture.mjs` + `perf/scenes.mjs` — a repeatable headless capture
+matrix driving the real engine in a real browser through the same
+`window.__omniEngine` debug handle the 5b suites use. `node
+perf/capture.mjs --help`-free usage is documented at the top of the file.
+
+Per scene it records, for every frame: the true rAF delta, the engine's
+own RAW per-frame sim total, the substep count, raw render ms, entity
+count, and heap usage — then reports p50/p95/p99/max for each, plus an
+allocation profile attributed to call frames.
+
+**Three calibrations were needed before any number here was trustworthy.
+They are the reason this section exists rather than a bare table.**
+
+1. **`sim` per FRAME is not `sim` per SUBSTEP.** The sim is fixed-timestep
+   at 120 Hz (`FIXED_DT = 1/120`) with `MAX_SUBSTEPS = 5`. A 16.7 ms frame
+   legitimately drains 2 substeps; a 33 ms frame drains 4. So a rising
+   per-frame sim total can mean "the sim got slower" OR "the frame got
+   longer and pulled more substeps in" — and in this container, where
+   software rasterization stretches every frame, it is mostly the latter.
+   The matrix reports BOTH (`stp` = mean substeps, `sim/stp99`), and
+   `lastFrameSteps` was added to `GameEngine` to make it measurable. This
+   is also the frame-pacing signal: substep bunching is visible directly.
+
+2. **The sampling heap profiler reports RETENTION, not allocation, by
+   default.** V8 drops samples for objects that have since been collected,
+   so the default profile describes what survived. Steady-state per-frame
+   garbage is by definition collected — so the default profile missed
+   essentially all of it. Measured: the default under-reported total
+   allocation by **~500×** (575 KB vs the heap trace's 294 MB over the same
+   12 s window). Passing `includeObjectsCollectedByMajorGC` +
+   `includeObjectsCollectedByMinorGC` to `HeapProfiler.startSampling`
+   brings the two into agreement (**531,848 vs 538,898 B/frame — 1.3%**),
+   and only then is the attribution the allocation rate we care about.
+   *Every allocation ranking below the first draft changed once this was
+   fixed;* the pre-calibration ranking was measuring the wrong thing.
+
+3. **The container is noisy.** Single runs vary widely (one asteroid-6k run
+   showed `sim max 184 ms` where its neighbours showed 35–41 ms). Every
+   number quoted for a decision is a **median of 3** (`--repeat 3`), and
+   levels are never compared across hosts — only deltas on the same host in
+   the same session.
+
+**So: LEVELS are indicative, DELTAS are evidence, ALLOCATION is exact.**
+No "is it 60 fps?" verdict may be read off this harness. That verdict
+comes from hardware captures only.
+
+---
+
+## P1 — Baseline + attribution
+
+### The capture matrix (BASELINE, median of 3, 390×844)
+
+```
+scene                 ents  stp sim/stp99  sim p99  sim max  rnd p99  rnd max  heapB/f  profB/f  GC/s  heapΔ
+hub-idle              1308 2.64      1.50     5.10     6.00    20.60    23.90   522149   532250   1.4   17.0
+asteroid-6k           1380 3.27      6.33    21.70    36.30    21.50    30.90  1824529  1941790   2.3   23.2
+tile-shatter-storm    1764 3.43      2.85    11.40    46.80    29.80   120.10   850487  1008999   3.6   10.2
+boss-capstone         2989 3.66      3.85    15.40    20.90    29.60    64.60  1499843  1569310   2.2   31.6
+roamer-stack          2813 3.74      3.25    13.00    14.00    27.90    30.40  1415019  1488122   2.0   33.0
+mass-death            3575 4.67      6.22    29.50    50.30    33.80    36.90  2510791  2819842   2.3   33.2
+stage-descent         2676 2.63      2.15     8.60    20.60    21.60   153.50   810384   899157   1.7   14.6
+```
+
+`stp` = mean substeps/frame · `sim/stp99` = p99 sim per substep (host-independent)
+· `heapB/f` and `profB/f` = allocated bytes/frame by the two independent
+methods · `heapΔ` = MB over the window.
+
+**Reading it against the budget.** On a device holding 60 fps the accumulator
+drains **2** substeps per frame, so the sim's own share of the 16.7 ms budget
+is `2 × sim/stp99`:
+
+| scene | 2 × sim/stp p99 | share of 16.7 ms |
+|---|---|---|
+| asteroid-6k | 12.7 ms | **76%** |
+| mass-death | 12.4 ms | **74%** |
+| boss-capstone | 7.7 ms | 46% |
+| roamer-stack | 6.5 ms | 39% |
+| tile-shatter-storm | 5.7 ms | 34% |
+| stage-descent | 4.3 ms | 26% |
+| hub-idle | 3.0 ms | 18% |
+
+Sim alone eats three quarters of the frame on the two worst scenes, before
+render gets any of it. That is the headline in-code number.
+
+**Allocation is the other headline: 0.5–2.8 MB *per frame*, in every scene,
+including the idle hub.** That is 30–170 MB/s, and it is what drives the
+observed 1.4–3.6 GC events/second. GC hitches count as stutter, so this is
+not a background concern — it is a dip generator running continuously.
+
+### Ranked in-code spike sources
+
+Ranked by allocated bytes over the window, consistent across all 7 scenes
+(numbers from asteroid-6k, the worst; 823 MB total sampled over 12 s):
+
+| # | site | asteroid-6k | mechanism | confidence |
+|---|---|---|---|---|
+| 1 | `applyFlow` (GameEngine) | 182 MB | double-field writes on `GameEntity` — see below | **indicated** |
+| 2 | `PhysicsSystem.handleEntityCollisions` | 163 MB | fresh `dynamicEntities: []` + a fresh `[]` per grid cell, every substep | **proven** |
+| 3 | `GameEngine.prepareFrameEntities` | 107 MB | `length = 0` + `push` refill | **proven** |
+| 4 | `PhysicsSystem.update` (own frame) | 75 MB | not yet split | unknown |
+| 5 | `EntityIndex.rebuild` | 70 MB | `length = 0` + `push` × 4 arrays | **proven** |
+| 6 | `AISystem.nearestEatableShard` | 51 MB | O(bubbles × shards) scan | partial |
+| 7 | `handleEntityCollisions < set` | 40 MB | `Map.set` on the per-substep grid rebuild | **proven** |
+| 8 | `ShardSystem.runMergeBroadphase` | 21 MB | — | unknown |
+
+Also present in other scenes: `equilibrateColors` (12–30 MB),
+`recomputeNeighborCounts` (52 MB in mass-death), `render`/`renderEntities`
+(10–41 MB), `updateConsumers` (9–11 MB).
+
+**Mechanism 1 (proven).** `array.length = 0` followed by `push` shrinks the
+backing store and re-grows it through the push growth policy on every
+rebuild. Verified standalone (`node --expose-gc`, 20 000 rebuilds of a
+1300-element array): **153.4 ms vs 58.2 ms (2.6× faster)** and **11× less
+heap growth** against index-fill + truncate-only-when-shrinking. This single
+idiom is items 2, 3, 5 and 7 — **~380 MB of the 823 MB**, and it is the
+dominant allocator in the *idle hub* as much as in the worst combat scene.
+It is not a gameplay cost at all; it is a container-refill cost that scales
+with entity count and runs 2–5× per frame.
+
+**Mechanism 2 (indicated, not yet proven).** `applyFlow` contains no visible
+allocation — it is arithmetic over scratch vectors — yet allocates ~98 bytes
+*per entity per substep*. Bisected with two ablations on the same scene:
+
+| variant | `applyFlow` allocation |
+|---|---|
+| baseline | 182.5 MB |
+| `--ablate lanejitter0` (no `e.flowLane` property write) | 133.5 MB |
+| `--ablate flowoff` (whole flow body skipped; only `e.rotation += …` runs) | **80.5 MB** |
+
+With the entire flow body skipped, one double-field write per entity still
+accounts for 80 MB. The probe (`perf/probe.mjs`) separately shows that
+writes to a nested `Vector2` (`e.velocity.x`) allocate ~0 — those objects
+have a uniform `{x, y}` shape. The difference points at V8 boxing doubles
+for `GameEntity`'s **optional numeric fields**, whose representation is
+generalized to Tagged because they are `number | undefined` (CLAUDE.md §4's
+"set the field when needed" pattern). Recorded as INDICATED: the ablation
+evidence is in-situ and reproducible, but the boxing itself has not been
+observed directly, and the fix is invasive enough to deserve its own
+milestone and its own confirmation.
+
+### Frame pacing
+
+`stp` (mean substeps/frame) is 2.6–4.7 across the matrix versus the 2.0 a
+device at 60 fps would drain — the container's slow software raster pulling
+extra substeps in, exactly the cascade the goal names. Nothing here shows the
+accumulator *failing*: `MAX_SUBSTEPS = 5` is hit only in `mass-death`
+(4.67 mean), and the `% FIXED_DT` remainder-keeping on the clamp path is
+correct. **The pacing risk is therefore not the accumulator's logic but the
+sim cost that makes a frame long in the first place** — which is item 1–8
+above. Re-check after P2.
+
+`stage-descent` shows `rnd max 153.5 ms` — the map-load frame, which is the
+one permitted long frame. Its `stp` of 2.63 is the *lowest* in the matrix,
+so the load does NOT leave a substep pile-up behind it. No residue.
+
+### Ablation results (experiments, not fixes)
+
+| Ablation | Scene | Effect |
+|---|---|---|
+| `react` (per-frame `setState` + full HUD reconcile removed) | hub-idle | heap 547 → 493 KB/frame (**≈10%**) |
+
+The per-frame React re-render is real (`App` re-renders 60×/s, allocating
+~90 handler closures and reconciling a 2157-line unmemoized `UIOverlay`)
+but it is **not** the dominant cost. Recorded so the hypothesis is closed
+with a number rather than left as a plausible story.
+
+---
+
+## Per-iteration log
+
+### Iteration 1 — instrument + baseline (P1)
+
+Built `perf/capture.mjs` / `perf/scenes.mjs`; calibrated it (three fixes
+above); captured the matrix. Engine change: `GameEngine.lastFrameSteps`
+(one field, written once per frame) so substep bunching is observable —
+the only production change in this milestone.
+
+**Mechanism verified independently** (`node --expose-gc`, 20 000 rebuilds
+of a 1300-element array): `length = 0` + `push` vs index-fill +
+truncate-only-when-shrinking → **153.4 ms vs 58.2 ms (2.6× faster)** and
+**11× less heap growth**. The idiom shrinks the backing store and then
+re-grows it through the push growth policy every single rebuild.
+
+---
+
+## DECISIONS TAKEN
+
+**D1 — The harness lives in `perf/`, outside `tests/`, and is not wired
+into `npm test`.**
+*Alternatives:* a Playwright spec under `tests/` (picked up by the 5b
+config automatically), or a second Playwright project.
+*Why:* the capture matrix takes minutes per run and the soak scene takes
+five on its own. `npm test` is a merge gate that has to stay fast and
+deterministic; a perf capture is neither (it is explicitly noise-prone —
+see calibration 3). Keeping it a standalone node script also lets it pass
+V8 flags (`--js-flags=--expose-gc`, `--enable-precise-memory-info`) and
+drive a CDP session, neither of which the test config exposes.
+
+**D2 — Scene randomness is seeded; `Math.random` is replaced page-side.**
+*Alternative:* let scenes run naturally and average more runs.
+*Why:* an A/B delta between two branches is only a delta if both saw the
+same world. Seeding costs nothing and removes the largest single source of
+between-run variance; the residual noise is host scheduling, which
+`--repeat 3` handles.
+
+**D3 — Allocation is reported from BOTH the heap trace and the sampling
+profiler, and their agreement is the trust signal.**
+*Alternative:* pick one.
+*Why:* calibration 2 was only detectable because the two disagreed. Keeping
+both means the next person to change the profiler configuration finds out
+immediately instead of silently measuring retention again.
+
+---
+
+## FOR-USER-REVIEW
+
+### CAPTURE REQUESTS — hardware Perf REC captures
+
+**Why I'm asking.** Everything above is headless. This container renders
+canvas in software, so it cannot tell you whether the game is smooth — only
+where the JS cost and the allocation are. The acceptance claim ("no
+perceptible dips") can only come from your device. These are ordered by
+value; **1–3 are the ones that matter most**, and if you only do those, the
+gauntlet still has what it needs.
+
+How: pause ▸ Debug Menu ▸ **Perf REC** ▸ set the scene label ▸ REC ▸ play ▸
+REC again ▸ Copy, then paste the block into the session. The label matters —
+it is what makes the paste self-identifying.
+
+| # | scene label | map | setup | duration | what I'm looking for |
+|---|---|---|---|---|---|
+| 1 | `baseline` | **Asteroid Field** (Debug ▸ map) | just fly and shoot into the shard field | 60–90 s | The worst in-code scene in the matrix (sim = 76% of budget). I need `spike worst frame` and its `render`/`sim` split. If worst-frame ≫ render+sim, it is an external stall; if ≈ render+sim, it is ours. |
+| 2 | `dense-wave` | Universe (normal run) | play to wave 4–5, let it get busy, include at least one big shatter | 90–120 s | Real play, not a stress test. This is the scene that decides whether the parked shard-broadphase pair budget is needed at all. |
+| 3 | `custom` | Universe | reach a **boss capstone** wave and fight it to the phase-3 transition | one full boss | One-frame work bursts: boss phase transitions and the capstone rout. Watch for a visible hitch at the moment the boss dies. |
+| 4 | `dragon-stack` | Universe | Debug ▸ Dragons: spawn 3–4, plus Debug ▸ Rivals ×4 | 60 s | The exotic roamers. PR #70 found these were NOT the hot path — I want to confirm that still holds after the roster grew. |
+| 5 | `roamer-swarm` | Universe | let it run 5+ minutes without dying | 5 min | GC cadence over a long soak. The `perf tier` distribution and whether hitches cluster or spread. |
+| 6 | `custom` | Overworld hub | fly around the hub doing nothing much | 45 s | The floor. If the *idle hub* hitches on device, the 0.5 MB/frame allocation is the reason, and that reframes the priority order. |
+
+**Two things to note as you play, in words** — the numbers won't capture
+them: (a) does a hitch happen at a *predictable moment* (a big kill, a
+portal, a wave start) or at random? (b) does it feel like a *stutter*
+(one frame) or a *slowdown* (a stretch of frames)? Those two answers
+separate a work burst from a sustained cost, and they are worth more than
+any single capture.
+
+I am **not blocking on these** — headless work continues, and this section
+will be updated with the attribution for whatever you paste.

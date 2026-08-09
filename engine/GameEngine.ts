@@ -586,6 +586,13 @@ export class GameEngine {
   // reads for tail attribution (distinct from the 60-frame-averaged
   // PerfSnapshot sim timers, which can't localise a single 50ms frame).
   private lastFrameSimMs: number = 0;
+  /** Substeps the accumulator drained on the last frame (0..MAX_SUBSTEPS).
+   *  `lastFrameSimMs` alone is ambiguous: at a fixed 120 Hz sim a 33 ms frame
+   *  legitimately costs twice the sim of a 16 ms one, so a rising sim total
+   *  can mean "the sim got slower" OR "the frame got longer and pulled more
+   *  substeps in".  Pairing the two separates the sim's own cost from the
+   *  substep-bunching a slow frame causes — the frame-PACING signal. */
+  private lastFrameSteps: number = 0;
   private lastPhysMiscMs: number = 0;
   private lastLogicMiscMs: number = 0;
   private lastDropsMs: number = 0;
@@ -2180,6 +2187,7 @@ export class GameEngine {
         this.simAccumulator %= FIXED_DT;
     }
     this.lastFrameSimMs = frameSimMs; // raw per-frame sim total (spike attribution)
+    this.lastFrameSteps = steps;      // …and how many substeps it covers
 
     // Enforce the particle hard-cap ONCE per frame (moved out of the per-spawn
     // path — see ParticleSystem.spawn).  Runs after the whole sim drain so
