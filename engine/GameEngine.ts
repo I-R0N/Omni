@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -601,6 +601,10 @@ export class GameEngine {
    *  substeps in".  Pairing the two separates the sim's own cost from the
    *  substep-bunching a slow frame causes — the frame-PACING signal. */
   private lastFrameSteps: number = 0;
+  /** Wall time of the per-frame `onStatsUpdate` hand-off to React. */
+  private lastStatsPushMs: number = 0;
+  /** Seconds accrued toward the next HUD (React) push — see HUD_RATE_CYCLE. */
+  private statsPushAccum: number = 0;
   private lastPhysMiscMs: number = 0;
   private lastLogicMiscMs: number = 0;
   private lastDropsMs: number = 0;
@@ -1083,6 +1087,18 @@ export class GameEngine {
   /** DBG: cycle the gnat (Swarm) movement mode to feel each side-by-side. */
   public cycleSwarmMove() {
     cycleSwarmMove();
+  }
+
+  /** DBG: cycle the HUD (React) update rate — 60Hz default / 30 / 15.
+   *
+   *  Diagnostic first, knob second: the per-frame React hand-off is the one
+   *  cost the engine's own timers never saw, and the hardware capture that
+   *  motivated this showed 32ms of a 35ms frame outside render+sim.  Lowering
+   *  it is the A/B that says whether that gap is React.  Overlay screens
+   *  always push immediately regardless of this setting. */
+  public cycleHudRate() {
+    cycleHudRate();
+    this.statsPushAccum = Infinity; // push on the very next frame
   }
 
   /** DBG: cycle the SIM RATE (120Hz default / 60Hz).
@@ -1575,6 +1591,7 @@ export class GameEngine {
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
+      hudRateName: getActiveHudRateName(),
       swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
@@ -1965,6 +1982,21 @@ export class GameEngine {
     // Build the perf snapshot once and reuse it for the HUD + the perf
     // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
     // pollute the FPS distribution).  `frameTime` is the true rAF delta.
+    // HUD push gate.  React reconciliation is per-frame work the engine's
+    // timers never measured; the HUD is chips and bars and does not need
+    // 60 Hz.  Anything that must stay frame-perfect (minimap, loadout strip,
+    // banners, damage text) is canvas-drawn and unaffected.
+    //
+    // Overlay states push IMMEDIATELY and unconditionally: the React tree is
+    // what renders the pause / station / death / stage-clear screens, so
+    // throttling those would delay a screen the player just asked for.  Only
+    // the in-play HUD is throttled.
+    this.statsPushAccum += frameTime;
+    const hudPeriod = 1 / getActiveHudRate();
+    const overlayUp = this.gameState !== GameState.PLAYING
+        || this.dockedAtStation || this.deathPending || this.stageClearPending;
+    const pushStats = overlayUp || this.statsPushAccum >= hudPeriod;
+    if (pushStats) this.statsPushAccum = 0;
     const perf = this.buildPerfSnapshot();
     // Menu-grade snapshots (loadout / shop / stats) are built while the
     // pause menu OR the docked station UI is up — both are sim-frozen
@@ -1983,9 +2015,11 @@ export class GameEngine {
         this.renderer.lastRenderMs,
         this.lastFrameSimMs,
         this.lastFrameSteps,
+        this.lastStatsPushMs,
       );
     }
-    this.onStatsUpdate({
+    const tStats0 = performance.now();
+    if (pushStats) this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
@@ -2075,6 +2109,7 @@ export class GameEngine {
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
+      hudRateName: getActiveHudRateName(),
       swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
@@ -2106,6 +2141,13 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
     });
+    // Cost of handing the frame to React.  This is the ONE per-frame cost the
+    // engine's own timers never saw: `onStatsUpdate` is a setState, and the
+    // reconciliation it triggers is neither `draw()` nor the sim.  A hardware
+    // capture (2026-08-09) showed 35ms frames carrying only 1ms render + 2ms
+    // sim, i.e. ~32ms outside everything measured — so the unmeasured work is
+    // the whole story and had to be given a number.
+    this.lastStatsPushMs = pushStats ? performance.now() - tStats0 : 0;
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
@@ -7333,7 +7375,7 @@ export class GameEngine {
       zoom: this.camera.zoom || 1,
       mapName: this.currentMap?.name || '—',
       difficulty: this.difficultyLevel,
-      buildTag: 'exotic-opt',
+      buildTag: '5c-perf',
     }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 

@@ -593,6 +593,79 @@ dense shard pile settling, not a number.
 
 ---
 
+## P8 — the first hardware capture, and what it overturns
+
+User capture, 2026-08-09 (Ring World, iPhone 440x756 dpr3, zoom 0.65, diff 3,
+11.4 s / 681 frames):
+
+```
+FPS   avg 60 · median 59 · 5%-low 56 · 1%-low 38 · min 29 · >=55: 95%
+frame avg 16.8ms · median 17.0 · p95 18.0 · p99 26.0
+cost  render avg 0.90ms · sim avg 2.67ms · collisions avg 1.09ms
+worst  #  frame   render     sim  steps   ents  parts    at
+      1   35.0    1.00    2.00      1    531     69    3.8s
+      2   30.0    2.00    3.00      1    480     42    0.6s
+      4   30.0    1.00    4.00      1    489     49    2.5s
+```
+
+**This overturns the P1 headline.** Three readings, in order of importance:
+
+1. **Our compute is ~3.6 ms of the 16.7 ms budget — 22%, not 76%.** The
+   "sim is 76% of budget" finding was a CONTAINER ARTEFACT: the software
+   rasterizer stretched frames, which pulled extra substeps in, which
+   inflated per-frame sim roughly 4x. On device, `sim avg 2.67 ms` and
+   `steps = 1`. The instrument's own calibration note (§"The instrument", 1)
+   warned that per-frame sim was host-inflated; the P1 budget table quoted it
+   anyway. That was the error.
+
+2. **Every worst frame is a MISSED VSYNC, not a slow frame.** 30 and 35 ms
+   against a 16.7 ms period are 2x and ~4x multiples, and they carry only
+   1–2 ms render and 2–4 ms sim. With ~13 ms of headroom, something outside
+   everything the engine measures is eating the frame.
+
+3. **`steps = 1` on every worst frame** — no substep bunching, and the
+   capture was taken at the 60 Hz sim rate. So neither the accumulator nor
+   the sim is implicated. Entity (531) and particle (69) counts are low, so
+   it is not a spawn burst either.
+
+### The unmeasured gap
+
+`GameEngine.onStatsUpdate` is a React `setState` and it fires EVERY FRAME.
+The reconciliation walks the whole unmemoized ~2100-line `UIOverlay` tree,
+and it is neither `draw()` nor the sim — **no engine timer has ever seen
+it.** The headless React ablation in P1 measured only its ALLOCATION share
+(~10%) and concluded it was not dominant; that says nothing about its TIME,
+which is the thing the budget is denominated in.
+
+Two changes so the next capture settles it rather than suggests it:
+
+- **`ui` is now timed and reported** — the `onStatsUpdate` hand-off gets its
+  own column in the worst-frame table, plus an `ui avg` in the cost line, and
+  the table now prints **`other` = frame − render − sim − ui** explicitly.
+  If `other` stays large with `ui` small, the gap is GC / compositing / an OS
+  stall and is not addressable in our JS — which is the PR #70 conclusion,
+  now testable instead of asserted.
+- **`HUD rate` DBG cycle (60 default / 30 / 15)** throttles only the in-play
+  HUD push. Overlay screens (pause / station / death / stage-clear) always
+  push immediately, and everything frame-critical (minimap, loadout strip,
+  banners, damage text) is canvas-drawn and untouched. It is the A/B that
+  turns the hypothesis into a verdict, and it is a knob the player can feel.
+
+Also fixed: `buildTag` was hardcoded `'exotic-opt'`, so every capture in this
+gauntlet was mislabelled with a prior session's name. Now `'5c-perf'`.
+
+### What this means for the gauntlet's conclusions
+
+The three shipped code fixes (P2/P3/P5) remain correct and remain
+zero-behaviour, but their MOTIVATION was partly wrong: they targeted a sim
+budget that was never 76% on real hardware. Their allocation reduction is
+still real and still on-goal (GC is a named dip source, and `other` being the
+whole story makes GC MORE likely to matter, not less). The sim-rate toggle's
+device value is likewise smaller than the headless numbers implied — though
+`steps = 1` in this capture shows it is doing what it claims.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement

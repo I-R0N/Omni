@@ -981,6 +981,29 @@ export const SIMULATION_CONSTANTS = {
 // player, not to a perf measurement.
 //
 // 120 is index 0 and stays the default, so the shipping path is unchanged.
+
+// ─── DBG: HUD (React) update rate ────────────────────────────────────────────
+//
+// `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.
+// The reconciliation it triggers walks the whole (unmemoized, ~2100-line)
+// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer ever
+// saw it.  A hardware capture (2026-08-09, Ring World, iPhone) showed 35 ms
+// frames carrying only 1 ms render + 2 ms sim — ~32 ms unaccounted — which is
+// what made this worth a knob.
+//
+// The HUD is text chips and bars; it does not need 60 Hz.  Everything that
+// must stay frame-perfect is canvas-drawn (minimap, loadout strip, wave
+// banners, damage text) and is unaffected by this.  60 is index 0 and stays
+// the default, so the shipping path is unchanged until someone chooses.
+export const HUD_RATE_CYCLE: ReadonlyArray<number> = [60, 30, 15] as const;
+let activeHudRateIndex = 0;
+export function getActiveHudRate(): number { return HUD_RATE_CYCLE[activeHudRateIndex]; }
+export function getActiveHudRateName(): string { return `${HUD_RATE_CYCLE[activeHudRateIndex]}Hz`; }
+export function cycleHudRate(): number {
+  activeHudRateIndex = (activeHudRateIndex + 1) % HUD_RATE_CYCLE.length;
+  return HUD_RATE_CYCLE[activeHudRateIndex];
+}
+
 export const SIM_RATE_CYCLE: ReadonlyArray<number> = [120, 60] as const;
 let activeSimRateIndex = 0;
 /** The sim rate currently selected, in Hz. */

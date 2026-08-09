@@ -103,6 +103,8 @@ export class PerfRecorder {
   private readonly worstEnts = new Float64Array(PerfRecorder.WORST_N);
   private readonly worstParts = new Float64Array(PerfRecorder.WORST_N);
   private readonly worstAtSec = new Float64Array(PerfRecorder.WORST_N);
+  private readonly worstUi = new Float64Array(PerfRecorder.WORST_N);
+  private sumUi = 0;
   private elapsedMs = 0;
 
   // Tier histogram (index = PerfController tier; small fixed span covers all).
@@ -171,6 +173,8 @@ export class PerfRecorder {
     this.worstEnts.fill(0);
     this.worstParts.fill(0);
     this.worstAtSec.fill(0);
+    this.worstUi.fill(0);
+    this.sumUi = 0;
     this.elapsedMs = 0;
   }
 
@@ -178,7 +182,7 @@ export class PerfRecorder {
    *  Called only when the frame beats the current slowest entry. */
   private noteWorst(
     ms: number, render: number, sim: number, steps: number,
-    ents: number, parts: number, atSec: number,
+    ents: number, parts: number, atSec: number, ui: number,
   ): void {
     const N = PerfRecorder.WORST_N;
     let slot = N - 1;
@@ -190,6 +194,7 @@ export class PerfRecorder {
       this.worstEnts[slot] = this.worstEnts[slot - 1];
       this.worstParts[slot] = this.worstParts[slot - 1];
       this.worstAtSec[slot] = this.worstAtSec[slot - 1];
+      this.worstUi[slot] = this.worstUi[slot - 1];
       slot--;
     }
     this.worstMs[slot] = ms;
@@ -199,6 +204,7 @@ export class PerfRecorder {
     this.worstEnts[slot] = ents;
     this.worstParts[slot] = parts;
     this.worstAtSec[slot] = atSec;
+    this.worstUi[slot] = ui;
   }
 
   /**
@@ -215,6 +221,7 @@ export class PerfRecorder {
     rawRenderMs: number,
     rawSimMs: number,
     substeps: number = 0,
+    uiMs: number = 0,
   ): void {
     if (!this.recording) return;
     if (this.count >= this.cap) { this.full = true; this.recording = false; return; }
@@ -225,7 +232,7 @@ export class PerfRecorder {
     if (frameMs > this.worstMs[PerfRecorder.WORST_N - 1]) {
       this.noteWorst(
         frameMs, rawRenderMs, rawSimMs, substeps,
-        perf.totalEntities, perf.particleCount, this.elapsedMs / 1000,
+        perf.totalEntities, perf.particleCount, this.elapsedMs / 1000, uiMs,
       );
     }
     if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
@@ -235,6 +242,7 @@ export class PerfRecorder {
       this.worstFrameRender = rawRenderMs;
       this.worstFrameSim = rawSimMs;
     }
+    this.sumUi += uiMs;
     this.sumRender += perf.renderMs;
     this.sumSim += perf.updatePhysicsMs + perf.updateLogicMs;
     this.sumCollisions += perf.collisionsMs;
@@ -303,7 +311,7 @@ export class PerfRecorder {
       `viewport ${ctx.viewportW}×${ctx.viewportH} dpr${ctx.dpr} zoom${r2(ctx.zoom)} · ${r1(durSec)}s · ${n} frames${this.full ? ' (capped)' : ''}`,
       `FPS   avg ${fpsR(avgFps)} · median ${fpsR(toFps(medianFrame))} · 5%-low ${fpsR(toFps(p95Frame))} · 1%-low ${fpsR(toFps(p99Frame))} · min ${fpsR(toFps(maxFrame))} · max ${fpsR(toFps(minFrame))} · ≥55: ${Math.round((ge55 / n) * 100)}% · ≥30: ${Math.round((ge30 / n) * 100)}%`,
       `frame avg ${r1(sumFrame / n)}ms · median ${r1(medianFrame)}ms · p95 ${r1(p95Frame)}ms · p99 ${r1(p99Frame)}ms`,
-      `cost  render avg ${r2(this.sumRender / n)}ms · sim avg ${r2(this.sumSim / n)}ms · collisions avg ${r2(this.sumCollisions / n)}ms`,
+      `cost  render avg ${r2(this.sumRender / n)}ms · sim avg ${r2(this.sumSim / n)}ms · collisions avg ${r2(this.sumCollisions / n)}ms · ui avg ${r2(this.sumUi / n)}ms`,
       // Sim breakdown so a heavy capture shows WHERE the sim ms goes.  updPhys +
       // updLogic = sim; physics (incl. collisions/gravity) + AI + flow live in
       // updPhys, shardSys in updLogic.  gravity/localGrav are sub-slices of
@@ -322,19 +330,21 @@ export class PerfRecorder {
     // the aggregates above and plain here.  `at` is seconds into the capture,
     // so a spike can be matched against what was happening on screen.
     if (this.worstMs[0] > 0) {
-      lines.push(`worst  #  frame   render     sim  steps   ents  parts    at`);
+      lines.push(`worst  #  frame   render     sim      ui   other  steps   ents  parts    at`);
       for (let i = 0; i < PerfRecorder.WORST_N; i++) {
         if (this.worstMs[i] <= 0) break;
         lines.push(
           `      ${i + 1}  ${r1(this.worstMs[i]).padStart(5)}  ` +
           `${r2(this.worstRender[i]).padStart(6)}  ${r2(this.worstSim[i]).padStart(6)}  ` +
+          `${r2(this.worstUi[i]).padStart(6)}  ` +
+          `${r1(Math.max(0, this.worstMs[i] - this.worstRender[i] - this.worstSim[i] - this.worstUi[i])).padStart(6)}  ` +
           `${String(this.worstSteps[i]).padStart(5)}  ${String(this.worstEnts[i]).padStart(5)}  ` +
           `${String(this.worstParts[i]).padStart(5)}  ${r1(this.worstAtSec[i]).padStart(5)}s`,
         );
       }
       lines.push(
-        `      (frame ≈ render+sim → our compute · frame ≫ both → GC/browser stall` +
-        ` · steps high → substep bunching · parts/ents high → spawn burst)`,
+        `      (ui = the React hand-off · OTHER = frame − render − sim − ui:` +
+        ` GC pause, compositing or an OS stall, i.e. NOT our JS)`,
       );
     }
     return lines.join('\n');

@@ -1657,6 +1657,8 @@ export interface EngineStats {
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */
   simRateName?: string;
+  /** DBG: active HUD (React) update rate label. */
+  hudRateName?: string;
   enemyScaleInfo?: string;
   swarmMoveName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
