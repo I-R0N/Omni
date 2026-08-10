@@ -112,6 +112,24 @@ export class PerfRecorder {
   private sumUi = 0;
   private elapsedMs = 0;
 
+  // ── Event timeline (gauntlet 5c P14) ──────────────────────────────────
+  //
+  // The worst-frame table says WHEN a spike happened but not WHAT was
+  // happening.  A 194s capture put three of its six worst frames inside a
+  // one-second window — clearly a discrete event rather than load — and the
+  // capture could not name it, so the investigation stalled on "a wave start
+  // is the leading candidate but is not identified".
+  //
+  // So mark the discrete transitions onto the same clock the worst-frame
+  // table uses, and let the report resolve each worst frame to its nearest
+  // event.  Bounded (events past the cap are dropped, and the report says
+  // so) and recording-only, so it costs nothing in normal play.
+  private static readonly MAX_EVENTS = 48;
+  private readonly evtAtSec = new Float64Array(PerfRecorder.MAX_EVENTS);
+  private readonly evtLabel: string[] = [];
+  private evtN = 0;
+  private evtDropped = 0;
+
   // Tier histogram (index = PerfController tier; small fixed span covers all).
   private readonly tierHist = new Int32Array(8);
   private maxTier = 0;
@@ -181,6 +199,37 @@ export class PerfRecorder {
     this.worstUi.fill(0);
     this.sumUi = 0;
     this.elapsedMs = 0;
+    this.evtN = 0;
+    this.evtDropped = 0;
+    this.evtLabel.length = 0;
+  }
+
+  /** Stamp a named discrete event onto the capture clock.  No-op unless
+   *  recording, so call sites need no guard of their own. */
+  public markEvent(label: string): void {
+    if (!this.recording) return;
+    if (this.evtN >= PerfRecorder.MAX_EVENTS) { this.evtDropped++; return; }
+    this.evtAtSec[this.evtN] = this.elapsedMs / 1000;
+    this.evtLabel[this.evtN] = label;
+    this.evtN++;
+  }
+
+  /** Nearest event to `atSec`, as `label+/-Xs`, or '—' when nothing is
+   *  close enough to be plausibly related. */
+  private nearestEvent(atSec: number): string {
+    let best = -1;
+    let bestGap = Infinity;
+    for (let i = 0; i < this.evtN; i++) {
+      const gap = Math.abs(this.evtAtSec[i] - atSec);
+      if (gap < bestGap) { bestGap = gap; best = i; }
+    }
+    // 2s is a deliberate cut-off: beyond that, "the nearest event" is just
+    // the nearest event, not an explanation, and reporting it would invite
+    // exactly the false attribution this table exists to prevent.
+    if (best < 0 || bestGap > 2) return '—';
+    const d = atSec - this.evtAtSec[best];
+    const sign = d >= 0 ? '+' : '−';
+    return `${this.evtLabel[best]}${sign}${Math.abs(d).toFixed(1)}s`;
   }
 
   /** Insert a frame into the worst-N table, keeping it sorted descending.
@@ -336,7 +385,7 @@ export class PerfRecorder {
     // the aggregates above and plain here.  `at` is seconds into the capture,
     // so a spike can be matched against what was happening on screen.
     if (this.worstMs[0] > 0) {
-      lines.push(`worst  #  frame   render     sim      ui   other  steps   ents  parts    at`);
+      lines.push(`worst  #  frame   render     sim      ui   other  steps   ents  parts    at  event`);
       for (let i = 0; i < PerfRecorder.WORST_N; i++) {
         if (this.worstMs[i] <= 0) break;
         lines.push(
@@ -345,13 +394,27 @@ export class PerfRecorder {
           `${r2(this.worstUi[i]).padStart(6)}  ` +
           `${r1(Math.max(0, this.worstMs[i] - this.worstRender[i] - this.worstSim[i] - this.worstUi[i])).padStart(6)}  ` +
           `${String(this.worstSteps[i]).padStart(5)}  ${String(this.worstEnts[i]).padStart(5)}  ` +
-          `${String(this.worstParts[i]).padStart(5)}  ${r1(this.worstAtSec[i]).padStart(5)}s`,
+          `${String(this.worstParts[i]).padStart(5)}  ${r1(this.worstAtSec[i]).padStart(5)}s  ` +
+          `${this.nearestEvent(this.worstAtSec[i])}`,
         );
       }
       lines.push(
         `      (ui = the React hand-off · OTHER = frame − render − sim − ui:` +
         ` GC pause, compositing or an OS stall, i.e. NOT our JS)`,
+        `      (event = nearest marked transition within 2s, blank beyond that)`,
       );
+    }
+
+    // Full event timeline.  The worst-frame `event` column answers "what was
+    // happening THEN"; this answers "what happened at all", which is what
+    // lets a spike be recognised as periodic (every wave) rather than a
+    // one-off.
+    if (this.evtN > 0) {
+      const parts: string[] = [];
+      for (let i = 0; i < this.evtN; i++) {
+        parts.push(`${r1(this.evtAtSec[i])}s ${this.evtLabel[i]}`);
+      }
+      lines.push(`events ${parts.join(' · ')}${this.evtDropped > 0 ? ` (+${this.evtDropped} dropped)` : ''}`);
     }
     return lines.join('\n');
   }

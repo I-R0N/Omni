@@ -605,6 +605,14 @@ export class GameEngine {
   private lastStatsPushMs: number = 0;
   /** Seconds accrued toward the next HUD (React) push — see HUD_RATE_CYCLE. */
   private statsPushAccum: number = 0;
+  // Last-seen values for the Perf REC event timeline (see markPerfEvents).
+  private _pmWave = -1;
+  private _pmState = '';
+  private _pmBoss = false;
+  private _pmMap = '';
+  private _pmDead = false;
+  private _pmStage = false;
+  private _pmDocked = false;
   private lastPhysMiscMs: number = 0;
   private lastLogicMiscMs: number = 0;
   private lastDropsMs: number = 0;
@@ -1968,6 +1976,58 @@ export class GameEngine {
       }
   }
 
+  /**
+   * Stamp discrete world transitions onto the Perf REC capture clock.
+   *
+   * The worst-frame table says WHEN a spike happened; without this it cannot
+   * say WHAT was happening, and a 194s device capture stalled on exactly that
+   * — three of its six worst frames inside one second, obviously an event
+   * rather than load, and no way to name it.
+   *
+   * Detection is done by DIFFING state here rather than by calling
+   * markEvent() from a dozen sites across WaveSystem / boss / portal code.
+   * That keeps the instrumentation in one readable place and out of the
+   * gameplay paths, at the cost of a few comparisons per frame — and those
+   * only run while a capture is active.
+   */
+  private markPerfEvents(): void {
+      const rec = this.perfRecorder;
+      if (this.waveIndex !== this._pmWave) {
+          this._pmWave = this.waveIndex;
+          rec.markEvent(`wave${this.waveIndex + 1}`);
+      }
+      if (this.waveState !== this._pmState) {
+          this._pmState = this.waveState;
+          // 'active' is the spawn stream opening; 'cleared' is the wave-clear
+          // beat (salvage spray + milestone drop), both plausible burst sites.
+          if (this.waveState === 'active') rec.markEvent('spawn');
+          else if (this.waveState === 'cleared') rec.markEvent('clear');
+      }
+      const bossAlive = !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+      if (bossAlive !== this._pmBoss) {
+          this._pmBoss = bossAlive;
+          rec.markEvent(bossAlive ? 'boss-in' : 'boss-dead');
+      }
+      const mapName = this.currentMap?.name ?? '';
+      if (mapName !== this._pmMap) {
+          const first = this._pmMap === '';
+          this._pmMap = mapName;
+          if (!first) rec.markEvent('mapload');
+      }
+      if (this.deathPending !== this._pmDead) {
+          this._pmDead = this.deathPending;
+          if (this.deathPending) rec.markEvent('death');
+      }
+      if (this.stageClearPending !== this._pmStage) {
+          this._pmStage = this.stageClearPending;
+          if (this.stageClearPending) rec.markEvent('stageclear');
+      }
+      if (this.dockedAtStation !== this._pmDocked) {
+          this._pmDocked = this.dockedAtStation;
+          rec.markEvent(this.dockedAtStation ? 'dock' : 'undock');
+      }
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
@@ -2016,6 +2076,7 @@ export class GameEngine {
     // pause menu OR the docked station UI is up — both are sim-frozen
     // full-screen overlays that need them.
     const menuOpen = this.gameState === GameState.PAUSED || this.dockedAtStation;
+    if (this.perfRecorder.recording) this.markPerfEvents();
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
       // frameTime (raw rAF delta), the raw per-frame render + sim (aligned to
       // the SAME just-finished frame — sample() runs at the top of the next
@@ -7376,7 +7437,24 @@ export class GameEngine {
   // Start/stop a capture, cycle the scene label, and export a copy-paste
   // report.  Surfaced in the DBG panel's "Perf REC" section; see
   // engine/systems/PerfRecorder.ts.
-  public perfRecToggle() { this.perfRecorder.toggle(); }
+  public perfRecToggle() {
+    const starting = !this.perfRecorder.recording;
+    this.perfRecorder.toggle();
+    // Seed the event-diff markers to the CURRENT world state when a capture
+    // opens.  Without this the first recorded frame reads every marker as
+    // "changed" and the timeline opens with a cluster of phantom events at
+    // 0.0s — which is exactly the false correlation the timeline exists to
+    // prevent.  Seeded silently, so the timeline holds only real transitions.
+    if (starting) {
+      this._pmWave = this.waveIndex;
+      this._pmState = this.waveState;
+      this._pmBoss = !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+      this._pmMap = this.currentMap?.name ?? '';
+      this._pmDead = this.deathPending;
+      this._pmStage = this.stageClearPending;
+      this._pmDocked = this.dockedAtStation;
+    }
+  }
   public perfRecCycleScene() { this.perfRecorder.cycleScene(); }
 
   /** Build the copy-paste perf report from the current capture window.  The
