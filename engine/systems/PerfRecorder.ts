@@ -80,6 +80,8 @@ export class PerfRecorder {
   // says whether the tail hitches are render, sim, or an external gap (both
   // small but frame time large → GC / browser stall, not our compute).
   private maxRawRender = 0;
+  private maxStampMs = 0;
+  private maxStampCount = 0;
   private maxRawSim = 0;
   private worstFrameMs = 0;
   private worstFrameRender = 0;
@@ -182,6 +184,8 @@ export class PerfRecorder {
     this.maxEnemies = 0;
     this.maxParticles = 0;
     this.maxRawRender = 0;
+    this.maxStampMs = 0;
+    this.maxStampCount = 0;
     this.maxRawSim = 0;
     this.worstFrameMs = 0;
     this.worstFrameRender = 0;
@@ -276,6 +280,8 @@ export class PerfRecorder {
     rawSimMs: number,
     substeps: number = 0,
     uiMs: number = 0,
+    stampMs: number = 0,
+    stampCount: number = 0,
   ): void {
     if (!this.recording) return;
     if (this.count >= this.cap) { this.full = true; this.recording = false; return; }
@@ -290,6 +296,7 @@ export class PerfRecorder {
       );
     }
     if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
+    if (stampMs > this.maxStampMs) { this.maxStampMs = stampMs; this.maxStampCount = stampCount; }
     if (rawSimMs > this.maxRawSim) this.maxRawSim = rawSimMs;
     if (frameMs > this.worstFrameMs) {
       this.worstFrameMs = frameMs;
@@ -375,7 +382,7 @@ export class PerfRecorder {
       // Spike attribution (raw per-frame): the worst frame's render/sim split
       // + the independent raw peaks.  worst frame ≈ render+sim → our compute;
       // worst frame ≫ render+sim → an external gap (GC / browser stall).
-      `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)}`,
+      `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)} · peak tilestamp ${r2(this.maxStampMs)}ms (${this.maxStampCount} tiles)`,
       `perf  tier avg ${r2(avgTier)} (${tierParts.join(' / ')}) · load peak ${r2(this.peakLoad)}`,
       `peak  entities ${this.maxEntities} · enemies ${this.maxEnemies} · particles ${this.maxParticles}`,
     ];

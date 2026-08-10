@@ -967,6 +967,56 @@ stamping wave transitions into the capture.
 
 ---
 
+## P14 — event stamping, and the tail turns out to be WARM-UP
+
+Ring World, 137.4 s / 8220 frames, `rscale 2x`, `auto on`. First capture
+with the event timeline.
+
+```
+worst  #  frame   render     sim      ui   other  steps   ents  parts    at  event
+      1   51.0   47.00    2.00    0.00     2.0      2   1404     70    5.1s  —
+      2   33.0   27.00    4.00    0.00     2.0      2   1394     60    3.7s  —
+      3   32.0    2.00    3.00    0.00    27.0      2   1386     52   11.6s  spawn−1.7s
+      4   32.0    1.00    4.00    0.00    27.0      2    542    104   14.9s  spawn+1.6s
+      6   31.0    1.00    3.00    0.00    27.0      2   1386     50   13.2s  spawn−0.1s
+events 13.3s spawn · 13.3s mapload · 45.4s clear · 49.9s wave2 · 49.9s spawn · 90.3s clear · 94.8s wave3 · 94.8s spawn
+```
+
+### The finding: EVERY worst frame is in the first 15 seconds
+
+The session ran 137 s. All six worst frames fall between 3.7 s and 14.9 s;
+the remaining **122 seconds of play produced nothing above 31 ms.** Two full
+wave cycles (`wave2` at 49.9 s, `wave3` at 94.8 s) passed without entering
+the table at all — which retires the standing hypothesis that wave starts
+cost a frame. They do not.
+
+**The tail is load and warm-up transient, not gameplay.** That is a
+materially smaller problem than "the game hitches", and it is only visible
+because the timeline let two wave cycles be ruled out by their absence.
+
+Two distinct groups, cleanly separated by the split:
+
+| frames | at | signature | reading |
+|---|---|---|---|
+| #1, #2 | 3.7, 5.1 s | **render 47 / 27 ms**, `other` ~2 | our render, during warm-up |
+| #3-#6 | 8.4-14.9 s | **`other` 27 ms**, render ~1-2 | clustered on the `13.3s mapload` — GC from discarding the old map |
+
+### Instrumented rather than guessed (again)
+
+The render group is presumably the static-tile cache warm-up, but the
+`STATIC_TILE_STAMPS_PER_FRAME = 24` budget added in P11 should already have
+bounded it — and 47 ms for 24 stamps implies ~2 ms per stamp, which is
+possible on iOS (a `clearRect` + `drawImage` on a map-sized offscreen canvas
+can force a texture round-trip) but is not established.
+
+Rather than lower the budget on a hunch — the error this gauntlet has
+already made twice — the stamping now carries its own timer:
+`RenderSystem.lastStampMs` / `lastStampCount`, surfaced as
+**`peak tilestamp X.XXms (N tiles)`** on the report's spike line. The next
+capture either confirms stamping as the cause or eliminates it outright.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement (REVISED after the hardware captures)

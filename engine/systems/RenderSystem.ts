@@ -375,6 +375,12 @@ export class RenderSystem {
   // Written at the end of render() and read by GameEngine for the dev perf
   // overlay.  render() is a single top-level pass so one timer covers it.
   public lastRenderMs: number = 0;
+  /** Time spent stamping tiles into the static-tile cache this frame, and
+   *  how many were stamped.  Separated out because a device capture showed
+   *  47ms and 27ms RENDER frames during early warm-up with no event nearby,
+   *  and "the cache stamps" is a guess until it carries its own number. */
+  public lastStampMs: number = 0;
+  public lastStampCount: number = 0;
   // Sub-timer for the dedicated nebula-tile / shard pass.  Lets the dev
   // overlay show what fraction of the total render budget is spent on
   // nebula entities, which is the primary suspect for the high render
@@ -1287,6 +1293,8 @@ export class RenderSystem {
       if (!this._staticTileCanvas) return;
       const entries = this._visibleEntities;
       let stampBudget = STATIC_TILE_STAMPS_PER_FRAME;
+      const tStamp0 = performance.now();
+      const stampStart = stampBudget;
       for (let i = 0; i < entries.length; i++) {
           const entity = entries[i].entity;
           if (!this.isStaticTileCacheable(entity)) continue;
@@ -1332,6 +1340,8 @@ export class RenderSystem {
               this.eraseStaticTileFromCache(entity);
           }
       }
+      this.lastStampCount = stampStart - stampBudget;
+      this.lastStampMs = this.lastStampCount > 0 ? performance.now() - tStamp0 : 0;
   }
 
   /**

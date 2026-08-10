@@ -2091,6 +2091,8 @@ export class GameEngine {
         this.lastFrameSimMs,
         this.lastFrameSteps,
         this.lastStatsPushMs,
+        this.renderer.lastStampMs,
+        this.renderer.lastStampCount,
       );
     }
     const tStats0 = performance.now();
