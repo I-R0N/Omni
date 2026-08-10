@@ -2093,6 +2093,8 @@ export class GameEngine {
         this.lastStatsPushMs,
         this.renderer.lastStampMs,
         this.renderer.lastStampCount,
+        this.renderer.lastTintMs,
+        this.renderer.lastTintMisses,
       );
     }
     const tStats0 = performance.now();

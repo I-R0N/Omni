@@ -381,6 +381,16 @@ export class RenderSystem {
    *  and "the cache stamps" is a guess until it carries its own number. */
   public lastStampMs: number = 0;
   public lastStampCount: number = 0;
+  /** Tinted-sprite cache MISSES this frame, and what they cost.  Each miss
+   *  builds a 128x128 canvas; the cache is capped at 256 entries with FIFO
+   *  eviction, and the tint key space is large (rock alone has 25 density
+   *  tiers, plus metal tiers, glass opacity and plastic palettes), so past
+   *  the cap it can THRASH — rebuilding canvases every frame.  A device
+   *  capture showed four 27-41ms RENDER frames at ~1520 entities with tile
+   *  stamping already eliminated (1ms peak), which is the shape thrashing
+   *  would have.  Measured rather than assumed. */
+  public lastTintMs: number = 0;
+  public lastTintMisses: number = 0;
   // Sub-timer for the dedicated nebula-tile / shard pass.  Lets the dev
   // overlay show what fraction of the total render budget is spent on
   // nebula entities, which is the primary suspect for the high render
@@ -797,6 +807,7 @@ export class RenderSystem {
       if (cached) return cached;
       const img = this.getImage(src);
       if (!img.complete || img.naturalWidth === 0) return null;
+      const tTint0 = performance.now();
 
       const size = 128; // power of 2; matches typical world draw size
       const c = document.createElement('canvas');
@@ -816,6 +827,8 @@ export class RenderSystem {
           if (firstKey !== undefined) this._tintedSprites.delete(firstKey);
       }
       this._tintedSprites.set(key, c);
+      this.lastTintMisses++;
+      this.lastTintMs += performance.now() - tTint0;
       return c;
   }
 
@@ -1380,6 +1393,8 @@ export class RenderSystem {
     flowOverlay?: FlowOverlayState,
   ) {
     const t0 = performance.now();
+    this.lastTintMs = 0;
+    this.lastTintMisses = 0;
     if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
     const ctx = this.ctx;
     const dpr = effectiveDpr();

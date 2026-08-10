@@ -82,6 +82,9 @@ export class PerfRecorder {
   private maxRawRender = 0;
   private maxStampMs = 0;
   private maxStampCount = 0;
+  private maxTintMs = 0;
+  private maxTintMisses = 0;
+  private totalTintMisses = 0;
   private maxRawSim = 0;
   private worstFrameMs = 0;
   private worstFrameRender = 0;
@@ -186,6 +189,9 @@ export class PerfRecorder {
     this.maxRawRender = 0;
     this.maxStampMs = 0;
     this.maxStampCount = 0;
+    this.maxTintMs = 0;
+    this.maxTintMisses = 0;
+    this.totalTintMisses = 0;
     this.maxRawSim = 0;
     this.worstFrameMs = 0;
     this.worstFrameRender = 0;
@@ -282,6 +288,8 @@ export class PerfRecorder {
     uiMs: number = 0,
     stampMs: number = 0,
     stampCount: number = 0,
+    tintMs: number = 0,
+    tintMisses: number = 0,
   ): void {
     if (!this.recording) return;
     if (this.count >= this.cap) { this.full = true; this.recording = false; return; }
@@ -297,6 +305,8 @@ export class PerfRecorder {
     }
     if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
     if (stampMs > this.maxStampMs) { this.maxStampMs = stampMs; this.maxStampCount = stampCount; }
+    if (tintMs > this.maxTintMs) { this.maxTintMs = tintMs; this.maxTintMisses = tintMisses; }
+    this.totalTintMisses += tintMisses;
     if (rawSimMs > this.maxRawSim) this.maxRawSim = rawSimMs;
     if (frameMs > this.worstFrameMs) {
       this.worstFrameMs = frameMs;
@@ -383,6 +393,8 @@ export class PerfRecorder {
       // + the independent raw peaks.  worst frame ≈ render+sim → our compute;
       // worst frame ≫ render+sim → an external gap (GC / browser stall).
       `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)} · peak tilestamp ${r2(this.maxStampMs)}ms (${this.maxStampCount} tiles)`,
+      `tint  peak ${r2(this.maxTintMs)}ms (${this.maxTintMisses} new) · ${this.totalTintMisses} total misses over the capture` +
+        ` — sustained misses mean the 256-entry tint cache is THRASHING, not warming`,
       `perf  tier avg ${r2(avgTier)} (${tierParts.join(' / ')}) · load peak ${r2(this.peakLoad)}`,
       `peak  entities ${this.maxEntities} · enemies ${this.maxEnemies} · particles ${this.maxParticles}`,
     ];

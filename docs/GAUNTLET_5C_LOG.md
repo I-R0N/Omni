@@ -1017,6 +1017,55 @@ capture either confirms stamping as the cause or eliminates it outright.
 
 ---
 
+## P16 — tile stamping ELIMINATED; the tint cache is the new suspect
+
+Ring World, 52.4 s, `rscale 2x`, `auto on`, with the stamp timer live:
+
+```
+spike worst frame 44.0ms → render 41.00 · sim 2.00 · peak tilestamp 1.00ms (2 tiles)
+worst  #  frame   render     sim      ui   other  steps   ents  parts    at  event
+      1   44.0   41.00    2.00    0.00     1.0      2   1518     64    6.7s  —
+      2   36.0    8.00   28.00    0.00     0.0      1    465     31   13.3s  spawn+0.0s
+      3   34.0   29.00    2.00    0.00     3.0      2   1527     67    7.7s  —
+      4   31.0   27.00    2.00    0.00     2.0      2   1532     73   11.3s  —
+      5   30.0   28.00    1.00    0.00     1.0      1   1513     59    6.7s  —
+```
+
+**`peak tilestamp 1.00ms (2 tiles)` — static-tile stamping is eliminated.**
+It was the obvious suspect and it is not the cause. Instrumenting instead of
+lowering the budget on the hunch was the right call; the budget change would
+have bought nothing and looked like a fix.
+
+**Four of six worst frames are RENDER, 27-41 ms**, at ~1520 entities, with
+`other` at 1-3 ms — so unambiguously our JS, in the render path, not
+compositing and not stamping.
+
+**Correction to P15.** Row 2 is `sim 28 ms` at exactly `spawn+0.0s` — so a
+wave spawn DOES cost a frame. P15 concluded the opposite from a capture in
+which no spawn happened to land in the worst-six. Absence of evidence was
+read as evidence of absence; two captures were needed to see it.
+
+### New suspect, instrumented not assumed
+
+`getTintedSprite` builds a **128x128 canvas per (sprite, tint) pair** and
+caps the cache at **256 entries with FIFO eviction**. The tint key space is
+much larger than that looks: rock alone has 25 density tiers
+(`ROCK_CONDENSE`), plus metal tiers, glass opacity bands and plastic
+palettes, multiplied by sprite source. Past the cap the cache does not warm —
+it **thrashes**, rebuilding canvases every frame, and the cost would scale
+with on-screen entity count and appear in bursts. That is exactly the shape
+of these four frames.
+
+The report now carries:
+`tint peak X.XXms (N new) · M total misses over the capture`.
+
+The discriminator is **sustained** misses: a warming cache produces a burst
+of misses that then stops; a thrashing one produces them forever. If M keeps
+climbing across a long capture, the fix is to raise the cap and/or quantise
+the tint key so the space is bounded by design.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement (REVISED after the hardware captures)
