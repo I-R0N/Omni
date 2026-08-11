@@ -13,6 +13,8 @@
  *  allocate).
  */
 import { GameEntity } from '../../../types';
+import { densityTintMultiplier } from '../../../constants';
+import type { ShardVariantId } from '../ShardSystem.types';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT } from '../../toroidal';
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
@@ -35,6 +37,40 @@ export function hexToRgb(hex: string): [number, number, number] {
 // Channel-wise lighten/darken toward white/black by fraction f∈[0,1].
 // Module-level (not per-frame closures) so the enemy-body gradient builder
 // in drawEnemyShape allocates nothing extra per entity.
+// Convert an [r, g, b] tuple back into a "#rrggbb" hex string.  Each
+// channel is clamped to [0, 255] then 0-padded.  Used by the density
+// tint helper to format a per-(variant, tier) cached colour string.
+export function rgbToHex(r: number, g: number, b: number): string {
+    const ri = Math.max(0, Math.min(255, Math.round(r))).toString(16).padStart(2, '0');
+    const gi = Math.max(0, Math.min(255, Math.round(g))).toString(16).padStart(2, '0');
+    const bi = Math.max(0, Math.min(255, Math.round(b))).toString(16).padStart(2, '0');
+    return `#${ri}${gi}${bi}`;
+}
+
+/**
+ * Resolve a shard's render colour for the current density tier.
+ * Tier 0 (or no variant / no density) returns `baseHex` unchanged so
+ * existing colours are preserved bit-for-bit.  Tier > 0 multiplies
+ * each channel by the per-(variant, tier) multiplier from
+ * `densityTintMultiplier`, caches the formatted hex on the entity
+ * (`densityCachedTint`), and returns it.  ShardSystem invalidates
+ * the cache (`densityCachedTint = undefined`) at every site that
+ * mutates `densityTier`.
+ */
+export function densityTintForRender(entity: GameEntity, baseHex: string): string {
+    const tier = entity.densityTier ?? 0;
+    if (tier <= 0) return baseHex;
+    const variantId = entity.shardVariant as ShardVariantId | undefined;
+    if (!variantId) return baseHex;
+    if (entity.densityCachedTint !== undefined) return entity.densityCachedTint;
+    const mul = densityTintMultiplier(variantId, tier);
+    if (mul >= 1.0) return baseHex;
+    const [r, g, b] = hexToRgb(baseHex);
+    const out = rgbToHex(r * mul, g * mul, b * mul);
+    entity.densityCachedTint = out;
+    return out;
+}
+
 export function liftCh(v: number, f: number): number {
     return Math.max(0, Math.min(255, Math.round(v + (255 - v) * f)));
 }
