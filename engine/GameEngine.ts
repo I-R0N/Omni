@@ -32,6 +32,7 @@ import { randomRockNebulaComposition } from './NebulaColor';
 import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentDeath } from './roamers/dragons';
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
+import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -92,7 +93,7 @@ export class GameEngine {
   private perfRecorder: PerfRecorder = new PerfRecorder();
 
   private isRunning: boolean = false;
-  private gameState: GameState = GameState.MENU;
+  gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
   // Fixed-timestep accumulator (Phase 1).  Frame delta is accumulated and the
   // simulation is stepped at SIMULATION_CONSTANTS.FIXED_DT until the
@@ -246,7 +247,7 @@ export class GameEngine {
   // DBG enemy-test override: when set, every wave spawns ONLY this subtype.
   // Persists across map switches (a testing setting); applies from the next
   // wave start.
-  private forcedTestEnemy: EnemySubtype | null = null;
+  forcedTestEnemy: EnemySubtype | null = null;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
   // Map the next restart / initial load should build.  Updated from the
@@ -358,7 +359,7 @@ export class GameEngine {
   // Bubbles are always-present roamers, not wave enemies.  maintainAmbient-
   // Bubbles keeps at least BUBBLE_CONSTANTS.AMBIENT_POPULATION alive, spawning
   // one offscreen each time this top-up timer elapses while the field is short.
-  private ambientBubbleTimer: number = 0;
+  ambientBubbleTimer: number = 0;
 
   // ── Dragon mini-boss (Stage 6) ────────────────────────────────────────────
   // Any number of engine-managed segmented serpents at once.  Each head is a
@@ -1502,7 +1503,7 @@ export class GameEngine {
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
-    this.seedAmbientBubbles(); // always-present fauna, ready from frame one
+    seedAmbientBubbles(this); // always-present fauna, ready from frame one
   }
 
   public skipWave() {
@@ -1847,7 +1848,7 @@ export class GameEngine {
       // Waves per the DESTINATION descriptor — enabled in an arena, off in
       // the hub — and the always-present ambient fauna for the new map.
       this.initWaveSystem();
-      this.seedAmbientBubbles();
+      seedAmbientBubbles(this);
 
       // Arrival burst at the destination spawn.
       this.openPortal(this.player.position, {
@@ -3211,15 +3212,15 @@ export class GameEngine {
 
     // Stage 5: bubbles form/tick player latches and split when fat.  Runs
     // BEFORE updateAttachments so a latch formed this step snaps the same frame.
-    this.updateBubbles(dt);
+    updateBubbles(this, dt);
     // Ambient fauna: keep the always-present bubble population topped up.
-    this.maintainAmbientBubbles(dt);
+    maintainAmbientBubbles(this, dt);
 
     // Stage 3 reusable mechanics: snap grapples to their targets, and run the
     // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
     // attachedToId / consume (Stage 4/5/6).
-    this.updateAttachments();
-    if (this.perfController.shouldRun('consume')) this.updateConsumers(dt);
+    updateAttachments(this);
+    if (this.perfController.shouldRun('consume')) updateConsumers(this, dt);
 
     // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
     // pass, so a phase that raises an escort brood arms its timer on the same
@@ -3920,7 +3921,7 @@ export class GameEngine {
 
   /** Apply (or refresh + stack) a status effect on an entity (the player
    *  today).  Re-hits add a stack up to maxStacks and refresh the timer. */
-  private applyStatusEffect(target: GameEntity, payload: EffectPayload) {
+  applyStatusEffect(target: GameEntity, payload: EffectPayload) {
     const list = target.statusEffects ?? (target.statusEffects = []);
     const existing = list.find(e => e.kind === payload.kind);
     if (existing) {
@@ -5285,248 +5286,6 @@ export class GameEngine {
       }
   }
 
-  // ─── Bubble engagement pass (Stage 5) ──────────────────────────────────
-  //
-  // For each BUBBLE enemy: (1) a PASSIVE bubble grown to its multiply.atSize
-  // SPLITS — it resets to base size and births one offspring (counts=false),
-  // capped at multiply.maxPopulation live bubbles; (2) a PROVOKED bubble LATCHES
-  // onto its AGGRO TARGET (the last thing to attack it — the player OR an enemy)
-  // on contact — attach (Stage 3c) + drain, and an EMP (disable status) when the
-  // target is the player.  Against the player the latch ends in a pop (spent
-  // charge); against an enemy it releases and the bubble survives to re-engage.
-  // O(enemies) with a one-shot population census only on a split frame; ungated
-  // (bubbles are few), matching the kamikaze/nest passes.  Toroidal.
-  private updateBubbles(dt: number) {
-      if (!this.currentMap) return;
-      const p = this.player;
-      const enemies = this.entityIndex.enemies;
-      const B = BUBBLE_CONSTANTS;
-      const baseSize = ENEMY_VARIANTS[EnemySubtype.BUBBLE].size;
-      // Terrain-slam window (player smacked a tile/asteroid fast) ticks down here.
-      if (p.terrainSlamTimer) p.terrainSlamTimer = Math.max(0, p.terrainSlamTimer - dt);
-      let ctx: WaveSpawnContext | null = null;
-
-      for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i];
-          if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
-          const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
-          if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
-          if (e.bubbleSickTimer) e.bubbleSickTimer = Math.max(0, e.bubbleSickTimer - dt);
-          const sick = (e.bubbleSickTimer ?? 0) > 0;
-
-          // ── Digesting a held shard: tick down, then grow + heal (the eat). The
-          // shrinking ghost is drawn inside the membrane by RenderSystem. ──
-          if ((e.bubbleDigestTimer ?? 0) > 0) {
-              e.bubbleDigestTimer = e.bubbleDigestTimer! - dt;
-              if (Math.random() < 0.25) {
-                  this.spawnParticles(e.position, 1, e.bubbleDigestColor || '#a8a29e', {
-                      speedMin: 0.5, speedMax: 2, sizeMin: 0.8, sizeMax: 1.8,
-                      lifetimeMin: 0.2, lifetimeMax: 0.45, positionJitter: Math.max(e.size.x, e.size.y) * 0.3,
-                  });
-              }
-              if (e.bubbleDigestTimer <= 0) {
-                  // Recover the richness from the stored per-shard duration.
-                  const rich = (e.bubbleDigestDuration ?? B.DIGEST_DURATION) / B.DIGEST_DURATION;
-                  this.growConsumer(e, cfg.consume!, rich);
-                  this.syncBubbleMaxHealth(e); // maxHP scales with the new size
-                  e.bubbleFeedTimer = B.FEED_PULSE; // final gulp bulge
-                  e.bubbleDigestTimer = 0;
-                  e.bubbleDigestDuration = undefined;
-                  e.bubbleDigestColor = undefined;
-                  e.bubbleDigestSize0 = undefined;
-              }
-          }
-
-          // ── Latched: EMP + size-scaled drain; falls off (→ sick) on the timer,
-          // a projectile hit, or a player terrain slam.  No longer dies. ──
-          if (e.attachedToId !== undefined) {
-              const victim = this.resolveAggroTarget(e.attachedToId);
-              const onPlayer = e.attachedToId === 'player';
-              // Face the target so the membrane squashes against its hull (render).
-              e.rotation = Math.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
-              if (victim && !victim.isExploding) {
-                  if (onPlayer) this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                  const drain = B.LATCH_DPS * (Math.max(e.size.x, e.size.y) / baseSize); // bigger bubble bites harder
-                  victim.health -= drain * dt;
-                  if (victim.health <= 0 && !victim.isExploding) this.handleEntityDeath(victim);
-              }
-              e.bubbleLatchTimer = (e.bubbleLatchTimer ?? 0) - dt;
-              const shaken = e.bubbleKnockFree === true || (onPlayer && (p.terrainSlamTimer ?? 0) > 0);
-              if (e.bubbleLatchTimer <= 0 || shaken || !victim || victim.isExploding) {
-                  e.bubbleKnockFree = undefined;
-                  this.detachLatch(e); // fall off + go sick + lose aggro (no death)
-              }
-              continue;
-          }
-
-          if (sick) continue; // sluggish + can't hunt/latch/breed (AISystem drifts it)
-
-          // ── Provoked + in contact with the aggro target → latch on ──
-          const target = e.aggroTargetId ? this.resolveAggroTarget(e.aggroTargetId) : (e.provoked ? p : null);
-          if (target) {
-              if (!target.active || target.isExploding) {
-                  // Attacker gone → calm down (back to ambient drift / breeding).
-                  e.aggroTargetId = undefined;
-                  e.provoked = false;
-              } else {
-                  const tr = Math.max(target.size.x, target.size.y) / 2;
-                  const dx = wrapDeltaX(e.position.x, target.position.x);
-                  const dy = wrapDeltaY(e.position.y, target.position.y);
-                  const reach = tr + Math.max(e.size.x, e.size.y) / 2 + B.CONTACT_PAD;
-                  if (dx * dx + dy * dy <= reach * reach) {
-                      e.attachedToId = target.id;
-                      e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
-                      e.bubbleLatchTimer = B.LATCH_DURATION;
-                      if (target.id === 'player') this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                      this.spawnParticles(target.position, 10, e.color || '#67e8f9', {
-                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
-                          lifetimeMin: 0.2, lifetimeMax: 0.5,
-                      });
-                  }
-                  continue; // a provoked bubble doesn't breed
-              }
-          }
-
-          // ── Passive + fat enough → split into two base-size bubbles ──
-          // (not while digesting a meal).
-          const mult = cfg.multiply;
-          if (mult && (e.bubbleDigestTimer ?? 0) <= 0 && Math.max(e.size.x, e.size.y) >= mult.atSize) {
-              let pop = 0;
-              for (let k = 0; k < enemies.length; k++) {
-                  const o = enemies[k];
-                  if (o.enemySubtype === EnemySubtype.BUBBLE && o.active && !o.isExploding) pop++;
-              }
-              if (pop >= mult.maxPopulation) continue;
-              ctx = ctx ?? this.waveContext();
-              if (!ctx) continue;
-              const base = cfg.size;
-              e.size.x = base; e.size.y = base;
-              this.syncBubbleMaxHealth(e); // back to base maxHP after shedding mass
-              const a = Math.random() * Math.PI * 2;
-              e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
-              e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
-              const child = this.waves.spawnAt(EnemySubtype.BUBBLE, e.position, ctx, false);
-              child.velocity.x = -Math.cos(a) * B.SPLIT_SPEED;
-              child.velocity.y = -Math.sin(a) * B.SPLIT_SPEED;
-              this.spawnParticles(e.position, 8, e.color || '#67e8f9', {
-                  speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3,
-                  lifetimeMin: 0.2, lifetimeMax: 0.5,
-              });
-          }
-      }
-  }
-
-  /** Resolve a bubble's aggro/latch target id to a live entity — the player
-   *  ('player') or an active enemy by id — or null if it's gone.  Cheap: the
-   *  player is special-cased and enemies come from the small filtered index. */
-  private resolveAggroTarget(id: string): GameEntity | null {
-      if (id === 'player') return this.player;
-      const enemies = this.entityIndex.enemies;
-      for (let i = 0; i < enemies.length; i++) {
-          if (enemies[i].id === id) return enemies[i].active ? enemies[i] : null;
-      }
-      return null;
-  }
-
-  /** Break a bubble's latch: it falls off, goes SICK (sluggish + can't eat),
-   *  and loses aggro — it does NOT die (shoot it while sick for the kill). */
-  private detachLatch(e: GameEntity) {
-      e.attachedToId = undefined;
-      e.attachOffset = undefined;
-      e.bubbleLatchTimer = 0;
-      e.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
-      e.aggroTargetId = undefined;
-      e.provoked = false; // calm down after the bite
-      this.spawnParticles(e.position, 12, BUBBLE_CONSTANTS.SICK_COLOR, {
-          speedMin: 2, speedMax: 7, sizeMin: 1.5, sizeMax: 3.2,
-          lifetimeMin: 0.2, lifetimeMax: 0.55,
-      });
-  }
-
-  /** Richness of a shard for mass/energy-conserved eating (shardRichness):
-   *  denser/bigger shards score higher → longer digest + more growth/health.
-   *  Clamped to BUBBLE_CONSTANTS.RICH_MIN..RICH_MAX. */
-  private shardRichness(shard: GameEntity): number {
-      const sizeR = Math.max(shard.size.x, shard.size.y) / 26; // ≈ a baseline shard
-      let dens = 1;
-      switch (shard.shardVariant) {
-          case 'metal-shard':   dens = 1.7;  break;
-          case 'rock-shard':    dens = 1.35; break;
-          case 'glass-shard':   dens = 0.9;  break;
-          case 'plastic-shard': dens = 0.9;  break;
-          case 'nebula-shard':  dens = 0.8;  break;
-      }
-      return Math.max(BUBBLE_CONSTANTS.RICH_MIN, Math.min(BUBBLE_CONSTANTS.RICH_MAX, sizeR * dens));
-    }
-
-  /** Toxic shards make the bubble sick on eating: plastic, or a GREEN nebula
-   *  shard (green-dominant blended colour). */
-  private isToxicShard(shard: GameEntity): boolean {
-      if (shard.shardVariant === 'plastic-shard') return true;
-      if (shard.shardVariant === 'nebula-shard') {
-          const hex = shard.nebulaBlendedHex || shard.color || '';
-          if (hex.length >= 7) {
-              const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-              return g > r * 1.1 && g > b * 1.1 && g > 90; // green-dominant
-          }
-      }
-      return false;
-  }
-
-  // ─── Ambient bubble population (Stage 5) ───────────────────────────────
-  //
-  // Bubbles are always-present fauna, not wave enemies — keep at least
-  // BUBBLE_CONSTANTS.AMBIENT_POPULATION alive at all times by topping up
-  // offscreen on a timer while the field is short (breeding can carry the count
-  // higher on its own).  Skipped while a DIFFERENT enemy is force-selected in
-  // the DBG enemy-test so that isolation stays clean.  O(enemies) census.
-  private maintainAmbientBubbles(dt: number) {
-      if (!this.currentMap || this.gameState !== GameState.PLAYING) return;
-      // A DBG enemy-test forcing a single type suppresses the ambient fauna so
-      // that type is seen in isolation.
-      if (this.forcedTestEnemy) return;
-
-      let count = 0;
-      const enemies = this.entityIndex.enemies;
-      for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i];
-          if (e.enemySubtype === EnemySubtype.BUBBLE && e.active && !e.isExploding) count++;
-      }
-      if (count >= BUBBLE_CONSTANTS.AMBIENT_POPULATION) {
-          this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
-          return;
-      }
-      this.ambientBubbleTimer -= dt;
-      if (this.ambientBubbleTimer > 0) return;
-      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
-      this.spawnAmbientBubble();
-  }
-
-  /** Seed the ambient bubble population in one shot (called on entering play so
-   *  the fauna is present from the first frame, not trickled in). */
-  private seedAmbientBubbles() {
-      if (!this.currentMap || this.forcedTestEnemy) return;
-      for (let i = 0; i < BUBBLE_CONSTANTS.AMBIENT_POPULATION; i++) this.spawnAmbientBubble();
-      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
-  }
-
-  /** Spawn one ambient bubble just outside the viewport (so it drifts in rather
-   *  than popping into view).  counts=false + the `ambient` variant flag keep it
-   *  out of wave accounting. */
-  private spawnAmbientBubble(): GameEntity | null {
-      const ctx = this.waveContext();
-      if (!ctx) return null;
-      const zoom = this.camera.zoom || 1;
-      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-      const angle = Math.random() * Math.PI * 2;
-      const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + Math.random() * 240;
-      const pos = {
-          x: this.player.position.x + Math.cos(angle) * dist,
-          y: this.player.position.y + Math.sin(angle) * dist,
-      };
-      wrapPosition(pos);
-      return this.waves.spawnAt(EnemySubtype.BUBBLE, pos, ctx, false);
-  }
 
   // ─── Kamikaze proximity fuse ───────────────────────────────────────────
   //
@@ -5553,161 +5312,6 @@ export class GameEngine {
       }
   }
 
-  // ─── Attach pass (Stage 3c) ────────────────────────────────────────────
-  //
-  // Snap every attached entity onto its target each frame (a latch / grapple).
-  // Runs in updateGameLogic AFTER physics so it tracks the target's post-move
-  // position.  If the target is gone (dead / inactive / missing) the attachment
-  // releases.  Iterates the (small) enemies index — the only attachers today
-  // are enemies (the bubble grappling the player); revisit if a non-enemy ever
-  // needs to attach.
-  private updateAttachments() {
-      const ents = this.entityIndex.enemies;
-      for (let i = 0; i < ents.length; i++) {
-          const e = ents[i];
-          if (!e.active || e.attachedToId === undefined) continue;
-          // Attachment targets are the player or an enemy (the bubble latch), so
-          // resolve through the player special-case + the small enemies index
-          // rather than a full O(all-entities) master-list scan.
-          const target = this.resolveAggroTarget(e.attachedToId);
-          if (!target || !target.active || target.isExploding) {
-              e.attachedToId = undefined;
-              continue;
-          }
-          e.position.x = target.position.x + (e.attachOffset?.x ?? 0);
-          e.position.y = target.position.y + (e.attachOffset?.y ?? 0);
-          wrapPosition(e.position);
-          e.velocity.x = target.velocity.x;
-          e.velocity.y = target.velocity.y;
-      }
-  }
-
-  // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
-  //
-  // For each consumer (an entity carrying a `consume` config — the bubble; the
-  // dragon later), two-phase feeding within the SENSE radius (`cfg.range`):
-  // mobile candidates outside membrane contact are PULLED inward (a suck-in tug,
-  // `cfg.pull`), and a candidate that has reached MEMBRANE CONTACT (radii
-  // overlap) is SWALLOWED — grow + animate (consumeEntity).  This replaces the
-  // old eat-on-sight-at-range so shards visibly stream in and pop on contact
-  // instead of vanishing from afar.  PerfController-gated ('consume');
-  // torus-correct.  Growth is capped at `cfg.maxSize`; the self-replication
-  // entity cap lives at the child-spawn site (updateBubbles, Stage 5).
-  private updateConsumers(dt: number) {
-      if (!this.currentMap) return;
-      const enemies = this.entityIndex.enemies;
-      // Candidates: mobile shards (asteroids index) and/or static tiles.
-      const shards = this.entityIndex.asteroids;
-      for (let c = 0; c < enemies.length; c++) {
-          const consumer = enemies[c];
-          const cfg = consumer.consume;
-          if (!cfg || !consumer.active || consumer.isExploding) continue;
-          // Only a calm, idle bubble feeds: a hunting (provoked), latched,
-          // digesting, or SICK bubble doesn't pull or capture shards.
-          if ((consumer.bubbleDigestTimer ?? 0) > 0 || consumer.attachedToId !== undefined
-              || consumer.provoked || (consumer.bubbleSickTimer ?? 0) > 0) continue;
-          const rangeSq = cfg.range * cfg.range;
-          const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
-          for (let k = 0; k < shards.length; k++) {
-              const cand = shards[k];
-              if (!cand.active || cand.isExploding) continue;
-              const wantTile = cfg.eats === 'tile';
-              const isTile = cand.mass === Infinity;
-              if (wantTile !== isTile) continue;
-              const dx = wrapDeltaX(consumer.position.x, cand.position.x); // consumer→cand
-              const dy = wrapDeltaY(consumer.position.y, cand.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 > rangeSq) continue;
-              const candR = Math.max(cand.size.x, cand.size.y) * 0.5;
-              const contact = consumerR + candR;
-              if (d2 <= contact * contact) {
-                  // SWALLOW on membrane contact.  Mobile shards are engulfed and
-                  // DIGESTED over time (held inside the bubble); static tiles
-                  // (the future dragon) are eaten instantly.
-                  if (isTile) this.consumeTile(consumer, cand, cfg, dx, dy);
-                  else { this.beginDigest(consumer, cand, dx, dy); break; }
-              } else if (!isTile && cfg.pull) {
-                  // Suck-in: tug the mobile shard toward the membrane, stronger
-                  // the closer it is (so a near shard accelerates into the mouth).
-                  const d = Math.sqrt(d2) || 1;
-                  const prox = 1 - d / cfg.range;          // 0 at the rim → 1 at contact
-                  const a = cfg.pull * (0.3 + 0.7 * prox) * dt;
-                  cand.velocity.x -= (dx / d) * a;
-                  cand.velocity.y -= (dy / d) * a;
-              }
-          }
-      }
-  }
-
-  /** Grow a consumer by one eat (size + heal + optional mass), scaled by `scale`
-   *  (the shard's richness — mass/energy conserved), capped at maxSize.  Shared
-   *  by the shard-digest finish + the instant tile eat.  (The bubble's maxHealth
-   *  is recomputed from its new size by syncBubbleMaxHealth, called after.) */
-  private growConsumer(consumer: GameEntity, cfg: ConsumeConfig, scale: number = 1) {
-      const cur = Math.max(consumer.size.x, consumer.size.y);
-      if (cur < cfg.maxSize) {
-          const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat * scale);
-          const s = grown / (cur || 1);
-          consumer.size.x *= s;
-          consumer.size.y *= s;
-      }
-      // Heal from eating (a denser meal heals more) — caps at the current maxHP;
-      // size-driven maxHP growth is applied by syncBubbleMaxHealth afterwards.
-      consumer.health = Math.min(consumer.maxHealth, consumer.health + BUBBLE_CONSTANTS.HEAL_PER_RICH * scale);
-      if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat * scale;
-  }
-
-  /** Keep a bubble's maxHealth LINEAR with its size (anchored at the variant's
-   *  base health @ base size).  Growing raises the ceiling AND fills the new HP
-   *  (mass conserved); shrinking on a split caps current HP to the new ceiling. */
-  private syncBubbleMaxHealth(e: GameEntity) {
-      const v = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
-      const newMax = v.health * (Math.max(e.size.x, e.size.y) / v.size);
-      const delta = newMax - e.maxHealth;
-      e.maxHealth = newMax;
-      e.health = delta > 0 ? Math.min(newMax, e.health + delta) : Math.min(e.health, newMax);
-  }
-
-  /** Begin digesting a mobile shard: snapshot its look onto the bubble, swallow
-   *  it (deactivate), and spray a brief inward implosion.  Digest TIME scales
-   *  with the shard's richness (denser = slower), stored on the bubble so the
-   *  finish (updateBubbles) recovers the same richness for the heal/grow.  A
-   *  TOXIC shard (plastic / green-nebula) also makes the bubble sick.  The bubble
-   *  renders the shard as a shrinking ghost INSIDE its membrane until done.
-   *  `dx/dy` is consumer→shard. */
-  private beginDigest(consumer: GameEntity, shard: GameEntity, dx: number, dy: number) {
-      const rich = this.shardRichness(shard);
-      const dur = BUBBLE_CONSTANTS.DIGEST_DURATION * rich;
-      consumer.bubbleDigestTimer = dur;
-      consumer.bubbleDigestDuration = dur;
-      consumer.bubbleDigestColor = shard.color || '#a8a29e';
-      consumer.bubbleDigestSize0 = Math.max(shard.size.x, shard.size.y);
-      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
-      if (this.isToxicShard(shard)) consumer.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
-      const inward = Math.atan2(-dy, -dx); // shard → bubble
-      this.spawnParticles(shard.position, 8, consumer.bubbleDigestColor, {
-          spreadAngle: inward, spreadCone: 0.8,
-          speedMin: 2.5, speedMax: 6, sizeMin: 1, sizeMax: 2.4,
-          lifetimeMin: 0.1, lifetimeMax: 0.26,
-      });
-      shard.active = false; // swallowed (no score/regen — it's eaten, not destroyed)
-  }
-
-  /** Instant tile eat (the future dragon): grow + route the tile through the
-   *  death/flow-field patch + an inward implosion.  `dx/dy` is consumer→tile. */
-  private consumeTile(consumer: GameEntity, tile: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
-      this.growConsumer(consumer, cfg);
-      const inward = Math.atan2(-dy, -dx);
-      this.spawnParticles(tile.position, 9, tile.color || '#a8a29e', {
-          spreadAngle: inward, spreadCone: 0.9,
-          speedMin: 2.5, speedMax: 6.5, sizeMin: 1, sizeMax: 2.6,
-          lifetimeMin: 0.12, lifetimeMax: 0.3,
-      });
-      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
-      this.physics.removeStaticEntity(tile);
-      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
-      tile.active = false;
-  }
 
   // ─── Kamikaze blast → player (direct, instant) ─────────────────────────
   //
