@@ -45,7 +45,8 @@ the differences are the point:
 - [x] **P5** — `engine/roamers/bubbles.ts` (shipped) — roamers complete
 - [x] **P6** — `engine/bosses.ts` (shipped)
 - [x] **P7** — `engine/outfitting.ts` (shipped)
-- [ ] **P8..Pn** — one extraction per milestone, loop until dry
+- [x] **P8** — `engine/debugControls.ts` (shipped)
+- [ ] **P9..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -59,8 +60,9 @@ the differences are the point:
 | P5 bubbles | 6,531 | `engine/roamers/bubbles.ts` | 430 |
 | P6 bosses | 6,213 | `engine/bosses.ts` | 350 |
 | P7 outfitting | 5,855 | `engine/outfitting.ts` | 420 |
+| P8 debug menu | 5,149 | `engine/debugControls.ts` | 768 |
 
-**−1,935 lines from `GameEngine.ts` so far (−25%).** Every milestone:
+**−2,641 lines from `GameEngine.ts` so far (−34%).** Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
 edited.
 
@@ -394,3 +396,49 @@ Two things follow for the rest of this gauntlet:
    accept `outfittingSnapshot` moving would have converted a real
    regression into a green run — the exact "behaviour change wearing a
    disguise" the brief rules out.
+
+### Iteration 8 — the debug menu (P8)
+
+`engine/debugControls.ts` (768 lines): 59 toggles and cycles, plus the
+seven DBG-only `FF_*_CYCLE` tables that only they read. GameEngine
+5,855 → **5,149** — the largest single move of the gauntlet and, per
+line, the one that most changes how the file reads: those methods were
+lines 629–1342, so a reader opening `GameEngine.ts` met the entire debug
+panel before reaching the constructor.
+
+**This one was flagged in the SEAM PLAN as the LOWEST-confidence
+extraction, and it was taken anyway** — the flag was about ordering, not
+correctness, and everything ahead of it had shipped. The reason it
+ranked last is real and unchanged: all 59 are public API, so the move
+had to re-point 59 call sites in `App.tsx`. What made it safe rather
+than brave is that the change is a pure rename at every site
+(`engineRef.current.X()` → `engineRef.current.dbg.X()`), the compiler
+checks every one, and `git diff --stat App.tsx` reads exactly
+`59 insertions(+), 59 deletions(-)`.
+
+**Deliberately a CLASS, not free functions.** The other extractions call
+in the other direction — the engine calls them — so `f(g, …)` reads
+fine. These are called from the UI, where `engine.dbg.toggleCollisions()`
+is legible and sixty imported free functions in `App.tsx` would not be.
+It is a plain concrete class with one back-reference and one instance:
+no interface, no dispatch, nothing to route through, and it costs one
+property load per user click.
+
+The verbatim diff for this move is unusually strong — **266 lines in,
+267 out, and the only diff line is the class's closing brace.** Not even
+signatures changed, because these stayed methods; only `this.` became
+`this.g.`.
+
+Three things stayed behind, each for a reason already established:
+
+- **`toggleTraits`** — the 5b trait suites call it off
+  `window.__omniEngine`, so it is observable surface (the P7 rule,
+  applied prospectively this time by grepping `tests/` first).
+- **`flowSamplerFor`** — a private helper the DBG pattern-cycle uses,
+  but `loadMap` uses it too, so it is engine machinery. The first cut
+  duplicated it into both files; that was caught and collapsed back to
+  one copy on the engine.
+- **Every flag they write.** `ffPattern`, `collisionsEnabled`,
+  `trailShape` and the rest are still `GameEngine` fields — the sim
+  reads them every frame. Only the methods moved. The seven cycle
+  TABLES did move, because nothing but the cycle methods ever read them.
