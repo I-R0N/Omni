@@ -47,7 +47,8 @@ the differences are the point:
 - [x] **P7** — `engine/outfitting.ts` (shipped)
 - [x] **P8** — `engine/debugControls.ts` (shipped)
 - [x] **P9** — `engine/explosions.ts` (shipped)
-- [ ] **P10..Pn** — one extraction per milestone, loop until dry
+- [x] **P10** — `engine/systems/render/` — enemy shapes + shared draw helpers (shipped)
+- [ ] **P11..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -64,7 +65,16 @@ the differences are the point:
 | P8 debug menu | 5,149 | `engine/debugControls.ts` | 768 |
 | P9 explosions | 4,859 | `engine/explosions.ts` | 336 |
 
-**−2,931 lines from `GameEngine.ts` so far (−38%).** Every milestone:
+`GameEngine.ts` is now **4,859** — **−2,931 (−38%)**.  P10 opens the
+second file:
+
+| milestone | `RenderSystem.ts` | new module | lines |
+|---|---|---|---|
+| baseline | 5,959 | — | — |
+| P10 enemy shapes | 4,944 | `engine/systems/render/enemyShapes.ts` | 915 |
+| | | `engine/systems/render/drawUtils.ts` | 142 |
+
+Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
 edited.
 
@@ -470,4 +480,30 @@ layer.
 `startExplosion` stayed on `GameEngine` on the P6 principle: it is the
 DEATH path (flip `isExploding`, arm the wreck timer), not the FX layer,
 and it is also called by the death and economy suites.
+
+### Iteration 10 — the renderer's enemy silhouettes (P10)
+
+With `GameEngine` well split, the SEAM PLAN's seam #9 came due:
+`drawEnemyShape` (679 lines) + `buildEnemyPath` (168) →
+`engine/systems/render/enemyShapes.ts` (915).
+`RenderSystem.ts` 5,959 → **4,944**.
+
+**The cleanest seam measured anywhere in this repo.** Those two methods
+touch exactly one `this.` member between them: *each other*. So unlike
+every other 5f extraction they need no engine and no renderer — they are
+plain free functions over `(ctx, entity, nowSec)`, and the call site went
+from `this.drawEnemyShape(…)` to `drawEnemyShape(…)`.
+
+It did need one companion move. The shape code shares four module-level
+helpers with the rest of the renderer (`hexToRgb`, `liftCh`, `sinkCh`,
+`drawDamageCracks` and the crack machinery behind it). Importing those
+back out of `RenderSystem.ts` would have made the two files circular, so
+they went to a third: **`engine/systems/render/drawUtils.ts`** (142
+lines), which both import and which knows about neither. The helpers used
+by the shape code *alone* (`enemyPalette`, `ENEMY_CRACK_STYLE`, the three
+`FLAME_*` colours) travelled with it instead of landing in the shared
+floor — a shared-utils file that accumulates single-caller helpers stops
+being a floor and becomes a junk drawer.
+
+Verbatim: 629 normalised lines each side, two signature diffs.
 

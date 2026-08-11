@@ -1,0 +1,142 @@
+/** Shared canvas helpers for the render layer — colour maths and the seeded
+ *  damage-crack overlay.
+ *
+ *  Split out of `RenderSystem.ts` in gauntlet 5f (see
+ *  `docs/GAUNTLET_5F_LOG.md`) so `enemyShapes.ts` could move without either
+ *  file importing the other.  Nothing here knows about `RenderSystem`; these
+ *  are free functions over a 2D context, which is why they were the natural
+ *  shared floor.
+ *
+ *  Everything is module-level on purpose: the caches (`_rgbCache`) warm once,
+ *  and the helpers are not per-frame closures, so the enemy-body gradient
+ *  builder allocates nothing extra per entity (CLAUDE.md §8, mutate-don't-
+ *  allocate).
+ */
+import { GameEntity } from '../../../types';
+
+// Converts a 6-digit hex color string to an [r, g, b] tuple.
+// Results are cached to avoid per-frame string parsing.
+export const _rgbCache = new Map<string, [number, number, number]>();
+export function hexToRgb(hex: string): [number, number, number] {
+    let cached = _rgbCache.get(hex);
+    if (!cached) {
+        const h = hex.replace('#', '');
+        cached = [
+            parseInt(h.substring(0, 2), 16),
+            parseInt(h.substring(2, 4), 16),
+            parseInt(h.substring(4, 6), 16),
+        ];
+        _rgbCache.set(hex, cached);
+    }
+    return cached;
+}
+
+// Channel-wise lighten/darken toward white/black by fraction f∈[0,1].
+// Module-level (not per-frame closures) so the enemy-body gradient builder
+// in drawEnemyShape allocates nothing extra per entity.
+export function liftCh(v: number, f: number): number {
+    return Math.max(0, Math.min(255, Math.round(v + (255 - v) * f)));
+}
+export function sinkCh(v: number, f: number): number {
+    return Math.max(0, Math.min(255, Math.round(v * (1 - f))));
+}
+
+// Deterministic [0,1) hash of a single scalar — the classic sin-fract trick.
+// Used by the enemy damage-state overlay to lay down a STABLE crack pattern
+// (seeded per-entity) that only grows as HP drops, instead of flickering
+// fresh randomness each frame.  No allocation, no per-entity state.
+export function hash01(n: number): number {
+    const s = Math.sin(n) * 43758.5453;
+    return s - Math.floor(s);
+}
+
+// Per-overlay tuning for the shared seeded crack pattern.  Enemies get a
+// charred near-black fracture with a hot glint; rocks a slate fracture
+// shadow; metal a brighter, thinner hairline split (both materials darker /
+// quieter than the enemy version so destructibles read as "cracked" not
+// "scorched").  Module-level constants → passed by reference, zero per-call
+// allocation in the draw loop.
+export interface CrackStyle {
+    scorchRgb: string;   // "r,g,b" of the charred darken fill
+    scorchBase: number;  // base scorch alpha (at first damage)
+    scorchGain: number;  // extra scorch alpha × dmgFrac
+    crackColor: string;  // stroke colour for each fissure
+    crackWidth: number;  // stroke width
+    glint: boolean;      // thin hot-orange highlight past 50 % damage
+}
+export const ENEMY_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '14,8,5', scorchBase: 0.15, scorchGain: 0.4,
+    crackColor: 'rgba(0,0,0,0.6)', crackWidth: 1.6, glint: true,
+};
+// Slate-900 fracture shadow — the rock fill shows through, reads as a
+// natural split rather than an opaque outline.  No hot glint (rock doesn't
+// glow).  Lighter scorch than enemies so the slate body stays readable.
+export const ROCK_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '15,23,42', scorchBase: 0.10, scorchGain: 0.28,
+    crackColor: 'rgba(15,23,42,0.7)', crackWidth: 2.0, glint: false,
+};
+// Brighter, thinner hairline split for metal — a precise mechanical
+// fracture against the gray plate, with a faint cold-white inner glint on
+// the worst damage instead of the enemy's hot orange.
+export const METAL_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '8,11,18', scorchBase: 0.10, scorchGain: 0.30,
+    crackColor: 'rgba(2,6,12,0.55)', crackWidth: 1.1, glint: false,
+};
+
+// Stable [0,1000) per-entity seed for the crack overlay, lazily derived
+// from the entity id (same id-hash the enemy core-pulse uses for
+// glowPhase) and cached on a render-only field so the fracture pattern
+// holds still frame-to-frame.
+export function crackSeedFor(entity: GameEntity): number {
+    if (entity.crackSeed !== undefined) return entity.crackSeed;
+    let h = 0; const id = entity.id;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+    entity.crackSeed = (h / 997) * 1000 + 1;
+    return entity.crackSeed;
+}
+
+// Lay down a STABLE, seeded set of fracture cracks (plus a charred scorch
+// darken) in the current entity-local transform.  The CALLER is responsible
+// for clipping to the silhouette (ctx.save → build path → ctx.clip) and for
+// restoring afterwards — keeping the clip with the caller avoids passing a
+// per-entity path-builder closure into the hot loop.  Deterministic per
+// `seed`; one crack is drawn per unit of `count`, so the fracture only
+// grows as HP drops instead of flickering fresh randomness each frame.
+export function drawDamageCracks(
+    ctx: CanvasRenderingContext2D,
+    r: number,
+    seed: number,
+    count: number,
+    dmgFrac: number,
+    s: CrackStyle,
+): void {
+    // Scorch — a charred darken that deepens with damage.
+    ctx.fillStyle = `rgba(${s.scorchRgb},${s.scorchBase + s.scorchGain * dmgFrac})`;
+    ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+    // Cracks — one jagged fissure per unit of count, each stable.
+    ctx.lineCap = 'round';
+    const TAU = Math.PI * 2;
+    for (let i = 0; i < count; i++) {
+        const a = hash01(seed + i * 1.7) * TAU;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const len = r * (0.55 + 0.4 * hash01(seed + i * 3.3));
+        // Perpendicular kink at the midpoint for a jagged, non-straight crack.
+        const perp = (hash01(seed + i * 5.1) - 0.5) * r * 0.5;
+        const x0 = ca * r * 0.1,    y0 = sa * r * 0.1;
+        const xm = ca * len * 0.55 - sa * perp, ym = sa * len * 0.55 + ca * perp;
+        const x1 = ca * len,        y1 = sa * len;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(xm, ym);
+        ctx.lineTo(x1, y1);
+        ctx.strokeStyle = s.crackColor;
+        ctx.lineWidth = s.crackWidth;
+        ctx.stroke();
+        // Thin hot-edge highlight on the worst damage so deep cracks glint.
+        if (s.glint && dmgFrac > 0.5) {
+            ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+        }
+    }
+}
