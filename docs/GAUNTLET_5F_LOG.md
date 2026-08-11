@@ -46,7 +46,8 @@ the differences are the point:
 - [x] **P6** — `engine/bosses.ts` (shipped)
 - [x] **P7** — `engine/outfitting.ts` (shipped)
 - [x] **P8** — `engine/debugControls.ts` (shipped)
-- [ ] **P9..Pn** — one extraction per milestone, loop until dry
+- [x] **P9** — `engine/explosions.ts` (shipped)
+- [ ] **P10..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -61,8 +62,9 @@ the differences are the point:
 | P6 bosses | 6,213 | `engine/bosses.ts` | 350 |
 | P7 outfitting | 5,855 | `engine/outfitting.ts` | 420 |
 | P8 debug menu | 5,149 | `engine/debugControls.ts` | 768 |
+| P9 explosions | 4,859 | `engine/explosions.ts` | 336 |
 
-**−2,641 lines from `GameEngine.ts` so far (−34%).** Every milestone:
+**−2,931 lines from `GameEngine.ts` so far (−38%).** Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
 edited.
 
@@ -442,3 +444,30 @@ Three things stayed behind, each for a reason already established:
   `trailShape` and the rest are still `GameEngine` fields — the sim
   reads them every frame. Only the methods moved. The seven cycle
   TABLES did move, because nothing but the cycle methods ever read them.
+
+### Iteration 9 — shockwaves and blasts (P9)
+
+`engine/explosions.ts` (336 lines), in create/tick/apply order:
+`spawnShockwave` puts an expanding ring into the world,
+`updateExplosionRings` advances every live ring and damages what its
+wavefront has just reached, and the two `apply*BlastToPlayer` helpers
+deliver a blast directly. `EMPTY_HIT_IDS` — the shared frozen empty set
+that keeps a cosmetic ring from allocating — came along, since the ring
+code is its only reader. GameEngine 5,149 → 4,859.
+
+Cleanest coupling measured in the whole gauntlet: the five members touch
+only **seven** engine members between them (`currentMap`, `player`,
+`physics`, `handleEntityDeath`, `handleScreenShake`, `spawnParticles`,
+`spawnDamageText`).
+
+`spawnShockwave` gets a one-line forward on the engine — the 5b trait
+suite calls it off `window.__omniEngine` to prove that ring damage
+bypasses the front-shield plate, so it is observable surface. Its
+options object became an exported `ShockwaveOpts` interface so the
+forward and the function cannot drift; that is a parameter type, not a
+layer.
+
+`startExplosion` stayed on `GameEngine` on the P6 principle: it is the
+DEATH path (flip `isExploding`, arm the wreck timer), not the FX layer,
+and it is also called by the death and economy suites.
+
