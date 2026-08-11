@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -75,6 +75,14 @@ interface RivalInstance {
   // every step, and it's dropped the moment it goes inactive/exploding.
   target?: GameEntity | null;
 }
+
+/** Shared empty snapshot for COSMETIC explosion rings (damage 0 +
+ *  knockback 0).  They never apply anything, so they never read it —
+ *  `updateExplosionRings` early-outs on an empty set.  Sharing one frozen
+ *  instance means an ordinary enemy death (which spawns two cosmetic rings)
+ *  allocates no Sets at all.  Never mutated; the damaging path builds its
+ *  own real Set. */
+const EMPTY_HIT_IDS: Set<string> = new Set<string>();
 
 export class GameEngine {
   private input: InputSystem;
@@ -586,6 +594,25 @@ export class GameEngine {
   // reads for tail attribution (distinct from the 60-frame-averaged
   // PerfSnapshot sim timers, which can't localise a single 50ms frame).
   private lastFrameSimMs: number = 0;
+  /** Substeps the accumulator drained on the last frame (0..MAX_SUBSTEPS).
+   *  `lastFrameSimMs` alone is ambiguous: at a fixed 120 Hz sim a 33 ms frame
+   *  legitimately costs twice the sim of a 16 ms one, so a rising sim total
+   *  can mean "the sim got slower" OR "the frame got longer and pulled more
+   *  substeps in".  Pairing the two separates the sim's own cost from the
+   *  substep-bunching a slow frame causes — the frame-PACING signal. */
+  private lastFrameSteps: number = 0;
+  /** Wall time of the per-frame `onStatsUpdate` hand-off to React. */
+  private lastStatsPushMs: number = 0;
+  /** Seconds accrued toward the next HUD (React) push — see HUD_RATE_CYCLE. */
+  private statsPushAccum: number = 0;
+  // Last-seen values for the Perf REC event timeline (see markPerfEvents).
+  private _pmWave = -1;
+  private _pmState = '';
+  private _pmBoss = false;
+  private _pmMap = '';
+  private _pmDead = false;
+  private _pmStage = false;
+  private _pmDocked = false;
   private lastPhysMiscMs: number = 0;
   private lastLogicMiscMs: number = 0;
   private lastDropsMs: number = 0;
@@ -1070,6 +1097,47 @@ export class GameEngine {
     cycleSwarmMove();
   }
 
+  /** DBG: cycle the SUBSTEP CAP (5 default / 3 / 2).
+   *
+   *  The spiral-of-death clamp, exposed because a device capture showed it
+   *  FEEDING the spiral: every worst frame pegged at 5 steps with 36-44ms of
+   *  sim.  Lower caps trade a brief slow-motion for a shorter worst frame.
+   *  Resets the accumulator so the changeover frame doesn't drain against the
+   *  old budget. */
+  public cycleSubstepCap() {
+    cycleSubstepCap();
+    this.simAccumulator = 0;
+    this.lastTime = performance.now();
+  }
+
+  /** DBG: cycle the HUD (React) update rate — 60Hz default / 30 / 15.
+   *
+   *  Diagnostic first, knob second: the per-frame React hand-off is the one
+   *  cost the engine's own timers never saw, and the hardware capture that
+   *  motivated this showed 32ms of a 35ms frame outside render+sim.  Lowering
+   *  it is the A/B that says whether that gap is React.  Overlay screens
+   *  always push immediately regardless of this setting. */
+  public cycleHudRate() {
+    cycleHudRate();
+    this.statsPushAccum = Infinity; // push on the very next frame
+  }
+
+  /** DBG: cycle the SIM RATE (120Hz default / 60Hz).
+   *
+   *  The single largest lever on sim cost that exists — at 120Hz a 60fps
+   *  frame pays for two full sim steps — but a TRADE rather than a free win,
+   *  because collision resolution is iterative and half the steps means half
+   *  the passes untangling a dense shard pile.  Exposed as a toggle so the
+   *  feel can be judged by hand at both rates; see SIM_RATE_CYCLE.
+   *
+   *  Resets the accumulator so the pending fraction of an old-length step
+   *  doesn't get re-interpreted against the new one on the changeover frame. */
+  public cycleSimRate() {
+    cycleSimRate();
+    this.simAccumulator = 0;
+    this.lastTime = performance.now();
+  }
+
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B. */
   public toggleTraits() {
     this.physics.traitsEnabled = !this.physics.traitsEnabled;
@@ -1543,6 +1611,9 @@ export class GameEngine {
       snitchCatchMode: this.snitchCatchMode,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
+      simRateName: getActiveSimRateName(),
+      hudRateName: getActiveHudRateName(),
+      substepCapName: getActiveSubstepCapName(),
       swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
@@ -1905,6 +1976,58 @@ export class GameEngine {
       }
   }
 
+  /**
+   * Stamp discrete world transitions onto the Perf REC capture clock.
+   *
+   * The worst-frame table says WHEN a spike happened; without this it cannot
+   * say WHAT was happening, and a 194s device capture stalled on exactly that
+   * — three of its six worst frames inside one second, obviously an event
+   * rather than load, and no way to name it.
+   *
+   * Detection is done by DIFFING state here rather than by calling
+   * markEvent() from a dozen sites across WaveSystem / boss / portal code.
+   * That keeps the instrumentation in one readable place and out of the
+   * gameplay paths, at the cost of a few comparisons per frame — and those
+   * only run while a capture is active.
+   */
+  private markPerfEvents(): void {
+      const rec = this.perfRecorder;
+      if (this.waveIndex !== this._pmWave) {
+          this._pmWave = this.waveIndex;
+          rec.markEvent(`wave${this.waveIndex + 1}`);
+      }
+      if (this.waveState !== this._pmState) {
+          this._pmState = this.waveState;
+          // 'active' is the spawn stream opening; 'cleared' is the wave-clear
+          // beat (salvage spray + milestone drop), both plausible burst sites.
+          if (this.waveState === 'active') rec.markEvent('spawn');
+          else if (this.waveState === 'cleared') rec.markEvent('clear');
+      }
+      const bossAlive = !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+      if (bossAlive !== this._pmBoss) {
+          this._pmBoss = bossAlive;
+          rec.markEvent(bossAlive ? 'boss-in' : 'boss-dead');
+      }
+      const mapName = this.currentMap?.name ?? '';
+      if (mapName !== this._pmMap) {
+          const first = this._pmMap === '';
+          this._pmMap = mapName;
+          if (!first) rec.markEvent('mapload');
+      }
+      if (this.deathPending !== this._pmDead) {
+          this._pmDead = this.deathPending;
+          if (this.deathPending) rec.markEvent('death');
+      }
+      if (this.stageClearPending !== this._pmStage) {
+          this._pmStage = this.stageClearPending;
+          if (this.stageClearPending) rec.markEvent('stageclear');
+      }
+      if (this.dockedAtStation !== this._pmDocked) {
+          this._pmDocked = this.dockedAtStation;
+          rec.markEvent(this.dockedAtStation ? 'dock' : 'undock');
+      }
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
@@ -1933,11 +2056,27 @@ export class GameEngine {
     // Build the perf snapshot once and reuse it for the HUD + the perf
     // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
     // pollute the FPS distribution).  `frameTime` is the true rAF delta.
+    // HUD push gate.  React reconciliation is per-frame work the engine's
+    // timers never measured; the HUD is chips and bars and does not need
+    // 60 Hz.  Anything that must stay frame-perfect (minimap, loadout strip,
+    // banners, damage text) is canvas-drawn and unaffected.
+    //
+    // Overlay states push IMMEDIATELY and unconditionally: the React tree is
+    // what renders the pause / station / death / stage-clear screens, so
+    // throttling those would delay a screen the player just asked for.  Only
+    // the in-play HUD is throttled.
+    this.statsPushAccum += frameTime;
+    const hudPeriod = 1 / getActiveHudRate();
+    const overlayUp = this.gameState !== GameState.PLAYING
+        || this.dockedAtStation || this.deathPending || this.stageClearPending;
+    const pushStats = overlayUp || this.statsPushAccum >= hudPeriod;
+    if (pushStats) this.statsPushAccum = 0;
     const perf = this.buildPerfSnapshot();
     // Menu-grade snapshots (loadout / shop / stats) are built while the
     // pause menu OR the docked station UI is up — both are sim-frozen
     // full-screen overlays that need them.
     const menuOpen = this.gameState === GameState.PAUSED || this.dockedAtStation;
+    if (this.perfRecorder.recording) this.markPerfEvents();
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
       // frameTime (raw rAF delta), the raw per-frame render + sim (aligned to
       // the SAME just-finished frame — sample() runs at the top of the next
@@ -1950,9 +2089,16 @@ export class GameEngine {
         this.perfController.loadLevel,
         this.renderer.lastRenderMs,
         this.lastFrameSimMs,
+        this.lastFrameSteps,
+        this.lastStatsPushMs,
+        this.renderer.lastStampMs,
+        this.renderer.lastStampCount,
+        this.renderer.lastTintMs,
+        this.renderer.lastTintMisses,
       );
     }
-    this.onStatsUpdate({
+    const tStats0 = performance.now();
+    if (pushStats) this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
@@ -2041,6 +2187,9 @@ export class GameEngine {
       snitchCatchMode: this.snitchCatchMode,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
+      simRateName: getActiveSimRateName(),
+      hudRateName: getActiveHudRateName(),
+      substepCapName: getActiveSubstepCapName(),
       swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
@@ -2072,6 +2221,13 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
     });
+    // Cost of handing the frame to React.  This is the ONE per-frame cost the
+    // engine's own timers never saw: `onStatsUpdate` is a setState, and the
+    // reconciliation it triggers is neither `draw()` nor the sim.  A hardware
+    // capture (2026-08-09) showed 35ms frames carrying only 1ms render + 2ms
+    // sim, i.e. ~32ms outside everything measured — so the unmeasured work is
+    // the whole story and had to be given a number.
+    this.lastStatsPushMs = pushStats ? performance.now() - tStats0 : 0;
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
@@ -2124,8 +2280,28 @@ export class GameEngine {
     // frame.  A MAX_SUBSTEPS clamp on the inner loop is the spiral-of-death
     // safeguard: if the sim is genuinely slower than real time the extra
     // time is silently discarded rather than compounding.
-    const { FIXED_DT, MAX_SUBSTEPS, MAX_FRAME_TIME } = SIMULATION_CONSTANTS;
-    this.simAccumulator += Math.min(frameTime, MAX_FRAME_TIME);
+    // FIXED_DT and the substep clamp are read LIVE from the sim-rate cycle
+    // (DBG "Sim rate", default 120Hz — identical to the hardcoded value it
+    // replaced).  See SIM_RATE_CYCLE in constants.ts for why the rate is a
+    // toggle rather than an edit.
+    const FIXED_DT = getSimDt();
+    const MAX_SUBSTEPS = getMaxSubsteps();
+    const { MAX_FRAME_TIME, VSYNC_SNAP_FRACTION } = SIMULATION_CONSTANTS;
+    let dtIn = Math.min(frameTime, MAX_FRAME_TIME);
+    // VSYNC SNAP.  Without this, a sim rate equal to the display rate makes
+    // the accumulator drift a hair either side of exactly one step, so frames
+    // alternate 1-step / 2-step and the world judders — which is exactly why
+    // a 1/60 timestep was tried and reverted once already (see the comment on
+    // SIMULATION_CONSTANTS).  Snapping a frame delta that lands within a
+    // quarter-step to the nearest whole number of steps removes the
+    // alternation at its source.  At 120Hz a 60fps frame is already ~2.000
+    // steps, so this is a no-op on the default path.
+    const rawSteps = dtIn / FIXED_DT;
+    const nearest = Math.round(rawSteps);
+    if (nearest >= 1 && Math.abs(rawSteps - nearest) < VSYNC_SNAP_FRACTION) {
+        dtIn = nearest * FIXED_DT;
+    }
+    this.simAccumulator += dtIn;
 
     let steps = 0;
     let frameSimMs = 0; // raw per-frame sim total (summed across substeps)
@@ -2180,6 +2356,7 @@ export class GameEngine {
         this.simAccumulator %= FIXED_DT;
     }
     this.lastFrameSimMs = frameSimMs; // raw per-frame sim total (spike attribution)
+    this.lastFrameSteps = steps;      // …and how many substeps it covers
 
     // Enforce the particle hard-cap ONCE per frame (moved out of the per-spawn
     // path — see ParticleSystem.spawn).  Runs after the whole sim drain so
@@ -2200,12 +2377,27 @@ export class GameEngine {
 
   private prepareFrameEntities() {
       if (!this.currentMap) return;
-      this.frameEntities.length = 0;
+      // REFILL IDIOM (gauntlet 5c, P2) — the canonical explanation lives here
+      // because this list is the hottest instance of it in the engine.
+      //
+      // `arr.length = 0` followed by `push` looks free and is not: setting the
+      // length down shrinks the backing store, and the pushes then re-grow it
+      // through the array growth policy, allocating a fresh backing store (and
+      // several intermediate ones) EVERY refill.  This list is rebuilt 2-3
+      // times per frame with ~1300-3600 entries, and it measured as the single
+      // largest allocator in the engine — in the idle hub as much as in combat.
+      //
+      // Index-filling into the existing array and truncating ONLY when the
+      // count actually shrank keeps the backing store at its high-water mark,
+      // so a steady-state field allocates nothing.  Contents and `length` are
+      // identical either way; no consumer can tell.  Measured standalone:
+      // 2.6x faster and 11x less heap churn over 20 000 refills of 1300 items.
       const ents = this.currentMap.entities;
-      for (let i = 0; i < ents.length; i++) {
-          this.frameEntities.push(ents[i]);
-      }
-      this.frameEntities.push(this.player);
+      const frame = this.frameEntities;
+      const n = ents.length;
+      for (let i = 0; i < n; i++) frame[i] = ents[i];
+      frame[n] = this.player;
+      if (frame.length !== n + 1) frame.length = n + 1;
       // Phase 4: rebuild type-filtered candidate lists so every downstream
       // system scan runs on the minimal relevant slice instead of the full
       // master entity list.  Rebuilt once per sim substep; consumers must
@@ -2244,6 +2436,99 @@ export class GameEngine {
       this.perfCounts.projectileCount   = this.entityIndex.projectiles.length;
       this.perfCounts.particleCount     = this.entityIndex.particleCount;
       this.perfCounts.interactableCount = this.entityIndex.interactableCount;
+  }
+
+  /** Baseline flow-correction rate, shared by the shard pass
+   *  (`applyFlowTo`) and the collectible-drop pass that mirrors it. */
+  private static readonly FLOW_CORRECTION = 0.08;
+
+  /**
+   * Steer one shard toward the local flow-field direction.
+   *
+   * CLOSURE HOISTING (gauntlet 5c, P3) — this used to be a `const applyFlow =
+   * (e) => {…}` declared inside `updatePhysics`, i.e. a function object
+   * CONSTRUCTED FRESH on every sim substep, 120 times a second.  That is not
+   * just the cost of the allocation: a function re-created that often never
+   * settles into V8's optimised tier, and in the unoptimised tier every
+   * intermediate double is boxed on the heap.  The site measured ~98 bytes of
+   * allocation per shard per substep — 175 MB over a 12 s capture on the
+   * Asteroid Field, the single largest allocator in the engine after P2 —
+   * while `perf/probe.mjs` showed the exact same operations allocating ZERO
+   * when run from a stable, optimisable loop.
+   *
+   * The body below is byte-for-byte the old closure's; only its home changed.
+   * Everything it used to capture is now an explicit parameter, which is what
+   * lets it be a plain method.
+   *
+   * The collectible-drop pass in `updatePhysics` deliberately keeps its own
+   * copy of this arithmetic rather than calling through here: drops carry a
+   * `rotationSpeed`, so routing them through this method would start
+   * integrating their rotation and that is a behaviour change, not a perf fix.
+   */
+  private applyFlowTo(
+      e: GameEntity,
+      dt: number,
+      flowTargetSpeed: number,
+      flowEnabled: boolean,
+      laneJitter: number,
+  ): void {
+      // Nebula shards anchor in place — flow correction is
+      // skipped so the field can't drag them around the map.
+      // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
+      // shard's velocity decays to zero after any kick (shatter,
+      // gravity pull, impact) and stays there.  Rotation still
+      // integrates so spinning shards keep tumbling visually.
+      if (e.shardVariant === 'nebula-shard') {
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+          return;
+      }
+      // DBG: when the asteroid-flow toggle is OFF, skip the
+      // velocity nudge entirely.  Rotation still integrates so
+      // existing tumble is preserved; existing velocity is left
+      // untouched (only damping + collisions modify it).
+      if (!flowEnabled) {
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+          return;
+      }
+      const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
+      // Per-shard lane jitter: nudge the target slightly
+      // perpendicular to the flow by a STABLE per-shard amount so
+      // shards ride parallel lanes instead of collapsing onto one
+      // streamline.  Lazily seeded once per entity (stable
+      // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
+      let fxDir = flow.x, fyDir = flow.y;
+      if (laneJitter > 0) {
+          if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+          const off = e.flowLane * laneJitter;
+          const px = -flow.y, py = flow.x;
+          const nx = flow.x + px * off;
+          const ny = flow.y + py * off;
+          const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
+          fxDir = nx / nmag;
+          fyDir = ny / nmag;
+      }
+      // Inverse-mass scaling — heavier shards lock on slower AND
+      // cruise at a lower terminal speed.  Plastic's 5× boost is
+      // multiplied BEFORE the mass scale so heavy plastic blobs
+      // are diluted along with everything else; the boost shows
+      // primarily on light plastic.
+      const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
+          / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
+      const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
+      const correctionMul = plasticBoost * massScale;
+      const targetSpeed = flowTargetSpeed * massScale;
+      const tx = fxDir * targetSpeed;
+      const ty = fyDir * targetSpeed;
+      const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
+      const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
+      const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
+      const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
+      const perpDeficit     = Math.min(1, vPerp / targetSpeed);
+      const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
+      const alpha           = Math.min(0.8, GameEngine.FLOW_CORRECTION * dt * urgency * correctionMul);
+      e.velocity.x += (tx - e.velocity.x) * alpha;
+      e.velocity.y += (ty - e.velocity.y) * alpha;
+      if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
   }
 
   private handleEnemyShooting(dt: number) {
@@ -2318,14 +2603,20 @@ export class GameEngine {
         this.handleProjectileHit
       );
 
-      this.currentMap.entities.forEach(e => {
+      // Indexed loop, not `forEach(e => …)`: the callback would be a fresh
+      // closure on every substep (120 Hz).  See the CLOSURE HOISTING note on
+      // applyFlowTo below — a function re-created per substep never settles
+      // into optimised code.
+      const mapEnts = this.currentMap.entities;
+      for (let i = 0; i < mapEnts.length; i++) {
+          const e = mapEnts[i];
           if (e.isExploding && e.explosionTimer !== undefined) {
               e.explosionTimer -= dt;
               if (e.explosionTimer <= 0) {
                   e.active = false;
               }
           }
-      });
+      }
 
       // Asteroid census + shard generation.  EntityIndex only contains
       // active asteroids, so we still need a master-list scan to catch
@@ -2371,71 +2662,14 @@ export class GameEngine {
       //   it had accumulated.  Keeping the perp-deficit hot makes the
       //   correction actively damp sideways motion, so packs spread back
       //   out onto the flow lines.
-      const FLOW_CORRECTION  = 0.08;
+      const FLOW_CORRECTION = GameEngine.FLOW_CORRECTION;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
       const flowEnabled = this.asteroidFlowEnabled;
       const laneJitter = this.ffLaneJitter;
-      const applyFlow = (e: GameEntity) => {
-          // Nebula shards anchor in place — flow correction is
-          // skipped so the field can't drag them around the map.
-          // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
-          // shard's velocity decays to zero after any kick (shatter,
-          // gravity pull, impact) and stays there.  Rotation still
-          // integrates so spinning shards keep tumbling visually.
-          if (e.shardVariant === 'nebula-shard') {
-              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-              return;
-          }
-          // DBG: when the asteroid-flow toggle is OFF, skip the
-          // velocity nudge entirely.  Rotation still integrates so
-          // existing tumble is preserved; existing velocity is left
-          // untouched (only damping + collisions modify it).
-          if (!flowEnabled) {
-              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-              return;
-          }
-          const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
-          // Per-shard lane jitter: nudge the target slightly
-          // perpendicular to the flow by a STABLE per-shard amount so
-          // shards ride parallel lanes instead of collapsing onto one
-          // streamline.  Lazily seeded once per entity (stable
-          // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
-          let fxDir = flow.x, fyDir = flow.y;
-          if (laneJitter > 0) {
-              if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
-              const off = e.flowLane * laneJitter;
-              const px = -flow.y, py = flow.x;
-              let nx = flow.x + px * off;
-              let ny = flow.y + py * off;
-              const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
-              fxDir = nx / nmag;
-              fyDir = ny / nmag;
-          }
-          // Inverse-mass scaling — heavier shards lock on slower AND
-          // cruise at a lower terminal speed.  Plastic's 5× boost is
-          // multiplied BEFORE the mass scale so heavy plastic blobs
-          // are diluted along with everything else; the boost shows
-          // primarily on light plastic.
-          const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
-              / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
-          const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
-          const correctionMul = plasticBoost * massScale;
-          const targetSpeed = FLOW_TARGET_SPEED * massScale;
-          const tx = fxDir * targetSpeed;
-          const ty = fyDir * targetSpeed;
-          const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
-          const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-          const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
-          const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
-          const perpDeficit     = Math.min(1, vPerp / targetSpeed);
-          const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
-          const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * correctionMul);
-          e.velocity.x += (tx - e.velocity.x) * alpha;
-          e.velocity.y += (ty - e.velocity.y) * alpha;
-          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-      };
-      for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
+      for (let i = 0; i < asteroids.length; i++) {
+          this.applyFlowTo(asteroids[i], dt, FLOW_TARGET_SPEED, flowEnabled, laneJitter);
+      }
 
       // Collectible drops (salvage + health) follow the same asteroid flow
       // field — the wind that catches loose shards also drags drops along,
@@ -5635,10 +5869,14 @@ export class GameEngine {
       // used to walk the whole map per ring on the single spawn frame, which
       // is the bulk of the "spawn-burst hitch".  Damaging rings (cannon AoE,
       // kamikaze, merge blow-back) still snapshot exactly as before.
-      const validHitIds = new Set<string>();
       const ents = this.currentMap.entities;
       const cosmeticRing = opts.damage <= 0 && opts.knockback <= 0;
+      // Allocate the snapshot Set only for rings that can actually use it.
+      // An ordinary enemy death spawns TWO cosmetic rings, so on a
+      // kill-heavy frame this was two dead Sets per kill.
+      let validHitIds = EMPTY_HIT_IDS;
       if (!cosmeticRing) {
+          validHitIds = new Set<string>();
           for (let i = 0; i < ents.length; i++) {
               const e = ents[i];
               if (!e.active || e.isExploding) continue;
@@ -7203,7 +7441,24 @@ export class GameEngine {
   // Start/stop a capture, cycle the scene label, and export a copy-paste
   // report.  Surfaced in the DBG panel's "Perf REC" section; see
   // engine/systems/PerfRecorder.ts.
-  public perfRecToggle() { this.perfRecorder.toggle(); }
+  public perfRecToggle() {
+    const starting = !this.perfRecorder.recording;
+    this.perfRecorder.toggle();
+    // Seed the event-diff markers to the CURRENT world state when a capture
+    // opens.  Without this the first recorded frame reads every marker as
+    // "changed" and the timeline opens with a cluster of phantom events at
+    // 0.0s — which is exactly the false correlation the timeline exists to
+    // prevent.  Seeded silently, so the timeline holds only real transitions.
+    if (starting) {
+      this._pmWave = this.waveIndex;
+      this._pmState = this.waveState;
+      this._pmBoss = !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+      this._pmMap = this.currentMap?.name ?? '';
+      this._pmDead = this.deathPending;
+      this._pmStage = this.stageClearPending;
+      this._pmDocked = this.dockedAtStation;
+    }
+  }
   public perfRecCycleScene() { this.perfRecorder.cycleScene(); }
 
   /** Build the copy-paste perf report from the current capture window.  The
@@ -7213,11 +7468,19 @@ export class GameEngine {
     return this.perfRecorder.report({
       viewportW: typeof window !== 'undefined' ? window.innerWidth : 0,
       viewportH: typeof window !== 'undefined' ? window.innerHeight : 0,
-      dpr: typeof window !== 'undefined' ? Math.round((window.devicePixelRatio || 1) * 10) / 10 : 1,
+      // The EFFECTIVE ratio — what the frame was actually rasterised at, and
+      // therefore what the render numbers below correspond to.  The raw device
+      // ratio is recoverable from the `set` line's rscale entry.
+      dpr: Math.round(effectiveDpr() * 10) / 10,
       zoom: this.camera.zoom || 1,
       mapName: this.currentMap?.name || '—',
       difficulty: this.difficultyLevel,
-      buildTag: 'exotic-opt',
+      buildTag: '5c-perf',
+      // Every DBG knob that can change what these numbers mean.  Without it
+      // an A/B capture cannot be told apart from the run it is compared to.
+      settings: `sim ${getActiveSimRateName()} · substep ${getActiveSubstepCapName()}`
+        + ` · rscale ${getActiveRenderScaleName()} · hud ${getActiveHudRateName()}`
+        + ` · auto ${this.perfController.autoEnabled ? 'on' : 'off'}`,
     }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 

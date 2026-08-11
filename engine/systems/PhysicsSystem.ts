@@ -6,11 +6,12 @@ import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
+import { CellBuckets } from './CellBuckets';
 
-// Number of spatial-hash cells along each axis of the toroidal map.  The
-// broadphase keys pack (col, row) into a single int using `(cx << 16) |
-// (cy & 0xFFFF)`, and cell indices are wrapped into [0, SPATIAL_COLS) so
-// neighbour queries near a seam land on the same bucket as the entities
+// Number of spatial-grid cells along each axis of the toroidal map.  The
+// broadphase identifies a cell by the dense index `cx * SPATIAL_ROWS + cy`,
+// with both coordinates wrapped into [0, SPATIAL_COLS) / [0, SPATIAL_ROWS)
+// so neighbour queries near a seam land on the same bucket as the entities
 // they should collide with on the opposite side.
 //
 // `let` + dimension listener so per-map size changes rebuild the cell
@@ -28,13 +29,24 @@ function wrapCellX(cx: number): number {
 function wrapCellY(cy: number): number {
     return ((cy % SPATIAL_ROWS) + SPATIAL_ROWS) % SPATIAL_ROWS;
 }
+// Cell identity is a DENSE INDEX (`cx * SPATIAL_ROWS + cy`), not a packed
+// `(cx << 16) | cy` hash key.  Both axes are already wrapped into
+// [0, SPATIAL_COLS) x [0, SPATIAL_ROWS) here, so the index space is exactly
+// the grid — which lets CellBuckets be a flat array instead of a Map and
+// turns every lookup (nine per entity per substep, in the 3x3 neighbour
+// scan) from a hash into an array index.  The static grid keeps a Map, but
+// it is keyed on the same dense index, so the two agree cell for cell.
 function cellKey(x: number, y: number): number {
     const cx = wrapCellX(Math.floor(x / SPATIAL_GRID_SIZE));
     const cy = wrapCellY(Math.floor(y / SPATIAL_GRID_SIZE));
-    return (cx << 16) | (cy & 0xFFFF);
+    return cx * SPATIAL_ROWS + cy;
 }
 function cellKeyFromCell(cx: number, cy: number): number {
-    return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
+    return wrapCellX(cx) * SPATIAL_ROWS + wrapCellY(cy);
+}
+/** Total cells in the current grid — the size CellBuckets must cover. */
+function cellCount(): number {
+    return SPATIAL_COLS * SPATIAL_ROWS;
 }
 
 // Parametric hex-colour lerp.  Used by applyDentStep to fade
@@ -76,13 +88,21 @@ export class PhysicsSystem {
   // staticGrid stores immovable geometry (Tiles) and is calculated ONLY on map load.
   // dynamicGrid stores moving entities (Player, Enemies, Projectiles) and is cleared every frame.
   private staticGrid: Map<number, GameEntity[]> = new Map();
-  private dynamicGrid: Map<number, GameEntity[]> = new Map();
+  // The two PER-SUBSTEP grids are CellBuckets, not plain Maps: they are
+  // rebuilt at 120 Hz, and allocating a fresh array per occupied cell each
+  // time was the engine's second-largest allocator (see CellBuckets' header).
+  // The static grid stays a plain Map — it is built once on map load, so
+  // there is nothing to recycle.
+  private dynamicGrid: CellBuckets = new CellBuckets();
   // Separate spatial hash for shard ↔ shard pair resolution.
   // Walked only on Nth physics steps per the ShPair pacing —
   // skipping the rebuild + walk entirely on off-frames is the
   // savings the DBG slider was missing when shard-shard pairs
   // were inline in the main collision pass.
-  private shardGrid: Map<number, GameEntity[]> = new Map();
+  private shardGrid: CellBuckets = new CellBuckets();
+  /** Reusable dynamic-entity working set, index-filled each substep.  A
+   *  fresh `[]` here churned a ~2000-slot backing store at 120 Hz. */
+  private dynamicEntities: GameEntity[] = [];
 
   // True if any static tile on the current map emits a repel field
   // (glass-tile / metal-tile today).  Set in initializeStaticGrid by
@@ -263,6 +283,13 @@ export class PhysicsSystem {
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
       this.staticGrid.clear();
+      // Map load: drop the per-substep bucket pools too.  Their free lists are
+      // sized to the OUTGOING map, and holding a 6k-shard map's worth of empty
+      // arrays alive across a portal into a sparse one is a leak, not a cache.
+      // (`beginPass` is the per-substep reset; this is the teardown.)
+      this.dynamicGrid.reset();
+      this.shardGrid.reset();
+      this.dynamicEntities.length = 0;
       this._anyRepelTilesPresent = false;
 
       for (let i = 0; i < entities.length; i++) {
@@ -806,8 +833,13 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
-    // 1. Clear ONLY Dynamic Grid (Static Grid is persistent)
-    this.dynamicGrid.clear();
+    // 1. Reset ONLY the Dynamic Grid (Static Grid is persistent).  beginPass
+    // empties the buckets and recycles their arrays — see CellBuckets.
+    // `resize` is a single compare once the grid is big enough; calling it
+    // here rather than only at map load means no path can change the map
+    // dimensions and leave the grid undersized.
+    this.dynamicGrid.resize(cellCount());
+    this.dynamicGrid.beginPass();
 
     // 2. Populate Dynamic Grid with moving entities.  While we're walking
     // each cell push, track the peak cell population — the 3×3 neighbourhood
@@ -818,7 +850,9 @@ export class PhysicsSystem {
     // discards every pair involving a particle (they're purely visual),
     // so inserting them wastes grid memory and forces O(particles) extra
     // inner-loop iterations on every neighbour scan for no effect.
-    let maxDensity = 0;
+    // Peak cell population is tracked by the bucket store itself now (same
+    // value, counted at the same moment — on each push).
+    let dynN = 0;
     // Awake-only count drives the PerfController throttle: an asleep shard
     // skips pair-resolution math (resolveShardPairs bails on asleep↔asleep),
     // so a field of settled bodies costs almost nothing and must NOT pin the
@@ -826,7 +860,7 @@ export class PhysicsSystem {
     // never-sleeping metal composites accumulate on mixed maps and throttle
     // shared passes (shardPair/colorBlend/…), starving nebula collisions.
     let awakeCount = 0;
-    const dynamicEntities: GameEntity[] = [];
+    const dynamicEntities = this.dynamicEntities;
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         if (!e.active || e.isExploding) continue;
@@ -863,20 +897,15 @@ export class PhysicsSystem {
         // can trigger a shatter.  The nebula branch in resolveCollision is
         // still pass-through (no impulse), so they never exchange momentum
         // with anything — only the shatter side-effect fires.
-        dynamicEntities.push(e);
+        dynamicEntities[dynN++] = e;
         if (!e.asleep) awakeCount++;
 
-        const key = cellKey(e.position.x, e.position.y);
-
-        let cell = this.dynamicGrid.get(key);
-        if (!cell) {
-            cell = [];
-            this.dynamicGrid.set(key, cell);
-        }
-        cell.push(e);
-        if (cell.length > maxDensity) maxDensity = cell.length;
+        this.dynamicGrid.push(cellKey(e.position.x, e.position.y), e);
     }
-    this.lastMaxCellDensity = maxDensity;
+    // Truncate only when the working set actually shrank.  Assigning
+    // `length` unconditionally every substep is the churn this is avoiding.
+    if (dynamicEntities.length !== dynN) dynamicEntities.length = dynN;
+    this.lastMaxCellDensity = this.dynamicGrid.maxDensity;
     this.lastDynamicCount = awakeCount;
 
     // 3. Check Collisions: Only iterate DYNAMIC entities as primary
@@ -1665,7 +1694,8 @@ export class PhysicsSystem {
     const vl = this.viewportLeft, vr = this.viewportRight;
     const vt = this.viewportTop, vb = this.viewportBottom;
 
-    this.shardGrid.clear();
+    this.shardGrid.resize(cellCount());
+    this.shardGrid.beginPass();
     let asleepCount = 0;
     let offscreenCount = 0;
     for (let i = 0; i < shards.length; i++) {
@@ -1681,10 +1711,7 @@ export class PhysicsSystem {
             e.offscreen = false;
         }
         e._pairSeq = i; // pass-local numeric dedup index (see pair loop below)
-        const key = cellKey(e.position.x, e.position.y);
-        let cell = this.shardGrid.get(key);
-        if (!cell) { cell = []; this.shardGrid.set(key, cell); }
-        cell.push(e);
+        this.shardGrid.push(cellKey(e.position.x, e.position.y), e);
     }
     this.lastAsleepCount = asleepCount;
     this.lastOffscreenShardCount = offscreenCount;

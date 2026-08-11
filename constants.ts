@@ -951,7 +951,185 @@ export const SIMULATION_CONSTANTS = {
   FIXED_DT: 1 / 120,       // Deterministic simulation timestep (seconds)
   MAX_SUBSTEPS: 5,         // Spiral-of-death clamp: max sim steps per rendered frame
   MAX_FRAME_TIME: 0.25,    // Safety clamp on raw frame delta before accumulating (s)
+  /** Frame-delta snapping tolerance, as a FRACTION of one sim step.
+   *
+   *  This is what makes a 60 Hz sim rate viable at all.  The comment above
+   *  records why 1/60 was rejected the first time: on a 60 Hz display the
+   *  accumulator drifts a hair either side of exactly one step, so frames
+   *  alternate 1-step / 2-step and the world visibly judders.  Snapping the
+   *  frame delta to the nearest whole number of steps when it lands within
+   *  this tolerance removes the alternation at its source — a standard
+   *  fixed-timestep technique, and cheaper than the divisibility trick it
+   *  replaces.  At the 120 Hz default it is a no-op in practice (a 60 Hz
+   *  frame is already almost exactly 2 steps), so it cannot regress the
+   *  shipping path.  0.25 = snap when within a quarter-step. */
+  VSYNC_SNAP_FRACTION: 0.25,
 };
+
+// ─── DBG: simulation rate (gauntlet 5c follow-up) ────────────────────────────
+//
+// The sim rate is the single largest lever on sim cost that exists: at 120 Hz
+// a 60 fps frame pays for TWO full sim steps, so every millisecond of sim work
+// is doubled by this one number.  60 Hz is the industry-mainstream rate (Unity
+// ships 50, Box2D recommends 60); 120 is on the high end, reserved for
+// sub-frame precision.
+//
+// It is exposed as a DBG cycle rather than simply lowered because dropping it
+// is a TRADE, not a free win: collision resolution is iterative, so half the
+// steps means half the passes untangling a dense shard pile, and the shard
+// fields will settle differently.  That is a FEEL judgement and belongs to the
+// player, not to a perf measurement.
+//
+// 120 is index 0 and stays the default, so the shipping path is unchanged.
+
+/** Max static-tile cache stamps allowed in ONE render frame.
+ *
+ *  The static-tile layer stamps tiles into a map-sized offscreen canvas
+ *  lazily, and the loop had no budget: whenever a lot of tiles became
+ *  cacheable at once — the hex sprite finishing loading after map build, or
+ *  a wave of tile regen — every one of them stamped in a single frame.  A
+ *  device capture (Ring World, 2026-08-09) caught it twice: `render 45.00`
+ *  at 12.6s with 1357 entities, and `render 40.00` at 29.9s, against a
+ *  1.41ms average.  Those were the only frames all session where OUR render
+ *  was the spike.
+ *
+ *  Capping is visually identical rather than a trade: a tile that does not
+ *  get its stamp this frame simply renders through the normal per-entity
+ *  path, which is exactly what it does today until it is stamped.  Only the
+ *  cache WARM-UP spreads out — at 24/frame a full map catches up in well
+ *  under a second. */
+export const STATIC_TILE_STAMPS_PER_FRAME = 24;
+
+// ─── DBG: substep cap (frame-pacing) ─────────────────────────────────────────
+//
+// MAX_SUBSTEPS is the spiral-of-death clamp, but set too HIGH it feeds the
+// spiral instead of stopping it.  A device capture (Seven Rings, 3359
+// entities, 2026-08-09) showed every worst frame pegged at steps = 5 with
+// sim = 36-44ms of a 56-60ms frame: the frame ran long, the accumulator
+// pulled in more substeps, those substeps made the frame longer still.
+// Positive feedback.
+//
+// A 60fps display with a 120Hz sim only NEEDS 2 substeps per frame; 5 allows
+// 2.5x real-time catch-up, and that headroom is what let one slow frame
+// snowball.  Capping lower converts a judder into a brief, smooth
+// slow-motion — and the engine ALREADY discards the excess time at the clamp
+// (`simAccumulator %= FIXED_DT`), so that cost is being paid either way; the
+// cap only decides at what point it is paid.
+//
+// Values are the cap at the 120Hz baseline; getMaxSubsteps() rescales them
+// for the active sim rate.  5 is index 0 and stays the default.
+export const SUBSTEP_CAP_CYCLE: ReadonlyArray<number> = [5, 3, 2] as const;
+let activeSubstepCapIndex = 0;
+export function getActiveSubstepCap(): number { return SUBSTEP_CAP_CYCLE[activeSubstepCapIndex]; }
+export function getActiveSubstepCapName(): string { return `${SUBSTEP_CAP_CYCLE[activeSubstepCapIndex]}`; }
+export function cycleSubstepCap(): number {
+  activeSubstepCapIndex = (activeSubstepCapIndex + 1) % SUBSTEP_CAP_CYCLE.length;
+  return SUBSTEP_CAP_CYCLE[activeSubstepCapIndex];
+}
+
+// ─── DBG: render scale (device-pixel-ratio cap) ──────────────────────────────
+//
+// The canvas backing store is sized by devicePixelRatio, and on an iPhone that
+// is 3 — so a 440x756 viewport rasterises ~3.0 MILLION pixels every frame, with
+// a lot of `globalCompositeOperation = 'lighter'` and radial gradients on top.
+//
+// That fill-rate cost is invisible to every timer in this engine: `renderMs`
+// measures the time our JS spends ISSUING canvas calls, while the actual
+// rasterisation and compositing happen in the browser compositor after the rAF
+// callback returns.  Device captures (2026-08-09) showed frames of 35-38ms
+// carrying 0-1ms render and 0-2ms sim — one of them with the engine doing
+// literally nothing — so the whole cost is outside our JS, and fill rate is the
+// leading candidate.
+//
+// Capping the ratio at 2 cuts the pixel count by ~2.3x (3.0M -> 1.3M).  It is a
+// SHARPNESS trade, which is why it is a toggle and not an edit: 3 is index 0
+// and stays the default until someone chooses otherwise.
+// 2 IS THE DEFAULT (user call, 2026-08-09, on the evidence below).  Measured
+// on Ring World against an otherwise identical 3x run: worst frame 81ms ->
+// 27ms, p99 36 -> 23ms, 1%-low 28 -> 43fps, min 12 -> 37fps, and the
+// unattributed `other` term — the one that had resisted every other fix this
+// session — fell from 47-78ms to 20-25ms.  That is the single largest
+// smoothness result of the gauntlet, and it confirms `other` was compositing.
+// 3x remains one tap away in the cycle.
+export const RENDER_SCALE_CYCLE: ReadonlyArray<number> = [2, 3, 1.5] as const;
+let activeRenderScaleIndex = 0;
+export function getActiveRenderScaleCap(): number { return RENDER_SCALE_CYCLE[activeRenderScaleIndex]; }
+export function getActiveRenderScaleName(): string {
+  const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  return dpr <= cap ? `${cap}x (native)` : `${cap}x`;
+}
+/** The device pixel ratio ACTUALLY in use, after the cap.  Every site that
+ *  converts between canvas pixels and CSS pixels must read this, not
+ *  `window.devicePixelRatio` — mixing the two makes the renderer compute a
+ *  logical viewport that does not match the canvas it is drawing into. */
+export function effectiveDpr(): number {
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+  return dpr < cap ? dpr : cap;
+}
+export function cycleRenderScale(): number {
+  activeRenderScaleIndex = (activeRenderScaleIndex + 1) % RENDER_SCALE_CYCLE.length;
+  return RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+}
+
+// ─── DBG: HUD (React) update rate ────────────────────────────────────────────
+//
+// `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.
+// The reconciliation it triggers walks the whole (unmemoized, ~2100-line)
+// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer ever
+// saw it.  A hardware capture (2026-08-09, Ring World, iPhone) showed 35 ms
+// frames carrying only 1 ms render + 2 ms sim — ~32 ms unaccounted — which is
+// what made this worth a knob.
+//
+// The HUD is text chips and bars; it does not need 60 Hz.  Everything that
+// must stay frame-perfect is canvas-drawn (minimap, loadout strip, wave
+// banners, damage text) and is unaffected by this.  60 is index 0 and stays
+// the default, so the shipping path is unchanged until someone chooses.
+export const HUD_RATE_CYCLE: ReadonlyArray<number> = [60, 30, 15] as const;
+let activeHudRateIndex = 0;
+export function getActiveHudRate(): number { return HUD_RATE_CYCLE[activeHudRateIndex]; }
+export function getActiveHudRateName(): string { return `${HUD_RATE_CYCLE[activeHudRateIndex]}Hz`; }
+export function cycleHudRate(): number {
+  activeHudRateIndex = (activeHudRateIndex + 1) % HUD_RATE_CYCLE.length;
+  return HUD_RATE_CYCLE[activeHudRateIndex];
+}
+
+export const SIM_RATE_CYCLE: ReadonlyArray<number> = [120, 60] as const;
+let activeSimRateIndex = 0;
+/** The sim rate currently selected, in Hz. */
+export function getActiveSimRate(): number { return SIM_RATE_CYCLE[activeSimRateIndex]; }
+export function getActiveSimRateName(): string { return `${SIM_RATE_CYCLE[activeSimRateIndex]}Hz`; }
+/** The live fixed timestep.  Read this instead of SIMULATION_CONSTANTS.FIXED_DT
+ *  anywhere the rate must be honoured (the accumulator loop). */
+export function getSimDt(): number { return 1 / SIM_RATE_CYCLE[activeSimRateIndex]; }
+/**
+ * How many BASELINE (1/120 s) steps one current step covers: 1 at 120 Hz,
+ * 2 at 60 Hz.
+ *
+ * Constants tuned PER STEP rather than per second have to be rescaled by this
+ * or they silently change meaning with the rate.  Deriving the scale from the
+ * existing 120 Hz numbers — rather than re-authoring them as per-second rates
+ * — is deliberate: it guarantees the 120 Hz path is bit-for-bit what it is
+ * today, so the toggle is a clean A/B rather than a retune of both branches.
+ *
+ * Two conversions are EXACT:
+ *   - exponential decay:   d_eff = d ** stepScale   (0.97 -> 0.9409)
+ *   - linear accumulation: s_eff = s * stepScale    (0.08 -> 0.16)
+ * Anything that INTERLEAVES the two in one step differs by a second-order
+ * term, and the iterative collision solver does not convert at all — that is
+ * where the real feel change lives, and why this is a toggle and not an edit.
+ */
+export function simStepScale(): number { return 120 / SIM_RATE_CYCLE[activeSimRateIndex]; }
+/** Substep clamp scaled to the rate, so the spiral-of-death guard covers the
+ *  same amount of WALL TIME at either rate (5 steps @120Hz ≈ 3 @60Hz). */
+export function getMaxSubsteps(): number {
+  return Math.max(2, Math.round(getActiveSubstepCap() / simStepScale()));
+}
+export function cycleSimRate(): number {
+  activeSimRateIndex = (activeSimRateIndex + 1) % SIM_RATE_CYCLE.length;
+  return SIM_RATE_CYCLE[activeSimRateIndex];
+}
 
 export const LOCAL_GRAVITY_CONSTANTS = {
   RANGE: 400,          // Pixel radius where gravity takes effect

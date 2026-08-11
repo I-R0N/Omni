@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -375,6 +375,22 @@ export class RenderSystem {
   // Written at the end of render() and read by GameEngine for the dev perf
   // overlay.  render() is a single top-level pass so one timer covers it.
   public lastRenderMs: number = 0;
+  /** Time spent stamping tiles into the static-tile cache this frame, and
+   *  how many were stamped.  Separated out because a device capture showed
+   *  47ms and 27ms RENDER frames during early warm-up with no event nearby,
+   *  and "the cache stamps" is a guess until it carries its own number. */
+  public lastStampMs: number = 0;
+  public lastStampCount: number = 0;
+  /** Tinted-sprite cache MISSES this frame, and what they cost.  Each miss
+   *  builds a 128x128 canvas; the cache is capped at 256 entries with FIFO
+   *  eviction, and the tint key space is large (rock alone has 25 density
+   *  tiers, plus metal tiers, glass opacity and plastic palettes), so past
+   *  the cap it can THRASH — rebuilding canvases every frame.  A device
+   *  capture showed four 27-41ms RENDER frames at ~1520 entities with tile
+   *  stamping already eliminated (1ms peak), which is the shape thrashing
+   *  would have.  Measured rather than assumed. */
+  public lastTintMs: number = 0;
+  public lastTintMisses: number = 0;
   // Sub-timer for the dedicated nebula-tile / shard pass.  Lets the dev
   // overlay show what fraction of the total render budget is spent on
   // nebula entities, which is the primary suspect for the high render
@@ -788,9 +804,24 @@ export class RenderSystem {
   private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
       const key = `${src}|${hex}`;
       const cached = this._tintedSprites.get(key);
-      if (cached) return cached;
+      if (cached) {
+          // LRU, not FIFO.  Eviction below takes the FIRST key in insertion
+          // order, so without this a hit leaves the entry where it was and
+          // the cache discards by AGE rather than by USE — which means a
+          // working set only slightly over the cap evicts precisely the
+          // entries about to be needed again, and every one of them is
+          // rebuilt (a 128x128 canvas, measured at ~2.4ms on device).  A
+          // device capture showed 890 rebuilds in 182s against a 256-entry
+          // cache.  Re-inserting on hit moves the entry to the end, so
+          // eviction follows recency.  Purely a cache-policy change: same
+          // canvases, same pixels, no visual difference.
+          this._tintedSprites.delete(key);
+          this._tintedSprites.set(key, cached);
+          return cached;
+      }
       const img = this.getImage(src);
       if (!img.complete || img.naturalWidth === 0) return null;
+      const tTint0 = performance.now();
 
       const size = 128; // power of 2; matches typical world draw size
       const c = document.createElement('canvas');
@@ -810,6 +841,8 @@ export class RenderSystem {
           if (firstKey !== undefined) this._tintedSprites.delete(firstKey);
       }
       this._tintedSprites.set(key, c);
+      this.lastTintMisses++;
+      this.lastTintMs += performance.now() - tTint0;
       return c;
   }
 
@@ -1286,6 +1319,9 @@ export class RenderSystem {
   private prepareStaticTileCacheForFrame(playerPos: Vector2 | undefined): void {
       if (!this._staticTileCanvas) return;
       const entries = this._visibleEntities;
+      let stampBudget = STATIC_TILE_STAMPS_PER_FRAME;
+      const tStamp0 = performance.now();
+      const stampStart = stampBudget;
       for (let i = 0; i < entries.length; i++) {
           const entity = entries[i].entity;
           if (!this.isStaticTileCacheable(entity)) continue;
@@ -1310,16 +1346,29 @@ export class RenderSystem {
               && entity.regenPopTimer === undefined
               && !inGlowRange;
           if (wantsCache && entity._staticCached !== true) {
-              // Pre-scrub the stamp area in case polygonPoints was
-              // mutated since the last stamp (rock-tile dent) — without
-              // this the new (smaller) polygon paints inside the old
-              // outline, leaving a halo of stale pixels around the dent.
-              this.eraseStaticTileFromCache(entity);
-              this.stampStaticTileToCache(entity);
+              // BUDGETED (see STATIC_TILE_STAMPS_PER_FRAME): stamping is a
+              // clearRect + drawImage on a map-sized offscreen canvas, and
+              // this loop used to do as many as were pending — so a moment
+              // where many tiles became cacheable at once (sprite load, a
+              // wave of regen) cost 40-45ms of render in ONE frame.  Skipping
+              // a stamp is not a visual change: the tile just renders through
+              // the normal per-entity path this frame, exactly as it does
+              // until it gets stamped.
+              if (stampBudget > 0) {
+                  stampBudget--;
+                  // Pre-scrub the stamp area in case polygonPoints was
+                  // mutated since the last stamp (rock-tile dent) — without
+                  // this the new (smaller) polygon paints inside the old
+                  // outline, leaving a halo of stale pixels around the dent.
+                  this.eraseStaticTileFromCache(entity);
+                  this.stampStaticTileToCache(entity);
+              }
           } else if (!wantsCache && entity._staticCached === true) {
               this.eraseStaticTileFromCache(entity);
           }
       }
+      this.lastStampCount = stampStart - stampBudget;
+      this.lastStampMs = this.lastStampCount > 0 ? performance.now() - tStamp0 : 0;
   }
 
   /**
@@ -1358,9 +1407,11 @@ export class RenderSystem {
     flowOverlay?: FlowOverlayState,
   ) {
     const t0 = performance.now();
+    this.lastTintMs = 0;
+    this.lastTintMisses = 0;
     if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
     const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = effectiveDpr();
     const width = (ctx.canvas.width || 0) / dpr;
     const height = (ctx.canvas.height || 0) / dpr;
 
@@ -1688,8 +1739,8 @@ export class RenderSystem {
       // viewports.  Half-extents include a one-cell margin so cells
       // straddling the edge still draw.
       const zoom = camera.zoom || 1;
-      const halfW = (ctx.canvas.width  / (window.devicePixelRatio || 1)) / 2 / zoom;
-      const halfH = (ctx.canvas.height / (window.devicePixelRatio || 1)) / 2 / zoom;
+      const halfW = (ctx.canvas.width  / effectiveDpr()) / 2 / zoom;
+      const halfH = (ctx.canvas.height / effectiveDpr()) / 2 / zoom;
       const viewMargin = cellSize;
       const viewLeft   = camX - halfW - viewMargin;
       const viewRight  = camX + halfW + viewMargin;
@@ -5261,7 +5312,7 @@ export class RenderSystem {
   public worldToScreen(camera: CameraState, pos: Vector2): Vector2 | null {
       const ctx = this.ctx;
       if (!ctx) return null;
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = effectiveDpr();
       const width = (ctx.canvas.width || 0) / dpr;
       const height = (ctx.canvas.height || 0) / dpr;
       const shake = camera.shakeOffset ?? { x: 0, y: 0 };
