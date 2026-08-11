@@ -60,9 +60,48 @@ components/
                           debug panel lives inside the pause menu)
 
 engine/
-  GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
-                          player entity, camera, map, regen queues, drop
-                          cache, and the rAF loop.
+  GameEngine.ts           Orchestrator (~4900 lines).  Owns the player
+                          entity, camera, map, regen queues, drop cache,
+                          and the rAF loop.  What is LEFT here after the
+                          5f decomposition is the frame itself —
+                          `loop` / `updatePhysics` / `updateGameLogic` /
+                          `handleEntityDeath` — plus run + map lifecycle,
+                          stations/portals, weapons, score and the stats
+                          push.  Concerns with a life of their own live
+                          in the sibling modules below; they are plain
+                          free functions taking `g: GameEngine`, so the
+                          engine calls them directly with no dispatch
+                          (see docs/GAUNTLET_5F_LOG.md, decision D1)
+  bosses.ts               Boss capstones: phase stamping, the live-boss
+                          HUD snapshot, the bounty + stage-clear beat,
+                          the module grant, the descent rift
+  explosions.ts           Shockwaves, the expanding AoE ring, and the
+                          direct player-blast path (the player is not in
+                          `currentMap.entities`, so the ring can never
+                          reach it — see §8)
+  outfitting.ts           Hex-slot machinery: the adjacency fixpoint,
+                          the fold into player stats, the derived gun
+                          loadout, tile move/swap, pricing,
+                          `statBreakdown`, the UI snapshots.  The
+                          COMMERCE API (moveModule / purchaseModule /
+                          sellModule / scrapModule) stays on GameEngine
+  debugControls.ts        `DebugControls` — every toggle and cycle behind
+                          pause ▸ Debug Menu, reached as `engine.dbg.*`.
+                          A class, not free functions, because the UI is
+                          the caller.  The flags it writes are still
+                          GameEngine fields; only the methods moved
+  roamers/                The engine-managed roamers — each a bespoke
+                          lifecycle the AISystem does not drive
+    dragons.ts            Stage-6 serpent: flow-weave roam, the Snake
+                          body it eats out of the terrain, sever/detach,
+                          portal entry + exit, kill payout
+    rivals.ts             Stage-7 privateers: score-cadence warp-in,
+                          cached hunt target, strafe, loot vacuum
+    snitch.ts             The persistent golden comet: burst/coast AI,
+                          per-catch speed ramp, the catch board-clear
+    bubbles.ts            Stage-5 ambient fauna + the eat/latch
+                          machinery it owns (Stage-3b consume-and-grow,
+                          Stage-3c attach)
   toroidal.ts             MAP_WIDTH/HEIGHT, wrap helpers, dimension-change
                           listener registry
   NebulaColor.ts          Palette-aware hex blending for nebula compositions
@@ -92,8 +131,33 @@ engine/
                           entirely so menus keep native touch scrolling
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
-    RenderSystem.ts       Canvas2D draw pass, tint cache, damage text,
-                          wave banner, minimap
+    RenderSystem.ts       Canvas2D draw pass (~3450 lines).  After the 5f
+                          split this is the WORLD pass — `render`,
+                          `renderEntities`, the sprite/tint/bitmap caches,
+                          the flow-field overlay — plus the frame
+                          orchestration that calls the render/ modules
+                          below
+    render/               Render sub-domains, split out of RenderSystem
+                          by what they draw.  Free functions; the ones
+                          taking `r: RenderSystem` do so only for state
+                          that persists between frames
+      drawUtils.ts        The shared floor both directions import so
+                          neither file imports the other: colour maths
+                          (hexToRgb / liftCh / sinkCh), the seeded
+                          damage-crack overlay + its style table, the
+                          torus shiftX/shiftY, roundRectPath
+      enemyShapes.ts      Procedural enemy silhouettes — one drawn shape
+                          per archetype, boss aura, engine flame, damage
+                          cracks.  Takes no engine and no renderer
+      hud.ts              The SCREEN-SPACE layer: minimap + its static
+                          layer, off-screen indicators, loadout strip,
+                          player messages, wave banners, damage text,
+                          fitFontPx
+      effects.ts          World-space ephemera: player + projectile
+                          trails, pooled particles, lightning arcs
+      staticTileCache.ts  The pre-rendered immovable-terrain layer —
+                          budgeted stamping, per-tile erase, single-draw
+                          blit
     AISystem.ts           Per-enemy behavior-dispatch table (ENEMY_BEHAVIOR →
                           moveStrategies); idle/chase state machine,
                           reaction-time lag targets, pack-sync, stuck

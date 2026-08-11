@@ -51,7 +51,7 @@ the differences are the point:
 - [x] **P11** — `engine/systems/render/hud.ts` (shipped)
 - [x] **P12** — `engine/systems/render/effects.ts` (shipped)
 - [x] **P13** — `engine/systems/render/staticTileCache.ts` (shipped) — **loop dry**
-- [ ] **P-final** — validation + report
+- [x] **P-final** — validation + report
 
 ### Running score
 
@@ -580,4 +580,202 @@ Verbatim: 169 normalised lines each side, nine signature diffs.
 **The loop is dry.** What remains in both files is either the one thing
 the brief said not to break up or a seam whose coupling is now measured
 and named — see the FOR-USER-REVIEW entry below.
+
+---
+
+## P-final — validation and report
+
+### Before / after
+
+| file | before | after | Δ |
+|---|---|---|---|
+| `engine/GameEngine.ts` | 7,790 | **4,859** | **−2,931 (−38%)** |
+| `engine/systems/RenderSystem.ts` | 5,959 | **3,456** | **−2,503 (−42%)** |
+
+Twelve new modules, 5,183 lines, none of them a wrapper:
+
+| module | lines | what it holds |
+|---|---|---|
+| `engine/debugControls.ts` | 768 | the whole pause ▸ Debug Menu |
+| `engine/systems/render/enemyShapes.ts` | 915 | procedural enemy silhouettes |
+| `engine/systems/render/hud.ts` | 739 | minimap, indicators, banners, HUD text |
+| `engine/systems/render/effects.ts` | 460 | trails, particles, lightning arcs |
+| `engine/roamers/bubbles.ts` | 430 | ambient fauna + eat/latch machinery |
+| `engine/outfitting.ts` | 420 | hex-slot machinery + stat attribution |
+| `engine/roamers/dragons.ts` | 418 | the Stage-6 serpent |
+| `engine/systems/render/staticTileCache.ts` | 353 | pre-rendered terrain layer |
+| `engine/bosses.ts` | 350 | capstone phases, bounty, descent |
+| `engine/explosions.ts` | 336 | shockwaves, AoE ring, player blasts |
+| `engine/roamers/rivals.ts` | 266 | the Stage-7 privateers |
+| `engine/roamers/snitch.ts` | 256 | the persistent golden comet |
+| `engine/systems/render/drawUtils.ts` | 191 | the shared draw floor |
+
+`CLAUDE.md` §2 is updated to this layout — §10 names exactly this case,
+and a reader who trusts the directory tree has to still find the code.
+
+### The three gates, three consecutive runs
+
+| run | `npm run typecheck` | `npm run build` | `npm test` |
+|---|---|---|---|
+| 1 | clean | clean | **38 passed** (3.0m) |
+| 2 | clean | clean | **38 passed** (2.6m) |
+| 3 | clean | clean | **38 passed** (2.6m) |
+
+`node scripts/inline-build.mjs` regenerated `omniverse-standalone.html`
+(5.45 MB, 27 assets inlined) — the one pre-existing warning,
+`asset not found: placeholder.png`, is unchanged from before this branch.
+
+**All 38 Playwright tests pass, and NOT ONE TEST WAS EDITED** — `git diff --stat` against the
+branch point shows zero changes under `tests/`. That is the load-bearing
+claim of this gauntlet: the suites are the only thing standing behind
+"zero behaviour change", so editing one to accommodate a move would have
+hollowed out the entire result.
+
+### The perf guard, and a measurement that had to be redone
+
+`node perf/simbench.mjs` is a GUARD here, not a goal: a >10% sim
+regression would mean a move introduced dispatch.
+
+The first comparison — 5f head against the numbers recorded at P1, hours
+earlier — looked like this:
+
+| scene | P1 baseline | 5f head | Δ |
+|---|---|---|---|
+| hub-idle | 1.107 | 1.162 | +5.0% |
+| asteroid-6k | 2.320 | 2.372 | +2.2% |
+| glass-field | 1.238 | 1.300 | +5.0% |
+| roamer-stack | 2.615 | 2.860 | **+9.4%** |
+
+Under the bar, but roamer-stack repeated at +8.5% on a second run, and a
+consistent 9% on *the scene with every extracted roamer alive at once* is
+exactly the shape a real dispatch cost would take. "Under the threshold"
+was not good enough for that, so the baseline commit was checked out,
+rebuilt, and benched **back-to-back** with the branch head, minutes
+apart on the same host:
+
+| scene | baseline `d6b27cf` | 5f head | Δ |
+|---|---|---|---|
+| hub-idle | 1.126 | 1.094 | −2.8% |
+| asteroid-6k | 2.260 | 2.353 | +4.1% |
+| glass-field | 1.242 | 1.021 | −17.8% |
+| roamer-stack | 2.707 | **2.740** | **+1.2%** |
+
+**roamer-stack is +1.2%, not +9%.** The gap was host drift between the
+morning baseline and the evening run, which is precisely what
+`docs/GAUNTLET_5C_LOG.md` warns about — *"levels are never compared
+across hosts, only deltas on the same host in the same session"* — and a
+warning this session managed to walk into anyway. The glass-field
+−17.8% is noise in the other direction (its best-to-worst spread is
+0.54–1.47 within a single run).
+
+**Verdict: sim cost is FLAT within this harness's noise. No dispatch was
+introduced.** And the honest framing stands: this was never a
+performance pass, and no speedup is claimed.
+
+---
+
+## FOR-USER-REVIEW — what was deliberately NOT split
+
+A tangled seam is information. These are the ones left, with the
+coupling named rather than waved at.
+
+**1. The frame itself — `loop` (346), `updateGameLogic` (536),
+`updatePhysics` (198), `handleEntityDeath` (328).** The per-frame ORDER
+*is* the engine, and CLAUDE.md §3 documents it as one readable sequence:
+prepare entities → PerfController → flow field → AI → enemy shooting →
+physics → camera → shards → waves → interactables → drops → weapons →
+projectiles. Breaking that into per-step functions in separate files
+would scatter the one thing a reader most needs to see whole. These are
+long because the frame is long, and length is not the same defect as
+disorder. `handleEntityDeath` is the hub every concern hangs off; moving
+it moves the hub, not a spoke.
+
+**2. `RenderSystem.renderEntities` — 1,881 lines, the largest single
+method in the repo.** A genuine readability problem and NOT an oversight.
+It is one giant per-entity-type branch over locals computed once at the
+top of the frame (camera shift, zoom, LOD thresholds, the viewport rect,
+cache handles), and every branch reads several of them. Splitting it
+means either threading a dozen parameters into each piece or rebuilding
+them per entity — the first is noise, the second is a per-entity cost in
+the hottest loop in the renderer. **Recommendation: this wants its own
+session, and it wants the 5c capture harness running alongside**, because
+unlike everything in 5f it cannot be done without touching the hot path.
+
+**3. `PhysicsSystem` (3,536) and `ShardSystem` (3,412) — untouched.**
+The brief ranked them lower and the P1 survey agreed:
+- Physics is dominated by `resolveCollision` (847), `handleEntityCollisions`
+  (250) and `resolveAsteroidPair` (198) — one interlocking impulse solver
+  sharing per-substep scratch buffers and the two `CellBuckets` grids.
+  There is no line through it that does not cut the solver in half.
+- Shard's candidates (`runMergeBroadphase` 361, `shatterAsteroidStyle`
+  283, `composeEntities` 274, `tickMetalAssembly` 196) all mutate the
+  same variant-table bookkeeping — `mergeCount`, `densityTier`,
+  `densityCachedTint`, the regen queue. Splitting by material would put
+  four writers of the same fields in four files, which is worse than one
+  long file that at least keeps them adjacent.
+
+**4. Two viable seams left on the table**, both clean, neither taken —
+the loop stopped because the two named god-files were done, not because
+these are hard:
+- **GameEngine's perf instrumentation** (~205 lines: the ring buffers,
+  `recordSimPerf`, `recordRenderPerf`, `buildPerfSnapshot`,
+  `markPerfEvents`). Self-contained; ~25 of its ~30 members are its own
+  buffers. The one wrinkle is that the scalar `lastXxxMs` timers are
+  WRITTEN from inside the sim loop, so moving them adds a property hop to
+  a hot path for no readability gain — they should stay on the engine
+  while the ring buffers and the report builders move.
+- **`RenderSystem`'s sprite/bitmap caches** (~240: `getTintedSprite`,
+  `getSpriteCentroid`, `getTwinkleBitmap`, `getSolidTriangleBitmap`,
+  `getSpecularBitmap`). Clean, but note 5c P17 found and fixed a real
+  defect in the tint cache's eviction policy; anyone moving it should
+  read that entry first.
+
+**5. The `engine.dbg.*` rename is the one owner-facing API change.**
+Sixty debug entry points moved from `engine.toggleX()` to
+`engine.dbg.toggleX()`. It was flagged in the SEAM PLAN as the
+lowest-confidence seam precisely because it is public API. It is cheap to
+veto — the class stays, only the call sites change — so if you would
+rather keep the flat surface, say so and it is a one-commit revert of
+`App.tsx`.
+
+---
+
+## Completion summary
+
+**Goal: make the engine navigable by a person.** Two files carried most
+of it; both are now roughly 40% smaller, and the code that left them
+lives in twelve modules named for what they hold.
+
+- `GameEngine.ts` 7,790 → **4,859** (−38%)
+- `RenderSystem.ts` 5,959 → **3,456** (−42%)
+- 13 milestones, 12 new modules, 5,183 lines relocated
+
+**Every move was verified verbatim, not eyeballed.** The procedure: pull
+the block from `git show HEAD:<file>`, strip comments and blanks from
+both sides, rewrite `this.` → `g.`/`r.` and the intra-module calls, and
+diff. A clean move leaves the same line count on both sides with every
+remaining diff line a function signature. Across all thirteen
+milestones, **zero non-signature diffs**. The one place that changed
+line counts by more than the signature lines was P8, where the diff was
+266 in / 267 out and the extra line was a class's closing brace.
+
+**Three things this gauntlet learned that outlast it:**
+
+1. **What the tests reach for IS the observable surface**, whatever its
+   declared visibility. `private` is compile-time only, the 5b suites
+   call straight through `window.__omniEngine`, and P7 broke eleven
+   tests by moving three methods that typecheck and build both said were
+   safe to move. `grep tests/` became part of the procedure. Six members
+   keep a one-line forward on their class for exactly this reason.
+2. **Proximity in a file is not membership in a concern.** Almost every
+   milestone had to reject something that sat inside the line range:
+   `updateNests` and `updateKamikazeProximity` (P5), `updateEnemyRegen`
+   (P6), `renderHealthBar` (P11), `overlayMaterialCracks` (P13). Grouping
+   by "sits nearby and sounds related" produces files whose names lie.
+3. **Compare on the same host in the same session.** A 9% apparent sim
+   regression evaporated to 1.2% under a back-to-back A/B. 5c had
+   already written that rule down; this session still had to relearn it.
+
+**No test was edited.** `git diff --stat` against the branch point shows
+zero changes under `tests/`.
 
