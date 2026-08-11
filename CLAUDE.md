@@ -131,24 +131,47 @@ engine/
                           entirely so menus keep native touch scrolling
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
-    RenderSystem.ts       Canvas2D draw pass (~3450 lines).  After the 5f
-                          split this is the WORLD pass — `render`,
+    RenderSystem.ts       Canvas2D draw pass (~1580 lines).  After the 5f
+                          split and the renderEntities decomposition that
+                          followed it, this is the WORLD pass — `render`,
                           `renderEntities`, the sprite/tint/bitmap caches,
                           the flow-field overlay — plus the frame
                           orchestration that calls the render/ modules
-                          below
+                          below.  `renderEntities` is now the per-entity
+                          FRAME: the guards, the glass-family static-tile
+                          fast path, the shared per-entity setTransform,
+                          the sprite path, and a 5-way `entity.type`
+                          dispatch into the four *Shapes modules
     render/               Render sub-domains, split out of RenderSystem
                           by what they draw.  Free functions; the ones
-                          taking `r: RenderSystem` do so only for state
-                          that persists between frames
-      drawUtils.ts        The shared floor both directions import so
-                          neither file imports the other: colour maths
-                          (hexToRgb / liftCh / sinkCh), the seeded
-                          damage-crack overlay + its style table, the
-                          torus shiftX/shiftY, roundRectPath
+                          taking the RenderSystem (`r`, or `rs` where the
+                          moved body already binds `r` as a radius) do so
+                          only for state that persists between frames
+      drawUtils.ts        The shared floor every direction imports so no
+                          two of them import each other: colour maths
+                          (hexToRgb / rgbToHex / liftCh / sinkCh /
+                          densityTintForRender), the seeded damage-crack
+                          overlay + its style table, the torus
+                          shiftX/shiftY, roundRectPath
       enemyShapes.ts      Procedural enemy silhouettes — one drawn shape
                           per archetype, boss aura, engine flame, damage
                           cracks.  Takes no engine and no renderer
+      tileShapes.ts       The STRUCTURE arm: glass-family tile, material
+                          tile, regen ghost, asteroid / mobile shard +
+                          LOD chips — plus the helpers only terrain
+                          calls (tileFillColor + the materialAutomata*
+                          chain, overlayMaterialCracks, timedTileBloom /
+                          renderProximityBloom, drawMetalDebugOutline)
+      nebulaTiles.ts      The cloud layer, both doors: the cached
+                          fast path (one drawImage) and the slow path
+                          (tint chain, sprite, twinkle) that refills it
+      projectileShapes.ts The four shot silhouettes — lightning, bouncer
+                          head, charged fireball, standard glow — and
+                          the two unit-radius gradient caches
+      dropShapes.ts       Collectible drops (salvage / health / glass
+                          debris) and the proximity-interactable POIs
+                          (station, portal, snitch).  Like enemyShapes,
+                          takes no engine and no renderer
       hud.ts              The SCREEN-SPACE layer: minimap + its static
                           layer, off-screen indicators, loadout strip,
                           player messages, wave banners, damage text,
