@@ -1694,6 +1694,12 @@ k. After N waves, spawn a portal to a new map.
        is a TRADE: collision resolution is iterative, so half
        the steps means half the passes untangling dense shard
        piles. **The verdict is a FEEL call for step 6.**
+    c2. **5e ABANDONED (#49c, user call 2026-08-10).** The
+       CPU-profile pass proposed at the 5c review was scrapped before
+       starting: the hardware captures overturned all of its premises
+       (sim is 1.4-2.7ms on device, the budget goes to `other`, and its
+       target ranking came from the profiler 5c proved unreliable).
+       5f no longer depends on it.
     d. **One behaviour-affecting change, flagged.** 60 Hz was
        tried and reverted once before (accumulator alternating
        1-vs-2 steps per frame → judder), so the toggle ships
@@ -1967,23 +1973,25 @@ observes the three strategy guardrails (decision #36e).
    viewport list + a mid-session resize case); optional candidate:
    damage-triggered health/shield bars (parking lot).
 
-5e. **CPU-profile perf pass** (decision #49, from the 5c review) — the
-   follow-on 5c earned rather than the one it planned. 5c cut
-   allocation 13–36% per scene but left TYPICAL SIM COST FLAT, and its
-   closing finding is that the heap profiler's per-frame attribution is
-   biased toward hot-running frames, so the residual "invisible"
-   allocation cluster (`applyFlowTo`, `handleEntityCollisions`,
-   `PhysicsSystem.update`, `nearestEatableShard` — ~388 MB of 573 MB on
-   the worst scene) cannot be targeted with the instrument that found
-   it. **Reach for a CPU profile** (`Profiler.start`/`stop` over the
-   existing `perf/` scenes), which answers "where does the 16.7 ms go"
-   directly and is not subject to that bias. Two specific questions it
-   should settle: whether any of the oversized hot functions is failing
-   to optimise or deoptimising, and whether the 5c sim-rate toggle's
-   remaining cost is broadphase or logic. Adds a `--cpu` mode to
-   `perf/capture.mjs`; the harness, scenes and ledger are already in
-   place. Separate session on purpose — this is a measure→fix→measure
-   loop, not just an instrument.
+5e. **CPU-profile perf pass — ABANDONED (user call, 2026-08-10).**
+   Proposed mid-5c and scrapped before starting, because the hardware
+   captures that arrived afterwards overturned every premise it rested
+   on.  It read: "5c left TYPICAL SIM COST FLAT ... reach for a CPU
+   profile, which answers where does the 16.7 ms go".  By the end of
+   5c the answers were already in: sim is **1.4–2.7 ms on device** and
+   was never the constraint; the 16.7 ms goes to `other`
+   (compositing / GC), not to our JS; and the "~388 MB residual
+   allocation cluster" it wanted to chase came from the very heap
+   profiler 5c then proved unreliable for per-frame attribution.  A
+   CPU profile would now mostly confirm that our JS is cheap, which
+   the captures already show.
+   **Kept as a record because the reasoning is instructive**: the item
+   was written from headless measurements, and the device disagreed
+   with all of them.  Two narrow threads survive and are logged in
+   `docs/GAUNTLET_5C_LOG.md` rather than promoted here — the
+   intermittent 27–41 ms render spike that never reproduced, and
+   allocation-driven GC as the only remaining lever on the last 0.06%
+   of frames.  Neither justifies a session on its own.
 
 5f. **Engine decomposition for maintainability** (decision #49b, user
    call) — `GameEngine.ts` is ~7 500 lines, `RenderSystem.ts` ~5 900,
@@ -2003,9 +2011,11 @@ observes the three strategy guardrails (decision #36e).
    tells you which functions have a perf reason to be split, so the two
    passes reinforce each other instead of guessing.
 
-   **Remaining-roadmap order** (decisions #47, #49): SFX (PR #79,
-   collaborator) ∥ [5b → 5c] → 5 (Pair C + polish) → 5d →
-   [5e → 5f] → 6 (tuning) → 7 (final playtest + second deploy).
+   **Remaining-roadmap order** (decisions #47, #49, #49c): SFX (PR #79,
+   collaborator) ∥ [5b → 5c] → 5 (Pair C + polish) → 5d → 5f →
+   6 (tuning) → 7 (final playtest + second deploy).  (5e abandoned;
+   5f no longer depends on it — its rationale is maintainability, which
+   never rested on any 5c measurement.)
    5c's **sim-rate toggle** (120 Hz / 60 Hz, DBG "Sim rate") is a FEEL
    decision with the cost side already measured (−62% sim p99, +26%
    frames): fold the verdict into 6, where it can be judged alongside
