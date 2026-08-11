@@ -47,8 +47,9 @@ the differences are the point:
 - [x] **P7** — `engine/outfitting.ts` (shipped)
 - [x] **P8** — `engine/debugControls.ts` (shipped)
 - [x] **P9** — `engine/explosions.ts` (shipped)
-- [x] **P10** — `engine/systems/render/` — enemy shapes + shared draw helpers (shipped)
-- [ ] **P11..Pn** — one extraction per milestone, loop until dry
+- [x] **P10** — `engine/systems/render/enemyShapes.ts` + `drawUtils.ts` (shipped)
+- [x] **P11** — `engine/systems/render/hud.ts` (shipped)
+- [ ] **P12..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -73,6 +74,8 @@ second file:
 | baseline | 5,959 | — | — |
 | P10 enemy shapes | 4,944 | `engine/systems/render/enemyShapes.ts` | 915 |
 | | | `engine/systems/render/drawUtils.ts` | 142 |
+| P11 screen-space HUD | 4,203 | `engine/systems/render/hud.ts` | 739 |
+| | | `drawUtils.ts` grew to | 191 |
 
 Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
@@ -506,4 +509,34 @@ floor — a shared-utils file that accumulates single-caller helpers stops
 being a floor and becomes a junk drawer.
 
 Verbatim: 629 normalised lines each side, two signature diffs.
+
+### Iteration 11 — the screen-space HUD layer (P11)
+
+`engine/systems/render/hud.ts` (739 lines): the minimap and its static
+layer, the off-screen indicators, the loadout strip, player messages,
+the wave banners, and the floating damage text.
+`RenderSystem.ts` 4,944 → **4,203** — down 30% from its 5,959 baseline.
+
+**The line the split follows is the coordinate space**, not the visual
+category: these are the passes that draw in SCREEN coordinates after the
+world pass has finished. That is why `renderHealthBar` stayed behind
+despite looking like HUD — it draws above an entity in WORLD space, and
+a file named for a coordinate space that contains an exception to it is
+a file whose name has stopped being useful.
+
+Coupling was four members. Three functions take the `RenderSystem` as a
+first parameter, and only because they read state that persists between
+frames: the pre-rendered minimap static layer, its cached range, and the
+DBG `chevronsOffscreenOnly` flag. The other five take none.
+
+`shiftX` / `shiftY` / `roundRectPath` joined `drawUtils.ts` for the same
+reason `hexToRgb` did in P10 — shared by both files, so a shared floor
+beats a circular import. `drawUtils.ts` is now 191 lines and still holds
+only things with more than one caller.
+
+`buildMinimapStaticLayer` keeps a forward on `RenderSystem`:
+`GameEngine.loadMap` calls it, so it is the renderer's public API.
+
+Verbatim: 486 → 488 normalised lines, and every diff is a signature (the
++2 is the two `r: RenderSystem` parameter lines).
 

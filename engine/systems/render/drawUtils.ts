@@ -13,6 +13,7 @@
  *  allocate).
  */
 import { GameEntity } from '../../../types';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT } from '../../toroidal';
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
 // Results are cached to avoid per-frame string parsing.
@@ -139,4 +140,52 @@ export function drawDamageCracks(
             ctx.stroke();
         }
     }
+}
+
+/**
+ * Return the shift that brings a world-space point (wx, wy) into the
+ * camera's wrap zone — i.e. the copy of that point whose delta from the
+ * camera is in [-HALF_MAP, +HALF_MAP).  Render translations use the
+ * shifted coords so entities near a seam draw at the correct on-screen
+ * position instead of ~MAP_WIDTH off the edge.  Since the frustum is
+ * always < HALF_MAP on each axis, at most one shift offset can bring
+ * an entity into view, so a single-draw render is sufficient (no
+ * duplicate-draw needed).
+ */
+export function shiftX(camX: number, wx: number): number {
+    const d = wx - camX;
+    if (d >  HALF_MAP_WIDTH) return wx - MAP_WIDTH;
+    if (d < -HALF_MAP_WIDTH) return wx + MAP_WIDTH;
+    return wx;
+}
+export function shiftY(camY: number, wy: number): number {
+    const d = wy - camY;
+    if (d >  HALF_MAP_HEIGHT) return wy - MAP_HEIGHT;
+    if (d < -HALF_MAP_HEIGHT) return wy + MAP_HEIGHT;
+    return wy;
+}
+
+// Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
+// Provide a fallback so older preview engines don't throw on drop rendering.
+export function roundRectPath(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number
+) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+        return;
+    }
+    // Manual fallback using arcTo
+    const rx = Math.min(r, w / 2);
+    const ry = Math.min(r, h / 2);
+    ctx.moveTo(x + rx, y);
+    ctx.lineTo(x + w - rx, y);
+    ctx.arcTo(x + w, y,     x + w, y + ry,     rx);
+    ctx.lineTo(x + w, y + h - ry);
+    ctx.arcTo(x + w, y + h, x + w - rx, y + h, rx);
+    ctx.lineTo(x + rx, y + h);
+    ctx.arcTo(x,      y + h, x,      y + h - ry, rx);
+    ctx.lineTo(x, y + ry);
+    ctx.arcTo(x,      y,     x + rx, y,          rx);
+    ctx.closePath();
 }
