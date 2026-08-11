@@ -49,7 +49,8 @@ the differences are the point:
 - [x] **P9** — `engine/explosions.ts` (shipped)
 - [x] **P10** — `engine/systems/render/enemyShapes.ts` + `drawUtils.ts` (shipped)
 - [x] **P11** — `engine/systems/render/hud.ts` (shipped)
-- [ ] **P12..Pn** — one extraction per milestone, loop until dry
+- [x] **P12** — `engine/systems/render/effects.ts` (shipped)
+- [ ] **P13..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -76,6 +77,7 @@ second file:
 | | | `engine/systems/render/drawUtils.ts` | 142 |
 | P11 screen-space HUD | 4,203 | `engine/systems/render/hud.ts` | 739 |
 | | | `drawUtils.ts` grew to | 191 |
+| P12 trails/particles/arcs | 3,771 | `engine/systems/render/effects.ts` | 460 |
 
 Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
@@ -539,4 +541,22 @@ only things with more than one caller.
 
 Verbatim: 486 → 488 normalised lines, and every diff is a signature (the
 +2 is the two `r: RenderSystem` parameter lines).
+
+### Iteration 12 — trails, particles and lightning arcs (P12)
+
+`engine/systems/render/effects.ts` (460 lines): the ribbon trails behind
+the player and every projectile, the pooled particle sprites, and the
+jagged lightning arc — three passes that draw EPHEMERA rather than
+entities. `RenderSystem.ts` 4,203 → **3,771**, down **37%** from its
+5,959 baseline.
+
+Only module-scope dependency was `RenderSystem` itself. Four functions
+take it, for its persistent state: the reusable trail scratch buffers
+(`_trailNX` …) that keep the strip builder from allocating per frame —
+CLAUDE.md §8's mutate-don't-allocate rule, and the reason those buffers
+could not simply become module-level constants in the new file — plus
+the DBG-selected `trailShape`.
+
+Verbatim: 324 → 328 normalised lines, every diff a signature (the +4 is
+the four `r: RenderSystem` parameter lines).
 
