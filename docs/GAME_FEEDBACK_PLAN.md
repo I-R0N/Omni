@@ -1709,6 +1709,46 @@ k. After N waves, spawn a portal to a new map.
        which is the same fragile case, so the snap protects
        the shipping path on the actual target hardware.
 
+50. **5f engine decomposition SHIPPED EARLY (PRs #82 + #83,
+    2026-08-11) — sequencing flip, user call.** The plan text
+    sequenced 5f AFTER 5d to avoid merge conflicts; the user
+    ran it immediately after 5c instead. Net effect of the
+    flip: the ONE in-flight branch (SFX, PR #79) pays a large
+    rebase ONCE — in progress now, collaborator working — and
+    every remaining session (Pair C + polish, 5d UI, tuning)
+    writes against the navigable structure instead of the
+    god-classes. Verified at review: typecheck + boot suite
+    green on the merged tip.
+    a. Results: GameEngine 7,790 → 4,859 (−38%), RenderSystem
+       5,959 → 3,456 (−42%); 12 new modules (engine/bosses,
+       outfitting, explosions, debugControls, roamers/×4,
+       systems/render/×9, CellBuckets); 5,183 lines
+       relocated. Ledger: `docs/GAUNTLET_5F_LOG.md`.
+    b. Discipline held: every move verified VERBATIM
+       (comment-stripped diff, zero non-signature diffs
+       across 13 milestones); zero behaviour change with no
+       exception hatch; NO test edited (the 5b net is what
+       made this tractable); no new abstraction layers (the
+       5c megamorphic measurement is the standing reason);
+       CLAUDE.md §2 updated as part of the deliverable.
+    c. Lessons recorded for future sessions: the tests'
+       reach IS the observable surface (six members keep
+       one-line forwards because suites call through
+       `window.__omniEngine`); proximity in a file ≠
+       membership in a concern; A/B comparisons only on the
+       same host in the same session.
+    d. FOR-USER-REVIEW carried: the ledger lists what was
+       deliberately NOT split, and the `App.tsx` call-site
+       change is offered as a one-commit revert if the flat
+       engine surface is preferred.
+    e. **The 60 fps goal's residual moves to steps 6/7**: 5c
+       (#49) reduced GC pressure but hardware captures showed
+       sim is 1.4–2.7 ms on device and the budget goes to
+       compositing/GC ("other") — so the remaining levers are
+       the sim-rate FEEL verdict (step 6) and on-device
+       judgment at the final playtest (step 7). The goal is
+       judged there, not re-attacked with more JS passes.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1993,7 +2033,9 @@ observes the three strategy guardrails (decision #36e).
    allocation-driven GC as the only remaining lever on the last 0.06%
    of frames.  Neither justifies a session on its own.
 
-5f. **Engine decomposition for maintainability** (decision #49b, user
+5f. ~~**Engine decomposition for maintainability**~~ — **DONE** (PRs
+   #82 + #83, decision #50; ran EARLY, right after 5c — see #50 for
+   the flip rationale). Original item text kept below. (decision #49b, user
    call) — `GameEngine.ts` is ~7 500 lines, `RenderSystem.ts` ~5 900,
    `PhysicsSystem.ts` ~3 500, `ShardSystem.ts` ~3 400. Split them for
    READABILITY, explicitly **not** for a promised speedup. Two rules
@@ -2011,11 +2053,12 @@ observes the three strategy guardrails (decision #36e).
    tells you which functions have a perf reason to be split, so the two
    passes reinforce each other instead of guessing.
 
-   **Remaining-roadmap order** (decisions #47, #49, #49c): SFX (PR #79,
-   collaborator) ∥ [5b → 5c] → 5 (Pair C + polish) → 5d → 5f →
-   6 (tuning) → 7 (final playtest + second deploy).  (5e abandoned;
-   5f no longer depends on it — its rationale is maintainability, which
-   never rested on any 5c measurement.)
+   **Remaining-roadmap order** (decisions #47, #49, #49c, #50): 5b, 5c
+   and 5f are DONE (5e abandoned; 5f ran early per #50). What remains:
+   SFX (PR #79, collaborator — rebasing onto the 5f structure) →
+   5 (Pair C + polish) → 5d (UI) → 6 (tuning, incl. the sim-rate
+   verdict and the 60 fps on-device judgment) → 7 (final playtest +
+   second deploy).
    5c's **sim-rate toggle** (120 Hz / 60 Hz, DBG "Sim rate") is a FEEL
    decision with the cost side already measured (−62% sim p99, +26%
    frames): fold the verdict into 6, where it can be judged alongside
