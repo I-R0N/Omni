@@ -39,8 +39,28 @@ the differences are the point:
 ## Checklist
 
 - [x] **P1** — Survey + baseline (no moves); SEAM PLAN written
-- [ ] **P2..Pn** — one extraction per milestone, loop until dry
+- [x] **P2** — `engine/roamers/dragons.ts` (shipped)
+- [x] **P3** — `engine/roamers/rivals.ts` (shipped)
+- [x] **P4** — `engine/roamers/snitch.ts` (shipped)
+- [x] **P5** — `engine/roamers/bubbles.ts` (shipped) — roamers complete
+- [x] **P6** — `engine/bosses.ts` (shipped)
+- [ ] **P7..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
+
+### Running score
+
+| milestone | `GameEngine.ts` | new module | lines |
+|---|---|---|---|
+| baseline | 7,790 | — | — |
+| P2 dragons | 7,410 | `engine/roamers/dragons.ts` | 418 |
+| P3 rivals | 7,161 | `engine/roamers/rivals.ts` | 266 |
+| P4 snitch | 6,927 | `engine/roamers/snitch.ts` | 256 |
+| P5 bubbles | 6,531 | `engine/roamers/bubbles.ts` | 430 |
+| P6 bosses | 6,213 | `engine/bosses.ts` | 350 |
+
+**−1,577 lines from `GameEngine.ts` so far (−20%).** Every milestone:
+typecheck clean, build clean, 38/38 Playwright tests pass, no test
+edited.
 
 ---
 
@@ -264,3 +284,71 @@ roamers are 1,372 lines (18% of the file) but expose only **15** call
 sites to the rest of the engine, whereas the modules/outfitting block is
 similar in size and touches **58** members. Size alone would have ranked
 them together.
+
+### Iterations 2–5 — the four roamers (P2–P5)
+
+Dragons, rivals, snitch, bubbles, in that order — the SEAM PLAN's
+confidence ranking, taken as written. Together they moved **1,259
+lines** out of `GameEngine.ts` (7,790 → 6,531).
+
+**The verification that makes "verbatim" checkable.** Every move is
+diffed mechanically rather than eyeballed: take the block from
+`git show HEAD:engine/GameEngine.ts`, strip comments and blank lines
+from both sides, rewrite `this.` → `g.` and the intra-module calls to
+their function form, and diff. A clean move leaves the SAME line count
+on both sides and every remaining diff line is a function signature.
+That held for all four:
+
+| module | normalised lines (old = new) | non-signature diffs |
+|---|---|---|
+| dragons | 304 | 0 |
+| rivals | 181 → 176 (`debugSpawnRival` stayed behind) | 0 |
+| snitch | 177 | 0 |
+| bubbles | 284 | 0 |
+
+This is worth more than it looks. "I moved it verbatim" is exactly the
+claim a decomposition pass has to make and exactly the one that is
+easiest to get subtly wrong — a dropped `!`, a reordered pair of
+statements. The diff is cheap and it is the only thing standing between
+"zero behaviour change" and a wish.
+
+Three judgement calls came out of these four:
+
+- **The snitch keeps flat engine fields, not a `SnitchInstance`.**
+  There is only ever one alive, so the dragon/rival per-instance struct
+  would be ceremony. The module header says so, to stop a later reader
+  "fixing" the asymmetry.
+- **`updateConsumers` / `updateAttachments` went into `bubbles.ts`**
+  despite CLAUDE.md calling them reusable Stage-3 primitives shared with
+  the dragon. Every field they touch is a `bubble*` field and their
+  helpers read `BUBBLE_CONSTANTS`; a neutral filename would have been
+  truer to the intent and less true to the code. The header records the
+  condition for moving them: the day a second consumer stops writing
+  bubble fields.
+- **`updateNests` and `updateKamikazeProximity` stayed on the engine.**
+  They sit inside the same contiguous run of lines but are generic
+  wave-enemy passes with nothing bubble about them. Extracting by line
+  range instead of by concern is how a decomposition ends up with a file
+  whose name lies.
+
+Public API stayed public: `debugSpawnDragon` / `debugSpawnRival` remain
+real methods on `GameEngine` (they carry their own argument allow-lists
+and `App.tsx` calls them), rather than becoming one-line forwards.
+
+### Iteration 6 — bosses (P6)
+
+`engine/bosses.ts` (350 lines): the phase-stamp pass, the live-boss HUD
+snapshot, the capstone bounty with its stage-clear beat, the module
+grant, and the descent rift. 208 normalised lines each side, six
+signature diffs, nothing else.
+
+Three things deliberately did NOT come along, and the reason is the same
+each time — they are near the boss code without being boss code:
+
+- `handleBossSpawn` — WaveSystem callback wiring the engine hands to
+  `waveContext()`.
+- `debugSpawnBoss` — public API.
+- **`updateEnemyRegen`** — a generic counterplay-trait pass. Only a boss
+  carries `regen` *today*; the trait is an `ENEMY_TRAITS` row that any
+  archetype can take, so filing its tick under "bosses" would encode a
+  roster accident as an architectural fact.

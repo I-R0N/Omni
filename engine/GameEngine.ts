@@ -33,6 +33,7 @@ import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentD
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
+import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -167,17 +168,17 @@ export class GameEngine {
   // growth and the boss rotation continue across a descent instead of
   // restarting with the arena's wave counter.  Returning to the HUB resets it
   // — the hub is the surface.
-  private stageIndex: number = 0;
+  stageIndex: number = 0;
   private stageClearPending: boolean = false;
   // Counts down AFTER the capstone dies and BEFORE the screen appears, so the
   // explosion, debris and salvage spray all land first.  The sim keeps running
   // during it — that is the point.
-  private stageClearDelay: number = 0;
+  stageClearDelay: number = 0;
   // Shape mirrors `EngineStats.stageClear` minus `mapName`, which the
   // snapshot fills from the live map.  (The `discountFraction` /
   // `discountSeconds` pair this used to carry died with the boss shop
   // discount; the capstone drops a module now — see §5 payout.)
-  private lastStageClear: {
+  lastStageClear: {
     stage: number; bossName: string; nextStage: number;
     scoreAwarded: number; salvageCredits: number;
     rewardLabel?: string; rewardDesc?: string; rewardCredits?: number;
@@ -214,7 +215,7 @@ export class GameEngine {
       s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
       return s;
   })();
-  private inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
+  inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
   private activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
   private activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
   // The one live "+N" points popup, if any.  New awards accumulate into it
@@ -378,8 +379,8 @@ export class GameEngine {
   // only engine state it needs is the live-boss handle the HUD bar reads and
   // the TIMED shop discount from the model-(d) payout (salvage + discount, no
   // unlock plumbing).  All three are run-scoped — reset with credits/score.
-  private liveBoss: GameEntity | null = null;
-  private bossesKilled = 0;
+  liveBoss: GameEntity | null = null;
+  bossesKilled = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
   // The station lives on the OVERWORLD map (found by isStation at map load).
@@ -401,7 +402,7 @@ export class GameEngine {
   // portals SHARE the E key: `updateInteractables` arbitrates by nearest
   // in-range, so at most one of `nearestStation` / `nearestPortal` is set
   // on any step and the affordance always names the action it will take.
-  private portals: GameEntity[] = [];
+  portals: GameEntity[] = [];
   private nearestPortal: GameEntity | null = null; // nearest in use range this step
   // Overworld roaming dragon — first spawn shortly after run start, then a
   // fresh rift a while after the previous dragon dies or leaves.
@@ -1526,7 +1527,7 @@ export class GameEngine {
       waveGraceTimer: undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
-      boss: this.bossStatsSnapshot(),
+      boss: bossStatsSnapshot(this),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -2094,7 +2095,7 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
-      boss: this.bossStatsSnapshot(),
+      boss: bossStatsSnapshot(this),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -2747,7 +2748,7 @@ export class GameEngine {
       // like one.  A rival-stolen kill pays the player nothing, same rule.
       if (entity.isBoss === true && entity.type === EntityType.ENEMY
           && !entity.isExploding && !entity.killedByRival) {
-          this.payBossBounty(entity);
+          payBossBounty(this, entity);
       }
       if (entity.type === EntityType.ENEMY && !entity.isExploding && !entity.killedByRival) {
           // Ship kills build the combo and are paid at the resulting
@@ -3225,7 +3226,7 @@ export class GameEngine {
     // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
     // pass, so a phase that raises an escort brood arms its timer on the same
     // step it is entered.  Also ticks the timed shop-discount window.
-    this.updateBosses(dt);
+    updateBosses(this, dt);
     // (h) regen trait: tick the burst buckets and heal.  Not boss-only — any
     // enemy carrying the trait is served here.
     this.updateEnemyRegen(dt);
@@ -4373,7 +4374,7 @@ export class GameEngine {
    *  (resaleValue) — if buying were discounted while sell-back stayed on full
    *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
    *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
-  private modulePrice(cost: number): number {
+  modulePrice(cost: number): number {
       return Math.max(0, Math.round(cost));
   }
 
@@ -4632,7 +4633,7 @@ export class GameEngine {
    *  "earned this run" counter can't drift from the balance.  Deliberately
    *  NOT used by resale (sell/scrap is a refund of money already earned, so
    *  routing it here would double-count) nor by the DBG credit grant. */
-  private earnCredits(n: number) {
+  earnCredits(n: number) {
       this.credits += n;
       this.runCreditsEarned += n;
       this.lifeCreditsEarned += n;
@@ -5431,7 +5432,7 @@ export class GameEngine {
   // reaches.  Powers both the Plasma Cannon AoE and the smaller shard→tile
   // merge blow-back.  Only entities in range AT SPAWN are eligible
   // (validHitIds snapshot), so entities born during the sweep are excluded.
-  private spawnShockwave(pos: Vector2, opts: {
+  spawnShockwave(pos: Vector2, opts: {
       radius: number;
       damage: number;
       knockback: number;
@@ -5643,24 +5644,6 @@ export class GameEngine {
   // health-fraction gate the boss has fallen past, keep the live-boss handle
   // for the HUD, and pay the model-(d) bounty on death.
 
-  /** Live-boss HUD readout — undefined when no boss is alive, so the HUD bar
-   *  simply isn't rendered.  Cheap: `liveBoss` is maintained by updateBosses,
-   *  so this is a couple of divisions per stats push. */
-  private bossStatsSnapshot(): EngineStats['boss'] {
-      const b = this.liveBoss;
-      if (!b || !b.active || b.isExploding) return undefined;
-      const def = b.enemySubtype ? BOSS_DEFS[b.enemySubtype] : undefined;
-      return {
-          name: def?.name ?? 'BOSS',
-          healthFrac: Math.max(0, Math.min(1, b.health / Math.max(1, b.maxHealth))),
-          shieldFrac: (b.maxShield ?? 0) > 0
-              ? Math.max(0, Math.min(1, (b.shield ?? 0) / b.maxShield!)) : 0,
-          phase: Math.max(0, b.bossPhase ?? 0),
-          phaseCount: def?.phases.length ?? 1,
-          color: b.color || '#f87171',
-      };
-  }
-
   /** Timed boss shop-discount readout — undefined when no window is running,
    *  so the shop UI can show the beat only while it is live. */
   /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
@@ -5674,116 +5657,6 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
   };
-
-  /**
-   * Boss phase pass.  Walks the enemy index (a wave has one boss, but the DBG
-   * menu can stack several) and, for each, finds the deepest BOSS_DEFS phase
-   * whose `atHealthFrac` gate it has fallen past.  If that isn't the applied
-   * phase, STAMP it.
-   *
-   * Every phase field lands on machinery that already exists — the weapon
-   * override merges in WeaponSystem, the shield rides the generalized
-   * absorption path, the spawner rides updateNests, the traits ride the
-   * PhysicsSystem damage path.  Nothing here is a bespoke boss script, which
-   * is the whole point of the framework (guardrail #36e).
-   *
-   * O(enemies) with an early flag check and no work on a non-transition step,
-   * so it stays ungated like the kamikaze / nest passes.
-   */
-  private updateBosses(dt: number) {
-      // Timed shop discount (payout model (d)) — run-scoped, ticks on sim time
-      // so it doesn't drain while docked or paused.
-      if (!this.currentMap) return;
-      const enemies = this.entityIndex.enemies;
-      let live: GameEntity | null = null;
-      for (let i = 0; i < enemies.length; i++) {
-          const b = enemies[i];
-          if (b.isBoss !== true || !b.active || b.isExploding) continue;
-          // The HUD bar tracks the most-wounded live boss (the one being fought).
-          if (!live || (b.health / Math.max(1, b.maxHealth)) < (live.health / Math.max(1, live.maxHealth))) live = b;
-
-          const def = b.enemySubtype ? BOSS_DEFS[b.enemySubtype] : undefined;
-          if (!def) continue;
-          const frac = b.health / Math.max(1, b.maxHealth);
-          let want = 0;
-          for (let p = 0; p < def.phases.length; p++) {
-              if (frac <= def.phases[p].atHealthFrac) want = p;
-          }
-          if (b.bossPhase === want) continue;
-          this.applyBossPhase(b, def, want);
-      }
-      this.liveBoss = live;
-  }
-
-  /** Stamp one BOSS_DEFS phase onto a boss.  Fields ABSENT from the phase are
-   *  CLEARED (a phase can drop a shield or stop escorts), so a phase is a full
-   *  description of the boss's current state rather than a patch. */
-  private applyBossPhase(boss: GameEntity, def: BossDef, index: number) {
-      const phase = def.phases[index];
-      const first = boss.bossPhase === undefined || boss.bossPhase < 0;
-      boss.bossPhase = index;
-
-      const arch = boss.enemySubtype ? ENEMY_VARIANTS[boss.enemySubtype] : undefined;
-      if (phase.color) boss.color = phase.color;
-      if (arch) boss.maxSpeed = arch.maxSpeed * (phase.speedMult ?? 1);
-      boss.weaponOverride = phase.weapon;
-      boss.spawner = phase.spawner;
-      boss.spawnTimer = phase.spawner ? phase.spawner.interval * 0.35 : undefined;
-
-      // Traits REPLACE the previous phase's set — a defence can be traded away.
-      boss.armor = phase.traits?.armor;
-      boss.evasive = phase.traits?.evasive;
-      if (!boss.evasive) boss.dodgeTimer = undefined;
-      boss.frontShield = phase.traits?.frontShield;
-      boss.regen = phase.traits?.regen;
-      if (!boss.regen) {
-          boss.regenBucket = undefined;
-          boss.regenBucketTimer = undefined;
-          boss.regenBurnTimer = undefined;
-      }
-
-      // Shield: raise / re-arm, or drop it entirely when the phase has none.
-      if (phase.shield) {
-          boss.shield = phase.shield.amount;
-          boss.maxShield = phase.shield.amount;
-          boss.shieldRechargeRate = phase.shield.regen;
-          boss.shieldRechargeTimer = 0;
-          if (phase.shield.arc) {
-              boss.shieldArcHalfWidth = (phase.shield.arc.deg * Math.PI / 180) / 2;
-              boss.shieldArcSpin = phase.shield.arc.slew;
-              boss.shieldArcAngle = boss.rotation;
-          } else {
-              boss.shieldArcHalfWidth = undefined;
-              boss.shieldArcSpin = undefined;
-          }
-      } else {
-          boss.shield = undefined;
-          boss.maxShield = undefined;
-          boss.shieldArcHalfWidth = undefined;
-          boss.shieldArcSpin = undefined;
-      }
-
-      // Phase-transition beat — skipped on the INITIAL stamp (phase 0 applies on
-      // the boss's first tick, and the entrance rift already sold that).
-      if (first) return;
-      if (phase.announce) {
-          const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-          this.waves.announcements.push({
-              text: phase.announce,
-              subtext: `PHASE ${index + 1}`,
-              color: phase.color ?? '#f87171',
-              lifetime: life,
-              maxLifetime: life,
-          });
-      }
-      this.spawnShockwave(boss.position, {
-          radius: Math.max(boss.size.x, boss.size.y) * 3,
-          damage: 0, knockback: 0,
-          color: phase.color ?? '#f87171',
-          lifetime: 0.5,
-      });
-      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-  }
 
   /**
    * REGEN counterplay trait ((h), WEAPONS_AMMO_PLAN §7).  For each enemy
@@ -5821,119 +5694,6 @@ export class GameEngine {
       }
   }
 
-  /**
-   * Boss kill payout — WEAPONS_AMMO_PLAN §6 model (d): SALVAGE + a timed SHOP
-   * DISCOUNT.  Deliberately NO weapon unlock: weapons stay purely purchased and
-   * the boss is an income accelerator that funds (or cheapens) the next shop
-   * run.  Called from handleEntityDeath alongside the normal enemy death path,
-   * which still runs — a boss explodes, pays kill points and sprays enemy
-   * shards like any other enemy.
-   */
-  private payBossBounty(boss: GameEntity) {
-      this.bossesKilled++;
-      this.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
-      // Stack the discount fraction (capped) and refresh the window.
-      // The money is PHYSICAL — the same salvage drops every other source pays,
-      // sprayed off the corpse so it converges and merges normally.
-      for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const d = 30 + Math.random() * 140;
-          this.spawnSalvageDrop({
-              x: boss.position.x + Math.cos(a) * d,
-              y: boss.position.y + Math.sin(a) * d,
-          });
-      }
-      // ── The payoff moment ──────────────────────────────────────────────
-      // Same beat the dragon gets (dragonDeath is the precedent): a rift
-      // COLLAPSE where the entrance rift opened, a debris burst in the boss's
-      // phase colour, and a heavy shake — layered on top of the normal enemy
-      // explosion the death path still runs.  All existing machinery.
-      this.openPortal(boss.position, {
-          color: boss.color || '#f87171',
-          radius: BOSS_CONSTANTS.PORTAL_RADIUS,
-          duration: BOSS_CONSTANTS.PORTAL_DURATION,
-      });
-      this.spawnParticles(boss.position, BOSS_CONSTANTS.DEATH_DEBRIS, boss.color || '#f87171', {
-          speedMin: 3, speedMax: 15, sizeMin: 2, sizeMax: 6,
-          lifetimeMin: 0.4, lifetimeMax: 1.1,
-      });
-      this.spawnParticles(boss.position, Math.round(BOSS_CONSTANTS.DEATH_DEBRIS * 0.4), '#ffffff', {
-          speedMin: 6, speedMax: 20, sizeMin: 1, sizeMax: 2.5,
-          lifetimeMin: 0.25, lifetimeMax: 0.6,
-      });
-      this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
-
-      // Name the kill and its payout — the banner is what tells the player the
-      // capstone is DOWN and that the shop just got cheaper, which is
-      // otherwise only legible by opening a station menu.
-      // The DROP-COUNT payout in real money, so the banner and the screen
-      // speak the same units the shop does.
-      const salvageCredits = BOSS_CONSTANTS.SALVAGE_DROPS * SALVAGE_CONSTANTS.CREDITS_PER_DROP;
-      // Capstone reward (user call, replaces the timed shop discount): a
-      // RANDOM module item — something you carry away and install, rather than
-      // a countdown you may not be near a shop to spend.
-      const reward = this.grantBossModule();
-      const def = boss.enemySubtype ? BOSS_DEFS[boss.enemySubtype] : undefined;
-      const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-      this.waves.announcements.push({
-          text: `${def?.name ?? 'BOSS'} DESTROYED`,
-          subtext: reward.label
-              ? `+◈${salvageCredits.toLocaleString()}  ·  ${reward.label.toUpperCase()}`
-              : `+◈${salvageCredits.toLocaleString()} SALVAGE`,
-          color: boss.color || '#f87171',
-          lifetime: life,
-          maxLifetime: life,
-      });
-      if (this.liveBoss === boss) this.liveBoss = null;
-
-      // ── The capstone's death ROUTS its forces ──────────────────────────
-      // Killing the boss wipes every enemy still standing, each through the
-      // FULL death path at FULL value (user call) — so the escort explodes,
-      // pays its kill points and sprays its salvage rather than being
-      // silently deleted or left to be mopped up after the fight is over.
-      // Mechanically this is the snitch board-clear (catchSnitch), minus the
-      // half-value scale.  NEUTRAL third parties (bubbles, dragons) and
-      // RIVALS are spared: they are not the boss's forces, and a capstone
-      // should not vacuum the ambient fauna off the map.  Snapshot the count
-      // first so the shards/particles those deaths append aren't re-scanned.
-      if (this.currentMap) {
-          const ents = this.currentMap.entities;
-          const n = ents.length;
-          for (let i = 0; i < n; i++) {
-              const e = ents[i];
-              if (e !== boss && e.type === EntityType.ENEMY && e.active && !e.isExploding
-                  && !e.thirdParty && !e.isRival) {
-                  this.handleEntityDeath(e);
-              }
-          }
-      }
-
-      // ── Stage cleared ──────────────────────────────────────────────────
-      // Open the DESCENT rift beside the wreck and raise the stage-clear
-      // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
-      // (or any wave-free map) has no ladder to descend from.
-      if (this.wavesEnabled) {
-          // The stage's ladder is FINISHED — no further wave starts in this
-          // arena.  Whatever is still on the field stays (the player mops up),
-          // but the arena stops feeding the fight so the choice between the
-          // two rifts is made in quiet.
-          this.waves.halted = true;
-          this.openDescentPortal(boss.position);
-          this.lastStageClear = {
-              stage: this.stageIndex + 1,
-              bossName: def?.name ?? 'Boss',
-              nextStage: this.stageIndex + 2,
-              scoreAwarded: BOSS_CONSTANTS.SCORE,
-              salvageCredits,
-              rewardLabel: reward.label,
-              rewardDesc: reward.desc,
-              rewardCredits: reward.credits,
-          };
-          // Arm the beat rather than freezing on the killing blow.
-          this.stageClearDelay = BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC;
-      }
-  }
-
   /** Arrival point beside the rift that leads back to `fromId`, or undefined
    *  when the freshly-loaded map has no such rift.  Offset clear of the mouth
    *  so the player emerges NEXT TO the rift (it stays visible, and the ship
@@ -5949,84 +5709,6 @@ export class GameEngine {
       };
       wrapPosition(pos);
       return pos;
-  }
-
-  /** Capstone reward: one RANDOM purchasable module dropped straight into the
-   *  inventory (user call — it replaced the timed shop discount, which asked
-   *  the player to be near a shop within a countdown to collect anything).
-   *
-   *  Uniform over the catalog, which is PROVISIONAL: it can hand a Mk III on
-   *  stage 1.  Weighting by stage depth is a tuning-pass question.
-   *
-   *  If the inventory is full there is nowhere to put it, so the reward pays
-   *  its catalog value in Salvage instead — the player is never simply denied
-   *  the drop for having full cargo. */
-  private grantBossModule(): { label?: string; desc?: string; credits?: number } {
-      const catalog = MODULE_DEFS.filter(d => d.cost > 0);
-      if (catalog.length === 0) return {};
-      const def = catalog[Math.floor(Math.random() * catalog.length)];
-      const slot = this.inventory.indexOf(null);
-      if (slot === -1) {
-          const paid = this.modulePrice(def.cost);
-          this.earnCredits(paid);
-          return { credits: paid };
-      }
-      this.inventory[slot] = def.id;
-      return { label: def.label, desc: def.desc };
-  }
-
-  /** The way DOWN: a descent rift beside the fallen boss, targeting a fresh
-   *  arena for the next stage.
-   *
-   *  The destination is a RANDOM arena descriptor (user call).  The existing
-   *  maps are test terrain and effectively interchangeable — this is a
-   *  placeholder for the procedural areas that will eventually pick terrain,
-   *  enemies and flow parameters per AREA.  What matters structurally is that
-   *  the target is a descriptor id, exactly like every other portal, so
-   *  swapping in a generator later changes this one line.
-   *
-   *  Marked `isDescent` so `enterPortal` knows to increment the depth; the
-   *  arena's own return rift is untouched, which is what makes the choice
-   *  in-world rather than a menu button. */
-  private openDescentPortal(pos: Vector2) {
-      if (!this.currentMap) return;
-      const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled
-          && HUB_PORTAL_SITES.some(site => site.targetId === d.id));
-      if (arenas.length === 0) return;
-      const dest = arenas[Math.floor(Math.random() * arenas.length)];
-
-      // Offset from the corpse so the rift doesn't sit under the debris.
-      const a = Math.random() * Math.PI * 2;
-      const p = {
-          x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
-          y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
-      };
-      wrapPosition(p);
-      const portal: GameEntity = {
-          id: nextId('portal'),
-          type: EntityType.INTERACTABLE,
-          isPortal: true,
-          isDescent: true,
-          portalTargetId: dest.id,
-          name: `Stage ${this.stageIndex + 2}`,
-          position: p,
-          velocity: { x: 0, y: 0 },
-          size: { x: PORTAL_CONSTANTS.SIZE, y: PORTAL_CONSTANTS.SIZE },
-          rotation: 0,
-          color: PORTAL_CONSTANTS.DESCENT_COLOR,
-          active: true,
-          health: 1,
-          maxHealth: 1,
-          mass: Infinity,
-      };
-      this.currentMap.entities.push(portal);
-      this.portals.push(portal);
-      // Arrival flourish so the rift reads as something that just OPENED.
-      this.openPortal(p, {
-          color: PORTAL_CONSTANTS.DESCENT_COLOR,
-          radius: PORTAL_CONSTANTS.BURST_RADIUS,
-          duration: PORTAL_CONSTANTS.BURST_DURATION,
-      });
   }
 
   /** DBG: warp a boss in near the player, phases and all.  `id` is an
@@ -6231,7 +5913,7 @@ export class GameEngine {
    *  of truth: the OVERWORLD hub is the wave-free home map — WaveSystem
    *  is initialised disabled there, exactly like difficulty "None" — and
    *  every arena runs waves.  Unregistered maps default to enabled. */
-  private get wavesEnabled(): boolean {
+  get wavesEnabled(): boolean {
     return descriptorForMapType(this.currentMap?.type)?.wavesEnabled ?? true;
   }
 
