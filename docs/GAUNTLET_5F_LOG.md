@@ -44,7 +44,8 @@ the differences are the point:
 - [x] **P4** — `engine/roamers/snitch.ts` (shipped)
 - [x] **P5** — `engine/roamers/bubbles.ts` (shipped) — roamers complete
 - [x] **P6** — `engine/bosses.ts` (shipped)
-- [ ] **P7..Pn** — one extraction per milestone, loop until dry
+- [x] **P7** — `engine/outfitting.ts` (shipped)
+- [ ] **P8..Pn** — one extraction per milestone, loop until dry
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -57,8 +58,9 @@ the differences are the point:
 | P4 snitch | 6,927 | `engine/roamers/snitch.ts` | 256 |
 | P5 bubbles | 6,531 | `engine/roamers/bubbles.ts` | 430 |
 | P6 bosses | 6,213 | `engine/bosses.ts` | 350 |
+| P7 outfitting | 5,855 | `engine/outfitting.ts` | 420 |
 
-**−1,577 lines from `GameEngine.ts` so far (−20%).** Every milestone:
+**−1,935 lines from `GameEngine.ts` so far (−25%).** Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
 edited.
 
@@ -352,3 +354,43 @@ each time — they are near the boss code without being boss code:
   carries `regen` *today*; the trait is an `ENEMY_TRAITS` row that any
   archetype can take, so filing its tick under "bosses" would encode a
   roster accident as an architectural fact.
+
+### Iteration 7 — outfitting, and the test net earning its keep (P7)
+
+`engine/outfitting.ts` (420 lines): the adjacency fixpoint, the fold into
+player stats, the derived gun loadout, the tile move/swap and its guards,
+pricing, `statBreakdown`, and the two snapshots the UI renders from. The
+COMMERCE API (`moveModule`, `purchaseModule`, `sellModule`,
+`scrapModule`, the DBG grants) stayed on `GameEngine` — that is what
+`App.tsx` calls and what carries the docked-at-a-station guards.
+GameEngine 6,213 → 5,855.
+
+**This is the milestone where the net caught something, and what it
+caught is worth more than the extraction.** The first attempt moved all
+eleven members. Typecheck was clean, the build was clean, and **eleven
+Playwright tests failed** with `e.outfittingSnapshot is not a function`.
+
+The suites call `outfittingSnapshot`, `moveModuleInternal` and
+`modulePrice` *straight off* `window.__omniEngine`. CLAUDE.md §8 already
+says `private` is compile-time only and the suites reach past it — but
+the consequence had not been drawn: **what the tests reach for IS the
+observable surface, whatever its declared visibility.** Those three are
+public API in every sense that matters, and moving them off the class
+was a behaviour change to the debug handle, not a relocation.
+
+So all three came back as methods on `GameEngine` that delegate to the
+module (imported under aliases so nothing shadows). Three one-line
+forwards, with a comment block saying why they exist. That is the
+"single-line forward for genuine public API" case from the SEAM PLAN,
+and it is now the case with *evidence* rather than a guess.
+
+Two things follow for the rest of this gauntlet:
+
+1. **`grep tests/ before moving a method`** is now part of the
+   procedure, alongside the verbatim diff. Typecheck cannot see through
+   `page.evaluate`, so the compiler will never warn about this class of
+   break.
+2. The fix was to change the CODE back, never the test. A test edited to
+   accept `outfittingSnapshot` moving would have converted a real
+   regression into a green run — the exact "behaviour change wearing a
+   disguise" the brief rules out.

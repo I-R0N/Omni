@@ -34,6 +34,10 @@ import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
+import { computeActiveSlots, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
+         firstFreeSlotFor, areaSlots, resaleValue, statBreakdown,
+         moveModuleInternal as moveModuleTiles, modulePrice as catalogPrice,
+         outfittingSnapshot as buildOutfittingSnapshot } from './outfitting';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -191,10 +195,10 @@ export class GameEngine {
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
   // shop stations; all reset per run.
-  private credits: number = 0;
+  credits: number = 0;
   // 2-slot equip loadout (pivot 1b) — DERIVED from the weapon-group GUN
   // hexes via syncLoadoutFromSlots (WeaponSystem is untouched).
-  private equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
+  equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
   // land in `inventory` (tile grid, duplicates allowed); outfitting moves
@@ -205,19 +209,19 @@ export class GameEngine {
   // AND its adjacency
   // requirement is met (MODULE_REQUIREMENTS fixpoint — see
   // computeActiveSlots); `activeShip`/`activeWeapon` cache the result.
-  private shipSlots: (string | null)[] = (() => {
+  shipSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
       s[0] = 'hull_base'; // free starter hull — the adjacency root, mounted center
       return s;
   })();
-  private weaponSlots: (string | null)[] = (() => {
+  weaponSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
       s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
       return s;
   })();
   inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
-  private activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
-  private activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+  activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+  activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -230,7 +234,7 @@ export class GameEngine {
   private readonly DAMAGE_TEXT_POOL_CAP = 64;
   private playerMessages: PlayerHUDMessage[] = [];
   private readonly MAX_PLAYER_MESSAGES = 6;
-  private currentWeaponIndex: number = 0;
+  currentWeaponIndex: number = 0;
   
   private minimapExpanded: boolean = false;
   private minimapTimer: number = 0;
@@ -1426,8 +1430,8 @@ export class GameEngine {
       shieldRechargeTimer: 0,
       shieldHitFlash: 0
     };
-    this.syncUnlocksToPlayer();
-    this.syncLoadoutFromSlots(); // derive loadout from gun hexes + apply module effects
+    syncUnlocksToPlayer(this);
+    syncLoadoutFromSlots(this); // derive loadout from gun hexes + apply module effects
 
     this.camera = {
       position: { x: 0, y: 0 },
@@ -3759,103 +3763,12 @@ export class GameEngine {
 
   // Movement multipliers from ACTIVE engine/thruster modules — read in the
   // per-frame movement line alongside the DBG thrust/speed cycles.
-  private moduleSpeedMult = 1;
-  private moduleThrustMult = 1;
+  moduleSpeedMult = 1;
+  moduleThrustMult = 1;
   // Total SHIP weight (hull + every active module).  A first-class ship
   // attribute — the acceleration curve reads it, and the Ship Status panel
   // reports it as its own stat rather than blaming individual guns.
-  private shipWeight = SHIP_WEIGHT.HULL_BASE;
-
-  /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
-   *  when its family has no requirement (hull / gun roots) or it touches
-   *  an ACTIVE module of its required family (HEX_ADJACENCY).  Chains
-   *  resolve naturally: thrusters need a LIVE engine, which needs a hull. */
-  private computeActiveSlots(slots: (string | null)[], out: boolean[]) {
-      for (let i = 0; i < out.length; i++) {
-          const id = slots[i];
-          const def = id !== null ? moduleDef(id) : undefined;
-          out[i] = def !== undefined && MODULE_REQUIREMENTS[def.family] === undefined;
-      }
-      let changed = true;
-      while (changed) {
-          changed = false;
-          for (let i = 0; i < slots.length; i++) {
-              const id = slots[i];
-              if (id === null || out[i]) continue;
-              const req = MODULE_REQUIREMENTS[moduleDef(id)!.family];
-              if (!req) continue;
-              for (const n of HEX_ADJACENCY[i]) {
-                  const nid = slots[n];
-                  if (nid !== null && out[n] && req.includes(moduleDef(nid)!.family)) {
-                      out[i] = true;
-                      changed = true;
-                      break;
-                  }
-              }
-          }
-      }
-  }
-
-  /** Recompute module activity (adjacency fixpoint) and fold the summed
-   *  effects of every ACTIVE module into the player's stats.  Called at
-   *  construction, on any outfit change, and on run reset.  Hull heals
-   *  the HP it adds so a purchase is felt immediately. */
-  private applyModuleEffects() {
-      this.computeActiveSlots(this.shipSlots, this.activeShip);
-      this.computeActiveSlots(this.weaponSlots, this.activeWeapon);
-      let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
-      let shieldCore = false, overcharge = false;
-      // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
-      // module's weight is a contribution to the SHIP's attribute, not an
-      // effect the module has on acceleration — see SHIP_WEIGHT.
-      let shipWeight = SHIP_WEIGHT.HULL_BASE;
-      const fold = (slots: (string | null)[], active: boolean[]) => {
-          for (let i = 0; i < slots.length; i++) {
-              const id = slots[i];
-              if (id === null || !active[i]) continue;
-              const d = moduleDef(id);
-              shipWeight += d?.weight ?? 0;
-              const e = d?.effect;
-              if (!e) continue;
-              maxHp += e.maxHp ?? 0;
-              maxShield += e.maxShield ?? 0;
-              regen += e.shieldRegenFrac ?? 0;
-              speed += e.speedFrac ?? 0;
-              accel += e.accelFrac ?? 0;
-              dmg += e.damageFrac ?? 0;
-              cool += e.cooldownFrac ?? 0;
-              if (e.shieldCore) shieldCore = true;
-              if (e.overcharge) overcharge = true;
-          }
-      };
-      fold(this.shipSlots, this.activeShip);
-      fold(this.weaponSlots, this.activeWeapon);
-      this.moduleSpeedMult = 1 + speed;
-      // Ship weight: flying light is faster — an unladen ship earns the
-      // BASE_BOOST, a heavy one drags (Blaster-only ≈ the 1.0 baseline).
-      this.shipWeight = shipWeight;
-      this.moduleThrustMult = (1 + accel)
-          * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));
-      // Weight is PHYSICAL too (user call): the player's collision mass scales
-      // with it, so PhysicsSystem's impulse solver (which divides by mass)
-      // shoves a heavy ship less and lets it plow through debris, while a
-      // stripped hull gets knocked around.  Normalised so the LEAN loadout is
-      // exactly the old constant — no change to the feel a run starts with.
-      this.player.mass = PHYSICS_CONSTANTS.PLAYER_MASS
-          * ((SHIP_WEIGHT.MASS_BASE + shipWeight)
-             / (SHIP_WEIGHT.MASS_BASE + SHIP_WEIGHT.MASS_REFERENCE));
-      const newMaxHp = 100 + maxHp;
-      const hpDelta = newMaxHp - this.player.maxHealth;
-      this.player.maxHealth = newMaxHp;
-      if (hpDelta > 0) this.player.health = Math.min(newMaxHp, this.player.health + hpDelta);
-      // Shield exists only while a shield CORE is active; plating adds on top.
-      this.player.maxShield = shieldCore ? SHIELD_CONSTANTS.MAX_CHARGE + maxShield : 0;
-      if ((this.player.shield ?? 0) > this.player.maxShield) this.player.shield = this.player.maxShield;
-      this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE * (1 + regen);
-      this.player.damageMult = 1 + dmg;
-      this.player.cooldownMult = Math.max(COOLDOWN_FLOOR, 1 - cool);
-      this.player.overchargeUnlocked = overcharge;
-  }
+  shipWeight = SHIP_WEIGHT.HULL_BASE;
 
   // ── DBG module grants ───────────────────────────────────────────────────
 
@@ -3869,7 +3782,7 @@ export class GameEngine {
       const inv = this.inventory.indexOf(null);
       if (inv === -1) return;
       this.inventory[inv] = id;
-      const free = this.firstFreeSlotFor(def);
+      const free = firstFreeSlotFor(this, def);
       if (free !== -1) this.moveModuleInternal({ area: 'inventory', idx: inv }, { area: def.group, idx: free });
   }
 
@@ -3897,7 +3810,7 @@ export class GameEngine {
       this.weaponSlots[4] = 'overcharge';
       const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
-      this.syncLoadoutFromSlots();
+      syncLoadoutFromSlots(this);
       this.player.shield = this.player.maxShield ?? 0;
   }
 
@@ -3912,7 +3825,7 @@ export class GameEngine {
       this.weaponSlots[0] = 'wpn_blaster';
       this.player.currentWeapon = WeaponType.BLASTER;
       this.currentWeaponIndex = 0;
-      this.syncLoadoutFromSlots();
+      syncLoadoutFromSlots(this);
   }
 
   /** DBG: grant Salvage for testing the shop. */
@@ -4199,55 +4112,6 @@ export class GameEngine {
 
   // ── Outfitting: loadout sync, tile moves, purchases, snapshots ──────────
 
-  /** Push the gun + module state onto the player entity so WeaponSystem
-   *  can gate weapon cycle/select + charged shots without reaching into
-   *  the engine.  ownedWeapons = the INSTALLED guns (the usable set). */
-  private syncUnlocksToPlayer() {
-      this.player.ownedWeapons = this.equippedWeapons.filter((w): w is WeaponType => w !== null);
-      this.player.equippedWeapons = [...this.equippedWeapons];
-      // The active weapon must be a mounted gun — if a move removed it,
-      // fall to the first mounted gun, or to NONE (weaponless flight is
-      // allowed; firing is gated off while currentWeapon is undefined).
-      const cur = this.player.currentWeapon;
-      if (cur === undefined || !this.equippedWeapons.includes(cur)) {
-          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null);
-          this.player.currentWeapon = first;
-          this.player.burstQueue = 0;
-          this.currentWeaponIndex = first !== undefined ? WEAPON_LIST.indexOf(first) : 0;
-      }
-  }
-
-  /** Rebuild the derived weapon loadout from the mounted guns (any
-   *  weapon hex, slot order; ≤ MAX_INSTALLED_GUNS by the move guard),
-   *  then re-sync the player entity + recompute activity/effects. */
-  private syncLoadoutFromSlots() {
-      const guns: WeaponType[] = [];
-      for (let i = 0; i < this.weaponSlots.length; i++) {
-          const id = this.weaponSlots[i];
-          const def = id !== null ? moduleDef(id) : undefined;
-          if (def?.weapon !== undefined) guns.push(def.weapon);
-      }
-      for (let i = 0; i < this.equippedWeapons.length; i++) {
-          this.equippedWeapons[i] = guns[i] ?? null;
-      }
-      this.syncUnlocksToPlayer();
-      this.applyModuleEffects();
-  }
-
-  /** First empty slot of the module's group that accepts its kind, or -1. */
-  private firstFreeSlotFor(def: ModuleDef): number {
-      const slots = def.group === 'ship' ? this.shipSlots : this.weaponSlots;
-      for (let i = 0; i < slots.length; i++) {
-          if (slots[i] === null && moduleFitsSlot(def, def.group, i)) return i;
-      }
-      return -1;
-  }
-
-  private areaSlots(area: 'inventory' | 'ship' | 'weapon'): (string | null)[] {
-      return area === 'inventory' ? this.inventory
-          : area === 'ship' ? this.shipSlots : this.weaponSlots;
-  }
-
   /**
    * Move a module item between tiles: inventory↔inventory (reorder),
    * inventory→hex (install), hex→inventory (uninstall), hex↔hex (move).
@@ -4266,13 +4130,35 @@ export class GameEngine {
       return this.moveModuleInternal(from, to);
   }
 
+  // ─── Outfitting: the three entry points that are PUBLIC SURFACE ─────────
+  //
+  // Bodies live in engine/outfitting.ts with the rest of the hex-slot
+  // machinery (gauntlet 5f).  These three keep a method on the engine because
+  // the 5b suites call them straight off `window.__omniEngine` — `private` is
+  // compile-time only, so what the tests reach for IS the observable surface,
+  // and moving them off the class broke three suites until they came back.
+  // That is the test net doing exactly the job it exists for; the forwards are
+  // the honest record of where the boundary actually is.
+
+  /** The tile move/swap itself, without `moveModule`'s drydock guard. */
+  moveModuleInternal(
+      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ): boolean { return moveModuleTiles(this, from, to); }
+
+  /** The ONE pricing seam — buy and resale both route through it. */
+  modulePrice(cost: number): number { return catalogPrice(cost); }
+
+  /** Hex-slot snapshot for the station UI + the pause cargo panel. */
+  outfittingSnapshot() { return buildOutfittingSnapshot(this); }
+
   /** SELL an inventory module back for MODULE_RESALE.SELL_FRACTION of its
    *  cost.  Needs a station (any — every station drydocks); acts on
    *  INVENTORY tiles only, so installed modules must be uninstalled
    *  first.  Free items (Base Hull) can't be sold — scrap those. */
   public sellModule(idx: number): boolean {
       if (!this.dockedAtStation) return false;
-      const value = this.resaleValue(idx, MODULE_RESALE.SELL_FRACTION);
+      const value = resaleValue(this, idx, MODULE_RESALE.SELL_FRACTION);
       if (value === null || value <= 0) return false;
       this.inventory[idx] = null;
       this.credits += value;
@@ -4284,61 +4170,10 @@ export class GameEngine {
    *  option when no station is near (also the only way to shed cost-0
    *  items like a spare Base Hull, which pay nothing). */
   public scrapModule(idx: number): boolean {
-      const value = this.resaleValue(idx, MODULE_RESALE.SCRAP_FRACTION);
+      const value = resaleValue(this, idx, MODULE_RESALE.SCRAP_FRACTION);
       if (value === null) return false;
       this.inventory[idx] = null;
       this.credits += value;
-      return true;
-  }
-
-  /** Rounded resale payout for an inventory tile, or null when the tile
-   *  is empty/invalid. */
-  private resaleValue(idx: number, fraction: number): number | null {
-      if (idx < 0 || idx >= this.inventory.length) return null;
-      const id = this.inventory[idx];
-      if (id === null) return null;
-      const def = moduleDef(id);
-      if (!def) return null;
-      // Priced off the DISCOUNTED cost, not the catalog cost — see modulePrice.
-      return Math.round(this.modulePrice(def.cost) * fraction);
-  }
-
-  /** The actual tile move/swap.  Guards: destination kind fit, displaced
-   *  item must fit the vacated tile, and the last mounted gun can never
-   *  leave the gun hexes without another gun taking its place. */
-  private moveModuleInternal(
-      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
-      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
-  ): boolean {
-      const fromSlots = this.areaSlots(from.area);
-      const toSlots = this.areaSlots(to.area);
-      if (from.idx < 0 || from.idx >= fromSlots.length) return false;
-      if (to.idx < 0 || to.idx >= toSlots.length) return false;
-      if (from.area === to.area && from.idx === to.idx) return false;
-      const id = fromSlots[from.idx];
-      if (id === null) return false;
-      const def = moduleDef(id);
-      if (!def) return false;
-      const displaced = toSlots[to.idx];
-      const dDef = displaced !== null ? moduleDef(displaced) : undefined;
-      if (to.area !== 'inventory' && !moduleFitsSlot(def, to.area, to.idx)) return false;
-      if (displaced !== null) {
-          if (!dDef) return false;
-          if (from.area !== 'inventory' && !moduleFitsSlot(dDef, from.area, from.idx)) return false;
-      }
-      // Apply, then enforce the slot-agnostic gun COUNT limit — a move may
-      // not leave more than MAX_INSTALLED_GUNS guns mounted in the weapon
-      // flower (weaponless is fine; there is no minimum).
-      fromSlots[from.idx] = displaced;
-      toSlots[to.idx] = id;
-      const gunsMounted = this.weaponSlots.reduce(
-          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
-      if (gunsMounted > MAX_INSTALLED_GUNS) {
-          fromSlots[from.idx] = id;
-          toSlots[to.idx] = displaced;
-          return false;
-      }
-      this.syncLoadoutFromSlots();
       return true;
   }
 
@@ -4366,16 +4201,6 @@ export class GameEngine {
       this.credits -= price;
       this.inventory[inv] = moduleId;
       return true;
-  }
-
-  /** Shop price for a catalog cost after the run's TIMED boss discount ((h)
-   *  payout model (d): a boss kill makes the shop cheaper for a window rather
-   *  than unlocking anything).  RESALE IS PRICED OFF THE SAME NUMBER
-   *  (resaleValue) — if buying were discounted while sell-back stayed on full
-   *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
-   *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
-  modulePrice(cost: number): number {
-      return Math.max(0, Math.round(cost));
   }
 
   /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
@@ -4406,7 +4231,7 @@ export class GameEngine {
           if (inv !== -1) this.inventory[inv] = displaced;
       }
       this.weaponSlots[slot] = mDef.id;
-      this.syncLoadoutFromSlots();
+      syncLoadoutFromSlots(this);
   }
 
   /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
@@ -4421,189 +4246,6 @@ export class GameEngine {
               return i === -1 ? null : i;
           })(),
       }));
-  }
-
-  /** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
-  /** Per-stat module attribution for the Ship Status panel (A2).
-   *
-   *  Walks the two hex groups exactly the way `applyModuleEffects`'s `fold`
-   *  does — same slots, same `activeShip`/`activeWeapon` fixpoint — and files
-   *  each module's effect under the derived stat it feeds.  The HEADLINE
-   *  value of every line is read straight off the player entity / the module
-   *  multipliers, so the panel can never disagree with the simulation: the
-   *  breakdown explains the number, it does not derive it.
-   *
-   *  A contributor's `active` means "this amount is IN the total".  It is
-   *  false both for an adjacency-inactive module (`requires` names the family
-   *  it must touch) and for shield PLATING with no shield core installed —
-   *  plating that is perfectly well connected but has nothing to plate.
-   *
-   *  Menu-only (built with the rest of the outfitting snapshot while paused
-   *  or docked), so it costs nothing on a live frame. */
-  private statBreakdown() {
-      type Contrib = {
-          area?: 'ship' | 'weapon'; idx?: number; moduleId?: string;
-          label: string; display: string; active: boolean; requires?: string;
-      };
-      const pct = (f: number) => `${f >= 0 ? '+' : '−'}${Math.round(Math.abs(f) * 100)}%`;
-      const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
-      const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
-      const cool: Contrib[] = [], charge: Contrib[] = [], weight: Contrib[] = [];
-      let shipWeight = SHIP_WEIGHT.HULL_BASE, shieldCore = false;
-
-      const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
-          for (let i = 0; i < slots.length; i++) {
-              const id = slots[i];
-              if (id === null) continue;
-              const def = moduleDef(id);
-              if (!def) continue;
-              const on = active[i];
-              const req = MODULE_REQUIREMENTS[def.family];
-              // Template for this module's rows — every push below spreads it
-              // and supplies the stat-specific `display`, so the template
-              // itself deliberately has none.
-              const base: Omit<Contrib, 'display'> = {
-                  area, idx: i, moduleId: id, label: def.label, active: on,
-                  requires: on ? undefined : (req !== undefined ? (req[0] as string) : undefined),
-              };
-              // Weight is a contribution to the SHIP's weight, not to
-              // acceleration: a gun does not make the ship accelerate worse,
-              // it makes the ship HEAVIER, and weight is what drags thrust.
-              // So a weighted module files under `weight` and tapping it
-              // highlights Ship weight — Acceleration then carries ONE derived
-              // row for the whole ship's weight (below).  Read off any module,
-              // not just guns.
-              if (def.weight) {
-                  if (on) shipWeight += def.weight;
-                  weight.push({ ...base, display: `+${def.weight.toFixed(1)}` });
-              }
-              const e = def.effect;
-              if (!e) continue;
-              if (e.maxHp)           hull.push({ ...base, display: `+${e.maxHp} HP` });
-              if (e.maxShield)       shield.push({ ...base, display: `+${e.maxShield}` });
-              if (e.shieldCore)    { if (on) shieldCore = true;
-                                     shield.push({ ...base, display: `+${SHIELD_CONSTANTS.MAX_CHARGE} base` }); }
-              if (e.shieldRegenFrac) regen.push({ ...base, display: pct(e.shieldRegenFrac) });
-              if (e.speedFrac)       speed.push({ ...base, display: pct(e.speedFrac) });
-              if (e.accelFrac)       accel.push({ ...base, display: pct(e.accelFrac) });
-              if (e.damageFrac)      dmg.push({ ...base, display: pct(e.damageFrac) });
-              if (e.cooldownFrac)    cool.push({ ...base, display: pct(-e.cooldownFrac) });
-              if (e.overcharge)      charge.push({ ...base, display: on ? 'enabled' : 'offline' });
-          }
-      };
-      walk('ship', this.shipSlots, this.activeShip);
-      walk('weapon', this.weaponSlots, this.activeWeapon);
-
-      // Plating with no shield core is connected-but-pointless: `maxShield`
-      // is gated to 0 in applyModuleEffects, so report zero contribution and
-      // name the missing piece rather than showing a number that isn't real.
-      if (!shieldCore) {
-          for (const c of shield) {
-              if (c.moduleId === 'shield') continue;
-              c.active = false;
-              c.requires = 'shield core';
-          }
-      }
-
-      // Fire RATE is the inverse of the cooldown multiplier, so the per-module
-      // cooldown cuts above do not sum in rate space.  Same shape as the
-      // acceleration drag row: the hex contributions stay in the units the
-      // modules are actually specified in (−8% cooldown), and one derived row
-      // carries the cooldown total the headline rate inverts.
-      if (cool.length > 0) {
-          cool.push({
-              label: 'Resulting cooldown',
-              display: `×${(this.player.cooldownMult ?? 1).toFixed(2)}`,
-              active: true,
-          });
-      }
-
-      // Weight drag is MULTIPLICATIVE over the ship's TOTAL weight, so it
-      // belongs to the ship, not to any hex.  One derived row on Acceleration
-      // names the ship weight it came from; the modules that make up that
-      // weight live on the Ship weight line above.
-      const dragMult = SHIP_WEIGHT.BASE_BOOST
-          / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight);
-      accel.push({
-          label: shipWeight === 0 ? 'Unladen ship' : `Ship weight ${shipWeight.toFixed(1)}`,
-          display: `×${dragMult.toFixed(2)}`,
-          active: true,
-      });
-
-      const line = (id: string, label: string, display: string, baseDisplay: string,
-                    contributors: Contrib[], note?: string) =>
-          ({ id, label, display, baseDisplay, contributors, note });
-
-      return [
-          // "Max hull"/"Max shield", not "Hull"/"Shield": the Condition block
-          // shows the LIVE pools (87 / 150) under those names, and the same
-          // word against two different numbers reads as a contradiction.
-          line('hull', 'Max hull', `${this.player.maxHealth}`, '100', hull),
-          line('shield', 'Max shield', `${this.player.maxShield}`, '0', shield,
-               shieldCore ? undefined : 'no shield core installed'),
-          line('shieldRegen', 'Shield regen',
-               `${(this.player.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE).toFixed(1)}/s`,
-               `${SHIELD_CONSTANTS.RECHARGE_RATE.toFixed(1)}/s`, regen),
-          line('damage', 'Damage', `×${(this.player.damageMult ?? 1).toFixed(2)}`, '×1.00', dmg),
-          line('cooldown', 'Fire rate',
-               `×${(1 / (this.player.cooldownMult ?? 1)).toFixed(2)}`, '×1.00', cool,
-               'modules cut cooldown; the rate is its inverse'),
-          line('speed', 'Top speed', `×${this.moduleSpeedMult.toFixed(2)}`, '×1.00', speed),
-          line('accel', 'Acceleration', `×${this.moduleThrustMult.toFixed(2)}`, '×1.00', accel,
-               'a heavier ship accelerates worse'),
-          line('weight', 'Ship weight', shipWeight.toFixed(1),
-               SHIP_WEIGHT.HULL_BASE.toFixed(1), weight,
-               'hull + everything mounted; drags Acceleration'),
-          line('overcharge', 'Charged shots',
-               this.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
-      ];
-  }
-
-  private outfittingSnapshot() {
-      const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
-          if (id === null) return null;
-          const def = moduleDef(id)!;
-          const req = MODULE_REQUIREMENTS[def.family];
-          return {
-              id, label: def.label, kind: def.kind as string, family: def.family as string,
-              active: active[i],
-              requires: req !== undefined ? (req[0] as string) : undefined,
-          };
-      });
-      const gunsMounted = this.weaponSlots.reduce(
-          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
-      return {
-          ship: hexSnap(this.shipSlots, this.activeShip),
-          weapon: hexSnap(this.weaponSlots, this.activeWeapon),
-          gunsMounted,
-          maxGuns: MAX_INSTALLED_GUNS,
-          inventory: this.inventory.map(id => {
-              if (id === null) return null;
-              const def = moduleDef(id)!;
-              // Both resale values track the same discounted price the shop
-              // charges, so a discount can never be laundered into credits.
-              const price = this.modulePrice(def.cost);
-              return {
-                  id, label: def.label, kind: def.kind as string, family: def.family as string, group: def.group as string,
-                  sellValue: Math.round(price * MODULE_RESALE.SELL_FRACTION),
-                  scrapValue: Math.round(price * MODULE_RESALE.SCRAP_FRACTION),
-              };
-          }),
-          // Per-module stat attribution (Pair A, A2).  Built from the SAME
-          // slot walk applyModuleEffects folds, so the UI never recomputes a
-          // derived stat — it only renders what the sim is already using.
-          statLines: this.statBreakdown(),
-          // Catalog prices are the DISCOUNTED prices the shop will actually
-          // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
-          catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
-              const price = this.modulePrice(d.cost);
-              return {
-                  id: d.id, group: d.group as string, kind: d.kind as string,
-                  label: d.label, desc: d.desc, cost: price,
-                  affordable: this.credits >= price && this.inventory.includes(null),
-              };
-          }),
-      };
   }
 
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
