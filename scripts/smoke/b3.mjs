@@ -7,7 +7,7 @@
 import { chromium } from 'playwright';
 import { readFileSync } from 'fs';
 
-const URL = process.env.SMOKE_URL || 'http://127.0.0.1:4175/';
+const URL = process.env.SMOKE_URL || 'http://127.0.0.1:4173/';
 const INVENTORY = process.env.INVENTORY || '/home/user/Omni/docs/SFX_INVENTORY.md';
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = '') => {

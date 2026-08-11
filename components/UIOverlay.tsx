@@ -108,6 +108,11 @@ interface UIOverlayProps {
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
+  onCycleSimRate?: () => void;
+  onCycleHudRate?: () => void;
+  onCycleSubstepCap?: () => void;
+  onCycleRenderScale?: () => void;
+  renderScaleName?: string;
   onCycleSwarmMove?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
@@ -265,6 +270,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCycleEnemyScale,
+  onCycleSimRate,
+  onCycleHudRate,
+  onCycleSubstepCap,
+  onCycleRenderScale,
+  renderScaleName,
   onCycleSwarmMove,
   onApplyCorrosion,
   onApplyDisable,
@@ -1006,6 +1016,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
+                {ctrlRow('Sim rate', onCycleSimRate, stats.simRateName ?? '120Hz',
+                  'Simulation rate: 120Hz (default) or 60Hz. At 120Hz a 60fps frame runs TWO full sim steps, so this is the single biggest lever on sim cost — but it is a TRADE, not a free win: collision resolution is iterative, so half the steps means half the passes untangling dense shard piles. Rate-dependent constants are converted exactly, and the frame delta is vsync-snapped so 60Hz does not judder. Judge it by FEEL in a shard field.')}
+                {ctrlRow('Substep cap', onCycleSubstepCap, stats.substepCapName ?? '5',
+                  'Max sim substeps one frame may drain (5 / 3 / 2) — the spiral-of-death clamp. Set too HIGH it feeds the spiral: a device capture showed every worst frame pegged at 5 steps with 36-44ms of sim in a 60ms frame, because a long frame pulls in more substeps which make it longer still. A 60fps display with a 120Hz sim only NEEDS 2. Lower caps convert a judder into a brief smooth slow-motion; the excess time is discarded either way.')}
+                {ctrlRow('Render scale', onCycleRenderScale, renderScaleName ?? '3x',
+                  'Cap on the canvas device-pixel-ratio (3 / 2 / 1.5). At dpr 3 a 440x756 phone viewport rasterises ~3.0 MILLION pixels every frame; capping at 2 cuts that to ~1.3M. This cost is INVISIBLE to the render timer — that measures our JS issuing canvas calls, while rasterisation and compositing happen in the browser compositor afterwards, which is exactly where device captures show the missing 25-36ms going. Trade: a softer image.')}
+                {ctrlRow('HUD rate', onCycleHudRate, stats.hudRateName ?? '60Hz',
+                  'How often the React HUD re-renders (60 / 30 / 15Hz). The per-frame setState reconciles the whole overlay tree and is the ONE cost the engine timers never saw — a device capture showed 32ms of a 35ms frame outside render+sim. Chips and bars do not need 60Hz; the minimap, loadout strip, banners and damage text are canvas-drawn and unaffected. Pause/station/death screens always update immediately.')}
                 {ctrlRow('Gnat move', onCycleSwarmMove, stats.swarmMoveName ?? 'boids',
                   'Cycle the Swarm gnat movement: boids (flock) → vortex (orbit + dart) → weave (serpentine) → burst (coast + telegraphed dash). Applies live to all gnats.')}
                 {ctrlRow('Corrode', onApplyCorrosion, 'Apply',

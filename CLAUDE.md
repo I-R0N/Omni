@@ -41,9 +41,18 @@ constants.ts              ~1000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
-package.json              Scripts: dev, build, preview (no lint/test script)
+package.json              Scripts: dev, build, preview, typecheck, test
+                          (no lint script)
+playwright.config.ts      Test harness: one 390×844 project, a webServer
+                          that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
+
+tests/                    Playwright smoke suites (roadmap 5b) — boot,
+                          loop, economy, attribution, traits, screens,
+                          plus helpers.ts (the shared harness over the
+                          debug handles) and README.md (suite map +
+                          the anti-flake rules).  38 tests
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
@@ -52,9 +61,48 @@ components/
                           the pause menu)
 
 engine/
-  GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
-                          player entity, camera, map, regen queues, drop
-                          cache, and the rAF loop.
+  GameEngine.ts           Orchestrator (~4900 lines).  Owns the player
+                          entity, camera, map, regen queues, drop cache,
+                          and the rAF loop.  What is LEFT here after the
+                          5f decomposition is the frame itself —
+                          `loop` / `updatePhysics` / `updateGameLogic` /
+                          `handleEntityDeath` — plus run + map lifecycle,
+                          stations/portals, weapons, score and the stats
+                          push.  Concerns with a life of their own live
+                          in the sibling modules below; they are plain
+                          free functions taking `g: GameEngine`, so the
+                          engine calls them directly with no dispatch
+                          (see docs/GAUNTLET_5F_LOG.md, decision D1)
+  bosses.ts               Boss capstones: phase stamping, the live-boss
+                          HUD snapshot, the bounty + stage-clear beat,
+                          the module grant, the descent rift
+  explosions.ts           Shockwaves, the expanding AoE ring, and the
+                          direct player-blast path (the player is not in
+                          `currentMap.entities`, so the ring can never
+                          reach it — see §8)
+  outfitting.ts           Hex-slot machinery: the adjacency fixpoint,
+                          the fold into player stats, the derived gun
+                          loadout, tile move/swap, pricing,
+                          `statBreakdown`, the UI snapshots.  The
+                          COMMERCE API (moveModule / purchaseModule /
+                          sellModule / scrapModule) stays on GameEngine
+  debugControls.ts        `DebugControls` — every toggle and cycle behind
+                          pause ▸ Debug Menu, reached as `engine.dbg.*`.
+                          A class, not free functions, because the UI is
+                          the caller.  The flags it writes are still
+                          GameEngine fields; only the methods moved
+  roamers/                The engine-managed roamers — each a bespoke
+                          lifecycle the AISystem does not drive
+    dragons.ts            Stage-6 serpent: flow-weave roam, the Snake
+                          body it eats out of the terrain, sever/detach,
+                          portal entry + exit, kill payout
+    rivals.ts             Stage-7 privateers: score-cadence warp-in,
+                          cached hunt target, strafe, loot vacuum
+    snitch.ts             The persistent golden comet: burst/coast AI,
+                          per-catch speed ramp, the catch board-clear
+    bubbles.ts            Stage-5 ambient fauna + the eat/latch
+                          machinery it owns (Stage-3b consume-and-grow,
+                          Stage-3c attach)
   toroidal.ts             MAP_WIDTH/HEIGHT, wrap helpers, dimension-change
                           listener registry
   NebulaColor.ts          Palette-aware hex blending for nebula compositions
@@ -84,8 +132,56 @@ engine/
                           entirely so menus keep native touch scrolling
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
-    RenderSystem.ts       Canvas2D draw pass, tint cache, damage text,
-                          wave banner, minimap
+    RenderSystem.ts       Canvas2D draw pass (~1580 lines).  After the 5f
+                          split and the renderEntities decomposition that
+                          followed it, this is the WORLD pass — `render`,
+                          `renderEntities`, the sprite/tint/bitmap caches,
+                          the flow-field overlay — plus the frame
+                          orchestration that calls the render/ modules
+                          below.  `renderEntities` is now the per-entity
+                          FRAME: the guards, the glass-family static-tile
+                          fast path, the shared per-entity setTransform,
+                          the sprite path, and a 5-way `entity.type`
+                          dispatch into the four *Shapes modules
+    render/               Render sub-domains, split out of RenderSystem
+                          by what they draw.  Free functions; the ones
+                          taking the RenderSystem (`r`, or `rs` where the
+                          moved body already binds `r` as a radius) do so
+                          only for state that persists between frames
+      drawUtils.ts        The shared floor every direction imports so no
+                          two of them import each other: colour maths
+                          (hexToRgb / rgbToHex / liftCh / sinkCh /
+                          densityTintForRender), the seeded damage-crack
+                          overlay + its style table, the torus
+                          shiftX/shiftY, roundRectPath
+      enemyShapes.ts      Procedural enemy silhouettes — one drawn shape
+                          per archetype, boss aura, engine flame, damage
+                          cracks.  Takes no engine and no renderer
+      tileShapes.ts       The STRUCTURE arm: glass-family tile, material
+                          tile, regen ghost, asteroid / mobile shard +
+                          LOD chips — plus the helpers only terrain
+                          calls (tileFillColor + the materialAutomata*
+                          chain, overlayMaterialCracks, timedTileBloom /
+                          renderProximityBloom, drawMetalDebugOutline)
+      nebulaTiles.ts      The cloud layer, both doors: the cached
+                          fast path (one drawImage) and the slow path
+                          (tint chain, sprite, twinkle) that refills it
+      projectileShapes.ts The four shot silhouettes — lightning, bouncer
+                          head, charged fireball, standard glow — and
+                          the two unit-radius gradient caches
+      dropShapes.ts       Collectible drops (salvage / health / glass
+                          debris) and the proximity-interactable POIs
+                          (station, portal, snitch).  Like enemyShapes,
+                          takes no engine and no renderer
+      hud.ts              The SCREEN-SPACE layer: minimap + its static
+                          layer, off-screen indicators, loadout strip,
+                          player messages, wave banners, damage text,
+                          fitFontPx
+      effects.ts          World-space ephemera: player + projectile
+                          trails, pooled particles, lightning arcs
+      staticTileCache.ts  The pre-rendered immovable-terrain layer —
+                          budgeted stamping, per-tile erase, single-draw
+                          blit
     AISystem.ts           Per-enemy behavior-dispatch table (ENEMY_BEHAVIOR →
                           moveStrategies); idle/chase state machine,
                           reaction-time lag targets, pack-sync, stuck
@@ -119,6 +215,10 @@ engine/
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
                           projectiles)
+    CellBuckets.ts        Allocation-free spatial-hash bucket store —
+                          flat array indexed by DENSE cell index, with
+                          recycled bucket arrays.  Backs the two
+                          per-substep broadphase grids (gauntlet 5c)
     AudioSystem.ts        SFX manager — gesture-unlocked WebAudio,
                           per-id polyphony caps + retrigger collapse,
                           tier-thinned global voice ceiling, torus-
@@ -130,11 +230,22 @@ engine/
                           window and exports a copy-paste report (DBG panel
                           "Perf REC" section; iPhone-friendly, no devtools)
 
+perf/                     Headless capture harness (gauntlet 5c) —
+                          capture.mjs (scene matrix: worst-frame / p99 /
+                          allocation attribution), simbench.mjs (low-noise
+                          ms-per-sim-substep), probe.mjs (targeted in-page
+                          micro-probes), scenes.mjs, README.md.
+                          Deliberately NOT part of `npm test`: runs take
+                          minutes and are noise-prone; the test suite is a
+                          merge gate.  Read perf/README.md before quoting
+                          any number out of it
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
                           EXCEPT docs/SFX_INVENTORY.md, which IS current
                           and IS the source of truth for sound (see §8)
-.github/workflows/        pr-preview, publish-standalone
+.github/workflows/        pr-checks (the merge gate: typecheck + build +
+                          Playwright on every PR), pr-preview,
+                          publish-standalone
 ```
 
 ---
@@ -391,7 +502,15 @@ Key invariants:
   PhysicsSystem, not the subsystem that set it.
 - **Optional fields are optional on purpose** — follow the existing "set
   the field when needed; check before use" pattern rather than widening
-  the interface for one-off feature state.
+  the interface for one-off feature state.  This has been MEASURED and it
+  is the fast option, which is worth knowing because the opposite is the
+  intuitive conclusion: gauntlet 5c tested normalising every entity to a
+  single hidden class (to avoid megamorphic inline caches) and it came out
+  **1.9× SLOWER** on the real entity population — the union of keys across
+  one map's shards is ~41 properties, and an object that wide spills out of
+  V8's in-object slots, which costs more than the megamorphic access does.
+  Do not "fix" this pattern for performance without re-running
+  `perf/probe.mjs`.
 
 Notable existing field categories on `GameEntity`:
 
@@ -1145,9 +1264,50 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - `node scripts/inline-build.mjs` after a build → writes
   `omniverse-standalone.html`, a single-file portable build with CSS, JS,
   and referenced PNGs inlined as data URIs.
-- **No test runner or linter is configured.** Don't invent one unless the
-  user asks. There is no standalone `tsc --noEmit` script either; type
-  errors surface during `vite build`.
+- **THREE validation gates, and all three are expected to be green
+  before a commit** (roadmap 5b, decision #46a — this REPLACES the old
+  "no test runner is configured; don't invent one" stance, which held
+  until the repo went public and gained a collaborator with no session
+  history):
+  - `npm run build` — the bundle. Still the last-mile check.
+  - `npm run typecheck` — `tsc --noEmit`. Note that **`vite build` does
+    NOT type-check** (esbuild strips types without checking them), which
+    is how six type errors accumulated unseen before 5b; the build being
+    green says nothing about the types.
+  - `npm test` — `playwright test`. The suites in `tests/` drive the
+    REAL engine in a REAL browser through the `window.__omniEngine` /
+    `window.__omniStats` debug handles; nothing is stubbed. The config's
+    `webServer` block runs `npm run build` itself and previews the
+    result, so `npm test` is one command from a clean clone — but it
+    means the browser must be present: `npx playwright install chromium`
+    once. See `tests/README.md` for the suite map and the harness rules.
+- **The same three gates run in CI on EVERY pull request, and they are the
+  LAST STEP BEFORE A MERGE** — `.github/workflows/pr-checks.yml`, job
+  `validate`, in this order: typecheck → build → `npx playwright install
+  --with-deps chromium` → test.  Running them locally is still expected
+  (a red CI run is a slow way to learn something `npm run typecheck`
+  would have told you in five seconds); CI is the backstop that makes
+  green non-optional rather than remembered.  Rules that go with it:
+  - **Do not merge a PR while `PR checks` is pending or red.**  The
+    workflow is the merge gate; "it passed locally" does not substitute,
+    because local runs skip the clean-clone `npm ci` and the CI browser.
+  - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
+    on fork PRs.  Keep it that way — a merge gate that silently skips for
+    outside contributors is not a gate.
+  - It also runs on pushes to `main`, so a bad merge is visible
+    immediately instead of at the next PR.
+  - On failure the Playwright HTML report uploads as a run artifact
+    (`playwright-report-<run id>`, 7-day retention) — read that before
+    re-running, since the suites are timing-sensitive and the report
+    carries the trace.
+  - Making the check *blocking* at the GitHub level is a REPO SETTING,
+    not a file in this tree: branch protection on `main` must list
+    `typecheck · build · test` as a required status check.  The workflow
+    alone reports; branch protection is what refuses the merge button.
+- **Still no linter.**  Tiers 3–5 of the parking lot's "Automated test
+  suite" entry (unit tests, Node sim tests, visual regression) remain
+  parked deliberately; 5b adopted tiers 1–2, and tier 6 (CI gating) is
+  now the workflow above.
 
 ---
 
@@ -1164,9 +1324,28 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pre-allocated `Vector2` buffers and `Float64Array` ring buffers.
   Allocating `{x,y}` inside per-frame loops is the #1 perf-regression
   pattern in this codebase.
-- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (built
-  once on map load) and a `dynamicGrid` (rebuilt every frame). Cell
-  size is `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
+- **The REFILL IDIOM (gauntlet 5c).**  `arr.length = 0` followed by
+  `push` is NOT a free way to refill a per-frame list: setting the
+  length down shrinks the backing store and the pushes re-grow it,
+  allocating on every refill.  Index-fill instead and truncate only
+  when the count actually shrank:
+  `for (…) arr[n++] = x;  if (arr.length !== n) arr.length = n;`
+  Measured 2.6× faster and 11× less heap churn over a 1300-element
+  list, and this idiom was the single largest allocator in the engine
+  before it was fixed (see `GameEngine.prepareFrameEntities`, which
+  carries the canonical comment, plus `EntityIndex.rebuild`).  Same
+  rule for per-frame closures: a function CONSTRUCTED inside a
+  per-substep path is rebuilt 120×/s — hoist it to a method and pass
+  its captures as parameters (`GameEngine.applyFlowTo`).
+- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (a `Map`,
+  built once on map load) and two per-substep `CellBuckets` grids
+  (`dynamicGrid`, `shardGrid`) — a FLAT ARRAY indexed by the dense cell
+  index `cx * SPATIAL_ROWS + cy`, with pooled bucket arrays, so a
+  steady-state field rebuilds them without allocating and every lookup
+  is an array index rather than a hash (the 3×3 neighbour scan does
+  nine per entity per substep).  All three are keyed on the same dense
+  index, so they agree cell for cell.  Cell size is
+  `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
   by `mass`: `Infinity` → static grid, finite → dynamic grid.  Don't
   branch on `EntityType` inside the broadphase.
 - **Static vs dynamic via mass.** Setting a tile's mass to a finite
@@ -1460,7 +1639,12 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `DropSystem.sfx`, `WeaponSystem.onEnemyFire`) assigned once in the
   GameEngine constructor — the same settable-field style as
   `setPhysics` / `traitsEnabled` — so no system imports audio state and
-  adding a sound is a call rather than a signature change.
+  adding a sound is a call rather than a signature change.  The engine
+  modules extracted in gauntlet 5f (`engine/roamers/*`, `engine/bosses.ts`,
+  `engine/explosions.ts`) need no sink at all: they are free functions
+  taking `g: GameEngine`, so a voice there is `g.audio.play(id, …)` — the
+  roamer/boss/AoE cues live beside the behaviour that causes them rather
+  than being routed back through the orchestrator.
 - **Audio is EVENT-DRIVEN; nothing audio-related runs per frame** except
   `audio.setListener(camera)` and `audio.setActive(...)`, two number
   writes and a boolean.  Voice lifetimes come from the duration each
@@ -1549,10 +1733,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   "can this be heard" check; `unlocked` alone is not.
 - **`window.__omniEngine` / `window.__omniStats` are debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so headless
-  Playwright smokes can drive the real engine in a real browser without a
-  test runner being added to the project (§7).  Two assignments, no
-  per-frame cost beyond the stats one already happening.
+  `window`.  NOTHING in the game reads them — they exist so the headless
+  Playwright suites in `tests/` can drive the real engine in a real browser
+  (§7; the "without a test runner being added" rationale is superseded —
+  roadmap 5b adopted one, and these handles are what it drives).  Two
+  assignments, no per-frame cost beyond the stats one already happening.
+  Note that `private` is compile-time only: at runtime a suite can read
+  engine internals (`runTimeSec`, `waves.waveOffset`) and call private
+  methods (`physics.resolveCollision`) straight off the handle.  That is
+  intended, and is what lets a test measure damage arithmetic in situ
+  instead of reimplementing it.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk
@@ -1642,10 +1832,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 
 - Default branch: `main`.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
-- Two GitHub Actions: `pr-preview.yml` (Netlify deploy previews),
+- Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
+  build + Playwright on every PR and on pushes to `main`),
+  `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
-- No CI type-check or test gates today — local `npm run build` is the
-  last-mile validation.
+- **`PR checks` is the default gate on every PR and the final step before
+  a merge.**  Run the same three commands locally first (`npm run
+  typecheck`, `npm run build`, `npm test` — §7); merge only once the CI
+  run on the PR's CURRENT head is green.  Never merge past a pending or
+  failing `typecheck · build · test`.  The other two workflows still gate
+  nothing — a preview build or a standalone release is not validation.
 
 ---
 

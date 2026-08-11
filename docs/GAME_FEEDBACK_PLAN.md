@@ -1627,6 +1627,88 @@ k. After N waves, spawn a portal to a new map.
        **damage-triggered health/shield bars** as an optional
        candidate.
 
+48. **5b test-harness bootstrap SHIPPED (PR #80,
+    2026-08-09).** Reviewed + verified locally (typecheck
+    green; boot suite passes from a clean install). The
+    "no test runner" era is over at tiers 1–2: 38 Playwright
+    tests / 6 suites (boot, loop, economy, attribution
+    refold, traits, screens), zero flakes ×3 runs, driving
+    the real engine via the debug handles; `npm run
+    typecheck` added. Ledger: `docs/GAUNTLET_5B_LOG.md`.
+    a. **The typecheck immediately paid for itself**: SIX
+       type errors were live on the base (vite build never
+       type-checks), and two were REAL BUGS shipping wrong
+       payloads to the UI — the stage-clear screen's reward
+       fields still spoke the removed shop-discount shape,
+       and `skipWave` pushed a drifted EngineStats literal.
+       Both fixed in-PR.
+    b. **Coverage gaps are explicit, not hidden** (ledger):
+       the canvas pixel-sampling indicator suite was
+       deliberately NOT re-derived (flakiest tier + the 5d
+       UI gauntlet is about to rework that surface) and
+       ship-select pointer synthesis is future work.
+    c. **Step-6 charter addition**: the suites HARD-CODE the
+       economy constants they assert (by design — importing
+       a constant to check itself proves nothing), so the
+       tuning pass MUST update tests/ alongside constants.ts
+       — that is the alarm working, not breakage.
+    d. **OPEN (user call): CI gating (tier 6).** Parked by
+       #46a, but this PR is a concrete argument: nothing
+       runs the three gates unless someone remembers, and a
+       collaborator is now committing. A minimal workflow
+       (build + typecheck + test on PR) is cheap.
+
+49. **5c performance gauntlet SHIPPED, goal NOT met (PR #81,
+    2026-08-09).** Ledger: `docs/GAUNTLET_5C_LOG.md`. Built
+    the `perf/` harness (capture matrix, sim benchmark,
+    in-page probes) and shipped three zero-behaviour fixes:
+    allocation is down **13–36% per frame in every scene**
+    (two independent methods agreeing to 1.3%) and memory is
+    flat over a 5-minute soak. But **typical sim cost is
+    FLAT** and the sim still measures ~76% of the 16.7 ms
+    budget on the worst scene, so the headline goal ("locked
+    60 fps, no dips") is **unmet**, and **no scene is
+    hardware-confirmed** — the six Perf REC captures the
+    ledger asks for were not provided, so every number is
+    headless. The defensible claim is narrow: GC pressure,
+    one named cause of stutter, is materially reduced.
+    a. **A measured rejection worth keeping.** Normalising
+       every entity to one hidden class (to kill megamorphic
+       ICs) tested **15× faster synthetically** and **1.9×
+       SLOWER on the real entity population** — 41 union keys
+       spill out of V8's in-object slots. CLAUDE.md §4 now
+       records this so the convention is not "fixed" again.
+    b. **An instrument caveat that limits the data.** V8's
+       sampling heap profiler charges allocations to whichever
+       frame is running when sampling trips: totals are sound,
+       **per-frame rankings are not**. Proven by an ablation
+       that gutted a function and still saw it blamed for
+       80 MB. Hence 5e reaching for a CPU profile instead.
+    c. **The sim-rate toggle (user call, DEFERRED to 6).**
+       `FIXED_DT` is 1/120, so a 60 fps frame pays for TWO
+       sim steps — the largest single lever that exists.
+       Shipped as a DBG cycle (120 Hz default / 60 Hz);
+       measured on the worst scene at **−62% sim p99, −50%
+       allocation, +26% frames rendered**, beating the three
+       code fixes combined. NOT taken as a default because it
+       is a TRADE: collision resolution is iterative, so half
+       the steps means half the passes untangling dense shard
+       piles. **The verdict is a FEEL call for step 6.**
+    c2. **5e ABANDONED (#49c, user call 2026-08-10).** The
+       CPU-profile pass proposed at the 5c review was scrapped before
+       starting: the hardware captures overturned all of its premises
+       (sim is 1.4-2.7ms on device, the budget goes to `other`, and its
+       target ranking came from the profiler 5c proved unreliable).
+       5f no longer depends on it.
+    d. **One behaviour-affecting change, flagged.** 60 Hz was
+       tried and reverted once before (accumulator alternating
+       1-vs-2 steps per frame → judder), so the toggle ships
+       with a vsync snap on the frame delta. It applies to the
+       DEFAULT path too — deliberately: on a 120 Hz ProMotion
+       display the 1/120 step is *also* one-step-per-frame,
+       which is the same fragile case, so the snap protects
+       the shipping path on the actual target hardware.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1852,7 +1934,9 @@ observes the three strategy guardrails (decision #36e).
    between Overworld stations reusing rival sprites + openPortal;
    parking-lot promotion, decision #40).
 
-5b. **Test-harness bootstrap** (decision #46a — its own small session
+5b. ~~**Test-harness bootstrap**~~ — **DONE** (PR #80, decision #48).
+   38 tests / 6 suites + typecheck; found 2 real bugs on day one.
+   Original item text kept below. (decision #46a — its own small session
    + PR, before or alongside the step-5 gauntlet; additive surface, so
    parallel is safe): promote the session-scratchpad Playwright smokes
    into a repo `tests/` directory (`@playwright/test` dev-dep + `test`
@@ -1870,7 +1954,16 @@ observes the three strategy guardrails (decision #36e).
    real-hardware Perf REC captures requested from the user via
    FOR-USER-REVIEW; the parked implementation sketches
    (shard-broadphase pair budget, exotic perf ideas) built only if
-   measurement says so.
+   measurement says so. **GOAL (user, 2026-08-09): locked smooth 60
+   fps on the target device under ALL gameplay conditions — no dips,
+   no stutter.** Operationally: WORST-FRAME is the metric (not
+   averages); the gauntlet loops until the capture matrix shows no
+   in-code frame over the 16.7 ms budget; steady-state allocation →
+   zero (GC hitches count as stutter); frame-PACING sources (substep
+   bunching, one-frame work bursts) are in scope, not just raw
+   compute; acceptance is confirmed on user hardware captures.
+   External browser/OS stalls (the PR #70 caveat) are attributed and
+   documented, never used to excuse an in-code spike.
 
 5d. **UI gauntlet** (decision #47b) — runs AFTER the step-5 Pair C +
    polish gauntlet and BEFORE the step-6 tuning pass: one coherence /
@@ -1880,9 +1973,53 @@ observes the three strategy guardrails (decision #36e).
    viewport list + a mid-session resize case); optional candidate:
    damage-triggered health/shield bars (parking lot).
 
-   **Remaining-roadmap order** (decision #47): SFX (PR #79,
-   collaborator) ∥ [5b → 5c] → 5 (Pair C + polish) → 5d → 6 (tuning)
-   → 7 (final playtest + second deploy).
+5e. **CPU-profile perf pass — ABANDONED (user call, 2026-08-10).**
+   Proposed mid-5c and scrapped before starting, because the hardware
+   captures that arrived afterwards overturned every premise it rested
+   on.  It read: "5c left TYPICAL SIM COST FLAT ... reach for a CPU
+   profile, which answers where does the 16.7 ms go".  By the end of
+   5c the answers were already in: sim is **1.4–2.7 ms on device** and
+   was never the constraint; the 16.7 ms goes to `other`
+   (compositing / GC), not to our JS; and the "~388 MB residual
+   allocation cluster" it wanted to chase came from the very heap
+   profiler 5c then proved unreliable for per-frame attribution.  A
+   CPU profile would now mostly confirm that our JS is cheap, which
+   the captures already show.
+   **Kept as a record because the reasoning is instructive**: the item
+   was written from headless measurements, and the device disagreed
+   with all of them.  Two narrow threads survive and are logged in
+   `docs/GAUNTLET_5C_LOG.md` rather than promoted here — the
+   intermittent 27–41 ms render spike that never reproduced, and
+   allocation-driven GC as the only remaining lever on the last 0.06%
+   of frames.  Neither justifies a session on its own.
+
+5f. **Engine decomposition for maintainability** (decision #49b, user
+   call) — `GameEngine.ts` is ~7 500 lines, `RenderSystem.ts` ~5 900,
+   `PhysicsSystem.ts` ~3 500, `ShardSystem.ts` ~3 400. Split them for
+   READABILITY, explicitly **not** for a promised speedup. Two rules
+   carried over from 5c's measurements, both counter-intuitive enough
+   to be worth stating: (1) do NOT add abstraction layers — interfaces
+   / base classes / polymorphic dispatch create exactly the megamorphic
+   call sites the engine already avoids by design, and 5c measured a
+   1.9× REGRESSION from the analogous "normalise everything" move on
+   entity shape; (2) extracting a hot inner loop into its own small
+   function is a different thing and may help (5c's closure hoist
+   gained 17%). Sequenced AFTER 5d because step 5 and 5d both still
+   land features in these files, and a decomposition landing first
+   just buys merge conflicts. Gated by the 5b test net (38 tests) —
+   which is what makes this tractable at all. Run 5e first: its profile
+   tells you which functions have a perf reason to be split, so the two
+   passes reinforce each other instead of guessing.
+
+   **Remaining-roadmap order** (decisions #47, #49, #49c): SFX (PR #79,
+   collaborator) ∥ [5b → 5c] → 5 (Pair C + polish) → 5d → 5f →
+   6 (tuning) → 7 (final playtest + second deploy).  (5e abandoned;
+   5f no longer depends on it — its rationale is maintainability, which
+   never rested on any 5c measurement.)
+   5c's **sim-rate toggle** (120 Hz / 60 Hz, DBG "Sim rate") is a FEEL
+   decision with the cost side already measured (−62% sim p99, +26%
+   frames): fold the verdict into 6, where it can be judged alongside
+   the rest of the playtest tuning.
 6. **Economy & progression tuning pass** (parking-lot promotion,
    decision #40) — one playtest-driven session tuning together:
    Overworld income pacing, per-wave enemy growth vs discrete module

@@ -10,7 +10,7 @@
  * catch a regression back.
  */
 import { chromium } from 'playwright';
-const URL = process.env.SMOKE_URL || 'http://127.0.0.1:4183/';
+const URL = process.env.SMOKE_URL || 'http://127.0.0.1:4173/';
 let pass = 0, fail = 0;
 const ok = (n, c, e = '') => { if (c) { pass++; console.log('  ok  ' + n); }
                                else { fail++; console.log('FAIL  ' + n + ' ' + e); } };

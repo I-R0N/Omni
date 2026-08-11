@@ -85,7 +85,8 @@ against them.
 ## 3. State of the branch
 
 Branch: `claude/gauntlet-pair-b-sfx-7oxdrc`. PR #79, targeting
-`claude/plan-completion`. Thirteen commits, ~5.8k lines added.
+`claude/plan-completion`. Fourteen commits, ~5.8k lines added, merged up
+to date with the integration branch.
 
 ### Complete
 
@@ -100,7 +101,8 @@ Branch: `claude/gauntlet-pair-b-sfx-7oxdrc`. PR #79, targeting
 | iOS fix | `ae39d92` | Silent-switch, `interrupted` state, persistent gesture listeners, diagnostic strip. |
 | Playtest tuning | `c5924e4`, `05e1efd`, `6ba05ea`, `674d5ce` | Material whine fix, engine idle, near-field shard rule, POI voices, player↔shard contact. |
 | Retarget | `7db950c` | Rebase onto `claude/plan-completion` + AUDIO_PLAN reconciliation. |
-| Smokes + handoff | *this commit* | `scripts/smoke/` — the six suites, previously session-local — plus this document. |
+| Smokes + handoff | `813f1e5` | `scripts/smoke/` — the six suites, previously session-local — plus this document. |
+| Second retarget | *this commit* | Merge of `claude/plan-completion` after the 5c / 5f / render-split work landed (50 commits). |
 
 **105 sound ids** are registered (98 one-shots, 7 loops) and the same 105
 are documented. A smoke asserts that parity in both directions, so the
@@ -141,9 +143,14 @@ are simply unfinished; see the checklist below.
 - **Volume and mute do not persist.** In-memory only, consistent with the
   project keeping no state across reloads. Making them stick is a
   deliberate, unmade decision.
-- **Two pre-existing TypeScript errors** in `constants.ts` and
-  `ShardSystem.ts` exist on the integration branch too. This branch adds
-  none — verified by diffing the error sets. Do not "fix" them here.
+- **`npm run typecheck` is clean** and `npm test` (38 Playwright specs,
+  the project's own harness from roadmap 5b) passes on this branch. Both
+  are enforced by the `pr-checks` merge gate, so a red one blocks the PR.
+- **`scripts/smoke/` predates `tests/`.** The six audio suites were
+  written before the project had a runner; roadmap 5b then built one
+  (`tests/`, `playwright.config.ts`, `npm test`). Both currently pass and
+  the audio assertions are *not* in the gate. Folding them into `tests/`
+  is worthwhile and listed as remaining work.
 - **The perf A/B assertion is load-sensitive** and can fail as noise on a
   busy machine. See `scripts/smoke/README.md`.
 
@@ -190,8 +197,9 @@ from React in `components/UIOverlay.tsx`.
 
 *Files:* `engine/GameEngine.ts`, `engine/systems/WaveSystem.ts`,
 `engine/systems/DropSystem.ts`, `components/UIOverlay.tsx`.
-*Validation:* extend `scripts/smoke/b3.mjs` with a `playsOf(id) >= 1`
-assertion per newly wired cue, driven through the real game path.
+*Validation:* a `playsOf(id) >= 1` assertion per newly wired cue, driven
+through the real game path — in `tests/` if item 8 has landed, otherwise
+in `scripts/smoke/b3.mjs`.
 
 ### 3. Bus structure and ducking
 
@@ -237,7 +245,24 @@ for. Every item is a single constant.
 `scripts/smoke/tone.mjs` so a retune does not push anything back into the
 fatiguing band.
 
-### 7. Music beds and the music director
+### 7. Fold the audio suites into `tests/`
+
+`scripts/smoke/` was written before the project had a runner; roadmap 5b
+has since built one. The audio assertions are therefore green but *not
+gated*, which is how they will eventually rot. Port them to
+`tests/audio.spec.ts` (and a sibling for the offline tonal guard) using
+the helpers in `tests/helpers.ts`, then delete `scripts/smoke/`.
+
+Two of them do not translate one-for-one and need thought rather than
+transcription: `tone.mjs` renders through an `OfflineAudioContext` rather
+than driving the game, and `b5.mjs`'s perf A/B is load-sensitive and will
+flake in CI — gate it behind an env var or drop it in favour of the
+`play()` microbenchmark beside it.
+
+*Files:* `tests/`, `scripts/smoke/`. *Validation:* `npm test` covers the
+audio assertions and the suite count goes up by roughly 165.
+
+### 8. Music beds and the music director
 
 The largest remaining piece and effectively its own project.
 `AUDIO_PLAN.md` §3 lists the game state that would drive it (all of which
@@ -251,13 +276,10 @@ since music is the bulk of the asset budget.
 - **Branch:** `claude/gauntlet-pair-b-sfx-7oxdrc`. PR #79 targets
   **`claude/plan-completion`**.
 - **Never push to, or target, `main`.** `main` deploys to Netlify.
-- **`npm run build` must be green before every commit.** That is the
-  project's only gate today. Roadmap item 5b (a test-harness bootstrap,
-  running in a parallel session) will add `npm run test` and
-  `npm run typecheck` — once those exist, run them too.
-- **`npx tsc --noEmit` currently reports two pre-existing errors.** Before
-  claiming you introduced none, diff your error set against the same
-  command on `origin/claude/plan-completion`.
+- **`npm run typecheck`, `npm run build` and `npm test` must all be green
+  before every commit.** The `pr-checks` workflow runs exactly these on
+  every PR and they are the merge gate. Also run the six audio suites in
+  `scripts/smoke/` when you touch audio — they are not in the gate yet.
 - **Update `docs/GAUNTLET_PAIR_B_LOG.md` as you go.** It is this work's
   ledger, not a summary written at the end. Record what you did, and
   record *decisions with the alternatives you rejected* — that is what
@@ -291,12 +313,16 @@ collapsed), `playsOf(id)`, `liveVoices`, `liveVoicesOf(id)`,
 `isLooping(id)`, `contextState`, `audible` and `resetCounters()` for
 exactly this.
 
-Six suites live in `scripts/smoke/` (165 assertions). See
-`scripts/smoke/README.md` for how to run them and what each covers. The
-short version:
+There are two suites of tests, and you want both. The project's own
+harness is `tests/` (38 specs, run with `npm test`, part of the merge
+gate). The audio assertions are separate — six suites in `scripts/smoke/`
+(165 assertions), not yet gated; see `scripts/smoke/README.md` for what
+each covers and §4 item 7 for folding them in. The short version:
 
 ```bash
-npm run build
+npm test                                          # the gated harness
+
+npm run build                                     # the audio suites
 npx vite preview --port 4173 --host 127.0.0.1 &
 node scripts/smoke/b2.mjs   # …b3, b4, b5, ios, tone
 ```

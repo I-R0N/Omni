@@ -11,7 +11,7 @@
  */
 import { chromium } from 'playwright';
 
-const URL = process.env.SMOKE_URL || 'http://127.0.0.1:4176/';
+const URL = process.env.SMOKE_URL || 'http://127.0.0.1:4173/';
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = '') => {
   if (cond) { pass++; console.log(`  ok  ${name}`); }

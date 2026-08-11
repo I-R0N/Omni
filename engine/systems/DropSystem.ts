@@ -5,6 +5,7 @@ import {
   DROP_CONFIG,
   SALVAGE_CONSTANTS,
   DROP_PULL,
+  simStepScale,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
   randomPlasticShardShade,
@@ -1121,7 +1122,14 @@ export class DropSystem {
    */
   public mergeDrops(activeDrops: GameEntity[]): void {
     const pullRangeSq = DROP_PULL.RANGE * DROP_PULL.RANGE;
-    const pullStrength = DROP_PULL.STRENGTH;
+    // Both DROP_PULL rates are authored PER SUBSTEP at the 120Hz baseline, so
+    // they must be rescaled when the sim rate changes or they silently mean
+    // something different.  Linear accumulation scales linearly; exponential
+    // decay scales by exponent.  Both conversions are exact — same velocity at
+    // every 1/120s boundary — and both are identity at the 120Hz default.
+    const stepScale = simStepScale();
+    const pullStrength = DROP_PULL.STRENGTH * stepScale;
+    const dampPerStep = Math.pow(DROP_PULL.DAMP_PER_STEP, stepScale);
     for (let i = 0; i < activeDrops.length; i++) {
       const a = activeDrops[i];
       // Generalized to any collectible drop (DROP_TYPES.collectible) — drops
@@ -1167,7 +1175,7 @@ export class DropSystem {
           // prior pull steps so the convergence stays controlled
           // rather than building up an orbital trajectory that
           // overshoots the merge contact.
-          const damp = DROP_PULL.DAMP_PER_STEP;
+          const damp = dampPerStep;
           a.velocity.x *= damp;
           a.velocity.y *= damp;
           b.velocity.x *= damp;

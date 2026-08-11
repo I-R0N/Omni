@@ -657,3 +657,67 @@ agent.
 through five rounds is folded in, and the branch is retargeted onto
 `claude/plan-completion`. Everything still open is in the handoff's §4
 and in the FOR-USER-REVIEW block at the top of this file.
+
+---
+
+## Second retarget — merging the 5c / 5f / render-split work
+
+`claude/plan-completion` moved 50 commits ahead while this branch sat in
+review: gauntlet 5c (performance — flat-array spatial grid, `CellBuckets`,
+render-scale default), gauntlet 5f (the GameEngine decomposition), the
+`renderEntities` split, and roadmap 5b (a real Playwright harness in
+`tests/` plus a `pr-checks` merge gate running typecheck + build + tests).
+`engine/GameEngine.ts` lost **3,148 lines** to that decomposition.
+
+**Merged rather than rebased.** A rebase replays 13 commits through the
+same moved regions and hits the same conflicts up to six times; a merge
+resolves them once. The repo already uses merge commits for PR
+integration, so this costs no history convention.
+
+**12 conflicts in `GameEngine.ts`, 2 in `CLAUDE.md`.** Seven of the twelve
+were the same shape — a region this branch had edited that upstream had
+MOVED WHOLESALE into a new module. Those took upstream's deletion, and the
+audio calls inside them were re-homed by hand:
+
+| Voices | New home |
+|---|---|
+| `bubble.latch`, `bubble.detach` | `engine/roamers/bubbles.ts` |
+| `snitch.dart`, `snitch.near`, `snitch.catch` | `engine/roamers/snitch.ts` |
+| `dragon.provoked`, `dragon.arrive`, `destroy.dragon`, `dragon.leave` | `engine/roamers/dragons.ts` |
+| `rival.warp.in`, `rival.warp.out` | `engine/roamers/rivals.ts` |
+| `boss.phase`, `boss.death` | `engine/bosses.ts` |
+| `impact.explosion.aoe` | `engine/explosions.ts` |
+
+The extracted modules are free functions taking `g: GameEngine`, so each
+call became `g.audio.play(...)` with no sink and no signature change —
+recorded as a CLAUDE.md §8 addendum, because it is now the normal shape
+for a voice outside a system class. Two moves needed more than a
+transcription: `despawnDragon` took no engine handle and gained a `g`
+parameter, and `roaredOnProvoke` (the sticky edge behind the provoke roar)
+is a field this branch added to `DragonInstance`, so it had to be re-added
+to upstream's interface.
+
+*Recorded because* the alternative was tempting and wrong: taking
+upstream's `GameEngine.ts` wholesale would have been one command instead
+of five careful hunks, and would have silently dropped `deathFx` /
+`playDeathFx`, the constructor sinks, and 45 further voices. The
+"conflicts are resolved" signal would have been identical.
+
+**Two module constants were casualties of the deleted regions** —
+`SALVAGE_STREAK_WINDOW_MS` / `SALVAGE_STREAK_MAX` and `SNITCH_NEAR_RANGE`,
+all three audio-only. Restored; the snitch one now lives in
+`engine/roamers/snitch.ts` beside its single reader.
+
+**Validation.** `npm run typecheck` clean — ZERO errors, where the
+previous retarget had to argue that its six were pre-existing (upstream
+fixed them and then gated the command). `npm run build` green. `npm test`
+38/38. All six audio suites green: B2 28, B3 49, B4 28, B5 27, iOS 12,
+tone 21 = **165**. B3 passing is the load-bearing result — it drives
+roamer, boss and portal cues through the real game path, so it is direct
+evidence the re-homed voices still fire from their new homes rather than
+merely still compiling.
+
+**A note for whoever ports these.** `scripts/smoke/*` had per-suite
+default ports (4173/4175/4176/4177/4181/4183) left over from running them
+concurrently in one session. They are now all 4173, so one preview server
+serves the lot. `SMOKE_URL` still overrides.

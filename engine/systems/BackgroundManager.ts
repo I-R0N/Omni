@@ -1,6 +1,6 @@
 
 import { MapType, Vector2, GameEntity } from '../../types';
-import { COLORS, SHOOTING_STAR_CONSTANTS } from '../../constants';
+import { COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
@@ -289,7 +289,14 @@ public setMapType(type: MapType) {
   }
 
   public render(ctx: CanvasRenderingContext2D, cameraPos: Vector2, attractors: GameEntity[] = [], zoom: number = 1.0) {
-    const dpr = window.devicePixelRatio || 1;
+    // MUST be the CAPPED ratio (effectiveDpr), not window.devicePixelRatio.
+    // The canvas backing store is sized with the cap applied, so dividing by
+    // the raw device ratio yields a scene smaller than the real CSS viewport
+    // — and since the star bands are generated to fill exactly this size, the
+    // same 24 000 stars end up packed into a fraction of the area.  At a 2x
+    // cap on a dpr-3 phone that is 4/9 of the area, i.e. 2.25x the star
+    // density, which reads as a visibly over-dense sky.
+    const dpr = effectiveDpr();
     const width = ctx.canvas.width / dpr;
     const height = ctx.canvas.height / dpr;
     if (width === 0 || height === 0) return;

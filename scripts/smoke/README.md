@@ -4,10 +4,10 @@ Headless assertions for the SFX system and explosion variety, written
 during the Pair B session. **165 assertions across six suites.**
 
 They are plain Node scripts driving Playwright against a built preview of
-the real game — there is no test runner in this project yet. Roadmap item
-5b (test-harness bootstrap, running in a parallel session) may absorb or
-relocate them; they live here so the verification work is not lost in the
-meantime.
+the real game. They predate the project's own harness: roadmap 5b has
+since landed `tests/` + `npm test`, which is what the `pr-checks` merge
+gate runs. These suites are **not** in that gate, so they will rot unless
+they are folded into `tests/` — see `docs/HANDOFF_PR79.md` §4 item 7.
 
 ## Running them
 
@@ -22,7 +22,7 @@ Environment variables:
 
 | Var | Default | Purpose |
 |---|---|---|
-| `SMOKE_URL` | `http://127.0.0.1:4173/` | Where the built game is served. |
+| `SMOKE_URL` | `http://127.0.0.1:4173/` | Where the built game is served. All six default to the same port, so one preview server serves the lot. |
 | `CHROME_PATH` | Playwright's own download | Point at a system Chromium if Playwright's is unavailable. |
 
 Playwright must be installed and resolvable (`npm i -D playwright`, or
