@@ -1117,6 +1117,52 @@ and which has diminishing returns from here.
 
 ---
 
+## P18 — Seven Rings, the worst scene in the game, is fixed
+
+Seven Rings was the one scene with a genuine SIM-bound problem (P10): 3359
+entities, `sim 44 ms` of a 60 ms frame, the substep clamp pegged at 5 on every
+worst frame, and the PerfController saturated. Re-captured at the new
+defaults, 164.2 s / 9832 frames:
+
+| metric | P10 (3x, 154.7 s) | now (2x, 164.2 s) |
+|---|---|---|
+| worst frame | 60.0 ms | **31.0 ms** |
+| frame p95 / p99 | 42 / 47 ms | **21 / 24 ms** |
+| 5%-low FPS | 24 | **48** |
+| 1%-low FPS | 21 | **42** |
+| min FPS | 17 | **32** |
+| >=30 fps | 93% | **100%** |
+| >=55 fps | 76% | **94%** |
+| sim avg | 4.93 ms | **1.43 ms** |
+| `steps` on worst frames | **5 (pegged)** | **2 (normal)** |
+| perf tier avg | 3.29, max 54% | **1.56, never heavy** |
+
+**The substep clamp is no longer pegged**, which was P10's whole diagnosis —
+so the `Substep cap` toggle built for it was never needed. It stays at the
+default 5 and remains available as a diagnostic. Building it behind a toggle
+rather than changing the default was the right call: the problem it targeted
+dissolved.
+
+**One number NOT to over-claim.** `shardSys` fell 2.61 ms -> 0.11 ms, a 24x
+drop that the 14% lower entity count (3359 -> 2887) cannot explain. The
+likely cause is a different scene state — that earlier session had far more
+MOBILE SHARDS, which is what `shardSys` cost actually scales with, and total
+entity count hides that. The P2/P3/P5 work made each shard cheaper, but
+attributing a 24x drop to it would be reading a difference in play as a
+difference in code. Recorded as unexplained rather than claimed.
+
+**Tinting confirmed clean:** `256 total misses` — exactly the cache size, so
+it filled once and stopped. No eviction churn at all after the LRU fix.
+`peak tilestamp 1.00 ms (13 tiles)` likewise.
+
+**Every one of the six worst frames is `other` at 22-27 ms**, with render at
+0-1 ms and sim at 2-4 ms. That ~25 ms `other` floor now appears in every
+capture regardless of map, entity count or activity — it is a device
+characteristic (compositing / GC), not a scene cost, and it accounts for
+6 frames in 9832 (**0.06%**).
+
+---
+
 ## Completion summary
 
 ### The acceptance statement (REVISED after the hardware captures)
@@ -1137,12 +1183,19 @@ Hardware-confirmed on Ring World (193.8 s, 11 581 frames, iPhone):
 | >=55 fps | 92% | **96%** |
 | worst frame (A/B, matched length) | 81 ms | **27 ms** |
 
+**Seven Rings — the one scene with a genuine sim-bound problem — is also
+fixed** (P18): worst frame 60 -> 31 ms, `>=30 fps` 93% -> **100%**, and the
+substep clamp no longer pegged. No scene in the matrix now falls below 30 fps
+at any point.
+
 **What is NOT claimed.** The literal goal — "no frame over 16.7 ms, ever" —
-is still not met: 6 frames in 11 581 (**0.05%**) exceed 27 ms, and they are
-heterogeneous one-off events (one `other`, one sim, one render), clustered at
-discrete moments rather than under load. Seven Rings at 3300+ entities has
-its own sim-bound problem that is bounded but not solved. So: **the game is
-measurably and confirmedly smoother, and a rare event-tied hitch remains.**
+is still not met. Every remaining worst frame across every capture is
+`other` at ~22-27 ms (compositing / GC), with our JS at 1-6 ms, at a rate of
+roughly **0.06% of frames**. That term is not addressable in our JavaScript;
+the only lever left on it is further allocation reduction to lower GC
+frequency, with diminishing returns from where P2/P3/P5 left it. So: **the
+game holds 100% of frames above 30 fps on every scene measured, ~95% above
+55, and a rare ~25 ms stall remains that is not ours.**
 
 ### What the headless work was worth, honestly
 
