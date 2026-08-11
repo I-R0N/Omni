@@ -139,7 +139,7 @@ const App: React.FC = () => {
   };
 
   const handleToggleDebug = () => {
-      if (engineRef.current) engineRef.current.toggleDebug();
+      if (engineRef.current) engineRef.current.dbg.toggleDebug();
   };
 
   const handleSetMapType = (type: MapType) => {
@@ -152,179 +152,179 @@ const App: React.FC = () => {
   };
 
   const handleCycleTrailShape = () => {
-      if (engineRef.current) engineRef.current.cycleTrailShape();
+      if (engineRef.current) engineRef.current.dbg.cycleTrailShape();
   };
 
   const handleCycleTrailEmitMode = () => {
-      if (engineRef.current) engineRef.current.cycleTrailEmitMode();
+      if (engineRef.current) engineRef.current.dbg.cycleTrailEmitMode();
   };
 
   const handleToggleLocalGravity = () => {
-      if (engineRef.current) engineRef.current.toggleLocalGravity();
+      if (engineRef.current) engineRef.current.dbg.toggleLocalGravity();
   };
 
   const handleToggleAttractorGravity = () => {
-      if (engineRef.current) engineRef.current.toggleAttractorGravity();
+      if (engineRef.current) engineRef.current.dbg.toggleAttractorGravity();
   };
 
   const handleToggleCollisions = () => {
-      if (engineRef.current) engineRef.current.toggleCollisions();
+      if (engineRef.current) engineRef.current.dbg.toggleCollisions();
   };
 
   const handleToggleShardTileCollisions = () => {
-      if (engineRef.current) engineRef.current.toggleShardTileCollisions();
+      if (engineRef.current) engineRef.current.dbg.toggleShardTileCollisions();
   };
 
   const handleCycleShardPairInterval = () => {
-      if (engineRef.current) engineRef.current.cycleShardPairInterval();
+      if (engineRef.current) engineRef.current.dbg.cycleShardPairInterval();
   };
 
   const handleCycleShardTilePairInterval = () => {
-      if (engineRef.current) engineRef.current.cycleShardTilePairInterval();
+      if (engineRef.current) engineRef.current.dbg.cycleShardTilePairInterval();
   };
 
   const handleTogglePerfAuto = () => {
-      if (engineRef.current) engineRef.current.togglePerfAuto();
+      if (engineRef.current) engineRef.current.dbg.togglePerfAuto();
   };
 
   const handleToggleShardGravity = () => {
-      if (engineRef.current) engineRef.current.toggleShardGravity();
+      if (engineRef.current) engineRef.current.dbg.toggleShardGravity();
   };
 
   const handleToggleShardBonding = () => {
-      if (engineRef.current) engineRef.current.toggleShardBonding();
+      if (engineRef.current) engineRef.current.dbg.toggleShardBonding();
   };
 
   const handleToggleNebulaShardCollisions = () => {
-      if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
+      if (engineRef.current) engineRef.current.dbg.toggleNebulaShardCollisions();
   };
 
   const handleTogglePlayerNebulaCollision = () => {
-      if (engineRef.current) engineRef.current.togglePlayerNebulaCollision();
+      if (engineRef.current) engineRef.current.dbg.togglePlayerNebulaCollision();
   };
 
   const handleToggleShardSleep = () => {
-      if (engineRef.current) engineRef.current.toggleShardSleep();
+      if (engineRef.current) engineRef.current.dbg.toggleShardSleep();
   };
 
   const handleToggleShardViewportCull = () => {
-      if (engineRef.current) engineRef.current.toggleShardViewportCull();
+      if (engineRef.current) engineRef.current.dbg.toggleShardViewportCull();
   };
 
   const handleToggleShardLod = () => {
-      if (engineRef.current) engineRef.current.toggleShardLod();
+      if (engineRef.current) engineRef.current.dbg.toggleShardLod();
   };
 
   const handleToggleMergeRate = () => {
-      if (engineRef.current) engineRef.current.toggleMergeRate();
+      if (engineRef.current) engineRef.current.dbg.toggleMergeRate();
   };
 
   const handleToggleScreenShake = () => {
-      if (engineRef.current) engineRef.current.toggleScreenShake();
+      if (engineRef.current) engineRef.current.dbg.toggleScreenShake();
   };
 
   const handleToggleTileOutlines = () => {
-      if (engineRef.current) engineRef.current.toggleTileOutlines();
+      if (engineRef.current) engineRef.current.dbg.toggleTileOutlines();
   };
 
   const handleToggleChevronMode = () => {
-      if (engineRef.current) engineRef.current.toggleChevronMode();
+      if (engineRef.current) engineRef.current.dbg.toggleChevronMode();
   };
 
   const handleToggleRepelPush = () => {
-      if (engineRef.current) engineRef.current.toggleRepelPush();
+      if (engineRef.current) engineRef.current.dbg.toggleRepelPush();
   };
 
   const handleTogglePlasticAutomata = () => {
-      if (engineRef.current) engineRef.current.togglePlasticAutomata();
+      if (engineRef.current) engineRef.current.dbg.togglePlasticAutomata();
   };
 
   const handleTogglePlasticAutomataDirection = () => {
-      if (engineRef.current) engineRef.current.togglePlasticAutomataDirection();
+      if (engineRef.current) engineRef.current.dbg.togglePlasticAutomataDirection();
   };
 
   const handleToggleMaterialAutomata = () => {
-      if (engineRef.current) engineRef.current.toggleMaterialAutomata();
+      if (engineRef.current) engineRef.current.dbg.toggleMaterialAutomata();
   };
 
   const handleCyclePlasticPalette = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticPalette();
+      if (engineRef.current) engineRef.current.dbg.cyclePlasticPalette();
   };
 
   const handleCyclePlasticShardPalette = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticShardPalette();
+      if (engineRef.current) engineRef.current.dbg.cyclePlasticShardPalette();
   };
 
   const handleCyclePlasticGlowBrightness = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticGlowBrightness();
+      if (engineRef.current) engineRef.current.dbg.cyclePlasticGlowBrightness();
   };
 
   const handleCycleMetalGlowBrightness = () => {
-      if (engineRef.current) engineRef.current.cycleMetalGlowBrightness();
+      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowBrightness();
   };
 
   const handleCycleGlassGlowColor = () => {
-      if (engineRef.current) engineRef.current.cycleGlassGlowColor();
+      if (engineRef.current) engineRef.current.dbg.cycleGlassGlowColor();
   };
 
   const handleCycleMetalGlowColor = () => {
-      if (engineRef.current) engineRef.current.cycleMetalGlowColor();
+      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowColor();
   };
 
   const handleCycleNebulaPalette = () => {
-      if (engineRef.current) engineRef.current.cycleNebulaPalette();
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaPalette();
   };
 
   const handleTogglePlasticBlend = () => {
-      if (engineRef.current) engineRef.current.togglePlasticBlend();
+      if (engineRef.current) engineRef.current.dbg.togglePlasticBlend();
   };
 
   const handleCycleNebulaStretch = () => {
-      if (engineRef.current) engineRef.current.cycleNebulaStretch();
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaStretch();
   };
 
   const handleCycleShatterGrace = () => {
-      if (engineRef.current) engineRef.current.cycleShatterGrace();
+      if (engineRef.current) engineRef.current.dbg.cycleShatterGrace();
   };
 
   const handleCyclePlayerThrust = () => {
-      if (engineRef.current) engineRef.current.cyclePlayerThrust();
+      if (engineRef.current) engineRef.current.dbg.cyclePlayerThrust();
   };
 
   const handleCyclePlayerSpeed = () => {
-      if (engineRef.current) engineRef.current.cyclePlayerSpeed();
+      if (engineRef.current) engineRef.current.dbg.cyclePlayerSpeed();
   };
 
   const handleCycleTileBlendAlpha = () => {
-      if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
+      if (engineRef.current) engineRef.current.dbg.cycleTileBlendAlpha();
   };
 
   const handleCycleShardBlendAlpha = () => {
-      if (engineRef.current) engineRef.current.cycleShardBlendAlpha();
+      if (engineRef.current) engineRef.current.dbg.cycleShardBlendAlpha();
   };
 
   const handleCycleColorBlendInterval = () => {
-      if (engineRef.current) engineRef.current.cycleColorBlendInterval();
+      if (engineRef.current) engineRef.current.dbg.cycleColorBlendInterval();
   };
 
   const handleToggleAsteroidFlow = () => {
-      if (engineRef.current) engineRef.current.toggleAsteroidFlow();
+      if (engineRef.current) engineRef.current.dbg.toggleAsteroidFlow();
   };
 
   const handleToggleSnitchCatchMode = () => {
-      if (engineRef.current) engineRef.current.toggleSnitchCatchMode();
+      if (engineRef.current) engineRef.current.dbg.toggleSnitchCatchMode();
   };
 
   const handleCycleSnitchSpeed = () => {
-      if (engineRef.current) engineRef.current.cycleSnitchSpeed();
+      if (engineRef.current) engineRef.current.dbg.cycleSnitchSpeed();
   };
 
   const handleCycleEnemyScale = () => {
-      if (engineRef.current) engineRef.current.cycleEnemyScale();
+      if (engineRef.current) engineRef.current.dbg.cycleEnemyScale();
   };
 
   const handleCycleSubstepCap = () => {
-      if (engineRef.current) engineRef.current.cycleSubstepCap();
+      if (engineRef.current) engineRef.current.dbg.cycleSubstepCap();
   };
 
   const handleCycleRenderScale = () => {
@@ -334,15 +334,15 @@ const App: React.FC = () => {
   };
 
   const handleCycleHudRate = () => {
-      if (engineRef.current) engineRef.current.cycleHudRate();
+      if (engineRef.current) engineRef.current.dbg.cycleHudRate();
   };
 
   const handleCycleSimRate = () => {
-      if (engineRef.current) engineRef.current.cycleSimRate();
+      if (engineRef.current) engineRef.current.dbg.cycleSimRate();
   };
 
   const handleCycleSwarmMove = () => {
-      if (engineRef.current) engineRef.current.cycleSwarmMove();
+      if (engineRef.current) engineRef.current.dbg.cycleSwarmMove();
   };
 
   const handleApplyCorrosion = () => {
@@ -431,47 +431,47 @@ const App: React.FC = () => {
   };
 
   const handleToggleFFOverlayVectors = () => {
-      if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
+      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayVectors();
   };
 
   const handleToggleFFOverlayCells = () => {
-      if (engineRef.current) engineRef.current.toggleFFOverlayCells();
+      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayCells();
   };
 
   const handleToggleFFOverlayObstacles = () => {
-      if (engineRef.current) engineRef.current.toggleFFOverlayObstacles();
+      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayObstacles();
   };
 
   const handleToggleFFOverlayRebuilds = () => {
-      if (engineRef.current) engineRef.current.toggleFFOverlayRebuilds();
+      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayRebuilds();
   };
 
   const handleCycleFFOverlaySampleN = () => {
-      if (engineRef.current) engineRef.current.cycleFFOverlaySampleN();
+      if (engineRef.current) engineRef.current.dbg.cycleFFOverlaySampleN();
   };
 
   const handleCycleFFDensity = () => {
-      if (engineRef.current) engineRef.current.cycleFFDensity();
+      if (engineRef.current) engineRef.current.dbg.cycleFFDensity();
   };
 
   const handleCycleFFKernelR = () => {
-      if (engineRef.current) engineRef.current.cycleFFKernelR();
+      if (engineRef.current) engineRef.current.dbg.cycleFFKernelR();
   };
 
   const handleCycleFFTangentMix = () => {
-      if (engineRef.current) engineRef.current.cycleFFTangentMix();
+      if (engineRef.current) engineRef.current.dbg.cycleFFTangentMix();
   };
 
   const handleCycleFFBreathe = () => {
-      if (engineRef.current) engineRef.current.cycleFFBreathe();
+      if (engineRef.current) engineRef.current.dbg.cycleFFBreathe();
   };
 
   const handleCycleFFLaneJitter = () => {
-      if (engineRef.current) engineRef.current.cycleFFLaneJitter();
+      if (engineRef.current) engineRef.current.dbg.cycleFFLaneJitter();
   };
 
   const handleCycleFFPattern = () => {
-      if (engineRef.current) engineRef.current.cycleFFPattern();
+      if (engineRef.current) engineRef.current.dbg.cycleFFPattern();
   };
 
   const handleSkipWave = () => {
