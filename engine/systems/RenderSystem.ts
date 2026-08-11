@@ -804,7 +804,21 @@ export class RenderSystem {
   private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
       const key = `${src}|${hex}`;
       const cached = this._tintedSprites.get(key);
-      if (cached) return cached;
+      if (cached) {
+          // LRU, not FIFO.  Eviction below takes the FIRST key in insertion
+          // order, so without this a hit leaves the entry where it was and
+          // the cache discards by AGE rather than by USE — which means a
+          // working set only slightly over the cap evicts precisely the
+          // entries about to be needed again, and every one of them is
+          // rebuilt (a 128x128 canvas, measured at ~2.4ms on device).  A
+          // device capture showed 890 rebuilds in 182s against a 256-entry
+          // cache.  Re-inserting on hit moves the entry to the end, so
+          // eviction follows recency.  Purely a cache-policy change: same
+          // canvases, same pixels, no visual difference.
+          this._tintedSprites.delete(key);
+          this._tintedSprites.set(key, cached);
+          return cached;
+      }
       const img = this.getImage(src);
       if (!img.complete || img.naturalWidth === 0) return null;
       const tTint0 = performance.now();

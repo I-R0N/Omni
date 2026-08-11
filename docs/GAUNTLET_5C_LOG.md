@@ -1066,6 +1066,57 @@ the tint key so the space is bounded by design.
 
 ---
 
+## P17 — the tint cache: a real defect, but NOT the spikes
+
+Ring World, 182.1 s / 10 886 frames — the longest capture of the session.
+
+```
+tint  peak 12.00ms (5 new) · 890 total misses
+spike worst frame 32.0ms → render 1.00 · sim 4.00 · peak render 19.00 · peak tilestamp 1.00ms
+FPS ≥55: 95% · ≥30: 100% · min 31 · p99 24.0ms
+worst frames: all `other` 22-27ms, render 1-2ms
+```
+
+### Three findings, in order of honesty
+
+**1. My own report line was asserting a verdict.** It printed *"sustained
+misses mean the 256-entry tint cache is THRASHING"* **unconditionally** —
+regardless of the number measured. That is exactly the false attribution
+every other part of this report is built to prevent, shipped by me two
+milestones after writing that principle down. Now it states the number and
+the threshold and lets the reader conclude:
+`(cache holds 256; misses >> 256 = evicted-before-reuse, ~256 = warm-up only)`.
+
+**2. Tinting is NOT the render spikes.** 890 misses over 182 s is ~5/second
+at ~2.4 ms each — roughly **1.2% of frame time**. And the 27-41 ms render
+frames **did not reproduce at all** this run (`peak render 19 ms`, and all
+six worst frames are `other`-dominated with render at 1-2 ms). So the
+previous capture's render spikes remain unexplained and are INTERMITTENT,
+which is itself information: they are not a function of entity count alone.
+
+**3. But 890 rebuilds against a 256-entry cache is a real defect**, and the
+cause is the eviction policy, not the size. The cache evicted the
+FIRST-INSERTED key, so it discarded by AGE rather than by USE — and a
+working set only slightly over the cap therefore evicts precisely the
+entries about to be needed again. Fixed by re-inserting on hit, making it a
+true LRU. Same canvases, same pixels, **no visual change**; only which entry
+is discarded changes. Raising the cap was the tempting alternative and the
+wrong one: at 64 KB per 128x128 canvas, 256 entries is already 16 MB and
+1024 would be 64 MB on a phone.
+
+### Where the game actually stands
+
+`>=30 fps: 100%` · `>=55: 95%` · `min 31` · `p99 24.0 ms` over three
+minutes, with two full wave cycles and a death. Every worst frame is now
+`other` (compositing / GC) at 22-27 ms, with our JS at 1-6 ms.
+
+**The in-code work is essentially done.** What remains in the tail is not
+ours to optimise in JS, and the honest next lever for it is allocation
+reduction (to lower GC frequency), which the P2/P3/P5 work already started
+and which has diminishing returns from here.
+
+---
+
 ## Completion summary
 
 ### The acceptance statement (REVISED after the hardware captures)

@@ -393,8 +393,13 @@ export class PerfRecorder {
       // + the independent raw peaks.  worst frame ≈ render+sim → our compute;
       // worst frame ≫ render+sim → an external gap (GC / browser stall).
       `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)} · peak tilestamp ${r2(this.maxStampMs)}ms (${this.maxStampCount} tiles)`,
-      `tint  peak ${r2(this.maxTintMs)}ms (${this.maxTintMisses} new) · ${this.totalTintMisses} total misses over the capture` +
-        ` — sustained misses mean the 256-entry tint cache is THRASHING, not warming`,
+      // State the number and the threshold; let the reader draw the
+      // conclusion.  The first version of this line asserted "THRASHING"
+      // unconditionally — i.e. it printed a verdict regardless of the data,
+      // which is precisely the false attribution the rest of this report is
+      // built to avoid.
+      `tint  peak ${r2(this.maxTintMs)}ms (${this.maxTintMisses} new) · ${this.totalTintMisses} total misses` +
+        ` (cache holds 256; misses >> 256 = evicted-before-reuse, ~256 = warm-up only)`,
       `perf  tier avg ${r2(avgTier)} (${tierParts.join(' / ')}) · load peak ${r2(this.peakLoad)}`,
       `peak  entities ${this.maxEntities} · enemies ${this.maxEnemies} · particles ${this.maxParticles}`,
     ];
