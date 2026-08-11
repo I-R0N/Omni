@@ -50,7 +50,7 @@ the differences are the point:
 - [x] **P10** — `engine/systems/render/enemyShapes.ts` + `drawUtils.ts` (shipped)
 - [x] **P11** — `engine/systems/render/hud.ts` (shipped)
 - [x] **P12** — `engine/systems/render/effects.ts` (shipped)
-- [ ] **P13..Pn** — one extraction per milestone, loop until dry
+- [x] **P13** — `engine/systems/render/staticTileCache.ts` (shipped) — **loop dry**
 - [ ] **P-final** — validation + report
 
 ### Running score
@@ -78,6 +78,7 @@ second file:
 | P11 screen-space HUD | 4,203 | `engine/systems/render/hud.ts` | 739 |
 | | | `drawUtils.ts` grew to | 191 |
 | P12 trails/particles/arcs | 3,771 | `engine/systems/render/effects.ts` | 460 |
+| P13 static-tile cache | 3,456 | `engine/systems/render/staticTileCache.ts` | 353 |
 
 Every milestone:
 typecheck clean, build clean, 38/38 Playwright tests pass, no test
@@ -559,4 +560,24 @@ the DBG-selected `trailShape`.
 
 Verbatim: 324 → 328 normalised lines, every diff a signature (the +4 is
 the four `r: RenderSystem` parameter lines).
+
+### Iteration 13 — the static-tile cache (P13), and the loop goes dry
+
+`engine/systems/render/staticTileCache.ts` (353 lines): stamp the map's
+immovable tiles into an offscreen canvas once, blit it in a single draw,
+and erase individual tiles as they die. `RenderSystem.ts` 4,203 →
+**3,456** across P11–P13 — down **42%** from its 5,959 baseline.
+
+`STATIC_TILE_MAX_CANVAS_DIM` came along: the cache is its only reader.
+`overlayMaterialCracks` did NOT, even though the first pass at grouping
+swept it up — a second look showed its three callers are all inside
+`renderEntities`, drawing cracks on SHARDS, and it has nothing to do
+with the tile cache. Grouping by "sits nearby and sounds related" is the
+failure mode this gauntlet has had to correct at almost every milestone.
+
+Verbatim: 169 normalised lines each side, nine signature diffs.
+
+**The loop is dry.** What remains in both files is either the one thing
+the brief said not to break up or a seam whose coupling is now measured
+and named — see the FOR-USER-REVIEW entry below.
 
