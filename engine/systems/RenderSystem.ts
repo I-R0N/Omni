@@ -7,11 +7,13 @@ import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA, HEX_SIZE } from '../maps/TileGenerator';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../toroidal';
-import { hexToRgb, liftCh, sinkCh, hash01, CrackStyle, crackSeedFor, drawDamageCracks,
-         ROCK_CRACK_STYLE, METAL_CRACK_STYLE, shiftX, shiftY, roundRectPath } from './render/drawUtils';
+import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01, CrackStyle,
+         crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, shiftX,
+         shiftY, roundRectPath } from './render/drawUtils';
 import { drawEnemyShape } from './render/enemyShapes';
 import { drawDropShape } from './render/dropShapes';
 import { drawProjectileShape } from './render/projectileShapes';
+import { drawNebulaTileCached, drawNebulaEntity } from './render/nebulaTiles';
 import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
          prepareStaticTileCacheForFrame, syncStaticTileCacheAgainstDeaths,
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
@@ -43,40 +45,6 @@ const FF_REBUILD_FLASH_MS = 600;
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
 const SHIELD_COLLISION_MULT = SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
-
-// Convert an [r, g, b] tuple back into a "#rrggbb" hex string.  Each
-// channel is clamped to [0, 255] then 0-padded.  Used by the density
-// tint helper to format a per-(variant, tier) cached colour string.
-function rgbToHex(r: number, g: number, b: number): string {
-    const ri = Math.max(0, Math.min(255, Math.round(r))).toString(16).padStart(2, '0');
-    const gi = Math.max(0, Math.min(255, Math.round(g))).toString(16).padStart(2, '0');
-    const bi = Math.max(0, Math.min(255, Math.round(b))).toString(16).padStart(2, '0');
-    return `#${ri}${gi}${bi}`;
-}
-
-/**
- * Resolve a shard's render colour for the current density tier.
- * Tier 0 (or no variant / no density) returns `baseHex` unchanged so
- * existing colours are preserved bit-for-bit.  Tier > 0 multiplies
- * each channel by the per-(variant, tier) multiplier from
- * `densityTintMultiplier`, caches the formatted hex on the entity
- * (`densityCachedTint`), and returns it.  ShardSystem invalidates
- * the cache (`densityCachedTint = undefined`) at every site that
- * mutates `densityTier`.
- */
-function densityTintForRender(entity: GameEntity, baseHex: string): string {
-    const tier = entity.densityTier ?? 0;
-    if (tier <= 0) return baseHex;
-    const variantId = entity.shardVariant as ShardVariantId | undefined;
-    if (!variantId) return baseHex;
-    if (entity.densityCachedTint !== undefined) return entity.densityCachedTint;
-    const mul = densityTintMultiplier(variantId, tier);
-    if (mul >= 1.0) return baseHex;
-    const [r, g, b] = hexToRgb(baseHex);
-    const out = rgbToHex(r * mul, g * mul, b * mul);
-    entity.densityCachedTint = out;
-    return out;
-}
 
 /**
  * PAuto automata colour for a plastic-shard: the active palette's
@@ -129,7 +97,7 @@ function repelGlowIntensity(impulse: number): number {
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
-  private debugMode: boolean = false;
+  debugMode: boolean = false;
   // Player trail shape — selectable from the debug panel.
   trailShape: TrailShape = TrailShape.CIRCLE;
   // DBG toggle — when true, the renderer draws thin collision-
@@ -297,7 +265,7 @@ export class RenderSystem {
   // Nebula tiles/shards re-use the background nebula PNGs with per-tile
   // colour composition applied via source-atop, so tinting happens once per
   // (sprite, colour) pair instead of every frame.
-  private _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
+  _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
   // Normalized (range [-0.5, 0.5]) alpha-weighted centroid offset of the
   // visible content within each sprite's bitmap bounds.  Computed once
   // per source URL at first draw, then reused to shift drawImage so the
@@ -481,7 +449,7 @@ export class RenderSystem {
    * for every nebula twinkle.  Drawn at NEBULA_CONSTANTS.TWINKLE_STAR_SIZE
    * world-units in the render path.
    */
-  private getTwinkleBitmap(): HTMLCanvasElement {
+  getTwinkleBitmap(): HTMLCanvasElement {
       if (this._twinkleBitmap) return this._twinkleBitmap;
       const size = 32;
       const c = document.createElement('canvas');
@@ -533,7 +501,7 @@ export class RenderSystem {
    * is blocked (e.g. cross-origin canvas taint).  Both cases just fall
    * back to drawing at the geometric bitmap centre — same as before.
    */
-  private getSpriteCentroid(src: string): { dx: number, dy: number } {
+  getSpriteCentroid(src: string): { dx: number, dy: number } {
       const cached = this._spriteCentroids.get(src);
       if (cached) return cached;
       const img = this.getImage(src);
@@ -596,7 +564,7 @@ export class RenderSystem {
    * canvas.  Quality cost is minimal because the blit downscales
    * either way.
    */
-  private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
+  getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
       const key = `${src}|${hex}`;
       const cached = this._tintedSprites.get(key);
       if (cached) {
@@ -1440,69 +1408,15 @@ export class RenderSystem {
           return;
       }
 
-      // ── Fast-path NEBULA tile render ───────────────────────────────
-      // Mirrors the STRUCTURE fast path.  Steady-state nebula tiles (no
-      // hit flash, no fade in / fade out, not in a twinkle window, cache
-      // populated by an earlier slow-path draw) collapse to a single
-      // drawImage + two globalAlpha writes — cutting per-tile cost from
-      // ~30-100 µs to ~5 µs.  Tiles drop into the slow path automatically
-      // when twinkle activates (nebulaTwinkleNextAt has elapsed) or when
-      // NebulaSystem invalidates the cache (nebulaCachedTinted=undefined).
-      // Shards are excluded because they still need ctx.rotate +
-      // speed-based opacity.
-      //
-      // Debug mode is NOT a fast-path blocker: the slow-path's cyan
-      // polygon overlay only matters for shards (which take the slow
-      // path anyway), and the HUD requires debug mode to be on for the
-      // user to see perf numbers — so blocking the fast path on
-      // debugMode would mean it never runs while we're measuring.
-      // Stage 5: fast-path gate flips from EntityType-keyed to
-      // variant-id-keyed.  Same cost (one string compare), same
-      // shape, same cache invalidation sites.  Only the nebula-tile
-      // variant populates the per-entity tinted-canvas cache —
-      // future variants can opt in via SHARD_VARIANTS[v].renderCache.
+      // ── Fast-path NEBULA tile render (render/nebulaTiles.ts) ────────
+      // A steady-state nebula tile collapses to a single drawImage off the
+      // per-entity cache the slow path populated on an earlier frame.  The
+      // leading variant test stays inline so every OTHER entity in the
+      // frame pays one string compare rather than a call; the eight
+      // conditions that force a tile back onto the slow path live with the
+      // draw they gate.
       if (entity.shardVariant === 'nebula-tile'
-          && entity.active
-          && !entity.hitFlash
-          && entity.mergeFadeTimer === undefined
-          && entity.nebulaSpawnTimer === undefined
-          && entity.regenPopTimer === undefined
-          && entity.nebulaCachedTinted !== undefined
-          && entity.nebulaTwinkleNextAt !== undefined
-          && perfNowSec < entity.nebulaTwinkleNextAt) {
-          ctx.globalAlpha = 0.55;
-          ctx.drawImage(
-              entity.nebulaCachedTinted,
-              rx + (entity.nebulaCachedDx ?? 0),
-              ry + (entity.nebulaCachedDy ?? 0),
-              entity.nebulaCachedSize ?? 0,
-              entity.nebulaCachedSize ?? 0,
-          );
-          ctx.globalAlpha = 1.0;
-          // Debug overlay parity with the slow path — without this the
-          // polygon outline only appears for tiles currently in their
-          // twinkle window (which forces them to the slow path), which
-          // looks like random flickering across the cluster.  Drawn in
-          // world space (no ctx.translate in the fast path) by adding
-          // (rx, ry) to each polygon point.
-          if (this.debugMode && entity.polygonPoints && entity.polygonPoints.length > 0) {
-              ctx.globalAlpha = 0.9;
-              ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              const p0 = entity.polygonPoints[0];
-              ctx.moveTo(rx + p0.x, ry + p0.y);
-              for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
-                  const p = entity.polygonPoints[pi];
-                  ctx.lineTo(rx + p.x, ry + p.y);
-              }
-              ctx.closePath();
-              ctx.stroke();
-              ctx.globalAlpha = 1.0;
-          }
-          this.lastNebulaFastCount++;
-          return;
-      }
+          && drawNebulaTileCached(this, ctx, entity, rx, ry, perfNowSec)) return;
 
       // Transform logic — compose camera × translate(rx, ry) × rotate
       // into one absolute matrix and write it via setTransform.  Replaces
@@ -1537,285 +1451,12 @@ export class RenderSystem {
       // already paired with inner save/restore at their use sites.
       ctx.globalAlpha = 1.0;
 
-      // --- NEBULA TILES & SHARDS ---
-      // Cloud-like rendering: tinted sprite drawn at a display-scale larger
-      // than the physics size so adjacent tiles blend seamlessly across
-      // their shared hex-grid boundaries.  Tinted sprites are cached.
+      // --- NEBULA TILES & SHARDS --- (render/nebulaTiles.ts)
+      // Cloud-like rendering: the tint chain, the area-proportional sprite,
+      // the debug outline and the twinkle scheduler — and the pass that
+      // refills the fast path's per-entity cache above.
       if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
-          this.lastNebulaSlowCount++;
-          // Per-entity blended-hex cache: populated lazily on first render
-          // and invalidated by NebulaSystem when composition mutates
-          // (merge / regen).  Skips blendCompositionToHex's per-call
-          // composition-key string allocation on every frame.
-          let tintHex: string;
-          if (entity.nebulaBlendedHex !== undefined) {
-              tintHex = entity.nebulaBlendedHex;
-          } else {
-              tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
-              entity.nebulaBlendedHex = tintHex;
-          }
-          // Interior-darken rule: nebula tiles surrounded by more active
-          // neighbours render progressively darker so cluster edges pop
-          // and interiors recede.  Max darkening at 6 neighbours (fully
-          // enclosed) caps at 0.55× brightness; shards skip the pass.
-          if (entity.shardVariant === 'nebula-tile' && entity.nebulaNeighborCount) {
-              const t = Math.min(1, entity.nebulaNeighborCount / 6);
-              const factor = 1 - t * 0.45;
-              const [r, g, b] = hexToRgb(tintHex);
-              const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v * factor)))
-                  .toString(16).padStart(2, '0');
-              tintHex = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-          }
-          // Density tier darkens nebula shards (only — tiles have density
-          // disabled in the variant config).  Stacks multiplicatively
-          // with the interior-darken rule above for tiles, but in
-          // practice tiles never reach this branch with a positive
-          // tier.  Skipped at tier 0 so existing shard colour matches
-          // pre-density visuals exactly.
-          if (entity.densityTier && entity.densityTier > 0
-              && entity.shardVariant === 'nebula-shard') {
-              tintHex = densityTintForRender(entity, tintHex);
-          }
-          const spriteSrc = entity.sprite;
-          // Fade-out multiplier — per-entity duration lets fast-collision
-          // shatters use a shorter, snappier fade than slow drift-through
-          // collisions.  Falls back to the base constant for legacy tiles
-          // without the per-entity duration field set.
-          const fadeDuration = entity.mergeFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
-          const fadeMul = entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0 && fadeDuration > 0
-              ? Math.max(0, entity.mergeFadeTimer / fadeDuration)
-              : 1.0;
-          // Fade-in multiplier — same per-entity duration treatment so
-          // child shards from a fast collision fade in fast, matching
-          // their parent tile's fade-out rate.  Combines multiplicatively
-          // with fadeMul so a tile shattered mid-birth smoothly crossfades
-          // from its current alpha toward zero.
-          const spawnDuration = entity.nebulaSpawnDuration ?? NEBULA_CONSTANTS.FADE_IN_DURATION;
-          const spawnMul = entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0 && spawnDuration > 0
-              ? Math.max(0, 1 - entity.nebulaSpawnTimer / spawnDuration)
-              : 1.0;
-          // Speed-based opacity falloff for shards — fast shards read
-          // a little translucent ("wind-torn cloud"), settled shards are
-          // fully opaque.  Uses speed² so we skip sqrt; tiles are
-          // stationary so we skip the branch entirely for them.
-          let speedMul = 1.0;
-          if (entity.shardVariant === 'nebula-shard') {
-              const vx = entity.velocity.x;
-              const vy = entity.velocity.y;
-              const speedSq = vx * vx + vy * vy;
-              speedMul = Math.max(
-                  NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_MIN,
-                  1 - speedSq * NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_K,
-              );
-          }
-          if (spriteSrc) {
-              // Fast path for shards: reuse the cached composite cache key
-              // so we do a single Map.get against the shared _tintedSprites
-              // store without rebuilding "${src}|${hex}" per frame.  Falls
-              // through to getTintedSprite on cache miss (first draw, or
-              // if the LRU evicted the canvas) which populates the store
-              // and returns the same canvas.  Tiles keep the default path
-              // since their tintHex varies with neighbour-count darkening.
-              let tinted: HTMLCanvasElement | null = null;
-              if (entity.shardVariant === 'nebula-shard') {
-                  if (entity.nebulaTintedKey === undefined) {
-                      entity.nebulaTintedKey = `${spriteSrc}|${tintHex}`;
-                  }
-                  tinted = this._tintedSprites.get(entity.nebulaTintedKey) ?? null;
-                  if (!tinted) tinted = this.getTintedSprite(spriteSrc, tintHex);
-              } else {
-                  tinted = this.getTintedSprite(spriteSrc, tintHex);
-              }
-              if (tinted) {
-                  const isTile = entity.shardVariant === 'nebula-tile';
-                  // Sprite size is proportional to the effective nebula
-                  // area the entity carries.  A fresh shard from a 5-way
-                  // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
-                  // half-merged shard draws ≈ 68; a full tile draws at
-                  // the reference size (96).  Using sqrt keeps visual
-                  // area (∝ sprite²) proportional to effective area, so
-                  // what the player sees matches the conserved mass
-                  // accounting used for merge → transmutation.  Legacy
-                  // entities without nebulaTileArea fall back to a full
-                  // tile sprite.
-                  const effArea = entity.nebulaTileArea ?? HEX_AREA;
-                  const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
-                  const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                      * Math.sqrt(areaRatio);
-                  // Content-centroid correction: shift the draw so the
-                  // sprite's visible-pixel centroid lands on the pivot.
-                  // Without this, asymmetric source PNGs appear to orbit
-                  // around their bitmap centre when rotated.  Fallback is
-                  // (0, 0) if the centroid isn't computable yet.
-                  const centroid = this.getSpriteCentroid(spriteSrc);
-                  const dOffset = -(drawSize / 2);
-                  const dx = dOffset - centroid.dx * drawSize;
-                  const dy = dOffset - centroid.dy * drawSize;
-                  // Velocity-aligned stretch (nebula-shard only).
-                  // Reads as "wind tugging the cloud forward" — the
-                  // sprite squashes along the velocity axis as the
-                  // shard moves.  Gated on speed² > REST so settled
-                  // shards skip the math.  Always uses "free" mode:
-                  // only the squash axis aligns to velocity; the
-                  // sprite stays at entity.rotation (controlled by
-                  // rotationSpeed) — achieved by rotating to
-                  // velocity, scaling, then rotating back so the
-                  // local coord system stays squashed along the
-                  // velocity axis while drawImage paints in the
-                  // entity-rotated frame.  Stretch magnitude reads
-                  // from getActiveNebulaStretchK() (DBG-cyclable
-                  // via the NStr button); when the cycle is at
-                  // K = 0 the stretch is skipped entirely.
-                  if (!isTile) {
-                      const stretchK = getActiveNebulaStretchK();
-                      if (stretchK > 0) {
-                          const vx = entity.velocity.x;
-                          const vy = entity.velocity.y;
-                          const speedSq = vx * vx + vy * vy;
-                          if (speedSq > NEBULA_CONSTANTS.VEL_STRETCH_REST_SPEED_SQ) {
-                              const speed = Math.sqrt(speedSq);
-                              const stretch = Math.min(
-                                  NEBULA_CONSTANTS.VEL_STRETCH_MAX,
-                                  speed * stretchK,
-                              );
-                              const velAngle = Math.atan2(vy, vx);
-                              const delta = velAngle - entity.rotation;
-                              ctx.rotate(delta);
-                              ctx.scale(
-                                  1 + stretch,
-                                  1 - stretch * NEBULA_CONSTANTS.VEL_STRETCH_SQUASH_RATIO,
-                              );
-                              ctx.rotate(-delta);
-                          }
-                      }
-                  }
-                  // Soft alpha — tiles slightly more opaque so the cloud
-                  // reads as solid, shards slightly less so they feel light.
-                  // Optional per-entity multiplier so callers can ask for
-                  // a wispier-than-default puff (rock-tile / rock-shard
-                  // shatter callers set ~0.5 so their nebula debris
-                  // reads as a faint dust cloud rather than a solid
-                  // tinted shard).
-                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul * (entity.nebulaAlphaMul ?? 1);
-                  ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
-                  ctx.globalAlpha = 1.0;
-                  // Populate the nebula fast-path cache while we have
-                  // every input on hand.  See the fast-path block above
-                  // renderEntities()'s slow body — once these four
-                  // fields are non-undefined, subsequent frames bypass
-                  // this whole slow path until NebulaSystem invalidates
-                  // them (composition / neighbour-count / area changes).
-                  if (entity.shardVariant === 'nebula-tile') {
-                      entity.nebulaCachedTinted = tinted;
-                      entity.nebulaCachedDx = dx;
-                      entity.nebulaCachedDy = dy;
-                      entity.nebulaCachedSize = drawSize;
-                  }
-              } else {
-                  // Fallback: procedural soft circle in the tint colour
-                  // while the nebula sprite is still loading.
-                  const r = Math.max(entity.size.x, entity.size.y) * 0.9;
-                  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-                  grad.addColorStop(0, tintHex);
-                  grad.addColorStop(1, 'rgba(0,0,0,0)');
-                  ctx.fillStyle = grad;
-                  ctx.globalAlpha = 0.45 * fadeMul * spawnMul * speedMul;
-                  ctx.beginPath();
-                  ctx.arc(0, 0, r, 0, Math.PI * 2);
-                  ctx.fill();
-                  ctx.globalAlpha = 1.0;
-              }
-          }
-
-          // --- DEBUG OVERLAY ---
-          // Nebula tiles: draw the hex outline so the invisible interactable
-          // footprint is visible during debug.
-          // Nebula shards: draw the polygon outline (same glass-shard style
-          // polygon set at spawn).  Legacy shards without polygonPoints fall
-          // back to an implicit circle defined by `size`.
-          // Gated on the main DBG mode OR the dedicated Outline toggle, so
-          // a dev can show nebula+plastic outlines together without
-          // switching the whole DBG mode on.
-          if (this.debugMode || this.tileOutlinesEnabled) {
-              ctx.globalAlpha = 0.9;
-              ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
-              ctx.lineWidth = 1;
-              if (entity.polygonPoints && entity.polygonPoints.length > 0) {
-                  ctx.beginPath();
-                  const p0 = entity.polygonPoints[0];
-                  ctx.moveTo(p0.x, p0.y);
-                  for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
-                      const p = entity.polygonPoints[pi];
-                      ctx.lineTo(p.x, p.y);
-                  }
-                  ctx.closePath();
-                  ctx.stroke();
-              } else if (entity.shardVariant === 'nebula-shard') {
-                  // Legacy fallback: implicit circle defined by `size`.
-                  const r = Math.max(entity.size.x, entity.size.y) / 2;
-                  ctx.beginPath();
-                  ctx.arc(0, 0, r, 0, Math.PI * 2);
-                  ctx.stroke();
-              }
-              ctx.globalAlpha = 1.0;
-          }
-
-          // --- TWINKLE STAR ---
-          // Stationary nebula TILES get an occasional fading-in/out star at a
-          // random in-sprite position — adds ambience to the backdrop.
-          // Skipped for NEBULA_SHARDs: shards are transient, drifting, and
-          // often in merge cooldown, so the twinkle is almost imperceptible
-          // on them while still costing a performance.now() + drawImage per
-          // shard per frame.  Cutting it for shards eliminates that work
-          // without a visible change.
-          //
-          if (entity.shardVariant === 'nebula-tile') {
-              const now = perfNowSec;
-              if (entity.nebulaTwinkleNextAt === undefined) {
-                  // First sighting — stagger the initial twinkle randomly
-                  // across the [MIN, MAX] interval so a freshly-spawned
-                  // cluster doesn't all twinkle in unison.
-                  entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
-                      + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
-                  entity.nebulaTwinkleX = (Math.random() * 2 - 1);
-                  entity.nebulaTwinkleY = (Math.random() * 2 - 1);
-              }
-              const elapsed = now - entity.nebulaTwinkleNextAt;
-              if (elapsed >= 0) {
-                  if (elapsed < NEBULA_CONSTANTS.TWINKLE_DURATION) {
-                      // Active twinkle — sin curve over the duration
-                      const t = elapsed / NEBULA_CONSTANTS.TWINKLE_DURATION;
-                      const twinkleAlpha = Math.sin(t * Math.PI) * fadeMul * spawnMul;
-                      if (twinkleAlpha > 0.01) {
-                          const star = this.getTwinkleBitmap();
-                          // Place the star within the sprite footprint —
-                          // half-extent × placement-range keeps it inside.
-                          // Same area-proportional draw-size formula the
-                          // sprite render uses above, so the twinkle
-                          // scales with the shard/tile as it merges.
-                          const effArea = entity.nebulaTileArea ?? HEX_AREA;
-                          const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
-                          const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                              * Math.sqrt(areaRatio);
-                          const halfExtent = (drawSize / 2) * NEBULA_CONSTANTS.TWINKLE_PLACEMENT_RANGE;
-                          const tx = (entity.nebulaTwinkleX ?? 0) * halfExtent;
-                          const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;
-                          const starSize = NEBULA_CONSTANTS.TWINKLE_STAR_SIZE;
-                          ctx.globalAlpha = twinkleAlpha;
-                          ctx.drawImage(star, tx - starSize / 2, ty - starSize / 2, starSize, starSize);
-                          ctx.globalAlpha = 1.0;
-                      }
-                  } else {
-                      // Cycle complete — schedule the next one with a fresh
-                      // random delay and reroll the in-sprite position.
-                      entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
-                          + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
-                      entity.nebulaTwinkleX = (Math.random() * 2 - 1);
-                      entity.nebulaTwinkleY = (Math.random() * 2 - 1);
-                  }
-              }
-          }
-
+          drawNebulaEntity(this, ctx, entity, perfNowSec);
           // Reset to the cached camera matrix so subsequent slow-path
           // entities (and post-loop draws like renderHealthBar) start from
           // camera space — mirrors what ctx.restore() did when paired
