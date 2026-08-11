@@ -1749,6 +1749,16 @@ k. After N waves, spawn a portal to a new map.
        judgment at the final playtest (step 7). The goal is
        judged there, not re-attacked with more JS passes.
 
+51. **CI promoted; step-5 gauntlet scoped (user, 2026-08-11).**
+    The #48d open question is answered YES: a minimal GitHub
+    Actions workflow running the three gates (build, typecheck,
+    Playwright suite) on PRs rides the step-5 Pair C + polish
+    gauntlet as its FIRST milestone, so every later milestone
+    of that gauntlet (and the collaborator's SFX PR) runs under
+    it. Existing workflows (pr-preview, publish-standalone)
+    stay untouched. Tier 6 of the parking-lot harness entry is
+    thereby consumed; tiers 3–5 remain parked.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
