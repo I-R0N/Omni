@@ -1597,6 +1597,10 @@ export interface EngineStats {
    *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
    *  nothing. */
   minimapMaterialName?: string;
+  /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
+   *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
+   *  so a change applies to newly generated rock. */
+  rockPaletteName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;

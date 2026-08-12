@@ -645,6 +645,18 @@ export interface TileClusterConfig {
 export interface PerMapVariantSpawn {
   freeSpawn?: FreeSpawnConfig;
   tileCluster?: TileClusterConfig;
+  /**
+   * Ring indices this variant occupies on a ring-shaped map (today:
+   * SevenRingsMap).  Added by gauntlet step 5 G7, when MAP_POPULATION
+   * became the authority for the natural maps' tile-variant mix: a ring
+   * map's "ratio" is not a cluster count, it is WHICH RING is made of
+   * what, and that is population data even though the geometry is not.
+   *
+   * The ring GEOMETRY (how many, how far out, how thinned) deliberately
+   * stays on the map class — that is the map's shape, not its population,
+   * and a map named Seven Rings does not get its ring count from a table.
+   */
+  tileRings?: readonly number[];
 }
 
 // ── Variant-specific completion hooks ──────────────────────────────

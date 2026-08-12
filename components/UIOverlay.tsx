@@ -81,6 +81,7 @@ interface UIOverlayProps {
   onToggleChevronMode?: () => void;
   onToggleJoystickDebug?: () => void;
   onCycleMinimapMaterial?: () => void;
+  onCycleRockPalette?: () => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -243,6 +244,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleChevronMode,
   onToggleJoystickDebug,
   onCycleMinimapMaterial,
+  onCycleRockPalette,
   onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -1305,6 +1307,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Chevrons', onToggleChevronMode,
                   stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
                   'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
+                {ctrlRow('Rock palette', onCycleRockPalette,
+                  stats.rockPaletteName ?? 'mixed',
+                  'Rock body colour family. Mixed (default): mostly slate with rust and mineral running through it, so a field reads as ROCK with variation. Slate: the old single flat grey. Rust / mineral: the pure warm and cool families, kept for regional-identity work and for judging them side by side. Shades are rolled per instance AT SPAWN — reload the map to repaint a whole field.')}
                 {ctrlRow('Minimap mat', onCycleMinimapMaterial,
                   stats.minimapMaterialName ?? 'Flow',
                   'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.')}

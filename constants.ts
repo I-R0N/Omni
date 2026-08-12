@@ -38,6 +38,62 @@ export const COLORS = {
   STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
 
+// ── Rock palettes (material-palette-residual, decision #30) ─────────
+// Rock was ONE flat slate (`COLORS.ASTEROID`), so a rock field read as grey
+// gravel — the most common material in the game and the least characterful.
+// Decision #30 asked for a "rock red+blue palette": per-instance shades
+// spanning a warm oxidised red and a cold mineral blue, so a rock cluster
+// has internal variation and different regions can eventually be built from
+// different families ("maps become known for characteristics").
+//
+// Same mechanism as the plastic palettes and for the same reason: the shade
+// is picked ONCE at spawn (`randomRockShade`) and stored on the entity, so
+// it survives the tile→shard→tile cycle and costs nothing per frame.  The
+// density-tint system multiplies this base, so every shade darkens toward
+// the shared ROCK_AGGREGATION_TINT_FLOOR exactly as the old flat colour did.
+export const ROCK_SLATE_SHADES = [
+  '#94a3b8', '#8b98ac', '#a1adc0', '#7f8b9e', '#9aa7ba',
+] as const;
+// Oxidised — iron reds and rust browns, desaturated enough to sit against a
+// near-black starfield without reading as lava.
+export const ROCK_RUST_SHADES = [
+  '#a1746a', '#8f6259', '#b08277', '#7d564f', '#96695f',
+] as const;
+// Mineral — cold blues with a slate backbone.
+export const ROCK_MINERAL_SHADES = [
+  '#7c93b8', '#6b83a8', '#8ba2c4', '#5f7699', '#7488ab',
+] as const;
+// Mixed — the shipped default: mostly slate with rust and mineral running
+// through it, so a field reads as ROCK with variation rather than as three
+// different materials.  The pure families stay selectable for regional
+// identity work and for judging them side by side.
+export const ROCK_MIXED_SHADES = [
+  ...ROCK_SLATE_SHADES, ...ROCK_SLATE_SHADES,
+  ...ROCK_RUST_SHADES, ...ROCK_MINERAL_SHADES,
+] as const;
+
+export const ROCK_PALETTES: ReadonlyArray<{ name: string; shades: readonly string[] }> = [
+  { name: 'mixed',   shades: ROCK_MIXED_SHADES   },
+  { name: 'slate',   shades: ROCK_SLATE_SHADES   },
+  { name: 'rust',    shades: ROCK_RUST_SHADES    },
+  { name: 'mineral', shades: ROCK_MINERAL_SHADES },
+] as const;
+
+let activeRockPaletteIndex = 0; // 'mixed'
+export function getActiveRockPaletteName(): string {
+  return ROCK_PALETTES[activeRockPaletteIndex].name;
+}
+export function cycleRockPalette(): number {
+  activeRockPaletteIndex = (activeRockPaletteIndex + 1) % ROCK_PALETTES.length;
+  return activeRockPaletteIndex;
+}
+/** One shade from the active rock palette.  Called at every rock-tile and
+ *  free rock-shard spawn site; shards otherwise inherit their parent's. */
+export function randomRockShade(): string {
+  const shades = ROCK_PALETTES[activeRockPaletteIndex].shades;
+  return shades[(Math.random() * shades.length) | 0];
+}
+
 // ── Plastic palettes ───────────────────────────────────────────────
 // Per-instance random shade picked by randomPlasticShade() at every
 // plastic-tile / plastic-shard spawn site so cluster colour reads as
@@ -292,11 +348,18 @@ export function cycleGlassGlowColor(): number {
 // ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
 // Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
 // the palette so the two tile glows can be A/B'd against a shared
-// vocabulary.  Default index 4 = 'magenta' (#e879f9), the closest
-// match to the legacy fuchsia `#d946ef` baked into SHARD_VARIANTS
-// ['metal-tile'].glow.color.  RenderSystem reads the live hex via
+// vocabulary.  RenderSystem reads the live hex via
 // getActiveMetalGlowColor() in the metal-tile glow branch.
-let activeMetalGlowIndex = 4; // 'magenta' — matches legacy fuchsia
+//
+// DEFAULT CHANGED index 4 'magenta' → 0 'cyan' (material-palette-residual,
+// decision #30 → gauntlet step 5 G7).  Magenta was never chosen: it was the
+// nearest match to a legacy fuchsia baked into SHARD_VARIANTS, and it left
+// the game's coldest material — now an explicitly blue steel that brightens
+// toward METAL_BRIGHT_TARGET — wearing a hot pink halo whenever the player
+// got close.  Cyan is the same cold family as the body, and it is NOT the
+// glass glow's 'sky' (index 8), so the two tile glows still read apart:
+// glass glows a soft sky, metal an icy cyan.
+let activeMetalGlowIndex = 0; // 'cyan' — the cold family the metal body lives in
 
 export function getActiveMetalGlowColor(): string {
   return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
@@ -1675,6 +1738,15 @@ export const METAL_ASSEMBLY = {
 export const METAL_HEX_CELLS = 6;                 // shards per hexagon layer (= 1 tier)
 export const METAL_MAX_DENSITY_TIER = 6;          // tier cap (rare — 36 shards)
 export const METAL_AGGREGATION_BRIGHT_CEIL = 1.5; // brightness at the top tier
+// De-white target (material-palette-residual, decision #30 → gauntlet step 5
+// G7).  Density brightening used to SCALE every channel by the same factor,
+// which drives a mid steel-blue toward its own ceiling on all three channels
+// at once — the colour desaturates as it climbs and dense metal ends up
+// reading as pale near-white hex.  Brightening toward an explicit SHINY
+// STEEL-BLUE instead keeps the material blue at every density, and gives the
+// "shiny metal" direction a colour to aim at rather than a brightness knob.
+// (Interpolation lives in the renderer; this is the endpoint.)
+export const METAL_BRIGHT_TARGET = '#a5d8f0';
 // Shards released when a metal tile breaks = densityTier × this.  Below the
 // 6/tier it took to BUILD the tile, so ~half the metal is "destroyed" in the
 // break — keeps dense clusters from flooding the field with debris.
@@ -5509,8 +5581,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   // Overworld (wave-free home map, 12k) — standard mixed terrain, read
-  // directly from this table by OverworldMap.init() (the authoritative
-  // pattern; the older natural maps still hardcode their ratios).
+  // directly from this table by OverworldMap.init().  Since G7 every
+  // natural map reads its tile-variant mix from here; the table is the
+  // authority rather than a parallel description of one.
   [MapType.OVERWORLD]: {
     'rock-shard': { freeSpawn: { count: 120, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
     'glass-tile':   { tileCluster: { clusterCount: 10, minClusterSize: 10, maxClusterSize: 30 } },
@@ -5518,34 +5591,55 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'metal-tile':   { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
     'nebula-tile':  { tileCluster: { clusterCount: 42, minClusterSize: 12, maxClusterSize: 36 } },
   },
+  // Deep Space (16k arena).  These counts are what UniverseMap.init HAS
+  // been generating; before G7 the class hardcoded them and this entry
+  // said something else entirely (glass 14 / nebula 65+120), so the table
+  // documented a map that had not existed for a long time.  The numbers
+  // moved here unchanged — G7 was a data move, not a rebalance.
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 6000 } },
-    'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
-    'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
-    'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    // The old 42-cluster budget split 64 / 23 / 13 glass / plastic / metal.
+    // Written out as counts, because a percentage split of a budget is a
+    // second thing to keep in sync and the counts are what get generated.
+    'glass-tile':          { tileCluster: { clusterCount: 27, minClusterSize: 10, maxClusterSize: 34 } },
+    'plastic-tile':        { tileCluster: { clusterCount: 10, minClusterSize:  8, maxClusterSize: 22 } },
+    'metal-tile':          { tileCluster: { clusterCount:  5, minClusterSize:  6, maxClusterSize: 14 } },
     // indestructible-tile intentionally absent — per decision #6,
     // reserved for deliberate border/structure placement, not random
     // clusters in the natural maps.  INDESTRUCTIBLE_FIELD showcase
     // still spawns it for stress testing.
+    //
+    // The inner/outer split is gone rather than moved: UniverseMap stopped
+    // applying it long ago (its own comment records why — on smaller maps
+    // it visibly concentrated clusters in the centre) and merely AVERAGED
+    // the two size ranges into one pass.  Carrying a field no code reads is
+    // how the entry above came to be wrong in the first place.
     'nebula-tile': {
-      tileCluster: {
-        clusterCount:    65,    // halved for 7.5k map (was 130)
-        minClusterSize:  14,
-        maxClusterSize:  42,
-        outer: {
-          clusterCount:   120,  // halved for 7.5k map (was 240)
-          minClusterSize: 7,
-          maxClusterSize: 26,
-        },
-      },
+      tileCluster: { clusterCount: 75, minClusterSize: 11, maxClusterSize: 34 },
     },
   },
   [MapType.RING]: {
     'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
   },
+  // Seven Rings (12k arena).  A ring map's tile-variant "ratio" is WHICH
+  // RING is made of what, so it is expressed as ring indices rather than
+  // cluster counts — inner rings soft, outer wall indestructible, which is
+  // the map's whole readable-difficulty idea.  The ring GEOMETRY (count,
+  // radii, thinning) stays in SevenRingsMap: that is the map's shape.
+  // indestructible-tile appears here and nowhere else in the natural maps,
+  // which is exactly what decision #6 reserves it for — deliberate border
+  // placement, never a random cluster.
   [MapType.SEVEN_RINGS]: {
     'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
+    'glass-tile':          { tileRings: [0, 1] },
+    'plastic-tile':        { tileRings: [2, 3] },
+    'metal-tile':          { tileRings: [4, 5] },
+    'indestructible-tile': { tileRings: [6] },
   },
+  // Pocket sandbox (4k).  The cluster COUNTS here already matched what
+  // PocketMap.init hardcoded; only the nebula SIZE range disagreed (the
+  // class generates 6–12, this said 6–20), so the table is corrected to
+  // the map that exists.
   [MapType.POCKET]: {
     'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 1600 } },
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
@@ -5554,7 +5648,7 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     // indestructible-tile intentionally absent — see UNIVERSE entry
     // above for the decision-#6 rationale.
     'nebula-tile': {
-      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
+      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 12 },
     },
   },
   [MapType.ASTEROID_FIELD]: {

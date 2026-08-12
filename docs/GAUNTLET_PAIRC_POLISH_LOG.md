@@ -26,7 +26,7 @@ tuning (step 6).
 | G4 | Menu help panel (c1) | **done** |
 | G5 | Minimap rework — nebula out, flow streamlines, faithfulness | **done** |
 | G6 | Portal off-screen indicators (decision #46b) | **done** |
-| G7 | Polish residuals — palette defaults, MAP_POPULATION authority | pending |
+| G7 | Polish residuals — palette defaults, MAP_POPULATION authority | **done** |
 | G8 | OPTIONAL — NPC station shuttles (first to cut) | pending |
 | G-final | Validation, docs sync, completion summary | pending |
 
@@ -527,6 +527,107 @@ rather than pretending otherwise.
 
 ---
 
+### G7 — Polish residuals (2026-08-12)
+
+Two unrelated leftovers, bundled because neither is a session on its own.
+
+#### (1) material-palette-residual
+
+Decision #30 carved this out of the material-palette pass and named exactly
+two things: **"metal de-white + shiny-ready blue range; rock red+blue
+palette."** Both were done, and a third fell out of doing them.
+
+**DECISION G7-a — metal brightens toward a COLOUR, not toward white.**
+Density brightening multiplied every channel by the same factor. That reads
+as brightening but is really a march toward the ceiling on all three channels
+at once: as the top channel clips, the gaps between channels close,
+saturation drains, and dense metal ends up pale near-white — which is the
+"de-white" complaint, restated as arithmetic. It now interpolates toward an
+explicit `METAL_BRIGHT_TARGET` (`#a5d8f0`), so metal is recognisably BLUE at
+every density and the "shiny metal" direction has a colour to aim at instead
+of a brightness knob to turn up. The density CURVE is unchanged (the factor
+is remapped onto a 0→1 mix), and the lattice cells — which are the density
+readout — climb toward the same target.
+
+**DECISION G7-b — rock gets a palette, defaulting to `mixed`.** Rock was one
+flat slate, which made the most common material in the game the least
+characterful. `ROCK_PALETTES` adds slate / rust / mineral families and a
+`mixed` default that is mostly slate with rust and mineral running through
+it — a field then reads as ROCK WITH VARIATION rather than as three
+materials. Same mechanism as the plastic palettes (rolled once at spawn,
+stored on the entity, inherited by shards), so it survives the
+tile→shard→tile cycle and costs nothing per frame; the density tint still
+multiplies the base, so every shade darkens to the same floor.
+*Alternative rejected:* pure `rust` or `mineral` as the default. Both read as
+a themed map rather than as rock, and they are more useful kept for the
+regional-identity work the map-composition item is groundwork for.
+
+**DECISION G7-c — the metal glow default changes magenta → cyan.** Not in
+#30's list; it became visible the moment metal stopped drifting white.
+Magenta was never a choice — the comment says it was "the closest match to
+the legacy fuchsia" baked into an older constant — and it left the game's
+coldest material wearing a hot pink halo whenever the player came near.
+Cyan is the body's own family, and it is deliberately NOT the glass glow's
+`sky`, so the two tile glows still read apart: glass a soft sky, metal an icy
+cyan.
+
+Every DBG row stays, and rock gains one (Visual ▸ **Rock palette**).
+Verified by capture at 390×844 on the METAL / ROCK / ASTEROID field
+showcases with the camera parked in the densest cluster — the whole point of
+these changes is what they look like, so "it typechecks" would not have been
+an answer.
+
+#### (2) map-composition — MAP_POPULATION becomes the authority
+
+CLAUDE.md §5 already carried the warning: *"treat MAP_POPULATION as
+authoritative for documentation but verify the relevant MapClasses subclass
+too."* Three natural maps hardcoded their own mix while the table said
+something else. Deep Space is the worst case: the class generated 27 / 10 / 5
+glass / plastic / metal clusters and 75 nebula, while the table claimed 14 /
+5 / 3 and 65+120. **The table was describing a map that had not existed for a
+long time.**
+
+**DECISION G7-d — the CODE's numbers won; the table was corrected to them.**
+This was specified as a data move, not a rebalance, so the population that
+ships is the population that shipped. Deep Space's 42-cluster budget split
+64/23/13 is written out as explicit counts, because a percentage split of a
+budget is a second thing to keep in sync. Deep Space's unused inner/outer
+nebula split was DELETED rather than carried across — the class stopped
+applying it long ago and merely averaged the two size ranges, and carrying a
+field nothing reads is how the entry drifted in the first place.
+
+**DECISION G7-e — Seven Rings expresses its mix as `tileRings`, a new
+optional field.** A ring map's "tile-variant ratio" is not a cluster count,
+it is WHICH RING is made of what. The ring GEOMETRY (count, radii, thinning)
+deliberately stays on the class: that is the map's shape, and a map named
+Seven Rings should not get its ring count from a population table. This is
+also the one place `indestructible-tile` appears in a natural map, which is
+exactly what decision #6 reserves it for — deliberate border placement,
+never a random cluster.
+
+Overworld, which already read the table inline, now goes through the same two
+shared helpers on `BaseMapLayer`, so there is one implementation rather than
+four similar ones. (De-duplication, not an abstraction layer — no interface,
+no dispatch; decision #50b.)
+
+**Equivalence, measured 8 builds per map before and after:**
+
+| | glass | plastic | metal | nebula / indestructible |
+|---|---|---|---|---|
+| Deep Space | 584 → 566 | 142 → 148 | 50 → 47 | 1623 → 1641 |
+| Pocket | 75 → 72 | 37 → 36 | 15 → 17 | 103 → 102 |
+| Seven Rings | 234 → 234 | 528 → 528 | 762 → 762 | 477 → 477 |
+
+The two random maps move less than their own run-to-run spread (Deep Space's
+glass alone ranges 511–624 across builds). Seven Rings is deterministic and
+came out **identical to the tile**, which is the strongest form of the claim.
+`tests/maps.spec.ts` now holds those bands, plus the ring ORDER — glass
+inside, indestructible outside — asserted by median radius per variant.
+
+**Gates:** typecheck, build, 74/74 tests (4 new in `tests/maps.spec.ts`).
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -571,6 +672,17 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G5-b** — streamline geometry cached in world space, keyed on the seed
   cell. Beat: stamping it into the pre-rendered terrain canvas (one blit, but
   blurred ~4× at the collapsed zoom, which is where the map is used).
+- **G7-a** — metal brightens toward an explicit steel-blue. Beat: scaling
+  every channel (arithmetically a march toward white, which was the bug).
+- **G7-b** — rock ships the `mixed` palette. Beat: pure rust or mineral
+  (reads as a themed map, not as rock).
+- **G7-c** — metal's proximity glow goes magenta → cyan. Beat: keeping a
+  legacy fuchsia on the game's coldest material.
+- **G7-d** — the table was corrected to the code's populations, not the
+  reverse. Beat: "fixing" the maps to match a table nothing had read for
+  months, which would have been a silent rebalance.
+- **G7-e** — Seven Rings' mix is `tileRings`; its geometry stays on the
+  class. Beat: pushing ring count and radii into the population table too.
 - **G6** — portal arrows keep the range gate and lose the on-screen
   exemption and the distance readout. Beat: direction 1, obey-all-the-rules
   (four permanent arrows on the hub's edge competing with threats), and

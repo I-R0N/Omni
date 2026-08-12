@@ -33,7 +33,7 @@ import {
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial,
+    cycleMinimapMaterial, cycleRockPalette,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -319,6 +319,13 @@ export class DebugControls {
    *  honest control for that is showing neither. */
   cycleMinimapMaterial() {
     cycleMinimapMaterial();
+  }
+
+  /** DBG (Visual): cycle the ROCK palette — mixed (default) / slate / rust /
+   *  mineral.  Shades are rolled per instance AT SPAWN, so this takes effect
+   *  on newly generated rock; reload the map to repaint a whole field. */
+  cycleRockPalette() {
+    cycleRockPalette();
   }
 
   /** DBG (Visual): force the onscreen joystick to draw with no touch session.
