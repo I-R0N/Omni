@@ -1006,6 +1006,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
                   'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-CATCH ramp. The first snitch flies at 0.05× player cruise and gains 0.05× each time one is CAUGHT (capped at 1.2×) — deferring the catch keeps it slow. This knob scales that for testing.')}
+                {statRow('Gamepad', stats.gamepadInfo ?? 'none',
+                  (stats.gamepadInfo && stats.gamepadInfo !== 'none') ? 'text-sky-300' : 'text-slate-400')}
+                {statRow('  ↳ axes', stats.gamepadAxes ?? '—', 'text-slate-400')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

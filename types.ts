@@ -1651,6 +1651,13 @@ export interface EngineStats {
   // interaction feels better.  'collide' (default): fly into the snitch.
   // 'shoot': any player-owned projectile within its catch radius nabs it.
   snitchCatchMode?: 'collide' | 'shoot';
+  /** DBG live gamepad readout (Pair C, c2) — a readout, not a toggle: the pad
+   *  has nothing to switch, and what a hardware check needs to see is whether
+   *  the axes are reaching the sim.  `gamepadInfo` names the adopted pad
+   *  (`'none'` when there isn't one); `gamepadAxes` carries the post-deadzone
+   *  thrust, the held aim heading, and a live FIRE flag. */
+  gamepadInfo?: string;
+  gamepadAxes?: string;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.

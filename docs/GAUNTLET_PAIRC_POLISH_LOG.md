@@ -21,7 +21,7 @@ tuning (step 6).
 | ID | Milestone | Status |
 |----|-----------|--------|
 | G1 | CI gate — three gates on PRs + the plan branch, cached, verified | **done** |
-| G2 | Gamepad support (Pair C c2, first half) | pending |
+| G2 | Gamepad support (Pair C c2, first half) | **done** |
 | G3 | Onscreen joystick (c2, second half) | pending |
 | G4 | Menu help panel (c1) | pending |
 | G5 | Minimap rework — nebula out, flow streamlines, faithfulness | pending |
@@ -104,9 +104,137 @@ what lets the gate run on fork PRs) all stay as 5b shipped them.
 Also added the run badge to the README's validation note and corrected the
 "no CI gating" sentence; the "no linter" half stands.
 
-**Verification:** the workflow's own change is verified by the run it triggers
-on this branch's first push — recorded below once it lands. Local gates green
-before the commit (38/38 tests, 2.2m).
+**Verification:** GREEN on this branch — run `31554784338`, `typecheck ·
+build · test`, 2 m 25 s, on PR #84. That run was a cache MISS by construction
+(nothing was stored under the new key yet), so it measures the unchanged path;
+the saving shows from the next run onward. Local gates green before the commit
+(38/38 tests, 2.2 m).
+
+**DECISION G1-c — the PR is opened NOW, as a draft, not at the end.**
+The brief asks for one PR at the end of the queue. But `pr-checks` fires on
+`pull_request` events, so with no PR open the gate cannot run on this branch
+at all — G1's own acceptance criterion ("verify it passes on your own
+branch's first push") is unreachable, and decision #51's stated purpose
+("every later milestone of that gauntlet runs under it") is unreachable with
+it. Opening it early as a DRAFT satisfies both and is still exactly one PR.
+Titled `[WIP — do not merge]`; the body becomes the ledger summary at
+G-final.
+*Alternative rejected:* adding `workflow_dispatch` or a branch glob to the
+workflow purely so this session could trigger it. That widens the gate's
+trigger surface permanently to solve a scheduling problem for one session.
+
+---
+
+### G2 — Gamepad support (2026-08-12)
+
+Pair C (c2), first half. A third input device beside keyboard/mouse and
+touch, added inside `InputSystem` — no new module, no dispatch layer
+(decision #50b).
+
+**The shape of it.** The pad does not get its own channel into the engine.
+It writes the *same* three things the mouse writes — the movement vector, the
+synthetic pointer, the fire/charge queues — so that nothing downstream of
+`InputSystem` knows a pad exists. Two consequences fall out for free rather
+than being built: aiming works (rotation is derived from the pointer), and
+shooting works (a shot's target is a pointer position). The only new surface
+in `GameEngine` is `pollGamepad()`, ~20 lines at the top of `loop`, plus one
+`||` in `updateInteractables`.
+
+**DECISION G2-a — the pad writes the SYNTHETIC POINTER rather than an aim
+channel.** The right stick parks a virtual cursor `AIM_RADIUS` px out from
+screen centre along its heading; `player.rotation` and every pad shot then
+travel the paths the mouse already uses.
+*Alternative rejected:* a separate `getAimVector()` that `GameEngine` prefers
+over the pointer. That means a branch at the rotation site AND another at the
+shooting site, and two ways for aim to be defined — the exact "second polling
+path" the (#44) ship-select note warned would collide.
+
+**DECISION G2-b — `AIM_RADIUS` (150) is load-bearing, not cosmetic.** It must
+exceed `SHIP_SELECT_RADIUS` (46). The ship sits at screen centre and
+`claimTapNear` claims taps within 46 px of it out of the fire queue, so a pad
+shot synthesised AT the centre would be silently eaten as a dock tap whenever
+the player is near a station or portal. The heading also persists when the
+stick is released and starts at (1, 0), so there is no frame in which the pad
+has no aim. **A test caught the first version of this**: the deadzone helper
+wrote (0,0) into the held heading every frame the thumb was off the stick, so
+a pad shot fired at the ship itself. Fixed with a separate read buffer; the
+assertion (`dist > SHIP_SELECT_RADIUS`) stays as the regression guard.
+
+**DECISION G2-c — fire is the pointer's model exactly, minus the drag
+cancel.** Press-and-release is a shot; holding past `CHARGE_FULL` and
+releasing is a charged shot; the same charge ring fills. What the pad does
+NOT inherit is `TAP_DISTANCE_LIMIT` — a thumb on the right stick moves the
+aim hundreds of px during any hold, so the drag cancel would have swallowed
+most pad shots.
+*Alternative rejected:* auto-repeat while the trigger is held, which is the
+usual twin-stick convention. It cannot coexist with hold-to-charge on the
+same button, and inventing a second fire model for one device is a worse
+answer than one model everywhere. **Routed to FOR-USER-REVIEW** — it is a
+feel call, and only a real pad can settle it.
+
+**DECISION G2-d — poll once per FRAME, gate FIRE on the world.**
+`navigator.getGamepads()` allocates a fresh snapshot per call and the hardware
+reports at 60–125 Hz, so sampling it inside the sim substep loop (up to 5×
+per frame) buys nothing but garbage. The poll sits above every freeze
+short-circuit in `loop`, because the pause button has to work from inside the
+paused state. What IS gated is the fire queue: a trigger held through a
+station visit must not bank a shot that lands on undock. INTERACT / CYCLE /
+PAUSE still latch — they are how you leave a frozen state — and both CYCLE
+and INTERACT are drained every frame whether or not they can be spent, so a
+press made against a frozen world cannot fire later out of context.
+
+**DECISION G2-e — adopt the pad by POLLING, not by trusting
+`gamepadconnected`.** The spec lets a browser withhold a pad until its first
+button press and Safari does exactly that, so an already-paired DualSense may
+never fire the event. The poll adopts the first live pad it sees and
+synthesises the connect/disconnect hint itself; the events remain as the fast
+path. First pad wins — a second one connecting does not steal the seat.
+
+**Mapping** (`INPUT_CONSTANTS.GAMEPAD`, W3C standard-gamepad indices; PS5
+names given): left stick + D-pad = thrust, right stick = aim, **R2 / Cross** =
+fire and charge, **Square** = interact (dock, portal, undock), **R1 /
+Triangle** = cycle weapon, **Options** = pause/resume. Radial deadzone 0.18
+with rescale, trigger threshold 0.35. All provisional feel numbers.
+
+- Radial, not per-axis: a per-axis zone leaves a cross-shaped dead region, so
+  a gentle diagonal push reads as pure horizontal.
+- Rescaled, not just clamped: without the rescale the first live deflection
+  jumps to 0.18 of full throttle, which is a visible lurch.
+- Triggers are read by analogue `value`, not `pressed` — some drivers only set
+  `pressed` at full travel.
+
+**The interact seam closed as designed.** CLAUDE.md §8 and the code comment at
+`updateInteractables` both reserved the controller button as "the third path
+into `selected`". It is now one `||` against a latched edge, drained only
+while a POI is in range — nothing else moved, and the nearest-wins arbitration
+between stations and portals is untouched.
+
+**Testing.** `tests/input.spec.ts`, 16 tests. The Gamepad API cannot be
+synthesised headless, so the layer is split at exactly that line:
+`pollGamepad()` does the untestable part (find a pad, read it) and
+`applyPadSnapshot()` — deadzones, pointer, edges, charge window — takes a
+plain snapshot object a test can write. Assertions route through real
+consumers: the movement vector the player integrates, the rotation the ship
+renders at, the station the interact button actually docks at, the weapon name
+in the stats payload.
+
+Two harness traps cost a cycle each and are worth recording:
+1. **The engine's own loop drains the queues between round-trips.** Feeding
+   pad frames in one `page.evaluate` and reading `getFireEvents()` in the next
+   reads an empty queue every time, because a real frame ran in between. The
+   `feedThen` helper does both in one evaluation. (This is harness rule 2 —
+   sample peaks, not instants — wearing a different hat.)
+2. **`waitForStats` predicates are stringified**, so a closed-over test-side
+   variable does not exist in the page and the predicate throws rather than
+   failing an assertion — surfacing as an unexplained timeout. Spell the
+   expected value out instead.
+
+**Deliberately NOT changed:** the world-space interact prompt still reads
+"TAP SHIP TO DOCK" with a pad connected. Rewriting it per active device is a
+legibility question across every prompt in the game, which is 5d's coherence
+sweep, not a gamepad milestone.
+
+**Gates:** typecheck, build, and 54/54 tests green (38 existing + 16 new).
 
 ---
 
@@ -120,6 +248,21 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G1-b** — a cache hit installs system deps separately rather than skipping
   the install step wholesale. Beat: a single guarded `--with-deps` step (a
   restored browser with no libraries to launch against).
+- **G1-c** — the PR opens now as a draft, so the gate can run on this branch
+  at all. Beat: widening the workflow's triggers for one session's benefit.
+- **G2-a** — the pad writes the synthetic pointer. Beat: a separate aim
+  channel plus branches at the rotation and shooting sites.
+- **G2-b** — `AIM_RADIUS` > `SHIP_SELECT_RADIUS`, and the aim heading
+  persists. Beat: synthesising shots at screen centre (silently eaten by
+  `claimTapNear` near any POI — caught by a test).
+- **G2-c** — one fire model across all three devices, minus the drag cancel.
+  Beat: trigger auto-repeat (incompatible with hold-to-charge; routed to
+  FOR-USER-REVIEW as a feel call).
+- **G2-d** — poll once per frame above the freeze short-circuits; gate FIRE
+  on the world, drain everything else regardless. Beat: polling per sim
+  substep (5× the garbage), and latching presses that fire out of context.
+- **G2-e** — adopt the pad by polling. Beat: trusting `gamepadconnected`,
+  which Safari may never fire for an already-paired pad.
 
 ---
 
@@ -127,6 +270,34 @@ Consolidated as they are made; each one names the alternative it beat.
 
 Items needing a human — judgment calls, and things only real hardware can
 answer. Consolidated in the completion summary at the end.
+
+- **HARDWARE CHECK — the gamepad (G2).** The suite proves the mapping layer
+  is correct given a snapshot; it cannot prove a real pad produces the
+  snapshot the constants assume. Everything below needs a DualSense and ten
+  minutes. Check the DBG readout first — pause ▸ Debug Menu ▸ Player ▸
+  **Gamepad** names the adopted pad and **↳ axes** shows live post-deadzone
+  thrust, the held aim heading, and a FIRE flag. If that line moves, the pad
+  is reaching the sim and everything else is mapping detail.
+
+  | # | Check | What "wrong" looks like |
+  |---|---|---|
+  | 1 | **iPhone Safari, Bluetooth.** Pair the pad, load the game, press a button. | The DBG row stays `none` — Safari withholds the pad until first input; if it still says `none` after a press, adoption is broken, not the pairing. |
+  | 2 | **Desktop, USB and Bluetooth.** Same check in Chrome and Safari. | — |
+  | 3 | **Stick directions.** Left stick up = fly up; right stick right = nose right. | Inverted Y, or the axes swapped — some drivers report a non-standard axis order. |
+  | 4 | **Deadzone 0.18.** Hands off: does the ship drift? Gentle push: does it creep, or lurch? | Drift = zone too small. Lurch = the rescale is not landing. |
+  | 5 | **Fire feel.** Tap R2 for a shot; hold ~1 s and release for a charged one; watch the ring. | See the open question below. |
+  | 6 | **Square docks.** Fly next to a station and press Square; press it again to undock. Then a portal. | Nothing happens, or it also fires a shot. |
+  | 7 | **Options pauses AND resumes.** | Resume fails — the poll would be sitting below a freeze short-circuit. |
+  | 8 | **R1 cycles** with two guns mounted. | — |
+  | 9 | **Yank the cable mid-thrust.** | The ship keeps thrusting — the disconnect reset is not firing. |
+
+- **OPEN QUESTION — should holding the fire trigger auto-repeat?** Today it
+  does not: the pad uses the same tap-or-charge model as mouse and touch
+  (decision G2-c). Twin-stick convention says a held trigger should stream
+  shots, but that cannot coexist with hold-to-charge on the same button. If
+  auto-repeat is wanted, the charged shot needs its own button (L2 is free)
+  and this is a two-line change plus a help-panel edit. **Judge it on
+  hardware** — it is the one gamepad decision that is purely feel.
 
 - **Branch protection is a repo setting, not a file.** The workflow reports;
   it does not refuse a merge. Making `typecheck · build · test` *blocking*

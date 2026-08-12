@@ -885,6 +885,8 @@ export class GameEngine {
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
+      gamepadInfo: this.input.padDebugName(),
+      gamepadAxes: this.input.padDebugAxes(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1304,11 +1306,53 @@ export class GameEngine {
       }
   }
 
+  /**
+   * Sample the gamepad once per rendered frame and spend the edges that do
+   * not belong to a sim step (Pair C, c2).
+   *
+   * Runs BEFORE every freeze short-circuit in `loop`, which is the point: the
+   * pause button has to work from inside the paused state, and a pad that
+   * connects while the menu is up should still say so.  What is gated is the
+   * FIRE queue — a trigger held through a station visit must not bank a shot
+   * that lands the instant you undock.
+   */
+  private pollGamepad() {
+    const frozen = this.gameState !== GameState.PLAYING || this.dockedAtStation
+                || this.stageClearPending || this.deathPending;
+    this.input.pollGamepad(!frozen);
+
+    const conn = this.input.consumePadConnectionEvent();
+    if (conn) {
+      this.pushPlayerMessage(
+        conn.connected ? 'GAMEPAD CONNECTED' : 'GAMEPAD DISCONNECTED',
+        conn.connected ? '#7dd3fc' : '#fca5a5',
+        INPUT_CONSTANTS.GAMEPAD.HINT_LIFETIME,
+      );
+    }
+
+    if (this.input.consumePausePress()) {
+      // pauseGame() is already a no-op while docked (one full-screen overlay
+      // at a time), so this needs no docked branch of its own.
+      if (this.gameState === GameState.PLAYING) this.pauseGame();
+      else if (this.gameState === GameState.PAUSED) this.resumeGame();
+    }
+
+    // Both of these are DRAINED every frame whether or not they can be spent,
+    // so a press made against a frozen world cannot fire later out of context.
+    // The one exception is INTERACT while docked — the docked branch below is
+    // its consumer, and undocking is exactly what it is for.
+    const cycle = this.input.consumeCyclePress();
+    if (cycle && !frozen) this.cycleWeapon();
+    if (frozen && !this.dockedAtStation) this.input.consumeInteractPress();
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
+
+    this.pollGamepad();
 
     // HUD score ticker — roll the displayed total up toward the true
     // score by integer steps (≥1, ≤ a fraction of the gap) so awards
@@ -1461,6 +1505,8 @@ export class GameEngine {
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
+      gamepadInfo: this.input.padDebugName(),
+      gamepadAxes: this.input.padDebugAxes(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1520,7 +1566,7 @@ export class GameEngine {
     // routes through undock() as well.
     if (this.dockedAtStation) {
         const eDown = this.input.isKeyDown('KeyE');
-        if (eDown && !this.dockKeyHeld) this.undock();
+        if ((eDown && !this.dockKeyHeld) || this.input.consumeInteractPress()) this.undock();
         this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
@@ -3251,10 +3297,10 @@ export class GameEngine {
     // actually in range, so tapping the ship in open space still shoots.
     // E stays as the keyboard equivalent.
     //
-    // A CONTROLLER button is the third path the user asked for; it is
-    // deliberately NOT wired here because Pair C (c2) owns the gamepad layer
-    // in InputSystem, and adding a second polling path would collide with it.
-    // When c2 lands, OR its button into `selected` below — nothing else moves.
+    // A CONTROLLER button is the third path, and c2 wired it exactly as the
+    // hole was left: the pad polls ONCE per frame in GameEngine.pollGamepad
+    // and latches an edge, which is OR'd into `selected` below.  Nothing else
+    // moved — no second polling path, no second arbitration.
     // Prompt AT the ship — the control lives there now, so the instruction
     // does too.  Cleared whenever nothing is in range.
     this.player.interactPrompt = portal
@@ -3263,6 +3309,13 @@ export class GameEngine {
            : 'TAP SHIP TO ENTER')
         : station ? 'TAP SHIP TO DOCK'
         : undefined;
+
+    // Drained EVERY step, spent only when something is in range: a press in
+    // open space is a press in open space, not a charge banked against the
+    // next station you happen to fly past.  (The tap path gets this for free —
+    // `claimTapNear` is only called while in range, and an unclaimed tap just
+    // shoots.)
+    const padInteract = this.input.consumeInteractPress();
 
     let selected = false;
     if (station || portal) {
@@ -3273,6 +3326,7 @@ export class GameEngine {
                 INPUT_CONSTANTS.SHIP_SELECT_RADIUS,
             );
         }
+        if (!selected && padInteract) selected = true;
     }
     const eDown = this.input.isKeyDown('KeyE');
     if (selected || (eDown && !this.dockKeyHeld)) {

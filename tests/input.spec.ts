@@ -1,0 +1,495 @@
+/** The gamepad mapping layer (Pair C, c2).
+ *
+ *  The Gamepad API cannot be synthesised in a headless browser — there is no
+ *  way to make `navigator.getGamepads()` return a device, and Playwright has
+ *  no pad emulation.  So the layer is split for exactly this reason:
+ *  `pollGamepad()` does the untestable part (find the pad, read it) and
+ *  `applyPadSnapshot()` does everything else — deadzones, the synthetic
+ *  pointer, button edges, the charge window.  This suite drives the second
+ *  half with hand-written snapshots, which covers every line of the mapping
+ *  the player actually feels.
+ *
+ *  What it therefore CANNOT say: whether a real DualSense reports the axis
+ *  order and button indices the constants assume, over USB or over Bluetooth
+ *  on iOS Safari.  That is a hardware check and it is written up in
+ *  docs/GAUNTLET_PAIRC_POLISH_LOG.md under FOR-USER-REVIEW.
+ *
+ *  Assertions route through the real consumers wherever one exists — the
+ *  movement vector the player integrates, the rotation the ship renders at,
+ *  the dock the interact button reaches — rather than reading the mapping's
+ *  own private fields back out (harness rule 6).
+ */
+
+import { test, expect } from '@playwright/test';
+import { boot, engine, stats, startRun, waitForStats } from './helpers';
+
+// Mirrors of INPUT_CONSTANTS, duplicated on purpose (harness rule 7): if a
+// tuning pass moves one, this file should have to change.
+const STICK_DEADZONE = 0.18;
+const AIM_RADIUS = 150;
+const CHARGE_FULL = 1.0;
+const SHIP_SELECT_RADIUS = 46;
+
+// W3C standard-gamepad indices, as bound in INPUT_CONSTANTS.GAMEPAD.BUTTONS.
+const BTN = {
+  CROSS: 0, SQUARE: 2, TRIANGLE: 3,
+  R1: 5, R2: 7, OPTIONS: 9,
+  DPAD_UP: 12, DPAD_DOWN: 13, DPAD_LEFT: 14, DPAD_RIGHT: 15,
+};
+
+/** One frame of pad state: sticks at rest, nothing pressed, unless overridden. */
+function pad(opts: { lx?: number; ly?: number; rx?: number; ry?: number; down?: number[] } = {}) {
+  const pressed: boolean[] = new Array(17).fill(false);
+  for (const b of opts.down ?? []) pressed[b] = true;
+  return {
+    axes: [opts.lx ?? 0, opts.ly ?? 0, opts.rx ?? 0, opts.ry ?? 0],
+    pressed,
+  };
+}
+
+/** Feed frames to the mapping layer. Frames are applied in order, so a
+ *  press/release pair is two entries — which is also how button EDGES are
+ *  exercised, since the layer derives them by remembering the last frame. */
+async function feed(page: any, frames: any[], fireEnabled = true) {
+  return engine(
+    page,
+    (e, arg: { frames: any[]; fireEnabled: boolean }) => {
+      for (const f of arg.frames) e.input.applyPadSnapshot(f, arg.fireEnabled);
+    },
+    { frames, fireEnabled },
+  );
+}
+
+/** Reset the pad's remembered edge state so one test's held buttons cannot
+ *  leak into the next assertion inside the same page. */
+async function releaseAll(page: any) {
+  await feed(page, [pad()]);
+}
+
+/** Feed frames AND read the result inside ONE page evaluation.
+ *
+ *  Required for anything queue-shaped. The engine's loop drains the fire
+ *  queues (and the interact latch) every frame, so feeding in one round-trip
+ *  and reading in the next is racing the game — the queue is usually empty by
+ *  the time the read lands. Injecting and reading in the same turn of the
+ *  event loop is the only way to observe them. `read` is stringified and
+ *  rebuilt in the page, so it must not close over test-side state.
+ */
+function feedThen<R>(
+  page: any,
+  frames: any[],
+  read: (e: any) => R,
+  fireEnabled = true,
+): Promise<R> {
+  return engine(
+    page,
+    (e, arg: { frames: any[]; fireEnabled: boolean; read: string }) => {
+      // eslint-disable-next-line no-new-func
+      const fn = new Function('e', `return (${arg.read})(e)`);
+      for (const f of arg.frames) e.input.applyPadSnapshot(f, arg.fireEnabled);
+      return fn(e);
+    },
+    { frames, fireEnabled, read: read.toString() },
+  );
+}
+
+test.describe('deadzone — a radial cut with a rescale', () => {
+  test('kills drift, rescales the live range, and clamps the diagonals', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e, dz: number) => {
+      const out = { x: 0, y: 0 };
+      const call = (x: number, y: number) => {
+        const mag = e.input.applyStickDeadzone(x, y, dz, out);
+        return { mag, x: out.x, y: out.y };
+      };
+      return {
+        rest: call(0, 0),
+        // Inside the zone in BOTH axes but outside it radially — the case a
+        // per-axis deadzone gets wrong.
+        diagonalDrift: call(0.13, 0.13),
+        justInside: call(dz * 0.99, 0),
+        justOutside: call(dz + 0.01, 0),
+        half: call(0.5, 0),
+        full: call(1, 0),
+        // Sticks over-report on the diagonals; the mapping must not let a
+        // corner push out-run a cardinal one.
+        corner: call(1, 1),
+      };
+    }, STICK_DEADZONE);
+
+    expect(r.rest.mag).toBe(0);
+    expect(r.justInside.mag).toBe(0);
+    expect(r.justInside.x).toBe(0);
+
+    // Radial, not per-axis: 0.13/0.13 is a magnitude of 0.184, just live.
+    expect(r.diagonalDrift.mag).toBeGreaterThan(0);
+    expect(r.diagonalDrift.mag).toBeLessThan(0.02);
+
+    // The rescale is the point: the first live deflection must be NEAR ZERO,
+    // not a jump to the deadzone value.
+    expect(r.justOutside.mag).toBeGreaterThan(0);
+    expect(r.justOutside.mag).toBeLessThan(0.02);
+
+    // Full deflection still reaches full throttle, and the corner is clamped
+    // to the same 1.0 rather than √2.
+    expect(r.full.mag).toBeCloseTo(1, 5);
+    expect(r.corner.mag).toBeCloseTo(1, 5);
+
+    // Direction survives the rescale.
+    expect(r.half.x).toBeGreaterThan(0);
+    expect(r.half.y).toBe(0);
+    expect(r.half.mag).toBeGreaterThan(0.35);
+    expect(r.half.mag).toBeLessThan(0.45);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('left stick and D-pad — thrust', () => {
+  test('the stick feeds the same movement vector the player integrates', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await feed(page, [pad({ lx: 1, ly: 0 })]);
+    const right = await engine(page, e => e.input.getMovementVector());
+    expect(right.x).toBeCloseTo(1, 5);
+    expect(right.y).toBeCloseTo(0, 5);
+
+    // +y is DOWN in screen space, and the pad reports a stick pushed toward
+    // the player as +y — so "pull back" must read as down, not up.
+    await feed(page, [pad({ lx: 0, ly: 1 })]);
+    const down = await engine(page, e => e.input.getMovementVector());
+    expect(down.y).toBeCloseTo(1, 5);
+
+    // Partial deflection is partial throttle — this is what the pointer
+    // branch's THROTTLE_DISTANCE ramp buys, and the stick must not lose it.
+    await feed(page, [pad({ lx: 0.5, ly: 0 })]);
+    const half = await engine(page, e => e.input.getMovementVector());
+    expect(half.x).toBeGreaterThan(0.3);
+    expect(half.x).toBeLessThan(0.5);
+
+    await feed(page, [pad()]);
+    const rest = await engine(page, e => e.input.getMovementVector());
+    expect(rest.x).toBe(0);
+    expect(rest.y).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the stick actually moves the ship', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Park the ship and hold the stick across real sim steps.  This is the
+    // end-to-end claim — not "the vector is right" but "the pad flies".
+    const before = await engine(page, e => {
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      return { x: e.player.position.x, y: e.player.position.y };
+    });
+
+    // The engine re-polls the real (absent) pad every frame, which would zero
+    // the stick between our injections — so re-inject as we go.
+    for (let i = 0; i < 40; i++) {
+      await feed(page, [pad({ lx: 1, ly: 0 })]);
+      await engine(page, e => { e.updateGameLogic(1 / 120); });
+    }
+
+    const after = await engine(page, e => ({
+      x: e.player.position.x, y: e.player.position.y, vx: e.player.velocity.x,
+    }));
+    expect(after.vx).toBeGreaterThan(0);
+    expect(after.x).not.toBe(before.x);
+
+    watch.assertClean();
+  });
+
+  test('the D-pad thrusts only while the stick is at rest', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await feed(page, [pad({ down: [BTN.DPAD_LEFT] })]);
+    const left = await engine(page, e => e.input.getMovementVector());
+    expect(left.x).toBeCloseTo(-1, 5);
+
+    // Diagonal D-pad is normalised, not √2 fast.
+    await feed(page, [pad({ down: [BTN.DPAD_UP, BTN.DPAD_RIGHT] })]);
+    const diag = await engine(page, e => e.input.getMovementVector());
+    expect(Math.hypot(diag.x, diag.y)).toBeCloseTo(1, 5);
+
+    // Stick wins: the two never sum into an over-unit vector.
+    await feed(page, [pad({ lx: 1, down: [BTN.DPAD_LEFT] })]);
+    const both = await engine(page, e => e.input.getMovementVector());
+    expect(both.x).toBeCloseTo(1, 5);
+
+    await releaseAll(page);
+    watch.assertClean();
+  });
+
+  test('the keyboard still overrides the pad', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await feed(page, [pad({ lx: 1, ly: 0 })]);
+    // The keyboard branch is documented as an immediate override; the pad was
+    // inserted BELOW it, so a key held while a stick is deflected must win.
+    const kb = await engine(page, e => {
+      e.input.keys.add('KeyA');
+      const v = e.input.getMovementVector();
+      e.input.keys.delete('KeyA');
+      return v;
+    });
+    expect(kb.x).toBeCloseTo(-1, 5);
+
+    await releaseAll(page);
+    watch.assertClean();
+  });
+});
+
+test.describe('right stick — aim through the synthetic pointer', () => {
+  test('parks the pointer AIM_RADIUS out and turns the ship', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await feed(page, [pad({ rx: 1, ry: 0 })]);
+    const p = await engine(page, e => {
+      const m = e.input.getMousePosition();
+      return { x: m.x, y: m.y, cx: window.innerWidth / 2, cy: window.innerHeight / 2 };
+    });
+    expect(Math.hypot(p.x - p.cx, p.y - p.cy)).toBeCloseTo(AIM_RADIUS, 3);
+
+    // Rotation is derived from the pointer, so aiming right faces the ship
+    // right (0 rad) — the pad reuses the mouse's path rather than its own.
+    await engine(page, e => { e.updateGameLogic(1 / 120); });
+    const rot = await engine(page, e => e.player.rotation);
+    expect(Math.abs(rot)).toBeLessThan(0.01);
+
+    await feed(page, [pad({ rx: 0, ry: 1 })]);
+    await engine(page, e => { e.updateGameLogic(1 / 120); });
+    const rotDown = await engine(page, e => e.player.rotation);
+    expect(rotDown).toBeCloseTo(Math.PI / 2, 2);
+
+    // Releasing the stick HOLDS the heading — a released stick is a hand off
+    // the mouse, not a snap back to centre.
+    await feed(page, [pad()]);
+    const held = await engine(page, e => {
+      const m = e.input.getMousePosition();
+      return Math.hypot(m.x - window.innerWidth / 2, m.y - window.innerHeight / 2);
+    });
+    expect(held).toBeCloseTo(AIM_RADIUS, 3);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('fire — the pointer model, minus the drag cancel', () => {
+  test('press and release queues one shot, clear of the ship', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const trigger = await feedThen(page, [pad({ down: [BTN.R2] }), pad()], e => {
+      const evts = e.input.getFireEvents();
+      return {
+        n: evts.length,
+        // Load-bearing: the shot's target must sit outside SHIP_SELECT_RADIUS
+        // of screen centre, or `claimTapNear` would swallow every pad shot
+        // fired within dock range as a tap on the ship.
+        dist: evts.length
+          ? Math.hypot(evts[0].x - window.innerWidth / 2, evts[0].y - window.innerHeight / 2)
+          : -1,
+      };
+    });
+    expect(trigger.n).toBe(1);
+    expect(trigger.dist).toBeGreaterThan(SHIP_SELECT_RADIUS);
+    expect(trigger.dist).toBeCloseTo(AIM_RADIUS, 3);
+
+    // A face button is bound to the same action.
+    const face = await feedThen(page, [pad({ down: [BTN.CROSS] }), pad()],
+      e => e.input.getFireEvents().length);
+    expect(face).toBe(1);
+
+    watch.assertClean();
+  });
+
+  test('holding past CHARGE_FULL releases a charged shot instead', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Press, then rewind the hold's start stamp past the charge window rather
+    // than sleeping for a real second — the window is measured in wall clock,
+    // so this drives the same branch without buying a flake.
+    const r = await engine(page, (e, arg: { press: any; release: any; sec: number }) => {
+      e.input.getFireEvents();
+      e.input.getChargeReleaseEvents();
+      e.input.applyPadSnapshot(arg.press, true);
+      e.input.padFireStart -= arg.sec * 1000;
+      e.input.applyPadSnapshot(arg.release, true);
+      return {
+        taps: e.input.getFireEvents().length,
+        charged: e.input.getChargeReleaseEvents().length,
+      };
+    }, { press: pad({ down: [BTN.R2] }), release: pad(), sec: CHARGE_FULL + 0.05 });
+
+    expect(r.taps).toBe(0);
+    expect(r.charged).toBe(1);
+
+    watch.assertClean();
+  });
+
+  test('the aim moving during a hold does NOT cancel the shot', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    // The pointer's tap path cancels on TAP_DISTANCE_LIMIT of travel.  A
+    // thumb on the right stick moves the aim 300px across a hold, so
+    // inheriting that rule would have swallowed most pad shots.
+    const n = await feedThen(page, [
+      pad({ rx: 1, down: [BTN.R2] }),
+      pad({ rx: -1, down: [BTN.R2] }),
+      pad({ rx: -1 }),
+    ], e => e.input.getFireEvents().length);
+    expect(n).toBe(1);
+
+    watch.assertClean();
+  });
+
+  test('a trigger held against a frozen world banks nothing', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    // fireEnabled=false is what the engine passes while docked / paused /
+    // stage-clear / dead.  The press must not queue a shot that lands the
+    // instant the world resumes.
+    const r = await feedThen(page, [pad({ down: [BTN.R2] }), pad()], e => ({
+      taps: e.input.getFireEvents().length,
+      charged: e.input.getChargeReleaseEvents().length,
+    }), false);
+    expect(r.taps).toBe(0);
+    expect(r.charged).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the charge ring reads the pad hold, same as a pointer hold', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await feed(page, [pad({ down: [BTN.R2] })]);
+    await engine(page, (e, sec: number) => { e.input.padFireStart -= sec * 1000; }, 0.5);
+    const held = await engine(page, e => e.input.getMouseHoldDuration());
+    expect(held).toBeGreaterThan(0.45);
+    expect(held).toBeLessThan(0.75);
+
+    await feed(page, [pad()]);
+    expect(await engine(page, e => e.input.getMouseHoldDuration())).toBe(0);
+    await engine(page, e => { e.input.getFireEvents(); e.input.getChargeReleaseEvents(); });
+
+    watch.assertClean();
+  });
+});
+
+test.describe('buttons — edges, not levels', () => {
+  test('a held button latches exactly one press', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const presses = await feedThen(page, [
+      pad({ down: [BTN.SQUARE] }),
+      pad({ down: [BTN.SQUARE] }),
+      pad({ down: [BTN.SQUARE] }),
+    ], e => {
+      let n = 0;
+      while (e.input.consumeInteractPress()) n++;
+      return n;
+    });
+    expect(presses).toBe(1);
+
+    await releaseAll(page);
+    watch.assertClean();
+  });
+
+  test('INTERACT docks at a station in range — the third path into `selected`', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Park beside the hub's home station, exactly as the tap path would need.
+    await engine(page, e => {
+      const st = e.stations[0];
+      e.player.position.x = st.position.x;
+      e.player.position.y = st.position.y + 40;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+    });
+    await waitForStats(page, s => !!s.dock?.inRange, 'dock range');
+
+    await feed(page, [pad({ down: [BTN.SQUARE] }), pad()]);
+    await engine(page, e => { e.updateGameLogic(1 / 120); });
+    await waitForStats(page, s => !!s.station, 'the station UI, opened from the pad');
+
+    // And the same button undocks — the docked branch is its other consumer.
+    await feed(page, [pad({ down: [BTN.SQUARE] }), pad()]);
+    await waitForStats(page, s => !s.station, 'undocked from the pad');
+
+    watch.assertClean();
+  });
+
+  test('a press made in open space is not banked for the next station', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Far from anything: the press is drained and discarded.
+    await engine(page, e => {
+      const st = e.stations[0];
+      e.player.position.x = st.position.x + 3000;
+      e.player.position.y = st.position.y + 3000;
+    });
+    await feed(page, [pad({ down: [BTN.SQUARE] }), pad()]);
+    await engine(page, e => { e.updateGameLogic(1 / 120); });
+
+    // Now fly into range. Nothing should dock without a fresh press.
+    await engine(page, e => {
+      const st = e.stations[0];
+      e.player.position.x = st.position.x;
+      e.player.position.y = st.position.y + 40;
+    });
+    await waitForStats(page, s => !!s.dock?.inRange, 'dock range');
+    for (let i = 0; i < 5; i++) await engine(page, e => { e.updateGameLogic(1 / 120); });
+    expect((await stats(page)).station).toBeFalsy();
+
+    watch.assertClean();
+  });
+
+  test('PAUSE toggles the game state from the pad', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await feed(page, [pad({ down: [BTN.OPTIONS] }), pad()]);
+    await waitForStats(page, s => s.gameState === 'PAUSED', 'paused from the pad');
+
+    // And back — the poll runs BEFORE the loop's freeze short-circuit for
+    // exactly this reason.
+    await feed(page, [pad({ down: [BTN.OPTIONS] }), pad()]);
+    await waitForStats(page, s => s.gameState === 'PLAYING', 'resumed from the pad');
+
+    watch.assertClean();
+  });
+
+  test('CYCLE_WEAPON walks the equipped slots', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The lean start mounts one gun; cycling a single slot is a no-op, so
+    // grant a second and assert the selection actually moves.  Names are
+    // spelled out rather than captured into the predicate: `waitForStats`
+    // stringifies it, so a closed-over variable does not exist in the page.
+    await engine(page, e => e.debugGrantWeapon('SHOTGUN'));
+    await waitForStats(page, s => s.currentWeapon === 'Blaster', 'the lean start weapon');
+
+    // Fed through the ENGINE's own poll, not called directly: this asserts
+    // that the edge survives the round trip GameEngine.pollGamepad makes.
+    await feed(page, [pad({ down: [BTN.R1] }), pad()]);
+    await waitForStats(page, s => s.currentWeapon === 'Shotgun', 'the weapon to cycle');
+
+    watch.assertClean();
+  });
+});

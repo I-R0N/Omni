@@ -930,6 +930,45 @@ export const INPUT_CONSTANTS = {
   CHARGE_FULL: 1.0,        // seconds: hold time required for a charged shot AND for the ring to read "full"
   TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
+
+  // ── Gamepad (Pair C, c2) ───────────────────────────────────────────────
+  // The pad is a THIRD input device beside keyboard/mouse and touch, not a
+  // replacement for either: it feeds the SAME movement vector, the same
+  // synthetic pointer the mouse writes, and the same fire/charge queues, so
+  // nothing downstream of InputSystem knows a pad exists.
+  //
+  // BUTTON INDICES are the W3C "standard gamepad" mapping, which is what a
+  // DualSense reports over both USB and Bluetooth (and what an Xbox pad
+  // reports too — the labels below are the PS5 names for the same indices).
+  // Every action lists ALL the buttons bound to it: a face button and a
+  // shoulder/trigger where the choice is a matter of taste, so neither
+  // convention is wrong on this pad.
+  GAMEPAD: {
+    /** Radial stick deadzone, applied to the MAGNITUDE and then rescaled so
+     *  the live range is still a full 0→1 (a raw clamp would make the first
+     *  usable deflection jump to 0.18). Sticks rest noisily; drift under this
+     *  is not input. Provisional — feel number, wants a real pad. */
+    STICK_DEADZONE: 0.18,
+    /** Analogue triggers report 0→1 on their button `value`; over this counts
+     *  as pressed. High enough that a resting finger is not a shot. */
+    TRIGGER_THRESHOLD: 0.35,
+    /** Distance (CSS px) from screen centre at which the pad parks its
+     *  synthetic pointer. Matches THROTTLE_DISTANCE so the aim reticle sits
+     *  where a mouse at full throttle would, and — load-bearing — is well
+     *  outside SHIP_SELECT_RADIUS, so a pad shot can never be mistaken for a
+     *  tap on the ship and swallowed by `claimTapNear`. */
+    AIM_RADIUS: 150,
+    /** Seconds the connect/disconnect HUD hint stays up. */
+    HINT_LIFETIME: 3.0,
+    AXES: { LX: 0, LY: 1, RX: 2, RY: 3 },
+    BUTTONS: {
+      FIRE:         [7, 0],   // R2, Cross — tap = shot, hold ≥ CHARGE_FULL = charged
+      INTERACT:     [2],      // Square — dock / enter portal / undock (the `selected` flag)
+      CYCLE_WEAPON: [5, 3],   // R1, Triangle
+      PAUSE:        [9],      // Options
+      DPAD:         [12, 13, 14, 15], // up, down, left, right — digital thrust
+    },
+  },
 };
 
 export const PHYSICS_CONSTANTS = {
