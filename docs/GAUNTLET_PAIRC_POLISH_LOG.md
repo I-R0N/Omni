@@ -23,7 +23,7 @@ tuning (step 6).
 | G1 | CI gate — three gates on PRs + the plan branch, cached, verified | **done** |
 | G2 | Gamepad support (Pair C c2, first half) | **done** |
 | G3 | Onscreen joystick (c2, second half) | **done** |
-| G4 | Menu help panel (c1) | pending |
+| G4 | Menu help panel (c1) | **done** |
 | G5 | Minimap rework — nebula out, flow streamlines, faithfulness | pending |
 | G6 | Portal off-screen indicators (decision #46b) | pending |
 | G7 | Polish residuals — palette defaults, MAP_POPULATION authority | pending |
@@ -318,6 +318,47 @@ rather than a transient, and closer to what the player actually sees.
 
 ---
 
+### G4 — Controls & Basics panel (2026-08-12)
+
+Pair C (c1). One help widget, rendered by one function, hosted by both the
+main menu and the pause menu.
+
+**DECISION G4-a — a collapsible SECTION, not a sixth full-screen overlay.**
+The game already has five full-screen surfaces (menu, pause, station, death,
+stage-clear) and how they cohere is 5d's job. A help screen that adds a sixth
+would be pre-empting that sweep with the least important surface. It uses the
+`PANEL_OPAQUE` treatment the Debug Menu uses, for the same reason: dense rows
+over a live map need a panel, not more transparency stacked on transparency.
+*Alternative rejected:* a dedicated overlay state, which also means a new
+gameState-adjacent flag and a new way to get back.
+
+**DECISION G4-b — one function, two hosts.** `renderHelpPanel()` sits at
+UIOverlay component scope beside `renderTestPanel` / `renderShipStatus`, the
+pattern already established for widgets shared between menus. The two hosts
+keep SEPARATE collapse keys (`menuhelp` / `pausehelp`) so opening it mid-run
+does not also unfold the front door. A test asserts the two render identical
+rows — "the same panel" is checked, not assumed.
+
+**Accuracy over ambition.** Every row describes what G2 and G3 actually
+bound. Where the game has no binding, the panel says nothing rather than
+inventing one: there is no keyboard weapon-cycle or pause key today, so
+neither appears. The one engine-driven element is the gamepad section's
+`connected` badge, from `stats.gamepadInfo` — the single fact in the panel
+the engine knows and the reader might not.
+
+Four sections: Touch, Keyboard & mouse, Gamepad, The run (salvage is money,
+stations outfit, portals lead to arenas, clear the field, death costs
+carried salvage). The last one is the "gameplay help" half of c1.
+
+**Layout.** A fixed-basis control column beside wrapping prose is exactly the
+shape that overflows a 390 px screen sideways, so the test asserts document
+scrollWidth against clientWidth AND every row's rect against the viewport,
+not just the panel's own box.
+
+**Gates:** typecheck, build, 64/64 tests (3 new in `tests/help.spec.ts`).
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -352,6 +393,10 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G3-d** — the aim finger keeps its movement role when no stick is down.
   Beat: making the stick the only way to move on touch (a mode to explain,
   and a regression for anyone who never finds the widget).
+- **G4-a** — help is a collapsible section, not a sixth full-screen overlay.
+  Beat: a dedicated overlay state (pre-empts 5d, adds a way in and out).
+- **G4-b** — one render function, two hosts, separate collapse keys. Beat:
+  duplicated copy that can drift between the two menus.
 
 ---
 

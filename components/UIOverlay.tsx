@@ -329,7 +329,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'menudebug' is the MAIN MENU's debug dropdown — the map / enemy-test
     // buttons that used to sit on the front door.  Collapsed by default: the
     // menu is difficulty + START, and everything else is a debug override.
+    // 'menuhelp' / 'pausehelp' are the Controls & Basics widget (Pair C, c1)
+    // in the two menus that host it.  Two keys rather than one so opening it
+    // to read the controls mid-run does not also unfold the front door.
     fieldmaps: true, switchmap: true, debug: true, menudebug: true,
+    menuhelp: true, pausehelp: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -887,6 +891,85 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
     </>
   );
+  /**
+   * Controls & basics (Pair C, c1).
+   *
+   * Shared verbatim by the main menu and the pause menu — same widget in both
+   * places, the pattern `renderTestPanel` / `renderShipStatus` already set.
+   * It is deliberately a COLLAPSIBLE SECTION rather than a sixth full-screen
+   * overlay: the game already has five, and how they cohere is 5d's job, not
+   * a help panel's.
+   *
+   * Everything here describes what SHIPPED.  The gamepad and touch-stick rows
+   * are the mappings G2/G3 actually bound, not a wishlist — a help screen that
+   * lies is worse than none.  The gamepad block lights up when a pad is
+   * actually connected (`stats.gamepadInfo`), which is the one thing here the
+   * engine knows and the reader might not.
+   */
+  const renderHelpPanel = () => {
+    const padOn = !!stats.gamepadInfo && stats.gamepadInfo !== 'none';
+
+    const group = (title: string, accent: string, rows: [string, string][], live?: React.ReactNode) => (
+      <div className="w-full">
+        <h4 className={`${accent} text-[11px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-2`}>
+          {title}{live}
+        </h4>
+        <div className="flex flex-col gap-1">
+          {rows.map(([control, what]) => (
+            <div key={control} className="flex gap-2 text-[11px] leading-snug">
+              {/* Fixed-basis control column so the descriptions line up, but
+                  `min-w-0` + wrapping on both halves so a 390px screen never
+                  pushes the row sideways. */}
+              <span className="text-slate-200 font-mono shrink-0 basis-[7.5rem] break-words">{control}</span>
+              <span className="text-slate-400 min-w-0">{what}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    return (
+      <div data-testid="help-panel" className="w-full flex flex-col gap-4 text-left">
+        {group('Touch', 'text-sky-300', [
+          ['Left thumb', 'Drag to fly. The stick appears wherever your thumb lands.'],
+          ['Right side', 'Drag to aim, tap to shoot.'],
+          ['Hold 1s, release', 'Charged shot (needs an Overcharge core installed).'],
+          ['Tap your ship', 'Dock at a station, or enter a portal you are next to.'],
+          ['Tap the minimap', 'Expand it. Tap a weapon slot to switch weapons.'],
+          ['One finger', 'Still works on its own: drag anywhere to fly and aim at once.'],
+        ])}
+
+        {group('Keyboard & mouse', 'text-emerald-300', [
+          ['W A S D / arrows', 'Fly.'],
+          ['Mouse', 'Aims. Click to shoot.'],
+          ['Hold 1s, release', 'Charged shot.'],
+          ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
+        ])}
+
+        {group('Gamepad', 'text-violet-300', [
+          ['Left stick / D-pad', 'Fly.'],
+          ['Right stick', 'Aim.'],
+          ['R2 or ✕', 'Shoot. Hold for a charged shot.'],
+          ['□', 'Dock, enter a portal, or undock.'],
+          ['R1 or △', 'Switch weapon.'],
+          ['Options', 'Pause.'],
+        ], padOn ? (
+          <span className="text-violet-200/80 font-mono text-[9px] normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded">
+            connected
+          </span>
+        ) : null)}
+
+        {group('The run', 'text-amber-300', [
+          ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
+          ['Stations', 'Dock to repair, buy modules, and outfit the ship. Outfitting needs a drydock.'],
+          ['Portals', 'The rifts on the hub lead to wave arenas. The return rift brings you home.'],
+          ['Waves', 'Clear the field to advance. Every sixth wave is a boss; killing it opens a way down.'],
+          ['Death', 'Costs a slice of the salvage you are still carrying — spent money is safe.'],
+        ])}
+      </div>
+    );
+  };
+
   // Human label for the cycling blend-alpha buttons.  Mirrors the
   // four-step cycle Off / Slow / Med / Fast across both Tile and
   // Shard blend knobs; the underlying values differ per cycle (see
@@ -2032,6 +2115,24 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               START
             </button>
 
+            {/* Controls & basics — the same widget the pause menu shows.
+                Collapsed by default: the front door stays DIFFICULTY / START,
+                and help is one tap away rather than in the way. */}
+            <div className="w-full text-center">
+              <button
+                data-testid="menu-help-toggle"
+                onClick={() => toggleSection('menuhelp')}
+                className="pointer-events-auto cursor-pointer text-sky-300/80 text-[11px] uppercase tracking-widest select-none hover:text-sky-200 py-2 px-3"
+              >
+                Controls &amp; Basics {collapsed.menuhelp ? '▸' : '▾'}
+              </button>
+              {!collapsed.menuhelp && (
+                <div className={`mt-2 w-full ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                  {renderHelpPanel()}
+                </div>
+              )}
+            </div>
+
             {/* Debug dropdown — the map picker and enemy test rows, collapsed
                 by default so they are reachable without being a front-door
                 choice.  Same PANEL_OPAQUE treatment as the pause menu's Debug
@@ -2139,6 +2240,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <p className="text-slate-500 text-[11px] text-center">
               Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
             </p>
+
+            {/* Controls & basics — the same widget the main menu shows, so
+                the answer is in the same words wherever you look for it. */}
+            <div className="text-center">
+              <button
+                data-testid="pause-help-toggle"
+                onClick={() => toggleSection('pausehelp')}
+                className="pointer-events-auto cursor-pointer text-sky-300/80 text-[11px] uppercase tracking-widest select-none hover:text-sky-200 py-2 px-3"
+              >
+                Controls &amp; Basics {collapsed.pausehelp ? '▸' : '▾'}
+              </button>
+              {!collapsed.pausehelp && (
+                <div className={`mt-2 mx-auto w-full max-w-xs ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                  {renderHelpPanel()}
+                </div>
+              )}
+            </div>
 
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}
