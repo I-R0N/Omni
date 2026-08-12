@@ -1593,6 +1593,10 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  /** DBG minimap MATERIAL mode name (decision #43, G5): 'Flow' / 'Dots' /
+   *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
+   *  nothing. */
+  minimapMaterialName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;

@@ -913,6 +913,49 @@ export const MINIMAP_CONSTANTS = {
     CLAMPED_ALPHA_MULT: 0.8,
     SPIN_HZ: 0.15,        // slow rotation of the diamond
   },
+  // Stations are the only BUILT contact on the map — fixed, safe, and not
+  // alive.  A square says all of that before the colour does, and it is the
+  // only rectilinear mark among dots and diamonds.
+  STATION_BLIP: {
+    HALF: 3,
+    OUTLINE_ALPHA: 0.55,
+    OUTLINE_WIDTH: 0.9,
+  },
+  // ── Material flow layer (decision #43, G5) ────────────────────────────
+  // Short streamlines traced through the asteroid flow field, replacing the
+  // per-shard dot spray.  A dot per shard answers "where is every rock",
+  // which at a few thousand shards is a grey wash; the field answers "which
+  // way is the material going", which is the only thing the map can usefully
+  // say about material it cannot draw individually.
+  //
+  // Seeds sit on a WORLD-space lattice whose spacing scales with the shown
+  // range, so the same count is drawn zoomed in and zoomed out (49 lines), and
+  // they are world-ANCHORED: the pattern slides under the moving window rather
+  // than being painted onto the glass.
+  FLOW: {
+    /** Lattice seeds each side of centre → (2n+1)² lines in view. */
+    SEEDS_PER_HALF: 4,
+    /** Integration steps per streamline (segments = STEPS). */
+    STEPS: 6,
+    /** Step length as a fraction of the lattice spacing.  The product
+     *  (STEPS × STEP_FRAC ≈ 0.84 of one cell) is the number that matters: a
+     *  line must be SHORTER than the gap between seeds, or the strokes run
+     *  into each other and the layer reads as long chords crossing the map
+     *  rather than as a field of local currents.  The first version used
+     *  2.2 cells and looked exactly that wrong when the map was expanded. */
+    STEP_FRAC: 0.14,
+    COLOR: '#64748b',
+    ALPHA: 0.34,
+    WIDTH: 1,
+    /** A brighter pulse travels each line downstream — the part that says
+     *  which WAY, and the reason this beats a static hatch. */
+    PULSE_ALPHA: 0.85,
+    PULSE_WIDTH: 1.8,
+    PULSE_HZ: 0.28,
+    /** Lines shorter than this (px, end to end) are dropped: in a dead-calm
+     *  cell the streamline collapses to a smudge that reads as noise. */
+    MIN_PX: 3,
+  },
 };
 
 export const INPUT_CONSTANTS = {
@@ -3105,6 +3148,32 @@ export function getActiveSnitchSpeedName(): string {
 export function cycleSnitchSpeed(): number {
   activeSnitchSpeedIndex = (activeSnitchSpeedIndex + 1) % SNITCH_SPEED_CYCLE.length;
   return activeSnitchSpeedIndex;
+}
+
+// ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────
+// What the minimap says about MATERIAL, as a three-way DBG cycle so the three
+// candidates can be judged against each other in motion rather than argued
+// about:
+//   'flow'  — streamlines sampled from the asteroid flow field: where material
+//             MOVES, instead of ten thousand dots saying where it is.  DEFAULT.
+//   'dots'  — the status quo ante: one dot per mobile shard.
+//   'off'   — neither.  The control, and the honest answer if the streamlines
+//             fail to read at 75px.
+// Static TILES are unaffected — they come from the pre-rendered static layer,
+// which is the minimap's actual terrain reading.
+export const MINIMAP_MATERIAL_MODES = ['flow', 'dots', 'off'] as const;
+export type MinimapMaterialMode = typeof MINIMAP_MATERIAL_MODES[number];
+let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('flow');
+export function getActiveMinimapMaterial(): MinimapMaterialMode {
+  return MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
+}
+export function getActiveMinimapMaterialName(): string {
+  const m = MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
+  return m === 'flow' ? 'Flow' : m === 'dots' ? 'Dots' : 'Off';
+}
+export function cycleMinimapMaterial(): number {
+  activeMinimapMaterialIndex = (activeMinimapMaterialIndex + 1) % MINIMAP_MATERIAL_MODES.length;
+  return activeMinimapMaterialIndex;
 }
 
 // DBG: gnat (Swarm) movement mode — cycle to feel each behavior side-by-side.

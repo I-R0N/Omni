@@ -33,6 +33,7 @@ import {
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
+    cycleMinimapMaterial,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -309,6 +310,15 @@ export class DebugControls {
    *  (also chevron on-screen entities — the original behaviour). */
   toggleChevronMode() {
     this.g.renderer.chevronsOffscreenOnly = !this.g.renderer.chevronsOffscreenOnly;
+  }
+
+  /** DBG (Visual): cycle what the minimap says about MATERIAL — Flow
+   *  (streamlines through the asteroid field, the default), Dots (the old
+   *  per-shard spray) or Off.  Three-way rather than a toggle because the
+   *  question decision #43 asked was whether streamlines BEAT dots, and the
+   *  honest control for that is showing neither. */
+  cycleMinimapMaterial() {
+    cycleMinimapMaterial();
   }
 
   /** DBG (Visual): force the onscreen joystick to draw with no touch session.

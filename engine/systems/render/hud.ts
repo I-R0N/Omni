@@ -26,7 +26,7 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS,
+    INPUT_CONSTANTS, getActiveMinimapMaterial,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -58,12 +58,22 @@ export function buildMinimapStaticLayer(r: RenderSystem, entities: GameEntity[],
     const scale = (res / 2) / range;
     const center = res / 2;
 
+    // Rebaking the terrain layer means the flow field was rebaked too — drop
+    // the streamline cache so it retraces against the new obstacles.
+    r._minimapFlowCache = null;
+
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         // Stage 5 fix: only static tiles render via the minimap
         // STRUCTURE pass.  Mobile shards (STRUCTURE+finite mass) are
         // not pinned to grid cells.
         if (!e.active || e.type !== EntityType.STRUCTURE || e.mass !== Infinity) continue;
+        // NEBULA IS OFF THE MINIMAP ENTIRELY (user directive, decision #43).
+        // It is a soft, drifting, low-contrast cloud that the map rendered as
+        // hard 2px dots — the densest thing on the map standing in for the
+        // vaguest thing in the world.  Nebula shards were already excluded
+        // from the dynamic buffer; this is the other half.
+        if (e.shardVariant === 'nebula-tile') continue;
         cx.fillStyle = e.color;
         // Map space: entity position is absolute.  Map center = (0,0).
         const dotX = center + e.position.x * scale;
@@ -474,6 +484,161 @@ export function renderLoadoutHUD(
     ctx.restore();
 }
 
+/**
+ * The minimap's MATERIAL layer: streamlines through the asteroid flow field
+ * (decision #43, gauntlet step 5 G5).
+ *
+ * Replaces the per-shard dot spray.  A dot per shard answers "where is every
+ * rock", which at a few thousand shards is a uniform grey wash on a 75 px
+ * square; the field answers "which way is the material going", which is the
+ * only useful thing a map that small can say about material it cannot draw
+ * individually.
+ *
+ * Two things make it cheap enough to run inside a per-frame draw:
+ *
+ *  1. **The geometry is cached in WORLD space** and rebuilt only when the
+ *     seed lattice actually changes — that is, when the camera crosses a
+ *     lattice cell, when the zoom changes, or on map load.  Panning within a
+ *     cell reuses the last trace; the per-frame cost is a transform and a
+ *     `lineTo` per point.
+ *  2. **The lattice spacing scales with the shown range**, so the same 49
+ *     lines are traced whether the map is showing 1 000 units or 8 000.  A
+ *     fixed world spacing would either be invisible zoomed out or thousands
+ *     of lines zoomed in.
+ *
+ * Seeds are snapped to world multiples of the spacing, which is what makes
+ * the pattern world-ANCHORED: it slides under the moving window instead of
+ * being painted on the glass, and only the SET of visible lines changes (at
+ * cell boundaries) rather than every line's position.
+ */
+function renderMinimapFlow(
+    r: RenderSystem,
+    ctx: CanvasRenderingContext2D,
+    camera: CameraState,
+    centerX: number,
+    centerY: number,
+    scale: number,
+    range: number,
+) {
+    const F = MINIMAP_CONSTANTS.FLOW;
+    const flow = r.flowFieldForMinimap();
+    if (!flow) return;
+
+    const spacing = range / F.SEEDS_PER_HALF;
+    const side = F.SEEDS_PER_HALF * 2 + 1;
+    const lines = side * side;
+    const pts = F.STEPS + 1;
+
+    // Lattice origin: the seed cell the camera is standing in.  Integer cell
+    // indices are what the cache is keyed on — panning inside one cell must
+    // not retrace anything.
+    const cellX = Math.floor(camera.position.x / spacing);
+    const cellY = Math.floor(camera.position.y / spacing);
+
+    let cache = r._minimapFlowCache;
+    const need = lines * pts * 2;
+    if (!cache || cache.data.length !== need) {
+        cache = r._minimapFlowCache = { data: new Float64Array(need), cellX: NaN, cellY: NaN, spacing: 0 };
+    }
+
+    if (cache.cellX !== cellX || cache.cellY !== cellY || cache.spacing !== spacing) {
+        cache.cellX = cellX;
+        cache.cellY = cellY;
+        cache.spacing = spacing;
+        const step = spacing * F.STEP_FRAC;
+        let w = 0;
+        for (let iy = 0; iy < side; iy++) {
+            for (let ix = 0; ix < side; ix++) {
+                let px = (cellX + ix - F.SEEDS_PER_HALF) * spacing;
+                let py = (cellY + iy - F.SEEDS_PER_HALF) * spacing;
+                cache.data[w++] = px;
+                cache.data[w++] = py;
+                for (let k = 0; k < F.STEPS; k++) {
+                    // The sampler returns a shared scratch vector — consume it
+                    // before the next call (FlowFieldGrid's contract).
+                    const v = flow.sampleAsteroidFlow(px, py);
+                    px += v.x * step;
+                    py += v.y * step;
+                    cache.data[w++] = px;
+                    cache.data[w++] = py;
+                }
+            }
+        }
+    }
+
+    // Draw.  World → minimap goes through the TORUS delta, not a raw
+    // subtraction: a streamline seeded just across the wrap seam is a few
+    // hundred units away, not a map-width away.
+    const data = cache.data;
+    const camX = camera.position.x;
+    const camY = camera.position.y;
+    const nowSec = performance.now() / 1000;
+
+    // A segment longer than this in screen px cannot be real: the step length
+    // is fixed, so an apparent jump means the two ends resolved to opposite
+    // sides of the WRAP SEAM.  Drawn naively that is a chord straight across
+    // the minimap — which is exactly what the first version did, and it read
+    // as a pair of hard straight lines cutting through the field.  Break the
+    // path there instead.
+    const stepPx = spacing * F.STEP_FRAC * scale;
+    const seamBreak = Math.max(4, stepPx * 3);
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = F.COLOR;
+
+    // Pass 1 — the quiet lines.
+    ctx.globalAlpha = F.ALPHA;
+    ctx.lineWidth = F.WIDTH;
+    ctx.beginPath();
+    for (let l = 0; l < lines; l++) {
+        const base = l * pts * 2;
+        const x0 = centerX + wrapDeltaX(camX, data[base]) * scale;
+        const y0 = centerY + wrapDeltaY(camY, data[base + 1]) * scale;
+        const xN = centerX + wrapDeltaX(camX, data[base + (pts - 1) * 2]) * scale;
+        const yN = centerY + wrapDeltaY(camY, data[base + (pts - 1) * 2 + 1]) * scale;
+        // A dead-calm cell traces a smudge; drop it rather than draw noise.
+        if (Math.abs(xN - x0) + Math.abs(yN - y0) < F.MIN_PX) continue;
+        let px = x0;
+        let py = y0;
+        ctx.moveTo(px, py);
+        for (let k = 1; k < pts; k++) {
+            const x = centerX + wrapDeltaX(camX, data[base + k * 2]) * scale;
+            const y = centerY + wrapDeltaY(camY, data[base + k * 2 + 1]) * scale;
+            if (Math.abs(x - px) > seamBreak || Math.abs(y - py) > seamBreak) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            px = x;
+            py = y;
+        }
+    }
+    ctx.stroke();
+
+    // Pass 2 — a bright segment travelling downstream along each line.  This
+    // is what makes the layer say which WAY the material is going; a static
+    // hatch would only say "there is a current here".  The phase is offset per
+    // line so the field shimmers rather than blinking in lockstep.
+    ctx.globalAlpha = F.PULSE_ALPHA;
+    ctx.lineWidth = F.PULSE_WIDTH;
+    ctx.beginPath();
+    for (let l = 0; l < lines; l++) {
+        const base = l * pts * 2;
+        const phase = (nowSec * F.PULSE_HZ + (l % 7) / 7 + (l % 3) / 3) % 1;
+        const k = Math.min(pts - 2, Math.floor(phase * (pts - 1)));
+        const ax = centerX + wrapDeltaX(camX, data[base + k * 2]) * scale;
+        const ay = centerY + wrapDeltaY(camY, data[base + k * 2 + 1]) * scale;
+        const bx = centerX + wrapDeltaX(camX, data[base + (k + 1) * 2]) * scale;
+        const by = centerY + wrapDeltaY(camY, data[base + (k + 1) * 2 + 1]) * scale;
+        if (Math.abs(bx - ax) + Math.abs(by - ay) < 0.5) continue;
+        if (Math.abs(bx - ax) > seamBreak || Math.abs(by - ay) > seamBreak) continue;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+}
+
 export function renderMinimap(
     r: RenderSystem,
     ctx: CanvasRenderingContext2D,
@@ -565,6 +730,16 @@ export function renderMinimap(
             mapX + sw1 * dScaleX, mapY + sh1 * dScaleY, sw2 * dScaleX, sh2 * dScaleY);
     }
 
+    // ── Material layer (decision #43, G5) ──────────────────────────────
+    // 'flow' traces the asteroid field; 'dots' is the old per-shard spray
+    // (handled in the entity loop below); 'off' draws neither.  Drawn after
+    // the terrain blit and before the contacts, so it reads as a property of
+    // the terrain rather than as another thing to look at.
+    const materialMode = getActiveMinimapMaterial();
+    if (materialMode === 'flow') {
+        renderMinimapFlow(r, ctx, camera, centerX, centerY, scale, range);
+    }
+
     // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
     // Enemy blips pulse so they pop against the static layer; the phase
     // uses performance.now() (render-side animation, frame-rate smooth).
@@ -600,13 +775,25 @@ export function renderMinimap(
                 : enemyPulseAlpha;
             const mult = bb ? bb.CLAMPED_ALPHA_MULT : blip.CLAMPED_ALPHA_MULT;
             ctx.globalAlpha = clamped ? alpha * mult : alpha;
-            ctx.fillStyle = entity.color;
+            // FAITHFULNESS (G5): contacts wear the INDICATOR LEGEND's colour,
+            // not `entity.color`.  §8 already fixed that legend for the arrows
+            // — red enemy, purple bubble, yellow rival, and a boss in the
+            // shared enemy red with its RING doing the distinguishing.  The
+            // minimap is the same kind of abstracted contact readout, so it
+            // has to speak the same language: a contact that is red on the
+            // edge of the screen and teal on the map is two contacts as far
+            // as the player is concerned.
+            const ic = UI_CONSTANTS.INDICATORS.COLORS;
+            const contactColor = entity.enemyShape === 'bubble' ? ic.BUBBLE
+                               : entity.isRival === true ? ic.RIVAL
+                               : ic.ENEMY;
+            ctx.fillStyle = contactColor;
             ctx.beginPath();
             ctx.arc(centerX + ex, centerY + ey, bb ? bb.RADIUS : blip.RADIUS, 0, Math.PI * 2);
             ctx.fill();
             if (bb) {
                 ctx.globalAlpha = (clamped ? alpha * mult : alpha) * bb.RING_ALPHA;
-                ctx.strokeStyle = entity.color;
+                ctx.strokeStyle = contactColor;
                 ctx.lineWidth = bb.RING_WIDTH;
                 ctx.beginPath();
                 ctx.arc(centerX + ex, centerY + ey, bb.RING_RADIUS, 0, Math.PI * 2);
@@ -684,13 +871,49 @@ export function renderMinimap(
 
         if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
-        ctx.fillStyle = entity.color;
+        // ── Mobile material (shards) ──────────────────────────────────
+        // Only in 'dots' mode.  The default is the flow layer above: a dot
+        // per shard is a few thousand identical marks that average out to a
+        // grey wash, and it answers a question ("where is that rock") the
+        // player never asks of a 75px map.
+        if (entity.type === EntityType.STRUCTURE) {
+            if (materialMode !== 'dots') continue;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = entity.color;
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            continue;
+        }
 
-        let dotRadius = 1.5;
-        if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
+        // ── The remaining POIs: stations and the snitch ───────────────
+        // FAITHFULNESS (G5): every contact wears the identity it has
+        // everywhere else, so the map reads with the same vocabulary as the
+        // world and the indicator arrows.
+        //   · STATION — indigo SQUARE.  Square because it is built, fixed and
+        //     safe: the one contact that is not alive and not a threat, and
+        //     the only rectilinear thing on a map of dots and diamonds.  The
+        //     colour is the indicator legend's, not `entity.color`, which is
+        //     the hull tint and differs per station variant.
+        //   · SNITCH — its own gold, and a dot, because it is a moving thing
+        //     like an enemy but not a threat.
+        // Portals and bosses are handled above; drops stay excluded entirely
+        // (CLAUDE.md §8) and never reach this buffer.
+        if (entity.isStation === true) {
+            const s = MINIMAP_CONSTANTS.STATION_BLIP;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = UI_CONSTANTS.INDICATORS.COLORS.STATION;
+            ctx.fillRect(dotX - s.HALF, dotY - s.HALF, s.HALF * 2, s.HALF * 2);
+            ctx.strokeStyle = `rgba(255,255,255,${s.OUTLINE_ALPHA})`;
+            ctx.lineWidth = s.OUTLINE_WIDTH;
+            ctx.strokeRect(dotX - s.HALF, dotY - s.HALF, s.HALF * 2, s.HALF * 2);
+            continue;
+        }
 
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = entity.isSnitch === true ? SNITCH_CONSTANTS.CORE_COLOR : entity.color;
         ctx.beginPath();
-        ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+        ctx.arc(dotX, dotY, entity.type === EntityType.INTERACTABLE ? 3 : 1.5, 0, Math.PI * 2);
         ctx.fill();
     }
 

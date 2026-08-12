@@ -235,6 +235,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.toggleJoystickDebug();
   };
 
+  const handleCycleMinimapMaterial = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleMinimapMaterial();
+  };
+
   const handleToggleRepelPush = () => {
       if (engineRef.current) engineRef.current.dbg.toggleRepelPush();
   };
@@ -521,6 +525,7 @@ const App: React.FC = () => {
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
         onToggleJoystickDebug={handleToggleJoystickDebug}
+        onCycleMinimapMaterial={handleCycleMinimapMaterial}
         onToggleRepelPush={handleToggleRepelPush}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}

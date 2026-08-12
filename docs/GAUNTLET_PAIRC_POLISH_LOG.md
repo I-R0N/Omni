@@ -24,7 +24,7 @@ tuning (step 6).
 | G2 | Gamepad support (Pair C c2, first half) | **done** |
 | G3 | Onscreen joystick (c2, second half) | **done** |
 | G4 | Menu help panel (c1) | **done** |
-| G5 | Minimap rework — nebula out, flow streamlines, faithfulness | pending |
+| G5 | Minimap rework — nebula out, flow streamlines, faithfulness | **done** |
 | G6 | Portal off-screen indicators (decision #46b) | pending |
 | G7 | Polish residuals — palette defaults, MAP_POPULATION authority | pending |
 | G8 | OPTIONAL — NPC station shuttles (first to cut) | pending |
@@ -359,6 +359,119 @@ not just the panel's own box.
 
 ---
 
+### G5 — Minimap rework (2026-08-12)
+
+The user's two minimap directives (decision #43) plus the faithfulness pass.
+
+#### (1) Nebula is off the minimap
+
+It was on the map in the half nobody would look for: nebula SHARDS were
+already excluded from the per-frame buffer, but nebula TILES went into the
+pre-rendered terrain layer like any other tile, drawn as hard 2 px dots. The
+densest, hardest-edged marks on the map stood for the softest, vaguest thing
+in the world. One `continue` in `buildMinimapStaticLayer`.
+
+Proved by test on the NEBULA_FIELD showcase — a map that is nebula and
+nothing else, so the terrain layer must come out with **zero** painted
+pixels. On a mixed map the same bug would hide behind the rock and glass that
+legitimately draw.
+
+#### (2) Shard dots → flow streamlines. VERDICT: flow ships as the default.
+
+`MINIMAP_CONSTANTS.FLOW` + `renderMinimapFlow`, behind the three-way DBG
+cycle **Visual ▸ Minimap mat** (`Flow` / `Dots` / `Off`) — three-way because
+the question was whether streamlines BEAT dots, and the honest control for
+that is a map showing neither.
+
+**Evidence 1 — performance is a wash.** Worst-frame `renderMs` on
+ASTEROID_FIELD (≈1 400 mobile shards), 14 interleaved rounds per mode:
+
+| | Flow | Dots | Off |
+|---|---|---|---|
+| collapsed, p99 / worst | 20.96 / 20.97 | 20.97 / 20.98 | 20.68 / 20.71 |
+| expanded, p99 / worst | 21.83 / 21.88 | 22.04 / 22.13 | 22.14 / 22.18 |
+
+All six numbers sit inside a 1.5 ms band on an 18–21 ms software-rendered
+headless frame: the material layer is below this harness's noise floor either
+way. Read `perf/README.md` before quoting these — headless timings are not
+device timings, and the claim here is only the RELATIVE one.
+
+**A methodology note worth keeping.** The first A/B ran the three modes back
+to back and had `Off` — which does strictly less work than either other mode
+— coming out **3 ms slower than both**. That is not a result, it is drift:
+warm-up, an evolving shard field and host CPU noise swamped the effect.
+Interleaving (rotate the mode every 500 ms, pool per mode) made the three
+collapse onto each other, which is the real answer. A sequential A/B on a
+noisy host will confidently report whatever order you sampled in.
+
+**Evidence 2 — legibility, from captures at 390×844.** Since perf does not
+decide it, the pictures do:
+
+- **Dots**, expanded: a dense white starfield of ~1 400 marks in which the
+  actual CONTACTS — the bubbles, the rival, the portals — are the same size
+  and brightness as the shards, and are simply lost. The layer actively
+  camouflages the thing the minimap exists to show.
+- **Flow**: short curved strokes, quiet grey, describing the field's real
+  spiral. The contacts are then the only dots on the map, and the terrain
+  reads through it.
+- **Off**: contacts are clearest of all, but the map has nothing to say about
+  a world made of moving material, and the flow layer costs nothing to keep.
+
+**DECISION G5-a — `flow` is the shipped default; `dots` and `off` stay as DBG
+comparisons.** Beat: keeping dots (drowns the contacts), and dropping the
+layer entirely (free, but says nothing).
+
+**DECISION G5-b — the geometry is cached in WORLD space and keyed on the seed
+CELL.** Seeds sit on a lattice whose spacing scales with the shown range, so
+the same 81 lines are traced at either zoom, and they are snapped to world
+multiples — which makes them world-ANCHORED (the pattern slides under the
+window rather than being painted on the glass) and makes the cache key
+obvious: retrace only when the camera crosses a cell, the zoom changes, or the
+map reloads. Panning reuses the trace. A test asserts both halves of that.
+*Alternative rejected:* stamping streamlines into the pre-rendered terrain
+canvas (one blit, zero per-frame cost). That canvas covers the whole map at
+280 px, so the collapsed minimap magnifies it ~4× — the strokes would be
+blurry smears exactly where the map is used most.
+
+**Two bugs the pictures caught, neither visible in a number:**
+1. **Lines four times too long.** `STEPS × STEP_FRAC` was 2.2 lattice cells,
+   so every "streamline" ran ~75% of the visible range and the expanded map
+   read as long chords crossing everything. The product has to be **under one
+   cell** (now 0.84) or the strokes run into each other and stop reading as
+   local currents.
+2. **Wrap-seam chords.** Streamline points are integrated in unwrapped world
+   space and projected through `wrapDeltaX/Y` individually, so a line
+   straddling the torus seam had consecutive points resolve to opposite sides
+   of the map — drawn naively, a hard straight line across the whole minimap.
+   Segments longer than 3 step-lengths now break the path. This is the
+   standard toroidal-polyline trap and it is worth stating plainly: **using
+   torus math per POINT is not enough; a polyline needs a seam break.**
+
+#### (3) Faithfulness pass
+
+Every remaining contact now wears the identity it has elsewhere:
+
+- **Enemies, bubbles, rivals, bosses** take the INDICATOR LEGEND's colour
+  (§8: red / purple / yellow, boss in the shared enemy red with its ring
+  doing the distinguishing) instead of `entity.color`. A contact that is red
+  on the screen edge and teal on the map is two contacts as far as the player
+  is concerned; the minimap and the arrows are the same kind of abstracted
+  readout and have to speak one language.
+- **Stations** become an indigo SQUARE (`STATION_BLIP`) — the legend's indigo,
+  and the only rectilinear mark on a map of dots and diamonds, because a
+  station is the one contact that is built, fixed and not alive.
+- **The snitch** keeps its own gold rather than borrowing the enemy red.
+- **Portals** were already the anomaly diamond with its radar ping; unchanged.
+- **Drops** stay excluded, and a test now says so in all three modes.
+
+**Not changed:** the boss keeps its ringed blip but loses the phase colour to
+the legend red. The phase colour still reads on the hull aura and the HUD
+bar, which are where a phase change is actually legible.
+
+**Gates:** typecheck, build, 69/69 tests (5 new in `tests/minimap.spec.ts`).
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -397,6 +510,12 @@ Consolidated as they are made; each one names the alternative it beat.
   Beat: a dedicated overlay state (pre-empts 5d, adds a way in and out).
 - **G4-b** — one render function, two hosts, separate collapse keys. Beat:
   duplicated copy that can drift between the two menus.
+- **G5-a** — flow streamlines are the shipped default. Beat: keeping the
+  per-shard dots (which camouflage the contacts), and removing the layer with
+  no replacement (free, but the map then says nothing about material).
+- **G5-b** — streamline geometry cached in world space, keyed on the seed
+  cell. Beat: stamping it into the pre-rendered terrain canvas (one blit, but
+  blurred ~4× at the collapsed zoom, which is where the map is used).
 
 ---
 
