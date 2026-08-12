@@ -27,8 +27,8 @@ tuning (step 6).
 | G5 | Minimap rework — nebula out, flow streamlines, faithfulness | **done** |
 | G6 | Portal off-screen indicators (decision #46b) | **done** |
 | G7 | Polish residuals — palette defaults, MAP_POPULATION authority | **done** |
-| G8 | OPTIONAL — NPC station shuttles (first to cut) | pending |
-| G-final | Validation, docs sync, completion summary | pending |
+| G8 | OPTIONAL — NPC station shuttles (first to cut) | **cut** |
+| G-final | Validation, docs sync, completion summary | **done** |
 
 ---
 
@@ -628,6 +628,64 @@ inside, indestructible outside — asserted by median radius per variant.
 
 ---
 
+### G8 — NPC station shuttles: CUT (2026-08-12)
+
+The brief marked this optional and first to cut, and it is the milestone
+that got cut. Not because it is hard — it is a lean roamer in
+`engine/roamers/`, reusing the rival sprite pool and `openPortal`, and the
+pattern is well worn by now — but because the session's budget went into two
+milestones that grew past their briefs and earned it:
+
+- **G5** was three directives, and answering the streamline question
+  honestly meant an A/B, then discovering the A/B was drift-dominated,
+  re-running it interleaved, then judging the result from captures because
+  the perf answer turned out to be "no difference" — plus two real rendering
+  bugs (over-long lines, wrap-seam chords) that only the pictures showed.
+- **G7** turned out to be a correctness problem wearing a data-move's
+  clothes: `MAP_POPULATION` was describing a Deep Space that had not existed
+  for a long time, so "move the numbers" had to become "establish which
+  numbers are real, then prove the move changed nothing".
+
+Spending the remainder on ambience while G-final's validation and CLAUDE.md
+sync were still owed would have been the wrong trade. The parking-lot entry
+is untouched and the work is unchanged in scope.
+
+---
+
+### G-final — Validation (2026-08-12)
+
+- **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
+  tests, three times over, ~3.4 minutes per test run.
+- **CI green on the branch** — the gate this gauntlet's own first milestone
+  finished. Verified on PR #84.
+- **Phone-scale.** Everything new was built and asserted at 390×844: the
+  help panel's fit (document scroll width AND every row's rect), the
+  joystick's zone and thumb-sized geometry, the minimap captures, the
+  material captures.
+- **Durable tests: +36.** 38 → 74. `input.spec.ts` (23), `minimap.spec.ts`
+  (6), `maps.spec.ts` (4), `help.spec.ts` (3).
+- **Docs synced.** CLAUDE.md §2 (InputSystem, hud.ts, the tests line), §5
+  (both new INPUT_CONSTANTS blocks, `MINIMAP_CONSTANTS.FLOW` /
+  `STATION_BLIP`, ROCK_PALETTES / METAL_BRIGHT_TARGET, MAP_POPULATION's
+  promotion to authority), §6a (no map hardcodes a ratio), §7 + §9 (the
+  cached CI gate and its new push trigger), §8 (a new input-devices
+  convention, a new minimap convention, the portal-arrow change, the new DBG
+  rows, the help panel). `tests/README.md` gained four suite rows and two
+  new harness rules — both of them flakes this session actually paid for.
+
+**Two harness rules were learned the hard way and are now written down**, in
+`tests/README.md` as rules 8 and 9, because both cost real debugging time:
+
+1. Anything queue-shaped must be fed and read in ONE page evaluation — the
+   engine's loop drains the fire queues and the interact latch every frame,
+   so a read in the next round-trip sees an empty queue. Better still, assert
+   a durable consequence (a spawned projectile) instead of the transient.
+2. `waitForStats` predicates are STRINGIFIED, so a closed-over test variable
+   does not exist in the page: the predicate throws `ReferenceError` and
+   surfaces as an unexplained timeout, not as a failed assertion.
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -691,10 +749,49 @@ Consolidated as they are made; each one names the alternative it beat.
 
 ---
 
+## Completion summary
+
+Eight milestones queued, seven shipped, one cut (G8, the optional ambience
+item — see its entry for why). 74 tests, up from 38. Three gates green ×3;
+CI green on PR #84.
+
+**What shipped, in one line each:**
+
+| | |
+|---|---|
+| **G1** | The CI gate finished: it already existed, so this added the plan-branch push trigger, a keyed Chromium cache, and a corrected README. |
+| **G2** | Gamepad support. The pad writes the same movement vector, synthetic pointer and fire queues the mouse writes, so aiming and shooting work without being built — and the controller button closed the `selected` seam CLAUDE.md §8 had reserved for it. |
+| **G3** | A floating touch joystick, and touch became two-handed. Its zone is defined by what it refuses — above all the ship-select disc, without which docking-by-tap silently breaks. |
+| **G4** | One Controls & Basics panel, hosted by both menus, accurate to what G2/G3 actually bound. |
+| **G5** | The minimap stopped drawing every rock and started drawing the current: nebula gone, shard dots replaced by flow streamlines, contacts wearing the indicator legend's colours. |
+| **G6** | The portal arrow stopped naming a place already on screen, and stopped being the only contact exempt from the rules. |
+| **G7** | Metal de-whited toward a real steel-blue, rock got a palette, and `MAP_POPULATION` became the authority it had only been documented as. |
+
+**Three things worth carrying forward beyond this branch:**
+
+1. **A sequential A/B on a noisy host reports whatever order you sampled
+   in.** G5's first measurement had the mode that does strictly LESS work
+   coming out 3 ms slower than the others. Interleave, always.
+2. **Per-point torus math is not enough for a polyline.** Consecutive points
+   either side of the wrap seam draw a chord across the whole map. The
+   streamline layer needed an explicit seam break; anything else that draws
+   a path in world space will too.
+3. **Some things are only decidable by looking.** G5's default and G7's
+   palettes were both settled from captures at 390×844, and two rendering
+   bugs (over-long streamlines, a hot pink halo on cold metal) were invisible
+   to every number available.
+
+---
+
 ## FOR-USER-REVIEW
 
 Items needing a human — judgment calls, and things only real hardware can
-answer. Consolidated in the completion summary at the end.
+answer. **Led by the hardware checklist, which is the one thing this session
+could not do for itself.**
+
+The standalone preview build for this PR (posted by the preview bot on every
+push, opens on an iPhone) is the fastest way to run these:
+`https://raw.githack.com/i-r0n/omni-standalone/main/previews/pr-84/index.html`
 
 - **HARDWARE CHECK — the gamepad (G2).** The suite proves the mapping layer
   is correct given a snapshot; it cannot prove a real pad produces the
@@ -732,6 +829,20 @@ answer. Consolidated in the completion summary at the end.
      loadout slot (switches weapon).
   5. **Visibility.** Is the widget too faint under a thumb in daylight, or
      too loud?
+
+- **JUDGMENT CALL — the minimap's material default (G5).** Shipped as
+  `flow`. Perf did not decide it (all three modes are inside the noise
+  floor), so it was decided from captures: `dots` camouflages the actual
+  contacts among ~1 400 identical marks. Flip Visual ▸ "Minimap mat" in
+  motion and see whether you agree — the DBG cycle exists exactly so this
+  can be overturned by looking rather than by arguing.
+
+- **JUDGMENT CALL — the material palettes (G7).** Rock ships `mixed` (mostly
+  slate, with rust and mineral running through it); the pure `rust` and
+  `mineral` families are on the DBG cycle and are the obvious raw material
+  for regional identity later. Metal now brightens toward `#a5d8f0` and
+  glows cyan instead of magenta. All four are aesthetic calls made from
+  captures; every one is a constant and a DBG row away from being changed.
 
 - **OPEN QUESTION — should holding the fire trigger auto-repeat?** Today it
   does not: the pad uses the same tap-or-charge model as mouse and touch
