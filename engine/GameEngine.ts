@@ -67,7 +67,11 @@ const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
  *  straight past it through `window.__omniEngine` — so widening it changes
  *  nothing at runtime.  The real public API is what `App.tsx` calls. */
 export class GameEngine {
-  private input: InputSystem;
+  /** Not `private`: DebugControls reaches it for the joystick DBG toggle,
+   *  and the Playwright suites drive the pad mapping through it (CLAUDE.md
+   *  §8 — `private` is compile-time only, so the suites could read it either
+   *  way; this just stops the compiler disagreeing with the debug menu). */
+  input: InputSystem;
   physics: PhysicsSystem;
   renderer: RenderSystem;
   private ai: AISystem;
@@ -887,6 +891,7 @@ export class GameEngine {
       snitchCatchMode: this.snitchCatchMode,
       gamepadInfo: this.input.padDebugName(),
       gamepadAxes: this.input.padDebugAxes(),
+      joystickForceVisible: this.input.joystickForceVisible,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1346,6 +1351,30 @@ export class GameEngine {
     if (frozen && !this.dockedAtStation) this.input.consumeInteractPress();
   }
 
+  /**
+   * Per-frame upkeep for the onscreen joystick (Pair C, c2): advance the
+   * release fade, and hand InputSystem the LIVE minimap rect.
+   *
+   * The rect is pushed rather than looked up because the stick must not claim
+   * a touch that belongs to the minimap toggle, and the minimap changes size
+   * at runtime (75 px collapsed, 280 px expanded) — a constant in
+   * INPUT_CONSTANTS could only be right for one of those.  This keeps HUD
+   * layout knowledge in the engine, where it already lives (the fire-event
+   * handler computes the same rect to catch the toggle tap).
+   */
+  private tickJoystick(frameTime: number) {
+    this.input.tickJoystick(frameTime);
+
+    const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
+    const size = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
+    this.input.setStickExclusion(
+      MARGIN,
+      window.innerHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
+      size,
+      size,
+    );
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
@@ -1353,6 +1382,7 @@ export class GameEngine {
     this.lastTime = time;
 
     this.pollGamepad();
+    this.tickJoystick(frameTime);
 
     // HUD score ticker — roll the displayed total up toward the true
     // score by integer steps (≥1, ≤ a fraction of the gap) so awards
@@ -1507,6 +1537,7 @@ export class GameEngine {
       snitchCatchMode: this.snitchCatchMode,
       gamepadInfo: this.input.padDebugName(),
       gamepadAxes: this.input.padDebugAxes(),
+      joystickForceVisible: this.input.joystickForceVisible,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -4779,6 +4810,7 @@ export class GameEngine {
               rebuilds:  this.ffOverlayRebuilds,
               sampleN:   this.ffOverlaySampleN,
           },
+          this.input.getJoystickState(),
       );
   }
 

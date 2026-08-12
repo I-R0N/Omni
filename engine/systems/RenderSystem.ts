@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
@@ -21,7 +21,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
-         renderMinimap, renderWaveAnnouncements, fitFontPx,
+         renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
 
 /**
@@ -604,6 +604,7 @@ export class RenderSystem {
     player?: GameEntity,
     waveAnnouncements?: WaveAnnouncement[],
     flowOverlay?: FlowOverlayState,
+    joystick?: JoystickHUDState | null,
   ) {
     const t0 = performance.now();
     this.lastTintMs = 0;
@@ -894,6 +895,12 @@ export class RenderSystem {
     // 9. Render 2-slot loadout HUD (Screen Space)
     if (player) {
         renderLoadoutHUD(ctx, player, width, height);
+    }
+
+    // 10. Onscreen joystick (Screen Space, LAST) — it lives under an actual
+    // thumb, so nothing may draw over it.  Null on mouse and pad.
+    if (joystick) {
+        renderJoystick(ctx, joystick);
     }
 
     this.lastRenderMs = performance.now() - t0;

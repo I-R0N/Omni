@@ -79,6 +79,7 @@ interface UIOverlayProps {
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
+  onToggleJoystickDebug?: () => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -239,6 +240,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleScreenShake,
   onToggleTileOutlines,
   onToggleChevronMode,
+  onToggleJoystickDebug,
   onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -1218,6 +1220,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Chevrons', onToggleChevronMode,
                   stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
                   'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
+                {ctrlRow('Joystick', onToggleJoystickDebug,
+                  stats.joystickForceVisible === true ? 'Forced' : 'Touch',
+                  'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}

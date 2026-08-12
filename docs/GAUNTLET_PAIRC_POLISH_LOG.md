@@ -22,7 +22,7 @@ tuning (step 6).
 |----|-----------|--------|
 | G1 | CI gate — three gates on PRs + the plan branch, cached, verified | **done** |
 | G2 | Gamepad support (Pair C c2, first half) | **done** |
-| G3 | Onscreen joystick (c2, second half) | pending |
+| G3 | Onscreen joystick (c2, second half) | **done** |
 | G4 | Menu help panel (c1) | pending |
 | G5 | Minimap rework — nebula out, flow streamlines, faithfulness | pending |
 | G6 | Portal off-screen indicators (decision #46b) | pending |
@@ -238,6 +238,86 @@ sweep, not a gamepad milestone.
 
 ---
 
+### G3 — Onscreen joystick (2026-08-12)
+
+Pair C (c2), second half. A left-thumb virtual stick for movement, coexisting
+with the tap-to-aim/fire gestures that were already there.
+
+**What was there before:** touch was a SINGLE pointer. One finger drove
+movement (screen-centre → touch, radial throttle), aim, tap-to-fire and
+hold-to-charge, all at once. Adding a stick means touch has to become
+two-handed, which is the real change here; the widget is the easy part.
+
+**DECISION G3-a — the stick FLOATS inside a zone, it does not sit at a fixed
+home.** It appears centred wherever the thumb lands. The bottom-left corner,
+where a parked stick belongs, is already the minimap's; a fixed stick would
+either fight it or sit somewhere a thumb cannot comfortably reach on a 390 px
+screen.
+*Alternative rejected:* a fixed stick above the minimap. It costs vertical
+space permanently, and it is worse ergonomics — a floating stick is always
+exactly under the thumb.
+
+**DECISION G3-b — the zone is defined by what it REFUSES, and one of those
+refusals is load-bearing.** A touch becomes the stick only in the left
+`ZONE_W_FRAC` (0.45) of the screen, below the HUD chips, above the
+minimap/loadout strip — and **never inside `SHIP_SELECT_RADIUS` of screen
+centre**. That last carve-out is not tidiness: the ship renders at screen
+centre and `claimTapNear` docks and enters portals from a tap within 46 px of
+it, and the left zone otherwise reaches into that disc. Without it, tapping
+the hull's lower-left quadrant would silently stop docking. There is a test
+that taps exactly there and requires a dock.
+
+**DECISION G3-c — the minimap rect is PUSHED to InputSystem per frame, not
+read from a constant.** The minimap is 75 px collapsed and 280 px expanded;
+expanded, it reaches into the thumb zone, and its own tap is what collapses
+it again. A constant exclusion could only be right for one of the two sizes.
+`GameEngine.tickJoystick` pushes the live rect each frame, which also keeps
+HUD-layout knowledge in the engine (where the fire-event handler already
+computes the same rect).
+*Alternative rejected:* importing MINIMAP_CONSTANTS into InputSystem and
+recomputing. Same numbers in two places, and still wrong while expanded
+unless the expansion flag is threaded through anyway.
+
+**DECISION G3-d — the aim finger is UNCHANGED, including its movement
+role.** When no stick is down, a single touch still does everything it did
+before, movement included. Only while a stick touch is live does the aim
+finger stop steering (the stick branch returns first). A player who never
+discovers the stick loses nothing, and there is no mode to explain.
+
+**Not a ghost.** `getJoystickState()` returns null whenever there is no live
+touch session, so the widget never appears under a mouse or a gamepad — which
+is also why it needs the DBG toggle (Visual ▸ **Joystick**: `Touch` /
+`Forced`) to be checkable on a desktop browser at all. The forced widget
+parks itself inside the zone it claims, so what the toggle draws is where a
+real thumb would work.
+
+**Rendering** is deliberately quiet — a thin ring at the origin, a filled
+knob, a stem between them — and draws LAST in the HUD pass, because it sits
+under an actual thumb and anything more elaborate is hidden by the hand
+holding it. Alpha rides a `FADE_SEC` release fade so lifting off dissolves
+rather than snaps. New shared type `JoystickHUDState` (types.ts), one new
+`render()` parameter, one call in `render/hud.ts`. No new module.
+
+**Testing.** Seven more tests in `tests/input.spec.ts` (23 total in the
+suite), driving **real `TouchEvent`s dispatched at the canvas** — Playwright's
+`page.touchscreen` only does single taps, and the whole point of this feature
+is a second finger being down at the same time. The events go to the canvas
+so they pass `shouldIgnoreEvent`, which is the rule that keeps overlay menus
+scrollable; routing around it would have tested a game that does not exist.
+Covered: the zone's refusals (ship disc, right half, both strips, the
+expanded minimap), float-to-thumb, the knob clamping at the ring, deadzone,
+real thrust, two-finger operation (stick held + aim thumb fires a real
+projectile), the ship-select tap still docking, and the DBG toggle.
+
+The same round-trip trap from G2 recurred in a new costume: the aim thumb's
+tap was asserted by reading the fire QUEUE, which the engine's loop drains
+every frame. Fixed by counting the spawned PROJECTILE instead — durable state
+rather than a transient, and closer to what the player actually sees.
+
+**Gates:** typecheck, build, 61/61 tests green.
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -263,6 +343,15 @@ Consolidated as they are made; each one names the alternative it beat.
   substep (5× the garbage), and latching presses that fire out of context.
 - **G2-e** — adopt the pad by polling. Beat: trusting `gamepadconnected`,
   which Safari may never fire for an already-paired pad.
+- **G3-a** — the touch stick floats inside a zone. Beat: a fixed stick above
+  the minimap (permanent screen cost, worse reach).
+- **G3-b** — the zone carves out the ship-select disc. Beat: a plain
+  left-half zone, which would silently break docking by tap.
+- **G3-c** — the live minimap rect is pushed per frame. Beat: a constant
+  exclusion, which cannot be right for both minimap sizes.
+- **G3-d** — the aim finger keeps its movement role when no stick is down.
+  Beat: making the stick the only way to move on touch (a mode to explain,
+  and a regression for anyone who never finds the widget).
 
 ---
 
@@ -290,6 +379,23 @@ answer. Consolidated in the completion summary at the end.
   | 7 | **Options pauses AND resumes.** | Resume fails — the poll would be sitting below a freeze short-circuit. |
   | 8 | **R1 cycles** with two guns mounted. | — |
   | 9 | **Yank the cable mid-thrust.** | The ship keeps thrusting — the disconnect reset is not firing. |
+
+- **HARDWARE CHECK — the joystick (G3).** On the phone, on the standalone
+  preview build the PR bot posts on every push. Every number in
+  `INPUT_CONSTANTS.JOYSTICK` is a provisional feel guess: ring radius 56 px,
+  knob 22 px, deadzone 6 px, zone = left 45% between 30% and (height − 100 px).
+  1. **Reach.** Does the stick land under the left thumb without shifting
+     your grip? Is the zone too small (thumb keeps landing outside it and
+     firing a shot instead) or too big?
+  2. **Throttle.** Is 56 px to full throttle right, or does it want a longer
+     travel?
+  3. **Two-handed.** Hold the stick and tap-fire with the right thumb at the
+     same time. Then hold to charge while steering.
+  4. **The three things it must not steal:** tap the ship near a station
+     (docks), tap the minimap (expands, and tap again to collapse), tap a
+     loadout slot (switches weapon).
+  5. **Visibility.** Is the widget too faint under a thumb in daylight, or
+     too loud?
 
 - **OPEN QUESTION — should holding the fire trigger auto-repeat?** Today it
   does not: the pad uses the same tap-or-charge model as mouse and touch

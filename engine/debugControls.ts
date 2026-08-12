@@ -311,6 +311,14 @@ export class DebugControls {
     this.g.renderer.chevronsOffscreenOnly = !this.g.renderer.chevronsOffscreenOnly;
   }
 
+  /** DBG (Visual): force the onscreen joystick to draw with no touch session.
+   *  The widget is touch-only by design — it exists while a thumb is on the
+   *  glass and nowhere else — which also means its size and placement cannot
+   *  be checked on a desktop browser without this. */
+  toggleJoystickDebug() {
+    this.g.input.joystickForceVisible = !this.g.input.joystickForceVisible;
+  }
+
   /** DBG (Shards & Physics): toggle the tile repel PUSH (glass + metal tiles).
    *  OFF disables only the outward velocity shove — the tile/scanner glow still
    *  reacts to a nearby body. */

@@ -20,12 +20,13 @@
  *  not known at design time.
  */
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType } from '../../../types';
+import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType, JoystickHUDState } from '../../../types';
 import {
     COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS,
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
+    INPUT_CONSTANTS,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -341,6 +342,64 @@ export function renderPlayerMessages(
  * dim dashed outline.  The charge ring stays on the player ship
  * (chargeProgress) — not drawn here.
  */
+/**
+ * The floating touch joystick (Pair C, c2 second half).
+ *
+ * Deliberately quiet: a thin ring where the thumb landed, a filled knob
+ * where it is now, and a line between them.  It is drawn UNDER nothing and
+ * over the world, at the very end of the HUD pass, because it sits under an
+ * actual thumb — anything more elaborate is hidden by the hand holding it.
+ *
+ * `state` is null whenever there is no live touch session, which is the
+ * normal case on mouse and pad, so nothing ghosts onto a device with no
+ * thumb.  Alpha rides `fade` so a release dissolves rather than snaps.
+ */
+export function renderJoystick(
+    ctx: CanvasRenderingContext2D,
+    state: JoystickHUDState,
+) {
+    const J = INPUT_CONSTANTS.JOYSTICK;
+    const a = Math.max(0, Math.min(1, state.fade));
+    if (a <= 0) return;
+
+    ctx.save();
+    ctx.lineCap = 'round';
+
+    // Outer ring — the throttle boundary.
+    ctx.globalAlpha = a * J.RING_ALPHA;
+    ctx.strokeStyle = J.COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(state.originX, state.originY, J.RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Stem from origin to knob: the only part that reads as a DIRECTION,
+    // and the reason the widget is legible at a glance under a thumb.
+    const dx = state.knobX - state.originX;
+    const dy = state.knobY - state.originY;
+    if (dx !== 0 || dy !== 0) {
+        ctx.globalAlpha = a * J.RING_ALPHA * 1.4;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(state.originX, state.originY);
+        ctx.lineTo(state.knobX, state.knobY);
+        ctx.stroke();
+    }
+
+    // Knob.
+    ctx.globalAlpha = a * J.KNOB_ALPHA;
+    ctx.fillStyle = J.COLOR;
+    ctx.beginPath();
+    ctx.arc(state.knobX, state.knobY, J.KNOB_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = a * (J.KNOB_ALPHA + 0.25);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = J.COLOR;
+    ctx.stroke();
+
+    ctx.restore();
+}
+
 export function renderLoadoutHUD(
     ctx: CanvasRenderingContext2D,
     player: GameEntity,

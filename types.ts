@@ -1658,6 +1658,9 @@ export interface EngineStats {
    *  thrust, the held aim heading, and a live FIRE flag. */
   gamepadInfo?: string;
   gamepadAxes?: string;
+  /** DBG: force the touch joystick to draw with no touch session, so its
+   *  size and placement can be checked on a desktop browser. */
+  joystickForceVisible?: boolean;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
@@ -1782,4 +1785,20 @@ export interface PlayerHUDMessage {
   color: string;
   lifetime: number;
   maxLifetime: number;
+}
+
+/** Render-side view of the onscreen joystick (Pair C, c2).  Produced by
+ *  `InputSystem.getJoystickState()` and handed to the HUD pass; NULL whenever
+ *  there is no live touch session, which is how the widget stays off mouse
+ *  and gamepad instead of ghosting there. */
+export interface JoystickHUDState {
+  /** Where the thumb landed — the stick floats, so this is not a constant. */
+  originX: number;
+  originY: number;
+  /** Where the thumb is now, clamped to the ring. */
+  knobX: number;
+  knobY: number;
+  /** 1 while held, decaying to 0 after release. Drives alpha. */
+  fade: number;
+  held: boolean;
 }

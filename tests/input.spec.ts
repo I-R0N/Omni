@@ -93,6 +93,259 @@ function feedThen<R>(
   );
 }
 
+/** Dispatch a real TouchEvent at the canvas.
+ *
+ *  Playwright's `page.touchscreen` only does single taps, and the joystick's
+ *  whole point is that a SECOND finger can be down at the same time — so the
+ *  events are constructed by hand.  They go to the canvas because
+ *  `shouldIgnoreEvent` engages game input only for gestures that start there
+ *  (that rule is what keeps overlay menus scrollable, and this suite must not
+ *  route around it). */
+async function touch(page: any, type: string, points: { id: number; x: number; y: number }[]) {
+  await page.evaluate(
+    ([t, pts]: [string, { id: number; x: number; y: number }[]]) => {
+      const canvas = document.querySelector('canvas')!;
+      const list = pts.map(p => new Touch({
+        identifier: p.id, target: canvas, clientX: p.x, clientY: p.y,
+      }));
+      canvas.dispatchEvent(new TouchEvent(t, {
+        changedTouches: list, touches: list, targetTouches: list,
+        bubbles: true, cancelable: true,
+      }));
+    },
+    [type, points] as [string, { id: number; x: number; y: number }[]],
+  );
+}
+
+test.describe('joystick zone — what it refuses to claim', () => {
+  test('never takes a gesture that already meant something', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const z = await engine(page, e => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const at = (x: number, y: number) => e.input.inJoystickZone(x, y);
+      return {
+        w, h,
+        // A left-thumb spot, clear of everything.
+        thumb: at(w * 0.2, h * 0.6),
+        // The ship sits at screen centre and `claimTapNear` docks from a tap
+        // within SHIP_SELECT_RADIUS of it — and the left zone reaches it.
+        shipDisc: at(w / 2 - 20, h / 2),
+        shipJustOutside: at(w / 2 - 60, h / 2),
+        // The aim / fire hand.
+        rightHalf: at(w * 0.8, h * 0.6),
+        // HUD chips live up here; the loadout strip and collapsed minimap
+        // live down there.
+        topStrip: at(w * 0.2, h * 0.1),
+        bottomStrip: at(w * 0.2, h - 20),
+      };
+    });
+
+    expect(z.thumb).toBe(true);
+    expect(z.shipDisc).toBe(false);
+    expect(z.shipJustOutside).toBe(true);
+    expect(z.rightHalf).toBe(false);
+    expect(z.topStrip).toBe(false);
+    expect(z.bottomStrip).toBe(false);
+
+    watch.assertClean();
+  });
+
+  test('yields to the EXPANDED minimap, which is 3.7x the collapsed one', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The collapsed map is below the zone already. Expanded, it reaches up
+    // into the thumb area — and its tap is what collapses it again, so the
+    // stick must not swallow that. The rect is pushed to InputSystem per
+    // frame precisely because it is not a constant.
+    const probe = { x: 60, y: 0 };
+    const before = await engine(page, (e, p: any) => {
+      p.y = window.innerHeight - 200;   // inside the expanded map, above the collapsed one
+      return e.input.inJoystickZone(p.x, p.y);
+    }, probe);
+
+    const after = await engine(page, e => {
+      e.minimapExpanded = true;
+      e.tickJoystick(1 / 60);           // the per-frame push
+      return e.input.inJoystickZone(60, window.innerHeight - 200);
+    });
+
+    expect(before).toBe(true);
+    expect(after).toBe(false);
+
+    await engine(page, e => { e.minimapExpanded = false; e.tickJoystick(1 / 60); });
+    watch.assertClean();
+  });
+});
+
+test.describe('joystick — a floating left-thumb stick', () => {
+  test('does not exist until a thumb lands, and flies the ship once it does', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // No touch session: nothing to draw. This is the mouse/pad case, and the
+    // widget must not ghost there.
+    expect(await engine(page, e => e.input.getJoystickState())).toBeNull();
+
+    const origin = await engine(page, e => ({
+      x: Math.round(window.innerWidth * 0.2),
+      y: Math.round(window.innerHeight * 0.6),
+    }));
+
+    await touch(page, 'touchstart', [{ id: 1, ...origin }]);
+    const held = await engine(page, e => e.input.getJoystickState());
+    expect(held).not.toBeNull();
+    expect(held.held).toBe(true);
+    // It floats: the widget is centred where the thumb landed, not at some
+    // fixed home the thumb has to find.
+    expect(held.originX).toBeCloseTo(origin.x, 0);
+    expect(held.originY).toBeCloseTo(origin.y, 0);
+
+    // Drag right, past the ring.
+    await touch(page, 'touchmove', [{ id: 1, x: origin.x + 90, y: origin.y }]);
+    const move = await engine(page, e => e.input.getMovementVector());
+    expect(move.x).toBeCloseTo(1, 2);
+    expect(move.y).toBeCloseTo(0, 2);
+
+    // The knob stops at the ring even though the thumb went past it.
+    const knob = await engine(page, e => e.input.getJoystickState());
+    expect(Math.hypot(knob.knobX - knob.originX, knob.knobY - knob.originY)).toBeCloseTo(56, 0);
+
+    // And it actually thrusts.
+    const flown = await engine(page, e => {
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      for (let i = 0; i < 30; i++) e.updateGameLogic(1 / 120);
+      return e.player.velocity.x;
+    });
+    expect(flown).toBeGreaterThan(0);
+
+    // Lift: thrust stops immediately, the widget fades rather than snapping.
+    await touch(page, 'touchend', [{ id: 1, x: origin.x + 90, y: origin.y }]);
+    const after = await engine(page, e => ({
+      move: e.input.getMovementVector(),
+      state: e.input.getJoystickState(),
+    }));
+    expect(after.move.x).toBe(0);
+    expect(after.state === null || after.state.held === false).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('a nudge inside the deadzone is not thrust', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const o = await engine(page, () => ({
+      x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6),
+    }));
+    await touch(page, 'touchstart', [{ id: 3, ...o }]);
+    await touch(page, 'touchmove', [{ id: 3, x: o.x + 4, y: o.y }]);
+    const dead = await engine(page, e => e.input.getMovementVector());
+    expect(dead.x).toBe(0);
+
+    // Just past it: a nudge, not a lurch — the same rescale the pad does.
+    await touch(page, 'touchmove', [{ id: 3, x: o.x + 12, y: o.y }]);
+    const nudge = await engine(page, e => e.input.getMovementVector());
+    expect(nudge.x).toBeGreaterThan(0);
+    expect(nudge.x).toBeLessThan(0.35);
+
+    await touch(page, 'touchend', [{ id: 3, x: o.x + 12, y: o.y }]);
+    watch.assertClean();
+  });
+
+  test('the aim thumb still fires while the stick is held', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const pts = await engine(page, () => ({
+      stick: { x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6) },
+      aim:   { x: Math.round(window.innerWidth * 0.8), y: Math.round(window.innerHeight * 0.4) },
+    }));
+
+    await touch(page, 'touchstart', [{ id: 10, ...pts.stick }]);
+    await touch(page, 'touchmove', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 60 }]);
+
+    // Count the SHOT, not the queued event: the engine's own loop drains the
+    // fire queue every frame, so a queue read in a second round-trip is
+    // racing the game (harness rule 2's cousin — the transient is gone by the
+    // time the read lands).  A spawned projectile is durable.
+    const before = await engine(page, e =>
+      e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length);
+
+    await touch(page, 'touchstart', [{ id: 11, ...pts.aim }]);
+    await touch(page, 'touchend', [{ id: 11, ...pts.aim }]);
+
+    const r = await engine(page, (e, n: number) => {
+      // Let the weapon tick run: the tap is spent inside updateGameLogic.
+      for (let i = 0; i < 4; i++) e.updateGameLogic(1 / 120);
+      return {
+        move: e.input.getMovementVector(),
+        fired: e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length - n,
+        stickHeld: !!e.input.getJoystickState()?.held,
+      };
+    }, before);
+
+    // Both hands did their own job: the stick still holds thrust (upward),
+    // and the second thumb's tap became a shot rather than being eaten.
+    expect(r.move.y).toBeLessThan(0);
+    expect(r.fired).toBeGreaterThan(0);
+    expect(r.stickHeld).toBe(true);
+
+    await touch(page, 'touchend', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 60 }]);
+    watch.assertClean();
+  });
+
+  test('the ship-select tap still docks — the stick never takes it', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    await engine(page, e => {
+      const st = e.stations[0];
+      e.player.position.x = st.position.x;
+      e.player.position.y = st.position.y + 40;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+    });
+    await waitForStats(page, s => !!s.dock?.inRange, 'dock range');
+
+    // A tap on the hull's lower-LEFT quadrant: inside the left zone's x and y
+    // bounds, so without the ship-disc carve-out the stick would claim it and
+    // docking would silently stop working near a station.
+    const p = await engine(page, () => ({
+      x: Math.round(window.innerWidth / 2 - 20),
+      y: Math.round(window.innerHeight / 2 + 20),
+    }));
+    await touch(page, 'touchstart', [{ id: 20, ...p }]);
+    await touch(page, 'touchend', [{ id: 20, ...p }]);
+    await waitForStats(page, s => !!s.station, 'the station UI, from a tap on the ship');
+
+    watch.assertClean();
+  });
+
+  test('the DBG toggle forces the widget visible with no touch', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    expect(await engine(page, e => e.input.getJoystickState())).toBeNull();
+    await engine(page, e => e.dbg.toggleJoystickDebug());
+    const forced = await engine(page, e => e.input.getJoystickState());
+    expect(forced).not.toBeNull();
+    expect(forced.held).toBe(false);
+    // Parked inside the zone it claims, so what the DBG draw shows is where
+    // a real thumb would work.
+    expect(await engine(page, (e, s: any) => e.input.inJoystickZone(s.originX, s.originY), forced)).toBe(true);
+
+    await engine(page, e => e.dbg.toggleJoystickDebug());
+    expect(await engine(page, e => e.input.getJoystickState())).toBeNull();
+
+    watch.assertClean();
+  });
+});
+
 test.describe('deadzone — a radial cut with a rescale', () => {
   test('kills drift, rescales the live range, and clamps the diagonals', async ({ page }) => {
     const watch = await boot(page);

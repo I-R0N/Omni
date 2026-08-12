@@ -1,6 +1,6 @@
 
 
-import { Vector2 } from '../../types';
+import { Vector2, JoystickHUDState } from '../../types';
 import { INPUT_CONSTANTS } from '../../constants';
 
 /** One frame of pad state, reduced to what the mapping layer cares about.
@@ -28,6 +28,28 @@ export class InputSystem {
   // as the movement input, so a long held + dragged release should still
   // fire the charged shot.
   private chargeReleaseEvents: Vector2[] = [];
+
+  // ── Onscreen joystick (Pair C, c2 second half) ────────────────────────
+  // Touch is two-handed now.  These track the LEFT thumb; the aim finger
+  // keeps using mousePosition / mouseDown, so the existing single-touch
+  // model is still exactly itself when no stick is down.
+  private stickTouchId: number | null = null;
+  private aimTouchId: number | null = null;
+  private stickOrigin: Vector2 = { x: 0, y: 0 };
+  /** Knob position, clamped to RADIUS from the origin — what gets drawn. */
+  private stickKnob: Vector2 = { x: 0, y: 0 };
+  /** Post-deadzone thrust, direction × throttle. */
+  private stickVec: Vector2 = { x: 0, y: 0 };
+  /** 1 while held, decaying to 0 after release (drives the widget fade). */
+  private stickFade: number = 0;
+  /** Rect the stick must not claim, in CSS px — the LIVE minimap, pushed in
+   *  by GameEngine each frame.  The collapsed map is inside ZONE_BOTTOM_PX
+   *  already; the expanded one is 280px tall and would otherwise swallow the
+   *  tap that collapses it again. */
+  private stickExclusion: { x: number; y: number; w: number; h: number } | null = null;
+  /** DBG: draw the widget even with no touch session, so the layout can be
+   *  checked on a desktop browser. */
+  public joystickForceVisible: boolean = false;
 
   // ── Gamepad state (Pair C, c2) ────────────────────────────────────────
   // The pad is POLLED, not evented: `navigator.getGamepads()` hands back a
@@ -160,19 +182,41 @@ export class InputSystem {
     this.checkTap(e.clientX, e.clientY);
   };
 
+  // Touch is now TWO-HANDED, and the split is by where a finger LANDS.
+  //
+  // A touch starting inside the joystick zone becomes the STICK and drives
+  // movement only.  Every other touch is the AIM finger and behaves exactly
+  // as the single-touch model always did — aim, tap-to-fire, hold-to-charge —
+  // including driving movement itself WHEN NO STICK IS DOWN, so a player who
+  // never discovers the stick loses nothing.  A third finger is ignored.
   private handleTouchStart = (e: TouchEvent) => {
     if (this.shouldIgnoreEvent(e)) return;
 
     // Prevent browser scrolling/zooming
     if (e.cancelable) e.preventDefault();
-    
-    if (e.changedTouches.length > 0) {
-      const touch = e.changedTouches[0];
-      this.mouseDown = true;
-      
-      this.mousePosition = { x: touch.clientX, y: touch.clientY };
-      this.touchStartTime = performance.now();
-      this.touchStartPos = { x: touch.clientX, y: touch.clientY };
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+
+      if (this.stickTouchId === null && this.inJoystickZone(touch.clientX, touch.clientY)) {
+        this.stickTouchId = touch.identifier;
+        this.stickOrigin.x = touch.clientX;
+        this.stickOrigin.y = touch.clientY;
+        this.stickKnob.x = touch.clientX;
+        this.stickKnob.y = touch.clientY;
+        this.stickVec.x = 0;
+        this.stickVec.y = 0;
+        this.stickFade = 1;
+        continue;
+      }
+
+      if (this.aimTouchId === null) {
+        this.aimTouchId = touch.identifier;
+        this.mouseDown = true;
+        this.mousePosition = { x: touch.clientX, y: touch.clientY };
+        this.touchStartTime = performance.now();
+        this.touchStartPos = { x: touch.clientX, y: touch.clientY };
+      }
     }
   };
 
@@ -180,24 +224,39 @@ export class InputSystem {
     if (this.shouldIgnoreEvent(e)) return;
 
     if (e.cancelable) e.preventDefault();
-    if (e.changedTouches.length > 0) {
-      const touch = e.changedTouches[0];
-      this.mousePosition = { x: touch.clientX, y: touch.clientY };
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === this.stickTouchId) {
+        this.updateStick(touch.clientX, touch.clientY);
+      } else if (touch.identifier === this.aimTouchId) {
+        this.mousePosition = { x: touch.clientX, y: touch.clientY };
+      }
     }
   };
 
   private handleTouchEnd = (e: TouchEvent) => {
     if (this.shouldIgnoreEvent(e)) {
+        // The gesture began off-canvas (an overlay), so it never owned game
+        // input — but a cancel can arrive without a matching start, so drop
+        // the pointer latch rather than leaving the ship thrusting.
         this.mouseDown = false;
+        this.aimTouchId = null;
         return;
     }
 
     if (e.cancelable) e.preventDefault();
-    this.mouseDown = false;
 
-    if (e.changedTouches.length > 0) {
-        const touch = e.changedTouches[0];
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === this.stickTouchId) {
+        this.stickTouchId = null;
+        this.stickVec.x = 0;
+        this.stickVec.y = 0;
+      } else if (touch.identifier === this.aimTouchId) {
+        this.aimTouchId = null;
+        this.mouseDown = false;
         this.checkTap(touch.clientX, touch.clientY);
+      }
     }
   };
 
@@ -222,6 +281,114 @@ export class InputSystem {
     if (dist >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return;
 
     this.fireEvents.push({ x, y });
+  }
+
+  // ── Onscreen joystick ──────────────────────────────────────────────────
+
+  /**
+   * Can a touch landing here become the movement stick?
+   *
+   * Everything this excludes is a gesture that was already there, and the
+   * order of the tests is the order of how much it would hurt to break:
+   *  - the SHIP DISC, because `claimTapNear` docks and enters portals from a
+   *    tap within SHIP_SELECT_RADIUS of the hull, and the hull sits at screen
+   *    centre — which the left zone otherwise reaches;
+   *  - the live MINIMAP rect, whose tap toggles it open and closed;
+   *  - the bottom strip (loadout slots, collapsed minimap) and the top strip
+   *    (HUD chips);
+   *  - the whole right half, which is the aim/fire hand.
+   */
+  public inJoystickZone(x: number, y: number): boolean {
+    const J = INPUT_CONSTANTS.JOYSTICK;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const sr = INPUT_CONSTANTS.SHIP_SELECT_RADIUS;
+    if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= sr * sr) return false;
+
+    const ex = this.stickExclusion;
+    if (ex && x >= ex.x && x <= ex.x + ex.w && y >= ex.y && y <= ex.y + ex.h) return false;
+
+    if (x > w * J.ZONE_W_FRAC) return false;
+    if (y < h * J.ZONE_TOP_FRAC) return false;
+    if (y > h - J.ZONE_BOTTOM_PX) return false;
+    return true;
+  }
+
+  /** GameEngine pushes the LIVE minimap rect here once per frame; the
+   *  expanded map is 3.7× the collapsed one, so this cannot be a constant. */
+  public setStickExclusion(x: number, y: number, w: number, h: number) {
+    if (!this.stickExclusion) this.stickExclusion = { x, y, w, h };
+    else {
+      this.stickExclusion.x = x;
+      this.stickExclusion.y = y;
+      this.stickExclusion.w = w;
+      this.stickExclusion.h = h;
+    }
+  }
+
+  private updateStick(x: number, y: number) {
+    const J = INPUT_CONSTANTS.JOYSTICK;
+    let dx = x - this.stickOrigin.x;
+    let dy = y - this.stickOrigin.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= J.DEAD_PX) {
+      this.stickVec.x = 0;
+      this.stickVec.y = 0;
+      this.stickKnob.x = this.stickOrigin.x;
+      this.stickKnob.y = this.stickOrigin.y;
+      return;
+    }
+
+    const nx = dx / dist;
+    const ny = dy / dist;
+    // Throttle ramps from the deadzone edge to RADIUS, so the first live
+    // movement is a nudge rather than a jump — the same rescale the pad's
+    // stick deadzone does, for the same reason.
+    const throttle = Math.min(1, (dist - J.DEAD_PX) / (J.RADIUS - J.DEAD_PX));
+    this.stickVec.x = nx * throttle;
+    this.stickVec.y = ny * throttle;
+
+    // The knob rides the thumb but stops at the ring; past that the thumb
+    // can wander without the widget chasing it off into the corner.
+    const knobDist = Math.min(dist, J.RADIUS);
+    this.stickKnob.x = this.stickOrigin.x + nx * knobDist;
+    this.stickKnob.y = this.stickOrigin.y + ny * knobDist;
+  }
+
+  /** Advance the release fade. Called once per rendered frame. */
+  public tickJoystick(dtSec: number) {
+    if (this.stickTouchId !== null) {
+      this.stickFade = 1;
+    } else if (this.stickFade > 0) {
+      const fade = INPUT_CONSTANTS.JOYSTICK.FADE_SEC;
+      this.stickFade = fade > 0 ? Math.max(0, this.stickFade - dtSec / fade) : 0;
+    }
+  }
+
+  /** Render-side view of the stick.  Returns null when there is nothing to
+   *  draw — which is the normal case on mouse and pad, so the widget never
+   *  ghosts onto a device that has no thumb. */
+  public getJoystickState(): JoystickHUDState | null {
+    if (this.joystickForceVisible && this.stickTouchId === null && this.stickFade <= 0) {
+      // DBG: park a neutral stick where a right-handed thumb would land.
+      const J = INPUT_CONSTANTS.JOYSTICK;
+      const x = window.innerWidth * J.ZONE_W_FRAC * 0.55;
+      const y = window.innerHeight - J.ZONE_BOTTOM_PX - J.RADIUS - 20;
+      return { originX: x, originY: y, knobX: x, knobY: y, fade: 1, held: false };
+    }
+    if (this.stickFade <= 0) return null;
+    return {
+      originX: this.stickOrigin.x,
+      originY: this.stickOrigin.y,
+      knobX: this.stickKnob.x,
+      knobY: this.stickKnob.y,
+      fade: this.stickFade,
+      held: this.stickTouchId !== null,
+    };
   }
 
   // ── Gamepad ────────────────────────────────────────────────────────────
@@ -507,7 +674,14 @@ export class InputSystem {
       return { x: kDir.x / length, y: kDir.y / length };
     }
 
-    // 2. Gamepad left stick / D-pad.  Sits between keyboard and pointer: it
+    // 2. Onscreen joystick.  Above the pad only because a thumb on glass is
+    //    a deliberate act on the device that has one; the two cannot both be
+    //    deflected on the same machine in practice.
+    if (this.stickVec.x !== 0 || this.stickVec.y !== 0) {
+      return { x: this.stickVec.x, y: this.stickVec.y };
+    }
+
+    // 3. Gamepad left stick / D-pad.  Sits between keyboard and pointer: it
     //    is analogue like the pointer branch (magnitude IS throttle) but,
     //    like the keyboard, it does not require a held gesture — so it must
     //    be consulted before the pointer, whose branch is gated on mouseDown.
@@ -515,7 +689,7 @@ export class InputSystem {
       return { x: this.padMove.x, y: this.padMove.y };
     }
 
-    // 3. Touch / Mouse Input
+    // 4. Touch / Mouse Input
     // Direction: screen center → current touch position (normalized).
     // Throttle: current radial distance from screen center, clamped to
     //           [0, THROTTLE_DISTANCE] and normalised to [0, 1].

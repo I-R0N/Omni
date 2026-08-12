@@ -931,6 +931,40 @@ export const INPUT_CONSTANTS = {
   TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 
+  // ── Onscreen joystick (Pair C, c2 second half) ─────────────────────────
+  // A FLOATING left-thumb stick: it has no fixed home, it appears wherever
+  // the thumb lands inside the zone below.  Floating rather than parked
+  // because the bottom-left corner is already the minimap's, and a fixed
+  // stick would either fight it or sit somewhere a thumb cannot reach.
+  //
+  // The zone is what keeps the stick from stealing the gestures that were
+  // already there: it excludes the top strip (HUD chips), the bottom strip
+  // (minimap + loadout slots, both tap targets), the RIGHT half entirely
+  // (aim and fire), and a disc around the ship (the dock / portal tap).
+  JOYSTICK: {
+    /** Left fraction of the viewport in which a touch can become the stick. */
+    ZONE_W_FRAC: 0.45,
+    /** Top of the zone, as a fraction of height — above it are the HUD chips. */
+    ZONE_TOP_FRAC: 0.30,
+    /** Bottom of the zone, px up from the bottom edge.  Covers the collapsed
+     *  minimap (MARGIN + SIZE) and the loadout strip; the EXPANDED minimap is
+     *  handled dynamically instead, since its rect changes at runtime. */
+    ZONE_BOTTOM_PX: 100,
+    /** Deflection (px) from the touch origin that means full throttle. */
+    RADIUS: 56,
+    /** Below this the stick reads as centred — kills thumb tremor without
+     *  eating a real nudge. */
+    DEAD_PX: 6,
+    KNOB_RADIUS: 22,
+    RING_ALPHA: 0.22,
+    KNOB_ALPHA: 0.40,
+    /** Seconds the widget takes to fade after the thumb lifts.  It exists
+     *  only while a touch session is live — there is no ghost stick sitting
+     *  under a mouse or a pad. */
+    FADE_SEC: 0.22,
+    COLOR: '#7dd3fc',
+  },
+
   // ── Gamepad (Pair C, c2) ───────────────────────────────────────────────
   // The pad is a THIRD input device beside keyboard/mouse and touch, not a
   // replacement for either: it feeds the SAME movement vector, the same
