@@ -158,11 +158,18 @@ export function renderIndicators(
 
         // Offscreen-only mode: the player can already see an on-screen
         // entity, so its arrow is redundant clutter — skip it.
-        // PORTALS ARE EXEMPT: their arrow is already range-gated to
-        // PORTAL_CONSTANTS.INDICATOR_RANGE, and inside that range it is a
-        // deliberate, labelled navigation cue that should stay on screen
-        // while the player lines up the approach.
-        if (r.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
+        //
+        // PORTALS USED TO BE EXEMPT, and are no longer (decision #46b,
+        // gauntlet step 5 G6).  The exemption meant that approaching a rift
+        // gave you the rift ON SCREEN, its own world-space destination tag,
+        // AND an edge arrow naming the same destination a second time — the
+        // arrow at its least useful, at the moment it was loudest.  The
+        // range gate stays, so a portal still does not put a permanent arrow
+        // on the edge from across the map; between those two rules the arrow
+        // now covers exactly the case it is good for — the rift is close
+        // enough to matter but not yet visible.  Long-range discovery is the
+        // minimap's job, which G5 just made materially better at it.
+        if (r.chevronsOffscreenOnly && item.onScreen) continue;
 
         const isBoss   = t.isBoss === true;
         const isBubble = t.enemyShape === 'bubble';
@@ -262,11 +269,20 @@ export function renderIndicators(
         // the player picks which rift to fly to) and a boss names itself —
         // both would be ambiguous unlabelled.  Ordinary enemies get NO
         // distance text any more: their size already carries it, and a dozen
-        // little "1234m" strings was most of the old clutter.  POIs keep the
-        // far-only distance readout.
+        // little "1234m" strings was most of the old clutter.  Other POIs
+        // keep the far-only distance readout.
+        //
+        // PORTALS NO LONGER PRINT A DISTANCE (G6).  They were the wordiest
+        // contact on the screen — name AND number, while an enemy prints
+        // nothing — and the number was the redundant half: a portal arrow
+        // only appears inside INDICATOR_RANGE now, and the size ramp already
+        // says how far through that range you are.  The NAME stays, because
+        // an unlabelled arrow is ambiguous the moment a second rift is on
+        // the same edge, which on the hub is the normal case.
         const portalName = isPortal ? (t.name ?? '')
             : isBoss ? (t.enemySubtype ? (BOSS_DEFS[t.enemySubtype]?.name ?? 'BOSS') : 'BOSS') : '';
-        const showDist = t.type !== EntityType.ENEMY && item.distSq > TEXT_THRESHOLD_POI;
+        const showDist = t.type !== EntityType.ENEMY && !isPortal
+            && item.distSq > TEXT_THRESHOLD_POI;
 
         if (showDist || portalName) {
              ctx.rotate(-angle);

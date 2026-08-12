@@ -50,6 +50,57 @@ async function setMaterial(page: any, name: 'Flow' | 'Dots' | 'Off') {
   await waitForStats(page, s => s.minimapMaterialName !== undefined, 'the material mode');
 }
 
+test.describe('off-screen indicators — portals', () => {
+  /** Park the player `dist` world units east of the first hub portal and let
+   *  a frame rebuild the indicator buffer. */
+  async function standOff(page: any, dist: number) {
+    await engine(page, (e, d: number) => {
+      const p = e.portals[0];
+      e.player.position.x = p.position.x + d;
+      e.player.position.y = p.position.y;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      e.camera.position.x = e.player.position.x;
+      e.camera.position.y = e.player.position.y;
+    }, dist);
+    await page.waitForTimeout(250);
+    return engine(page, e => {
+      const entry = e.renderer._indicatorBuffer.find((i: any) => i.entity.isPortal);
+      return entry ? { present: true, onScreen: entry.onScreen } : { present: false, onScreen: false };
+    });
+  }
+
+  test('the arrow is bracketed: close enough to matter, not yet visible', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+
+    // This asserts the INPUTS the suppression rule reads — presence in the
+    // buffer (the range gate) and the `onScreen` flag (the redundancy gate).
+    // The rule that consumes them is one line inside a canvas draw and is not
+    // reachable from here; it is stated plainly rather than pretended at.
+
+    // Far side of the map: no arrow at all. A rift across the map is not
+    // navigation, and this is the half of the old behaviour that stays.
+    expect((await standOff(page, 6000)).present).toBe(false);
+
+    // Inside INDICATOR_RANGE but well outside the viewport: this is the case
+    // the arrow exists for.
+    const approach = await standOff(page, 900);
+    expect(approach.present).toBe(true);
+    expect(approach.onScreen).toBe(false);
+
+    // On top of it: still buffered, but now flagged on-screen — which is what
+    // now suppresses it (G6). The rift and its own world-space tag are right
+    // there; a third naming of the same place was the complaint.
+    const arrived = await standOff(page, 40);
+    expect(arrived.present).toBe(true);
+    expect(arrived.onScreen).toBe(true);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('minimap — material layer', () => {
   test('ships with the flow layer as the default', async ({ page }) => {
     const watch = await boot(page);

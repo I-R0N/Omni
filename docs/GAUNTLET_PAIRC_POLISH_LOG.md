@@ -25,7 +25,7 @@ tuning (step 6).
 | G3 | Onscreen joystick (c2, second half) | **done** |
 | G4 | Menu help panel (c1) | **done** |
 | G5 | Minimap rework — nebula out, flow streamlines, faithfulness | **done** |
-| G6 | Portal off-screen indicators (decision #46b) | pending |
+| G6 | Portal off-screen indicators (decision #46b) | **done** |
 | G7 | Polish residuals — palette defaults, MAP_POPULATION authority | pending |
 | G8 | OPTIONAL — NPC station shuttles (first to cut) | pending |
 | G-final | Validation, docs sync, completion summary | pending |
@@ -472,6 +472,61 @@ bar, which are where a phase change is actually legible.
 
 ---
 
+### G6 — Portal off-screen indicators (2026-08-12)
+
+The parking-lot entry "Portal off-screen indicators behave unlike every other
+indicator" (2026-08-05), routed here by decision #46b, which asked for ONE of
+its three candidate directions and the reasoning.
+
+**CHOSEN: direction 2 — keep the range gate, drop the redundancy.** The
+portal arrow is now suppressed once the rift is on screen, exactly like every
+other contact; the `INDICATOR_RANGE` gate stays. Between the two rules the
+arrow covers precisely the case it is good for: **close enough to matter, not
+yet visible.**
+
+Also folded in, from the entry's third divergence: **portals no longer print
+a distance.** They were the wordiest contact on the screen — name AND number,
+while an ordinary enemy prints nothing at all — and the number was the
+redundant half, since the arrow only appears inside a fixed range and the
+size ramp already says how far through that range you are. The NAME stays: an
+unlabelled arrow is ambiguous the moment a second rift shares the edge, which
+on the four-portal hub is the normal case, not an edge case.
+
+**Why not direction 1** (drop the range gate too, obey the rules completely,
+lean entirely on the minimap): the hub has four portals. Fading them in from
+across the map means four permanent green arrows on the edge competing with
+the threat arrows for the player's attention, for landmarks that do not move
+and are not urgent. The range gate is not the anomalous part of the old
+behaviour — it is the part that was right.
+
+**Why not direction 3** (a separate waypoint/navigation layer): it is the
+most interesting answer and the wrong one to take here. A navigation layer is
+a new HUD surface with its own visual language, and this gauntlet has just
+finished arguing (G4, G5) that the game should have FEWER competing
+languages, not more. If waypoints arrive it should be with the persistence /
+overworld work that gives them something to point at beyond four fixed rifts,
+not as a fix for one arrow being noisy.
+
+**Consistency with G5, which is what makes this safe.** The entry's own
+counter-argument to touching the arrow was "far from one, there is no arrow
+to find it by — the minimap anomaly blip is doing that job". G5 made the
+minimap materially better at that job in the same session: the shard-dot wash
+that used to camouflage every contact is gone, and the portal blip is a
+spinning diamond with a radar ping that clamps to the border rather than
+being culled. Long-range discovery is the minimap's; approach is the arrow's.
+
+**Testing.** What the sim exposes is the INPUT to the suppression — presence
+in the indicator buffer (the range gate) and the `onScreen` flag (the
+redundancy gate) — and all three brackets are asserted: 6 000 units away, no
+buffer entry at all; 900 units, buffered and off-screen; 40 units, buffered
+and flagged on-screen. The one-line rule that consumes those inputs lives
+inside a canvas draw and is not reachable from the harness; the test says so
+rather than pretending otherwise.
+
+**Gates:** typecheck, build, 70/70 tests.
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -516,6 +571,11 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G5-b** — streamline geometry cached in world space, keyed on the seed
   cell. Beat: stamping it into the pre-rendered terrain canvas (one blit, but
   blurred ~4× at the collapsed zoom, which is where the map is used).
+- **G6** — portal arrows keep the range gate and lose the on-screen
+  exemption and the distance readout. Beat: direction 1, obey-all-the-rules
+  (four permanent arrows on the hub's edge competing with threats), and
+  direction 3, a waypoint navigation layer (a new HUD language in the session
+  that spent G4/G5 reducing them; it belongs with the persistence work).
 
 ---
 

@@ -3389,9 +3389,17 @@ export const PORTAL_CONSTANTS = {
   // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
   // for a rift on the far side of the map is noise, not navigation — the
   // arrow only appears once the player is close enough for that rift to be
-  // a real option.  Inside this range the arrow is PERSISTENT: unlike other
-  // POIs it is not suppressed when the portal itself is on screen, so the
-  // labelled cue stays put while the player lines up the approach.
+  // a real option.
+  //
+  // Inside that range the arrow now behaves like every other contact
+  // (decision #46b, gauntlet step 5 G6): it is SUPPRESSED once the rift is
+  // on screen, because the rift itself and its own world-space destination
+  // tag are already there and a third naming of the same place is the arrow
+  // at its least useful.  So the two rules bracket exactly the case the
+  // arrow is good for — close enough to matter, not yet visible.  Finding a
+  // rift from further out is the MINIMAP's job (its anomaly blip clamps to
+  // the border rather than being culled, and G5 cleared the shard-dot wash
+  // that used to hide it).
   INDICATOR_RANGE: 1500,
 };
 
