@@ -8,9 +8,12 @@ name: PR checks
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  # Also guard the default branch itself, so a bad merge is visible immediately.
+  # Also guard the long-lived branches themselves, so a bad merge is visible
+  # immediately rather than at the next PR opened against them.  `main` is the
+  # default branch; `claude/plan-completion` is the integration branch the
+  # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md).
   push:
-    branches: [main]
+    branches: [main, claude/plan-completion]
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -49,8 +52,34 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The browser download is the one step worth caching: `npm ci` costs ~2s
+      # behind setup-node's lockfile-keyed npm cache, while fetching Chromium
+      # costs ~25s every run.  Key on the RESOLVED Playwright version (read
+      # from the installed package, so it tracks the lockfile) plus the runner
+      # OS — a runner-image bump must not serve a browser built against a
+      # different libc.
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.pw.outputs.version }}
+
+      # A cache hit restores the browser but NOT the apt libraries it links
+      # against, so the two paths differ: on a hit install only the system
+      # deps, on a miss do the full download.  Guarding one `--with-deps` step
+      # on the cache would yield a cached browser that cannot launch.
       - name: Install Playwright browser
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       # Gate 3 — the smoke suites.  playwright.config.ts's webServer builds and
       # previews `dist/` itself, so this needs no separate serve step.
