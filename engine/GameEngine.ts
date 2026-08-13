@@ -20,7 +20,7 @@ import { nextId } from './systems/IdAllocator';
 import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -894,6 +894,7 @@ export class GameEngine {
       gamepadInfo: this.input.padDebugName(),
       gamepadAxes: this.input.padDebugAxes(),
       joystickForceVisible: this.input.joystickForceVisible,
+      controlScheme: this.input.getControlScheme(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1250,6 +1251,15 @@ export class GameEngine {
     this.currentWeaponIndex = this.weapons.cycleWeapon(this.player);
   }
 
+  /**
+   * Pick the control scheme (user directive, G9).  A PREFERENCE, like
+   * difficulty: it deliberately survives `restartGame()` and every map load,
+   * because it describes the player's hands, not the run.
+   */
+  public setControlScheme(scheme: ControlScheme) {
+    this.input.setControlScheme(scheme);
+  }
+
   public setDifficulty(level: number) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
       this.difficultyLevel = clamped;
@@ -1542,6 +1552,7 @@ export class GameEngine {
       gamepadInfo: this.input.padDebugName(),
       gamepadAxes: this.input.padDebugAxes(),
       joystickForceVisible: this.input.joystickForceVisible,
+      controlScheme: this.input.getControlScheme(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -2855,7 +2866,12 @@ export class GameEngine {
             }
         }
 
-        if (!this.minimapExpanded) {
+        // Whether a TAP is a shot is the scheme's call (G9): under the
+        // joystick scheme shooting is the fire button's job, and a tap that
+        // both aims and fires cannot coexist with a thumb that drags to aim.
+        // The tap still reached the minimap toggle, the loadout slots and
+        // `claimTapNear` above — those are not weapons.
+        if (!this.minimapExpanded && this.input.tapFires()) {
             this.handleShooting(evt, false);
         }
     });
@@ -2864,10 +2880,21 @@ export class GameEngine {
     // released.  Fire a charged shot.
     const chargeReleaseEvents = this.input.getChargeReleaseEvents();
     chargeReleaseEvents.forEach(evt => {
-        if (!this.minimapExpanded) {
+        if (!this.minimapExpanded && this.input.tapFires()) {
             this.handleShooting(evt, true);
         }
     });
+
+    // DEVICE shots — the onscreen fire button and the pad's trigger.  These
+    // bypass the tap handler entirely (see InputSystem.getDeviceFireEvents):
+    // a synthesised shot is aimed at the world, so it must not be offered to
+    // the HUD widgets a real tap would hit on the way past.  The expanded
+    // minimap does not block them either — the player pressed a weapon
+    // control, not the map.
+    const deviceFires = this.input.getDeviceFireEvents();
+    for (let i = 0; i < deviceFires.length; i++) this.handleShooting(deviceFires[i], false);
+    const deviceCharges = this.input.getDeviceChargeEvents();
+    for (let i = 0; i < deviceCharges.length; i++) this.handleShooting(deviceCharges[i], true);
 
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
@@ -4815,6 +4842,7 @@ export class GameEngine {
               sampleN:   this.ffOverlaySampleN,
           },
           this.input.getJoystickState(),
+          this.input.getFireButtonState(),
       );
   }
 

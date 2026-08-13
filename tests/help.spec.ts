@@ -16,7 +16,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats } from './helpers';
+import { boot, engine, stats, startRun, waitForStats } from './helpers';
 
 const PHONE_W = 390;
 
@@ -92,14 +92,15 @@ test.describe('controls & basics — reachable from both menus', () => {
     watch.assertClean();
   });
 
-  test('covers all three input devices and the run basics', async ({ page }) => {
+  test('covers every scheme and the run basics', async ({ page }) => {
     const watch = await boot(page);
     await page.getByTestId('menu-help-toggle').click();
 
     const text = (await page.getByTestId('help-panel').textContent()) ?? '';
-    // The four section headings — if a device section is ever dropped, the
-    // panel silently stops answering the question it exists for.
-    for (const heading of ['Touch', 'Keyboard & mouse', 'Gamepad', 'The run']) {
+    // One section per control scheme, plus the run. If a device section is
+    // ever dropped, the panel silently stops answering the question it
+    // exists for.
+    for (const heading of ['Touch', 'Joystick touch', 'Keyboard & mouse', 'Gamepad', 'The run']) {
       expect(text, `missing section: ${heading}`).toContain(heading);
     }
 
@@ -111,8 +112,42 @@ test.describe('controls & basics — reachable from both menus', () => {
     expect(rows).toContain('Hold 1s, release');
 
     // No pad is attached in this browser, so the live badge must be absent —
-    // the one part of this panel the engine drives.
+    // one of the two parts of this panel the engine drives.
     expect(text).not.toContain('connected');
+
+    watch.assertClean();
+  });
+
+  test('the panel follows the picked scheme, and the picker changes it', async ({ page }) => {
+    const watch = await boot(page);
+
+    // The picker is on the front door, next to Difficulty, because it is the
+    // same kind of choice: a preference that shapes the whole run.
+    await expect(page.getByTestId('scheme-picker')).toBeVisible();
+    for (const id of ['touch', 'joystick', 'keyboard', 'gamepad']) {
+      const box = await page.getByTestId(`scheme-${id}`).boundingBox();
+      expect(box, `${id} button should be laid out`).not.toBeNull();
+      // Thumb-sized on the phone, and inside it.
+      expect(box!.height).toBeGreaterThanOrEqual(36);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(PHONE_W);
+    }
+
+    await page.getByTestId('scheme-joystick').click();
+    await waitForStats(page, s => s.controlScheme === 'joystick', 'the joystick scheme');
+
+    // The help panel marks the active scheme, so the block a player reads is
+    // the one describing the controls they actually have.
+    await page.getByTestId('menu-help-toggle').click();
+    const active = await page.$$eval('[data-testid="help-panel"] h4', els =>
+      els.filter(e => (e.textContent || '').includes('active')).map(e => (e.textContent || '').trim()));
+    expect(active).toHaveLength(1);
+    expect(active[0]).toContain('Joystick');
+
+    // And it survives a restart, like difficulty — it describes the player's
+    // hands, not the run.
+    await engine(page, e => { e.startGame(); e.restartGame(); });
+    expect((await stats(page)).controlScheme).toBe('joystick');
 
     watch.assertClean();
   });

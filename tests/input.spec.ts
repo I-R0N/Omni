@@ -117,10 +117,17 @@ async function touch(page: any, type: string, points: { id: number; x: number; y
   );
 }
 
+/** The joystick only exists in its own control scheme (G9) — selecting it is
+ *  now part of the setup for every stick assertion. */
+async function useJoystickScheme(page: any) {
+  await engine(page, e => e.setControlScheme('joystick'));
+}
+
 test.describe('joystick zone — what it refuses to claim', () => {
   test('never takes a gesture that already meant something', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     const z = await engine(page, e => {
       const w = window.innerWidth;
@@ -156,6 +163,7 @@ test.describe('joystick zone — what it refuses to claim', () => {
   test('yields to the EXPANDED minimap, which is 3.7x the collapsed one', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     // The collapsed map is below the zone already. Expanded, it reaches up
     // into the thumb area — and its tap is what collapses it again, so the
@@ -185,6 +193,7 @@ test.describe('joystick — a floating left-thumb stick', () => {
   test('does not exist until a thumb lands, and flies the ship once it does', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     // No touch session: nothing to draw. This is the mouse/pad case, and the
     // widget must not ghost there.
@@ -238,6 +247,7 @@ test.describe('joystick — a floating left-thumb stick', () => {
   test('a nudge inside the deadzone is not thrust', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     const o = await engine(page, () => ({
       x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6),
@@ -257,42 +267,48 @@ test.describe('joystick — a floating left-thumb stick', () => {
     watch.assertClean();
   });
 
-  test('the aim thumb still fires while the stick is held', async ({ page }) => {
+  test('the aim thumb AIMS and the button SHOOTS, both while the stick is held', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     const pts = await engine(page, () => ({
       stick: { x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6) },
       aim:   { x: Math.round(window.innerWidth * 0.8), y: Math.round(window.innerHeight * 0.4) },
+      fire:  { x: Math.round(window.innerWidth - 58),  y: Math.round(window.innerHeight - 110) },
     }));
 
     await touch(page, 'touchstart', [{ id: 10, ...pts.stick }]);
     await touch(page, 'touchmove', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 60 }]);
 
-    // Count the SHOT, not the queued event: the engine's own loop drains the
-    // fire queue every frame, so a queue read in a second round-trip is
-    // racing the game (harness rule 2's cousin — the transient is gone by the
-    // time the read lands).  A spawned projectile is durable.
+    // The aim thumb AIMS. In this scheme it must NOT also shoot — that is
+    // the whole reason the scheme has a button, and a thumb that is dragging
+    // to aim cannot also be tapping to fire.
     const before = await engine(page, e =>
       e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length);
-
     await touch(page, 'touchstart', [{ id: 11, ...pts.aim }]);
     await touch(page, 'touchend', [{ id: 11, ...pts.aim }]);
+    const afterTap = await engine(page, (e, n: number) => {
+      for (let i = 0; i < 4; i++) e.updateGameLogic(1 / 120);
+      return e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length - n;
+    }, before);
+    expect(afterTap).toBe(0);
 
+    // The BUTTON shoots — with the stick still held, which is the three-way
+    // the scheme exists to make possible.
+    await touch(page, 'touchstart', [{ id: 12, ...pts.fire }]);
+    await touch(page, 'touchend', [{ id: 12, ...pts.fire }]);
     const r = await engine(page, (e, n: number) => {
-      // Let the weapon tick run: the tap is spent inside updateGameLogic.
       for (let i = 0; i < 4; i++) e.updateGameLogic(1 / 120);
       return {
-        move: e.input.getMovementVector(),
         fired: e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length - n,
+        move: e.input.getMovementVector(),
         stickHeld: !!e.input.getJoystickState()?.held,
       };
     }, before);
 
-    // Both hands did their own job: the stick still holds thrust (upward),
-    // and the second thumb's tap became a shot rather than being eaten.
-    expect(r.move.y).toBeLessThan(0);
     expect(r.fired).toBeGreaterThan(0);
+    expect(r.move.y).toBeLessThan(0);
     expect(r.stickHeld).toBe(true);
 
     await touch(page, 'touchend', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 60 }]);
@@ -302,6 +318,7 @@ test.describe('joystick — a floating left-thumb stick', () => {
   test('the ship-select tap still docks — the stick never takes it', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     await engine(page, e => {
       const st = e.stations[0];
@@ -329,6 +346,7 @@ test.describe('joystick — a floating left-thumb stick', () => {
   test('the DBG toggle forces the widget visible with no touch', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await useJoystickScheme(page);
 
     expect(await engine(page, e => e.input.getJoystickState())).toBeNull();
     await engine(page, e => e.dbg.toggleJoystickDebug());
@@ -543,7 +561,10 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
     await startRun(page);
 
     const trigger = await feedThen(page, [pad({ down: [BTN.R2] }), pad()], e => {
-      const evts = e.input.getFireEvents();
+      // The DEVICE queue, not the tap queue (G9): a synthesised shot must
+      // not be offered to the minimap toggle or the loadout slots on its way
+      // to the weapon, which is what `fireEvents` exists for.
+      const evts = e.input.getDeviceFireEvents();
       return {
         n: evts.length,
         // Load-bearing: the shot's target must sit outside SHIP_SELECT_RADIUS
@@ -560,7 +581,7 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
 
     // A face button is bound to the same action.
     const face = await feedThen(page, [pad({ down: [BTN.CROSS] }), pad()],
-      e => e.input.getFireEvents().length);
+      e => e.input.getDeviceFireEvents().length);
     expect(face).toBe(1);
 
     watch.assertClean();
@@ -574,14 +595,14 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
     // than sleeping for a real second — the window is measured in wall clock,
     // so this drives the same branch without buying a flake.
     const r = await engine(page, (e, arg: { press: any; release: any; sec: number }) => {
-      e.input.getFireEvents();
-      e.input.getChargeReleaseEvents();
+      e.input.getDeviceFireEvents();
+      e.input.getDeviceChargeEvents();
       e.input.applyPadSnapshot(arg.press, true);
       e.input.padFireStart -= arg.sec * 1000;
       e.input.applyPadSnapshot(arg.release, true);
       return {
-        taps: e.input.getFireEvents().length,
-        charged: e.input.getChargeReleaseEvents().length,
+        taps: e.input.getDeviceFireEvents().length,
+        charged: e.input.getDeviceChargeEvents().length,
       };
     }, { press: pad({ down: [BTN.R2] }), release: pad(), sec: CHARGE_FULL + 0.05 });
 
@@ -601,7 +622,7 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
       pad({ rx: 1, down: [BTN.R2] }),
       pad({ rx: -1, down: [BTN.R2] }),
       pad({ rx: -1 }),
-    ], e => e.input.getFireEvents().length);
+    ], e => e.input.getDeviceFireEvents().length);
     expect(n).toBe(1);
 
     watch.assertClean();
@@ -614,8 +635,8 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
     // stage-clear / dead.  The press must not queue a shot that lands the
     // instant the world resumes.
     const r = await feedThen(page, [pad({ down: [BTN.R2] }), pad()], e => ({
-      taps: e.input.getFireEvents().length,
-      charged: e.input.getChargeReleaseEvents().length,
+      taps: e.input.getDeviceFireEvents().length,
+      charged: e.input.getDeviceChargeEvents().length,
     }), false);
     expect(r.taps).toBe(0);
     expect(r.charged).toBe(0);
@@ -743,6 +764,184 @@ test.describe('buttons — edges, not levels', () => {
     await feed(page, [pad({ down: [BTN.R1] }), pad()]);
     await waitForStats(page, s => s.currentWeapon === 'Shotgun', 'the weapon to cycle');
 
+    watch.assertClean();
+  });
+});
+
+test.describe('control schemes — the touch models are mutually exclusive', () => {
+  /** Park the ship, run the sim, report the velocity it picked up. */
+  async function flyFor(page: any, steps = 30) {
+    return engine(page, (e, n: number) => {
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      for (let i = 0; i < n; i++) e.updateGameLogic(1 / 120);
+      return { vx: e.player.velocity.x, vy: e.player.velocity.y };
+    }, steps);
+  }
+
+  test('the default is standard touch, with no stick and no button', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    expect((await stats(page)).controlScheme).toBe('touch');
+    const r = await engine(page, e => ({
+      stick: e.input.getJoystickState(),
+      button: e.input.getFireButtonState(),
+      tapFires: e.input.tapFires(),
+    }));
+    expect(r.stick).toBeNull();
+    expect(r.button).toBeNull();
+    expect(r.tapFires).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('a touch in the stick zone flies the ship in ONE scheme and aims in the other', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const spot = await engine(page, () => ({
+      x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6),
+    }));
+
+    // Standard touch: the same touch is the drag-to-fly gesture, and there
+    // is no widget under it. It flies the ship toward the touch point —
+    // down-left of centre, so both components are negative-x / positive-y.
+    await touch(page, 'touchstart', [{ id: 40, ...spot }]);
+    const standardMove = await engine(page, e => e.input.getMovementVector());
+    expect(Math.hypot(standardMove.x, standardMove.y)).toBeGreaterThan(0.2);
+    expect(await engine(page, e => e.input.getJoystickState())).toBeNull();
+    await touch(page, 'touchend', [{ id: 40, ...spot }]);
+
+    // Joystick scheme: the identical touch becomes the STICK — at rest until
+    // dragged, and now with a widget under it.
+    await engine(page, e => e.setControlScheme('joystick'));
+    await touch(page, 'touchstart', [{ id: 41, ...spot }]);
+    const stickAtRest = await engine(page, e => ({
+      move: e.input.getMovementVector(),
+      stick: e.input.getJoystickState(),
+    }));
+    expect(stickAtRest.move.x).toBe(0);
+    expect(stickAtRest.move.y).toBe(0);
+    expect(stickAtRest.stick).not.toBeNull();
+    await touch(page, 'touchend', [{ id: 41, ...spot }]);
+
+    watch.assertClean();
+  });
+
+  test('keyboard and controller keep touch alive but stop the MOUSE dragging the ship', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const spot = await engine(page, () => ({
+      x: Math.round(window.innerWidth * 0.8), y: Math.round(window.innerHeight * 0.3),
+    }));
+
+    for (const scheme of ['keyboard', 'gamepad'] as const) {
+      await engine(page, (e, sc: string) => e.setControlScheme(sc), scheme);
+
+      // A MOUSE drag must not steer: on these schemes the keys or the stick
+      // do that, and a click is only a shot.
+      await page.mouse.move(spot.x, spot.y);
+      await page.mouse.down();
+      const mouseMove = await engine(page, e => e.input.getMovementVector());
+      expect(mouseMove.x, `${scheme}: mouse should not steer`).toBe(0);
+      expect(mouseMove.y, `${scheme}: mouse should not steer`).toBe(0);
+      await page.mouse.up();
+
+      // A FINGER still does — "simultaneous touch control".
+      await touch(page, 'touchstart', [{ id: 50, ...spot }]);
+      const touchMove = await engine(page, e => e.input.getMovementVector());
+      expect(Math.hypot(touchMove.x, touchMove.y), `${scheme}: touch should steer`).toBeGreaterThan(0.2);
+      await touch(page, 'touchend', [{ id: 50, ...spot }]);
+
+      // And no touch widgets in either scheme.
+      const widgets = await engine(page, e => ({
+        stick: e.input.getJoystickState(), button: e.input.getFireButtonState(),
+      }));
+      expect(widgets.stick).toBeNull();
+      expect(widgets.button).toBeNull();
+    }
+
+    watch.assertClean();
+  });
+
+  test('the keyboard still flies the ship under every scheme', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    for (const scheme of ['touch', 'joystick', 'keyboard', 'gamepad'] as const) {
+      await engine(page, (e, sc: string) => e.setControlScheme(sc), scheme);
+      await engine(page, e => e.input.keys.add('KeyD'));
+      const v = await flyFor(page);
+      await engine(page, e => e.input.keys.delete('KeyD'));
+      expect(v.vx, `${scheme}: WASD should always fly`).toBeGreaterThan(0);
+    }
+
+    watch.assertClean();
+  });
+
+  test('the fire button charges on a hold and is drawn from the first frame', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await engine(page, e => e.setControlScheme('joystick'));
+
+    // Visible with no touch session at all — unlike the joystick, a button
+    // that only appears once pressed cannot be found.
+    const btn = await engine(page, e => e.input.getFireButtonState());
+    expect(btn).not.toBeNull();
+    expect(btn.pressed).toBe(false);
+
+    // Hold past the charge window: a charged shot, not a tap shot, and the
+    // ring the ship draws reads the same hold.
+    const r = await engine(page, (e, sec: number) => {
+      e.input.getDeviceFireEvents();
+      e.input.getDeviceChargeEvents();
+      const b = e.input.getFireButtonState();
+      e.input.handleMouseDown({ target: document.querySelector('canvas'), clientX: b.x, clientY: b.y });
+      e.input.fireBtnStart -= sec * 1000;
+      const held = e.input.getMouseHoldDuration();
+      const charge = e.input.getFireButtonState().charge;
+      e.input.handleMouseUp({ target: document.querySelector('canvas'), clientX: b.x, clientY: b.y });
+      return {
+        held,
+        charge,
+        taps: e.input.getDeviceFireEvents().length,
+        charged: e.input.getDeviceChargeEvents().length,
+      };
+    }, CHARGE_FULL + 0.05);
+
+    expect(r.held).toBeGreaterThan(CHARGE_FULL);
+    expect(r.charge).toBe(1);
+    expect(r.taps).toBe(0);
+    expect(r.charged).toBe(1);
+
+    watch.assertClean();
+  });
+
+  test('switching scheme mid-run releases whatever the old one held', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await engine(page, e => e.setControlScheme('joystick'));
+
+    const spot = await engine(page, () => ({
+      x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6),
+    }));
+    await touch(page, 'touchstart', [{ id: 60, ...spot }]);
+    await touch(page, 'touchmove', [{ id: 60, x: spot.x + 80, y: spot.y }]);
+    expect((await engine(page, e => e.input.getMovementVector())).x).toBeGreaterThan(0.5);
+
+    // Switch with the stick still deflected: it must not leave the ship
+    // thrusting forever with no widget on screen to explain it.
+    await engine(page, e => e.setControlScheme('touch'));
+    const after = await engine(page, e => ({
+      move: e.input.getMovementVector(),
+      stick: e.input.getJoystickState(),
+    }));
+    expect(after.move.x).toBe(0);
+    expect(after.stick).toBeNull();
+
+    await touch(page, 'touchend', [{ id: 60, x: spot.x + 80, y: spot.y }]);
     watch.assertClean();
   });
 });

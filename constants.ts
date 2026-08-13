@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig, ControlScheme } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -1036,6 +1036,27 @@ export const INPUT_CONSTANTS = {
   CHARGE_FULL: 1.0,        // seconds: hold time required for a charged shot AND for the ring to read "full"
   TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
+
+  // ── Fire button (joystick scheme) ──────────────────────────────────────
+  // The joystick scheme's shooting control.  Tap-to-shoot is the STANDARD
+  // touch scheme's gesture; a scheme whose left thumb is pinned to a stick
+  // needs a thing to press with the right one, and a tap that both aims and
+  // fires cannot coexist with a thumb that is dragging to aim.
+  //
+  // Parked above the loadout strip on the right, mirroring the joystick's
+  // side.  Its own rect is excluded from the aim gesture, so pressing it
+  // never yanks the aim to the corner.
+  FIRE_BUTTON: {
+    RADIUS: 38,
+    /** px in from the right edge to the button's CENTRE. */
+    MARGIN_X: 58,
+    /** px from the bottom edge to the button's CENTRE.  Clears the loadout
+     *  strip (SLOT_H + BOTTOM_MARGIN = 62) with a comfortable gap. */
+    MARGIN_Y: 110,
+    IDLE_ALPHA: 0.20,
+    PRESSED_ALPHA: 0.42,
+    COLOR: '#f87171',
+  },
 
   // ── Onscreen joystick (Pair C, c2 second half) ─────────────────────────
   // A FLOATING left-thumb stick: it has no fixed home, it appears wherever
@@ -3221,6 +3242,61 @@ export function cycleSnitchSpeed(): number {
   activeSnitchSpeedIndex = (activeSnitchSpeedIndex + 1) % SNITCH_SPEED_CYCLE.length;
   return activeSnitchSpeedIndex;
 }
+
+// ── Control schemes (user directive, step 5 G9) ──────────────────────────────
+// Picked at game start (main menu) and changeable from the pause menu.  Like
+// DIFFICULTY, the choice is a PREFERENCE: it survives restarts and is not
+// part of run state.
+//
+// The axis that matters is the TOUCH MODEL.  The two touch schemes are
+// mutually exclusive ways to drive the same ship — blending them (which is
+// what shipped first) has the floating stick and the drag-to-fly gesture
+// fighting over the same finger.  Keyboard and controller do NOT switch touch
+// off; they select the standard touch model AND stop the MOUSE from dragging
+// the ship, because on those schemes steering is the keys' or the stick's job
+// and a click should only shoot.
+//
+//   scheme     joystick+button   mouse drags ship   touch drags ship   tap fires
+//   touch      no                yes                yes                yes
+//   joystick   YES               no                 no (stick)         no (button)
+//   keyboard   no                NO                 yes                yes
+//   gamepad    no                NO                 yes                yes
+//
+// `keyboard` and `gamepad` are deliberately identical in TOUCH behaviour —
+// the honest reading of "the controller and keyboard options should also
+// allow simultaneous touch control".  What differs between them is which
+// device the help panel leads with.
+export const CONTROL_SCHEMES: ReadonlyArray<{
+  id: ControlScheme;
+  label: string;
+  /** One line for the menu button's caption. */
+  blurb: string;
+}> = [
+  { id: 'touch',    label: 'Touch',      blurb: 'Drag to fly and aim · tap to shoot' },
+  { id: 'joystick', label: 'Joystick',   blurb: 'Left stick to fly · button to shoot' },
+  { id: 'keyboard', label: 'Keyboard',   blurb: 'WASD + mouse · touch still works' },
+  { id: 'gamepad',  label: 'Controller', blurb: 'Gamepad · touch still works' },
+] as const;
+
+export function controlSchemeDef(id: ControlScheme) {
+  return CONTROL_SCHEMES.find(c => c.id === id) ?? CONTROL_SCHEMES[0];
+}
+
+/** Per-scheme behaviour flags.  One table, read by InputSystem and by the
+ *  engine's tap-to-fire gate — so "what does this scheme do" is answerable in
+ *  one place rather than by grepping for the scheme name. */
+export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
+  joystick: boolean;
+  fireButton: boolean;
+  mouseDragMoves: boolean;
+  touchDragMoves: boolean;
+  tapFires: boolean;
+}> = {
+  touch:    { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true  },
+  joystick: { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false },
+  keyboard: { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true  },
+  gamepad:  { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true  },
+};
 
 // ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────
 // What the minimap says about MATERIAL, as a three-way DBG cycle so the three

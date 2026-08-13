@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
@@ -21,7 +21,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
-         renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick,
+         renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
 
 /**
@@ -612,6 +612,7 @@ export class RenderSystem {
     waveAnnouncements?: WaveAnnouncement[],
     flowOverlay?: FlowOverlayState,
     joystick?: JoystickHUDState | null,
+    fireButton?: FireButtonHUDState | null,
   ) {
     const t0 = performance.now();
     this.lastTintMs = 0;
@@ -913,10 +914,14 @@ export class RenderSystem {
         renderLoadoutHUD(ctx, player, width, height);
     }
 
-    // 10. Onscreen joystick (Screen Space, LAST) — it lives under an actual
-    // thumb, so nothing may draw over it.  Null on mouse and pad.
+    // 10. The touch scheme's two widgets (Screen Space, LAST) — they live
+    // under actual thumbs, so nothing may draw over them.  Both are null
+    // unless the active control scheme has them.
     if (joystick) {
         renderJoystick(ctx, joystick);
+    }
+    if (fireButton) {
+        renderFireButton(ctx, fireButton);
     }
 
     this.lastRenderMs = performance.now() - t0;

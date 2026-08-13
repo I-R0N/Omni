@@ -1669,6 +1669,9 @@ export interface EngineStats {
   /** DBG: force the touch joystick to draw with no touch session, so its
    *  size and placement can be checked on a desktop browser. */
   joystickForceVisible?: boolean;
+  /** The active control scheme (menu selection).  Drives the menu's own
+   *  selector, the help panel's highlight, and the two touch HUD widgets. */
+  controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
@@ -1787,12 +1790,37 @@ export interface WaveAnnouncement {
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).
+/**
+ * Which control scheme the player picked (main menu, or the pause menu).
+ *
+ * The distinction that actually matters is the TOUCH MODEL — the two touch
+ * schemes are mutually exclusive ways to drive the same ship, and blending
+ * them (which is what shipped first) means the joystick and the drag-to-fly
+ * gesture fight over the same finger.  Keyboard and controller do NOT
+ * disable touch: they pick the standard touch model and additionally stop
+ * the MOUSE from dragging the ship around, since on those schemes steering
+ * is the keys' or the stick's job and a click should only shoot.
+ */
+export type ControlScheme = 'touch' | 'joystick' | 'keyboard' | 'gamepad';
+
 export interface PlayerHUDMessage {
   id: string;
   text: string;
   color: string;
   lifetime: number;
   maxLifetime: number;
+}
+
+/** Render-side view of the onscreen FIRE button — the joystick scheme's
+ *  shooting control.  Null in every other scheme, and (like the joystick)
+ *  null when there is no touch session, so it never ghosts onto a desktop. */
+export interface FireButtonHUDState {
+  x: number;
+  y: number;
+  radius: number;
+  pressed: boolean;
+  /** 0→1 charge progress while held, for the ring around the button. */
+  charge: number;
 }
 
 /** Render-side view of the onscreen joystick (Pair C, c2).  Produced by

@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype } from '../types';
+import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype, ControlScheme } from '../types';
+import { CONTROL_SCHEMES } from '../constants';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
 // single-element "Test Maps" showcases (plus the multi-material Tile Heavy
@@ -82,6 +83,7 @@ interface UIOverlayProps {
   onToggleJoystickDebug?: () => void;
   onCycleMinimapMaterial?: () => void;
   onCycleRockPalette?: () => void;
+  onSetControlScheme?: (scheme: ControlScheme) => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -245,6 +247,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleJoystickDebug,
   onCycleMinimapMaterial,
   onCycleRockPalette,
+  onSetControlScheme,
   onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -896,6 +899,41 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     </>
   );
   /**
+   * Control-scheme picker (user directive, G9).  Shared by the main menu —
+   * where it is the choice made at game start — and the pause menu, so a
+   * player who picked wrong is one tap from fixing it rather than one
+   * restart.
+   *
+   * A 2x2 grid rather than a row: four labels plus a caption each do not fit
+   * a 390px row, and the caption is the part that makes the choice
+   * legible without reading the help panel.
+   */
+  const renderSchemePicker = () => {
+    const active = stats.controlScheme ?? 'touch';
+    return (
+      <div data-testid="scheme-picker" className="w-full grid grid-cols-2 gap-2">
+        {CONTROL_SCHEMES.map(scheme => (
+          <button
+            key={scheme.id}
+            data-testid={`scheme-${scheme.id}`}
+            onClick={() => onSetControlScheme && onSetControlScheme(scheme.id)}
+            className={`px-2 py-2 rounded-lg border text-left transition-all ${
+              active === scheme.id
+                ? 'bg-sky-600 border-sky-400 text-white shadow-lg'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-sky-400 hover:text-white'
+            }`}
+          >
+            <div className="text-xs font-bold">{scheme.label}</div>
+            <div className={`text-[9px] leading-tight mt-0.5 ${active === scheme.id ? 'text-sky-100' : 'text-slate-500'}`}>
+              {scheme.blurb}
+            </div>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  /**
    * Controls & basics (Pair C, c1).
    *
    * Shared verbatim by the main menu and the pause menu — same widget in both
@@ -912,11 +950,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    */
   const renderHelpPanel = () => {
     const padOn = !!stats.gamepadInfo && stats.gamepadInfo !== 'none';
+    const scheme = stats.controlScheme ?? 'touch';
 
-    const group = (title: string, accent: string, rows: [string, string][], live?: React.ReactNode) => (
-      <div className="w-full">
+    // The ACTIVE scheme's block is the one the player is reading for, so it
+    // is marked; the others stay visible because switching is one tap away
+    // and the point of the panel is to make that choice an informed one.
+    const group = (
+      title: string, accent: string, rows: [string, string][],
+      live?: React.ReactNode, activeFor?: ControlScheme[],
+    ) => (
+      <div className={`w-full ${activeFor && !activeFor.includes(scheme) ? 'opacity-45' : ''}`}>
         <h4 className={`${accent} text-[11px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-2`}>
-          {title}{live}
+          {title}
+          {activeFor && activeFor.includes(scheme) && (
+            <span className="text-[9px] normal-case tracking-normal bg-white/10 px-1.5 py-0.5 rounded">active</span>
+          )}
+          {live}
         </h4>
         <div className="flex flex-col gap-1">
           {rows.map(([control, what]) => (
@@ -935,20 +984,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     return (
       <div data-testid="help-panel" className="w-full flex flex-col gap-4 text-left">
         {group('Touch', 'text-sky-300', [
-          ['Left thumb', 'Drag to fly. The stick appears wherever your thumb lands.'],
-          ['Right side', 'Drag to aim, tap to shoot.'],
+          ['Drag anywhere', 'Fly and aim at once — direction and speed from the screen centre.'],
+          ['Tap', 'Shoot where you tapped.'],
           ['Hold 1s, release', 'Charged shot (needs an Overcharge core installed).'],
           ['Tap your ship', 'Dock at a station, or enter a portal you are next to.'],
           ['Tap the minimap', 'Expand it. Tap a weapon slot to switch weapons.'],
-          ['One finger', 'Still works on its own: drag anywhere to fly and aim at once.'],
-        ])}
+        ], null, ['touch'])}
+
+        {group('Joystick touch', 'text-sky-300', [
+          ['Left thumb', 'Drag to fly. The stick appears wherever your thumb lands.'],
+          ['Right side', 'Drag to aim. The aim stays where you left it.'],
+          ['Fire button', 'Shoot. Hold it for a charged shot — the ring shows the charge.'],
+          ['Tap your ship', 'Dock, or enter a portal. Tapping elsewhere does not shoot.'],
+        ], null, ['joystick'])}
 
         {group('Keyboard & mouse', 'text-emerald-300', [
           ['W A S D / arrows', 'Fly.'],
           ['Mouse', 'Aims. Click to shoot.'],
           ['Hold 1s, release', 'Charged shot.'],
           ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
-        ])}
+          ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
+        ], null, ['keyboard'])}
 
         {group('Gamepad', 'text-violet-300', [
           ['Left stick / D-pad', 'Fly.'],
@@ -957,11 +1013,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['□', 'Dock, enter a portal, or undock.'],
           ['R1 or △', 'Switch weapon.'],
           ['Options', 'Pause.'],
+          ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], padOn ? (
           <span className="text-violet-200/80 font-mono text-[9px] normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded">
             connected
           </span>
-        ) : null)}
+        ) : null, ['gamepad'])}
 
         {group('The run', 'text-amber-300', [
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
@@ -2117,6 +2174,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
+            {/* Controls — the choice made at game start (user directive).
+                Sits with DIFFICULTY because it is the same kind of thing: a
+                preference that shapes the whole run and survives restarts. */}
+            <div className="w-full flex flex-col items-center gap-3">
+              <span className="text-slate-200 text-sm tracking-wide">Controls</span>
+              {renderSchemePicker()}
+            </div>
+
             <button
               data-testid="menu-start"
               onClick={onStart}
@@ -2250,6 +2315,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <p className="text-slate-500 text-[11px] text-center">
               Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
             </p>
+
+            {/* Controls — changeable mid-run, so picking wrong at the front
+                door costs a tap rather than a restart. */}
+            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
+              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Controls</h3>
+              {renderSchemePicker()}
+            </div>
 
             {/* Controls & basics — the same widget the main menu shows, so
                 the answer is in the same words wherever you look for it. */}

@@ -613,6 +613,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   - `INPUT_CONSTANTS.JOYSTICK` — the floating touch stick's zone
     (left fraction, top fraction, bottom px), ring/knob geometry,
     deadzone and fade.  The zone is defined by what it REFUSES; see §8.
+- `CONTROL_SCHEMES` / `CONTROL_SCHEME_RULES` / `controlSchemeDef()` — the
+  control-scheme picker (user directive, step 5 G9).  FOUR schemes chosen at
+  game start (and changeable from the pause menu): `touch` (drag to fly and
+  aim, tap to shoot — the default), `joystick` (floating stick + an onscreen
+  FIRE button), `keyboard`, `gamepad`.  The axis that matters is the TOUCH
+  MODEL: the two touch schemes are mutually exclusive ways to drive the same
+  ship, because a floating stick and the drag-to-fly gesture otherwise fight
+  over the same finger.  `keyboard` and `gamepad` do NOT switch touch off —
+  they select the standard touch model AND stop the MOUSE from dragging the
+  ship, since on those schemes steering belongs to the keys or the stick and
+  a click should only shoot.  `CONTROL_SCHEME_RULES` is the one table every
+  read goes through (`joystick` / `fireButton` / `mouseDragMoves` /
+  `touchDragMoves` / `tapFires`), so a scheme's behaviour is a lookup rather
+  than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
+  it survives `restartGame()` and every map load.
+  `INPUT_CONSTANTS.FIRE_BUTTON` carries the button's geometry.
 - `ROCK_PALETTES` / `randomRockShade()` — per-instance rock body shades
   (slate / rust / mineral, shipped `mixed`), rolled once at spawn like
   the plastic palettes and inherited by shards.  `METAL_BRIGHT_TARGET`
@@ -1701,6 +1717,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     they can be spent, so no press fires later out of context.
   - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
     which must exceed `SHIP_SELECT_RADIUS` — see §5.
+  - **The CONTROL SCHEME decides which touch model is live** (G9).  The
+    joystick and the standard drag-to-fly gesture are mutually exclusive —
+    they compete for the same finger — so they are separate schemes rather
+    than layers, and `CONTROL_SCHEME_RULES` is where "what does this scheme
+    do" is answered.  Two consequences worth knowing before touching input:
+    a TAP only fires under a scheme with `tapFires` (it still reaches the
+    minimap toggle, the loadout slots and `claimTapNear`, which are not
+    weapons), and DEVICE shots — the fire button and the pad trigger — go
+    into a SEPARATE queue (`getDeviceFireEvents`) that bypasses the tap
+    handler entirely, because a synthesised shot aimed at the world must not
+    be eaten by a HUD widget the aim happened to point at.
   - **The touch joystick is a FLOATING left-thumb stick** whose zone is
     defined by what it REFUSES: the ship-select disc at screen centre
     (or docking by tap silently breaks), the LIVE minimap rect (pushed in
@@ -1709,8 +1736,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     whole right half.  It exists only while a touch session is live —
     `getJoystickState()` returns null otherwise, which is why checking its
     layout on a desktop needs the DBG toggle.  When NO stick is down the
-    single-touch model is unchanged, so a player who never finds it loses
-    nothing.
+    single-touch model is unchanged.  Its scheme also gets the FIRE BUTTON,
+    which — unlike the stick — is drawn from the first frame and accepts a
+    mouse press: a control that only appears once pressed cannot be found,
+    and in that scheme it is the only way to shoot.
 
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an

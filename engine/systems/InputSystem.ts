@@ -1,7 +1,7 @@
 
 
-import { Vector2, JoystickHUDState } from '../../types';
-import { INPUT_CONSTANTS } from '../../constants';
+import { Vector2, JoystickHUDState, FireButtonHUDState, ControlScheme } from '../../types';
+import { INPUT_CONSTANTS, CONTROL_SCHEME_RULES } from '../../constants';
 
 /** One frame of pad state, reduced to what the mapping layer cares about.
  *  `applyPadSnapshot` takes this rather than a live `Gamepad` so the whole
@@ -28,6 +28,32 @@ export class InputSystem {
   // as the movement input, so a long held + dragged release should still
   // fire the charged shot.
   private chargeReleaseEvents: Vector2[] = [];
+
+  // ── Control scheme (user directive, G9) ───────────────────────────────
+  // The picked scheme decides which touch model is live.  Every read goes
+  // through `rules`, which is the CONTROL_SCHEME_RULES row — so a scheme's
+  // behaviour is one table lookup rather than a name compared in five
+  // places.
+  private scheme: ControlScheme = 'touch';
+  private rules = CONTROL_SCHEME_RULES.touch;
+  /** Whether the live pointer session came from a FINGER or a mouse.  The
+   *  two share `mouseDown` / `mousePosition`, but the keyboard and gamepad
+   *  schemes let touch drag the ship while the mouse may not, so the source
+   *  has to be remembered. */
+  private pointerIsTouch: boolean = false;
+
+  // ── Fire button (joystick scheme) ─────────────────────────────────────
+  private fireTouchId: number | null = null;
+  private fireBtnDown: boolean = false;
+  private fireBtnStart: number = 0;
+  /** Fire events raised by a DEVICE (pad trigger, fire button) rather than
+   *  by a tap on the world.  Kept apart from `fireEvents` on purpose: the
+   *  engine's tap handler first offers a tap to the minimap toggle, the
+   *  loadout slots and `claimTapNear`, and a synthetic shot must not be
+   *  eaten by any of them just because the aim happened to point at the
+   *  minimap.  (That was a live bug for the pad before this queue existed.) */
+  private deviceFireEvents: Vector2[] = [];
+  private deviceChargeEvents: Vector2[] = [];
 
   // ── Onscreen joystick (Pair C, c2 second half) ────────────────────────
   // Touch is two-handed now.  These track the LEFT thumb; the aim finger
@@ -165,7 +191,15 @@ export class InputSystem {
   private handleMouseDown = (e: MouseEvent) => {
     if (this.shouldIgnoreEvent(e)) return;
 
+    // The fire button is drawn in this scheme, so it is clickable in it too.
+    if (this.inFireButton(e.clientX, e.clientY)) {
+      this.fireBtnDown = true;
+      this.fireBtnStart = performance.now();
+      return;
+    }
+
     this.mouseDown = true;
+    this.pointerIsTouch = false;
     this.touchStartTime = performance.now();
     this.touchStartPos = { x: e.clientX, y: e.clientY };
     // Update pos immediately so rotation is correct
@@ -173,6 +207,11 @@ export class InputSystem {
   };
 
   private handleMouseUp = (e: MouseEvent) => {
+    if (this.fireBtnDown) {
+        this.releaseFireButton();
+        this.mouseDown = false;
+        return;
+    }
     if (this.shouldIgnoreEvent(e)) {
         this.mouseDown = false;
         return;
@@ -198,7 +237,19 @@ export class InputSystem {
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
 
-      if (this.stickTouchId === null && this.inJoystickZone(touch.clientX, touch.clientY)) {
+      // The FIRE button claims first: it is the smallest target on the
+      // screen and it sits inside the half the aim finger owns, so anything
+      // else claiming ahead of it would swallow the press.
+      if (this.rules.fireButton && this.fireTouchId === null
+          && this.inFireButton(touch.clientX, touch.clientY)) {
+        this.fireTouchId = touch.identifier;
+        this.fireBtnDown = true;
+        this.fireBtnStart = performance.now();
+        continue;
+      }
+
+      if (this.rules.joystick && this.stickTouchId === null
+          && this.inJoystickZone(touch.clientX, touch.clientY)) {
         this.stickTouchId = touch.identifier;
         this.stickOrigin.x = touch.clientX;
         this.stickOrigin.y = touch.clientY;
@@ -213,6 +264,7 @@ export class InputSystem {
       if (this.aimTouchId === null) {
         this.aimTouchId = touch.identifier;
         this.mouseDown = true;
+        this.pointerIsTouch = true;
         this.mousePosition = { x: touch.clientX, y: touch.clientY };
         this.touchStartTime = performance.now();
         this.touchStartPos = { x: touch.clientX, y: touch.clientY };
@@ -241,6 +293,8 @@ export class InputSystem {
         // the pointer latch rather than leaving the ship thrusting.
         this.mouseDown = false;
         this.aimTouchId = null;
+        this.fireTouchId = null;
+        this.fireBtnDown = false;
         return;
     }
 
@@ -248,7 +302,10 @@ export class InputSystem {
 
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
-      if (touch.identifier === this.stickTouchId) {
+      if (touch.identifier === this.fireTouchId) {
+        this.fireTouchId = null;
+        this.releaseFireButton();
+      } else if (touch.identifier === this.stickTouchId) {
         this.stickTouchId = null;
         this.stickVec.x = 0;
         this.stickVec.y = 0;
@@ -283,6 +340,111 @@ export class InputSystem {
     this.fireEvents.push({ x, y });
   }
 
+  // ── Control scheme ─────────────────────────────────────────────────────
+
+  /** Set the active scheme.  Anything the outgoing scheme owned is released
+   *  immediately, so switching mid-run cannot leave a stick deflected or a
+   *  fire button stuck down. */
+  public setControlScheme(scheme: ControlScheme) {
+    if (!CONTROL_SCHEME_RULES[scheme] || scheme === this.scheme) return;
+    this.scheme = scheme;
+    this.rules = CONTROL_SCHEME_RULES[scheme];
+    this.stickTouchId = null;
+    this.stickVec.x = 0;
+    this.stickVec.y = 0;
+    this.stickFade = 0;
+    this.fireTouchId = null;
+    this.fireBtnDown = false;
+  }
+
+  public getControlScheme(): ControlScheme {
+    return this.scheme;
+  }
+
+  /** Does a TAP on the world fire a shot in this scheme?  False under the
+   *  joystick scheme, where shooting is the button's job.  The engine asks
+   *  before spending a tap — the tap still reaches the minimap toggle, the
+   *  loadout slots and `claimTapNear`, which are not weapons. */
+  public tapFires(): boolean {
+    return this.rules.tapFires;
+  }
+
+  // ── Fire button ────────────────────────────────────────────────────────
+
+  /** Centre of the fire button in CSS px.  Computed rather than stored so it
+   *  follows a resize with no listener. */
+  private fireButtonCenter(out: Vector2): Vector2 {
+    const B = INPUT_CONSTANTS.FIRE_BUTTON;
+    out.x = window.innerWidth - B.MARGIN_X;
+    out.y = window.innerHeight - B.MARGIN_Y;
+    return out;
+  }
+  private _fbScratch: Vector2 = { x: 0, y: 0 };
+
+  public inFireButton(x: number, y: number): boolean {
+    if (!this.rules.fireButton) return false;
+    const c = this.fireButtonCenter(this._fbScratch);
+    const dx = x - c.x;
+    const dy = y - c.y;
+    const r = INPUT_CONSTANTS.FIRE_BUTTON.RADIUS;
+    return dx * dx + dy * dy <= r * r;
+  }
+
+  /** Release the button, raising the shot.  Same model as every other
+   *  device: a press-and-release is a shot, holding past CHARGE_FULL and
+   *  releasing is a charged shot, and the ring fills over the same window —
+   *  so the joystick scheme teaches nothing new about shooting. */
+  private releaseFireButton() {
+    if (!this.fireBtnDown) return;
+    this.fireBtnDown = false;
+    const held = (performance.now() - this.fireBtnStart) / 1000;
+    // Fire along the CURRENT aim, wherever the aim finger last left it —
+    // the button says when, the aim says where.
+    const target = { x: this.mousePosition.x, y: this.mousePosition.y };
+    if (held >= INPUT_CONSTANTS.CHARGE_FULL) this.deviceChargeEvents.push(target);
+    else this.deviceFireEvents.push(target);
+  }
+
+  /**
+   * Render-side view.  Null unless the scheme HAS a button — and non-null
+   * from the first frame otherwise, unlike the joystick.
+   *
+   * The joystick can afford to appear only under a thumb because it appears
+   * WHERE the thumb lands; a button that is invisible until pressed cannot
+   * be found, and in this scheme it is the only way to shoot.  It follows
+   * that the button also accepts a MOUSE press: a control the player must be
+   * able to see is a control they will try to click.
+   */
+  public getFireButtonState(): FireButtonHUDState | null {
+    if (!this.rules.fireButton) return null;
+    const c = this.fireButtonCenter(this._fbScratch);
+    const held = this.fireBtnDown
+      ? (performance.now() - this.fireBtnStart) / 1000 / INPUT_CONSTANTS.CHARGE_FULL
+      : 0;
+    return {
+      x: c.x,
+      y: c.y,
+      radius: INPUT_CONSTANTS.FIRE_BUTTON.RADIUS,
+      pressed: this.fireBtnDown,
+      charge: Math.max(0, Math.min(1, held)),
+    };
+  }
+
+  /** Shots raised by a DEVICE (fire button, pad trigger) rather than by a
+   *  tap on the world.  Drained straight into the weapon by the engine —
+   *  they must not pass the tap handler's minimap / loadout / ship-select
+   *  intercepts, which exist for taps the PLAYER aimed at the HUD. */
+  public getDeviceFireEvents(): Vector2[] {
+    const out = [...this.deviceFireEvents];
+    this.deviceFireEvents.length = 0;
+    return out;
+  }
+  public getDeviceChargeEvents(): Vector2[] {
+    const out = [...this.deviceChargeEvents];
+    this.deviceChargeEvents.length = 0;
+    return out;
+  }
+
   // ── Onscreen joystick ──────────────────────────────────────────────────
 
   /**
@@ -310,6 +472,8 @@ export class InputSystem {
 
     const ex = this.stickExclusion;
     if (ex && x >= ex.x && x <= ex.x + ex.w && y >= ex.y && y <= ex.y + ex.h) return false;
+
+    if (this.inFireButton(x, y)) return false;
 
     if (x > w * J.ZONE_W_FRAC) return false;
     if (y < h * J.ZONE_TOP_FRAC) return false;
@@ -373,6 +537,7 @@ export class InputSystem {
    *  draw — which is the normal case on mouse and pad, so the widget never
    *  ghosts onto a device that has no thumb. */
   public getJoystickState(): JoystickHUDState | null {
+    if (!this.rules.joystick) return null;
     if (this.joystickForceVisible && this.stickTouchId === null && this.stickFade <= 0) {
       // DBG: park a neutral stick where a right-handed thumb would land.
       const J = INPUT_CONSTANTS.JOYSTICK;
@@ -524,8 +689,12 @@ export class InputSystem {
       if (fireEnabled) {
         const held = (performance.now() - this.padFireStart) / 1000;
         const target = this.padPointerTarget();
-        if (held >= INPUT_CONSTANTS.CHARGE_FULL) this.chargeReleaseEvents.push(target);
-        else this.fireEvents.push(target);
+        // DEVICE queue, not the tap queue: a pad shot must not be offered to
+        // the minimap toggle or the loadout slots on its way to the weapon.
+        // Aiming straight down with the map expanded used to toggle the map
+        // instead of firing, because the synthetic target landed on it.
+        if (held >= INPUT_CONSTANTS.CHARGE_FULL) this.deviceChargeEvents.push(target);
+        else this.deviceFireEvents.push(target);
       }
     }
 
@@ -689,7 +858,15 @@ export class InputSystem {
       return { x: this.padMove.x, y: this.padMove.y };
     }
 
-    // 4. Touch / Mouse Input
+    // 4. Touch / Mouse Input — gated by the SCHEME.  The joystick scheme
+    //    steers with its stick and nothing else; the keyboard and gamepad
+    //    schemes let a FINGER drag the ship but not the mouse, because on
+    //    those schemes steering belongs to the keys or the pad and a click
+    //    should only shoot.
+    if (this.pointerIsTouch ? !this.rules.touchDragMoves : !this.rules.mouseDragMoves) {
+      return { x: 0, y: 0 };
+    }
+
     // Direction: screen center → current touch position (normalized).
     // Throttle: current radial distance from screen center, clamped to
     //           [0, THROTTLE_DISTANCE] and normalised to [0, 1].
@@ -718,7 +895,8 @@ export class InputSystem {
   }
 
   public isActionPressed(): boolean {
-    return this.keys.has('Space') || this.keys.has('Enter') || this.mouseDown || this.padFireDown;
+    return this.keys.has('Space') || this.keys.has('Enter') || this.mouseDown
+        || this.padFireDown || this.fireBtnDown;
   }
 
   /** Returns true only when a keyboard fire key (Space/Enter) is held — excludes mouse/touch. */
@@ -779,10 +957,14 @@ export class InputSystem {
    * GameEngine to drive `player.chargeProgress` for the charge-ring HUD.
    */
   public getMouseHoldDuration(): number {
-    // The pad's fire hold feeds the same charge ring — one charge model for
-    // all three devices, so the ring means the same thing everywhere.
+    // Every device's fire hold feeds the SAME charge ring — one charge model
+    // everywhere, so the ring means the same thing whichever control you are
+    // holding.  The fire button reads first: in the joystick scheme the aim
+    // finger is not a trigger, so its hold must not fill the ring.
+    if (this.fireBtnDown) return (performance.now() - this.fireBtnStart) / 1000;
     if (this.padFireDown) return (performance.now() - this.padFireStart) / 1000;
     if (!this.mouseDown) return 0;
+    if (!this.rules.tapFires) return 0;
     return (performance.now() - this.touchStartTime) / 1000;
   }
 

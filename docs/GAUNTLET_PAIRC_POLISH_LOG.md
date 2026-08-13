@@ -29,6 +29,7 @@ tuning (step 6).
 | G7 | Polish residuals — palette defaults, MAP_POPULATION authority | **done** |
 | G8 | OPTIONAL — NPC station shuttles (first to cut) | **cut** |
 | G-final | Validation, docs sync, completion summary | **done** |
+| G9 | Control-scheme selection (user directive, post-queue) | **done** |
 
 ---
 
@@ -686,6 +687,107 @@ is untouched and the work is unchanged in scope.
 
 ---
 
+### G9 — Control schemes (user directive, 2026-08-12)
+
+Added AFTER the queue closed, on the user's direction: *"the onscreen touch
+joystick controls and the standard touch controls should be separate. Let's
+include a control type selection at game start and have separate options for
+standard touch/mouse and joystick touch controls (use a button for shooting)
+as well as the other existing control options. The physical controller and
+keyboard option should also allow simultaneous touch control."*
+
+**What G3 got wrong.** The joystick shipped as a LAYER on top of the existing
+touch model — a stick in the left zone, the old drag-to-fly gesture
+everywhere else. G3's own decision G3-d argued for that ("a player who never
+discovers the stick loses nothing"), and it is the thing this milestone
+undoes. The two models compete for the same finger: with both live, whether a
+touch flies the ship *directly* or moves a stick depends on which side of an
+invisible boundary it landed on, and the player is never told which mode they
+are in. They are two ways to drive the same ship, so they are two SCHEMES.
+
+**DECISION G9-a — the scheme is a PREFERENCE, shaped like difficulty.**
+Picked on the main menu next to DIFFICULTY, changeable from the pause menu
+(picking wrong at the front door should cost a tap, not a restart), and it
+survives `restartGame()` and every map load — it describes the player's
+hands, not the run. No new persistence layer: this repo has none, and
+difficulty already sets the precedent for a menu preference living on the
+engine.
+
+**DECISION G9-b — one rules TABLE, not a scheme name compared in five
+places.** `CONTROL_SCHEME_RULES` has a row per scheme and five booleans:
+
+| scheme | joystick+button | mouse drags ship | touch drags ship | tap fires |
+|---|---|---|---|---|
+| `touch` | no | yes | yes | yes |
+| `joystick` | **yes** | no | no (stick) | no (button) |
+| `keyboard` | no | **no** | yes | yes |
+| `gamepad` | no | **no** | yes | yes |
+
+**DECISION G9-c — keyboard and controller keep touch, and lose the MOUSE
+drag.** "Should also allow simultaneous touch control" is honoured
+literally: a finger still flies the ship on both. What they additionally do
+is stop the *mouse* from dragging the ship, which required tracking whether
+the live pointer session came from a finger or a mouse (they share
+`mouseDown` / `mousePosition`). That is a real improvement in its own right —
+on a keyboard you steer with WASD, and holding the mouse to move while
+clicking to shoot is the worst of both. `keyboard` and `gamepad` are
+therefore identical in TOUCH behaviour; what differs is which block the help
+panel marks as active. Recorded rather than papered over.
+
+**DECISION G9-d — the fire button is visible from the first frame, and
+clickable.** The joystick can afford to appear only under a thumb because it
+appears WHERE the thumb lands. A button cannot: invisible until pressed means
+unfindable, and in this scheme it is the only way to shoot. It follows that
+it also takes a mouse press — a control the player can see is one they will
+try to click — which incidentally makes the scheme testable on a desktop.
+It sits above the loadout strip on the right, mirroring the stick's side, and
+its rect is carved out of both the joystick zone and the aim gesture. Its
+ring doubles as the charge readout, filling over the same window as the ring
+on the ship.
+
+**DECISION G9-e — the fire button keeps the one shooting model.** Tap =
+shot; hold past `CHARGE_FULL` and release = charged shot. Same as tap-to-fire,
+same as the pad trigger. A fire button that auto-repeats is the obvious
+alternative and it is the SAME open question already logged for the pad
+trigger — it cannot coexist with hold-to-charge on one control. Both stay in
+FOR-USER-REVIEW as one decision, not two.
+
+**A latent bug fixed on the way.** Device-raised shots (the fire button, and
+the pad trigger since G2) now go into their own queue that bypasses the tap
+handler. They used to enter `fireEvents`, which the engine first offers to
+the minimap toggle, the loadout slots and `claimTapNear` — so a pad shot
+aimed straight DOWN with the minimap expanded toggled the map instead of
+firing. A synthesised shot is aimed at the world; only a real tap can be
+meant for a HUD widget.
+
+**Tests changed, and why the change is legitimate** (the standing rule is
+that no test may be edited to accommodate a change unless the ledger says why
+its meaning legitimately changed):
+
+- **Seven joystick tests now select the joystick scheme first.** The widget
+  is no longer unconditional, which is the entire point of the milestone; the
+  assertions themselves are untouched.
+- **Three pad-fire tests read `getDeviceFireEvents()` instead of
+  `getFireEvents()`.** The queue a device shot lands in changed, deliberately
+  and for correctness — see the bug above.
+- **One test was rewritten rather than repaired.** "The aim thumb still fires
+  while the stick is held" asserted behaviour the user has now ruled out. It
+  is now "the aim thumb AIMS and the button SHOOTS, both while the stick is
+  held", which asserts the three-way the scheme exists to make possible —
+  and it asserts the tap does NOT fire, so the old behaviour cannot creep
+  back.
+
+Six new scheme tests cover the rest: the default, the same touch in the same
+place behaving differently under two schemes, the mouse/finger split on
+keyboard and controller, WASD working under every scheme, the button's charge
+hold, and switching mid-run releasing whatever the old scheme held (a stick
+deflected through a switch would otherwise thrust forever with no widget on
+screen to explain it).
+
+**Gates:** typecheck, build, **81/81** tests (74 + 7).
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -739,6 +841,18 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G7-d** — the table was corrected to the code's populations, not the
   reverse. Beat: "fixing" the maps to match a table nothing had read for
   months, which would have been a silent rebalance.
+- **G9-a** — the scheme is a preference shaped like difficulty (menu + pause,
+  survives restarts). Beat: a new persistence layer this repo does not have.
+- **G9-b** — one `CONTROL_SCHEME_RULES` table. Beat: the scheme name compared
+  at each of the five sites that care.
+- **G9-c** — keyboard/controller keep touch and lose the mouse drag. Beat:
+  making them touch-free (contradicts the directive) or leaving the mouse
+  dragging the ship while you steer with keys.
+- **G9-d** — the fire button draws from the first frame and takes a mouse
+  press. Beat: the joystick's appear-under-a-thumb rule, which makes an
+  unfindable button.
+- **G9-e** — the fire button uses the one shooting model. Beat: auto-repeat,
+  which is the same open question as the pad trigger and belongs with it.
 - **G7-e** — Seven Rings' mix is `tileRings`; its geometry stays on the
   class. Beat: pushing ring count and radii into the population table too.
 - **G6** — portal arrows keep the range gate and lose the on-screen
@@ -844,13 +958,23 @@ push, opens on an iPhone) is the fastest way to run these:
   glows cyan instead of magenta. All four are aesthetic calls made from
   captures; every one is a constant and a DBG row away from being changed.
 
-- **OPEN QUESTION — should holding the fire trigger auto-repeat?** Today it
-  does not: the pad uses the same tap-or-charge model as mouse and touch
-  (decision G2-c). Twin-stick convention says a held trigger should stream
-  shots, but that cannot coexist with hold-to-charge on the same button. If
-  auto-repeat is wanted, the charged shot needs its own button (L2 is free)
-  and this is a two-line change plus a help-panel edit. **Judge it on
-  hardware** — it is the one gamepad decision that is purely feel.
+- **OPEN QUESTION — should a held FIRE CONTROL auto-repeat?** Today none of
+  them do: the pad trigger and the onscreen fire button both use the same
+  tap-or-charge model as mouse and touch (decisions G2-c, G9-e). Convention
+  says a held trigger — and especially a held fire BUTTON — should stream
+  shots, but that cannot coexist with hold-to-charge on the same control. If
+  auto-repeat is wanted, the charged shot needs its own control (L2 is free
+  on the pad; a second, smaller button beside the fire button on touch), and
+  it is a small change plus a help-panel edit. **Judge it on hardware** — it
+  is one decision covering both controls, not two.
+
+- **HARDWARE CHECK — the control schemes (G9).** Pick each on the main menu
+  and play a minute. Specifically: does *Joystick* feel better than *Touch*
+  on the phone, and is the fire button in the right place for a right thumb
+  (it sits above the loadout strip, 58 px in from the right, 110 px up)? Is
+  the default right — should a phone open on *Joystick* rather than *Touch*?
+  Nothing detects the device today; the default is standard touch because it
+  is what the game has always done.
 
 - **Branch protection is a repo setting, not a file.** The workflow reports;
   it does not refuse a merge. Making `typecheck · build · test` *blocking*

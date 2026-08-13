@@ -20,7 +20,7 @@
  *  not known at design time.
  */
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType, JoystickHUDState } from '../../../types';
+import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType, JoystickHUDState, FireButtonHUDState } from '../../../types';
 import {
     COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS,
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
@@ -422,6 +422,49 @@ export function renderJoystick(
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = J.COLOR;
     ctx.stroke();
+
+    ctx.restore();
+}
+
+/**
+ * The onscreen FIRE button — the joystick scheme's shooting control (G9).
+ *
+ * Unlike the joystick it is drawn from the first frame, because a control
+ * that only appears once pressed cannot be found, and in this scheme it is
+ * the only way to shoot.  The ring around it doubles as the CHARGE readout,
+ * filling over the same window as the ring on the ship, so the two agree.
+ */
+export function renderFireButton(
+    ctx: CanvasRenderingContext2D,
+    state: FireButtonHUDState,
+) {
+    const B = INPUT_CONSTANTS.FIRE_BUTTON;
+    ctx.save();
+
+    // Body.
+    ctx.globalAlpha = state.pressed ? B.PRESSED_ALPHA : B.IDLE_ALPHA;
+    ctx.fillStyle = B.COLOR;
+    ctx.beginPath();
+    ctx.arc(state.x, state.y, state.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rim.
+    ctx.globalAlpha = state.pressed ? 0.9 : 0.5;
+    ctx.strokeStyle = B.COLOR;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Charge arc — starts at 12 o'clock and sweeps clockwise, same
+    // direction as the ship's ring.
+    if (state.charge > 0) {
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = state.charge >= 1 ? '#fde047' : '#fca5a5';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(state.x, state.y, state.radius + 4, -Math.PI / 2,
+                -Math.PI / 2 + Math.PI * 2 * state.charge);
+        ctx.stroke();
+    }
 
     ctx.restore();
 }

@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { EngineStats, MapType, GameState } from './types';
+import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
 import UIOverlay from './components/UIOverlay';
 
@@ -241,6 +241,10 @@ const App: React.FC = () => {
 
   const handleCycleRockPalette = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
+  };
+
+  const handleSetControlScheme = (scheme: ControlScheme) => {
+      if (engineRef.current) engineRef.current.setControlScheme(scheme);
   };
 
   const handleToggleRepelPush = () => {
@@ -531,6 +535,7 @@ const App: React.FC = () => {
         onToggleJoystickDebug={handleToggleJoystickDebug}
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
         onCycleRockPalette={handleCycleRockPalette}
+        onSetControlScheme={handleSetControlScheme}
         onToggleRepelPush={handleToggleRepelPush}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
