@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype, ControlScheme } from '../types';
-import { CONTROL_SCHEMES } from '../constants';
+import { CONTROL_SCHEMES, controlSchemeDef } from '../constants';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
 // single-element "Test Maps" showcases (plus the multi-material Tile Heavy
@@ -912,12 +912,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     const active = stats.controlScheme ?? 'touch';
     return (
       <div data-testid="scheme-picker" className="w-full grid grid-cols-2 gap-2">
-        {CONTROL_SCHEMES.map(scheme => (
+        {CONTROL_SCHEMES.map((scheme, i) => (
           <button
             key={scheme.id}
             data-testid={`scheme-${scheme.id}`}
             onClick={() => onSetControlScheme && onSetControlScheme(scheme.id)}
             className={`px-2 py-2 rounded-lg border text-left transition-all ${
+              // Five options into a 2-up grid: the odd one out spans the row
+              // rather than leaving a hole.
+              i === CONTROL_SCHEMES.length - 1 && CONTROL_SCHEMES.length % 2 === 1 ? 'col-span-2 ' : ''
+            }${
               active === scheme.id
                 ? 'bg-sky-600 border-sky-400 text-white shadow-lg'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-sky-400 hover:text-white'
@@ -929,6 +933,36 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
           </button>
         ))}
+      </div>
+    );
+  };
+
+  /**
+   * The same choice as a DROPDOWN (user directive), for the pause menu.
+   *
+   * A native `<select>` rather than a custom menu: on a phone it opens the
+   * OS picker, which is a better target than anything drawn here, and it
+   * comes with keyboard and screen-reader behaviour for free.  The pause menu
+   * is already a long scroll — five buttons with captions would push the rest
+   * of it further down for a setting most players touch once.
+   */
+  const renderSchemeDropdown = () => {
+    const active = stats.controlScheme ?? 'touch';
+    return (
+      <div className="w-full flex flex-col gap-1">
+        <select
+          data-testid="scheme-select"
+          value={active}
+          onChange={ev => onSetControlScheme && onSetControlScheme(ev.target.value as ControlScheme)}
+          className="w-full bg-slate-900 border border-slate-600 text-white text-xs rounded-lg px-2 py-2 focus:border-sky-400 focus:outline-none"
+        >
+          {CONTROL_SCHEMES.map(scheme => (
+            <option key={scheme.id} value={scheme.id}>{scheme.label}</option>
+          ))}
+        </select>
+        <span className="text-slate-500 text-[10px] leading-tight">
+          {controlSchemeDef(active).blurb}
+        </span>
       </div>
     );
   };
@@ -992,11 +1026,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ], null, ['touch'])}
 
         {group('Joystick touch', 'text-sky-300', [
-          ['Left thumb', 'Drag to fly. The stick appears wherever your thumb lands.'],
-          ['Right side', 'Drag to aim. The aim stays where you left it.'],
+          ['Stick thumb', 'Drag to fly. The stick appears wherever your thumb lands.'],
+          ['Aim', 'The ship points where it flies — the stick aims it. No second gesture.'],
           ['Fire button', 'Shoot. Hold it for a charged shot — the ring shows the charge.'],
+          ['Handedness', 'Two versions: stick left + fire right, or the mirror of it.'],
           ['Tap your ship', 'Dock, or enter a portal. Tapping elsewhere does not shoot.'],
-        ], null, ['joystick'])}
+        ], null, ['joystick-left', 'joystick-right'])}
 
         {group('Keyboard & mouse', 'text-emerald-300', [
           ['W A S D / arrows', 'Fly.'],
@@ -2320,7 +2355,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 door costs a tap rather than a restart. */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
               <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Controls</h3>
-              {renderSchemePicker()}
+              {renderSchemeDropdown()}
             </div>
 
             {/* Controls & basics — the same widget the main menu shows, so

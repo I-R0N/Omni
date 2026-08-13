@@ -172,6 +172,7 @@ export class InputSystem {
   };
 
   private handleMouseMove = (e: MouseEvent) => {
+    if (!this.rules.pointerAims) return;
     this.mousePosition = { x: e.clientX, y: e.clientY };
   };
 
@@ -203,7 +204,7 @@ export class InputSystem {
     this.touchStartTime = performance.now();
     this.touchStartPos = { x: e.clientX, y: e.clientY };
     // Update pos immediately so rotation is correct
-    this.mousePosition = { x: e.clientX, y: e.clientY };
+    if (this.rules.pointerAims) this.mousePosition = { x: e.clientX, y: e.clientY };
   };
 
   private handleMouseUp = (e: MouseEvent) => {
@@ -265,7 +266,11 @@ export class InputSystem {
         this.aimTouchId = touch.identifier;
         this.mouseDown = true;
         this.pointerIsTouch = true;
-        this.mousePosition = { x: touch.clientX, y: touch.clientY };
+        // Under the joystick schemes the aim belongs to the STICK, so a
+        // stray finger must not yank the nose toward wherever it landed.
+        // The touch is still tracked, because a TAP still docks the ship and
+        // still reaches the minimap and the loadout slots.
+        if (this.rules.pointerAims) this.mousePosition = { x: touch.clientX, y: touch.clientY };
         this.touchStartTime = performance.now();
         this.touchStartPos = { x: touch.clientX, y: touch.clientY };
       }
@@ -280,7 +285,7 @@ export class InputSystem {
       const touch = e.changedTouches[i];
       if (touch.identifier === this.stickTouchId) {
         this.updateStick(touch.clientX, touch.clientY);
-      } else if (touch.identifier === this.aimTouchId) {
+      } else if (touch.identifier === this.aimTouchId && this.rules.pointerAims) {
         this.mousePosition = { x: touch.clientX, y: touch.clientY };
       }
     }
@@ -375,8 +380,12 @@ export class InputSystem {
    *  follows a resize with no listener. */
   private fireButtonCenter(out: Vector2): Vector2 {
     const B = INPUT_CONSTANTS.FIRE_BUTTON;
-    out.x = window.innerWidth - B.MARGIN_X;
-    out.y = window.innerHeight - B.MARGIN_Y;
+    // Opposite side from the stick.  On the LEFT it also sits higher: the
+    // minimap already owns that corner, and a fire button on top of the map
+    // toggle would cost the player their map.
+    const mirrored = this.rules.stickSide === 'right';
+    out.x = mirrored ? B.MARGIN_X : window.innerWidth - B.MARGIN_X;
+    out.y = window.innerHeight - (mirrored ? B.MARGIN_Y_MIRRORED : B.MARGIN_Y);
     return out;
   }
   private _fbScratch: Vector2 = { x: 0, y: 0 };
@@ -461,6 +470,7 @@ export class InputSystem {
    *  - the whole right half, which is the aim/fire hand.
    */
   public inJoystickZone(x: number, y: number): boolean {
+    if (!this.rules.joystick) return false;
     const J = INPUT_CONSTANTS.JOYSTICK;
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -475,7 +485,13 @@ export class InputSystem {
 
     if (this.inFireButton(x, y)) return false;
 
-    if (x > w * J.ZONE_W_FRAC) return false;
+    // MIRRORED for a left-handed grip: the zone is whichever HALF the stick
+    // lives on, and the fire button takes the other.
+    if (this.rules.stickSide === 'right') {
+      if (x < w * (1 - J.ZONE_W_FRAC)) return false;
+    } else {
+      if (x > w * J.ZONE_W_FRAC) return false;
+    }
     if (y < h * J.ZONE_TOP_FRAC) return false;
     if (y > h - J.ZONE_BOTTOM_PX) return false;
     return true;
@@ -516,6 +532,15 @@ export class InputSystem {
     this.stickVec.x = nx * throttle;
     this.stickVec.y = ny * throttle;
 
+    // THE SHIP AIMS WHERE IT FLIES (user directive).  The stick writes the
+    // synthetic POINTER — the same trick the gamepad uses — so the hull's
+    // rotation and every shot's target follow the flight direction through
+    // the paths the mouse already drives, with nothing else to keep in sync.
+    // The heading persists when the thumb lifts, exactly as a released stick
+    // or a hand off the mouse does.
+    this.mousePosition.x = window.innerWidth / 2 + nx * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
+    this.mousePosition.y = window.innerHeight / 2 + ny * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
+
     // The knob rides the thumb but stops at the ring; past that the thumb
     // can wander without the widget chasing it off into the corner.
     const knobDist = Math.min(dist, J.RADIUS);
@@ -541,7 +566,9 @@ export class InputSystem {
     if (this.joystickForceVisible && this.stickTouchId === null && this.stickFade <= 0) {
       // DBG: park a neutral stick where a right-handed thumb would land.
       const J = INPUT_CONSTANTS.JOYSTICK;
-      const x = window.innerWidth * J.ZONE_W_FRAC * 0.55;
+      const x = this.rules.stickSide === 'right'
+        ? window.innerWidth * (1 - J.ZONE_W_FRAC * 0.55)
+        : window.innerWidth * J.ZONE_W_FRAC * 0.55;
       const y = window.innerHeight - J.ZONE_BOTTOM_PX - J.RADIUS - 20;
       return { originX: x, originY: y, knobX: x, knobY: y, fade: 1, held: false };
     }

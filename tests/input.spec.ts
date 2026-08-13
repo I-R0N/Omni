@@ -120,7 +120,7 @@ async function touch(page: any, type: string, points: { id: number; x: number; y
 /** The joystick only exists in its own control scheme (G9) — selecting it is
  *  now part of the setup for every stick assertion. */
 async function useJoystickScheme(page: any) {
-  await engine(page, e => e.setControlScheme('joystick'));
+  await engine(page, e => e.setControlScheme('joystick-left'));
 }
 
 test.describe('joystick zone — what it refuses to claim', () => {
@@ -267,7 +267,7 @@ test.describe('joystick — a floating left-thumb stick', () => {
     watch.assertClean();
   });
 
-  test('the aim thumb AIMS and the button SHOOTS, both while the stick is held', async ({ page }) => {
+  test('the ship aims where it flies, and only the button shoots', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
     await useJoystickScheme(page);
@@ -278,24 +278,37 @@ test.describe('joystick — a floating left-thumb stick', () => {
       fire:  { x: Math.round(window.innerWidth - 58),  y: Math.round(window.innerHeight - 110) },
     }));
 
+    // Fly RIGHT. The nose must follow, with no aim gesture anywhere.
     await touch(page, 'touchstart', [{ id: 10, ...pts.stick }]);
-    await touch(page, 'touchmove', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 60 }]);
+    await touch(page, 'touchmove', [{ id: 10, x: pts.stick.x + 80, y: pts.stick.y }]);
+    await engine(page, e => { e.updateGameLogic(1 / 120); });
+    expect(Math.abs(await engine(page, e => e.player.rotation))).toBeLessThan(0.01);
 
-    // The aim thumb AIMS. In this scheme it must NOT also shoot — that is
-    // the whole reason the scheme has a button, and a thumb that is dragging
-    // to aim cannot also be tapping to fire.
+    // Fly UP: the nose comes with it.
+    await touch(page, 'touchmove', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 80 }]);
+    await engine(page, e => { e.updateGameLogic(1 / 120); });
+    expect(await engine(page, e => e.player.rotation)).toBeCloseTo(-Math.PI / 2, 2);
+
+    // A finger on the far side does NOT steal the aim — under this scheme
+    // there is no second aim channel to fight the stick.
     const before = await engine(page, e =>
       e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length);
     await touch(page, 'touchstart', [{ id: 11, ...pts.aim }]);
-    await touch(page, 'touchend', [{ id: 11, ...pts.aim }]);
-    const afterTap = await engine(page, (e, n: number) => {
+    await touch(page, 'touchmove', [{ id: 11, x: pts.aim.x, y: pts.aim.y + 40 }]);
+    await touch(page, 'touchend', [{ id: 11, x: pts.aim.x, y: pts.aim.y + 40 }]);
+    const afterStray = await engine(page, (e, n: number) => {
       for (let i = 0; i < 4; i++) e.updateGameLogic(1 / 120);
-      return e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length - n;
+      return {
+        rotation: e.player.rotation,
+        fired: e.currentMap.entities.filter((x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length - n,
+      };
     }, before);
-    expect(afterTap).toBe(0);
+    expect(afterStray.rotation).toBeCloseTo(-Math.PI / 2, 2);
+    // ...and it does not shoot either: that is the fire button's job.
+    expect(afterStray.fired).toBe(0);
 
-    // The BUTTON shoots — with the stick still held, which is the three-way
-    // the scheme exists to make possible.
+    // The BUTTON shoots, with the stick still held — the two-thumb hold the
+    // scheme exists to make possible.
     await touch(page, 'touchstart', [{ id: 12, ...pts.fire }]);
     await touch(page, 'touchend', [{ id: 12, ...pts.fire }]);
     const r = await engine(page, (e, n: number) => {
@@ -311,7 +324,53 @@ test.describe('joystick — a floating left-thumb stick', () => {
     expect(r.move.y).toBeLessThan(0);
     expect(r.stickHeld).toBe(true);
 
-    await touch(page, 'touchend', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 60 }]);
+    await touch(page, 'touchend', [{ id: 10, x: pts.stick.x, y: pts.stick.y - 80 }]);
+    watch.assertClean();
+  });
+
+  test('the left-handed scheme is the mirror of it, and works the same', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await engine(page, e => e.setControlScheme('joystick-right'));
+
+    const geo = await engine(page, e => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const btn = e.input.getFireButtonState();
+      return {
+        w, h,
+        rightThumb: e.input.inJoystickZone(w * 0.8, h * 0.6),
+        leftThumb: e.input.inJoystickZone(w * 0.2, h * 0.6),
+        btnX: btn.x,
+        btnY: btn.y,
+        // The minimap owns the bottom-left corner, so the mirrored button
+        // must sit clear of it rather than on top of the map toggle.
+        minimapTop: h - 75 - 14,
+      };
+    });
+
+    // The stick has swapped sides...
+    expect(geo.rightThumb).toBe(true);
+    expect(geo.leftThumb).toBe(false);
+    // ...and so has the button.
+    expect(geo.btnX).toBeLessThan(geo.w / 2);
+    expect(geo.btnY + 38).toBeLessThan(geo.minimapTop);
+
+    // And it still flies: same stick, other hand.
+    const spot = { x: Math.round(geo.w * 0.8), y: Math.round(geo.h * 0.6) };
+    await touch(page, 'touchstart', [{ id: 70, ...spot }]);
+    await touch(page, 'touchmove', [{ id: 70, x: spot.x - 80, y: spot.y }]);
+    const flown = await engine(page, e => {
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      for (let i = 0; i < 30; i++) e.updateGameLogic(1 / 120);
+      return { vx: e.player.velocity.x, rotation: e.player.rotation };
+    });
+    expect(flown.vx).toBeLessThan(0);
+    // Flying LEFT points the nose left (π), whichever hand holds the stick.
+    expect(Math.abs(Math.abs(flown.rotation) - Math.PI)).toBeLessThan(0.05);
+
+    await touch(page, 'touchend', [{ id: 70, x: spot.x - 80, y: spot.y }]);
     watch.assertClean();
   });
 
@@ -815,7 +874,7 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
 
     // Joystick scheme: the identical touch becomes the STICK — at rest until
     // dragged, and now with a widget under it.
-    await engine(page, e => e.setControlScheme('joystick'));
+    await engine(page, e => e.setControlScheme('joystick-left'));
     await touch(page, 'touchstart', [{ id: 41, ...spot }]);
     const stickAtRest = await engine(page, e => ({
       move: e.input.getMovementVector(),
@@ -870,7 +929,7 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
     const watch = await boot(page);
     await startRun(page);
 
-    for (const scheme of ['touch', 'joystick', 'keyboard', 'gamepad'] as const) {
+    for (const scheme of ['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad'] as const) {
       await engine(page, (e, sc: string) => e.setControlScheme(sc), scheme);
       await engine(page, e => e.input.keys.add('KeyD'));
       const v = await flyFor(page);
@@ -884,7 +943,7 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
   test('the fire button charges on a hold and is drawn from the first frame', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-    await engine(page, e => e.setControlScheme('joystick'));
+    await engine(page, e => e.setControlScheme('joystick-left'));
 
     // Visible with no touch session at all — unlike the joystick, a button
     // that only appears once pressed cannot be found.
@@ -922,7 +981,7 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
   test('switching scheme mid-run releases whatever the old one held', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-    await engine(page, e => e.setControlScheme('joystick'));
+    await engine(page, e => e.setControlScheme('joystick-left'));
 
     const spot = await engine(page, () => ({
       x: Math.round(window.innerWidth * 0.2), y: Math.round(window.innerHeight * 0.6),

@@ -1048,11 +1048,16 @@ export const INPUT_CONSTANTS = {
   // never yanks the aim to the corner.
   FIRE_BUTTON: {
     RADIUS: 38,
-    /** px in from the right edge to the button's CENTRE. */
+    /** px in from the button's OWN edge to its centre — the right edge in the
+     *  left-handed layout, the left edge in the mirrored one. */
     MARGIN_X: 58,
     /** px from the bottom edge to the button's CENTRE.  Clears the loadout
      *  strip (SLOT_H + BOTTOM_MARGIN = 62) with a comfortable gap. */
     MARGIN_Y: 110,
+    /** ...but on the LEFT the minimap is already there (MARGIN 20 + SIZE 75
+     *  up from the bottom), so the mirrored layout sits the button higher
+     *  rather than on top of it. */
+    MARGIN_Y_MIRRORED: 150,
     IDLE_ALPHA: 0.20,
     PRESSED_ALPHA: 0.42,
     COLOR: '#f87171',
@@ -3256,11 +3261,18 @@ export function cycleSnitchSpeed(): number {
 // the ship, because on those schemes steering is the keys' or the stick's job
 // and a click should only shoot.
 //
-//   scheme     joystick+button   mouse drags ship   touch drags ship   tap fires
-//   touch      no                yes                yes                yes
-//   joystick   YES               no                 no (stick)         no (button)
-//   keyboard   no                NO                 yes                yes
-//   gamepad    no                NO                 yes                yes
+//   scheme            stick+button   mouse drags   touch drags   tap fires
+//   touch             no             yes           yes           yes
+//   joystick-left     YES (L/R)      no            no (stick)    no (button)
+//   joystick-right    YES (R/L)      no            no (stick)    no (button)
+//   keyboard          no             NO            yes           yes
+//   gamepad           no             NO            yes           yes
+//
+// The two joystick schemes are the same scheme MIRRORED — stick left + fire
+// right, or stick right + fire left — because which thumb wants the stick is
+// handedness, not preference about the game.  In both, the ship AIMS WHERE IT
+// FLIES: the stick writes the synthetic pointer, so there is no separate aim
+// gesture to compete with it.
 //
 // `keyboard` and `gamepad` are deliberately identical in TOUCH behaviour —
 // the honest reading of "the controller and keyboard options should also
@@ -3272,10 +3284,11 @@ export const CONTROL_SCHEMES: ReadonlyArray<{
   /** One line for the menu button's caption. */
   blurb: string;
 }> = [
-  { id: 'touch',    label: 'Touch',      blurb: 'Drag to fly and aim · tap to shoot' },
-  { id: 'joystick', label: 'Joystick',   blurb: 'Left stick to fly · button to shoot' },
-  { id: 'keyboard', label: 'Keyboard',   blurb: 'WASD + mouse · touch still works' },
-  { id: 'gamepad',  label: 'Controller', blurb: 'Gamepad · touch still works' },
+  { id: 'touch',          label: 'Touch',            blurb: 'Drag to fly and aim · tap to shoot' },
+  { id: 'joystick-left',  label: 'Joystick (right-handed)', blurb: 'Stick left · fire button right' },
+  { id: 'joystick-right', label: 'Joystick (left-handed)',  blurb: 'Stick right · fire button left' },
+  { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
+  { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
 ] as const;
 
 export function controlSchemeDef(id: ControlScheme) {
@@ -3291,11 +3304,19 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
   mouseDragMoves: boolean;
   touchDragMoves: boolean;
   tapFires: boolean;
+  /** Does a POINTER drag set the aim?  False under the joystick schemes,
+   *  where the ship AIMS WHERE IT FLIES (user directive): the stick writes
+   *  the synthetic pointer, so a second aim channel would only fight it. */
+  pointerAims: boolean;
+  /** Which side of the screen the stick lives on; the fire button takes the
+   *  other.  Undefined for schemes with neither. */
+  stickSide?: 'left' | 'right';
 }> = {
-  touch:    { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true  },
-  joystick: { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false },
-  keyboard: { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true  },
-  gamepad:  { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true  },
+  touch:            { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true,  pointerAims: true },
+  'joystick-left':  { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'left'  },
+  'joystick-right': { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'right' },
+  keyboard:         { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
+  gamepad:          { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
 };
 
 // ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────

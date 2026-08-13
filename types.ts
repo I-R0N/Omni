@@ -1801,7 +1801,12 @@ export interface WaveAnnouncement {
  * the MOUSE from dragging the ship around, since on those schemes steering
  * is the keys' or the stick's job and a click should only shoot.
  */
-export type ControlScheme = 'touch' | 'joystick' | 'keyboard' | 'gamepad';
+export type ControlScheme =
+  | 'touch'
+  | 'joystick-left'   // stick under the left thumb, fire button under the right
+  | 'joystick-right'  // mirrored, for a left-handed grip
+  | 'keyboard'
+  | 'gamepad';
 
 export interface PlayerHUDMessage {
   id: string;

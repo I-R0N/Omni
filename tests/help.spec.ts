@@ -124,7 +124,7 @@ test.describe('controls & basics — reachable from both menus', () => {
     // The picker is on the front door, next to Difficulty, because it is the
     // same kind of choice: a preference that shapes the whole run.
     await expect(page.getByTestId('scheme-picker')).toBeVisible();
-    for (const id of ['touch', 'joystick', 'keyboard', 'gamepad']) {
+    for (const id of ['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad']) {
       const box = await page.getByTestId(`scheme-${id}`).boundingBox();
       expect(box, `${id} button should be laid out`).not.toBeNull();
       // Thumb-sized on the phone, and inside it.
@@ -133,8 +133,8 @@ test.describe('controls & basics — reachable from both menus', () => {
       expect(box!.x + box!.width).toBeLessThanOrEqual(PHONE_W);
     }
 
-    await page.getByTestId('scheme-joystick').click();
-    await waitForStats(page, s => s.controlScheme === 'joystick', 'the joystick scheme');
+    await page.getByTestId('scheme-joystick-left').click();
+    await waitForStats(page, s => s.controlScheme === 'joystick-left', 'the joystick scheme');
 
     // The help panel marks the active scheme, so the block a player reads is
     // the one describing the controls they actually have.
@@ -147,7 +147,40 @@ test.describe('controls & basics — reachable from both menus', () => {
     // And it survives a restart, like difficulty — it describes the player's
     // hands, not the run.
     await engine(page, e => { e.startGame(); e.restartGame(); });
-    expect((await stats(page)).controlScheme).toBe('joystick');
+    expect((await stats(page)).controlScheme).toBe('joystick-left');
+
+    watch.assertClean();
+  });
+
+  test('the pause menu changes it through a dropdown', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await engine(page, e => e.pauseGame());
+    await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+
+    // A native <select>: on a phone it opens the OS picker, which is a better
+    // target than anything drawn here, and the pause menu is already a long
+    // scroll without five captioned buttons in it.
+    const select = page.getByTestId('scheme-select');
+    await expect(select).toBeVisible();
+    await expect(select).toHaveValue('touch');
+
+    const box = await select.boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(30);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(PHONE_W);
+
+    // Every scheme is reachable from it, including both handednesses.
+    const options = await select.locator('option').evaluateAll(
+      els => els.map(e => (e as HTMLOptionElement).value));
+    expect(options).toEqual(['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad']);
+
+    await select.selectOption('joystick-right');
+    await waitForStats(page, s => s.controlScheme === 'joystick-right', 'the mirrored scheme');
+
+    // Mid-run, so it takes effect on resume rather than at the next restart.
+    await engine(page, e => e.resumeGame());
+    await waitForStats(page, s => s.gameState === 'PLAYING', 'the resumed run');
+    expect((await stats(page)).controlScheme).toBe('joystick-right');
 
     watch.assertClean();
   });

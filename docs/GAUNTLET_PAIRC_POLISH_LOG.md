@@ -30,6 +30,7 @@ tuning (step 6).
 | G8 | OPTIONAL — NPC station shuttles (first to cut) | **cut** |
 | G-final | Validation, docs sync, completion summary | **done** |
 | G9 | Control-scheme selection (user directive, post-queue) | **done** |
+| G10 | Stick-driven aim, handedness, pause dropdown (user directive) | **done** |
 
 ---
 
@@ -788,6 +789,69 @@ screen to explain it).
 
 ---
 
+### G10 — Aim from the stick, handedness, and a dropdown (user directive, 2026-08-13)
+
+Three follow-ups on G9, all from the user: *"Joystick on screen controls
+should aim wherever the player is flying. There should also be two different
+handed versions (joystick left and button right, joystick right and button
+left). Controls should be changeable in the pause menu - preferably a drop
+down menu."*
+
+**DECISION G10-a — the stick writes the SYNTHETIC POINTER, so the ship aims
+where it flies.** This is G2-a's trick applied to the third device: the stick
+parks the virtual cursor `AIM_RADIUS` out along its heading, and the hull's
+rotation and every shot's target follow through the paths the mouse already
+drives. Nothing in the engine changed. The heading persists when the thumb
+lifts, exactly as a released pad stick does.
+*Alternative rejected:* rotating the ship from `stickVec` at the engine's
+rotation site. That is a second definition of "where is the ship aiming", and
+the shooting site would need the same branch — the exact split G2-a avoided.
+
+**DECISION G10-b — the joystick schemes turn POINTER AIMING off.** With the
+stick aiming, a drag on the far side of the screen would fight it, and the
+old right-side aim drag now has nothing to do. So `pointerAims` is false in
+both joystick schemes: a stray finger cannot yank the nose. The touch is
+still TRACKED, because a tap still docks the ship and still reaches the
+minimap and the loadout slots — it just no longer aims or fires.
+
+**DECISION G10-c — handedness is two SCHEMES, not a second setting.**
+`joystick-left` (stick left, fire right) and `joystick-right` (mirrored).
+They share one rules row shape with a `stickSide` field; the zone test and
+the button's centre both read it.
+*Alternative rejected:* a separate handedness toggle beside the scheme
+picker. It is a second control for something the player picks once, and it
+only means anything for two of the five schemes — a setting that is inert
+most of the time is a setting that confuses.
+
+**A layout consequence worth stating:** on the LEFT the fire button cannot
+use the same margin, because the minimap already owns that corner — a button
+on top of the map toggle costs the player their map. The mirrored layout
+sits it higher (`MARGIN_Y_MIRRORED`), clear of the collapsed minimap, and a
+test asserts that clearance rather than trusting the arithmetic.
+
+**DECISION G10-d — a native `<select>` in the pause menu; the grid stays on
+the main menu.** The dropdown was asked for and it is right there: on a phone
+a native select opens the OS picker, which is a better target than anything
+drawn in-canvas, and it brings keyboard and screen-reader behaviour for free.
+The pause menu is already a long scroll and five captioned buttons would push
+the rest of it down for a setting most players touch once. The MAIN menu keeps
+the grid, because game start is where the alternatives should be visible with
+their one-line blurbs rather than hidden behind a closed control.
+
+**Tests.** The "aim thumb AIMS and the button SHOOTS" test from G9 was
+rewritten again — its premise (a right-side drag aims) is what this milestone
+removes. It is now "the ship aims where it flies, and only the button
+shoots", asserting the nose follows the stick through two headings, that a
+stray finger changes neither the aim nor fires, and that the button still
+shoots with the stick held. Plus a mirroring test (zone swapped, button
+swapped AND clear of the minimap, and it still flies) and a dropdown test
+(every scheme reachable, including both handednesses, and the change lands
+mid-run).
+
+**Gates:** typecheck, build, **83/83** tests.
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -841,6 +905,16 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G7-d** — the table was corrected to the code's populations, not the
   reverse. Beat: "fixing" the maps to match a table nothing had read for
   months, which would have been a silent rebalance.
+- **G10-a** — the stick writes the synthetic pointer, so aim follows flight.
+  Beat: rotating from the stick vector at the engine's rotation site (a second
+  definition of aim, needing the same branch at the shooting site).
+- **G10-b** — pointer aiming is off under the joystick schemes. Beat: leaving
+  a right-side drag able to fight the stick for the nose.
+- **G10-c** — handedness is two schemes. Beat: a separate toggle that is inert
+  for three of the five schemes.
+- **G10-d** — dropdown in the pause menu, grid on the main menu. Beat: one
+  widget everywhere (either a long scroll mid-run, or hidden alternatives at
+  game start).
 - **G9-a** — the scheme is a preference shaped like difficulty (menu + pause,
   survives restarts). Beat: a new persistence layer this repo does not have.
 - **G9-b** — one `CONTROL_SCHEME_RULES` table. Beat: the scheme name compared

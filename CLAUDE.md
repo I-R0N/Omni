@@ -614,10 +614,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     (left fraction, top fraction, bottom px), ring/knob geometry,
     deadzone and fade.  The zone is defined by what it REFUSES; see §8.
 - `CONTROL_SCHEMES` / `CONTROL_SCHEME_RULES` / `controlSchemeDef()` — the
-  control-scheme picker (user directive, step 5 G9).  FOUR schemes chosen at
-  game start (and changeable from the pause menu): `touch` (drag to fly and
-  aim, tap to shoot — the default), `joystick` (floating stick + an onscreen
-  FIRE button), `keyboard`, `gamepad`.  The axis that matters is the TOUCH
+  control-scheme picker (user directive, step 5 G9).  FIVE schemes chosen at
+  game start (and changeable from the pause menu, via a DROPDOWN there):
+  `touch` (drag to fly and aim, tap to shoot — the default),
+  `joystick-left` / `joystick-right` (floating stick + an onscreen FIRE
+  button, MIRRORED for handedness — stick left + fire right, or the reverse;
+  in both the ship AIMS WHERE IT FLIES, because the stick writes the
+  synthetic pointer and there is no second aim gesture to fight it),
+  `keyboard`, `gamepad`.  The axis that matters is the TOUCH
   MODEL: the two touch schemes are mutually exclusive ways to drive the same
   ship, because a floating stick and the drag-to-fly gesture otherwise fight
   over the same finger.  `keyboard` and `gamepad` do NOT switch touch off —
@@ -625,8 +629,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ship, since on those schemes steering belongs to the keys or the stick and
   a click should only shoot.  `CONTROL_SCHEME_RULES` is the one table every
   read goes through (`joystick` / `fireButton` / `mouseDragMoves` /
-  `touchDragMoves` / `tapFires`), so a scheme's behaviour is a lookup rather
-  than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
+  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide`), so a scheme's
+  behaviour is a lookup rather than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
   it survives `restartGame()` and every map load.
   `INPUT_CONSTANTS.FIRE_BUTTON` carries the button's geometry.
 - `ROCK_PALETTES` / `randomRockShade()` — per-instance rock body shades
@@ -1724,7 +1728,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     do" is answered.  Two consequences worth knowing before touching input:
     a TAP only fires under a scheme with `tapFires` (it still reaches the
     minimap toggle, the loadout slots and `claimTapNear`, which are not
-    weapons), and DEVICE shots — the fire button and the pad trigger — go
+    weapons); a POINTER drag only aims under a scheme with `pointerAims`,
+    which the joystick schemes turn OFF because their stick already writes
+    the pointer; and DEVICE shots — the fire button and the pad trigger — go
     into a SEPARATE queue (`getDeviceFireEvents`) that bypasses the tap
     handler entirely, because a synthesised shot aimed at the world must not
     be eaten by a HUD widget the aim happened to point at.
@@ -1736,7 +1742,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     whole right half.  It exists only while a touch session is live —
     `getJoystickState()` returns null otherwise, which is why checking its
     layout on a desktop needs the DBG toggle.  When NO stick is down the
-    single-touch model is unchanged.  Its scheme also gets the FIRE BUTTON,
+    single-touch model is unchanged.  The stick's SIDE is the scheme's
+    (`stickSide`), and the fire button takes the other — on the left it also
+    sits higher, because the minimap already owns that corner.  Its scheme
+    also gets the FIRE BUTTON,
     which — unlike the stick — is drawn from the first frame and accepts a
     mouse press: a control that only appears once pressed cannot be found,
     and in that scheme it is the only way to shoot.
