@@ -1192,6 +1192,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('Gamepad', stats.gamepadInfo ?? 'none',
                   (stats.gamepadInfo && stats.gamepadInfo !== 'none') ? 'text-sky-300' : 'text-slate-400')}
                 {statRow('  ↳ axes', stats.gamepadAxes ?? '—', 'text-slate-400')}
+                {statRow('  ↳ rumble', stats.rumbleInfo ?? '—',
+                  stats.rumbleInfo === 'ready' || stats.rumbleInfo === 'playing'
+                    ? 'text-emerald-300' : 'text-slate-400')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

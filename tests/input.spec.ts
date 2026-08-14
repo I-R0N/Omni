@@ -1134,6 +1134,45 @@ test.describe('rumble — force feedback rides the screen shake', () => {
     watch.assertClean();
   });
 
+  test('the DBG readout says WHY there is no rumble', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Silence has four different causes and a player checking on hardware
+    // cannot tell them apart. Each one gets its own answer.
+    const noPad = await engine(page, e => e.input.rumbleDebugInfo());
+    expect(noPad).toBe('no pad');
+
+    const rest = await engine(page, e => {
+      const out: Record<string, string> = {};
+      e.dbg.toggleRumble();
+      out.toggledOff = e.input.rumbleDebugInfo();
+      e.dbg.toggleRumble();
+
+      // Pretend a pad is adopted, so the later states are reachable.
+      e.input.padIndex = 0;
+      e.input.currentActuator = () => null;
+      out.noActuator = e.input.rumbleDebugInfo();
+
+      e.input.currentActuator = () => ({ playEffect: () => Promise.resolve() });
+      out.ready = e.input.rumbleDebugInfo();
+
+      e.input.rumbleUnsupported = true;
+      out.refused = e.input.rumbleDebugInfo();
+
+      e.input.rumbleUnsupported = false;
+      e.input.padIndex = null;
+      return out;
+    });
+
+    expect(rest.toggledOff).toBe('off (DBG)');
+    expect(rest.noActuator).toBe('pad has no actuator');
+    expect(rest.ready).toBe('ready');
+    expect(rest.refused).toBe('browser refused');
+
+    watch.assertClean();
+  });
+
   test('the DBG toggle silences it, and it is independent of screen shake', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);

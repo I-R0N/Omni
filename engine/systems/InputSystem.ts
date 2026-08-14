@@ -964,6 +964,23 @@ export class InputSystem {
     return this.padMapping === 'standard' ? name : `${name} ⚠non-std`;
   }
 
+  /**
+   * DBG readout, line 3: WHY there is or is not force feedback.
+   *
+   * Rumble is the one thing in the input layer that cannot be checked
+   * anywhere but on real hardware, so the panel has to distinguish the four
+   * different reasons a pad might sit silent — a toggle, no pad, a pad with
+   * no motors, and a browser that refused the effect — rather than leaving
+   * "nothing happened" to cover all of them.
+   */
+  public rumbleDebugInfo(): string {
+    if (!this.rumbleEnabled) return 'off (DBG)';
+    if (this.padIndex === null) return 'no pad';
+    if (this.rumbleUnsupported) return 'browser refused';
+    if (!this.currentActuator()) return 'pad has no actuator';
+    return performance.now() < this.rumbleUntilMs ? 'playing' : 'ready';
+  }
+
   /** DBG readout, line 2: the numbers that tell you whether the pad is
    *  actually reaching the sim — post-deadzone thrust, held aim heading, and
    *  a live FIRE flag.  This is the one thing a hardware check needs to see. */

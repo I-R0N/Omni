@@ -1671,6 +1671,12 @@ export interface EngineStats {
   joystickForceVisible?: boolean;
   /** DBG: gamepad force feedback on/off. */
   rumbleEnabled?: boolean;
+  /** DBG: WHY there is or is not force feedback right now — 'ready',
+   *  'playing', 'no pad', 'pad has no actuator', 'browser refused', or
+   *  'off (DBG)'.  Rumble cannot be checked anywhere but on hardware, so the
+   *  panel has to separate the reasons rather than leave silence to cover
+   *  all of them. */
+  rumbleInfo?: string;
   /** The active control scheme (menu selection).  Drives the menu's own
    *  selector, the help panel's highlight, and the two touch HUD widgets. */
   controlScheme?: ControlScheme;

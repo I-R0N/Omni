@@ -919,6 +919,13 @@ headless, so every assertion here is about the code in front of the motors.
 Whether a DualSense actually buzzes, and whether the curve feels right, is on
 the hardware checklist.
 
+Which is why a **third DBG line** was added, Player ▸ **↳ rumble**: silence has
+four different causes on real hardware — the toggle is off, no pad is adopted,
+the pad has no actuator, or the browser refused the effect — and "nothing
+happened" covers all four identically. The row names which one. It is the
+only diagnostic in the input layer that exists purely because the thing it
+describes cannot be tested here.
+
 ---
 
 ## Decisions taken
