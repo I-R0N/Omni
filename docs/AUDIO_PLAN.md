@@ -234,6 +234,15 @@ Minimum viable set, given the states above:
 Regional variants of (4)/(5) are where the "different parts of the galaxy"
 feel comes from — see the area-composition entry in PARKING_LOT.
 
+> **Where the beds come from** is assessed separately in
+> `docs/MUSIC_GENERATION_FEASIBILITY.md` — generating them with an
+> open-weights music model (MiniMax-Music3), what such a model can and
+> cannot give the vertical-layering design above, and the offline pipeline
+> that closes the gap.  Short version: the generator is an authoring-time
+> asset source, the music director in §3 is unaffected, and the per-bed
+> `{bpm, loopStart, layers[]}` sidecar described there is the interface
+> between them.
+
 ---
 
 ## 6. Open decisions
