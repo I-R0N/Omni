@@ -606,6 +606,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     indices per action, radial `STICK_DEADZONE` (rescaled, not just
     clamped), `TRIGGER_THRESHOLD`, and `AIM_RADIUS`, the distance from
     screen centre at which the pad parks its synthetic pointer.
+    `INPUT_CONSTANTS.RUMBLE` sits beside it — force feedback rides the
+    SCREEN SHAKE (see §8).
     `AIM_RADIUS` must stay well ABOVE `SHIP_SELECT_RADIUS` — the ship
     renders at screen centre and `claimTapNear` claims taps within that
     radius, so a shot synthesised at the centre is silently eaten as a
@@ -1708,6 +1710,21 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   because rotation is derived from the pointer and a shot's target IS a
   pointer position; there is deliberately no second aim channel (step 5
   G2).  Four rules go with it:
+  - **RUMBLE rides the screen shake.**  `GameEngine.handleScreenShake(amount)`
+    is the funnel every impact in the game already goes through with
+    magnitudes tuned against each other, so `InputSystem.rumble(amount)` hangs
+    off it rather than growing a second list of things that should buzz.  It
+    is called ABOVE the screen-shake toggle (camera lurch and hand buzz are
+    different preferences) and has its own DBG row.  `rumbleParamsFor` is pure
+    and takes `nowMs`, so the threshold, curve, throttle and interrupt rule are
+    all testable; only the actuator itself is stood in for.  Note `dual-rumble`
+    is the ONLY effect the Gamepad API exposes — the DualSense's adaptive
+    triggers, voice-coil haptics and light bar need raw HID reports (WebHID:
+    desktop Chromium/Edge only, never Safari or mobile), which this
+    deliberately does not do.  `playEffect` REJECTS on a browser that knows
+    the method but not the effect, so the rejection is swallowed and the pad
+    is asked exactly once — an unhandled rejection would fail every suite's
+    clean-console assertion.
   - **The pad is POLLED once per rendered frame**, from
     `GameEngine.pollGamepad` at the top of `loop` — above every freeze
     short-circuit, so the pause button works from inside the paused state.

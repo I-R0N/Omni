@@ -83,6 +83,7 @@ interface UIOverlayProps {
   onToggleJoystickDebug?: () => void;
   onCycleMinimapMaterial?: () => void;
   onCycleRockPalette?: () => void;
+  onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
@@ -247,6 +248,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleJoystickDebug,
   onCycleMinimapMaterial,
   onCycleRockPalette,
+  onToggleRumble,
   onSetControlScheme,
   onToggleRepelPush,
   onTogglePlasticAutomata,
@@ -1044,10 +1046,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         {group('Gamepad', 'text-violet-300', [
           ['Left stick / D-pad', 'Fly.'],
           ['Right stick', 'Aim.'],
-          ['R2 or ✕', 'Shoot. Hold for a charged shot.'],
-          ['□', 'Dock, enter a portal, or undock.'],
-          ['R1 or △', 'Switch weapon.'],
-          ['Options', 'Pause.'],
+          ['Right trigger', 'Shoot. Hold for a charged shot. (Bottom face button too.)'],
+          ['Left face button', 'Dock, enter a portal, or undock. □ on PlayStation, X on Xbox.'],
+          ['Right shoulder', 'Switch weapon. (Top face button too.)'],
+          ['Start / Options', 'Pause.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], padOn ? (
           <span className="text-violet-200/80 font-mono text-[9px] normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded">
@@ -1399,6 +1401,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Chevrons', onToggleChevronMode,
                   stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
                   'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
+                {ctrlRow('Rumble', onToggleRumble,
+                  stats.rumbleEnabled === false ? 'Off' : 'On',
+                  'Gamepad force feedback. Rides the SCREEN SHAKE — every impact already funnels through one call with magnitudes tuned against each other, so the hand feels what the camera feels. Separate from the Screen shake toggle: the camera lurching and the pad buzzing are different preferences. Only dual-rumble is reachable from a browser; the DualSense adaptive triggers need WebHID (desktop Chromium only).')}
                 {ctrlRow('Rock palette', onCycleRockPalette,
                   stats.rockPaletteName ?? 'mixed',
                   'Rock body colour family. Mixed (default): mostly slate with rust and mineral running through it, so a field reads as ROCK with variation. Slate: the old single flat grey. Rust / mineral: the pure warm and cool families, kept for regional-identity work and for judging them side by side. Shades are rolled per instance AT SPAWN — reload the map to repaint a whole field.')}

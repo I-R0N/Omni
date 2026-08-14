@@ -85,6 +85,13 @@ export class InputSystem {
   // rendered frame from GameEngine.loop.
   private padIndex: number | null = null;
   private padId: string = '';
+  /** The browser's `Gamepad.mapping`.  Every binding in INPUT_CONSTANTS.GAMEPAD
+   *  is an INDEX into the W3C "standard gamepad" layout, so a pad the browser
+   *  cannot map to that layout reports `''` here and its buttons land wherever
+   *  its firmware put them.  We still adopt it — a scrambled pad that flies is
+   *  better than no pad — but the DBG readout says so, which is the difference
+   *  between "the pad is broken" and "this pad is non-standard". */
+  private padMapping: string = '';
   /** Previous frame's pressed state, indexed by button. Length grows to fit. */
   private padPrev: boolean[] = [];
   /** Left-stick thrust after deadzone + rescale; zero when at rest. */
@@ -150,6 +157,7 @@ export class InputSystem {
     if (this.padIndex !== null && this.padIndex !== gp.index) return;
     this.padIndex = gp.index;
     this.padId = gp.id || 'Gamepad';
+    this.padMapping = gp.mapping || '';
     this.padPrev.length = 0;
     this.padConnectionEvent = { connected: true, id: this.padId };
   };
@@ -343,6 +351,111 @@ export class InputSystem {
     if (dist >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return;
 
     this.fireEvents.push({ x, y });
+  }
+
+  // ── Rumble ─────────────────────────────────────────────────────────────
+
+  /** DBG: force feedback on/off.  Separate from the screen-shake toggle —
+   *  wanting the hand to feel a crash and wanting the camera to lurch are
+   *  different preferences. */
+  public rumbleEnabled: boolean = true;
+  /** When the effect currently playing ends, and how strong it was.
+   *  `-Infinity` means NONE HAS EVER PLAYED — a plain 0 would be read by the
+   *  minimum-gap rule below as "one just finished at time zero", which
+   *  swallows the first impact of the session. */
+  private rumbleUntilMs: number = -Infinity;
+  private rumbleMag: number = 0;
+  /** Set once a `playEffect` call has been rejected or thrown, so an
+   *  unsupported browser is asked exactly once instead of every impact. */
+  private rumbleUnsupported: boolean = false;
+
+  /**
+   * Map a SCREEN-SHAKE amount onto a dual-rumble effect, or null if this one
+   * should not play.
+   *
+   * Pure, and separated from the device call for the same reason the pad's
+   * mapping is (`applyPadSnapshot`): the actuator cannot exist in a headless
+   * browser, but every decision in front of it — the threshold, the curve,
+   * the throttle, the interrupt rule — is exactly what needs testing.
+   *
+   * `nowMs` is passed in rather than read, so a test can drive the throttle
+   * without sleeping.
+   */
+  public rumbleParamsFor(amount: number, nowMs: number):
+      { duration: number; strongMagnitude: number; weakMagnitude: number } | null {
+    const R = INPUT_CONSTANTS.RUMBLE;
+    if (!this.rumbleEnabled || this.rumbleUnsupported) return null;
+    if (amount < R.MIN_SHAKE) return null;
+
+    const t = Math.max(0, Math.min(1,
+      (amount - R.MIN_SHAKE) / Math.max(1e-6, R.FULL_SHAKE - R.MIN_SHAKE)));
+
+    // An effect already playing is interrupted only by a MEANINGFULLY
+    // stronger one.  Without this, a crash's long thump is chopped up by the
+    // stream of small hits that always follows it.
+    if (nowMs < this.rumbleUntilMs) {
+      // Still playing: only a meaningfully stronger hit cuts in.
+      if (t < this.rumbleMag + R.INTERRUPT_DELTA) return null;
+    } else if (nowMs < this.rumbleUntilMs + R.MIN_INTERVAL_MS) {
+      // Just finished: leave a gap, or a stream of small hits reads as one
+      // continuous drone rather than as separate impacts.
+      return null;
+    }
+
+    const duration = R.MIN_MS + (R.MAX_MS - R.MIN_MS) * t;
+    return {
+      duration,
+      strongMagnitude: t,
+      weakMagnitude: t * R.WEAK_FRAC,
+    };
+  }
+
+  /** The adopted pad's haptic actuator, or null.  Its own method so a test
+   *  can stand a fake device in front of it — the one part of this that a
+   *  headless browser cannot provide. */
+  public currentActuator(): { playEffect(type: string, params: object): Promise<unknown> } | null {
+    if (this.padIndex === null) return null;
+    const nav = navigator as Navigator & { getGamepads?: () => (Gamepad | null)[] };
+    if (typeof nav.getGamepads !== 'function') return null;
+    const pad = nav.getGamepads()[this.padIndex];
+    const act = (pad as unknown as { vibrationActuator?: { playEffect?: unknown } } | null)?.vibrationActuator;
+    if (!act || typeof act.playEffect !== 'function') return null;
+    return act as { playEffect(type: string, params: object): Promise<unknown> };
+  }
+
+  /**
+   * Play force feedback for a screen shake of `amount`.  A no-op with no pad,
+   * with no actuator, or in a browser that does not implement the effect —
+   * which today is most of them, so this must never be load-bearing.
+   */
+  public rumble(amount: number) {
+    const now = performance.now();
+    const params = this.rumbleParamsFor(amount, now);
+    if (!params) return;
+
+    const act = this.currentActuator();
+    if (!act) return;
+
+    this.rumbleUntilMs = now + params.duration;
+    this.rumbleMag = params.strongMagnitude;
+
+    try {
+      // The promise REJECTS on a browser that knows the method but not the
+      // effect type.  Swallow it: an unhandled rejection would put an error
+      // in the console, which every suite asserts is clean — and more to the
+      // point, a missing motor is not a game problem.
+      const p = act.playEffect('dual-rumble', {
+        startDelay: 0,
+        duration: params.duration,
+        strongMagnitude: params.strongMagnitude,
+        weakMagnitude: params.weakMagnitude,
+      });
+      if (p && typeof (p as Promise<unknown>).catch === 'function') {
+        (p as Promise<unknown>).catch(() => { this.rumbleUnsupported = true; });
+      }
+    } catch {
+      this.rumbleUnsupported = true;
+    }
   }
 
   // ── Control scheme ─────────────────────────────────────────────────────
@@ -593,6 +706,10 @@ export class InputSystem {
     this.padMove.y = 0;
     this.padFireDown = false;
     this.padPrev.length = 0;
+    // A different pad may well support what the last one did not.
+    this.rumbleUntilMs = -Infinity;
+    this.rumbleMag = 0;
+    this.rumbleUnsupported = false;
   }
 
   /**
@@ -775,6 +892,7 @@ export class InputSystem {
         if (p && p.connected) {
           this.padIndex = p.index;
           this.padId = p.id || 'Gamepad';
+          this.padMapping = p.mapping || '';
           this.padPrev.length = 0;
           this.padConnectionEvent = { connected: true, id: this.padId };
           pad = p;
@@ -840,7 +958,10 @@ export class InputSystem {
    *  human-readable part, so trim from the FRONT. */
   public padDebugName(): string {
     if (this.padIndex === null) return 'none';
-    return this.padId.length > 20 ? '…' + this.padId.slice(-20) : (this.padId || 'Gamepad');
+    const name = this.padId.length > 16 ? '…' + this.padId.slice(-16) : (this.padId || 'Gamepad');
+    // A non-standard pad is the single most likely reason for "the buttons
+    // are wrong", and it is invisible without this.
+    return this.padMapping === 'standard' ? name : `${name} ⚠non-std`;
   }
 
   /** DBG readout, line 2: the numbers that tell you whether the pad is

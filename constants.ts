@@ -1037,6 +1037,42 @@ export const INPUT_CONSTANTS = {
   TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 
+  // ── Gamepad rumble ─────────────────────────────────────────────────────
+  // Force feedback rides the SCREEN SHAKE.  Every impact in the game already
+  // funnels through `GameEngine.handleScreenShake(amount)` — crashes,
+  // explosions, cannon recoil, boss deaths — with magnitudes long since tuned
+  // against each other.  Rumble is the haptic twin of that shake, so it hangs
+  // off the same call rather than growing a second list of "things that should
+  // buzz" to keep in sync with the first.
+  //
+  // `dual-rumble` is the only effect the Gamepad API exposes: two magnitudes,
+  // a strong low-frequency motor and a weak high-frequency one.  The
+  // DualSense's real party tricks — adaptive trigger resistance, the
+  // voice-coil haptics, the light bar — need raw HID reports (WebHID), which
+  // is a desktop-Chromium-only path and deliberately not what this drives.
+  RUMBLE: {
+    /** Shake amounts below this do not buzz.  MICRO (1) is every projectile
+     *  hit; a pad that rattles on every plink is a pad you turn off. */
+    MIN_SHAKE: 4,
+    /** Shake amount that maps to full strength.  HEAVY (20) is a high-speed
+     *  crash, and should be the loudest thing the hand feels. */
+    FULL_SHAKE: 20,
+    /** Effect length in ms at MIN_SHAKE and at FULL_SHAKE. */
+    MIN_MS: 90,
+    MAX_MS: 260,
+    /** The weak (high-frequency) motor runs at this fraction of the strong
+     *  one — a little buzz on top of the thump, rather than both at once,
+     *  which just reads as noise. */
+    WEAK_FRAC: 0.55,
+    /** Floor on the gap between effects (ms).  playEffect restarts the motors,
+     *  so firing one per frame produces a flat drone instead of hits; a new
+     *  effect interrupts early ONLY if it is meaningfully stronger. */
+    MIN_INTERVAL_MS: 70,
+    /** How much stronger a new event must be to interrupt one already
+     *  playing (0.15 = 15 percentage points of magnitude). */
+    INTERRUPT_DELTA: 0.15,
+  },
+
   // ── Fire button (joystick scheme) ──────────────────────────────────────
   // The joystick scheme's shooting control.  Tap-to-shoot is the STANDARD
   // touch scheme's gesture; a scheme whose left thumb is pinned to a stick

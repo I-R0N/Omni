@@ -1669,6 +1669,8 @@ export interface EngineStats {
   /** DBG: force the touch joystick to draw with no touch session, so its
    *  size and placement can be checked on a desktop browser. */
   joystickForceVisible?: boolean;
+  /** DBG: gamepad force feedback on/off. */
+  rumbleEnabled?: boolean;
   /** The active control scheme (menu selection).  Drives the menu's own
    *  selector, the help panel's highlight, and the two touch HUD widgets. */
   controlScheme?: ControlScheme;

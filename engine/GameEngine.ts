@@ -895,6 +895,7 @@ export class GameEngine {
       gamepadAxes: this.input.padDebugAxes(),
       joystickForceVisible: this.input.joystickForceVisible,
       controlScheme: this.input.getControlScheme(),
+      rumbleEnabled: this.input.rumbleEnabled,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1553,6 +1554,7 @@ export class GameEngine {
       gamepadAxes: this.input.padDebugAxes(),
       joystickForceVisible: this.input.joystickForceVisible,
       controlScheme: this.input.getControlScheme(),
+      rumbleEnabled: this.input.rumbleEnabled,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1905,6 +1907,13 @@ export class GameEngine {
   }
 
   handleScreenShake = (amount: number) => {
+      // Force feedback rides this call — every impact in the game already
+      // funnels through it with magnitudes tuned against each other, so the
+      // hand feels what the camera feels.  Deliberately ABOVE the
+      // screen-shake toggle: wanting a crash in the hand and wanting the
+      // camera to lurch are different preferences.
+      this.input.rumble(amount);
+
       if (!this.screenShakeEnabled) return;
       // Prioritize larger shakes
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {

@@ -108,8 +108,11 @@ test.describe('controls & basics — reachable from both menus', () => {
     // Spot-check the three controls a player cannot discover by poking at
     // the screen, one per device.
     expect(rows).toContain('E');
-    expect(rows).toContain('Options');
+    expect(rows).toContain('Start / Options');
     expect(rows).toContain('Hold 1s, release');
+    // Pad buttons are named by POSITION, not by PlayStation glyph: the
+    // bindings are positional, so "□" reads wrong in an Xbox player's hands.
+    expect(rows).toContain('Right trigger');
 
     // No pad is attached in this browser, so the live badge must be absent —
     // one of the two parts of this panel the engine drives.

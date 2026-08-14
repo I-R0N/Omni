@@ -31,6 +31,7 @@ tuning (step 6).
 | G-final | Validation, docs sync, completion summary | **done** |
 | G9 | Control-scheme selection (user directive, post-queue) | **done** |
 | G10 | Stick-driven aim, handedness, pause dropdown (user directive) | **done** |
+| G11 | Gamepad rumble + two pad legibility fixes (user directive) | **done** |
 
 ---
 
@@ -852,6 +853,74 @@ mid-run).
 
 ---
 
+### G11 — Force feedback (user directive, 2026-08-14)
+
+The user asked whether the PS5 pad's force feedback is usable. It is, in the
+one form the web exposes, and it now ships.
+
+**DECISION G11-a — rumble rides the SCREEN SHAKE.**
+`GameEngine.handleScreenShake(amount)` is already the funnel every impact in
+the game goes through — crashes, explosions, cannon recoil, boss deaths, a
+dozen call sites — with magnitudes long since tuned against each other.
+`InputSystem.rumble(amount)` hangs off that one call, so the hand feels what
+the camera feels and there is no second list of "things that should buzz" to
+drift out of sync with the first.
+*Alternative rejected:* a per-event rumble table. It is the same information
+twice, and the second copy is the one that goes stale.
+
+It is called ABOVE the screen-shake early-return and has its own DBG row:
+wanting a crash in the hand and wanting the camera to lurch are different
+preferences, and only one of them is felt by a player with no pad.
+
+**DECISION G11-b — `dual-rumble` only; no WebHID.** Two magnitudes, a strong
+low-frequency motor and a weak high-frequency one, which is the whole of what
+the Gamepad API offers. The DualSense's actual party tricks — adaptive
+trigger resistance, the voice-coil haptics, the light bar — need raw HID
+output reports, i.e. WebHID: Chrome/Edge **desktop only**, never Safari, never
+mobile, and on Bluetooth it needs the CRC-checked 0x31 report that some
+firmware rejects. A control that works on the desktop browser and nowhere
+else is not the game's input layer; it is a separate optional enhancement,
+and it is recorded in FOR-USER-REVIEW rather than built.
+
+**DECISION G11-c — the same split as the pad mapping: pure decision, opaque
+device.** `rumbleParamsFor(amount, nowMs)` is pure and takes the clock as an
+argument, so the threshold (below MEDIUM nothing buzzes — a pad that rattles
+on every projectile plink is a pad you switch off), the curve, the minimum
+gap and the interrupt rule are all testable headlessly. Only the actuator is
+stood in for, because a headless browser has no motors.
+
+**Two bugs, both found by writing the tests:**
+1. **The first impact of the session was swallowed.** `rumbleUntilMs`
+   initialised to `0`, and the minimum-gap rule read that as "an effect just
+   finished at time zero". It is `-Infinity` now — an explicit "never played"
+   sentinel.
+2. **A rejected `playEffect` would have failed every suite.** The promise
+   rejects on a browser that knows the method but not the effect type, and an
+   unhandled rejection lands in the console, which every test asserts is
+   clean. It is swallowed, and the flag it sets means an unsupported browser
+   is asked exactly once rather than on every impact for the rest of the run.
+
+**Two legibility fixes rode along**, both from the same question ("what else
+works?"):
+- **Non-standard pads are flagged.** Every binding is an INDEX into the W3C
+  standard layout, so a pad the browser cannot map to it has its buttons
+  wherever its firmware put them. It is still adopted — a scrambled pad that
+  flies beats no pad — but the DBG readout now shows `⚠non-std`, which is the
+  difference between "the pad is broken" and "this pad is non-standard".
+- **The help panel names buttons by POSITION.** It said "R2 or ✕" and "□";
+  the bindings are positional, so an Xbox player was reading glyphs their pad
+  does not have. Now "Right trigger", "Left face button (□ on PlayStation, X
+  on Xbox)".
+
+**Gates:** typecheck, build, **87/87** tests (83 + 4).
+
+**Unverifiable by construction:** there is no pad in this environment and none
+headless, so every assertion here is about the code in front of the motors.
+Whether a DualSense actually buzzes, and whether the curve feels right, is on
+the hardware checklist.
+
+---
+
 ## Decisions taken
 
 Consolidated as they are made; each one names the alternative it beat.
@@ -905,6 +974,13 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G7-d** — the table was corrected to the code's populations, not the
   reverse. Beat: "fixing" the maps to match a table nothing had read for
   months, which would have been a silent rebalance.
+- **G11-a** — rumble rides `handleScreenShake`. Beat: a per-event rumble
+  table (the same information twice, with one copy going stale).
+- **G11-b** — `dual-rumble` only; WebHID left to FOR-USER-REVIEW. Beat:
+  building adaptive triggers into the input layer for a desktop-Chromium-only
+  path that Safari and every mobile browser lack.
+- **G11-c** — pure `rumbleParamsFor(amount, nowMs)`, stand-in actuator. Beat:
+  an untestable device call, which would have shipped both bugs above.
 - **G10-a** — the stick writes the synthetic pointer, so aim follows flight.
   Beat: rotating from the stick vector at the engine's rotation site (a second
   definition of aim, needing the same branch at the shooting site).
@@ -1031,6 +1107,24 @@ push, opens on an iPhone) is the fastest way to run these:
   for regional identity later. Metal now brightens toward `#a5d8f0` and
   glows cyan instead of magenta. All four are aesthetic calls made from
   captures; every one is a constant and a DBG row away from being changed.
+
+- **HARDWARE CHECK — rumble (G11).** Nothing about this could be verified
+  here: no pad exists in the test environment. On a real pad, check that (a)
+  it buzzes at all — Edge/Chrome desktop is the likeliest yes, iOS Safari the
+  likeliest no, and the DBG row Visual ▸ **Rumble** turns it off; (b) the
+  curve feels right — nothing below an enemy collision buzzes, a high-speed
+  crash is the loudest thing; (c) a firefight does not become one continuous
+  drone (there is a minimum gap and a stronger-only interrupt rule, but they
+  are guesses).
+
+- **OPTIONAL, NOT BUILT — WebHID for the DualSense's real haptics.** Adaptive
+  trigger resistance, the voice-coil haptics and the light bar are reachable
+  ONLY through raw HID output reports: `navigator.hid`, Chrome/Edge desktop
+  only, behind a one-time permission click, and on Bluetooth it needs the
+  CRC-checked 0x31 report that some firmware rejects (USB-C is reliable).
+  Since the user plays in Edge, this is genuinely available to them — as a
+  desktop-only enhancement layer on top of the portable `dual-rumble` path,
+  never as a replacement for it. Say the word and it is its own milestone.
 
 - **OPEN QUESTION — should a held FIRE CONTROL auto-repeat?** Today none of
   them do: the pad trigger and the onscreen fire button both use the same

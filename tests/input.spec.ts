@@ -1004,3 +1004,171 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
     watch.assertClean();
   });
 });
+
+test.describe('rumble — force feedback rides the screen shake', () => {
+  // Mirrors INPUT_CONSTANTS.RUMBLE (harness rule 7).
+  const MIN_SHAKE = 4;
+  const FULL_SHAKE = 20;
+  const MIN_INTERVAL_MS = 70;
+
+  test('maps shake amount onto an effect, and ignores the small stuff', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // `rumbleParamsFor` takes `nowMs` so the throttle can be driven without
+    // sleeping — the same split as the pad's snapshot mapping: the decision
+    // is testable, the device is not.
+    const r = await engine(page, (e, arg: { min: number; full: number }) => {
+      const at = (amount: number, now: number) => e.input.rumbleParamsFor(amount, now);
+      return {
+        // MICRO (1) is every projectile hit. A pad that rattles on every
+        // plink is a pad you switch off.
+        micro: at(1, 0),
+        justUnder: at(arg.min - 0.01, 0),
+        // MEDIUM (10) — an enemy collision.
+        medium: at(10, 10_000),
+        // HEAVY (20) — a high-speed crash, the loudest thing in the game.
+        heavy: at(arg.full, 20_000),
+        // Beyond the top of the curve stays clamped rather than overdriving.
+        beyond: at(arg.full * 3, 30_000),
+      };
+    }, { min: MIN_SHAKE, full: FULL_SHAKE });
+
+    expect(r.micro).toBeNull();
+    expect(r.justUnder).toBeNull();
+
+    expect(r.medium).not.toBeNull();
+    expect(r.medium.strongMagnitude).toBeGreaterThan(0);
+    expect(r.medium.strongMagnitude).toBeLessThan(1);
+    // The weak motor is a buzz on top of the thump, not a second thump.
+    expect(r.medium.weakMagnitude).toBeLessThan(r.medium.strongMagnitude);
+
+    expect(r.heavy.strongMagnitude).toBeCloseTo(1, 5);
+    expect(r.heavy.duration).toBeGreaterThan(r.medium.duration);
+    expect(r.beyond.strongMagnitude).toBeCloseTo(1, 5);
+  });
+
+  test('a stream of small hits does not become one long drone', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e, gap: number) => {
+      const at = (amount: number, now: number) => {
+        const p = e.input.rumbleParamsFor(amount, now);
+        // rumbleParamsFor is pure; the engine records the effect when it
+        // actually plays one, so mirror that here.
+        if (p) { e.input.rumbleUntilMs = now + p.duration; e.input.rumbleMag = p.strongMagnitude; }
+        return p;
+      };
+      // -Infinity is the "nothing has ever played" sentinel; a plain 0 would
+      // be read as "one just finished at time zero" and eat the first hit.
+      e.input.rumbleUntilMs = -Infinity;
+      e.input.rumbleMag = 0;
+      const first = at(10, 0);
+      return {
+        first,
+        // Same-strength hit while the first is still playing: ignored.
+        during: at(10, 20),
+        // A much stronger one DOES cut in — a crash mid-scrap should be felt.
+        strongerDuring: at(20, 30),
+        // And right after an effect ends there is still a gap, or separate
+        // impacts blur into a continuous buzz.
+        immediatelyAfter: at(10, 30 + 300),
+        wellAfter: at(10, 30 + 300 + gap + 1),
+      };
+    }, MIN_INTERVAL_MS);
+
+    expect(r.first).not.toBeNull();
+    expect(r.during).toBeNull();
+    expect(r.strongerDuring).not.toBeNull();
+    expect(r.immediatelyAfter).toBeNull();
+    expect(r.wellAfter).not.toBeNull();
+  });
+
+  test('an impact reaches the device, and an unsupported browser is asked once', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The actuator is the ONE part of this a headless browser cannot supply,
+    // so it is stood in for — exactly as the pad snapshot is. Everything in
+    // front of it is the real code path, driven by a real screen shake.
+    const r = await engine(page, e => {
+      const calls: any[] = [];
+      e.input.currentActuator = () => ({
+        playEffect: (type: string, params: any) => { calls.push({ type, params }); return Promise.resolve(); },
+      });
+      e.input.rumbleUntilMs = -Infinity;
+      e.input.rumbleMag = 0;
+      // A high-speed crash, through the engine's own shake funnel.
+      e.handleScreenShake(20);
+      return { calls, n: calls.length };
+    });
+
+    expect(r.n).toBe(1);
+    expect(r.calls[0].type).toBe('dual-rumble');
+    expect(r.calls[0].params.strongMagnitude).toBeCloseTo(1, 5);
+    expect(r.calls[0].params.duration).toBeGreaterThan(0);
+
+    // A browser that knows the method but not the effect REJECTS. That must
+    // not reach the console (every suite asserts it clean), and it must not
+    // be retried on every impact for the rest of the run.
+    const after: { attempts: number; unsupported: boolean } = await engine(page, e => {
+      let n = 0;
+      e.input.currentActuator = () => ({
+        playEffect: () => { n++; return Promise.reject(new Error('unsupported')); },
+      });
+      e.input.rumbleUntilMs = -Infinity;
+      e.input.rumbleMag = 0;
+      e.handleScreenShake(20);
+      return new Promise(resolve => setTimeout(() => {
+        e.input.rumbleUntilMs = -Infinity;
+        e.handleScreenShake(20);
+        e.handleScreenShake(20);
+        resolve({ attempts: n, unsupported: e.input.rumbleUnsupported });
+      }, 50)) as any;
+    });
+
+    expect(after.attempts).toBe(1);
+    expect(after.unsupported).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('the DBG toggle silences it, and it is independent of screen shake', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, e => {
+      const calls: any[] = [];
+      e.input.currentActuator = () => ({
+        playEffect: (t: string, p: any) => { calls.push(p); return Promise.resolve(); },
+      });
+      const fire = () => { e.input.rumbleUntilMs = -Infinity; e.input.rumbleMag = 0; e.handleScreenShake(20); };
+
+      fire();
+      const withRumble = calls.length;
+
+      // Screen shake OFF, rumble ON: the hand still feels it. The two are
+      // different preferences and only one of them needs eyes.
+      e.dbg.toggleScreenShake();
+      fire();
+      const shakeOff = calls.length;
+      e.dbg.toggleScreenShake();
+
+      // Rumble OFF: silent.
+      e.dbg.toggleRumble();
+      fire();
+      const rumbleOff = calls.length;
+      e.dbg.toggleRumble();
+
+      return { withRumble, shakeOff, rumbleOff, enabled: e.input.rumbleEnabled };
+    });
+
+    expect(r.withRumble).toBe(1);
+    expect(r.shakeOff).toBe(2);
+    expect(r.rumbleOff).toBe(2);
+    expect(r.enabled).toBe(true);
+
+    watch.assertClean();
+  });
+});

@@ -243,6 +243,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
   };
 
+  const handleToggleRumble = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleRumble();
+  };
+
   const handleSetControlScheme = (scheme: ControlScheme) => {
       if (engineRef.current) engineRef.current.setControlScheme(scheme);
   };
@@ -535,6 +539,7 @@ const App: React.FC = () => {
         onToggleJoystickDebug={handleToggleJoystickDebug}
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
         onCycleRockPalette={handleCycleRockPalette}
+        onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
         onToggleRepelPush={handleToggleRepelPush}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}

@@ -328,6 +328,14 @@ export class DebugControls {
     cycleRockPalette();
   }
 
+  /** DBG (Visual): gamepad force feedback on/off.  Separate from the
+   *  screen-shake toggle on purpose — the camera lurching and the hand
+   *  buzzing are different preferences, and only one of them is felt by a
+   *  player with no pad. */
+  toggleRumble() {
+    this.g.input.rumbleEnabled = !this.g.input.rumbleEnabled;
+  }
+
   /** DBG (Visual): force the onscreen joystick to draw with no touch session.
    *  The widget is touch-only by design — it exists while a thumb is on the
    *  glass and nowhere else — which also means its size and placement cannot
