@@ -721,3 +721,48 @@ merely still compiling.
 default ports (4173/4175/4176/4177/4181/4183) left over from running them
 concurrently in one session. They are now all 4173, so one preview server
 serves the lot. `SMOKE_URL` still overrides.
+
+---
+
+## Third retarget — the Pair C controller work
+
+`claude/plan-completion` moved 25 commits ahead with gauntlet Pair C
+(gamepad support, control schemes, force feedback, the help panel) plus
+the G-series polish. Merged again; four conflicts, all "keep both sides":
+
+| File | Conflict | Resolution |
+|---|---|---|
+| `engine/systems/WeaponSystem.ts` | Pair C added an `onRumble` callback in the same parameter slot as this branch's `onFire` | `onRumble` KEEPS slot 6, `onFire` becomes slot 7 |
+| `engine/GameEngine.ts` | the matching call site | same order |
+| `engine/GameEngine.ts` | constants import | upstream's line with the three audio symbols re-grafted |
+| `components/UIOverlay.tsx` | Pair C's Controls row landed where the audio row is | both rows |
+| `CLAUDE.md` | ×2, MAP_POPULATION authority + the DBG row table | upstream's, plus this branch's audio lines |
+
+The WeaponSystem slot order is NOT arbitrary: `tests/input.spec.ts` calls
+`firePlayerWeapon` POSITIONALLY with `e.handleRumble` sixth, so putting
+`onFire` there instead would have broken three upstream tests in a way
+that looks like a Pair C bug. Checked the callers before choosing.
+
+### A measurement of mine that was wrong
+
+The sample-path suite's frame-time A/B fired its voices at world origin
+while the listener sits wherever the player is. `crash.player.shard` is
+NEAR-FIELD (240/850), so every voice was dropped as out of earshot: the
+comparison was muted-vs-also-silent, and the "-3.8%, samples are free"
+number reported from it measured nothing. Fixed to fire at the listener,
+and the suite now ASSERTS the scene played voices before it is allowed to
+draw a conclusion from the frame times — the guard the first cut lacked.
+
+Corrected numbers, on a scene that really does play: median frame time
+**-1.0%** against the muted baseline with 116 voices built (of 1440
+attempts — poly 3 and the global ceiling gate the rest, which is the
+design working). Per `play()`: **0.27 µs sampled, 0.25 µs synth**. The
+earlier claim that sampled voices are CHEAPER than synth ones is not
+supported at this scale either; both are sub-microsecond and the ratio
+between them is timer quantisation.
+
+*Recorded because* the failure mode is worth naming: a positional-audio
+test that fires at the wrong coordinates does not error, it passes
+quietly while measuring silence — the same shape as the vacuous B3
+assertion in decision #34, and the second time this pass has been caught
+by it.

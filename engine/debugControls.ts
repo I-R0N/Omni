@@ -33,6 +33,7 @@ import {
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
+    cycleMinimapMaterial, cycleRockPalette,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -309,6 +310,38 @@ export class DebugControls {
    *  (also chevron on-screen entities — the original behaviour). */
   toggleChevronMode() {
     this.g.renderer.chevronsOffscreenOnly = !this.g.renderer.chevronsOffscreenOnly;
+  }
+
+  /** DBG (Visual): cycle what the minimap says about MATERIAL — Flow
+   *  (streamlines through the asteroid field, the default), Dots (the old
+   *  per-shard spray) or Off.  Three-way rather than a toggle because the
+   *  question decision #43 asked was whether streamlines BEAT dots, and the
+   *  honest control for that is showing neither. */
+  cycleMinimapMaterial() {
+    cycleMinimapMaterial();
+  }
+
+  /** DBG (Visual): cycle the ROCK palette — mixed (default) / slate / rust /
+   *  mineral.  Shades are rolled per instance AT SPAWN, so this takes effect
+   *  on newly generated rock; reload the map to repaint a whole field. */
+  cycleRockPalette() {
+    cycleRockPalette();
+  }
+
+  /** DBG (Visual): gamepad force feedback on/off.  Separate from the
+   *  screen-shake toggle on purpose — the camera lurching and the hand
+   *  buzzing are different preferences, and only one of them is felt by a
+   *  player with no pad. */
+  toggleRumble() {
+    this.g.input.rumbleEnabled = !this.g.input.rumbleEnabled;
+  }
+
+  /** DBG (Visual): force the onscreen joystick to draw with no touch session.
+   *  The widget is touch-only by design — it exists while a thumb is on the
+   *  glass and nowhere else — which also means its size and placement cannot
+   *  be checked on a desktop browser without this. */
+  toggleJoystickDebug() {
+    this.g.input.joystickForceVisible = !this.g.input.joystickForceVisible;
   }
 
   /** DBG (Shards & Physics): toggle the tile repel PUSH (glass + metal tiles).

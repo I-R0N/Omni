@@ -1,9 +1,11 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { EngineStats, MapType, GameState } from './types';
+import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
 import UIOverlay from './components/UIOverlay';
+import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
+import { installMenuNav, pickNext } from './components/menuNav';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,6 +51,19 @@ const App: React.FC = () => {
     // assignment.  Read/poke at your own risk — nothing in the game reads it.
     (window as any).__omniEngine = engine;
 
+    // Debug handle #3, and the one with the strongest case: the DualSense
+    // output-report builders are the only code in the input layer that can be
+    // WRONG IN A WAY NOTHING REPORTS — a pad silently discards a report with
+    // a bad CRC or a bad byte layout, so "no trigger resistance" and "no pad
+    // connected" look identical.  They are pure, and CRC-32 has a published
+    // test vector, so a suite can pin them without hardware.  Nothing in the
+    // game reads this.
+    (window as any).__omniHid = { crc32, buildTriggerData, buildRumbleData, buildOutputReport };
+    // Debug handle #4: the menu driver's geometric step rule, so a suite can
+    // pin it against a synthetic layout instead of against whatever the menu
+    // happens to contain this week.
+    (window as any).__omniMenuNav = { pickNext };
+
     const handleResize = () => {
       if (canvasRef.current) {
         const canvas = canvasRef.current;
@@ -85,9 +100,21 @@ const App: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
 
+    // Gamepad menu navigation (G15).  Installed here rather than inside
+    // UIOverlay because it drives DOM FOCUS, not React state: it must not be
+    // torn down and rebuilt every time the HUD re-renders, which is every
+    // stats push.
+    const uninstallNav = installMenuNav({
+      steps: () => engine.input.consumeNavSteps(),
+      confirm: () => engine.input.consumeConfirmPress(),
+      back: () => engine.input.consumeBackPress(),
+      onBack: () => engine.menuBack(),
+    });
+
     // Cleanup
     return () => {
       engine.stop();
+      uninstallNav();
       window.removeEventListener('resize', handleResize);
     };
   }, []);
@@ -246,6 +273,42 @@ const App: React.FC = () => {
 
   const handleToggleChevronMode = () => {
       if (engineRef.current) engineRef.current.dbg.toggleChevronMode();
+  };
+
+  const handleToggleJoystickDebug = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleJoystickDebug();
+  };
+
+  const handleCycleMinimapMaterial = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleMinimapMaterial();
+  };
+
+  const handleCycleRockPalette = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
+  };
+
+  const handleToggleRumble = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleRumble();
+  };
+
+  const handleSetControlScheme = (scheme: ControlScheme) => {
+      if (engineRef.current) engineRef.current.setControlScheme(scheme);
+  };
+
+  const handleToggleAdaptiveTriggers = () => {
+      // Fire-and-forget: the outcome arrives on the next EngineStats push
+      // (`adaptiveTriggersConnected`), so there is no result to hold here, and
+      // a cancelled device picker is a rejected-then-swallowed promise rather
+      // than an error state to render.
+      if (engineRef.current) void engineRef.current.toggleAdaptiveTriggers();
+  };
+
+  const handleCycleTriggerEncoding = () => {
+      if (engineRef.current) engineRef.current.cycleTriggerEncoding();
+  };
+
+  const handleTestTriggerLink = () => {
+      if (engineRef.current) engineRef.current.testAdaptiveTriggerLink();
   };
 
   const handleToggleRepelPush = () => {
@@ -535,6 +598,14 @@ const App: React.FC = () => {
         onToggleMute={handleToggleMute}
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
+        onToggleJoystickDebug={handleToggleJoystickDebug}
+        onCycleMinimapMaterial={handleCycleMinimapMaterial}
+        onCycleRockPalette={handleCycleRockPalette}
+        onToggleRumble={handleToggleRumble}
+        onSetControlScheme={handleSetControlScheme}
+        onToggleAdaptiveTriggers={handleToggleAdaptiveTriggers}
+        onCycleTriggerEncoding={handleCycleTriggerEncoding}
+        onTestTriggerLink={handleTestTriggerLink}
         onToggleRepelPush={handleToggleRepelPush}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}

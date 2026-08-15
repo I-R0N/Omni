@@ -138,8 +138,15 @@ const run = async () => {
         const tick = () => {
           const now = performance.now();
           ts.push(now - last); last = now;
-          // Hammer the sampled id the way a rubble field does.
-          for (let i = 0; i < 8; i++) e.audio.play('crash.player.shard', { x: i * 40, y: 0 });
+          // Hammer the sampled id the way a rubble field does — AT THE
+          // LISTENER.  Firing at world origin looked fine and measured
+          // nothing: this id is near-field, so every voice was dropped as
+          // out of earshot and the comparison was muted-vs-also-silent.
+          const p = e.player.position;
+          for (let i = 0; i < 8; i++) {
+            e.audio.play('crash.player.shard', { x: p.x + i * 12, y: p.y });
+            const st = e.audio.ids?.get('crash.player.shard'); if (st) st.lastAt = -999;
+          }
           if (++n < 180) requestAnimationFrame(tick); else res();
         };
         requestAnimationFrame(tick);
@@ -148,12 +155,20 @@ const run = async () => {
       return ts[Math.floor(ts.length / 2)];
     };
     e.audio.muted = true;  const muted = await measure();
+    e.audio.resetCounters();
     e.audio.muted = false; const loud = await measure();
+    const played = e.audio.playsOf('crash.player.shard');
     e.audio.muted = false;
-    return { muted, loud };
+    return { muted, loud, played };
   });
   const delta = (frames.loud - frames.muted) / frames.muted * 100;
   console.log(`  ..  median frame: muted ${frames.muted.toFixed(2)} ms, sampled ${frames.loud.toFixed(2)} ms (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%)`);
+  // Guard the guard: a frame-time comparison against a scene that played
+  // nothing is the failure mode this measurement had on its first cut.
+  // Far below the 1440 attempts, and that is the design working: poly 3 and
+  // the global ceiling gate the rest.  The bar is only "voices were really
+  // built", since a frame-time comparison against silence proves nothing.
+  ok(frames.played > 50, `the measured scene actually played voices (${frames.played} of 1440 attempts)`);
   ok(Math.abs(delta) < 15, `sampled playback does not move frame time (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%)`);
 
   // ── Fallback: the state of the repo with no files present ────────────────

@@ -5,6 +5,121 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Controller schemes — refinement pass (parked 2026-08-15)
+
+Both pad schemes are SHIPPED AND UNTUNED. The wire format is settled
+(`zones`, confirmed on hardware) and the plumbing is covered by tests, but
+every judgement call below was made without a pad in hand and none of it has
+been felt. Parked deliberately: these are looking-and-feeling questions, and
+guessing at them from here is how G12 shipped three bugs.
+
+### PS5 / full-pad scheme (`gamepad`)
+
+The seven adaptive-trigger profiles in `WEAPON_TRIGGERS` plus the two
+state-driven ones (`chargeTrigger`, `THRUST_TRIGGER`) are authored, not
+tuned. Open:
+
+- **Is the Blaster's rattle better than a click?** It fires 7x/s, so a click
+  is fatigue — but a low-frequency `vibration` may just read as mush. This is
+  the single most likely wrong call in the table.
+- **Do Burst's three notches read as three?** `texture` quantises to ten
+  travel zones; three notches inside one pull may blur into one texture.
+- **Is the Cannon's ramp a deep pull or just heavy?** And does Homing's
+  shallower ramp feel distinct from it, or are two `slope` guns one gun?
+- **Do the state-driven pair land?** Does the charge wall growing under the
+  finger read as CHARGING, and does the thrust trigger stiffening near the
+  cap read as SPEED? Both are quantised to five steps — possibly too coarse
+  to feel as a ramp, possibly too fine to be worth the HID writes.
+- **Fire point.** It tracks each profile's break, clamped to 0.25–0.75. Are
+  the clamps in the right place, and does a shape with no break (`resistance`,
+  `vibration`) firing at its START feel right, or should it also fire deep?
+
+Every number is in `constants.ts`; the shapes are in
+`engine/systems/DualSenseHID.ts`. The `simple` encoding stays on the DBG
+cycle in case a firmware disagrees.
+
+### Minimal-pad scheme (`gamepad-thrust`)
+
+Built for cheap clip-on Bluetooth pads: EITHER stick steers and aims (larger
+deflection wins), EITHER trigger throttles, and the gun is therefore on the
+FACE button — if either trigger may be the throttle, neither can be the gun.
+Open:
+
+- **Does the premise hold?** Stick-for-heading + trigger-for-throttle versus
+  the stick doing both. The whole scheme rests on this and it may simply feel
+  worse.
+- **Both sticks doing the same job** — forgiving, or sloppy? On a full pad
+  the right stick now flies rather than aims, which is a real change in what
+  a DualSense feels like under this scheme.
+- **Losing R2-as-gun on a full pad.** Plain `gamepad` is the escape hatch,
+  but if the trade annoys, the alternative is a third scheme (left trigger
+  throttles, right trigger fires) — which is more schemes for one axis of
+  difference, and worth resisting unless the feel demands it.
+- **Aim-where-you-fly.** Correct for a one-stick pad, but on a two-stick pad
+  it discards independent aim entirely. Possibly the scheme should use the
+  second stick for aim WHEN it is present — except "present" is not
+  detectable (see below), so it would have to be inferred from use.
+- **No device detection is possible.** The Gamepad API reports a fixed 17
+  buttons under the standard mapping whether or not the hardware has them, so
+  "does this pad have an L2" is unanswerable. Anything adaptive here has to
+  be inferred from what the player actually moves, which is a design in its
+  own right.
+
+### Related, already parked
+
+The one-stick/two-button scheme above (its own entry) is the next step past
+`gamepad-thrust` — same motivation, fewer controls still. If the minimal
+scheme's premise holds, that entry gets easier; if it does not, both should
+be reconsidered together.
+
+---
+
+## Minimal Bluetooth control style — one stick, two buttons (2026-08-15)
+
+A sixth control scheme for the smallest pads: **one analogue stick and two
+buttons**, nothing else. The stick does aiming, flying AND acceleration
+together; button A shoots and charges; button B is ACTIONS (dock / enter
+portal / cycle weapon).
+
+Why it is worth building: the cheap clip-on Bluetooth gamepads people
+actually pair with a phone are frequently this shape, or close to it, and the
+existing `gamepad` scheme assumes a full standard layout — two sticks, two
+triggers, four face buttons, a D-pad. On a two-button pad most of that is
+missing, and the parts that ARE missing are the ones the scheme leans on
+hardest (the right stick IS the aim, since G2-a routed the pad through the
+synthetic pointer).
+
+What the design has to answer, and none of it is hard so much as it is a set
+of decisions:
+
+- **One stick doing three jobs.** Direction and throttle already come from
+  one deflection under `gamepad`, so that half is solved. Aim is the problem:
+  the ship would have to AIM WHERE IT FLIES, exactly as the joystick touch
+  schemes already do (`pointerAims: false`, the stick writes the synthetic
+  pointer). So the mechanism exists — this scheme reuses the joystick
+  schemes' rule with a pad as the source.
+- **Two buttons for four actions.** Shoot and charge already share one
+  control everywhere (`CHARGE_FULL` on a hold). Actions is the crowded one:
+  dock / enter portal is already ONE arbitrated trigger (`updateInteractables`
+  nearest-wins), which leaves weapon cycling. A hold on button B is the
+  obvious answer and matches the shoot/charge precedent.
+- **Pause with no Options button.** The one genuinely new gap. Either a
+  two-button chord, a long hold on B, or accept that pause is a screen tap on
+  a device that has a screen.
+
+Cost is small because the pieces are all built: `CONTROL_SCHEME_RULES` gets a
+row, `INPUT_CONSTANTS.GAMEPAD.BUTTONS` gets a remap, and the `pointerAims:
+false` path is already exercised by two shipped schemes. The reason it is
+parked rather than done is that **nobody has one of these pads to test with**,
+and G12 is a standing lesson in what shipping an untestable input path costs.
+
+Related: the gamepad menu navigation (G15) assumes a D-pad. A two-button pad
+would need the stick as its nav source — worth doing anyway, since stick nav
+is a ~10-line addition to `tickMenuNav` and is what most players will reach
+for first.
+
+---
+
 ## Bulwark difficulty note (level design)
 
 **Context:** The BULWARK enemy (Stage 0 core roster) is a comparatively HARD
