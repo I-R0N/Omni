@@ -53,7 +53,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           plus input / help / minimap / maps (step 5),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  96 tests
+                          anti-flake rules).  98 tests
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
@@ -1768,14 +1768,26 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     feel like is a function of what the player is holding RIGHT NOW and
     "charging" fires no weapon-change event.  Precedence: no gun or EMP'd →
     released (the disable made physical), charging → a hard wall, otherwise
-    the gun's own profile.  The byte offsets in `REPORT` come from public
-    reverse-engineering and are **UNVERIFIED** — there is no pad in CI, and a
-    pad silently DISCARDS a report with a bad CRC or layout, so a malformed
-    report and an absent pad feel identical.  Hence the two mitigations: the
-    offsets live in ONE table, and `window.__omniHid` exposes the pure
-    builders so `tests/input.spec.ts` can pin CRC-32 against its published
-    vector (`0xCBF43926`) plus the report SHAPE — which bytes move, and that
-    no others do.
+    the gun's own profile.  Profiles are authored in NORMALISED units (0..1 of
+    travel, 0..1 of strength) and converted at the wire, because the two
+    candidate ENCODINGS disagree about ranges while the design intent does
+    not.  The report FRAME matches the Linux kernel's
+    `dualsense_output_report_common` field for field — note the trigger blocks
+    are at data offsets **10 and 21**, not the 11 and 22 most samples quote:
+    those index a buffer whose byte 0 is the REPORT ID, which WebHID's
+    `sendReport(reportId, data)` does not carry, so a literal transcription
+    lands every field one byte late.  The Bluetooth report also pads 24
+    reserved bytes before the CRC; a short report is DROPPED, not truncated.
+    What is still open is the trigger EFFECT encoding: `'zones'` (modes
+    0x21/0x25, parameters packed into ten travel zones) and `'simple'` (modes
+    0x01/0x02, raw byte parameters) are both reported working on different
+    firmware, and a pad silently DISCARDS the one it does not understand — so
+    both ship, selectable at DBG ▸ "trig enc", because the only instrument
+    that can tell them apart is a pad in a hand.  DBG ▸ "HID buzz" pulses the
+    pad's MOTORS through the same framing and CRC to bisect transport from
+    encoding.  `window.__omniHid` exposes the pure builders so
+    `tests/input.spec.ts` can pin CRC-32 against its published vector
+    (`0xCBF43926`), the corrected offsets, and both encodings' bytes.
   - **The pad is POLLED once per rendered frame**, from
     `GameEngine.pollGamepad` at the top of `loop` — above every freeze
     short-circuit, so the pause button works from inside the paused state.

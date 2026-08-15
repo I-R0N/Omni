@@ -86,6 +86,8 @@ interface UIOverlayProps {
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
   onToggleAdaptiveTriggers?: () => void;
+  onCycleTriggerEncoding?: () => void;
+  onTestTriggerLink?: () => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -252,6 +254,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleRumble,
   onSetControlScheme,
   onToggleAdaptiveTriggers,
+  onCycleTriggerEncoding,
+  onTestTriggerLink,
   onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -1245,6 +1249,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     what was actually sent, not just a connected flag. */}
                 {statRow('  ↳ triggers', stats.adaptiveTriggerInfo ?? '—',
                   stats.adaptiveTriggersConnected ? 'text-emerald-300' : 'text-slate-400')}
+                {statRow('  ↳ report', stats.adaptiveTriggerReport ?? '—', 'text-slate-400')}
+                {ctrlRow('  ↳ trig enc', onCycleTriggerEncoding,
+                  stats.adaptiveTriggerInfo?.includes('simple') ? 'simple' : 'zones',
+                  'Which wire encoding the trigger effects are sent in. TWO conventions are in wide use and a DualSense silently discards the one its firmware does not understand, so this is a diagnostic rather than a preference. "zones" = modes 0x21/0x25, parameters packed into ten travel zones (what the console appears to use). "simple" = modes 0x01/0x02, raw byte parameters (what most samples send). If one gives no resistance, try the other.')}
+                {ctrlRow('  ↳ HID buzz', onTestTriggerLink, 'Test',
+                  'Pulses the pad MOTORS through the HID output report — the same framing and CRC the trigger effects ride, but with an encoding that is not in dispute. If this buzzes and the triggers stay limp, the transport is fine and the effect encoding is wrong (try "trig enc"). If it does not buzz, nothing is reaching the pad at all — read the error on the triggers row.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

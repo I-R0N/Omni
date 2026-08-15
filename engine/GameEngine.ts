@@ -901,6 +901,7 @@ export class GameEngine {
       adaptiveTriggersSupported: this.input.adaptiveTriggersSupported(),
       adaptiveTriggersConnected: this.input.adaptiveTriggersConnected(),
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
+      adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1283,6 +1284,14 @@ export class GameEngine {
       : this.input.connectAdaptiveTriggers();
   }
 
+  /** DBG: step the trigger wire encoding, and pulse the pad's motors over the
+   *  SAME HID path to prove the transport independently of the encoding.
+   *  Both exist because a DualSense answers a report it dislikes with
+   *  silence, so "nothing happened" needs to be bisected rather than
+   *  re-guessed. */
+  public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
+  public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
+
   public setDifficulty(level: number) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
       this.difficultyLevel = clamped;
@@ -1581,6 +1590,7 @@ export class GameEngine {
       adaptiveTriggersSupported: this.input.adaptiveTriggersSupported(),
       adaptiveTriggersConnected: this.input.adaptiveTriggersConnected(),
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
+      adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),

@@ -2,7 +2,7 @@
 
 import { Vector2, JoystickHUDState, FireButtonHUDState, ControlScheme, RumbleKind } from '../../types';
 import { INPUT_CONSTANTS, CONTROL_SCHEME_RULES } from '../../constants';
-import { DualSenseHID, TriggerEffect, TRIGGER_OFF } from './DualSenseHID';
+import { DualSenseHID, TriggerProfile, TriggerEncoding, TRIGGER_ENCODINGS, TRIGGER_OFF } from './DualSenseHID';
 
 /** One frame of pad state, reduced to what the mapping layer cares about.
  *  `applyPadSnapshot` takes this rather than a live `Gamepad` so the whole
@@ -384,7 +384,7 @@ export class InputSystem {
   private hid: DualSenseHID = new DualSenseHID();
   /** The profile currently pushed to the pad, so the per-frame sync can
    *  compare before touching an async path at all. */
-  private triggerProfile: TriggerEffect = TRIGGER_OFF;
+  private triggerProfile: TriggerProfile = TRIGGER_OFF;
 
   /** Is the adaptive-trigger path even reachable in this browser?  The UI
    *  uses this to decide whether to OFFER the control, since a button that
@@ -424,7 +424,7 @@ export class InputSystem {
    * The left trigger is always released — the game binds nothing to it, and a
    * clutch on a control that does nothing is just a stiff trigger.
    */
-  public setTriggerProfile(profile: TriggerEffect): void {
+  public setTriggerProfile(profile: TriggerProfile): void {
     this.triggerProfile = profile;
     if (!this.hid.isConnected()) return;
     void this.hid.applyTriggers(profile, TRIGGER_OFF);
@@ -434,8 +434,34 @@ export class InputSystem {
    *  and, when live, the head of the last report actually sent, because a
    *  wrong byte layout is otherwise indistinguishable from a dead pad. */
   public adaptiveTriggerDebugInfo(): string {
-    const info = this.hid.debugInfo();
-    return this.hid.isConnected() ? `${info} · ${this.hid.lastReportHex()}` : info;
+    return this.hid.debugInfo();
+  }
+
+  public adaptiveTriggerReportHex(): string {
+    return this.hid.lastReportHex();
+  }
+
+  public triggerEncoding(): TriggerEncoding {
+    return this.hid.encoding;
+  }
+
+  /** Step to the next wire encoding.  A DIAGNOSTIC, not a preference: the two
+   *  conventions are both reported working on different firmware, a pad
+   *  discards the one it does not understand in silence, and the only
+   *  instrument that can tell them apart is a pad in a hand. */
+  public cycleTriggerEncoding(): void {
+    const i = TRIGGER_ENCODINGS.indexOf(this.hid.encoding);
+    this.hid.setEncoding(TRIGGER_ENCODINGS[(i + 1) % TRIGGER_ENCODINGS.length]);
+  }
+
+  /** Run the pad's motors through the HID report rather than the Gamepad API.
+   *  This BISECTS the feature: the motors ride the same framing and the same
+   *  CRC as the triggers, but their encoding is not in dispute — so a buzz
+   *  here with no trigger resistance means the wire format is right and the
+   *  effect encoding is wrong, while silence on both means nothing is
+   *  reaching the pad at all. */
+  public testAdaptiveTriggerLink(): void {
+    void this.hid.pulseRumble();
   }
 
   /**

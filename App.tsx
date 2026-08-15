@@ -4,7 +4,7 @@ import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
 import UIOverlay from './components/UIOverlay';
-import { crc32, buildTriggerData, buildOutputReport, TRIGGER_MODE } from './engine/systems/DualSenseHID';
+import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -57,7 +57,7 @@ const App: React.FC = () => {
     // connected" look identical.  They are pure, and CRC-32 has a published
     // test vector, so a suite can pin them without hardware.  Nothing in the
     // game reads this.
-    (window as any).__omniHid = { crc32, buildTriggerData, buildOutputReport, TRIGGER_MODE };
+    (window as any).__omniHid = { crc32, buildTriggerData, buildRumbleData, buildOutputReport };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -267,6 +267,14 @@ const App: React.FC = () => {
       // a cancelled device picker is a rejected-then-swallowed promise rather
       // than an error state to render.
       if (engineRef.current) void engineRef.current.toggleAdaptiveTriggers();
+  };
+
+  const handleCycleTriggerEncoding = () => {
+      if (engineRef.current) engineRef.current.cycleTriggerEncoding();
+  };
+
+  const handleTestTriggerLink = () => {
+      if (engineRef.current) engineRef.current.testAdaptiveTriggerLink();
   };
 
   const handleToggleRepelPush = () => {
@@ -560,6 +568,8 @@ const App: React.FC = () => {
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
         onToggleAdaptiveTriggers={handleToggleAdaptiveTriggers}
+        onCycleTriggerEncoding={handleCycleTriggerEncoding}
+        onTestTriggerLink={handleTestTriggerLink}
         onToggleRepelPush={handleToggleRepelPush}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}

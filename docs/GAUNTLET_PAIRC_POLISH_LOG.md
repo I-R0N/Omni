@@ -33,6 +33,7 @@ tuning (step 6).
 | G10 | Stick-driven aim, handedness, pause dropdown (user directive) | **done** |
 | G11 | Gamepad rumble + two pad legibility fixes (user directive) | **done** |
 | G12 | DualSense adaptive triggers over WebHID (user directive) | **done** |
+| G12b | Trigger report corrections + the bisection tooling (hardware report) | **done** |
 
 ---
 
@@ -833,6 +834,78 @@ DEFAULT test state is the mobile state.
 
 ---
 
+### G12b — Three bugs, and a way to stop guessing (hardware report, 2026-08-15)
+
+**Hardware result: no trigger feedback**, Edge, pad connected over HID, every
+weapon tried. G12 shipped with its offsets flagged UNVERIFIED; that flag was
+the correct disclosure and the wrong amount of work. Checking the layout
+properly against the Linux kernel's `dualsense_output_report_common`
+(hid-playstation — a maintained driver against real hardware, not a forum
+post) turns up three defects, two of them certain.
+
+**BUG 1 — every field was one byte late.** The trigger blocks were written at
+data offsets 11 and 22. Those are the numbers nearly every published sample
+quotes, and they are indices into a buffer whose byte 0 is the REPORT ID.
+WebHID's `sendReport(reportId, data)` carries the id SEPARATELY, so a literal
+transcription puts the mode byte in `power_save_control` and the parameters
+in the top of the trigger block. Correct data offsets are **10 and 21**.
+Pinned by a test that asserts the mode byte is at 10 AND is not at 11 — the
+failure mode is a one-byte shift, so an assertion that only checks the right
+place would pass on the wrong data if the block were ever widened.
+
+**BUG 2 — the Bluetooth report was 24 bytes short.** The BT frame is
+report_id + seq_tag + tag + the 47-byte common block + **24 reserved bytes** +
+CRC-32, i.e. 77 data bytes. The reserved span is padding, but its LENGTH is
+not optional: a short HID report is dropped, not truncated. The CRC was also
+computed over the pre-padding payload, so it was wrong as well as short.
+
+**BUG 3 (SUSPECTED, and the reason for the rest of this milestone) — the
+effect encoding may be the wrong convention entirely.** Two are in wide use:
+`'simple'` (modes 0x01/0x02, raw byte parameters) and `'zones'` (modes
+0x21/0x25, parameters packed into ten 0–9 travel zones with a 0–8 strength).
+Both are reported working, on different firmware. G12 shipped 0x01/0x02 with
+byte parameters in the 0–255 range, which under the zones convention is not
+merely different but out of range.
+
+**DECISION G12b-a — ship BOTH encodings behind a DBG cycle instead of picking
+one.** A DualSense answers an effect it does not understand with silence, so
+every guess costs a full hardware round trip, and there is no instrument here
+that can distinguish a wrong guess from a wrong offset. Two encodings and a
+switch turns an unbounded series of commits into one sitting with the pad.
+
+*Alternative rejected:* pick the more likely one (`zones`) and ship again.
+That is the move that produced this milestone.
+
+**DECISION G12b-b — profiles move to NORMALISED units.** `start`/`end` as
+fractions of travel, `strength` as 0..1. The two encodings disagree about
+ranges (0–255 bytes vs 0–9 zones and 0–8 force); the design intent — "the
+Cannon is the deepest pull in the game" — is true in both. Wire units in
+`constants.ts` were what let an out-of-range value look reasonable.
+
+**DECISION G12b-c — a rumble self-test over the SAME HID path.** DBG ▸ "HID
+buzz" drives the pad's motors through the identical framing, length and CRC
+the trigger effects ride, but their two bytes are not in dispute. This
+BISECTS the feature: buzz + no resistance = transport correct, encoding
+wrong; no buzz = nothing is reaching the pad, read the error. Nothing else
+can tell those apart, and they need opposite fixes. It is a DIAGNOSTIC, not a
+feature — force feedback ships through the portable Gamepad API and always
+will.
+
+Also: the DBG row now reports transport, encoding, and either the last error
+or how long ago a report went out — Chrome REJECTS a report whose length
+disagrees with the descriptor and says why, which would have caught bug 2
+immediately had the string been on screen.
+
+**Tests: +2 (net), all six HID tests rewritten.** Offsets 10/21 with the
+off-by-one explicitly excluded, both encodings' bytes, the OFF profile
+clearing all eleven bytes (releasing is an instruction, not a skipped write),
+the rumble block leaving the trigger bytes alone (or the bisection proves
+nothing), and BT framing at 77 bytes with an independently recomputed CRC.
+
+**Gates:** typecheck, build, 98/98 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
@@ -1212,6 +1285,14 @@ Consolidated as they are made; each one names the alternative it beat.
   the sent bytes in the DBG row. Beat: shipping unverifiable offsets with no
   way to correct them, on hardware that answers a malformed report with
   silence.
+- **G12b-a** — ship both wire encodings behind a DBG cycle. Beat: picking the
+  likelier one and shipping again, which is the move that made this milestone
+  necessary.
+- **G12b-b** — profiles in normalised units, converted at the wire. Beat: wire
+  units in `constants.ts`, where an out-of-range value looks reasonable.
+- **G12b-c** — bisect with a rumble pulse over the same HID path. Beat:
+  another round of "try it now", which cannot separate a dead transport from
+  a wrong encoding.
 
 ---
 
@@ -1319,25 +1400,29 @@ push, opens on an iPhone) is the fastest way to run these:
   drone (there is a minimum gap and a stronger-only interrupt rule, but they
   are guesses).
 
-- **HARDWARE CHECK — adaptive triggers (G12). THE BYTE LAYOUT IS UNVERIFIED
-  AND THIS IS THE ONLY WAY TO FIND OUT.** Built and shipped; the CRC and the
-  report shape are pinned by tests, but the OFFSETS inside the report come
-  from public reverse-engineering and no pad exists in this environment. A
-  DualSense silently discards a malformed report, so a wrong offset and a
-  disconnected pad feel exactly the same. To check: desktop Edge or Chrome,
-  pad connected (**USB-C is the reliable transport**; Bluetooth needs the
-  CRC-checked 0x31 report that some firmware rejects), pause ▸ Controls ▸
-  *Connect DualSense Triggers*, pick the pad in the browser dialog. Then:
-  (a) does the right trigger stiffen at all? (b) do the guns feel DIFFERENT
-  from each other — Blaster light and early, Cannon deep and heavy, Laser and
-  Lightning a constant push with no click? (c) does holding a charged shot
-  put up a wall, and does an EMP make the trigger go slack? If (a) fails,
-  read pause ▸ Debug Menu ▸ `↳ triggers`: it shows the transport and the head
-  of the report actually sent, which is what a correction would be made
-  from — every offset is in one `REPORT` table in
-  `engine/systems/DualSenseHID.ts`.
-  **Not built, still available:** the voice-coil haptics and the light bar,
-  reachable through the same transport.
+- **HARDWARE CHECK — adaptive triggers (G12b). THE ONE OPEN QUESTION IS WHICH
+  WIRE ENCODING THIS FIRMWARE HONOURS, AND FIVE MINUTES WITH THE PAD SETTLES
+  IT.** Two certain bugs are fixed (trigger blocks were one byte late; the
+  Bluetooth report was 24 bytes short, so it was being dropped outright).
+  What remains is a genuine fork nothing here can resolve. Do this in order:
+  1. Connect (pause ▸ Controls ▸ *Connect DualSense Triggers*). **USB-C
+     first** — it removes the CRC and the BT framing from the picture
+     entirely.
+  2. Pause ▸ Debug Menu ▸ **"↳ HID buzz"** ▸ Test. **If the pad does not
+     buzz, stop** — nothing is reaching it, and the answer is on the
+     "↳ triggers" row (Chrome names a length mismatch or a refused open;
+     Steam or DS4Windows holding the device exclusively is the usual
+     culprit). Report that string.
+  3. If it buzzes, the transport is proven and only the effect encoding is in
+     question. Fly with the Blaster, then cycle **"↳ trig enc"** between
+     `zones` and `simple`. One of them should make the right trigger stiffen.
+  4. With the working one selected: do the guns feel DIFFERENT — Blaster
+     light and early, Cannon deep and heavy, Laser and Lightning a constant
+     push with no click? Does a charged hold put up a wall, and does an EMP
+     make the trigger go slack?
+  Report which encoding won and it becomes the default, with the cycle kept
+  as a DBG row. **Not built, still available:** the voice-coil haptics and the
+  light bar, over the same transport.
 
 - **OPEN QUESTION — should a held FIRE CONTROL auto-repeat?** Today none of
   them do: the pad trigger and the onscreen fire button both use the same

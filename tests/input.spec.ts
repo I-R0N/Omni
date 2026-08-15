@@ -1386,65 +1386,128 @@ test.describe('adaptive triggers — the DualSense output report', () => {
     watch.assertClean();
   });
 
-  test('a weapon-mode effect writes mode, start, end and force — and nothing else', async ({ page }) => {
+  test('the trigger blocks sit at 10 and 21 — the report id is NOT in the data', async ({ page }) => {
     const watch = await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
+      const off = { kind: 'off', start: 0, end: 0, strength: 0 };
       const d = Array.from(hid.buildTriggerData(
-        { mode: hid.TRIGGER_MODE.WEAPON, start: 80, end: 150, force: 255 },
-        { mode: hid.TRIGGER_MODE.OFF, start: 0, end: 0, force: 0 },
-      ) as Uint8Array);
+        { kind: 'weapon', start: 0.6, end: 0.9, strength: 1 }, off, 'zones') as Uint8Array);
       return {
         len: d.length,
         flag0: d[0],
-        right: d.slice(11, 15),
-        left: d.slice(22, 26),
-        // Everything outside the two effect blocks and the flag bytes must
-        // stay zero: a stray byte in this report is another feature entirely
-        // (lightbar, mic LED, volume) fired by accident.
-        strayCount: d.filter((b, i) => b !== 0 && i !== 0 && !(i >= 11 && i < 22) && !(i >= 22 && i < 33)).length,
+        // The single most likely way for this whole feature to be silently
+        // dead: most published samples index a buffer whose byte 0 is the
+        // REPORT ID, so their "11" is this array's 10.  WebHID takes the data
+        // without that byte, and one byte of drift is a discarded report.
+        modeAt10: d[10],
+        modeAt11: d[11],
+        leftAt21: d[21],
+        rumbleBytesClear: d[2] === 0 && d[3] === 0,
       };
     });
 
     expect(r.len).toBe(47);
-    // Both trigger actuators enabled — the OFF effect is an instruction to
-    // release, so it still needs its enable bit set.
     expect(r.flag0).toBe(0x04 | 0x08);
-    expect(r.right).toEqual([2, 80, 150, 255]);
-    expect(r.left).toEqual([0, 0, 0, 0]);
-    expect(r.strayCount).toBe(0);
+    expect(r.modeAt10).toBe(0x25);
+    expect(r.modeAt11).not.toBe(0x25);
+    // OFF is all zeroes — which is what RELEASES the clutch, so it is a real
+    // instruction and not a skipped write.
+    expect(r.leftAt21).toBe(0);
+    // A trigger report must not also drive the motors: those bytes belong to
+    // the Gamepad API path, and setting them here would fight it.
+    expect(r.rumbleBytesClear).toBe(true);
+
+    watch.assertClean();
   });
 
-  test('resistance mode writes start and force, and end never inverts the click', async ({ page }) => {
+  test('both wire encodings are reachable and produce different bytes', async ({ page }) => {
     await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
-      const off = { mode: hid.TRIGGER_MODE.OFF, start: 0, end: 0, force: 0 };
-      const res = Array.from(hid.buildTriggerData(
-        { mode: hid.TRIGGER_MODE.RESISTANCE, start: 40, end: 0, force: 110 }, off) as Uint8Array);
-      // A weapon effect whose end is at or before its start has no break to
-      // give way at; the builder pushes end past start rather than emitting a
-      // degenerate effect the pad may interpret freely.
-      const degenerate = Array.from(hid.buildTriggerData(
-        { mode: hid.TRIGGER_MODE.WEAPON, start: 60, end: 60, force: 100 }, off) as Uint8Array);
-      return { res: res.slice(11, 15), degenerate: degenerate.slice(11, 15) };
+      const off = { kind: 'off', start: 0, end: 0, strength: 0 };
+      const weapon = { kind: 'weapon', start: 0.6, end: 0.9, strength: 1 };
+      const resist = { kind: 'resistance', start: 0.3, end: 0, strength: 0.5 };
+      const block = (p: any, enc: string) =>
+        Array.from(hid.buildTriggerData(p, off, enc) as Uint8Array).slice(10, 21);
+      return {
+        weaponZones: block(weapon, 'zones'),
+        weaponSimple: block(weapon, 'simple'),
+        resistZones: block(resist, 'zones'),
+        resistSimple: block(resist, 'simple'),
+      };
     });
 
-    // RESISTANCE takes two parameters, not three — byte 3 stays clear.
-    expect(r.res).toEqual([1, 40, 110, 0]);
-    expect(r.degenerate).toEqual([2, 60, 61, 100]);
+    // 'zones': a weapon effect names its start and stop zones as a bitmask.
+    // start 0.6 -> zone 5, end 0.9 -> zone 8, strength 1 -> 8, encoded as 7.
+    expect(r.weaponZones.slice(0, 4)).toEqual([0x25, (1 << 5), 0x01, 7]);
+    // 'simple': the same intent as raw bytes over the full travel.
+    expect(r.weaponSimple.slice(0, 4)).toEqual([0x02, 153, 230, 255]);
+
+    // Resistance takes a different mode in each, and neither writes a break.
+    expect(r.resistZones[0]).toBe(0x21);
+    expect(r.resistSimple.slice(0, 3)).toEqual([0x01, 77, 128]);
+    expect(r.resistSimple[3]).toBe(0);
+
+    // The whole point of shipping both: they must actually differ on the wire.
+    expect(r.weaponZones).not.toEqual(r.weaponSimple);
   });
 
-  test('USB sends the block bare; Bluetooth wraps it in a sequence tag and a CRC', async ({ page }) => {
+  test('an OFF profile clears all eleven bytes — releasing is an instruction', async ({ page }) => {
+    await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const off = { kind: 'off', start: 0, end: 0, strength: 0 };
+      const d = Array.from(hid.buildTriggerData(off, off, 'zones') as Uint8Array);
+      return {
+        right: d.slice(10, 21),
+        left: d.slice(21, 32),
+        // The enable bits stay SET: the pad has to be listening to the
+        // trigger actuators to be told to let go of them.
+        flag0: d[0],
+      };
+    });
+
+    expect(r.right).toEqual(new Array(11).fill(0));
+    expect(r.left).toEqual(new Array(11).fill(0));
+    expect(r.flag0).toBe(0x04 | 0x08);
+  });
+
+  test('the rumble self-test drives the motors and leaves the triggers alone', async ({ page }) => {
+    await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const d = Array.from(hid.buildRumbleData(1, 0.5) as Uint8Array);
+      return {
+        flag0: d[0],
+        strong: d[3],
+        weak: d[2],
+        triggersClear: d.slice(10, 32).every((b: number) => b === 0),
+      };
+    });
+
+    // COMPATIBLE_VIBRATION | HAPTICS_SELECT — both, or the motors stay idle.
+    expect(r.flag0).toBe(0x01 | 0x02);
+    expect(r.strong).toBe(255);
+    expect(r.weak).toBe(128);
+    // The bisection only works if this report says nothing about the
+    // triggers: otherwise a buzz would prove nothing about them either way.
+    expect(r.triggersClear).toBe(true);
+  });
+
+  test('USB sends the block bare; Bluetooth pads to full length and appends a CRC', async ({ page }) => {
     await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
       const data = hid.buildTriggerData(
-        { mode: hid.TRIGGER_MODE.WEAPON, start: 30, end: 50, force: 90 },
-        { mode: hid.TRIGGER_MODE.OFF, start: 0, end: 0, force: 0 },
+        { kind: 'weapon', start: 0.25, end: 0.45, strength: 0.35 },
+        { kind: 'off', start: 0, end: 0, strength: 0 },
+        'zones',
       ) as Uint8Array;
 
       const usb = hid.buildOutputReport(data, false, 0);
@@ -1452,8 +1515,8 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       const btBytes = Array.from(bt.bytes as Uint8Array);
 
       // Recompute the CRC the way the pad does: over the 0xA2 seed byte, the
-      // report id, and the payload ahead of the trailing four bytes.
-      const crcInput = [0xa2, 0x31, btBytes[0], btBytes[1], ...Array.from(data as Uint8Array)];
+      // report id, and everything ahead of the trailing four bytes.
+      const crcInput = [0xa2, 0x31, ...btBytes.slice(0, btBytes.length - 4)];
       const expected = hid.crc32(crcInput);
       const at = btBytes.length - 4;
       const trailer = (btBytes[at] | (btBytes[at + 1] << 8) | (btBytes[at + 2] << 16) | (btBytes[at + 3] << 24)) >>> 0;
@@ -1475,8 +1538,12 @@ test.describe('adaptive triggers — the DualSense output report', () => {
     expect(r.usbBare).toBe(true);
 
     expect(r.btId).toBe(0x31);
-    // 2 framing bytes + the 47-byte block + a 4-byte CRC.
-    expect(r.btLen).toBe(53);
+    // 2 framing bytes + the 47-byte block + 24 reserved + a 4-byte CRC = 77,
+    // i.e. 78 with the report id.  The reserved span is padding, but its
+    // LENGTH is not optional: a short report is a DROPPED report, not a
+    // partial one, and leaving it out was the second of this feature's two
+    // silent-failure bugs.
+    expect(r.btLen).toBe(77);
     // The sequence counter lives in the HIGH nibble, so 3 reads as 0x30 — a
     // low-nibble version is the kind of mistake the pad answers with silence.
     expect(r.seqByte).toBe(0x30);
@@ -1516,17 +1583,17 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       e.player.currentWeapon = weapon;
 
       return {
-        armedMode: armed.mode, armedForce: armed.force,
-        disabledMode: disabled.mode,
-        weaponlessMode: weaponless.mode,
+        armedKind: armed.kind, armedStrength: armed.strength,
+        disabledKind: disabled.kind,
+        weaponlessKind: weaponless.kind,
       };
     });
 
     // The starting Blaster: the lightest click in the table.
-    expect(r.armedMode).toBe(2);
-    expect(r.armedForce).toBe(90);
-    expect(r.disabledMode).toBe(0);
-    expect(r.weaponlessMode).toBe(0);
+    expect(r.armedKind).toBe('weapon');
+    expect(r.armedStrength).toBeCloseTo(0.35, 5);
+    expect(r.disabledKind).toBe('off');
+    expect(r.weaponlessKind).toBe('off');
 
     watch.assertClean();
   });

@@ -1685,6 +1685,11 @@ export interface EngineStats {
   adaptiveTriggersSupported?: boolean;
   adaptiveTriggersConnected?: boolean;
   adaptiveTriggerInfo?: string;
+  /** The head of the last output report actually sent, as hex.  The only
+   *  window into a transport that reports nothing back: a pad discards a
+   *  malformed report in silence, so the bytes on the wire are the evidence a
+   *  correction would be made from. */
+  adaptiveTriggerReport?: string;
   /** The active control scheme (menu selection).  Drives the menu's own
    *  selector, the help panel's highlight, and the two touch HUD widgets. */
   controlScheme?: ControlScheme;
