@@ -13,7 +13,10 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S2 — Density derived from area.** Star count is now
       `area × STAR_DENSITY_CYCLE[i]`; density delta 3.95× → 0.96×. Pinned by
       `tests/starfield.spec.ts` (4 tests).
-- [ ] **S3 — Kill the resampling.**
+- [x] **S3 — Kill the resampling.** Bands are device-resolution, stars land on
+      whole device pixels, the blit is 1:1 at integer offsets. Audited against
+      the live render: 100% unscaled, 100% integer-aligned, at every ratio.
+      **Costs memory — S4's subject.**
 - [ ] **S4 — Memory and draw calls.**
 - [ ] **S5 — Docs + validation.**
 
@@ -26,14 +29,20 @@ readiness probe, the same mulberry32 seed the capture matrix installs, so two
 runs build the same sky and a difference in the pixels is a difference in
 rasterization rather than in the seed.
 
-It reports four things, and they are not worth the same:
+It reports five things, and they are not worth the same:
 
 | measurement | how | worth |
 |---|---|---|
 | structure — band count, canvas dims, backing-store bytes | read off the live `BackgroundManager` | exact, browser independent |
-| density — lit source pixels per band, per 10k CSS px² | `getImageData` over the band canvases | exact |
-| resampling — device pixels lit + luma histogram | replays the real blit at integer vs fractional offset, reads back device pixels | exact per engine; see the WebKit caveat |
+| density — star count, and lit source pixels as a % of device pixels | manager fields + `getImageData` over the band canvases | exact |
+| star footprint — scanline run lengths in a band canvas | `getImageData` | exact |
+| **the real blit path** — is each band blit unscaled and integer-aligned? | wraps `drawImage` on the LIVE context, reads the transform in force and the post-transform destination | exact; this is the S3 acceptance check |
 | draw calls | wraps `drawImage` on the live render context for 60 frames | exact |
+
+Plus a clearly-labelled **counterfactual** control that replays the *old*
+fractional dpr-scaled blit, so the filter's effect stays visible for
+comparison. It measures what the code no longer does, and is captioned that
+way — see the S3 correction note.
 
 Frame TIME is deliberately **not** reported. This container rasterizes canvas
 in software (`perf/README.md`), so a millisecond figure for a fill-rate-bound
@@ -241,6 +250,74 @@ showed *before* this change, and 729 is what the phone showed from the same
 absolute budget; both endpoints of the bug are in the table so the call can be
 overturned by looking.
 
+## S3 — kill the resampling
+
+There were **two** filters in the path, not one. S1's claim 2b is why:
+
+1. **Generation.** `fillRect(Math.random() * width, …, 1, 1)` — a 1×1 rect at a
+   FRACTIONAL origin, which Canvas2D antialiases into a 2×2 partial-alpha
+   block. Fixed by generating bands at device resolution and drawing each star
+   at `Math.floor` device coordinates with an integer device size.
+2. **Blit.** A CSS-px band drawn into a `setTransform(dpr,…)` context at a
+   fractional scroll offset. Fixed by blitting under the IDENTITY transform
+   (the bands are already device-resolution) at `Math.round`ed device offsets,
+   with `imageSmoothingEnabled = false` as belt and braces.
+
+Fixing only (2) would have left every star a smear regardless — which is why
+S1 measuring the source footprint mattered.
+
+### Verified against the live render, not by reading
+
+`perf/starfield.mjs` gained `BLIT_PROBE`: it wraps `drawImage` on the real
+context, reads back the transform in force and the post-transform destination,
+and reports what fraction of band blits are unscaled and integer-aligned.
+
+```
+                 blits/30f   unscaled   integer dst   smoothing off
+390x844  dpr1        7320       100%          100%            100%
+390x844  dpr2        7320       100%          100%            100%
+390x844  dpr3        7320       100%          100%            100%
+1440x900 dpr1        7320       100%          100%            100%
+1440x900 dpr2        7320       100%          100%            100%
+```
+
+Source star footprint, scanline runs in a band canvas — the generation half:
+
+```
+              before S3          after S3
+390x844 dpr1  2px: 93.8%         1px: 100%
+390x844 dpr2  2px: 93.8%         1px: 50.7%, 2px: 49.3%   (= round(size x dpr))
+```
+
+The dpr-2 split is the intended `round(size × dpr)`: a star is 1 or 2 whole
+device pixels, never a fraction of one.
+
+**A probe correction worth recording.** The S1 resample section replayed a
+blit at fractional offsets. After S3 the shipped code does no such thing, so
+that section was measuring a counterfactual — still useful as a control, but
+misleading presented as a measurement. It is now labelled COUNTERFACTUAL and
+the real path is audited separately. The same pass fixed a units bug in the
+density column: it divided lit DEVICE pixels by CSS area, which multiplies
+coverage by dpr² and made a dpr-2 run of an identical sky look 37% denser
+than the dpr-1 run. Density is now reported as exact star count from the
+manager, and coverage as a fraction of device pixels.
+
+### The cost, stated plainly
+
+Device-resolution bands are dpr² larger:
+
+```
+                    before S3     after S3
+390x844  dpr2          80.3 MB      321.3 MB
+1440x900 dpr2         316.2 MB     1264.9 MB
+```
+
+**1.26 GB of backing store on a desktop retina window.** This is the expected
+consequence of S3 and is exactly what S4 exists to fix — the brief orders them
+this way on purpose ("with (2) and (3) settled, revisit whether 60 separate
+full-viewport canvases is the right structure at all"). It is an intermediate
+state inside one PR, not a shipping one. **S4 must land.**
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -280,6 +357,28 @@ different axis. Anchored to the phone's count rather than the desktop's (unlike
 D3) because it is an authored feature that should read on the target device,
 and it has spent its whole life invisible under the haze S2 removes.
 
+**D6 — Fix the SOURCE smear as well as the blit, rather than only the blit.**
+Beat: the brief's literal instruction, "render bands at DEVICE resolution so a
+star lands on whole device pixels", which on its own means resizing the band
+canvases and nothing else. That would have left every star an antialiased 2×2
+block from the fractional `fillRect` origin — S1's claim 2b — so the field
+would still have been soft, and the fix would have looked like it failed.
+Snapping star positions and sizes to whole device pixels is the other half.
+
+**D7 — Round the DRAW, keep the ACCUMULATOR fractional.** Beat: rounding
+`band.offsetX` itself, which is the obvious way to get integer offsets. It
+would quantise slow parallax to a dead stop: the furthest bands move well under
+half a device pixel per frame, so each frame's rounding would discard the
+entire shift and the distant layers would never move at all.
+
+**D8 — Default the size floor to one DEVICE pixel, not one CSS pixel.** Beat:
+`'css'`, which preserves the apparent star size the field has always had. The
+point of S3 is that a high-dpi display can now show a finer sky than a CSS
+pixel permits, and defaulting to the CSS floor would spend the whole change on
+crispness while throwing the resolution away. The two are identical at dpr 1,
+so this only decides what dpr ≥ 2 looks like — and it is a DBG cycle, so it is
+one tap to disagree.
+
 **D5 — Split the budget evenly across bands and absorb the round-off in the
 total.** Beat: giving band 0 the remainder. A remainder in one band makes the
 furthest parallax layer measurably denser than the rest, which is exactly the
@@ -297,6 +396,19 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
   its existing density. If the phone now looks too empty, **pause ▸ Debug Menu
   ▸ Visual ▸ Star density** cycles 185 → 320 → 729 → 90; 729 is exactly what
   the phone showed before. Tell me which one and it becomes the default.
+
+- **S3 — the sky is sharper, and on a retina screen it is FINER.** At dpr 1
+  nothing much changes: a star was a 1-CSS-px rect, and it still is, just no
+  longer antialiased across four pixels. At dpr ≥ 2 the change is real — a star
+  may now be a single DEVICE pixel, so the field reads as finer and more
+  pinpoint rather than soft. That is the intent, but it is a taste call.
+  **pause ▸ Debug Menu ▸ Visual ▸ Star size** flips it: `Device px` (default,
+  finest) vs `CSS px` (never smaller than one CSS pixel — the apparent size the
+  field has always had, but crisp instead of filtered). Identical at dpr 1.
+  Screenshots: `perf/out/shots/s2/` (pre-S3) vs `perf/out/shots/s3/` at dpr 1
+  and dpr 2 — regenerate with
+  `node perf/starfield.mjs --shot <dir> --dpr 2 --width 390 --height 844`
+  (`perf/out/` is gitignored by repo convention, so they are not in the tree).
 
 - **The WebKit gap.** The Edge-vs-Safari delta cannot be reproduced in this
   container (proxy blocks Playwright's WebKit download). If you can re-shoot
@@ -322,6 +434,26 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 3 — S3 (kill the resampling)
+
+Device-resolution bands; integer star placement and integer device sizes;
+identity-transform 1:1 blit at rounded device offsets; `sceneDpr` added to the
+rebuild guard so a render-scale cap change regenerates the bands (without it
+the blit silently stops being 1:1 — the defect returning through a different
+door). `STAR_SIZE_CYCLE` DBG knob under Visual. Dead `size < 1.5` arc branch
+removed from both star loops — S1 proved size tops out at 1.17 CSS px.
+
+`perf/starfield.mjs` gained the real-path `BLIT_PROBE` and lost two
+instrument defects (see above): a counterfactual presented as a measurement,
+and a device-px-over-CSS-area units bug in the density column.
+
+Two tests added and one existing assertion changed. **The changed one:**
+`bandCanvasW === 1000` became `=== round(1000 × sceneDpr)`. Its meaning
+legitimately changed — band canvases are DEVICE-resolution as of this
+milestone, so the old assertion was only right by coincidence at dpr 1 and
+would have been wrong the moment the suite ran at any other ratio. It is also
+an assertion this PR authored two commits earlier, not a pre-existing one.
 
 ### Iteration 2 — S2 (density derived from area)
 

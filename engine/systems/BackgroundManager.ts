@@ -2,7 +2,7 @@
 import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
-  STARFIELD_CONSTANTS, getActiveStarDensity,
+  STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -48,6 +48,16 @@ export class BackgroundManager {
   private puffTextures: (HTMLCanvasElement | HTMLImageElement)[] = [];
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
+  // The pixel ratio the CURRENT bands were generated at.  Band canvases are
+  // device-resolution (S3), so a change to the render-scale cap resizes them
+  // even though the CSS scene size is unchanged — without this the bands would
+  // keep their old device size and the 1:1 blit would silently become a scaled
+  // one, which is the exact defect S3 removes.
+  private sceneDpr: number = 0;
+  // Band canvas size in DEVICE pixels.  The scroll offsets and the 4-way tile
+  // wrap are all in this space, because that is the space the blit is 1:1 in.
+  private bandPixelWidth: number = 0;
+  private bandPixelHeight: number = 0;
   private initialized: boolean = false;
   // Derived star budget for the CURRENT scene size, kept as fields rather than
   // recomputed, because they are the numbers the density invariant is stated
@@ -197,9 +207,27 @@ public setMapType(type: MapType) {
     }
   }
 
-  private initContent(width: number, height: number) {
+  /** Device-pixel size for a star whose designed size is `sizeCss` CSS px.
+   *
+   *  Always an INTEGER, and always at least 1, so the star fills whole device
+   *  pixels.  A fractional size would be antialiased at the edges, which is
+   *  half of the resampling S3 exists to remove — the other half being the
+   *  fractional POSITION, handled at the call sites. */
+  private starDevicePx(sizeCss: number, dpr: number): number {
+    const floor = getActiveStarSizeMode() === 'css' ? Math.max(1, Math.round(dpr)) : 1;
+    return Math.max(floor, Math.round(sizeCss * dpr));
+  }
+
+  private initContent(width: number, height: number, dpr: number) {
     this.sceneWidth = width;
     this.sceneHeight = height;
+    this.sceneDpr = dpr;
+    // Bands are DEVICE-resolution: generated at the size they will be blitted
+    // at, so `drawImage` runs 1:1 with no filter in the path.
+    const pw = Math.max(1, Math.round(width * dpr));
+    const ph = Math.max(1, Math.round(height * dpr));
+    this.bandPixelWidth = pw;
+    this.bandPixelHeight = ph;
     // starBands and milkyWayBand are (re)initialized further down in this
     // same method, alongside the rest of the band-generation pass.
     this.nebulaPuffs = [];
@@ -254,7 +282,7 @@ public setMapType(type: MapType) {
 
     // Pre-render milky way to its own band canvas (scrolls at a fixed slow speed).
     const mwCanvas = document.createElement('canvas');
-    mwCanvas.width = width; mwCanvas.height = height;
+    mwCanvas.width = pw; mwCanvas.height = ph;
     const mwCtx = mwCanvas.getContext('2d')!;
     const mwAngle = (Math.random() - 0.5);
     const mwColors = ['#8b5cf6', '#3b82f6', '#fbbf24', '#f472b6'];
@@ -267,13 +295,16 @@ public setMapType(type: MapType) {
       Math.round((width / 1000) * STARFIELD_CONSTANTS.MILKY_WAY_PER_1K_WIDTH),
     );
     for (let i = 0; i < this.milkyWayStarCount; i++) {
-        const x = Math.random() * width;
-        const y = (height / 2) + Math.tan(mwAngle) * (x - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
+        // Laid out in CSS space (where the design constants live), then
+        // snapped to whole DEVICE pixels — see the star-band loop below for
+        // why the snap is the point rather than an optimisation.
+        const xCss = Math.random() * width;
+        const yCss = (height / 2) + Math.tan(mwAngle) * (xCss - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
         const size = 0.3 + Math.pow(Math.random(), 3) * 0.6;
         mwCtx.globalAlpha = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
         mwCtx.fillStyle = Math.random() > 0.7 ? mwColors[Math.floor(Math.random() * mwColors.length)] : starColor();
-        if (size < 1.5) { mwCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
-        else { mwCtx.beginPath(); mwCtx.arc(x, y, size, 0, Math.PI * 2); mwCtx.fill(); }
+        const px = this.starDevicePx(size, dpr);
+        mwCtx.fillRect(Math.round(xCss * dpr), Math.round(yCss * dpr), px, px);
     }
     mwCtx.globalAlpha = 1.0;
     this.milkyWayBand = { canvas: mwCanvas, speed: 0.03, offsetX: 0, offsetY: 0 };
@@ -303,7 +334,7 @@ public setMapType(type: MapType) {
         const tMid = (b + 0.5) / NUM_BANDS;
         const speed = 0.02 + (tMid * tMid) * 2.0;
         const bandCanvas = document.createElement('canvas');
-        bandCanvas.width = width; bandCanvas.height = height;
+        bandCanvas.width = pw; bandCanvas.height = ph;
         const bandCtx = bandCanvas.getContext('2d')!;
         // Per-band brightness cap: furthest band (b=0) dimmest at 25%,
         // closest band (b=NUM_BANDS-1) brightest at 95%, linear between.
@@ -321,10 +352,25 @@ public setMapType(type: MapType) {
             const opacity = bandBrightness * variation;
             bandCtx.globalAlpha = opacity;
             bandCtx.fillStyle = starColor();
-            const x = Math.random() * width;
-            const y = Math.random() * height;
-            if (size < 1.5) { bandCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
-            else { bandCtx.beginPath(); bandCtx.arc(x, y, size, 0, Math.PI * 2); bandCtx.fill(); }
+            // WHOLE DEVICE PIXELS, both position and size.
+            //
+            // This used to be `fillRect(Math.random() * width, …, max(1, size),
+            // …)` in CSS space.  The rect was 1x1, but its ORIGIN was
+            // fractional, so Canvas2D antialiased every star into a 2x2 block
+            // of partial-alpha pixels before anything else touched it —
+            // measured at 93.8% of scanline runs being 2px wide (S1, claim 2b).
+            // Flooring the position and rounding the size to integers is what
+            // makes a star occupy exactly the pixels it is drawn into.
+            //
+            // The `size < 1.5` arc branch that used to sit here was dead code:
+            // star size tops out at 1.17 CSS px, so the fillRect branch always
+            // won.  An arc would reintroduce edge antialiasing anyway.
+            const px = this.starDevicePx(size, dpr);
+            bandCtx.fillRect(
+                Math.floor(Math.random() * pw),
+                Math.floor(Math.random() * ph),
+                px, px,
+            );
         }
         bandCtx.globalAlpha = 1.0;
         this.starBands.push({ canvas: bandCanvas, speed, offsetX: 0, offsetY: 0 });
@@ -345,8 +391,9 @@ public setMapType(type: MapType) {
     const height = ctx.canvas.height / dpr;
     if (width === 0 || height === 0) return;
 
-    if (!this.initialized || width !== this.sceneWidth || height !== this.sceneHeight) {
-        this.initContent(width, height);
+    if (!this.initialized || width !== this.sceneWidth || height !== this.sceneHeight
+        || dpr !== this.sceneDpr) {
+        this.initContent(width, height, dpr);
         this.lastCameraPos = { ...cameraPos };
     }
 
@@ -431,15 +478,38 @@ public setMapType(type: MapType) {
     ctx.globalAlpha = 1.0;
 
     // RENDER STARS — each band is a pre-rendered canvas, shifted each frame
-    // and tiled 4-ways for seamless wrapping. 32 drawImage calls vs 12,000.
+    // and tiled 4-ways for seamless wrapping.
+    //
+    // NO RESAMPLING IN THIS PATH (S3).  The bands are generated at DEVICE
+    // resolution, so the blit runs under the IDENTITY transform — not the
+    // dpr-scaled one the rest of the background uses — and every offset is
+    // rounded to a whole device pixel.  A CSS-px band drawn into a
+    // `setTransform(dpr,…)` context at a fractional offset is what made the
+    // field browser-dependent: measured, that turned 296 lit device pixels at
+    // mean luma 32.3 into 635 at 14.7, by whichever filter the engine happened
+    // to pick (S1, claim 2c).  1:1 and integer-aligned, there is no filter to
+    // pick.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Belt and braces: with a 1:1 integer blit there is nothing to interpolate,
+    // but an explicitly disabled smoother means a future half-pixel slip
+    // degrades into a hard edge rather than quietly back into a filter.
+    ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = 1.0;
+    const bw = this.bandPixelWidth;
+    const bh = this.bandPixelHeight;
     const drawBand = (band: StarBand, shiftX: number, shiftY: number) => {
-        band.offsetX = ((band.offsetX - shiftX) % width + width) % width;
-        band.offsetY = ((band.offsetY - shiftY) % height + height) % height;
-        ctx.drawImage(band.canvas, band.offsetX,         band.offsetY);
-        ctx.drawImage(band.canvas, band.offsetX - width, band.offsetY);
-        ctx.drawImage(band.canvas, band.offsetX,         band.offsetY - height);
-        ctx.drawImage(band.canvas, band.offsetX - width, band.offsetY - height);
+        // The ACCUMULATOR stays fractional and only the DRAW is rounded.
+        // Rounding the accumulator instead would quantise slow parallax to a
+        // standstill: the furthest bands move well under half a device pixel
+        // per frame, and each frame's rounding would discard the whole shift.
+        band.offsetX = ((band.offsetX - shiftX * dpr) % bw + bw) % bw;
+        band.offsetY = ((band.offsetY - shiftY * dpr) % bh + bh) % bh;
+        const ox = Math.round(band.offsetX);
+        const oy = Math.round(band.offsetY);
+        ctx.drawImage(band.canvas, ox,      oy);
+        ctx.drawImage(band.canvas, ox - bw, oy);
+        ctx.drawImage(band.canvas, ox,      oy - bh);
+        ctx.drawImage(band.canvas, ox - bw, oy - bh);
     };
 
     if (this.milkyWayBand) drawBand(this.milkyWayBand, dx * 0.03, dy * 0.03);
@@ -447,6 +517,10 @@ public setMapType(type: MapType) {
         drawBand(band, dx * band.speed * 0.2, dy * band.speed * 0.2);
     }
 
+    // Back to CSS-pixel space for the shooting stars, which are laid out in
+    // CSS units like the rest of the renderer.
+    ctx.imageSmoothingEnabled = true;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.updateAndDrawShootingStars(ctx, width, height);
 
     ctx.restore();

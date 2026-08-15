@@ -34,7 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
-    cycleStarDensity,
+    cycleStarDensity, cycleStarSize,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -541,6 +541,19 @@ export class DebugControls {
    *  resize and the change would not show up until the window moved. */
   cycleStarDensity() {
     cycleStarDensity();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the star SIZE floor — 'device' (a star may be one device
+   *  pixel; default) vs 'css' (never smaller than one CSS pixel, the
+   *  apparent-size floor the field had before the bands went device-
+   *  resolution).  Identical at dpr 1 by construction; the knob only
+   *  differs where the resampling problem was, which is dpr >= 2.
+   *
+   *  Like the density cycle this is a generation-time input, so it has to
+   *  invalidate the background rather than only stepping the constant. */
+  cycleStarSize() {
+    cycleStarSize();
     this.g.renderer.invalidateBackground();
   }
 

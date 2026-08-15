@@ -1665,6 +1665,8 @@ export interface EngineStats {
   swarmMoveName?: string;
   /** DBG: active star-field density (stars per 10 000 CSS px²). */
   starDensityName?: string;
+  /** DBG: active star size floor ('Device px' / 'CSS px'). */
+  starSizeName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).

@@ -213,9 +213,14 @@ const PROBE = () => {
   };
 
   const dprNow = window.devicePixelRatio;
+  // The ratio the BANDS were generated at — the capped `effectiveDpr`, which
+  // is what the 1:1 blit depends on and is not always `window.devicePixelRatio`.
+  const sceneDpr = bg.sceneDpr ?? dprNow;
+  const areaCss = bg.sceneWidth * bg.sceneHeight;
 
   return {
     devicePixelRatio: dprNow,
+    sceneDpr,
     // What the manager itself believes the scene is.
     sceneWidth: bg.sceneWidth,
     sceneHeight: bg.sceneHeight,
@@ -231,20 +236,92 @@ const PROBE = () => {
     backingStoreBytes: bytes,
     backingStoreMB: +(bytes / 1e6).toFixed(1),
 
-    // Density, expressed the way the fix has to reason about it.
+    // ── density ────────────────────────────────────────────────────────────
+    // Star COUNT comes off the manager and is exact; it is also the quantity
+    // S2's invariant is stated in, so it is the one to compare across
+    // viewports.  Lit-PIXEL coverage is reported separately and as a FRACTION
+    // OF DEVICE PIXELS — dividing device pixels by CSS area (as this probe did
+    // before S3) silently multiplies coverage by dpr^2 and makes a dpr-2 run
+    // look denser than a dpr-1 run of the identical sky.
+    starCount: bg.starCount ?? 0,
+    starsPerBand: bg.starsPerBand ?? 0,
+    starsPer10kCssPx: +(((bg.starCount ?? 0) / areaCss) * 1e4).toFixed(2),
     litPerBandSampled: sampled,
     meanLitPerBand: +meanLitPerBand.toFixed(1),
     litTotalEstimate: Math.round(meanLitPerBand * bands.length),
-    sceneAreaCssPx: bg.sceneWidth * bg.sceneHeight,
-    litPer10kCssPx: +((meanLitPerBand * bands.length) / (bg.sceneWidth * bg.sceneHeight) * 1e4).toFixed(2),
+    sceneAreaCssPx: areaCss,
+    litCoveragePctOfDevicePx: +(
+      (meanLitPerBand * bands.length) / (areaCss * sceneDpr * sceneDpr) * 100
+    ).toFixed(2),
 
     sourceRunHistogram: runHist,
 
-    resampleInteger: resample(dprNow, 0),
-    resampleFractional: resample(dprNow, 0.5),
-    resampleThird: resample(dprNow, 0.37),
+    // COUNTERFACTUAL CONTROL, not a measurement of the shipped path.  This
+    // replays the blit the code used to perform — a band drawn into a
+    // dpr-scaled context at a fractional offset — so the filter's effect stays
+    // visible for comparison.  What the code ACTUALLY does now is audited by
+    // BLIT_PROBE below, against the live render.
+    counterfactualInteger: resample(sceneDpr, 0),
+    counterfactualFractional: resample(sceneDpr, 0.5),
   };
 };
+
+/** Audits the REAL band blit: wraps `drawImage` on the live context and records
+ *  the transform in force and the destination coordinates actually used.
+ *
+ *  This is the check that matters for S3. A star lands on whole device pixels
+ *  only if the blit is (a) unscaled — identity transform, because the bands are
+ *  already device-resolution — and (b) at integer destination coordinates. Both
+ *  are observable from inside `drawImage`, so neither has to be taken on trust. */
+const BLIT_PROBE = (frames) => new Promise(resolve => {
+  const e = window.__omniEngine;
+  const ctx = e.renderer.ctx;
+  const proto = Object.getPrototypeOf(ctx);
+  const real = proto.drawImage;
+  const bg = e.renderer.backgroundManager;
+  const realRender = bg.render.bind(bg);
+  let inBg = false;
+  const seen = { n: 0, identityScale: 0, integerDst: 0, smoothingOff: 0, samples: [] };
+
+  bg.render = function (...args) { inBg = true; try { return realRender(...args); } finally { inBg = false; } };
+  proto.drawImage = function (img, ...rest) {
+    if (inBg && rest.length === 2) {
+      const t = this.getTransform();
+      const [dx, dy] = rest;
+      seen.n++;
+      // Unscaled and unrotated: the band is blitted 1:1.
+      if (t.a === 1 && t.d === 1 && t.b === 0 && t.c === 0) seen.identityScale++;
+      // Integer DEVICE-pixel destination, after the transform is applied.
+      const px = t.a * dx + t.c * dy + t.e;
+      const py = t.b * dx + t.d * dy + t.f;
+      if (Number.isInteger(px) && Number.isInteger(py)) seen.integerDst++;
+      if (this.imageSmoothingEnabled === false) seen.smoothingOff++;
+      if (seen.samples.length < 4) {
+        seen.samples.push({ dx, dy, devX: +px.toFixed(3), devY: +py.toFixed(3),
+                            scaleX: t.a, scaleY: t.d, smoothing: this.imageSmoothingEnabled });
+      }
+    }
+    return real.call(this, img, ...rest);
+  };
+
+  let n = 0;
+  const tick = () => {
+    if (++n >= frames) {
+      proto.drawImage = real;
+      bg.render = realRender;
+      resolve({
+        blits: seen.n,
+        pctUnscaled: +(seen.n ? (seen.identityScale / seen.n) * 100 : 0).toFixed(1),
+        pctIntegerDst: +(seen.n ? (seen.integerDst / seen.n) * 100 : 0).toFixed(1),
+        pctSmoothingOff: +(seen.n ? (seen.smoothingOff / seen.n) * 100 : 0).toFixed(1),
+        samples: seen.samples,
+      });
+      return;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+});
 
 /** Counts drawImage calls issued into the LIVE render context over N frames. */
 const DRAWCALL_PROBE = (frames) => new Promise(resolve => {
@@ -295,6 +372,7 @@ for (const cfg of CONFIGS) {
 
   const probe = await page.evaluate(PROBE);
   const draws = await page.evaluate(DRAWCALL_PROBE, 60);
+  const blit = await page.evaluate(BLIT_PROBE, 30);
 
   if (shotDir) {
     mkdirSync(shotDir, { recursive: true });
@@ -302,7 +380,7 @@ for (const cfg of CONFIGS) {
     await page.screenshot({ path: `${shotDir}/${name}` });
   }
 
-  results.push({ label, browser: browserName, config: cfg, ...probe, draws, consoleErrors: errors });
+  results.push({ label, browser: browserName, config: cfg, ...probe, draws, blit, consoleErrors: errors });
   await ctx.close();
 }
 
@@ -313,18 +391,31 @@ const pad = (s, n) => String(s).padEnd(n);
 const rpad = (s, n) => String(s).padStart(n);
 
 console.log(`\n=== star field — ${browserName} — map ${MAP} ===\n`);
-console.log(pad('viewport', 14) + rpad('dpr', 4) + rpad('bands', 7) + rpad('band px', 12) +
-            rpad('backing MB', 12) + rpad('stars', 8) + rpad('per 10k css px2', 17) + rpad('bg draws/f', 12));
+console.log(pad('viewport', 12) + rpad('dpr', 4) + rpad('bands', 7) + rpad('band px', 12) +
+            rpad('backing MB', 12) + rpad('stars', 8) + rpad('stars/10k css', 15) +
+            rpad('lit % dev px', 14) + rpad('bg draws/f', 12));
 for (const r of results) {
   console.log(
-    pad(`${r.config.width}x${r.config.height}`, 14) +
+    pad(`${r.config.width}x${r.config.height}`, 12) +
     rpad(r.config.dpr, 4) +
     rpad(r.numBands + (r.hasMilkyWay ? '+mw' : ''), 7) +
     rpad(`${r.bandCanvasW}x${r.bandCanvasH}`, 12) +
     rpad(r.backingStoreMB, 12) +
-    rpad(r.litTotalEstimate, 8) +
-    rpad(r.litPer10kCssPx, 17) +
+    rpad(r.starCount, 8) +
+    rpad(r.starsPer10kCssPx, 15) +
+    rpad(r.litCoveragePctOfDevicePx, 14) +
     rpad(r.draws.perFrameBackground, 12),
+  );
+}
+
+console.log(`\n--- the REAL blit path (what the shipped code does, per frame) ---`);
+console.log(`(a star lands on whole device pixels iff the blit is unscaled AND integer-aligned)`);
+for (const r of results) {
+  const b = r.blit;
+  console.log(
+    pad(`${r.config.width}x${r.config.height} dpr${r.config.dpr}`, 20) +
+    `blits ${rpad(b.blits, 5)}   unscaled ${rpad(b.pctUnscaled + '%', 7)}` +
+    `   integer dst ${rpad(b.pctIntegerDst + '%', 7)}   smoothing off ${rpad(b.pctSmoothingOff + '%', 7)}`,
   );
 }
 
@@ -337,15 +428,18 @@ for (const r of results) {
   console.log(`${r.config.width}x${r.config.height} dpr${r.config.dpr}: ${desc}`);
 }
 
-console.log(`\n--- resampling: device pixels lit, and their luma spread ---`);
-console.log(`(integer offset vs fractional offset; a filter shows up as more lit pixels at lower mean luma)`);
+console.log(`\n--- COUNTERFACTUAL: what a fractional, dpr-scaled blit would still do ---`);
+console.log(`(control only — the shipped path above does neither. A filter shows up as`);
+console.log(` more lit device pixels at lower mean luma.)`);
 for (const r of results) {
-  const a = r.resampleInteger, b = r.resampleFractional, c = r.resampleThird;
-  if (!a) continue;
-  console.log(`${r.config.width}x${r.config.height} dpr${r.config.dpr}:`);
-  console.log(`    offset 0.00 : lit ${rpad(a.lit, 6)}  meanLuma ${rpad(a.meanLuma, 7)}`);
-  console.log(`    offset 0.50 : lit ${rpad(b.lit, 6)}  meanLuma ${rpad(b.meanLuma, 7)}   (${((b.lit / a.lit - 1) * 100).toFixed(1)}% more lit px)`);
-  console.log(`    offset 0.37 : lit ${rpad(c.lit, 6)}  meanLuma ${rpad(c.meanLuma, 7)}   (${((c.lit / a.lit - 1) * 100).toFixed(1)}% more lit px)`);
+  const a = r.counterfactualInteger, b = r.counterfactualFractional;
+  if (!a || !a.lit) continue;
+  console.log(
+    pad(`${r.config.width}x${r.config.height} dpr${r.config.dpr}`, 20) +
+    `offset 0.0: lit ${rpad(a.lit, 5)} luma ${rpad(a.meanLuma, 7)}` +
+    `   |  offset 0.5: lit ${rpad(b.lit, 5)} luma ${rpad(b.meanLuma, 7)}` +
+    `   (${((b.lit / a.lit - 1) * 100).toFixed(1)}% more lit px)`,
+  );
 }
 
 const anyErrors = results.filter(r => r.consoleErrors.length);

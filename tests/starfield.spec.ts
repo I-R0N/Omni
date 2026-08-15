@@ -37,6 +37,9 @@ const readField = (page: import('@playwright/test').Page) =>
       milkyWayStarCount: bg.milkyWayStarCount,
       sceneWidth: bg.sceneWidth,
       sceneHeight: bg.sceneHeight,
+      sceneDpr: bg.sceneDpr,
+      bandPixelWidth: bg.bandPixelWidth,
+      bandPixelHeight: bg.bandPixelHeight,
       bandCanvasW: bg.starBands.length ? bg.starBands[0].canvas.width : 0,
       bandCanvasH: bg.starBands.length ? bg.starBands[0].canvas.height : 0,
     };
@@ -107,8 +110,85 @@ test.describe('the star field', () => {
 
     // Band canvases follow the viewport, and the band COUNT does not.
     expect(desktop.bands).toBe(NUM_BANDS);
-    expect(desktop.bandCanvasW).toBe(1000);
-    expect(desktop.bandCanvasH).toBe(1100);
+    expect(desktop.bandCanvasW).toBe(Math.round(1000 * desktop.sceneDpr));
+    expect(desktop.bandCanvasH).toBe(Math.round(1100 * desktop.sceneDpr));
+
+    watch.assertClean();
+  });
+
+  test('renders bands at DEVICE resolution so no filter is in the blit path', async ({ page }) => {
+    // S3. A CSS-px band blitted into a dpr-scaled context at a fractional
+    // offset is resampled by whatever filter the engine picks — measured at
+    // +114% lit device pixels at 45% the luma, and the filter choice is not
+    // specified by the canvas spec, which is how two browsers come to disagree
+    // about the same sky. Bands sized in DEVICE pixels are what removes the
+    // scale from the blit; the integer offsets in `drawBand` remove the
+    // fractional part.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+
+    const f = await readField(page);
+
+    // The manager tracked the ratio it generated at, and it is the CAPPED one
+    // (`effectiveDpr`), which is the same accessor the canvas was sized with.
+    expect(f.sceneDpr).toBeGreaterThan(0);
+    const canvasDpr = await engine(page, e => e.renderer.ctx.canvas.width / e.renderer.ctx.canvas.clientWidth);
+    expect(Math.abs(f.sceneDpr - canvasDpr)).toBeLessThan(0.01);
+
+    // Band backing store is the scene in DEVICE pixels — the 1:1 blit target.
+    expect(f.bandPixelWidth).toBe(Math.round(f.sceneWidth * f.sceneDpr));
+    expect(f.bandPixelHeight).toBe(Math.round(f.sceneHeight * f.sceneDpr));
+    expect(f.bandCanvasW).toBe(f.bandPixelWidth);
+    expect(f.bandCanvasH).toBe(f.bandPixelHeight);
+
+    watch.assertClean();
+  });
+
+  test('rebuilds the bands when the pixel ratio changes, not only the size', async ({ page }) => {
+    // Device-resolution bands make the pixel RATIO a generation input, so the
+    // render-scale cap (DBG ▸ Player ▸ Render scale) has to rebuild them even
+    // though the CSS scene size is unchanged. Without that, the bands keep
+    // their old device size and the blit silently stops being 1:1 — the exact
+    // defect S3 removes, coming back through a different door.
+    //
+    // The cap itself is stepped in App.tsx, not on the engine, so this drives
+    // the mechanism the cap relies on: stale the manager's recorded ratio and
+    // require the next frame to notice. Writing an internal to SET UP a
+    // scenario is allowed; the behaviour under test — the rebuild guard in
+    // `render` — is still the real one (harness rule 6).
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+
+    const before = await readField(page);
+    expect(before.bandPixelWidth).toBe(Math.round(before.sceneWidth * before.sceneDpr));
+
+    await engine(page, e => {
+      const bg = e.renderer.backgroundManager;
+      // Pretend the bands were generated at a different ratio, and make the
+      // recorded band size visibly wrong so a rebuild is observable rather
+      // than assumed. (-1 can never be a real ratio.)
+      bg.sceneDpr = -1;
+      bg.bandPixelWidth = 1;
+    });
+
+    await waitForEngine(
+      page,
+      e => {
+        const bg = e.renderer.backgroundManager;
+        return bg.bandPixelWidth === Math.round(bg.sceneWidth * bg.sceneDpr);
+      },
+      'the bands to be regenerated at the canvas ratio',
+    );
+
+    const after = await readField(page);
+    expect(after.sceneDpr).toBeCloseTo(before.sceneDpr, 5);
+    expect(after.bandCanvasW).toBe(after.bandPixelWidth);
+    expect(after.bandCanvasH).toBe(after.bandPixelHeight);
+    expect(after.bands).toBe(before.bands);
+    // The scene did not resize — only the ratio guard fired.
+    expect(after.sceneWidth).toBe(before.sceneWidth);
 
     watch.assertClean();
   });

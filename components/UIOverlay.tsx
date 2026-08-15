@@ -111,6 +111,7 @@ interface UIOverlayProps {
   renderScaleName?: string;
   onCycleSwarmMove?: () => void;
   onCycleStarDensity?: () => void;
+  onCycleStarSize?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -272,6 +273,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   renderScaleName,
   onCycleSwarmMove,
   onCycleStarDensity,
+  onCycleStarSize,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -1198,6 +1200,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {!collapsed.visual && (<>
                 {ctrlRow('Star density', onCycleStarDensity, stats.starDensityName ?? '185',
                   'Background star-field density, in stars per 10,000 CSS px² (185 / 320 / 729 / 90). The count is DERIVED from viewport area at this density, so a phone and a desktop window now show the same sky per unit area — they used to share one absolute 24,000-star budget, which made the smaller window ~4× denser. 185 is what a 1440×900 desktop showed before the fix; 729 is what a 390×844 phone showed, kept here so the two can be compared by looking. Regenerates the bands immediately.')}
+                {ctrlRow('Star size', onCycleStarSize, stats.starSizeName ?? 'Device px',
+                  'Star size floor. Bands are generated at DEVICE resolution and blitted 1:1 at whole device-pixel offsets, so no resampling filter is in the path — which makes this a real choice for the first time. Device px: a star may be a single device pixel, the finest sky the display can show. CSS px: never smaller than one CSS pixel — the apparent-size floor the field had before, but crisp instead of filtered. IDENTICAL at dpr 1; the knob only differs at dpr ≥ 2.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

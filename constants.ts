@@ -1704,6 +1704,35 @@ export function cycleStarDensity(): number {
   return STAR_DENSITY_CYCLE[activeStarDensityIndex];
 }
 
+// ─── DBG: star size floor ────────────────────────────────────────────────────
+//
+// Star bands are generated at DEVICE resolution and blitted 1:1 at whole
+// device-pixel offsets, so a star occupies exactly the pixels it is drawn into
+// and no resampling filter is in the path (see the star-field gauntlet, S3).
+// That makes the SIZE FLOOR a real choice for the first time — before, every
+// star was a 1-CSS-px fillRect at a fractional origin, which antialiased into
+// a ~2x2 smear and then got filtered again on the way to the screen.
+//
+//   'device' — a star may be a single DEVICE pixel: max(1, round(size x dpr)).
+//              The finest, sharpest sky a display can show; on a dpr-2 phone
+//              most stars become 1-2 device px.  DEFAULT.
+//   'css'    — a star is never smaller than one CSS pixel: the apparent-size
+//              floor the field had before S3, but crisp instead of filtered.
+//
+// At dpr 1 the two are IDENTICAL — the knob only differs where the problem
+// was, which is dpr >= 2.
+export type StarSizeMode = 'device' | 'css';
+export const STAR_SIZE_CYCLE: ReadonlyArray<StarSizeMode> = ['device', 'css'] as const;
+let activeStarSizeIndex = 0;
+export function getActiveStarSizeMode(): StarSizeMode { return STAR_SIZE_CYCLE[activeStarSizeIndex]; }
+export function getActiveStarSizeName(): string {
+  return STAR_SIZE_CYCLE[activeStarSizeIndex] === 'device' ? 'Device px' : 'CSS px';
+}
+export function cycleStarSize(): StarSizeMode {
+  activeStarSizeIndex = (activeStarSizeIndex + 1) % STAR_SIZE_CYCLE.length;
+  return STAR_SIZE_CYCLE[activeStarSizeIndex];
+}
+
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.OVERWORLD]: {
     maxSpeed: 120,

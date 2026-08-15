@@ -349,6 +349,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleStarDensity();
   };
 
+  const handleCycleStarSize = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleStarSize();
+  };
+
   const handleApplyCorrosion = () => {
       if (engineRef.current) engineRef.current.debugApplyCorrosion();
   };
@@ -550,6 +554,7 @@ const App: React.FC = () => {
         renderScaleName={renderScaleName}
         onCycleSwarmMove={handleCycleSwarmMove}
         onCycleStarDensity={handleCycleStarDensity}
+        onCycleStarSize={handleCycleStarSize}
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}
