@@ -112,6 +112,7 @@ interface UIOverlayProps {
   onCycleSwarmMove?: () => void;
   onCycleStarDensity?: () => void;
   onCycleStarSize?: () => void;
+  onCycleStarBands?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -274,6 +275,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleSwarmMove,
   onCycleStarDensity,
   onCycleStarSize,
+  onCycleStarBands,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -1202,6 +1204,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Background star-field density, in stars per 10,000 CSS px² (185 / 320 / 729 / 90). The count is DERIVED from viewport area at this density, so a phone and a desktop window now show the same sky per unit area — they used to share one absolute 24,000-star budget, which made the smaller window ~4× denser. 185 is what a 1440×900 desktop showed before the fix; 729 is what a 390×844 phone showed, kept here so the two can be compared by looking. Regenerates the bands immediately.')}
                 {ctrlRow('Star size', onCycleStarSize, stats.starSizeName ?? 'Device px',
                   'Star size floor. Bands are generated at DEVICE resolution and blitted 1:1 at whole device-pixel offsets, so no resampling filter is in the path — which makes this a real choice for the first time. Device px: a star may be a single device pixel, the finest sky the display can show. CSS px: never smaller than one CSS pixel — the apparent-size floor the field had before, but crisp instead of filtered. IDENTICAL at dpr 1; the knob only differs at dpr ≥ 2.')}
+                {ctrlRow('Star depth', onCycleStarBands, stats.starBandsName ?? '240',
+                  'Parallax DEPTH LAYERS (240 / 120 / 480 / 60). The star budget is split evenly across them, so this changes how finely depth is quantised, not how many stars there are — more layers means a smoother near-to-far gradient as the camera moves. Frozen at 60 for as long as a layer was a full-viewport canvas (60 of those cost 80–316 MB); a layer is now five numbers, so 240 costs ~10 KB. Regenerates the field immediately.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

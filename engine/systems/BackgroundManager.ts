@@ -3,6 +3,7 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
+  getActiveStarBands,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -54,9 +55,11 @@ export class BackgroundManager {
   // overdraw, against a star budget of ~6 000.  Measured, direct drawing is
   // 6-25x faster and takes 0.07 MB where the canvases took 80-1265 MB.
   //
-  // Parallax is unchanged: stars still belong to one of NUM_BANDS depth layers
-  // and each layer still scrolls at its own speed.  A layer is now three
-  // numbers rather than a canvas, so keeping 60 of them is free.
+  // Parallax works the same way: stars belong to a depth layer and each layer
+  // scrolls at its own speed.  What changed is the PRICE of a layer.  A layer
+  // used to BE a full-viewport canvas, so 60 of them cost 80-316 MB and depth
+  // granularity was rationed; a layer is now five numbers, so the default rose
+  // to 240 layers for ~10 KB and 240 float updates per frame (S6).
   //
   // Layout is a struct-of-arrays sorted by draw group, so the per-frame loop is
   // a linear walk over typed arrays with one state change per group and zero
@@ -74,8 +77,10 @@ export class BackgroundManager {
   private starY: Int32Array = new Int32Array(0);
   /** Star edge length in DEVICE px (>= 1, always integral). */
   private starSize: Uint8Array = new Uint8Array(0);
-  /** Which depth layer each star rides. */
-  private starBandIdx: Uint8Array = new Uint8Array(0);
+  /** Which depth layer each star rides.  Uint16, not Uint8: the layer count is
+   *  DBG-cyclable up to 480, and a Uint8 would wrap silently past 255 —
+   *  scattering the far layers' stars onto near ones with no error anywhere. */
+  private starBandIdx: Uint16Array = new Uint16Array(0);
   /** Draw groups over the arrays above, in sorted order. */
   private starGroups: StarGroup[] = [];
   private nebulaPuffs: NebulaPuff[] = [];
@@ -339,7 +344,7 @@ public setMapType(type: MapType) {
     const bucketOf = (opacity: number) =>
         Math.min(ALPHA_BUCKETS - 1, Math.max(0, Math.round(opacity * (ALPHA_BUCKETS - 1))));
 
-    const NUM_BANDS = STARFIELD_CONSTANTS.NUM_BANDS;
+    const NUM_BANDS = getActiveStarBands();
     // Band index NUM_BANDS is the milky way — one more depth layer, scrolling
     // at its own fixed slow speed, rather than a special case with its own
     // storage and its own draw path.
@@ -463,7 +468,7 @@ public setMapType(type: MapType) {
     this.starX = new Int32Array(total);
     this.starY = new Int32Array(total);
     this.starSize = new Uint8Array(total);
-    this.starBandIdx = new Uint8Array(total);
+    this.starBandIdx = new Uint16Array(total);
     this.starGroups = [];
     let cursor = 0;
     for (let g = 0; g < NUM_GROUPS; g++) {

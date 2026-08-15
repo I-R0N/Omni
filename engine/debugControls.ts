@@ -34,7 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
-    cycleStarDensity, cycleStarSize,
+    cycleStarDensity, cycleStarSize, cycleStarBands,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -554,6 +554,18 @@ export class DebugControls {
    *  invalidate the background rather than only stepping the constant. */
   cycleStarSize() {
     cycleStarSize();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the number of PARALLAX DEPTH LAYERS (240 default / 120 / 480
+   *  / 60).  The star budget is split evenly across them, so this changes how
+   *  finely depth is quantised, not how many stars there are.
+   *
+   *  It was frozen at 60 for as long as a layer was a full-viewport canvas —
+   *  60 of those cost 80-316 MB.  Since the field became data a layer is five
+   *  numbers, so 240 costs about 10 KB and 240 float updates per frame. */
+  cycleStarBands() {
+    cycleStarBands();
     this.g.renderer.invalidateBackground();
   }
 

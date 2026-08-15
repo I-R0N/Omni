@@ -1671,19 +1671,39 @@ export const SHOOTING_STAR_CONSTANTS = {
 // scene size as `canvas.width / effectiveDpr()`, which is exactly the CSS
 // viewport, so the two agree by construction.
 export const STARFIELD_CONSTANTS = {
-  /** Parallax depth layers.  Each is one pre-rendered canvas scrolling at its
-   *  own speed; the star BUDGET is split evenly across them, so changing this
-   *  changes the smoothness of the parallax and not the density. */
-  NUM_BANDS: 60,
   /** Milky-way stars per 1000 CSS px of viewport WIDTH.  The milky way is a
    *  LINE feature — its stars are placed along a diagonal spanning the
    *  viewport width — so it scales linearly with width, where the star field
-   *  proper scales with area.  Anchored to the phone's current count (80 at
+   *  proper scales with area.  Anchored to the phone's original count (80 at
    *  390 px wide): it is an authored feature that should still read on the
    *  target device, and it spent its whole life buried under the haze that
    *  the density fix above removes. */
   MILKY_WAY_PER_1K_WIDTH: 205,
 } as const;
+
+// ─── DBG: parallax depth layers ──────────────────────────────────────────────
+//
+// How many discrete scroll speeds the field is quantised into.  The star budget
+// is split evenly across them, so this changes the SMOOTHNESS OF THE DEPTH and
+// not the density.
+//
+// This was 60 and effectively frozen there, because a layer used to BE a
+// full-viewport canvas: 60 of them cost 80 MB on a phone and 316 MB on a
+// desktop window, so more depth meant more memory in whole megabytes.  Since
+// the field became data (S4) a layer is five numbers and a scroll accumulator —
+// 240 layers cost about 10 KB and 240 float updates per frame — so depth is
+// essentially free and there is no longer a reason to be stingy with it.
+//
+// 240 IS THE DEFAULT (user call, on the S6 evidence): 4x the depth granularity
+// at no measurable cost.  60 stays in the cycle as the pre-S6 value.
+export const STAR_BANDS_CYCLE: ReadonlyArray<number> = [240, 120, 480, 60] as const;
+let activeStarBandsIndex = 0;
+export function getActiveStarBands(): number { return STAR_BANDS_CYCLE[activeStarBandsIndex]; }
+export function getActiveStarBandsName(): string { return `${STAR_BANDS_CYCLE[activeStarBandsIndex]}`; }
+export function cycleStarBands(): number {
+  activeStarBandsIndex = (activeStarBandsIndex + 1) % STAR_BANDS_CYCLE.length;
+  return STAR_BANDS_CYCLE[activeStarBandsIndex];
+}
 
 // ─── DBG: star density ───────────────────────────────────────────────────────
 //
@@ -1691,11 +1711,21 @@ export const STARFIELD_CONSTANTS = {
 // than as an edit (the repo's established pattern for a look that should be
 // overturned by looking rather than by arguing).
 //
-// 185 IS THE DEFAULT: it is the density a 1440x900 desktop window shows today,
-// i.e. the sparser of the two skies the user has actually been looking at, and
-// the one that reads as a star field in the S1 side-by-side.  729 — the phone's
-// current density — is kept one tap away so the two can be A/B'd directly.
-export const STAR_DENSITY_CYCLE: ReadonlyArray<number> = [185, 320, 729, 90] as const;
+// 729 IS THE DEFAULT (user call): it is the star COUNT the 390x844 phone showed
+// before the gauntlet — the "large number of stars" that was liked — and since
+// density is now uniform per unit area, every screen size gets it.
+//
+// Worth knowing when reading this number against the old sky: the count is the
+// same, but the LOOK is not.  Each star used to be a 1-CSS-px fillRect at a
+// FRACTIONAL origin, which Canvas2D antialiased into a ~3.7-pixel smear, so 729
+// stars covered 26.9% of the screen.  A star is now one crisp device pixel, so
+// the same 729 covers ~7.3%.  Same many stars, a quarter of the ink.
+//
+// Cost scales LINEARLY with this number — unlike the old pre-rendered bands,
+// whose cost was flat in star count and linear in LAYER count.  That trade is
+// why raising density is affordable now and raising it used to be free; see the
+// S6 table in docs/GAUNTLET_STARFIELD_LOG.md before going far past 2000.
+export const STAR_DENSITY_CYCLE: ReadonlyArray<number> = [729, 1200, 2000, 185, 400] as const;
 let activeStarDensityIndex = 0;
 export function getActiveStarDensity(): number { return STAR_DENSITY_CYCLE[activeStarDensityIndex]; }
 export function getActiveStarDensityName(): string { return `${STAR_DENSITY_CYCLE[activeStarDensityIndex]}`; }

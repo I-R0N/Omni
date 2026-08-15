@@ -22,9 +22,9 @@ import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, waitForEngine } from './helpers';
 
 /** Default step of `STAR_DENSITY_CYCLE` — stars per 10 000 CSS px². */
-const DEFAULT_DENSITY = 185;
-/** `STARFIELD_CONSTANTS.NUM_BANDS`. */
-const NUM_BANDS = 60;
+const DEFAULT_DENSITY = 729;
+/** Default step of `STAR_BANDS_CYCLE` — parallax depth layers. */
+const NUM_BANDS = 240;
 
 /** The star-field budget the live manager derived for its current scene. */
 const readField = (page: import('@playwright/test').Page) =>
@@ -234,9 +234,10 @@ test.describe('the star field', () => {
     const before = await engine(page, e => Array.from<number>(e.renderer.backgroundManager.bandOffsetX));
 
     await engine(page, e => { e.player.position.x += 400; });
+    const near = NUM_BANDS - 1;
     await waitForEngine(
       page,
-      new Function('e', `return e.renderer.backgroundManager.bandOffsetX[59] !== ${JSON.stringify(before[59])}`) as any,
+      new Function('e', `return e.renderer.backgroundManager.bandOffsetX[${near}] !== ${JSON.stringify(before[near])}`) as any,
       'the nearest layer to scroll',
     );
 
@@ -246,7 +247,7 @@ test.describe('the star field', () => {
     // Layer speed rises quadratically with depth index, so a near layer must
     // outrun a far one. Offsets wrap, so compare the SPEED table that drives
     // them plus the fact that the field moved at all.
-    expect(speeds[59]).toBeGreaterThan(speeds[0] * 10);
+    expect(speeds[NUM_BANDS - 1]).toBeGreaterThan(speeds[0] * 10);
     expect(after.some((v, i) => v !== before[i])).toBe(true);
 
     // Every offset stays inside the wrap window — an offset that escaped it
@@ -337,11 +338,11 @@ test.describe('the star field', () => {
     await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const before = await readField(page);
-    // Within 1% of the nominal density: the budget is split into a WHOLE
-    // number of stars per band, so the realised density lands slightly under
-    // the target (6060 stars rather than 6089 at 390x844).
+    // Within 1% of the nominal density, EITHER SIDE: the budget is split into a
+    // whole number of stars per layer, and that rounding can go either way
+    // (24 000 stars at 390x844 against a nominal 23 996).
     expect(densityOf(before)).toBeGreaterThan(DEFAULT_DENSITY * 0.99);
-    expect(densityOf(before)).toBeLessThanOrEqual(DEFAULT_DENSITY);
+    expect(densityOf(before)).toBeLessThan(DEFAULT_DENSITY * 1.01);
 
     // Star count is a GENERATION-time input, so the cycle has to invalidate
     // the background rather than only stepping the constant — otherwise the

@@ -22,6 +22,8 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
       6–25× faster in the A/B.
 - [x] **S5 — Docs + validation.** Stale comments fixed (three, not two);
       CLAUDE.md §2 + §8 synced; three gates × 2 consecutive runs green.
+- [x] **S6 — Spend the savings** (user request). Density default back to 729
+      (the star count that was liked); depth layers 60 → 240. Both DBG cycles.
 
 ---
 
@@ -428,6 +430,84 @@ antialiased before any scaling happens.
 **Validation.** Three gates, two consecutive runs each, green both times.
 46 tests (38 pre-existing + 8 new).
 
+## S6 — spend the savings
+
+User request after reviewing S1–S5: *"I also liked the large number of stars.
+Is it possible to increase that number again and introduce more layers to create
+more parallax depth now that we have some memory savings?"* Both, and the
+structure S4 landed is what makes them cheap.
+
+### Density: default 185 → 729
+
+729 is the star count the 390×844 phone showed before the gauntlet — the "large
+number of stars" in question — and since density is now uniform per unit area,
+every screen size gets it.
+
+**The count is the same as before the gauntlet; the LOOK is not, and that is the
+point.** Each star used to be a 1-CSS-px `fillRect` at a fractional origin,
+antialiased into a ~3.7-pixel smear, so 729 stars covered **26.9%** of the
+screen and read as TV static. A star is now one crisp device pixel, so the same
+729 covers **7.05%**. Same many stars, roughly a quarter of the ink.
+
+If the old *ink coverage* is what is wanted rather than the old *count*, that is
+~2000–2700 on this scale, and 2000 is in the cycle.
+
+### Depth: 60 → 240 layers
+
+Layer count was frozen at 60 for one reason: a layer used to BE a full-viewport
+canvas, so depth granularity cost whole megabytes. It now costs five numbers and
+one scroll accumulator.
+
+```
+                     60 layers    240 layers
+per-frame work       61 float updates    241 float updates
+storage              ~2.4 KB             ~9.6 KB
+```
+
+Star size and brightness are already continuous in the layer's depth fraction
+(`t`), so more layers simply gives a finer near-to-far gradient — no other
+tuning had to move.
+
+`starBandIdx` was widened **Uint8 → Uint16**. The cycle offers 480 layers, and a
+Uint8 index wraps silently past 255 — the far layers' stars would scatter onto
+near ones with no error raised anywhere.
+
+### What it costs
+
+```
+                        before gauntlet        after S6
+390x844   stars              24 000             24 000     (same count)
+          coverage            26.9%               7.05%    (crisp, not smeared)
+          layers                 60                240
+          memory             80.3 MB              0.3 MB
+          bg drawImage          244                  0
+1440x900  stars              24 000             94 560     (density now uniform)
+          memory            316.2 MB              1.0 MB
+```
+
+Bench at the new defaults, against the equivalent band structure:
+
+```
+390x844  dpr2   bands 287.66 ms / 1269.2 Mpx  |  direct 15.39 ms / 0.048 Mpx  -> 18.7x
+1440x900 dpr2   bands 964.81 ms / 4997.4 Mpx  |  direct 56.22 ms / 0.190 Mpx  -> 17.2x
+```
+
+**The one honest caveat.** Direct drawing costs one canvas call per star, so
+cost is now LINEAR in density — where the old pre-rendered structure was flat in
+star count and linear in layer count. That trade is why raising density is
+affordable rather than free, and it is the opposite of the old trade, so it is
+worth stating plainly:
+
+- At 390×844 (the target device) the default is 24 000 calls per frame — on the
+  order of 1–2 ms of call overhead on real hardware. Fine.
+- At 1440×900 the same density is 94 560 calls. Still ~17× cheaper than the
+  structure it replaced, and 316 MB lighter, but it is the configuration to
+  watch if desktop frame time ever matters. The cycle's 400 and 185 steps are
+  the dial-back.
+
+Nothing here regresses against the pre-gauntlet code on any axis measured: at
+4× the stars, desktop still costs 17× less time and 316× less memory.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -521,6 +601,20 @@ rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
 
+**D14 — Default density to the old COUNT (729), not the old COVERAGE (~2400).**
+Beat: matching what the pre-gauntlet phone sky actually *looked* like, which
+would need ~2400 on this scale because the old stars were 3.7-pixel smears. The
+request was for "the large number of stars", and the number is 729's worth;
+reproducing the smear's ink coverage would be reproducing the defect's side
+effect, not the thing that was liked. 2000 is one tap away if the denser ink is
+what is actually wanted — which is a judgement to make by looking, not here.
+
+**D15 — Widen `starBandIdx` to Uint16 rather than capping the layer cycle at
+254.** Beat: keeping Uint8 and limiting the DBG cycle to fit. The cap would be
+an invisible constraint enforced by nothing — the next person to add a 512 entry
+gets silent index wraparound, with far-layer stars scattering onto near layers
+and no error anywhere. 6 KB is not worth a trap like that.
+
 **D13 — Do NOT regenerate `omniverse-standalone.html`, against gauntlet
 convention.** Beat: following the established P-final pattern (`5f P-final:
 validation, CLAUDE.md layout sync, standalone rebuild`). PR #84 is open against
@@ -541,7 +635,15 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 
 ## FOR-USER-REVIEW
 
-- **S2 — the sky got much sparser on the phone, and that is the change.**
+- **S6 — the dense sky is back, at 729 (your call), with 4× the depth.**
+  ~24 000 stars on the phone again, which is the pre-gauntlet count. It will
+  read *finer* than the old one at the same count: those stars were 3.7-pixel
+  smears covering 26.9% of the screen, these are single crisp pixels covering
+  7.05%. If you want the old INK rather than the old COUNT, Visual ▸ Star
+  density ▸ **2000** is that. Star depth is on its own row (240 / 120 / 480 /
+  60). Shots in `perf/out/shots/s6/`.
+
+- **S2 (superseded by S6, kept for the record) — the sky got much sparser.**
   390×844 went from 24 000 stars to ~6 000 (`perf/out/shots/before/` vs
   `perf/out/shots/s2/`). The before shot reads as TV static; the after reads as
   a star field. The desktop is essentially unchanged, by construction — 185 is
@@ -649,6 +751,25 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 6 — S6 (spend the savings)
+
+User asked for the dense sky back plus more parallax depth. Density default
+185 → 729, layer count 60 → 240, both as DBG cycles; layer count became a cycle
+rather than a constant for the first time, since it was only ever frozen by the
+memory cost that S4 removed.
+
+Measured before choosing, and the measurement changed how it was reported: at
+729 the sky has the pre-gauntlet star COUNT but a quarter of its ink, because
+the old stars were antialiased smears and the new ones are single crisp pixels.
+That is worth saying out loud, because "the same number as before" and "looks
+the same as before" are not the same claim here.
+
+One test assertion of mine was wrong and got fixed: it required the realised
+density to land at or BELOW nominal, on the assumption that per-layer integer
+rounding always rounds down. At 240 layers it rounds up (24 000 stars against a
+nominal 23 996). Replaced with a symmetric ±1% bound, which is what the code
+actually guarantees.
 
 ### Iteration 5 — S5 (docs + validation)
 

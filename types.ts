@@ -1667,6 +1667,8 @@ export interface EngineStats {
   starDensityName?: string;
   /** DBG: active star size floor ('Device px' / 'CSS px'). */
   starSizeName?: string;
+  /** DBG: active parallax depth-layer count. */
+  starBandsName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).
