@@ -994,6 +994,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    */
   const renderAdaptiveTriggers = () => {
     if (!stats.adaptiveTriggersSupported) return null;
+    // Rendered in BOTH menus (see the call sites).  It is one component with
+    // no internal state, so two call sites cost nothing and the alternative —
+    // one copy, at the bottom of the pause menu's scroll — is a control
+    // players report as missing.
     const on = !!stats.adaptiveTriggersConnected;
     return (
       <div className="w-full flex flex-col gap-1">
@@ -2285,6 +2289,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="w-full flex flex-col items-center gap-3">
               <span className="text-slate-200 text-sm tracking-wide">Controls</span>
               {renderSchemePicker()}
+              {/* Also here, not only in the pause menu: this is where a
+                  player sets their hands up before playing, and the pause
+                  menu's copy sits below the whole outfitting panel — far
+                  enough down a long scroll to read as missing. */}
+              {renderAdaptiveTriggers()}
             </div>
 
             <button

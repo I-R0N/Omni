@@ -1112,6 +1112,33 @@ export class InputSystem {
       this.writePadPointer();
     }
 
+    // 2b. EITHER STICK, under the trigger-thrust scheme (user directive).
+    //
+    // The scheme exists for MINIMAL pads — the cheap clip-on Bluetooth
+    // controllers that have one stick and one or two triggers — so it must
+    // not care WHICH stick that one is.  Whichever is deflected further wins
+    // and supplies BOTH heading and aim: the ship aims where it flies, the
+    // same rule the joystick touch schemes already use, because a one-stick
+    // pad has no second stick to aim with.
+    //
+    // On a full pad this means the two sticks do the same job rather than
+    // fighting; the larger deflection is the player's actual intent, and the
+    // other one being centred costs nothing.
+    if (this.rules.triggerThrust) {
+      const moveMag = Math.sqrt(this.padMove.x * this.padMove.x + this.padMove.y * this.padMove.y);
+      const useAim = aimMag > moveMag;
+      const hx = useAim ? this.padAimRead.x : this.padMove.x;
+      const hy = useAim ? this.padAimRead.y : this.padMove.y;
+      const mag = useAim ? aimMag : moveMag;
+      if (mag > 0) {
+        this.padMove.x = hx / mag;
+        this.padMove.y = hy / mag;
+        this.padAim.x = this.padMove.x;
+        this.padAim.y = this.padMove.y;
+        this.writePadPointer();
+      }
+    }
+
     // 3. Buttons.
     if (this.padGroupEdge(snap, G.BUTTONS.CONFIRM)) this.padConfirmPresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.BACK)) this.padBackPresses++;
@@ -1152,7 +1179,10 @@ export class InputSystem {
     // DualSense trigger leaves rest, so reading it fires the gun before the
     // clutch has resisted anything.  A digital face button reports 1, which
     // clears any threshold, so it is unaffected.
-    const fireHeld = fireEnabled && this.padGroupValue(snap, G.BUTTONS.FIRE) >= this.padFirePoint();
+    // Under trigger-thrust the triggers are the THROTTLE, so the gun is the
+    // face button alone — see FIRE_FACE.
+    const fireGroup = this.rules.triggerThrust ? G.BUTTONS.FIRE_FACE : G.BUTTONS.FIRE;
+    const fireHeld = fireEnabled && this.padGroupValue(snap, fireGroup) >= this.padFirePoint();
     if (fireHeld && !this.padFireDown) {
       this.padFireDown = true;
       this.padFireStart = performance.now();

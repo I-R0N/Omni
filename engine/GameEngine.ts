@@ -2992,8 +2992,12 @@ export class GameEngine {
     // up a charged shot (a hard wall), or the equipped gun's own profile.
     // The call is a struct compare when nothing changed; it is a no-op
     // entirely unless the player has opted into WebHID.
+    const thrustScheme = this.input.usesTriggerThrust();
     this.input.setTriggerProfile(
-      (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
+      // Under trigger-thrust the RIGHT trigger is a throttle too, so a weapon
+      // profile on it would be describing a control the player is not using.
+      thrustScheme ? THRUST_TRIGGER(this.playerSpeedFraction())
+      : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
       : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
       : WEAPON_TRIGGERS[this.player.currentWeapon]);
 
@@ -3003,7 +3007,7 @@ export class GameEngine {
     // hand knows without reading the HUD.  Released under every other scheme
     // — a clutch on a control that does nothing is just a stiff trigger.
     this.input.setThrustTriggerProfile(
-      this.input.usesTriggerThrust() && !this.player.isExploding
+      thrustScheme && !this.player.isExploding
         ? THRUST_TRIGGER(this.playerSpeedFraction())
         : TRIGGER_OFF);
 

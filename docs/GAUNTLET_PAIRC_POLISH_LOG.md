@@ -37,6 +37,7 @@ tuning (step 6).
 | G13 | Fire on trigger PRESS, not release (user directive) | **done** |
 | G14 | Fire AT the break point + the three richer trigger shapes | **done** |
 | G15 | Trigger thrust, gamepad menu navigation, parking-lot entry | **done** |
+| G16 | Minimal-pad thrust scheme + the adaptive control in both menus | **done** |
 
 ---
 
@@ -1090,6 +1091,62 @@ explicit later instruction to park the item, which supersedes it.
 
 ---
 
+### G16 — Any stick, any trigger (user directive, 2026-08-15)
+
+*"The new control with one stick for direction and left trigger for thrust
+should use both/either of the joysticks... This allows controllers with one
+stick and left and/or right triggers to be able to play."*
+
+G15 shipped `gamepad-thrust` bound to the LEFT stick and the LEFT trigger,
+which quietly assumed a full standard pad — the exact assumption the scheme
+exists to remove. It is now the MINIMAL-PAD scheme in fact as well as in
+intent.
+
+**DECISION G16-a — either stick, larger deflection wins, and it AIMS too.**
+A one-stick pad has no second stick to aim with, so the ship aims where it
+flies. That rule is not new: it is what the joystick touch schemes already
+do (`pointerAims: false` — the stick writes the synthetic pointer), so this
+reuses a shipped mechanism rather than adding a second aim model. On a full
+pad the two sticks now do the same job rather than fighting; the larger
+deflection is the intent, and the other being centred costs nothing.
+
+**DECISION G16-b — either trigger, and therefore the gun moves to the FACE
+button.** This is the consequence worth stating plainly: if EITHER trigger
+may be the throttle, then NEITHER can be the gun, or a pad with only a right
+trigger would fire every time it accelerated. `FIRE_FACE` ([0]) replaces
+`FIRE` ([7, 0]) under this scheme. Full-pad players who want R2-as-gun have
+the plain `gamepad` scheme, which is untouched.
+
+*Alternative rejected:* detect which triggers the pad has and bind
+accordingly. The Gamepad API reports a fixed 17 buttons under the standard
+mapping whether or not the hardware has them, so "has an L2" is not
+answerable — and a non-standard pad reports an arbitrary layout. Reading zero
+forever from a control that is not there is the honest version of the same
+thing, and needs no detection at all.
+
+Both triggers therefore carry the speed-ramped `THRUST_TRIGGER` under this
+scheme; a weapon profile on the right trigger would be describing a control
+the player is not using.
+
+**BUG (reported) — the adaptive-triggers control "no longer appears".** NOT
+REPRODUCED as a code fault: the control's source is unchanged since G12, and
+a test that stubs `navigator.hid` before boot confirms it renders. What IS
+true is that it only ever existed in ONE place — the bottom of the pause
+menu's Controls block, below the entire cargo/outfitting panel — and the
+headless suites have no `navigator.hid`, so **every existing assertion about
+it was asserting the ABSENT branch**. The feature had no coverage at all in
+the state where it does something.
+
+Fixed on both counts: it now renders in the MAIN MENU too (beside the scheme
+picker, where a player sets their hands up before playing — a short screen,
+not a long scroll), and a new test stubs WebHID and pins its presence in
+BOTH menus. That test is the durable part; the placement is what the user
+actually asked for.
+
+**Gates:** typecheck, build, 111/111 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
@@ -1489,6 +1546,15 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G14-c** — charge and thrust profiles are state-driven and quantised at the
   caller. Beat: static profiles (a nicer button), and per-frame writes (the
   pad's endpoint is not a frame buffer).
+- **G16-a** — either stick steers AND aims under trigger-thrust. Beat: a
+  second aim model; the joystick schemes' aim-where-you-fly rule already
+  existed and is what a one-stick pad needs.
+- **G16-b** — either trigger throttles, so the gun moves to the face button.
+  Beat: detecting which triggers the pad has (the Gamepad API reports 17
+  buttons whether or not the hardware has them, so it is not answerable).
+- **G16-c** — the adaptive control renders in BOTH menus, and a test stubs
+  WebHID to pin it. Beat: leaving it in one place at the bottom of a long
+  scroll, with every existing assertion covering only the ABSENT branch.
 - **G15-a** — trigger thrust is a SCHEME. Beat: a toggle, which would leave
   two readings of a stick deflection live at once.
 - **G15-b** — the throttle's resistance reports the ship's SPEED. Beat:
@@ -1620,10 +1686,13 @@ push, opens on an iPhone) is the fastest way to run these:
   wall growing under the finger read as charging, and does the thrust trigger
   stiffening near top speed read as speed? Every number is in
   `WEAPON_TRIGGERS` / `chargeTrigger` / `THRUST_TRIGGER`.
-- **HARDWARE CHECK — trigger thrust (G15).** Pick *Controller (trigger
-  thrust)*. Does flying with the stick for heading and L2 for throttle beat
-  the stick doing both? It is the scheme's whole premise and it may simply
-  feel worse.
+- **HARDWARE CHECK — trigger thrust (G15/G16).** Pick *Controller (trigger
+  thrust)*. Does flying with a stick for heading and a trigger for throttle
+  beat the stick doing both? It is the scheme's whole premise and it may
+  simply feel worse. Also worth checking now that EITHER stick works: does
+  having both sticks do the same job read as forgiving, or as sloppy? And on
+  a full DualSense, does losing R2-as-gun (it is a throttle here) annoy —
+  the plain *Controller* scheme is the escape hatch if so.
 - **HARDWARE CHECK — menu navigation (G15).** D-pad through the pause menu,
   the station panels and the hex flowers. The geometric rule is pinned by a
   test against a synthetic grid, but whether it FEELS right on the real hex

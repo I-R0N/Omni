@@ -53,7 +53,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           plus input / help / minimap / maps (step 5),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  108 tests
+                          anti-flake rules).  111 tests
 
 components/
   menuNav.ts              GAMEPAD MENU NAVIGATION (G15) — the D-pad
@@ -1768,7 +1768,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     open), and **nothing in the sim may branch on it** — the pad plays
     identically without it, which is why it is not a control scheme and why
     the UI control renders only where `EngineStats.adaptiveTriggersSupported`
-    is true.  `WEAPON_TRIGGERS` (per gun) and `CHARGE_TRIGGER` (while a
+    is true — in BOTH the main menu and the pause menu, because one copy at
+    the bottom of the pause menu's scroll reads as a missing feature.  `WEAPON_TRIGGERS` (per gun) and `CHARGE_TRIGGER` (while a
     charged shot winds up) are the profile table; the sync sits beside the
     charge-ring update in `updateGameLogic`, because what the trigger should
     feel like is a function of what the player is holding RIGHT NOW and
@@ -1861,14 +1862,24 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     they can be spent, so no press fires later out of context.
   - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
     which must exceed `SHIP_SELECT_RADIUS` — see §5.
-  - **`gamepad-thrust` makes the LEFT TRIGGER an analogue throttle** (G15):
-    the left stick supplies DIRECTION only and the trigger supplies
-    magnitude.  Its own scheme rather than a toggle because it changes what a
-    stick deflection MEANS — under `gamepad` the deflection IS the throttle —
-    and two answers to that cannot be live at once.  Its trigger resistance
-    ramps with the ship's speed fraction, so "already flat out" is something
-    the hand knows; every other scheme leaves the left trigger RELEASED,
-    since a clutch on a control that does nothing is just a stiff trigger.
+  - **`gamepad-thrust` is the MINIMAL-PAD scheme** (G15/G16): a TRIGGER
+    supplies thrust magnitude and a STICK supplies direction.  Which trigger
+    and which stick is deliberately not specified — EITHER stick steers (and
+    aims: the ship aims where it flies, the joystick schemes' rule, because a
+    one-stick pad has no second stick to aim with) and EITHER trigger
+    throttles, larger deflection winning in both cases.  That is what lets a
+    cheap clip-on pad with one stick and one trigger play, WITHOUT any device
+    sniffing — a control the pad does not have simply reads zero forever.
+    It follows that the gun moves to the FACE button
+    (`GAMEPAD.BUTTONS.FIRE_FACE`): if either trigger may be the throttle, then
+    neither can be the trigger, or a one-trigger pad would shoot every time it
+    accelerated.  Its own scheme rather than a toggle because it changes what
+    a stick deflection MEANS — under `gamepad` the deflection IS the throttle
+    — and two answers to that cannot be live at once.  BOTH triggers carry the
+    speed-ramped `THRUST_TRIGGER` resistance here, so "already flat out" is
+    something the hand knows; every other scheme leaves the left trigger
+    RELEASED, since a clutch on a control that does nothing is just a stiff
+    trigger.
   - **The CONTROL SCHEME decides which touch model is live** (G9).  The
     joystick and the standard drag-to-fly gesture are mutually exclusive —
     they compete for the same finger — so they are separate schemes rather

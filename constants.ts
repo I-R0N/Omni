@@ -1202,11 +1202,20 @@ export const INPUT_CONSTANTS = {
     AXES: { LX: 0, LY: 1, RX: 2, RY: 3 },
     BUTTONS: {
       FIRE:         [7, 0],   // R2, Cross — tap = shot, hold ≥ CHARGE_FULL = charged
+      /** FIRE under the trigger-thrust scheme.  R2 drops out because BOTH
+       *  triggers are the throttle there — a minimal pad may only have one,
+       *  and which one it is cannot be detected, so neither can be the gun.
+       *  The face button covers it, which is what a one-stick pad has. */
+      FIRE_FACE:    [0],
       INTERACT:     [2],      // Square — dock / enter portal / undock (the `selected` flag)
       CYCLE_WEAPON: [5, 3],   // R1, Triangle
       PAUSE:        [9],      // Options
       DPAD:         [12, 13, 14, 15], // up, down, left, right — digital thrust
-      THROTTLE:     [6],      // L2 — analogue thrust under `gamepad-thrust`
+      /** THROTTLE under `gamepad-thrust`: EITHER trigger, whichever is
+       *  pulled further.  A pad with only a left trigger and a pad with only
+       *  a right one both work, and there is no device sniffing involved —
+       *  the trigger that is not there simply reads zero forever. */
+      THROTTLE:     [6, 7],   // L2, R2
       // MENU navigation.  These reuse buttons that are already bound in
       // flight, which is safe because they are only ever SPENT while a
       // full-screen overlay is up and the world is frozen: Cross cannot fire
@@ -3476,7 +3485,7 @@ export const CONTROL_SCHEMES: ReadonlyArray<{
   { id: 'joystick-right', label: 'Joystick (left-handed)',  blurb: 'Stick right · fire button left' },
   { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
   { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
-  { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'L2 throttles · left stick steers only' },
+  { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'Either trigger throttles · either stick steers + aims' },
 ] as const;
 
 export function controlSchemeDef(id: ControlScheme) {

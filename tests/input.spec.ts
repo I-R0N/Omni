@@ -1492,12 +1492,16 @@ test.describe('trigger thrust — the stick steers, the trigger throttles', () =
         thrustNoPull: read('gamepad-thrust', arg.halfStick),
         // A throttle with no heading has nothing to push against.
         thrustNoStick: read('gamepad-thrust', arg.pullOnly),
+        // EITHER trigger throttles — a minimal pad may have only the right
+        // one, and which one it has cannot be detected.
+        thrustRightTrigger: read('gamepad-thrust', arg.stickRightPull),
       };
     }, {
       halfStick: pad({ lx: 0.5 }),
       halfStickFullPull: pad({ lx: 0.5, analog: { 6: 1 } }),
       fullStickHalfPull: pad({ lx: 1, analog: { 6: 0.5 } }),
       pullOnly: pad({ analog: { 6: 1 } }),
+      stickRightPull: pad({ lx: 1, analog: { 7: 1 } }),
     });
 
     // Deadzone rescale: 0.5 deflection past an 0.18 radial deadzone.
@@ -1512,9 +1516,91 @@ test.describe('trigger thrust — the stick steers, the trigger throttles', () =
 
     expect(r.thrustNoPull).toEqual({ x: 0, y: 0 });
     expect(r.thrustNoStick).toEqual({ x: 0, y: 0 });
+    expect(r.thrustRightTrigger.x).toBeCloseTo(1, 3);
 
     watch.assertClean();
   });
+
+  test('EITHER stick steers and aims — a one-stick pad is a whole pad', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e: any, arg: any) => {
+      const read = (scheme: string, snap: any) => {
+        e.setControlScheme(scheme);
+        e.input.applyPadSnapshot(snap, true);
+        const v = e.input.getMovementVector();
+        const aim = e.input.padAim;
+        return {
+          move: { x: +v.x.toFixed(3), y: +v.y.toFixed(3) },
+          aim: { x: +aim.x.toFixed(3), y: +aim.y.toFixed(3) },
+        };
+      };
+      return {
+        // RIGHT stick only, full pull: it flies the ship, which under the
+        // plain gamepad scheme it never would.
+        rightOnly: read('gamepad-thrust', arg.rightStick),
+        // LEFT stick only: same answer, the other way round.
+        leftOnly: read('gamepad-thrust', arg.leftStick),
+        // BOTH, disagreeing: the larger deflection is the player's intent.
+        both: read('gamepad-thrust', arg.bothSticks),
+      };
+    }, {
+      rightStick: pad({ ry: -1, analog: { 6: 1 } }),
+      leftStick: pad({ lx: -1, analog: { 6: 1 } }),
+      bothSticks: pad({ lx: 0.4, ry: -1, analog: { 6: 1 } }),
+    });
+
+    // Right stick pushed UP flies up — and the ship AIMS where it flies,
+    // because a one-stick pad has no second stick to aim with.
+    expect(r.rightOnly.move.y).toBeCloseTo(-1, 2);
+    expect(r.rightOnly.aim.y).toBeCloseTo(-1, 2);
+
+    expect(r.leftOnly.move.x).toBeCloseTo(-1, 2);
+    expect(r.leftOnly.aim.x).toBeCloseTo(-1, 2);
+
+    // Right stick at full deflection beats a left stick at 0.4.
+    expect(r.both.move.y).toBeCloseTo(-1, 2);
+    expect(r.both.move.x).toBeCloseTo(0, 2);
+
+    watch.assertClean();
+  });
+
+  test('the gun moves to the FACE button, because both triggers are the throttle',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page);
+
+      const r = await engine(page, (e: any, arg: any) => {
+        const fires = (scheme: string, snap: any) => {
+          e.setControlScheme(scheme);
+          e.input.applyPadSnapshot(pad0, true);
+          e.input.getDeviceFireEvents();
+          e.input.applyPadSnapshot(snap, true);
+          return e.input.getDeviceFireEvents().length;
+        };
+        const pad0 = arg.rest;
+        return {
+          // Plain gamepad: R2 is the gun.
+          plainR2: fires('gamepad', arg.r2),
+          // Trigger-thrust: R2 is a throttle, so it must NOT fire — a pad
+          // with only a right trigger would otherwise shoot every time it
+          // accelerated.
+          thrustR2: fires('gamepad-thrust', arg.r2),
+          thrustFace: fires('gamepad-thrust', arg.cross),
+        };
+      }, {
+        rest: pad(),
+        r2: pad({ analog: { 7: 1 } }),
+        cross: pad({ down: [0] }),
+      });
+
+      expect(r.plainR2).toBe(1);
+      expect(r.thrustR2).toBe(0);
+      expect(r.thrustFace).toBe(1);
+
+      watch.assertClean();
+    });
 
   test('the left trigger is released under every scheme that does not use it', async ({ page }) => {
     const watch = await boot(page);
@@ -1894,11 +1980,34 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       expect(r.info).toContain('not connected');
     }
 
-    // The pause-menu control renders only where it can work.
+    // The control renders only where it can work.
     await engine(page, (e: any) => e.pauseGame());
     await expect(page.getByTestId('scheme-select')).toBeVisible();
     await expect(page.getByTestId('adaptive-triggers-toggle'))
       .toHaveCount(r.supported ? 1 : 0);
+
+    watch.assertClean();
+  });
+
+  test('where WebHID EXISTS the control is in BOTH menus', async ({ page }) => {
+    // Headless Chromium has no `navigator.hid`, so the supported branch was
+    // never exercised — which is how the control could go missing from a menu
+    // without a single test noticing.  A stub is enough: the button only ever
+    // asks `isSupported()` before rendering, and what it calls on click is
+    // covered by the picker's own permission flow, not by this.
+    await page.addInitScript(() => {
+      (navigator as any).hid = { requestDevice: async () => [] };
+    });
+    const watch = await boot(page);
+
+    // MAIN MENU — where a player sets their hands up before playing.
+    await expect(page.getByTestId('adaptive-triggers-toggle')).toHaveCount(1);
+
+    // PAUSE MENU — the same widget, so a mid-run change costs no restart.
+    await startRun(page);
+    await engine(page, (e: any) => e.pauseGame());
+    await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+    await expect(page.getByTestId('adaptive-triggers-toggle')).toHaveCount(1);
 
     watch.assertClean();
   });
