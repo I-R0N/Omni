@@ -8,18 +8,35 @@
  *  invisible; at low speed it is the motion, and it reads as jitter.
  *
  *  This measures it directly. The player is driven at a constant slow velocity
- *  and, every frame, the probe records where the field ACTUALLY DRAWS — the
- *  mean drawn x over a sample of stars, which is the quantity the eye tracks
- *  when it perceives the field as moving.
+ *  and, every frame, the probe recomputes where each star WILL BE DRAWN,
+ *  mirroring `renderStars`, then compares against the previous frame.
  *
- *  Two numbers come out of it:
+ *  THE METRIC IS COHERENCE, AND GETTING THERE TOOK TWO WRONG TURNS THAT ARE
+ *  WORTH KNOWING ABOUT (both recorded in the S8 section of the ledger):
  *
- *   - `stepped frames %` — how often a given depth layer's drawn offset changes
- *     at all. A smoothly moving field changes every frame; a stuck one changes
- *     rarely and by a whole pixel when it does.
- *   - `centroid jerk` — the standard deviation of the per-frame change in the
- *     field's mean drawn position, divided by its mean change. 0 is perfectly
- *     smooth motion; ~1 or above means the field advances in lurches.
+ *   - The first metric was the share of ALL stars moving each frame, and it
+ *     showed the fix doing almost nothing. That was the metric being wrong.
+ *     With 240 depth layers stepping at independent times, the whole-field
+ *     average is a smooth trickle even when every individual layer is lurching.
+ *   - The first before/after run showed the undithered path frozen 100% of
+ *     frames at EVERY speed including cruise — impossible, and the probe's
+ *     fault: the player had died mid-sweep, and a stationary camera looks
+ *     exactly like a stuck field. Hence `player.health` being topped up below.
+ *
+ *  So the numbers that matter are about the NEAREST depth layer — brightest,
+ *  largest, fastest-scrolling, and therefore the first to step and the one you
+ *  actually see twitch:
+ *
+ *   - `worst frame` — the largest share of that layer that moved on any single
+ *     frame. 100% means the layer moves as one body; that is the artifact.
+ *   - `coherent jumps` — how often MOST of the layer moved together. At drift
+ *     speeds this should be 0: stars crossing pixel boundaries at staggered
+ *     moments read as motion, a lump of them crossing at once reads as a jerk.
+ *
+ *  Both converge to 100% at high speed, which is correct rather than a
+ *  regression: there the layer genuinely advances a pixel every frame.
+ *
+ *  The whole-field column is kept as context, not as the verdict.
  *
  *  Usage:
  *    npx vite build && npx vite preview --port 4183 --strictPort &
