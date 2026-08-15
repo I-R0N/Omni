@@ -114,7 +114,7 @@ interface UIOverlayProps {
   onCycleStarSize?: () => void;
   onCycleStarBands?: () => void;
   onCycleStarRegion?: () => void;
-  onToggleStarDither?: () => void;
+  onCycleStarMotion?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -279,7 +279,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleStarSize,
   onCycleStarBands,
   onCycleStarRegion,
-  onToggleStarDither,
+  onCycleStarMotion,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -1212,9 +1212,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Parallax DEPTH LAYERS (240 / 120 / 480 / 60). The star budget is split evenly across them, so this changes how finely depth is quantised, not how many stars there are — more layers means a smoother near-to-far gradient as the camera moves. Frozen at 60 for as long as a layer was a full-viewport canvas (60 of those cost 80–316 MB); a layer is now five numbers, so 240 costs ~10 KB. Regenerates the field immediately.')}
                 {ctrlRow('Star regions', onCycleStarRegion, stats.starRegionName ?? 'Medium',
                   'Non-uniform star density across the MAP (Medium / Strong / Soft / Off). Rich regions fill the sky in, voids thin it out as you fly — a region is roughly 4–7 screens across, so it reads over a few seconds of travel. The emptiest region keeps 30% of the stars (10% on Strong); never 0, because a totally empty sky reads as a rendering failure rather than as a void. The Milky Way is exempt — it is a landmark. Deliberately NOT driven by the asteroid flow field: that is a direction field with no density signal, and it re-bakes when you destroy a tile, which would make the sky reshuffle when you shoot a rock. Takes effect on the next frame, no rebuild.')}
-                {ctrlRow('Star smooth', onToggleStarDither,
-                  stats.starDitherEnabled === false ? 'Off' : 'On',
-                  'Sub-pixel motion dither for the star field. Stars are snapped to whole device pixels (that is what makes them crisp and browser-independent), but a snapped field can only MOVE in whole-pixel steps — measured, a depth layer changed position in only 1% of frames at ship speed 2, so the sky froze and then lurched. ON gives each star its own sub-pixel phase so they cross pixel boundaries at 256 different moments: every star still lands on a whole pixel, but the FIELD advances continuously. OFF is the pre-fix behaviour, for A/B.')}
+                {ctrlRow('Star motion', onCycleStarMotion, stats.starMotionName ?? 'Smooth',
+                  'How stars move. SMOOTH (default): drawn at their exact fractional position, so the field scrolls continuously at any speed; canvas antialiases them, so they are slightly softer. CRISP: snapped to whole device pixels for maximum sharpness, but a snapped star can only MOVE in whole-pixel steps, so it visibly steps at low ship speeds. This is a genuine trade for 1-pixel stars — you cannot have both. Safe to choose freely now: the cross-browser bug was the drawImage blit filter on the old band canvases, and there is no drawImage in this path any more.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

@@ -69,6 +69,8 @@ const label = flag('label', browserName);
  *  no background-nebula centers, so the backdrop is pure star field and the
  *  pixel counts below are stars and nothing else. */
 const MAP = flag('map', 'ASTEROID_FIELD');
+/** Star MOTION mode to measure/shoot in: 'smooth' (default) or 'crisp'. */
+const MOTION = flag('motion', 'smooth');
 
 /** Configurations to sweep.  390x844 is the phone the game is played on and
  *  is the default everywhere in this repo; the desktop size is included
@@ -475,6 +477,9 @@ for (const cfg of CONFIGS) {
   await page.goto(BASE);
   await page.waitForFunction(() => !!window.__omniEngine);
   await page.evaluate(m => { window.__omniEngine.setMapType(m); window.__omniEngine.startGame(); }, MAP);
+  if (MOTION === 'crisp') {
+    await page.evaluate(() => window.__omniEngine.dbg.cycleStarMotion());
+  }
   // Let the background initialise and a few frames land.
   await page.waitForTimeout(2500);
 

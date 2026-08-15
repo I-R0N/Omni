@@ -19,7 +19,7 @@
  *  file, which is the alarm working.
  */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, waitForStats } from './helpers';
 
 /** Default step of `STAR_DENSITY_CYCLE` — stars per 10 000 CSS px². */
 const DEFAULT_DENSITY = 729;
@@ -261,15 +261,17 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('draws every star at WHOLE device pixels, dithered or not', async ({ page }) => {
-    // The S3 guarantee, pinned against the actual draw calls rather than
-    // inferred from the storage types. S8 added a sub-pixel dither to fix
-    // low-speed jitter, and the whole point of that fix is that it changes
-    // WHEN a star crosses a pixel boundary and never WHERE it lands — a
-    // fractional coordinate here would put the antialiasing back and undo S3.
+  test('CRISP mode lands on whole device pixels; SMOOTH mode is genuinely sub-pixel', async ({ page }) => {
+    // The two halves of the motion trade, pinned against the real draw calls
+    // rather than inferred from the storage types.
     //
-    // Both modes are checked, because the dither is a DBG toggle and the
-    // undithered path is still shipped code.
+    // CRISP is the S3 behaviour: whole device pixels, so no antialiasing and
+    // no browser-dependent softness. A fractional coordinate there would
+    // silently undo it.
+    // SMOOTH is the default and is fractional ON PURPOSE — that is what makes
+    // the field scroll continuously instead of stepping. Asserting it really
+    // is fractional matters just as much: if it quietly snapped, the low-speed
+    // jitter would be back and the mode would be a lie.
     const watch = await boot(page);
     await startRun(page);
     await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
@@ -281,7 +283,7 @@ test.describe('the star field', () => {
       const proto = Object.getPrototypeOf(ctx);
       const real = proto.fillRect;
 
-      const run = (label: string) => new Promise<any>(resolve => {
+      const run = () => new Promise<any>(resolve => {
         let calls = 0, fractional = 0, sample: any = null;
         let inStars = false;
         const realStars = bg.renderStars.bind(bg);
@@ -292,23 +294,26 @@ test.describe('the star field', () => {
         proto.fillRect = function (x: number, y: number, w: number, h: number) {
           if (inStars) {
             calls++;
-            if (!Number.isInteger(x) || !Number.isInteger(y)
-                || !Number.isInteger(w) || !Number.isInteger(h)) {
+            if (!Number.isInteger(x) || !Number.isInteger(y)) {
+              fractional++;
+              if (!sample) sample = { x, y, w, h };
+            }
+            // Size is integral in BOTH modes — only position is in question.
+            if (!Number.isInteger(w) || !Number.isInteger(h)) {
               fractional++;
               if (!sample) sample = { x, y, w, h };
             }
           }
           return real.call(this, x, y, w, h);
         };
-        // Drift slowly — this is the regime the dither exists for, and the one
-        // where a fractional coordinate would be most likely to appear.
         let n = 0;
         const tick = () => {
+          // Drift slowly: the regime the motion mode exists for.
           e.player.velocity.x = 0.05;
           if (++n >= 12) {
             proto.fillRect = real;
             bg.renderStars = realStars;
-            resolve({ label, calls, fractional, sample });
+            resolve({ calls, fractional, sample });
             return;
           }
           requestAnimationFrame(tick);
@@ -316,19 +321,71 @@ test.describe('the star field', () => {
         requestAnimationFrame(tick);
       });
 
-      const on = await run('dither-on');
-      e.dbg.toggleStarDither();
-      const off = await run('dither-off');
-      e.dbg.toggleStarDither();
-      return { on, off };
+      // Default is 'smooth'; cycle to reach 'crisp'.
+      const smooth = await run();
+      e.dbg.cycleStarMotion();
+      const crisp = await run();
+      e.dbg.cycleStarMotion();
+      return { smooth, crisp };
     });
 
-    // The audit actually observed the star draw path.
-    expect(audit.on.calls).toBeGreaterThan(1000);
-    expect(audit.off.calls).toBeGreaterThan(1000);
+    expect(audit.smooth.calls).toBeGreaterThan(1000);
+    expect(audit.crisp.calls).toBeGreaterThan(1000);
 
-    expect(audit.on.fractional, `fractional star rect: ${JSON.stringify(audit.on.sample)}`).toBe(0);
-    expect(audit.off.fractional, `fractional star rect: ${JSON.stringify(audit.off.sample)}`).toBe(0);
+    // CRISP: not one fractional coordinate.
+    expect(audit.crisp.fractional,
+      `crisp mode drew a fractional rect: ${JSON.stringify(audit.crisp.sample)}`).toBe(0);
+
+    // SMOOTH: genuinely sub-pixel. Most stars sit at fractional offsets, so a
+    // count of zero would mean the mode silently snapped.
+    expect(audit.smooth.fractional).toBeGreaterThan(0);
+
+    // And the cycle returned to where it started. Polled rather than read
+    // inline: `__omniStats` is republished once per frame, so a read taken in
+    // the same tick as the cycle still holds the previous payload.
+    await waitForStats(page, s => s.starMotionName === 'Smooth', 'motion mode back to Smooth');
+
+    watch.assertClean();
+  });
+
+  test('fades stars in and out at the region edge — they never pop', async ({ page }) => {
+    // The bug this fixes: region gating drew a hard PREFIX of each group, so a
+    // star switched fully on or fully off in one frame, anywhere on screen
+    // including the middle of it. Stars must never flash.
+    //
+    // The fix draws the last slice of the visible run at descending opacity, so
+    // a star crosses several intermediate alphas as the cut sweeps past it.
+    // This asserts the fade band exists, is ordered, and reaches low enough
+    // that the final step is close to invisible before a star is dropped.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const fades = await engine(page, e => {
+      const bg = e.renderer.backgroundManager;
+      // Take the group with the most stars — the one most likely to be seen.
+      let biggest = bg.starGroups[0];
+      for (const g of bg.starGroups) if (g.count > biggest.count) biggest = g;
+      const alphaOf = (fill: string) => Number(fill.slice(fill.lastIndexOf(',') + 1, -1));
+      return {
+        steps: biggest.fadeFills.length,
+        base: alphaOf(biggest.fill),
+        ladder: biggest.fadeFills.map(alphaOf),
+      };
+    });
+
+    // A fade band exists and has real depth to it.
+    expect(fades.steps).toBeGreaterThanOrEqual(3);
+
+    // Strictly descending, and all below the group's own opacity — otherwise a
+    // "fading" star would be drawn brighter than a solid one.
+    for (let i = 0; i < fades.ladder.length; i++) {
+      expect(fades.ladder[i]).toBeLessThan(i === 0 ? fades.base : fades.ladder[i - 1]);
+    }
+
+    // The dimmest step is a small fraction of full, so the last thing that
+    // happens before a star vanishes is nearly invisible rather than a pop.
+    expect(fades.ladder[fades.ladder.length - 1]).toBeLessThan(fades.base * 0.35);
 
     watch.assertClean();
   });

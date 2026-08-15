@@ -28,8 +28,10 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
       evaluated and rejected with reasons; purpose-built torus-periodic field
       instead. Costs one field sample per frame.
 - [x] **S8 — Fix the low-speed jitter S3 introduced** (user report). Per-star
-      sub-pixel dither: coherent whole-layer jumps at low speed 3–9% of frames
-      → 0%, with the whole-device-pixel guarantee intact.
+      sub-pixel dither. **Measured well and looked worse — superseded by S9.**
+- [x] **S9 — Sub-pixel motion by default; fade the region edge** (user report).
+      S8's dither REMOVED. Position error at low speed 0.23 px → 0.000; region
+      stars fade instead of popping.
 
 ---
 
@@ -666,6 +668,89 @@ pilot alive and resets position per run. **A measurement that confirms your
 hypothesis too strongly is a reason to check the measurement**, and this one
 would have made the fix look far better than it is.
 
+## S9 — the dither was wrong, and stars were popping
+
+Two user reports, both regressions of mine:
+
+> *"Star smooth actually appears to make the jittering worse."*
+> *"The star regions settings cause stars to disappear and appear in the middle
+> of the screen. They should never flash on screen."*
+
+### Why the S8 dither made it worse
+
+S8 measured coherence and treated it as the defect: it scored a depth layer
+badly when all ~100 of its stars stepped on the same frame, and the dither
+scattered those steps across 256 sub-pixel phases so no layer ever moved as one
+body. The metric improved exactly as designed.
+
+**The metric was rewarding the wrong thing.** A coherent 1-pixel step of a whole
+layer is one discrete event, and the eye reads a rigid shift as motion. Stars
+stepping *independently* preserve no local structure — neighbouring stars change
+their relative positions by a pixel constantly — and that reads as the whole sky
+FIZZING. Uncorrelated high-frequency noise across the entire screen is more
+objectionable than a low-frequency lurch in one plane, which is why the fix
+scored better and looked worse.
+
+I had the perceptual model backwards, and no amount of the measurement I chose
+would have told me — it was measuring the thing I had wrongly assumed was bad.
+
+**The dither is removed rather than left behind the toggle.** A disproved option
+in a cycle is clutter, and keeping it would imply it is a reasonable choice.
+
+### What replaced it
+
+The honest framing is that S3's snapping was buying SHARPNESS, not correctness —
+and I had been treating it as correctness. The cross-browser bug this gauntlet
+started from was the `drawImage` BLIT FILTER on the pre-rendered band canvases,
+whose kernel the canvas spec leaves unspecified. **S4 deleted those canvases
+outright**, so there is no `drawImage` in the star path at all any more. What is
+left is `fillRect` coverage antialiasing on an axis-aligned rect: analytic area
+coverage, consistent across engines in a way a resampling filter never was.
+
+So sub-pixel positioning became safe again the moment S4 landed, and nobody
+noticed — including me, for two milestones.
+
+`STAR_MOTION_CYCLE`, DBG ▸ Visual ▸ **Star motion**:
+
+- **`smooth`** (default) — exact fractional position. Continuous motion at any
+  speed. Antialiased, so slightly softer.
+- **`crisp`** — snapped to whole device pixels. Maximum sharpness; visibly steps
+  at low speed. The S3 behaviour.
+
+For 1-pixel stars this is a genuine trade and **you cannot have both**. Measured
+(`perf/starfield-motion.mjs`, retargeted to quantisation error — the old
+coherence metric was retired for the reason above):
+
+```
+                mean position error (device px)      stars not moving, per frame
+   ship speed     smooth        crisp                  smooth     crisp
+        2          0.000        0.225                    0%        99%
+        6          0.000        0.225                    0%        97%
+       15          0.000        0.245                    0%        91%
+       40          0.000        0.256                    0%        78%
+      120          0.000        0.252                    0%        49%
+```
+
+At ship speed 2, crisp leaves **99% of the field frozen on any given frame**.
+Smooth is zero error by construction. Cost is unchanged: 8.43 ms/frame in the
+bench against 8.2 ms before, so antialiased rects are not measurably dearer
+here.
+
+### The region edge now fades
+
+Gating drew a hard PREFIX of each threshold-sorted group, so a star switched
+fully on or fully off in a single frame — anywhere on screen, including the
+middle of it. I dismissed this when writing S7 on the grounds that one star
+among 24 000 is imperceptible. That was wrong: a point of light appearing from
+nothing is exactly what peripheral vision is built to catch.
+
+The last `STAR_REGION_FADE.EDGE_FRAC` (35%) of each group's visible run is now
+drawn in `STEPS` (6) descending-opacity sub-runs, precomputed per group as extra
+rgba strings. A star crosses several intermediate alphas as the cut sweeps past,
+and because the field changes over seconds of travel, each crossing takes about
+a second. Costs 6 extra `fillStyle` writes per group — state changes, not
+per-star work — and allocates nothing per frame.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -759,7 +844,28 @@ rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
 
-**D19 — Fix the jitter with a per-star dither rather than by unsnapping the
+**D21 — Remove the S8 dither outright rather than demote it to a non-default
+option.** Beat: keeping it as a third motion mode. It is disproved, not merely
+unfashionable — it looks worse than both alternatives, and a cycle entry implies
+a real choice. The experiment stays in the ledger, which is where a dead end
+belongs.
+
+**D22 — Default to SMOOTH and treat sharpness as the thing being traded.** Beat:
+keeping crisp as the default because it was the S3 headline. That framing was
+mine and it was wrong: snapping never bought cross-browser correctness once S4
+removed the blit — it bought sharpness — and two rounds of user testing found
+the motion cost worse than the softness. Crisp stays one tap away for anyone who
+disagrees.
+
+**D23 — Fade the region edge with per-group opacity sub-runs, not per-star
+alpha.** Beat: giving each star its own alpha, which is the obvious way to fade
+and would destroy the fill-style batching the whole draw loop depends on
+(~24 000 state changes instead of ~1 150). Because groups are already sorted by
+threshold, the fade band is a contiguous run, so it splits into a handful of
+sub-runs at precomputed opacities and costs state changes rather than per-star
+work.
+
+**D19 (SUPERSEDED by D21) — Fix the jitter with a per-star dither rather than by unsnapping the
 field.** Beat: dropping back to fractional positions, which is the obvious fix
 and restores perfectly smooth motion. It also restores the antialiasing —
 a fractional `fillRect` origin is exactly the source smear S1 measured at 93.8%
@@ -830,13 +936,17 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 
 ## FOR-USER-REVIEW
 
-- **S8 — the low-speed jitter should be gone.** It was mine: S3's pixel
-  snapping is what made the sky crisp, and a snapped field can only move in
-  whole-pixel steps, so at a drift it froze and lurched. Stars now cross pixel
-  boundaries at staggered moments — still landing on whole pixels, so nothing
-  about the crispness changed. Visual ▸ **Star smooth** toggles it if you want
-  to compare. If jitter persists with it ON, it is something other than the star
-  field and I would want to know what it looks like.
+- **S9 — the jitter fix is now sub-pixel motion, and the sky is slightly
+  softer as a result.** This is the trade and it is unavoidable for 1-pixel
+  stars: crisp stars cannot move smoothly, smooth stars cannot be perfectly
+  crisp. Default is now **Smooth** (zero position error at every speed);
+  Visual ▸ **Star motion** ▸ Crisp restores the sharper, stepping version.
+  Shots: `perf/out/shots/s9/`. If smooth reads as too soft, say so — the next
+  lever is star SIZE, where a 2-device-px star keeps a solid core while still
+  moving continuously.
+
+- **S8's dither is gone** (it was the thing making jitter worse). Recorded as a
+  dead end rather than left in the menu.
 
 - **S7 — the sky now thins out in some parts of the map.** Default is
   **Medium**: the emptiest regions keep 30% of the stars, the richest ~100%, and
@@ -965,6 +1075,34 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 9 — S9 (dither removed; region edge faded)
+
+Two user-reported regressions, both mine, both from this gauntlet.
+
+The dither: measured well, looked worse, removed. The lesson recorded above is
+that S8's metric was built on an assumption it could not test — it scored
+coherence as the defect, and coherence turned out to be the desirable property.
+
+Checked the frame pacing before rewriting anything, since a variable substep
+drain would have been a second cause: per-rendered-frame camera delta at
+constant velocity has cv 0.18 at low speed, driven by rare 4-substep frames.
+Real but secondary; quantisation is the primary cause.
+
+The realisation that unlocked the fix: S4 removed every `drawImage` from the
+star path, so fractional positions stopped being a cross-browser risk two
+milestones ago and nobody noticed.
+
+Region popping: fixed with a faded edge rather than by turning the feature off.
+The dismissal in S7 ("imperceptible at 24 000 stars") was wrong about how
+peripheral vision works.
+
+Three test assertions changed meaning, all authored by this PR: the whole-pixel
+audit now checks crisp is integral AND that smooth is genuinely fractional (a
+silently-snapping "smooth" mode would be a lie), and a new test pins the fade
+ladder is ordered and reaches near-invisibility. One test timing bug of mine was
+fixed before landing: reading `__omniStats` in the same tick as a DBG cycle
+returns the previous frame's payload.
 
 ### Iteration 8 — S8 (the low-speed jitter)
 

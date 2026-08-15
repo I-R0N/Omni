@@ -3,7 +3,8 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, getActiveStarRegion, isStarDither,
+  getActiveStarBands, getActiveStarRegion, getActiveStarMotion,
+  STAR_REGION_FADE,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -25,6 +26,10 @@ interface StarGroup {
   fill: string;
   start: number;
   count: number;
+  /** Descending-opacity variants of `fill`, for the region field's fade band.
+   *  Precomputed because building an rgba string per frame would allocate in
+   *  the draw loop. */
+  fadeFills: string[];
   /** How many of this group's leading stars are MILKY-WAY stars.  They sort
    *  first and are never gated away by the region field — the galactic band is
    *  a landmark, and a landmark that dissolves when you fly into a void is not
@@ -90,13 +95,6 @@ export class BackgroundManager {
   private starY: Int32Array = new Int32Array(0);
   /** Star edge length in DEVICE px (>= 1, always integral). */
   private starSize: Uint8Array = new Uint8Array(0);
-  /** Per-star sub-pixel PHASE, 0..255 mapping to [0, 1) of a device pixel.
-   *  Staggers WHEN each star crosses to the next pixel, so a slowly scrolling
-   *  field advances continuously instead of every star in a layer jumping on
-   *  the same frame.  Uint8 is ample: 1/256 px of phase precision is orders of
-   *  magnitude below anything visible, and it keeps both axes to 48 KB. */
-  private starDitherX: Uint8Array = new Uint8Array(0);
-  private starDitherY: Uint8Array = new Uint8Array(0);
   /** Which depth layer each star rides.  Uint16, not Uint8: the layer count is
    *  DBG-cyclable up to 480, and a Uint8 would wrap silently past 255 —
    *  scattering the far layers' stars onto near ones with no error anywhere. */
@@ -495,8 +493,6 @@ public setMapType(type: MapType) {
     this.starY = new Int32Array(total);
     this.starSize = new Uint8Array(total);
     this.starBandIdx = new Uint16Array(total);
-    this.starDitherX = new Uint8Array(total);
-    this.starDitherY = new Uint8Array(total);
     this.starGroups = [];
     let cursor = 0;
     for (let g = 0; g < NUM_GROUPS; g++) {
@@ -514,8 +510,14 @@ public setMapType(type: MapType) {
         order.sort((a, b) => keys[a] - keys[b]);
         let mwCount = 0;
         while (mwCount < n && keys[order[mwCount]] < 0) mwCount++;
+        const fadeFills: string[] = [];
+        for (let k = 1; k < STAR_REGION_FADE.STEPS; k++) {
+            const m = (STAR_REGION_FADE.STEPS - k) / STAR_REGION_FADE.STEPS;
+            fadeFills.push(`rgba(${r},${gg},${bl},${(alpha * m).toFixed(3)})`);
+        }
         this.starGroups.push({
             fill: `rgba(${r},${gg},${bl},${alpha.toFixed(3)})`,
+            fadeFills,
             start: cursor,
             count: n,
             mwCount,
@@ -526,10 +528,6 @@ public setMapType(type: MapType) {
             this.starY[cursor] = gY[g][j];
             this.starSize[cursor] = gS[g][j];
             this.starBandIdx[cursor] = gB[g][j];
-            // Independent phases per axis, so diagonal drift does not make the
-            // two axes step together and reintroduce the lockstep.
-            this.starDitherX[cursor] = (Math.random() * 256) | 0;
-            this.starDitherY[cursor] = (Math.random() * 256) | 0;
             cursor++;
         }
     }
@@ -748,47 +746,75 @@ public setMapType(type: MapType) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1.0;
     // Opacity is baked into each group's rgba fill, so `globalAlpha` stays 1
-    // and a group costs exactly one state change.
+    // and a group costs one state change (plus the fade band's, below).
     const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
     const bdx = this.bandDrawX, bdy = this.bandDrawY;
     const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
-    const DX = this.starDitherX, DY = this.starDitherY;
-    const dither = isStarDither();
+    const crisp = getActiveStarMotion() === 'crisp';
     const groups = this.starGroups;
+    const FADE_STEPS = STAR_REGION_FADE.STEPS;
+
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
-        ctx.fillStyle = grp.fill;
         const gated = grp.count - grp.mwCount;
-        const end = grp.start + grp.mwCount
-                  + (frac >= 1 ? gated : Math.round(gated * frac));
-        if (dither) {
-            for (let i = grp.start; i < end; i++) {
-                const b = B[i];
-                // The star's own sub-pixel phase decides WHEN it crosses to the
-                // next pixel, so the layer's stars step at 256 different moments
-                // instead of all on one frame.  `| 0` truncates, and every term
-                // is non-negative here, so this is a floor to a WHOLE device
-                // pixel — the S3 guarantee survives; only the timing changed.
-                let x = (X[i] + bofx[b] + DX[i] * (1 / 256)) | 0;
-                if (x >= pw) x -= pw;
-                let y = (Y[i] + bofy[b] + DY[i] * (1 / 256)) | 0;
-                if (y >= ph) y -= ph;
-                const sz = S[i];
-                ctx.fillRect(x, y, sz, sz);
+        const visible = frac >= 1 ? gated : Math.round(gated * frac);
+        // The last slice of the visible run FADES rather than ending abruptly.
+        // Without this a star switches on or off in a single frame, anywhere on
+        // screen including the middle of it, which is exactly the flashing the
+        // region field must never cause.
+        const band = (frac >= 1 || visible <= 0)
+          ? 0
+          : Math.min(visible, Math.round(gated * STAR_REGION_FADE.EDGE_FRAC));
+        const solidEnd = grp.start + grp.mwCount + visible - band;
+
+        // Full-opacity run, then the fade band in descending steps.  Each run
+        // is one fillStyle write and a contiguous walk; the star loop itself is
+        // identical in every run, so this costs state changes, not per-star work.
+        let runStart = grp.start;
+        let runEnd = solidEnd;
+        for (let step = 0; step <= FADE_STEPS - 1; step++) {
+            if (step === 0) {
+                ctx.fillStyle = grp.fill;
+            } else {
+                ctx.fillStyle = grp.fadeFills[step - 1];
+                runStart = runEnd;
+                runEnd = solidEnd + Math.round((band * step) / (FADE_STEPS - 1));
             }
-        } else {
-            for (let i = grp.start; i < end; i++) {
-                const b = B[i];
-                // Undithered: every star in a layer shares one rounded offset,
-                // so the whole layer steps on the same frame.  Kept behind the
-                // DBG toggle as the A/B for the dither above.
-                let x = X[i] + bdx[b];
-                if (x >= pw) x -= pw;
-                let y = Y[i] + bdy[b];
-                if (y >= ph) y -= ph;
-                const sz = S[i];
-                ctx.fillRect(x, y, sz, sz);
+            if (runEnd <= runStart) { if (step === 0) { runEnd = solidEnd; } continue; }
+
+            if (crisp) {
+                // SNAPPED: whole device pixels, maximum sharpness.  Every star
+                // in a layer shares one rounded offset, so the layer steps as a
+                // body — visible as jitter at low ship speeds.  See the S9
+                // note in the ledger for why this is no longer the default.
+                for (let i = runStart; i < runEnd; i++) {
+                    const b = B[i];
+                    let x = X[i] + bdx[b];
+                    if (x >= pw) x -= pw;
+                    let y = Y[i] + bdy[b];
+                    if (y >= ph) y -= ph;
+                    const sz = S[i];
+                    ctx.fillRect(x, y, sz, sz);
+                }
+            } else {
+                // SUB-PIXEL: the exact fractional position, so the field moves
+                // continuously at any speed.  Canvas antialiases the rect
+                // across the pixels it straddles — that is COVERAGE
+                // antialiasing on an axis-aligned rect, which is analytic and
+                // consistent across engines, unlike the drawImage resampling
+                // filter this gauntlet started by removing (and which S4
+                // deleted from this path entirely).
+                for (let i = runStart; i < runEnd; i++) {
+                    const b = B[i];
+                    let x = X[i] + bofx[b];
+                    if (x >= pw) x -= pw;
+                    let y = Y[i] + bofy[b];
+                    if (y >= ph) y -= ph;
+                    const sz = S[i];
+                    ctx.fillRect(x, y, sz, sz);
+                }
             }
+            if (band <= 0) break;   // nothing gated — the solid run was all of it
         }
     }
   }

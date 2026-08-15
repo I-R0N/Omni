@@ -1795,28 +1795,61 @@ export function cycleStarRegion(): StarRegionStep {
   return STAR_REGION_CYCLE[activeStarRegionIndex];
 }
 
-// ─── DBG: star sub-pixel DITHER ──────────────────────────────────────────────
+// ─── DBG: star MOTION — sub-pixel vs pixel-snapped ───────────────────────────
 //
-// Stars are snapped to whole device pixels (S3), which is what removes the
-// browser-dependent resampling — but a pixel-snapped field can only MOVE in
-// whole-pixel steps.  At low scroll speeds that means it holds still for many
-// frames and then jumps a pixel: measured at 390x844 dpr2, a mid depth layer's
-// drawn position changed in only 1% of frames at ship speed 2 and 6% at speed
-// 15, so the field was frozen 94-99% of the time and then lurched.  That is the
-// "jitter at low ship speeds" this exists to fix.
+// The trade this knob exposes is real and unavoidable for 1-pixel stars:
+// a pixel-SNAPPED star is maximally sharp but can only MOVE in whole-pixel
+// steps, so at low scroll speeds it holds still and then jumps.  A sub-pixel
+// star moves continuously but is antialiased across the pixels it straddles,
+// so it is softer.  You cannot have both.
 //
-// The fix is a per-star sub-pixel PHASE.  Each star rounds at a different
-// moment within the pixel, so at any instant the share of stars that have
-// already stepped equals the field's true sub-pixel offset.  Every star still
-// lands on a whole device pixel — the S3 guarantee is untouched — but the FIELD
-// advances continuously instead of in lockstep.  It is spatial dithering
-// applied to motion.
+// SMOOTH IS THE DEFAULT, and the reason it is safe now is worth stating: the
+// cross-browser bug this gauntlet started from was the drawImage BLIT FILTER
+// on the old pre-rendered band canvases, whose kernel the canvas spec leaves
+// unspecified.  S4 deleted those canvases outright, so there is no drawImage
+// in the star path at all.  What remains is fillRect coverage antialiasing on
+// an axis-aligned rect, which is analytic area coverage and consistent across
+// engines in a way a resampling filter never was.  Snapping was therefore
+// buying sharpness, not correctness — and it cost smooth motion, which two
+// rounds of user testing found worse than the softness.
 //
-// ON by default; the toggle is here to A/B it, because "smooth" is a judgement
-// and the artifact it fixes is invisible in a still frame.
-let starDitherEnabled = true;
-export function isStarDither(): boolean { return starDitherEnabled; }
-export function toggleStarDither(): boolean { starDitherEnabled = !starDitherEnabled; return starDitherEnabled; }
+//   'smooth' — exact fractional position.  Continuous motion at any speed.
+//              Stars are antialiased, so slightly softer.  DEFAULT.
+//   'crisp'  — snapped to whole device pixels.  Maximum sharpness; visibly
+//              steps at low ship speeds.  This was the S3 behaviour.
+//
+// (A third option was tried and REMOVED: a per-star sub-pixel dither, which
+// staggered WHEN each star crossed a pixel boundary so no layer stepped as one
+// body.  It measured well and looked worse — uncorrelated per-star stepping
+// reads as the whole sky fizzing, which is more objectionable than a coherent
+// layer step.  See S9 in docs/GAUNTLET_STARFIELD_LOG.md.)
+export type StarMotionMode = 'smooth' | 'crisp';
+export const STAR_MOTION_CYCLE: ReadonlyArray<StarMotionMode> = ['smooth', 'crisp'] as const;
+let activeStarMotionIndex = 0;
+export function getActiveStarMotion(): StarMotionMode { return STAR_MOTION_CYCLE[activeStarMotionIndex]; }
+export function getActiveStarMotionName(): string {
+  return STAR_MOTION_CYCLE[activeStarMotionIndex] === 'smooth' ? 'Smooth' : 'Crisp';
+}
+export function cycleStarMotion(): StarMotionMode {
+  activeStarMotionIndex = (activeStarMotionIndex + 1) % STAR_MOTION_CYCLE.length;
+  return STAR_MOTION_CYCLE[activeStarMotionIndex];
+}
+
+// How the region field's edge is FADED, so gated stars never pop.
+//
+// Region gating draws a prefix of each (threshold-sorted) draw group, so a
+// hard cut makes a star switch on or off in one frame — anywhere on screen,
+// including the middle of it.  Stars must never flash, so the stars nearest the
+// cut are drawn at reduced alpha instead: the last `EDGE_FRAC` of the visible
+// run is split into `STEPS` sub-runs of descending opacity, and a star crosses
+// them one at a time as the cut sweeps past.  Costs STEPS extra fillStyle
+// writes per group, not a per-star test.
+export const STAR_REGION_FADE = {
+  /** Share of a group's gated stars that form the fade band. */
+  EDGE_FRAC: 0.35,
+  /** Opacity steps across that band.  More = smoother, at one fillStyle each. */
+  STEPS: 6,
+} as const;
 
 // ─── DBG: star size floor ────────────────────────────────────────────────────
 //
