@@ -1,8 +1,11 @@
 # MiniMax-Music3 for Omni's adaptive score — feasibility
 
 Assessment of <https://huggingface.co/MiniMaxAI/MiniMax-Music3> as the
-generator for the **active layered background music** described in
-`docs/AUDIO_PLAN.md` §3 (music director) and §5 (music beds).
+**offline generator of the audio files** for the active layered background
+music described in `docs/AUDIO_PLAN.md` §3 (music director) and §5 (music
+beds).  The question is asset authoring, not runtime: the model runs on a
+rented box while the soundtrack is being made, the game ships the `.opus`
+files it produced, and nothing model-shaped is ever in the bundle.
 
 **Nothing here is implemented.**  The game still has ZERO audio — no
 `AudioContext`, no audio assets, no `AudioSystem`, no trigger hooks
@@ -13,23 +16,27 @@ generator for the **active layered background music** described in
 
 ## 1. Verdict
 
-**Feasible as an OFFLINE ASSET GENERATOR.  Not feasible as the layering
-mechanism itself, and not usable at runtime at all.**
-
-Split the question in two, because they have opposite answers:
+**Yes — with one structural caveat that shapes the whole pipeline: Music3
+cannot hand you the layers.**
 
 | Question | Answer |
 |---|---|
-| Can Music3 generate music good enough to be Omni's score? | **Yes.** Full-song coherence, 32 kHz stereo, prompt-controlled genre/instrumentation/energy. It is over-qualified for a top-down arena game. |
-| Can Music3 *run in the browser*, per-session or per-frame, reacting to the game? | **No, and not close.** 11.1B params, two CUDA GPUs, non-streaming. There is no web/WASM/ONNX path and there will not be one. |
-| Can Music3 emit the *layered stems* the music director needs? | **No.** It emits one finished stereo mixdown per call. No stems, no loop points, no tempo/key guarantee, no "same take minus the drums". |
-| Can the stems be obtained anyway? | **Yes — with a second model.** Generate the full take with Music3, then split it with a source separator (Demucs). That is the whole bridge, and it is the crux of this document. |
+| Can Music3 generate music good enough to be Omni's score? | **Yes.** Full-song coherence up to 5 min, 32 kHz stereo, prompt control over genre / BPM / key / instrumentation / arrangement. It is over-qualified for a top-down arena game. |
+| Can it emit the *layered stems* the music director needs? | **No.** One finished stereo mixdown per call. No stems, no loop points, no tempo/key guarantee, no "same take minus the drums". |
+| Can the layers be obtained anyway? | **Yes — with a second model.** Generate the take with Music3, then split it with a source separator (Demucs, MIT). That is the whole bridge and the crux of this document. |
+| Does anything model-shaped ship? | **No.** It produces `.wav` files at authoring time exactly like the nebula PNGs. (For completeness: running Music3 *live* is not an option either — 11.1B params, two CUDA GPUs, non-streaming, no web path. It was never the plan and is not a loss.) |
 
-So: Music3 is a **content pipeline** decision, not an architecture
-decision.  It produces `.wav` files at authoring time exactly like the
-nebula PNGs; the engine ships the results and never knows a model existed.
-The adaptive behaviour is 100% the job of the `AudioSystem` /music director
-in `AUDIO_PLAN.md` §3, which has to be built either way.
+The caveat matters more than it first sounds, because **"layered" is exactly
+the axis Music3 is weakest on**.  Re-prompting is not a substitute for
+stems: a second generation captioned "same track, no drums" is a different
+performance in a different room, not the first one with the drums muted, so
+the two cannot be crossfaded or summed.  Layers have to come from *one*
+take, split after the fact.
+
+So Music3 is a **content pipeline** decision, not an architecture decision.
+The adaptive behaviour is 100% the job of the `AudioSystem` / music director
+in `AUDIO_PLAN.md` §3, which has to be built either way — and it is
+indifferent to which generator produced the stems.
 
 ---
 
@@ -188,6 +195,104 @@ Notes on the non-obvious steps:
   after rejects (wrong energy, vocal bleed, structure that will not loop).
   Eight beds → 40–80 generations → an afternoon or two of iteration, not a
   project.
+
+---
+
+### 4a. Worked example — the arena bed family
+
+The arena is the right first target because it is the only family that
+exercises every hard part at once: instrumental-only, seamless loop, and
+multiple intensity layers.  One generation feeds **both** of §5's beds (4,
+arena exploration, and 5, arena combat) — that is the trick.
+
+**1. One caption, pinned to a tempo and key.**  Both are requests, not
+guarantees (§2), but pinning them makes the family internally consistent
+and gives the post-analysis a value to check against:
+
+```bash
+curl http://127.0.0.1:8000/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "minimax_ttm",
+    "input": "[Instrumental]",
+    "instructions": "Fully instrumental, no vocals, no vocal samples, no choir, no spoken word. Dark synth-driven space combat score, 124 BPM, D minor, 4/4. Global: driving but loopable, no fade-out, consistent energy across the whole piece, no long silences. Arrangement: sustained analog pad and low drone bed throughout; muted arpeggiated synth ostinato; distorted sub bass on the downbeats; tight electronic kick, snare and hats; occasional metallic percussive hits. Production: wide stereo pads, dry centred drums, modern loud master.",
+    "response_format": "wav",
+    "seed": 7,
+    "max_new_tokens": 9000
+  }' --output arena_take07.wav
+```
+
+Roll 5–10 seeds, keep the best take by ear.  Reject anything that fades
+out, drops to silence, or sings.
+
+**2. Split it.**  `htdemucs_6s` gives six stems instead of four, which maps
+better onto intensity layers:
+
+```bash
+demucs -n htdemucs_6s arena_take07.wav
+# → drums / bass / other / vocals / guitar / piano
+```
+
+The `vocals` stem is the §2a safety check: it should be near-silent.
+Measure its RMS and reject the take automatically if it is not.
+
+**3. Assign the stems to intensity layers.**  Additive, so every layer sums
+back toward the original mix:
+
+| Layer | Stems | Driven by |
+|---|---|---|
+| L1 — base | `other` + `bass` | always on inside an arena |
+| L2 — pulse | `+ drums` | wave active (vs `waveGraceTimer` breather) |
+| L3 — threat | `+ guitar` + `piano` | live enemy count over a threshold |
+
+§5's "arena exploration" bed is then **L1 alone**, and "arena combat" is
+L1+L2+L3.  They are the same recording, so moving between them is a gain
+ramp, not a crossfade.
+
+**4. Find the loop on a real bar line.**  Detect the *actual* BPM rather
+than trusting the caption's 124 — Music3 gives "generative control rather
+than strict symbolic guarantees", and a bar grid built on the requested
+tempo instead of the delivered one will drift audibly by the end of a
+minute:
+
+```python
+import librosa
+y, sr = librosa.load('arena_take07.wav', sr=None, mono=True)
+tempo, beats = librosa.beat.beat_track(y=y, sr=sr, units='time')
+# bar = 4 beats in 4/4; pick a 32-bar window from a downbeat, well
+# inside the take so the intro and outro are excluded
+```
+
+At a delivered 124 BPM a bar is 1.935 s and a 32-bar loop is 61.9 s.  Cut
+**every stem at the identical sample offsets** — they must stay aligned —
+and apply a short equal-power crossfade at the seam.
+
+**5. Encode and describe.**  Opus 112 kbps stereo per layer, plus a sidecar
+that is the entire interface between the asset pipeline and the engine:
+
+```json
+{
+  "id": "arena",
+  "bpm": 124.0,
+  "barSec": 1.9355,
+  "loopSec": 61.935,
+  "layers": [
+    { "id": "base",   "src": "music/arena.base.opus" },
+    { "id": "pulse",  "src": "music/arena.pulse.opus" },
+    { "id": "threat", "src": "music/arena.threat.opus" }
+  ]
+}
+```
+
+**The consequence worth noticing**: because every layer in a family is one
+take cut at identical offsets, the layers are *sample-aligned* — the music
+director starts all three together and only animates gain.  §3's harder
+requirement, "transition at musical boundaries", therefore only applies
+*between* families (hub ↔ arena ↔ boss ↔ station), which is a handful of
+transitions on a `barSec` grid rather than a continuous problem.  Within a
+family, horizontal re-sequencing collapses into vertical layering for free.
+That is the strongest argument for the generate-then-separate pipeline over
+prompting each layer independently.
 
 ---
 
