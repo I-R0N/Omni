@@ -208,7 +208,15 @@ engine/
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
                           incremental tile-destroy patching
     EntityIndex.ts        Per-frame filtered lists (enemies, asteroids, …)
-    BackgroundManager.ts  Parallax stars + nebula BG layers
+    BackgroundManager.ts  Parallax stars + nebula BG layers.  The star
+                          field is DATA, not bitmaps: a struct-of-arrays
+                          of device-pixel positions/sizes sorted into
+                          fillStyle groups, drawn directly every frame by
+                          `renderStars` (one state change per group, zero
+                          allocation).  Count is derived from viewport
+                          AREA at a target density, so every screen size
+                          shows the same sky per unit area.  See §8 and
+                          docs/GAUNTLET_STARFIELD_LOG.md
     IdAllocator.ts        Monotonic nextId() for entity IDs
     PerfController.ts     Load-driven frame-skip coordinator for every
                           skippable periodic pass (see §3 and §8)
@@ -1628,7 +1636,27 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   join it rather than add a second path: when buying was discounted and
   sell-back was not, buy-then-sell netted `discount - (1 - SELL_FRACTION)`
   of cost per cycle — an infinite money pump above a 10% discount.
-- **Off-screen indicators are EDGE-anchored, size-coded and typed.**
+- **The STAR FIELD is drawn at whole DEVICE pixels, and its count comes
+  from AREA.**  Two invariants, both measured into place by the star-field
+  gauntlet (`docs/GAUNTLET_STARFIELD_LOG.md`), and both easy to undo by
+  accident:
+  (1) **Density is per CSS px², never an absolute count.**  The budget is
+  `(width × height / 10⁴) × STAR_DENSITY_CYCLE[i]`, split across
+  `STARFIELD_CONSTANTS.NUM_BANDS` depth layers.  A fixed count makes a
+  smaller window a denser sky — measured at 3.95× between a 390×844 phone
+  and a 1440×900 desktop, which put 26.9% of the phone's pixels inside a
+  star.  `tests/starfield.spec.ts` fails if the two disagree by >3%.
+  (2) **Stars are rasterized ONCE, at integer device coordinates, under the
+  IDENTITY transform.**  There is no intermediate canvas — a star's
+  position AND size are whole device pixels, so nothing can resample it.
+  Both halves matter: a 1×1 `fillRect` at a *fractional* origin is
+  antialiased into a 2×2 smear before any scaling happens, so snapping the
+  draw offset without snapping the star position fixes nothing.  Anything
+  that reintroduces a pre-rendered layer blitted at a fractional or
+  dpr-scaled offset reintroduces a browser-dependent look, because the
+  `drawImage` filter kernel is not specified.  `effectiveDpr()` is a
+  GENERATION input here, not just a draw-time one, so `sceneDpr` is part of
+  the rebuild guard — a render-scale cap change must regenerate the field.
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
   INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
   edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE

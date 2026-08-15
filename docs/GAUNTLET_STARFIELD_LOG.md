@@ -20,7 +20,8 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S4 — Memory and draw calls.** The band canvases are gone: the field is
       data, drawn directly. 1264.9 MB → 0.2 MB, 244 blits/frame → 0, and
       6–25× faster in the A/B.
-- [ ] **S5 — Docs + validation.**
+- [x] **S5 — Docs + validation.** Stale comments fixed (three, not two);
+      CLAUDE.md §2 + §8 synced; three gates × 2 consecutive runs green.
 
 ---
 
@@ -399,6 +400,34 @@ left, so there is no blit to align and no filter to pick: stars are rasterized
 exactly once, at integer device coordinates, under the identity transform. The
 class of bug S3 fixed is now structurally absent rather than carefully avoided.
 
+## S5 — docs and validation
+
+**Stale comments: three, not two.** The brief named two, and a third had gone
+stale in the same way:
+
+1. `// 32 drawImage calls vs 12,000` — written for 8 bands × 1500 stars. Gone;
+   there is no blit at all now.
+2. `// Pre-render 8 star bands. Each band gets 1500 stars = 12,000 total.` —
+   same vintage. Replaced by the derived-budget explanation.
+3. **`render()`'s `effectiveDpr` comment**, which still said "the same 24 000
+   stars end up packed into a fraction of the area". The count is no longer
+   24 000 and no longer absolute. Rewritten — and it now also names the
+   SECOND reason the capped ratio matters, which did not exist when it was
+   written: `effectiveDpr` is a GENERATION input since S3, because star
+   coordinates are baked in device pixels, so a mismatched ratio breaks pixel
+   alignment as well as density.
+
+**CLAUDE.md.** §2's `BackgroundManager` line now says the field is data rather
+than bitmaps. §8 gained one invariant covering both halves of what was fixed —
+density from area, and single-rasterization at integer device pixels — written
+so the two failure modes are recoverable from the text: a fixed count makes a
+smaller window denser, and snapping the draw offset without snapping the star
+POSITION fixes nothing, because a fractional `fillRect` origin is already
+antialiased before any scaling happens.
+
+**Validation.** Three gates, two consecutive runs each, green both times.
+46 tests (38 pre-existing + 8 new).
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -492,6 +521,16 @@ rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
 
+**D13 — Do NOT regenerate `omniverse-standalone.html`, against gauntlet
+convention.** Beat: following the established P-final pattern (`5f P-final:
+validation, CLAUDE.md layout sync, standalone rebuild`). PR #84 is open against
+the same base and already regenerates that file, so a second regeneration is a
+guaranteed conflict in a 5.7 MB generated artifact — and the brief's standing
+instruction for the parallel work is to rebase rather than fight it. The file
+is reproducible in one command (`npm run build && node scripts/inline-build.mjs`)
+and `publish-standalone.yml` is what actually releases it, so nothing is lost
+by letting #84 carry it. Flagged rather than silently skipped.
+
 **D5 — Split the budget evenly across bands and absorb the round-off in the
 total.** Beat: giving band 0 the remainder. A remainder in one band makes the
 furthest parallax layer measurably denser than the rest, which is exactly the
@@ -537,6 +576,64 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 
 ---
 
+## Completion summary
+
+### What the four claims came to
+
+| # | prior-session claim | verdict | fixed in |
+|---|---|---|---|
+| 1 | count fixed, area is not | **confirmed** — 3.95× delta, 26.9% of the phone's pixels lit | S2 |
+| 2a | sizes 0.15–0.81, always < 1.5 | range **wrong** (0.15–1.17), conclusion **right** | S3 |
+| 2b | every star is one CSS pixel | **refuted** — already a 2×2 antialiased smear in the source | S3 |
+| 2c | fractional dpr blit resamples | **mechanism confirmed**, cross-browser attribution **untested** | S3, then made structurally impossible by S4 |
+| 3 | ~311 MB / ~79 MB | **confirmed** (316.2 / 80.3, counting the milky way) | S4 |
+| 4 | 244 draw calls; comments stale | **confirmed exactly**; three stale comments, not two | S4, S5 |
+
+The diagnosis held up as a work queue. Two corrections changed what had to be
+built: the source-level smear (2b) meant S3 had to fix star *placement* and not
+only the blit, and the ~4× window-size density delta (1) is large enough that it
+— not rasterization — may be the dominant term in the user's screenshot.
+
+### End to end
+
+```
+                              before        after
+390x844 dpr2  density        729           184     stars / 10k CSS px²
+              lit coverage    26.9%          0.6%   of device pixels
+              backing store   80.3 MB        0.1 MB
+              bg drawImage   244              0     per frame
+              overdraw       321.3 Mpx      0.012 Mpx  per frame
+1440x900 dpr2 backing store  316.2 MB        0.2 MB
+              density        185            185     stars / 10k CSS px²
+```
+
+Phone and desktop now agree on density to within 0.6%, against 3.95× before.
+
+### What is NOT settled
+
+- **The Edge-vs-Safari delta is unverified.** WebKit cannot be downloaded in
+  this container. The resampling MECHANISM is measured and now structurally
+  absent, but nobody has re-shot the user's side-by-side. That is the
+  acceptance test this gauntlet cannot run for itself.
+- **Two visual defaults are calls, not findings** — star density (185) and the
+  size floor (`device`). Both ship as DBG cycles with the pre-change value one
+  tap away. See FOR-USER-REVIEW.
+- **Frame-time on real hardware.** Every timing here is software raster. The
+  overdraw and byte numbers are exact and device independent, and the direction
+  is corroborated by this game's own hardware captures (`RENDER_SCALE_CYCLE`),
+  but a device capture through the in-game Perf REC panel is what would confirm
+  the win. Suggested: Ring World, before/after.
+
+### Overlap with the parallel PRs
+
+Base (`claude/plan-completion`) did not move during this work, so there was
+nothing to rebase. Neither open PR touches `BackgroundManager.ts`, `perf/`, or
+`tests/starfield.spec.ts`, so the substance is conflict-free. Overlap is
+confined to shared wiring files — `App.tsx`, `UIOverlay.tsx`, `constants.ts`,
+`GameEngine.ts`, `debugControls.ts`, `types.ts`, `CLAUDE.md`, `RenderSystem.ts`
+— where this branch only ADDS (two DBG rows and their plumbing). `InputSystem.ts`
+was left alone as instructed.
+
 ## Per-iteration log
 
 ### Iteration 1 — S1 (verify and measure)
@@ -552,6 +649,15 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 5 — S5 (docs + validation)
+
+Three stale comments fixed rather than the two the brief named — `render()`'s
+`effectiveDpr` note had gone stale the same way and now also documents the
+second reason the capped ratio matters, which S3 created. CLAUDE.md §2 and §8
+synced. Checked the two parallel PRs: base unmoved, no overlap in the files
+that carry the substance. Declined the conventional standalone rebuild (D13).
+Three gates run twice, consecutively, green both times.
 
 ### Iteration 4 — S4 (memory and draw calls)
 

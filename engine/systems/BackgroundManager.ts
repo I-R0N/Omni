@@ -492,11 +492,14 @@ public setMapType(type: MapType) {
   public render(ctx: CanvasRenderingContext2D, cameraPos: Vector2, attractors: GameEntity[] = [], zoom: number = 1.0) {
     // MUST be the CAPPED ratio (effectiveDpr), not window.devicePixelRatio.
     // The canvas backing store is sized with the cap applied, so dividing by
-    // the raw device ratio yields a scene smaller than the real CSS viewport
-    // — and since the star bands are generated to fill exactly this size, the
-    // same 24 000 stars end up packed into a fraction of the area.  At a 2x
-    // cap on a dpr-3 phone that is 4/9 of the area, i.e. 2.25x the star
-    // density, which reads as a visibly over-dense sky.
+    // the raw device ratio yields a scene SMALLER than the real CSS viewport.
+    // Two things then go wrong at once: the star budget is derived from that
+    // scene's area, so the sky comes out over-dense (at a 2x cap on a dpr-3
+    // phone the scene is 4/9 of the area, i.e. 2.25x the density), and every
+    // star's DEVICE coordinate is baked against a ratio the canvas is not
+    // actually using, so the field stops landing on whole pixels.
+    // `sceneDpr` below is this same value, remembered, so a change to the cap
+    // regenerates the field instead of leaving it mismatched.
     const dpr = effectiveDpr();
     const width = ctx.canvas.width / dpr;
     const height = ctx.canvas.height / dpr;
