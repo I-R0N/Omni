@@ -34,7 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
-    cycleStarDensity, cycleStarSize, cycleStarBands,
+    cycleStarDensity, cycleStarSize, cycleStarBands, cycleStarRegion,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -567,6 +567,16 @@ export class DebugControls {
   cycleStarBands() {
     cycleStarBands();
     this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the star-REGION field — how much star density varies by where
+   *  in the map you are (Medium / Strong / Soft / Off).
+   *
+   *  Unlike the other three star knobs this is a DRAW-time input, not a
+   *  generation-time one: the field gates how many of each group's stars are
+   *  drawn, so it takes effect on the very next frame with no rebuild. */
+  cycleStarRegion() {
+    cycleStarRegion();
   }
 
   /** DBG: cycle the SUBSTEP CAP (5 default / 3 / 2).

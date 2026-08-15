@@ -3,12 +3,19 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands,
+  getActiveStarBands, getActiveStarRegion,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
-import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+import { wrapDeltaX, wrapDeltaY, MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
 import { hexToRgb } from './render/drawUtils';
+
+/** Amplitude of each region-field wave, descending — one dominant structure
+ *  with two finer ones laid over it.  Equal weights average into mush. */
+const REGION_WAVE_WEIGHTS = [1.0, 0.6, 0.35] as const;
+/** Phase offsets, so the waves do not all peak at the origin (which would put
+ *  a conspicuous bullseye at the map centre, where the player spawns). */
+const REGION_WAVE_PHASES = [0.13, 0.71, 0.29] as const;
 
 /** A run of stars sharing one `fillStyle`, so the draw loop sets canvas state
  *  once per group instead of once per star.  Colour AND opacity are baked into
@@ -18,6 +25,12 @@ interface StarGroup {
   fill: string;
   start: number;
   count: number;
+  /** How many of this group's leading stars are MILKY-WAY stars.  They sort
+   *  first and are never gated away by the region field — the galactic band is
+   *  a landmark, and a landmark that dissolves when you fly into a void is not
+   *  one.  Everything after them is ordered by a stable random threshold, so
+   *  drawing a PREFIX of the group is a spatially unbiased sample of it. */
+  mwCount: number;
 }
 
 interface NebulaPuff {
@@ -398,7 +411,12 @@ public setMapType(type: MapType) {
     const gY: number[][] = [];
     const gS: number[][] = [];
     const gB: number[][] = [];
-    for (let i = 0; i < NUM_GROUPS; i++) { gX.push([]); gY.push([]); gS.push([]); gB.push([]); }
+    // Stable random draw-order key per star.  Sorting each group by it is what
+    // lets the region field gate stars by taking a PREFIX of the group rather
+    // than testing every star every frame — see `renderStars`.  Milky-way stars
+    // get -1 so they sort ahead of everything and survive any gating.
+    const gT: number[][] = [];
+    for (let i = 0; i < NUM_GROUPS; i++) { gX.push([]); gY.push([]); gS.push([]); gB.push([]); gT.push([]); }
 
     const emit = (xDev: number, yDev: number, sizeCss: number, band: number,
                   colorIdx: number, opacity: number) => {
@@ -407,6 +425,7 @@ public setMapType(type: MapType) {
         gY[g].push(yDev);
         gS[g].push(this.starDevicePx(sizeCss, dpr));
         gB[g].push(band);
+        gT[g].push(band === MW_BAND ? -1 : Math.random());
     };
 
     // WHOLE DEVICE PIXELS, both position and size.
@@ -477,16 +496,27 @@ public setMapType(type: MapType) {
         const colorIdx = (g / ALPHA_BUCKETS) | 0;
         const alpha = (g % ALPHA_BUCKETS) / (ALPHA_BUCKETS - 1);
         const [r, gg, bl] = hexToRgb(PALETTE[colorIdx]);
+        // Order the group by its draw-order key.  An INDEX permutation rather
+        // than sorting five parallel arrays in lockstep; generation-time, so
+        // the allocation is fine (the per-frame path still allocates nothing).
+        const keys = gT[g];
+        const order = new Uint32Array(n);
+        for (let i = 0; i < n; i++) order[i] = i;
+        order.sort((a, b) => keys[a] - keys[b]);
+        let mwCount = 0;
+        while (mwCount < n && keys[order[mwCount]] < 0) mwCount++;
         this.starGroups.push({
             fill: `rgba(${r},${gg},${bl},${alpha.toFixed(3)})`,
             start: cursor,
             count: n,
+            mwCount,
         });
         for (let i = 0; i < n; i++) {
-            this.starX[cursor] = gX[g][i];
-            this.starY[cursor] = gY[g][i];
-            this.starSize[cursor] = gS[g][i];
-            this.starBandIdx[cursor] = gB[g][i];
+            const j = order[i];
+            this.starX[cursor] = gX[g][j];
+            this.starY[cursor] = gY[g][j];
+            this.starSize[cursor] = gS[g][j];
+            this.starBandIdx[cursor] = gB[g][j];
             cursor++;
         }
     }
@@ -598,7 +628,7 @@ public setMapType(type: MapType) {
 
     // RENDER STARS — drawn directly from the star arrays, no intermediate
     // canvas.  See `renderStars`.
-    this.renderStars(ctx, dx, dy, dpr);
+    this.renderStars(ctx, dx, dy, dpr, cameraPos);
 
     // Back to CSS-pixel space for the shooting stars, which are laid out in
     // CSS units like the rest of the renderer.
@@ -630,7 +660,44 @@ public setMapType(type: MapType) {
    *  Hoisted to a method rather than a closure inside `render` on purpose: a
    *  function constructed in a per-frame path is rebuilt every frame
    *  (CLAUDE.md §8, the refill idiom's sibling rule). */
-  private renderStars(ctx: CanvasRenderingContext2D, dx: number, dy: number, dpr: number) {
+  /** Star-density field: how rich the sky is at a world position, in [0, 1].
+   *
+   *  Three plane waves with INTEGER wave numbers.  Integer is the whole trick —
+   *  it makes the field exactly periodic over MAP_WIDTH x MAP_HEIGHT, so it is
+   *  seam-continuous on the torus with no special case at the wrap (the same
+   *  device FlowFieldGrid's breathing term uses).  Irregular-looking because the
+   *  three wave VECTORS are not multiples of one another; a single wave, or a
+   *  product of two, would read as stripes or a checkerboard.
+   *
+   *  Deliberately NOT the asteroid flow field, which was evaluated for this:
+   *  that is a normalised DIRECTION field with no density signal in its
+   *  magnitude, it is re-baked when tiles are destroyed and slowly breathes, and
+   *  reading it here would couple the backdrop to a gameplay system.  A sky that
+   *  reshuffles when you shoot a nearby rock is a bug that would be very hard to
+   *  recognise as one.  See the S7 decision in the ledger. */
+  private regionDensityAt(
+    wx: number, wy: number,
+    waves: ReadonlyArray<readonly [number, number]> = getActiveStarRegion().waves,
+  ): number {
+    if (waves.length === 0) return 1;
+    const u = wx / MAP_WIDTH;
+    const v = wy / MAP_HEIGHT;
+    const TAU = Math.PI * 2;
+    // Fixed weights, descending: one dominant structure with two finer ones on
+    // top.  Equal weights would average into mush.
+    const W = REGION_WAVE_WEIGHTS;
+    let n = 0;
+    let norm = 0;
+    for (let i = 0; i < waves.length; i++) {
+      const w = i < W.length ? W[i] : W[W.length - 1];
+      n += w * Math.sin(TAU * (waves[i][0] * u + waves[i][1] * v + REGION_WAVE_PHASES[i % REGION_WAVE_PHASES.length]));
+      norm += w;
+    }
+    const d = 0.5 + n / (2 * norm);
+    return d < 0 ? 0 : d > 1 ? 1 : d;
+  }
+
+  private renderStars(ctx: CanvasRenderingContext2D, dx: number, dy: number, dpr: number, cameraPos: Vector2) {
     const pw = this.bandPixelWidth;
     const ph = this.bandPixelHeight;
     if (pw <= 0 || ph <= 0) return;
@@ -653,6 +720,18 @@ public setMapType(type: MapType) {
         this.bandDrawY[b] = Math.round(this.bandOffsetY[b]);
     }
 
+    // REGION GATING (S7).  Star density varies by where in the MAP the camera
+    // is: rich regions fill the sky in, voids thin it out.  Because each group
+    // is sorted by a stable random key, drawing a PREFIX of it is a spatially
+    // unbiased random sample — so this costs ONE field sample per frame and a
+    // multiply per group, not a test per star.  Milky-way stars sort ahead of
+    // the key and are never gated away.
+    const region = getActiveStarRegion();
+    const frac = region.waves.length > 0
+      ? region.minFrac + (1 - region.minFrac)
+                       * this.regionDensityAt(cameraPos.x, cameraPos.y, region.waves)
+      : 1;
+
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1.0;
     // Opacity is baked into each group's rgba fill, so `globalAlpha` stays 1
@@ -663,7 +742,9 @@ public setMapType(type: MapType) {
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
         ctx.fillStyle = grp.fill;
-        const end = grp.start + grp.count;
+        const gated = grp.count - grp.mwCount;
+        const end = grp.start + grp.mwCount
+                  + (frac >= 1 ? gated : Math.round(gated * frac));
         for (let i = grp.start; i < end; i++) {
             const b = B[i];
             // Both terms are integers, so the sum is too — a star always lands

@@ -113,6 +113,7 @@ interface UIOverlayProps {
   onCycleStarDensity?: () => void;
   onCycleStarSize?: () => void;
   onCycleStarBands?: () => void;
+  onCycleStarRegion?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -276,6 +277,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleStarDensity,
   onCycleStarSize,
   onCycleStarBands,
+  onCycleStarRegion,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -1206,6 +1208,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Star size floor. Bands are generated at DEVICE resolution and blitted 1:1 at whole device-pixel offsets, so no resampling filter is in the path — which makes this a real choice for the first time. Device px: a star may be a single device pixel, the finest sky the display can show. CSS px: never smaller than one CSS pixel — the apparent-size floor the field had before, but crisp instead of filtered. IDENTICAL at dpr 1; the knob only differs at dpr ≥ 2.')}
                 {ctrlRow('Star depth', onCycleStarBands, stats.starBandsName ?? '240',
                   'Parallax DEPTH LAYERS (240 / 120 / 480 / 60). The star budget is split evenly across them, so this changes how finely depth is quantised, not how many stars there are — more layers means a smoother near-to-far gradient as the camera moves. Frozen at 60 for as long as a layer was a full-viewport canvas (60 of those cost 80–316 MB); a layer is now five numbers, so 240 costs ~10 KB. Regenerates the field immediately.')}
+                {ctrlRow('Star regions', onCycleStarRegion, stats.starRegionName ?? 'Medium',
+                  'Non-uniform star density across the MAP (Medium / Strong / Soft / Off). Rich regions fill the sky in, voids thin it out as you fly — a region is roughly 4–7 screens across, so it reads over a few seconds of travel. The emptiest region keeps 30% of the stars (10% on Strong); never 0, because a totally empty sky reads as a rendering failure rather than as a void. The Milky Way is exempt — it is a landmark. Deliberately NOT driven by the asteroid flow field: that is a direction field with no density signal, and it re-bakes when you destroy a tile, which would make the sky reshuffle when you shoot a rock. Takes effect on the next frame, no rebuild.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

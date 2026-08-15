@@ -261,6 +261,109 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
+  test('varies density by map REGION without ever emptying the sky', async ({ page }) => {
+    // S7. Density is gated by a world-space field sampled at the camera, and
+    // the gate is a PREFIX of each fill group (groups are sorted by a stable
+    // random key, so a prefix is a spatially unbiased sample). Two things have
+    // to hold and neither is visible in a screenshot taken in one place:
+    // the field must actually VARY across the map, and it must never reach zero.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const probe = await engine(page, (e) => {
+      const bg = e.renderer.backgroundManager;
+      // Walk the map and record the drawn fraction the renderer would use.
+      // Reading the field directly rather than counting pixels: the sim
+      // exposes the same fact (harness rule 3).
+      let min = Infinity, max = -Infinity;
+      const mw = e.currentMap.width, mh = e.currentMap.height;
+      for (let i = 0; i < 40; i++) {
+        for (let j = 0; j < 40; j++) {
+          const d = bg.regionDensityAt((i / 40 - 0.5) * mw, (j / 40 - 0.5) * mh);
+          if (d < min) min = d;
+          if (d > max) max = d;
+        }
+      }
+      // Seam continuity: the field is built from integer wave numbers so it
+      // must agree exactly across the torus wrap. A discontinuity here would
+      // show in game as a visible line in the sky at the map edge.
+      //
+      // The period is the LIVE map size, read off the loaded map rather than
+      // assumed — the field is periodic over MAP_WIDTH x MAP_HEIGHT, and every
+      // map is a different size.
+      const W = e.currentMap.width, H = e.currentMap.height;
+      const seam = Math.abs(
+        bg.regionDensityAt(-W / 2, 123) - bg.regionDensityAt(W / 2, 123),
+      );
+      const seamY = Math.abs(
+        bg.regionDensityAt(456, -H / 2) - bg.regionDensityAt(456, H / 2),
+      );
+      // NO SUB-MAP REPETITION. The wave vectors have no common factor, so the
+      // field must NOT also be periodic over half the map — if it were, a
+      // player flying in one direction would pass the identical sky twice.
+      // (The first draft scaled every vector by a common multiplier and did
+      // exactly that; `perf/starfield-regions.mjs` showed the tiling.)
+      let halfPeriodMaxDiff = 0;
+      for (let i = 0; i < 24; i++) {
+        const px = (i / 24 - 0.5) * W;
+        const d0 = bg.regionDensityAt(px, 77);
+        const d1 = bg.regionDensityAt(px + W / 2, 77);
+        halfPeriodMaxDiff = Math.max(halfPeriodMaxDiff, Math.abs(d0 - d1));
+      }
+      return { min, max, seam, seamY, halfPeriodMaxDiff, mapW: W, mapH: H, groups: bg.starGroups.length };
+    });
+
+    // Sanity that we sampled a real map, not a 0x0 one.
+    expect(probe.mapW).toBeGreaterThan(100);
+    expect(probe.mapH).toBeGreaterThan(100);
+
+    // The field genuinely varies — a flat field would gate nothing.
+    expect(probe.max - probe.min).toBeGreaterThan(0.5);
+    expect(probe.min).toBeGreaterThanOrEqual(0);
+    expect(probe.max).toBeLessThanOrEqual(1);
+
+    // …and it wraps seamlessly on the torus, on both axes.
+    expect(probe.seam).toBeLessThan(1e-9);
+    expect(probe.seamY).toBeLessThan(1e-9);
+
+    // …while NOT repeating at half the map. This is the bug the region
+    // visualiser caught: a common factor in the wave vectors tiles the field.
+    expect(probe.halfPeriodMaxDiff).toBeGreaterThan(0.2);
+
+    // The emptiest region still keeps a real share of the budget. A sky that
+    // can reach zero reads as a rendering failure, not as a void.
+    //
+    // Measured over the WHOLE FIELD, not per group: a rare-colour group holding
+    // three stars legitimately rounds to zero in a void, and that is invisible.
+    // What must not collapse is the sky.
+    const floor = await engine(page, e => {
+      const bg = e.renderer.backgroundManager;
+      let drawn = 0, total = 0;
+      for (const g of bg.starGroups) {
+        // Reproduce the renderer's prefix arithmetic at the sparsest field
+        // value any cycle step allows, which is what `minFrac` bounds.
+        const gated = g.count - g.mwCount;
+        drawn += g.mwCount + Math.round(gated * 0.10);
+        total += g.count;
+      }
+      return drawn / total;
+    });
+    expect(floor).toBeGreaterThan(0.08);
+
+    // …and the Milky Way survives it intact — it is a landmark, and a landmark
+    // that dissolves in a void is not one.
+    const mw = await engine(page, e => {
+      const bg = e.renderer.backgroundManager;
+      let kept = 0;
+      for (const g of bg.starGroups) kept += g.mwCount;
+      return { kept, expected: bg.milkyWayStarCount };
+    });
+    expect(mw.kept).toBe(mw.expected);
+
+    watch.assertClean();
+  });
+
   test('rebuilds the bands when the pixel ratio changes, not only the size', async ({ page }) => {
     // Device-resolution bands make the pixel RATIO a generation input, so the
     // render-scale cap (DBG ▸ Player ▸ Render scale) has to rebuild them even

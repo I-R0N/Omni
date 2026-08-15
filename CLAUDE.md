@@ -1657,6 +1657,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `drawImage` filter kernel is not specified.  `effectiveDpr()` is a
   GENERATION input here, not just a draw-time one, so `sceneDpr` is part of
   the rebuild guard — a render-scale cap change must regenerate the field.
+  (3) **Star density varies by MAP REGION, and the field's wave vectors must
+  have NO COMMON FACTOR.**  `regionDensityAt` sums plane waves with INTEGER
+  wave vectors, which is what makes it periodic over `MAP_WIDTH ×
+  MAP_HEIGHT` and therefore seam-continuous on the torus.  A common factor
+  `f` also makes it periodic over `map/f`, so the same regions tile `f`
+  times across the map and a player flying one direction passes the
+  identical sky repeatedly — that shipped in a first draft and is invisible
+  in any single frame.  Control region SIZE by picking bigger wave numbers,
+  never by multiplying the set by a scale.  Gating is a PREFIX of each
+  fill-style group (groups are sorted by a stable random key at generation,
+  so a prefix is a spatially unbiased sample), which is why it costs one
+  sample per frame rather than a test per star.  `perf/starfield-regions.mjs`
+  prints the field as ASCII — use it, not a screenshot, to judge the shape.
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
   INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
   edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE

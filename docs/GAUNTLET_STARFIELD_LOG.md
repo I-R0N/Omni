@@ -24,6 +24,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
       CLAUDE.md §2 + §8 synced; three gates × 2 consecutive runs green.
 - [x] **S6 — Spend the savings** (user request). Density default back to 729
       (the star count that was liked); depth layers 60 → 240. Both DBG cycles.
+- [x] **S7 — Non-uniform density by map region** (user request). Flow field
+      evaluated and rejected with reasons; purpose-built torus-periodic field
+      instead. Costs one field sample per frame.
 
 ---
 
@@ -508,6 +511,91 @@ worth stating plainly:
 Nothing here regresses against the pre-gauntlet code on any axis measured: at
 4× the stars, desktop still costs 17× less time and 316× less memory.
 
+## S7 — non-uniform density by map region
+
+User request: *"I would also like to test using less stars in different areas of
+the map instead of a uniform distribution. This could leverage the flow field to
+only have stars in those areas or not in those areas. Otherwise, it could use a
+different schema if there is no clear benefit to leverage flow field."*
+
+### The flow field: evaluated, rejected
+
+Three reasons, and any one of them is disqualifying:
+
+1. **It is a DIRECTION field, not a density field.** `sampleAsteroidFlow`
+   returns vectors that are normalised and then deflected around obstacles.
+   Its magnitude carries no "how much stuff is here" signal, so driving star
+   density from it means inventing a quantity it does not encode.
+2. **It mutates with gameplay.** Cells are re-baked when a tile is destroyed,
+   and the whole field slowly breathes (`FlowFieldGrid`'s breathing term).
+   Stars are the most distant thing in the scene. A backdrop that reshuffles
+   when you shoot a nearby rock is a category error — and a bug that would be
+   very hard to recognise as one, because it would look like flicker.
+3. **It couples the backdrop to a gameplay system.** `BackgroundManager`
+   currently knows about toroidal maths, constants and assets, and nothing else.
+
+So: a different schema, purpose-built for density.
+
+### What shipped
+
+A world-space field sampled **at the camera**, gating what share of the star
+budget is drawn. Fly into a rich region and the sky fills in; fly into a void
+and it thins out.
+
+**The field** is a sum of three plane waves with INTEGER wave vectors. Integer
+is what makes it exactly periodic over `MAP_WIDTH × MAP_HEIGHT`, so it is
+seam-continuous across the torus wrap with no special case — the same device
+`FlowFieldGrid`'s breathing term uses for the same reason.
+
+**The gating is free.** Each fill group is sorted at generation by a stable
+random key, so drawing a PREFIX of a group is a spatially unbiased random
+sample of it. Per frame that is one field sample and one multiply per group —
+not a test per star. Milky-way stars sort ahead of the key and are never gated:
+the galactic band is a landmark, and a landmark that dissolves in a void is not
+one.
+
+`minFrac` floors the emptiest region at 30% of the budget (10% on Strong).
+Never 0 — a completely empty sky reads as a rendering failure, not as a void.
+
+### The bug the visualiser caught
+
+The first draft had a single `scale` multiplier over a fixed set of base wave
+vectors. `perf/starfield-regions.mjs` (new) prints the field as ASCII, and the
+problem was visible instantly:
+
+```
+   *#%#=-=+-  -***#%#=-=+-  -**        <-- the same pattern, twice
+   ++*#=:.:-:-*@%++*#=:.:-:-*@%
+```
+
+Multiplying every wave vector by `scale` gives them all a common factor, which
+makes the field periodic over `map/scale` as well as over the map. At scale 2 a
+player flying in one direction passes through the identical sky pattern twice.
+
+Fixed by choosing wave vectors PER STEP with **no common factor**
+(`[[1,2],[3,-1],[2,5]]`, gcd 1) instead of scaling a common base. Region size is
+now controlled by picking bigger wave numbers, not by a multiplier. Pinned by a
+test that samples the field at half-map offsets and requires them to DIFFER.
+
+This is the argument for building the visualiser rather than eyeballing one
+screenshot: the defect is invisible in any single frame, and only shows when
+the whole field is laid out at once.
+
+### Measured
+
+```
+=== star-region field, ASTEROID_FIELD 6000x6000 (' '=empty, '@'=rich) ===
+     .:====----+*####***###*+-.
+   ..:-=+++=--=+#%@@%#*++++=-:.
+   :.:-=++++==+*%@@@#*=-:-----:
+   …
+richest   field 0.994 at -1500,-1900 — 23 995 stars (99.6% of budget)
+emptiest  field 0.003 at   600, 1500 —  7 325 stars (30.4% of budget)
+```
+
+A diagonal walk across the map ranges 51%–75% of budget, so ordinary travel
+does read as a changing sky rather than as a constant one.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -601,6 +689,29 @@ rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
 
+**D16 — Reject the flow field as the density source, and say so in the code.**
+Beat: using it as asked. It is a normalised DIRECTION field with no density
+signal in its magnitude, it re-bakes on tile destruction and breathes over time,
+and reading it would couple the backdrop to a gameplay system. The rejection is
+written into `constants.ts` beside the replacement, not just here, because the
+obvious next question on reading that code is "why not use the flow field?" and
+the answer should not require finding this file.
+
+**D17 — Sample the field at the CAMERA, not per star.** Beat: giving each star a
+world position and gating it individually, which would show a visible boundary
+between a dense region and a void within one screen. Two problems: a star's
+"world position" is ill-defined in a parallax-tiled field (a distant layer is
+effectively at infinity and follows the camera, so gating it by world region
+would make it pop as you move), and evaluating noise per star is ~24 000
+evaluations per frame against one. Camera sampling gives "regions of the map are
+starrier", which is what was asked for, at O(1).
+
+**D18 — Gate by PREFIX of a sorted group, not by a per-star test.** Beat: a
+visibility flag per star checked in the draw loop. Sorting each group once at
+generation by a stable random key makes a prefix a spatially unbiased sample, so
+the per-frame cost is one multiply per group instead of a branch per star — and
+the draw loop stays a branch-free linear walk over typed arrays.
+
 **D14 — Default density to the old COUNT (729), not the old COVERAGE (~2400).**
 Beat: matching what the pre-gauntlet phone sky actually *looked* like, which
 would need ~2400 on this scale because the old stars were 3.7-pixel smears. The
@@ -634,6 +745,17 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 ---
 
 ## FOR-USER-REVIEW
+
+- **S7 — the sky now thins out in some parts of the map.** Default is
+  **Medium**: the emptiest regions keep 30% of the stars, the richest ~100%, and
+  a region is a few seconds of travel across. Visual ▸ **Star regions** cycles
+  Medium / Strong (10% floor, more dramatic) / Fine (smaller regions) / Off.
+  It is a draw-time gate, so it takes effect instantly with no rebuild.
+  `node perf/starfield-regions.mjs --shot <dir>` prints the field as ASCII and
+  shoots the richest and emptiest spots on the map.
+  **I defaulted this ON at Medium** because a test you have to go and enable is
+  one you will not run — but it is the change here most likely to be wrong for
+  you, and Off is one tap away.
 
 - **S6 — the dense sky is back, at 729 (your call), with 4× the depth.**
   ~24 000 stars on the phone again, which is the pre-gauntlet count. It will
@@ -751,6 +873,26 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 7 — S7 (non-uniform density by map region)
+
+Evaluated the flow field first, since the request named it: rejected on three
+counts (direction not density, mutates with gameplay, couples the backdrop to a
+gameplay system), with the reasoning written into the code beside the
+replacement.
+
+Built `perf/starfield-regions.mjs` to visualise the field, and it earned itself
+immediately: the first draft's `scale` multiplier gave every wave vector a
+common factor, tiling the field 2x2 across the map. Invisible in any single
+screenshot; obvious the moment the whole field is printed at once. Wave vectors
+are now chosen per step with no common factor, and a test pins it by requiring
+half-map offsets to differ.
+
+Two test assertions of mine were wrong before they landed: the seam check
+hardcoded a 4000-unit period instead of reading the live map size, and the
+"never empties" check measured the per-GROUP minimum, which legitimately rounds
+to zero for a rare-colour group holding three stars. The second now measures the
+whole field, which is the quantity that actually matters.
 
 ### Iteration 6 — S6 (spend the savings)
 

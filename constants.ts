@@ -1734,6 +1734,67 @@ export function cycleStarDensity(): number {
   return STAR_DENSITY_CYCLE[activeStarDensityIndex];
 }
 
+// ─── DBG: star REGIONS (non-uniform density across the map) ──────────────────
+//
+// Star density varies by WHERE IN THE MAP the camera is, instead of being
+// uniform everywhere: fly into a rich region and the sky fills in, fly into a
+// void and it thins out.
+//
+// WHY NOT THE FLOW FIELD (evaluated, rejected — see the S7 decision in
+// docs/GAUNTLET_STARFIELD_LOG.md):
+//   - It is a DIRECTION field.  `sampleAsteroidFlow` returns normalised vectors
+//     deflected around obstacles, so its magnitude carries no density signal to
+//     read.  We would be inventing one from a quantity that does not encode it.
+//   - It MUTATES with gameplay.  Cells are re-baked when a tile is destroyed
+//     and the whole field slowly breathes.  Stars are the most distant thing in
+//     the scene; a backdrop that reshuffles when you shoot a nearby rock is a
+//     category error, not a feature.
+//   - It would couple the backdrop to a gameplay system.  BackgroundManager
+//     currently knows about toroidal maths, constants and assets, and nothing
+//     else.
+// So the field below is purpose-built for density: a sum of three plane waves
+// with INTEGER wave numbers, which makes it exactly periodic on the torus (the
+// same trick FlowFieldGrid's breathing term uses for seam-continuity), static
+// per map, and free of any dependency on gameplay state.
+//
+// `minFrac` is the share of the star budget still drawn in the emptiest region
+// — never 0, because a completely empty sky reads as a rendering failure rather
+// than as a void.
+//
+// `waves` are the field's wave VECTORS, as integer (kx, ky) pairs.  Integer is
+// what makes the field exactly periodic over the map, and the pairs MUST HAVE
+// NO COMMON FACTOR.  That is not a style note: a common factor f makes the
+// field periodic over map/f as well, so the same regions repeat f times across
+// the map and a player flying in one direction passes through the identical
+// sky pattern over and over.  The first draft used a single `scale` multiplier
+// over a fixed base, which gives every vector the factor `scale` by
+// construction — `perf/starfield-regions.mjs` printed the field as ASCII and
+// the 2x2 tiling was immediately visible.  Wave vectors are therefore chosen
+// per step rather than scaled.
+//
+// Bigger wave numbers mean SMALLER regions.  The 'Medium' set spans roughly
+// one map down to a fifth of it, which is a few seconds of travel per region.
+export interface StarRegionStep {
+  name: string;
+  minFrac: number;
+  waves: ReadonlyArray<readonly [number, number]>;
+}
+export const STAR_REGION_CYCLE: ReadonlyArray<StarRegionStep> = [
+  // gcd(1,2,3,1,2,5) = 1 — no sub-map repetition.
+  { name: 'Medium', minFrac: 0.30, waves: [[1, 2], [3, -1], [2, 5]] },
+  { name: 'Strong', minFrac: 0.10, waves: [[1, 2], [3, -1], [2, 5]] },
+  // gcd(2,3,5,2,7,4) = 1 — smaller regions, still no repetition.
+  { name: 'Fine',   minFrac: 0.25, waves: [[2, 3], [5, -2], [7, 4]] },
+  { name: 'Off',    minFrac: 1.00, waves: [] },
+] as const;
+let activeStarRegionIndex = 0;
+export function getActiveStarRegion(): StarRegionStep { return STAR_REGION_CYCLE[activeStarRegionIndex]; }
+export function getActiveStarRegionName(): string { return STAR_REGION_CYCLE[activeStarRegionIndex].name; }
+export function cycleStarRegion(): StarRegionStep {
+  activeStarRegionIndex = (activeStarRegionIndex + 1) % STAR_REGION_CYCLE.length;
+  return STAR_REGION_CYCLE[activeStarRegionIndex];
+}
+
 // ─── DBG: star size floor ────────────────────────────────────────────────────
 //
 // Star bands are generated at DEVICE resolution and blitted 1:1 at whole
