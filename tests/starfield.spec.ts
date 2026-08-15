@@ -30,8 +30,12 @@ const NUM_BANDS = 60;
 const readField = (page: import('@playwright/test').Page) =>
   engine(page, (e) => {
     const bg = e.renderer.backgroundManager;
+    let inGroups = 0;
+    for (const g of bg.starGroups) inGroups += g.count;
     return {
-      bands: bg.starBands.length,
+      // One depth layer per band PLUS the milky way, which is now just the
+      // last layer rather than a special case.
+      bands: bg.bandSpeed.length,
       starsPerBand: bg.starsPerBand,
       starCount: bg.starCount,
       milkyWayStarCount: bg.milkyWayStarCount,
@@ -40,8 +44,12 @@ const readField = (page: import('@playwright/test').Page) =>
       sceneDpr: bg.sceneDpr,
       bandPixelWidth: bg.bandPixelWidth,
       bandPixelHeight: bg.bandPixelHeight,
-      bandCanvasW: bg.starBands.length ? bg.starBands[0].canvas.width : 0,
-      bandCanvasH: bg.starBands.length ? bg.starBands[0].canvas.height : 0,
+      // Star storage — the arrays the draw loop walks.
+      arrayLength: bg.starX.length,
+      groups: bg.starGroups.length,
+      starsInGroups: inGroups,
+      maxStarSize: bg.starSize.length ? Math.max(...Array.from<number>(bg.starSize)) : 0,
+      minStarSize: bg.starSize.length ? Math.min(...Array.from<number>(bg.starSize)) : 0,
     };
   });
 
@@ -53,15 +61,25 @@ test.describe('the star field', () => {
   test('derives its star count from viewport AREA at the target density', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const f = await readField(page);
 
-    // The parallax structure survives the density change — S2 changed the
-    // BUDGET, not the number of depth layers.
-    expect(f.bands).toBe(NUM_BANDS);
+    // The parallax structure survives — S2 changed the BUDGET and S4 changed
+    // the STORAGE, but neither changed the number of depth layers.
+    // (+1 is the milky way, which S4 folded in as the last layer.)
+    expect(f.bands).toBe(NUM_BANDS + 1);
     expect(f.starsPerBand).toBeGreaterThan(0);
-    expect(f.starCount).toBe(f.starsPerBand * f.bands);
+    // The BUDGET is split across the depth bands; the milky way carries its
+    // own width-scaled count on top, so it is not part of this product.
+    expect(f.starCount).toBe(f.starsPerBand * NUM_BANDS);
+
+    // Every star reached the draw arrays exactly once. Stars are stored sorted
+    // into fill-style groups, so a star lost between generation and grouping
+    // would simply never be drawn — silently, and only on some viewports.
+    expect(f.arrayLength).toBe(f.starCount + f.milkyWayStarCount);
+    expect(f.starsInGroups).toBe(f.arrayLength);
+    expect(f.groups).toBeGreaterThan(0);
 
     // The scene is the CSS viewport, not the device-pixel backing store.
     // These two agreeing is what makes "per CSS px²" a meaningful unit.
@@ -81,7 +99,7 @@ test.describe('the star field', () => {
     // the two viewports below differ in area by 3.5x.
     const watch = await boot(page);
     await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const phone = await readField(page);
 
@@ -108,10 +126,10 @@ test.describe('the star field', () => {
     expect(ratio).toBeGreaterThan(0.97);
     expect(ratio).toBeLessThan(1.03);
 
-    // Band canvases follow the viewport, and the band COUNT does not.
-    expect(desktop.bands).toBe(NUM_BANDS);
-    expect(desktop.bandCanvasW).toBe(Math.round(1000 * desktop.sceneDpr));
-    expect(desktop.bandCanvasH).toBe(Math.round(1100 * desktop.sceneDpr));
+    // The device-pixel scene follows the viewport; the layer COUNT does not.
+    expect(desktop.bands).toBe(NUM_BANDS + 1);
+    expect(desktop.bandPixelWidth).toBe(Math.round(1000 * desktop.sceneDpr));
+    expect(desktop.bandPixelHeight).toBe(Math.round(1100 * desktop.sceneDpr));
 
     watch.assertClean();
   });
@@ -126,7 +144,7 @@ test.describe('the star field', () => {
     // fractional part.
     const watch = await boot(page);
     await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const f = await readField(page);
 
@@ -136,11 +154,108 @@ test.describe('the star field', () => {
     const canvasDpr = await engine(page, e => e.renderer.ctx.canvas.width / e.renderer.ctx.canvas.clientWidth);
     expect(Math.abs(f.sceneDpr - canvasDpr)).toBeLessThan(0.01);
 
-    // Band backing store is the scene in DEVICE pixels — the 1:1 blit target.
+    // Star coordinates live in the scene's DEVICE-pixel space.
     expect(f.bandPixelWidth).toBe(Math.round(f.sceneWidth * f.sceneDpr));
     expect(f.bandPixelHeight).toBe(Math.round(f.sceneHeight * f.sceneDpr));
-    expect(f.bandCanvasW).toBe(f.bandPixelWidth);
-    expect(f.bandCanvasH).toBe(f.bandPixelHeight);
+    // Sizes are whole device pixels, never fractional — a fractional size is
+    // antialiased at its edges, which is half of the resampling S3 removed.
+    expect(f.minStarSize).toBeGreaterThanOrEqual(1);
+    expect(Number.isInteger(f.minStarSize)).toBe(true);
+    expect(Number.isInteger(f.maxStarSize)).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('holds no pre-rendered band canvases — the field is data, not bitmaps', async ({ page }) => {
+    // S4. The star field used to be 61 full-viewport canvases blitted 4 ways
+    // each: 244 whole-screen blits per frame, and 80 MB of backing store at
+    // 390x844 dpr1 rising to 1.26 GB at 1440x900 dpr2 once the bands went
+    // device-resolution in S3. Measured, drawing the stars directly is 6-25x
+    // faster and holds well under a megabyte.
+    //
+    // This asserts the STRUCTURE rather than the megabytes, because the
+    // megabytes are a consequence: any canvas held per band brings the whole
+    // cost back, and it would come back quietly.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const held = await engine(page, (e) => {
+      const bg = e.renderer.backgroundManager;
+      // Anything canvas-shaped reachable from the manager, other than the
+      // nebula puff textures (which are legitimately cached bitmaps).
+      const canvasFields: string[] = [];
+      let bytes = 0;
+      for (const k of Object.keys(bg)) {
+        if (k === 'puffTextures' || k === 'nebulaPuffs') continue;
+        const v = (bg as any)[k];
+        const list = Array.isArray(v) ? v : [v];
+        for (const item of list) {
+          if (item && typeof item === 'object') {
+            const c = item.canvas ?? item;
+            if (c && typeof c.width === 'number' && typeof c.getContext === 'function') {
+              canvasFields.push(k);
+              bytes += c.width * c.height * 4;
+            }
+          }
+        }
+      }
+      return {
+        canvasFields,
+        bytes,
+        // The star arrays, which are what replaced them.
+        starBytes: bg.starX.byteLength + bg.starY.byteLength
+                 + bg.starSize.byteLength + bg.starBandIdx.byteLength,
+        stars: bg.starX.length,
+      };
+    });
+
+    expect(held.canvasFields).toEqual([]);
+    expect(held.bytes).toBe(0);
+    // ~10 bytes per star: two Int32 coordinates, a size byte and a band byte.
+    expect(held.starBytes).toBeLessThan(held.stars * 12);
+    // Sanity: the whole field costs less than a megabyte, against 80 MB before.
+    expect(held.starBytes).toBeLessThan(1e6);
+
+    watch.assertClean();
+  });
+
+  test('still parallaxes: layers scroll, and nearer layers scroll faster', async ({ page }) => {
+    // S4 replaced 61 scrolling canvases with 61 scrolling offsets, so the
+    // scroll arithmetic was rewritten. A static sky would look completely
+    // normal in a screenshot — this is the failure a still image cannot catch.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    // Park the camera, note where each layer sits, then move a known distance.
+    // Reading offsets rather than pixels is harness rule 3, and it also makes
+    // the per-layer SPEED observable, which pixels would not.
+    const before = await engine(page, e => Array.from<number>(e.renderer.backgroundManager.bandOffsetX));
+
+    await engine(page, e => { e.player.position.x += 400; });
+    await waitForEngine(
+      page,
+      new Function('e', `return e.renderer.backgroundManager.bandOffsetX[59] !== ${JSON.stringify(before[59])}`) as any,
+      'the nearest layer to scroll',
+    );
+
+    const after = await engine(page, e => Array.from<number>(e.renderer.backgroundManager.bandOffsetX));
+    const speeds = await engine(page, e => Array.from<number>(e.renderer.backgroundManager.bandSpeed));
+
+    // Layer speed rises quadratically with depth index, so a near layer must
+    // outrun a far one. Offsets wrap, so compare the SPEED table that drives
+    // them plus the fact that the field moved at all.
+    expect(speeds[59]).toBeGreaterThan(speeds[0] * 10);
+    expect(after.some((v, i) => v !== before[i])).toBe(true);
+
+    // Every offset stays inside the wrap window — an offset that escaped it
+    // would push stars off-screen permanently rather than wrapping them.
+    const pw = await engine(page, e => e.renderer.backgroundManager.bandPixelWidth);
+    for (const v of after) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(pw);
+    }
 
     watch.assertClean();
   });
@@ -159,7 +274,7 @@ test.describe('the star field', () => {
     // `render` — is still the real one (harness rule 6).
     const watch = await boot(page);
     await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const before = await readField(page);
     expect(before.bandPixelWidth).toBe(Math.round(before.sceneWidth * before.sceneDpr));
@@ -179,13 +294,12 @@ test.describe('the star field', () => {
         const bg = e.renderer.backgroundManager;
         return bg.bandPixelWidth === Math.round(bg.sceneWidth * bg.sceneDpr);
       },
-      'the bands to be regenerated at the canvas ratio',
+      'the field to be regenerated at the canvas ratio',
     );
 
     const after = await readField(page);
     expect(after.sceneDpr).toBeCloseTo(before.sceneDpr, 5);
-    expect(after.bandCanvasW).toBe(after.bandPixelWidth);
-    expect(after.bandCanvasH).toBe(after.bandPixelHeight);
+    expect(after.bandPixelHeight).toBe(Math.round(after.sceneHeight * after.sceneDpr));
     expect(after.bands).toBe(before.bands);
     // The scene did not resize — only the ratio guard fired.
     expect(after.sceneWidth).toBe(before.sceneWidth);
@@ -196,7 +310,7 @@ test.describe('the star field', () => {
   test('scales the milky way with WIDTH — it is a line feature, not an area one', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const before = await readField(page);
 
@@ -220,7 +334,7 @@ test.describe('the star field', () => {
   test('the DBG density cycle takes effect immediately, without a resize', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starBands.length > 0, 'star bands');
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const before = await readField(page);
     // Within 1% of the nominal density: the budget is split into a WHOLE
@@ -234,13 +348,6 @@ test.describe('the star field', () => {
     // change would not appear until the window was resized. That is exactly
     // what this asserts: same viewport, new density.
     await engine(page, e => e.dbg.cycleStarDensity());
-    await waitForEngine(
-      page,
-      e => e.renderer.backgroundManager.starCount !== undefined
-        && e.renderer.backgroundManager.starBands.length > 0
-        && e.renderer.backgroundManager.starsPerBand > 0,
-      'the bands to regenerate',
-    );
     await waitForEngine(
       page,
       new Function('e', `return e.renderer.backgroundManager.starCount !== ${before.starCount}`) as any,

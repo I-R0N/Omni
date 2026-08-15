@@ -17,7 +17,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
       whole device pixels, the blit is 1:1 at integer offsets. Audited against
       the live render: 100% unscaled, 100% integer-aligned, at every ratio.
       **Costs memory — S4's subject.**
-- [ ] **S4 — Memory and draw calls.**
+- [x] **S4 — Memory and draw calls.** The band canvases are gone: the field is
+      data, drawn directly. 1264.9 MB → 0.2 MB, 244 blits/frame → 0, and
+      6–25× faster in the A/B.
 - [ ] **S5 — Docs + validation.**
 
 ---
@@ -33,11 +35,12 @@ It reports five things, and they are not worth the same:
 
 | measurement | how | worth |
 |---|---|---|
-| structure — band count, canvas dims, backing-store bytes | read off the live `BackgroundManager` | exact, browser independent |
-| density — star count, and lit source pixels as a % of device pixels | manager fields + `getImageData` over the band canvases | exact |
-| star footprint — scanline run lengths in a band canvas | `getImageData` | exact |
-| **the real blit path** — is each band blit unscaled and integer-aligned? | wraps `drawImage` on the LIVE context, reads the transform in force and the post-transform destination | exact; this is the S3 acceptance check |
+| structure — layer count, device-pixel scene, bytes held | read off the live `BackgroundManager` | exact, browser independent |
+| density — star count, and lit pixels as a % of device pixels | manager fields + `getImageData` over a scratch render of the field | exact |
+| star footprint — scanline run lengths in the composed field | `getImageData` | exact |
+| **the real blit path** — is any band blit unscaled and integer-aligned? | wraps `drawImage` on the LIVE context, reads the transform in force and the post-transform destination | exact; the S3 acceptance check (since S4 it reports *no blits at all*) |
 | draw calls | wraps `drawImage` on the live render context for 60 frames | exact |
+| `--bench` — pre-rendered bands vs direct draw | reconstructs the old structure from live star data, A/Bs it against the real `renderStars` | the S4 decision; ratio directional, overdraw exact |
 
 Plus a clearly-labelled **counterfactual** control that replays the *old*
 fractional dpr-scaled blit, so the filter's effect stays visible for
@@ -318,6 +321,84 @@ this way on purpose ("with (2) and (3) settled, revisit whether 60 separate
 full-viewport canvases is the right structure at all"). It is an intermediate
 state inside one PR, not a shipping one. **S4 must land.**
 
+## S4 — memory and draw calls
+
+S3 left the field at **321.3 MB** on the phone and **1264.9 MB** on a retina
+desktop window. So the question the brief poses — "is 60 separate
+full-viewport canvases the right structure at all?" — had to be answered, and
+answered with measurement rather than taste.
+
+### The decisive experiment
+
+`perf/starfield.mjs --bench` times both structures against the same context,
+flushing with a 1px readback so the numbers are rasterization and not call
+submission, and interleaving A/B/A/B so a drifting machine biases both equally.
+
+```
+                        bands (61 x 4 blits)      direct (per-star fillRect)     ratio
+390x844  dpr1      20.00 ms   80.3 Mpx   80.3 MB    3.30 ms   0.012 Mpx  0.07 MB    6.1x
+390x844  dpr2      76.37 ms  321.3 Mpx  321.3 MB    3.14 ms   0.012 Mpx  0.06 MB   24.3x
+1440x900 dpr2     236.73 ms 1264.9 Mpx 1264.9 MB   14.12 ms   0.048 Mpx  0.29 MB   16.8x
+```
+
+Software raster over-weights fill rate, so the RATIO is directional rather
+than the device's. Two things make the conclusion safe anyway:
+
+- **The overdraw column is exact and device independent.** 244 whole-screen
+  blits at 390×844 dpr2 is 321 megapixels of mostly-transparent alpha blending
+  per frame, for ~6 000 stars. Direct drawing touches 0.012 Mpx. That is a
+  26 000× difference in pixels written — not a margin any noise could flip.
+- **This device is known to be fill-rate bound.** `RENDER_SCALE_CYCLE`'s
+  comment in `constants.ts` records that capping the pixel ratio at 2 was "the
+  single largest smoothness result of the gauntlet", and that the unattributed
+  `other` term it moved was compositing. Removing 244 full-screen blends is the
+  same lever pulled much harder.
+
+The band pre-render existed to trade ~12 000 per-star `fillRect`s for 32
+`drawImage`s. **Both halves of that trade went stale** — it is now 244 blits
+against ~6 000 stars — which is precisely what the brief flagged about the
+stale comment, and it turns out the comment being stale and the DECISION being
+stale were the same fact.
+
+### What shipped
+
+Stars are a struct-of-arrays sorted by draw group:
+
+```
+starX, starY      Int32Array   position within its layer, DEVICE px, integral
+starSize          Uint8Array   edge length, DEVICE px, integral
+starBandIdx       Uint8Array   which depth layer it rides
+starGroups[]      { fill, start, count }   contiguous runs sharing one fillStyle
+```
+
+Per frame: advance 61 layer offsets, then one linear walk with **one canvas
+state change per group** and zero allocation. Opacity is quantised into 16
+buckets and **baked into each group's rgba fill**, so a group costs one
+`fillStyle` write rather than a `fillStyle` plus a `globalAlpha`. 12 colours ×
+16 buckets caps state changes at 192/frame against ~6 000 stars.
+
+Wrapping is now one compare-and-subtract per star per axis, replacing the
+4-way tiled blit — both terms are integers, so a star still lands on whole
+device pixels.
+
+The milky way became **the last depth layer** rather than a parallel structure
+with its own canvas, storage and draw path.
+
+```
+                    before S4      after S4
+390x844  dpr1         80.3 MB       0.1 MB
+390x844  dpr2        321.3 MB       0.1 MB
+1440x900 dpr2       1264.9 MB       0.2 MB
+background drawImage / frame   244        0
+```
+
+Density is untouched — 184.1 / 185.19 stars per 10k CSS px², identical to S2.
+
+**S3's guarantee got stronger, not weaker.** There is no intermediate canvas
+left, so there is no blit to align and no filter to pick: stars are rasterized
+exactly once, at integer device coordinates, under the identity transform. The
+class of bug S3 fixed is now structurally absent rather than carefully avoided.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -379,6 +460,38 @@ crispness while throwing the resolution away. The two are identical at dpr 1,
 so this only decides what dpr ≥ 2 looks like — and it is a DBG cycle, so it is
 one tap to disagree.
 
+**D9 — Delete the band canvases entirely rather than shrinking or reducing
+them.** Beat two alternatives the brief named. *Fewer bands* (60 → 8) divides
+the cost by 7.5 and coarsens the parallax to 8 discrete depths — it pays a
+visible price for a partial fix, and 1264.9 MB / 7.5 is still 169 MB.
+*Bands smaller than the viewport, tiled more* keeps memory flat but INCREASES
+draw calls (a 512px tile over 1440×900 needs 12 draws per band, so 732/frame),
+and a repeating tile is the one artifact the eye reliably catches in a star
+field. Direct drawing beats both on every axis measured, and it is the only
+option that removes the resampling class of bug structurally instead of by
+careful arithmetic.
+
+**D10 — Bake opacity into the fill colour instead of using `globalAlpha`.**
+Beat: grouping by colour and setting `globalAlpha` per star (~6 000 state
+changes) or per alpha bucket (two state changes per group). A `globalAlpha`
+write costs about what a `fillStyle` write costs, so folding alpha into the
+rgba string halves the state changes for free. The price is quantising opacity
+to 16 buckets — a ~5.6% step, below the just-noticeable difference for a
+1-pixel dot on black.
+
+**D11 — Keep 60 depth layers.** Beat: reducing them now that the structure
+changed. The layer count was only ever expensive because each layer was a
+canvas; a layer is now three numbers and 61 of them cost 61 float updates per
+frame. There is no reason to spend parallax smoothness to save that.
+
+**D12 — Keep the bench runnable by RECONSTRUCTING the old structure.** Beat:
+deleting the bench once the decision was made, or leaving it referencing fields
+that no longer exist. A structural call this large should be re-checkable on
+another machine rather than believed from a ledger table, so the bench now
+rebuilds the 61 band canvases from the live star data and A/Bs them against the
+real `renderStars` — not against this file's re-implementation of it (harness
+rule 6 applies to probes too).
+
 **D5 — Split the budget evenly across bands and absorb the round-off in the
 total.** Beat: giving band 0 the remainder. A remainder in one band makes the
 furthest parallax layer measurably denser than the rest, which is exactly the
@@ -410,6 +523,11 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
   `node perf/starfield.mjs --shot <dir> --dpr 2 --width 390 --height 844`
   (`perf/out/` is gitignored by repo convention, so they are not in the tree).
 
+- **S4 changed nothing visual, by design.** The sky after S4 is the same sky
+  as after S3 — same stars, same density, same positions. If you see a
+  difference between `perf/out/shots/s3/` and `perf/out/shots/s4/`, that is a
+  bug and I want to know.
+
 - **The WebKit gap.** The Edge-vs-Safari delta cannot be reproduced in this
   container (proxy blocks Playwright's WebKit download). If you can re-shoot
   the side-by-side after S3 lands, that is the acceptance test this gauntlet
@@ -434,6 +552,34 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 4 — S4 (memory and draw calls)
+
+Measured first: added `--bench` to `perf/starfield.mjs`, which A/Bs the two
+structures against the same context. Direct drawing won 6–25× on time and
+4 400× on memory, so the band canvases went.
+
+`BackgroundManager` now holds stars as sorted typed arrays and draws them in
+one batched pass; `renderStars` is a hoisted method rather than a per-frame
+closure. The milky way folded in as the last depth layer.
+
+Two tests added — the no-canvases structural invariant, and a PARALLAX test.
+The second is there because S4 rewrote the scroll arithmetic and a static sky
+is invisible in a screenshot; it asserts the layers move, that near layers
+outrun far ones, and that every offset stays inside its wrap window.
+
+Three assertions in the existing suite changed meaning legitimately: `bands`
+counts depth LAYERS and there are now 61 rather than 60 (the milky way became
+one), `starCount` is the product over the 60 depth bands rather than over all
+layers, and the band-canvas dimension checks became device-pixel scene checks
+because there are no band canvases left to measure. All three are assertions
+this PR authored, and each changed because the thing it described changed.
+
+The probe needed the same treatment: it read `bg.starBands`, which no longer
+exists. Density and footprint are now measured by rendering the field once
+into a scratch canvas and counting what landed — strictly better than the old
+per-band sampling, because it measures the composed field the player sees,
+overlaps included.
 
 ### Iteration 3 — S3 (kill the resampling)
 

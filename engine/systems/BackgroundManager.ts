@@ -7,12 +7,16 @@ import {
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+import { hexToRgb } from './render/drawUtils';
 
-interface StarBand {
-  canvas: HTMLCanvasElement;
-  speed: number;
-  offsetX: number;
-  offsetY: number;
+/** A run of stars sharing one `fillStyle`, so the draw loop sets canvas state
+ *  once per group instead of once per star.  Colour AND opacity are baked into
+ *  the rgba string: a `globalAlpha` write costs the same as a `fillStyle`
+ *  write, so folding alpha into the colour halves the state changes. */
+interface StarGroup {
+  fill: string;
+  start: number;
+  count: number;
 }
 
 interface NebulaPuff {
@@ -39,8 +43,41 @@ interface ShootingStar {
 
 export class BackgroundManager {
   private mapType: MapType;
-  private starBands: StarBand[] = [];
-  private milkyWayBand: StarBand | null = null;
+  // ── THE STAR FIELD ───────────────────────────────────────────────────────
+  //
+  // Stars are DATA, drawn directly every frame — there are no pre-rendered
+  // band canvases.  See the S4 section of docs/GAUNTLET_STARFIELD_LOG.md; the
+  // short version is that the pre-render existed to trade ~12 000 fillRects
+  // for 32 drawImages, and both halves of that trade went stale.  It had grown
+  // to 61 full-viewport canvases blitted 4 ways each — 244 whole-screen blits
+  // per frame, which at 390x844 dpr2 is 321 MEGApixels of mostly-transparent
+  // overdraw, against a star budget of ~6 000.  Measured, direct drawing is
+  // 6-25x faster and takes 0.07 MB where the canvases took 80-1265 MB.
+  //
+  // Parallax is unchanged: stars still belong to one of NUM_BANDS depth layers
+  // and each layer still scrolls at its own speed.  A layer is now three
+  // numbers rather than a canvas, so keeping 60 of them is free.
+  //
+  // Layout is a struct-of-arrays sorted by draw group, so the per-frame loop is
+  // a linear walk over typed arrays with one state change per group and zero
+  // allocation.
+  private bandSpeed: Float64Array = new Float64Array(0);
+  /** Scroll accumulators, in DEVICE px.  Fractional — see `renderStars`. */
+  private bandOffsetX: Float64Array = new Float64Array(0);
+  private bandOffsetY: Float64Array = new Float64Array(0);
+  /** Per-frame integer draw offsets, derived from the accumulators above.
+   *  Preallocated and overwritten in place; never rebuilt per frame. */
+  private bandDrawX: Int32Array = new Int32Array(0);
+  private bandDrawY: Int32Array = new Int32Array(0);
+  /** Star position within its band, in DEVICE px, always integral. */
+  private starX: Int32Array = new Int32Array(0);
+  private starY: Int32Array = new Int32Array(0);
+  /** Star edge length in DEVICE px (>= 1, always integral). */
+  private starSize: Uint8Array = new Uint8Array(0);
+  /** Which depth layer each star rides. */
+  private starBandIdx: Uint8Array = new Uint8Array(0);
+  /** Draw groups over the arrays above, in sorted order. */
+  private starGroups: StarGroup[] = [];
   private nebulaPuffs: NebulaPuff[] = [];
   private shootingStars: ShootingStar[] = [];
   private shootingTimer: number = 0;
@@ -48,14 +85,14 @@ export class BackgroundManager {
   private puffTextures: (HTMLCanvasElement | HTMLImageElement)[] = [];
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
-  // The pixel ratio the CURRENT bands were generated at.  Band canvases are
-  // device-resolution (S3), so a change to the render-scale cap resizes them
-  // even though the CSS scene size is unchanged — without this the bands would
-  // keep their old device size and the 1:1 blit would silently become a scaled
-  // one, which is the exact defect S3 removes.
+  // The pixel ratio the CURRENT star field was generated at.  Star positions
+  // and sizes are baked in DEVICE pixels (S3), so a change to the render-scale
+  // cap has to regenerate them even though the CSS scene size is unchanged —
+  // without this the stars keep their old device coordinates and the field
+  // silently stops matching the canvas it is drawn into.
   private sceneDpr: number = 0;
-  // Band canvas size in DEVICE pixels.  The scroll offsets and the 4-way tile
-  // wrap are all in this space, because that is the space the blit is 1:1 in.
+  // The scene in DEVICE pixels.  Star coordinates and the scroll wrap both
+  // live in this space, because it is the space the field is rasterized in.
   private bandPixelWidth: number = 0;
   private bandPixelHeight: number = 0;
   private initialized: boolean = false;
@@ -222,14 +259,14 @@ public setMapType(type: MapType) {
     this.sceneWidth = width;
     this.sceneHeight = height;
     this.sceneDpr = dpr;
-    // Bands are DEVICE-resolution: generated at the size they will be blitted
-    // at, so `drawImage` runs 1:1 with no filter in the path.
+    // The scene in DEVICE pixels.  Star coordinates are baked in this space so
+    // the field rasterizes with no scale and no filter in the path.
     const pw = Math.max(1, Math.round(width * dpr));
     const ph = Math.max(1, Math.round(height * dpr));
     this.bandPixelWidth = pw;
     this.bandPixelHeight = ph;
-    // starBands and milkyWayBand are (re)initialized further down in this
-    // same method, alongside the rest of the band-generation pass.
+    // The star arrays and the depth layers are (re)built further down in this
+    // same method, alongside the rest of the generation pass.
     this.nebulaPuffs = [];
 
     // Nebula puffs — one background puff per recorded tile-cluster
@@ -265,116 +302,190 @@ public setMapType(type: MapType) {
         }
     }
 
-    // Realistic stellar color distribution based on spectral class frequency.
+    // Realistic stellar colour distribution based on spectral class frequency.
     // Heavily weighted toward white/warm-white (most common), with a visible
-    // minority of blue, orange and red stars for depth and variety.
-    const starColor = (): string => {
+    // minority of blue, orange and red stars for depth and variety.  The last
+    // four are milky-way-only accents.
+    const PALETTE = [
+        '#ffffff',   // 0  A-type — white
+        '#fff4e0',   // 1  F-type — warm white
+        '#ffd280',   // 2  G-type — pale yellow (sun-like)
+        '#ffb347',   // 3  K-type — orange
+        '#c8d8ff',   // 4  B-type — pale blue
+        '#9bb0ff',   // 5  B/O-type — blue-white
+        '#ff7043',   // 6  M-type giant — red-orange
+        '#7ec8ff',   // 7  O-type — hot blue
+        '#8b5cf6',   // 8  milky-way accents
+        '#3b82f6',   // 9
+        '#fbbf24',   // 10
+        '#f472b6',   // 11
+    ];
+    const starColorIdx = (): number => {
         const r = Math.random();
-        if (r < 0.50) return '#ffffff';    // A-type — white
-        if (r < 0.65) return '#fff4e0';    // F-type — warm white
-        if (r < 0.74) return '#ffd280';    // G-type — pale yellow (sun-like)
-        if (r < 0.82) return '#ffb347';    // K-type — orange
-        if (r < 0.89) return '#c8d8ff';    // B-type — pale blue
-        if (r < 0.94) return '#9bb0ff';    // B/O-type — blue-white
-        if (r < 0.97) return '#ff7043';    // M-type giant — red-orange
-        return '#7ec8ff';                   // O-type — hot blue
+        if (r < 0.50) return 0;
+        if (r < 0.65) return 1;
+        if (r < 0.74) return 2;
+        if (r < 0.82) return 3;
+        if (r < 0.89) return 4;
+        if (r < 0.94) return 5;
+        if (r < 0.97) return 6;
+        return 7;
     };
+    // Opacity is QUANTISED into buckets so stars can be batched by fill style.
+    // 16 buckets over a 0.05–0.95 range is a ~5.6% step, which is below the
+    // just-noticeable difference for a 1-pixel dot against black, and it is
+    // what turns ~6 000 state changes per frame into at most 12 x 16.
+    const ALPHA_BUCKETS = 16;
+    const bucketOf = (opacity: number) =>
+        Math.min(ALPHA_BUCKETS - 1, Math.max(0, Math.round(opacity * (ALPHA_BUCKETS - 1))));
 
-    // Pre-render milky way to its own band canvas (scrolls at a fixed slow speed).
-    const mwCanvas = document.createElement('canvas');
-    mwCanvas.width = pw; mwCanvas.height = ph;
-    const mwCtx = mwCanvas.getContext('2d')!;
-    const mwAngle = (Math.random() - 0.5);
-    const mwColors = ['#8b5cf6', '#3b82f6', '#fbbf24', '#f472b6'];
-    // Linear in WIDTH, not area: the milky way's stars are strung along a
-    // diagonal that spans the viewport width, so keeping its along-band
-    // density constant means scaling with width.  (The star field proper is
-    // an AREA feature and scales with area — see below.)
-    this.milkyWayStarCount = Math.max(
-      1,
-      Math.round((width / 1000) * STARFIELD_CONSTANTS.MILKY_WAY_PER_1K_WIDTH),
-    );
-    for (let i = 0; i < this.milkyWayStarCount; i++) {
-        // Laid out in CSS space (where the design constants live), then
-        // snapped to whole DEVICE pixels — see the star-band loop below for
-        // why the snap is the point rather than an optimisation.
-        const xCss = Math.random() * width;
-        const yCss = (height / 2) + Math.tan(mwAngle) * (xCss - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
-        const size = 0.3 + Math.pow(Math.random(), 3) * 0.6;
-        mwCtx.globalAlpha = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
-        mwCtx.fillStyle = Math.random() > 0.7 ? mwColors[Math.floor(Math.random() * mwColors.length)] : starColor();
-        const px = this.starDevicePx(size, dpr);
-        mwCtx.fillRect(Math.round(xCss * dpr), Math.round(yCss * dpr), px, px);
-    }
-    mwCtx.globalAlpha = 1.0;
-    this.milkyWayBand = { canvas: mwCanvas, speed: 0.03, offsetX: 0, offsetY: 0 };
-
-    // Pre-render the parallax star bands.  Speed increases quadratically from
-    // background (slow) to foreground (fast).
-    //
-    // The star BUDGET is derived from viewport AREA at a target density
-    // (STAR_DENSITY_CYCLE, stars per 10k CSS px^2) and then split evenly
-    // across the bands — it is NOT a fixed count.  A fixed count made a
-    // smaller window a denser sky: measured 729 stars per 10k CSS px^2 on a
-    // 390x844 phone against 185 on a 1440x900 desktop, from the same absolute
-    // 24 000.  Deriving from area is what makes the two agree.
-    this.starBands = [];
     const NUM_BANDS = STARFIELD_CONSTANTS.NUM_BANDS;
+    // Band index NUM_BANDS is the milky way — one more depth layer, scrolling
+    // at its own fixed slow speed, rather than a special case with its own
+    // storage and its own draw path.
+    const MW_BAND = NUM_BANDS;
+    const TOTAL_BANDS = NUM_BANDS + 1;
+
+    // The star BUDGET is derived from viewport AREA at a target density
+    // (STAR_DENSITY_CYCLE, stars per 10k CSS px^2) — it is NOT a fixed count.
+    // A fixed count made a smaller window a denser sky: measured 729 stars per
+    // 10k CSS px^2 on a 390x844 phone against 185 on a 1440x900 desktop, from
+    // the same absolute 24 000.  Deriving from area is what makes them agree.
     this.starCount = Math.max(
       NUM_BANDS,
       Math.round(((width * height) / 1e4) * getActiveStarDensity()),
     );
     // Every band carries the same share, so the density invariant holds per
-    // band as well as in total.  Round-off is absorbed by the total below
-    // rather than by band 0, which would make the furthest layer denser.
+    // band as well as in total.  Round-off is absorbed by the total rather
+    // than by band 0, which would make the furthest layer denser.
     const STARS_PER_BAND = Math.max(1, Math.round(this.starCount / NUM_BANDS));
     this.starsPerBand = STARS_PER_BAND;
     this.starCount = STARS_PER_BAND * NUM_BANDS;
+
+    // Linear in WIDTH, not area: the milky way's stars are strung along a
+    // diagonal that spans the viewport width, so keeping its along-band
+    // density constant means scaling with width.  (The field proper is an AREA
+    // feature and scales with area — above.)
+    this.milkyWayStarCount = Math.max(
+      1,
+      Math.round((width / 1000) * STARFIELD_CONSTANTS.MILKY_WAY_PER_1K_WIDTH),
+    );
+
+    // Depth layers.  Speed increases quadratically from background (slow) to
+    // foreground (fast); the milky way sits at a fixed slow drift.
+    this.bandSpeed = new Float64Array(TOTAL_BANDS);
+    this.bandOffsetX = new Float64Array(TOTAL_BANDS);
+    this.bandOffsetY = new Float64Array(TOTAL_BANDS);
+    this.bandDrawX = new Int32Array(TOTAL_BANDS);
+    this.bandDrawY = new Int32Array(TOTAL_BANDS);
     for (let b = 0; b < NUM_BANDS; b++) {
         const tMid = (b + 0.5) / NUM_BANDS;
-        const speed = 0.02 + (tMid * tMid) * 2.0;
-        const bandCanvas = document.createElement('canvas');
-        bandCanvas.width = pw; bandCanvas.height = ph;
-        const bandCtx = bandCanvas.getContext('2d')!;
+        this.bandSpeed[b] = 0.02 + (tMid * tMid) * 2.0;
+    }
+    this.bandSpeed[MW_BAND] = 0.03;
+
+    // ── generate into per-group buckets, then flatten ──────────────────────
+    // Generation runs on map load and on resize only, so allocating here is
+    // fine; the PER-FRAME path below allocates nothing.
+    const total = this.starCount + this.milkyWayStarCount;
+    const NUM_GROUPS = PALETTE.length * ALPHA_BUCKETS;
+    const gX: number[][] = [];
+    const gY: number[][] = [];
+    const gS: number[][] = [];
+    const gB: number[][] = [];
+    for (let i = 0; i < NUM_GROUPS; i++) { gX.push([]); gY.push([]); gS.push([]); gB.push([]); }
+
+    const emit = (xDev: number, yDev: number, sizeCss: number, band: number,
+                  colorIdx: number, opacity: number) => {
+        const g = colorIdx * ALPHA_BUCKETS + bucketOf(opacity);
+        gX[g].push(xDev);
+        gY[g].push(yDev);
+        gS[g].push(this.starDevicePx(sizeCss, dpr));
+        gB[g].push(band);
+    };
+
+    // WHOLE DEVICE PIXELS, both position and size.
+    //
+    // This used to be `fillRect(Math.random() * width, …, max(1, size), …)` in
+    // CSS space.  The rect was 1x1, but its ORIGIN was fractional, so Canvas2D
+    // antialiased every star into a 2x2 block of partial-alpha pixels before
+    // anything else touched it — measured at 93.8% of scanline runs being 2px
+    // wide (S1, claim 2b).  Flooring position and rounding size to integers is
+    // what makes a star occupy exactly the pixels it is drawn into.
+    //
+    // (The old `size < 1.5` arc branch here was dead code: star size tops out
+    // at 1.17 CSS px, so the fillRect branch always won.  An arc would
+    // reintroduce edge antialiasing anyway.)
+    for (let b = 0; b < NUM_BANDS; b++) {
+        const tMid = (b + 0.5) / NUM_BANDS;
         // Per-band brightness cap: furthest band (b=0) dimmest at 25%,
         // closest band (b=NUM_BANDS-1) brightest at 95%, linear between.
         const bandBrightness = 0.25 + tMid * 0.70;
         for (let i = 0; i < STARS_PER_BAND; i++) {
             const t = (b + Math.random()) / NUM_BANDS;
             // Power-law size distribution: many tiny stars, fewer large ones.
-            // Math.pow(r, 3) skews heavily toward small values so the field
-            // has dense background haze but visible coloured foreground stars.
+            // Math.pow(r, 3) skews heavily toward small values so the field has
+            // dense background haze but visible coloured foreground stars.
             const sizeBase = 0.3 + Math.pow(Math.random(), 3) * 0.6;
             const size = sizeBase * (0.5 + t * 0.8);
             // Within-band variation scaled against the band's brightness cap,
             // so parallax depth maps directly to perceived brightness.
             const variation = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
-            const opacity = bandBrightness * variation;
-            bandCtx.globalAlpha = opacity;
-            bandCtx.fillStyle = starColor();
-            // WHOLE DEVICE PIXELS, both position and size.
-            //
-            // This used to be `fillRect(Math.random() * width, …, max(1, size),
-            // …)` in CSS space.  The rect was 1x1, but its ORIGIN was
-            // fractional, so Canvas2D antialiased every star into a 2x2 block
-            // of partial-alpha pixels before anything else touched it —
-            // measured at 93.8% of scanline runs being 2px wide (S1, claim 2b).
-            // Flooring the position and rounding the size to integers is what
-            // makes a star occupy exactly the pixels it is drawn into.
-            //
-            // The `size < 1.5` arc branch that used to sit here was dead code:
-            // star size tops out at 1.17 CSS px, so the fillRect branch always
-            // won.  An arc would reintroduce edge antialiasing anyway.
-            const px = this.starDevicePx(size, dpr);
-            bandCtx.fillRect(
+            emit(
                 Math.floor(Math.random() * pw),
                 Math.floor(Math.random() * ph),
-                px, px,
+                size, b, starColorIdx(), bandBrightness * variation,
             );
         }
-        bandCtx.globalAlpha = 1.0;
-        this.starBands.push({ canvas: bandCanvas, speed, offsetX: 0, offsetY: 0 });
     }
+
+    const mwAngle = (Math.random() - 0.5);
+    for (let i = 0; i < this.milkyWayStarCount; i++) {
+        // Laid out in CSS space (where the design constants live), then
+        // snapped to whole device pixels like every other star.
+        const xCss = Math.random() * width;
+        const yCss = (height / 2) + Math.tan(mwAngle) * (xCss - width / 2)
+                   + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
+        const size = 0.3 + Math.pow(Math.random(), 3) * 0.6;
+        // 30% of milky-way stars take one of the four accent hues.
+        const colorIdx = Math.random() > 0.7
+            ? 8 + Math.floor(Math.random() * 4)
+            : starColorIdx();
+        emit(
+            Math.round(xCss * dpr), Math.round(yCss * dpr),
+            size, MW_BAND, colorIdx,
+            Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04),
+        );
+    }
+
+    // Flatten into the struct-of-arrays the draw loop walks.  Groups are laid
+    // out contiguously, so drawing is: set fillStyle once, then a linear run.
+    this.starX = new Int32Array(total);
+    this.starY = new Int32Array(total);
+    this.starSize = new Uint8Array(total);
+    this.starBandIdx = new Uint8Array(total);
+    this.starGroups = [];
+    let cursor = 0;
+    for (let g = 0; g < NUM_GROUPS; g++) {
+        const n = gX[g].length;
+        if (n === 0) continue;
+        const colorIdx = (g / ALPHA_BUCKETS) | 0;
+        const alpha = (g % ALPHA_BUCKETS) / (ALPHA_BUCKETS - 1);
+        const [r, gg, bl] = hexToRgb(PALETTE[colorIdx]);
+        this.starGroups.push({
+            fill: `rgba(${r},${gg},${bl},${alpha.toFixed(3)})`,
+            start: cursor,
+            count: n,
+        });
+        for (let i = 0; i < n; i++) {
+            this.starX[cursor] = gX[g][i];
+            this.starY[cursor] = gY[g][i];
+            this.starSize[cursor] = gS[g][i];
+            this.starBandIdx[cursor] = gB[g][i];
+            cursor++;
+        }
+    }
+
     this.initialized = true;
   }
 
@@ -477,45 +588,9 @@ public setMapType(type: MapType) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1.0;
 
-    // RENDER STARS — each band is a pre-rendered canvas, shifted each frame
-    // and tiled 4-ways for seamless wrapping.
-    //
-    // NO RESAMPLING IN THIS PATH (S3).  The bands are generated at DEVICE
-    // resolution, so the blit runs under the IDENTITY transform — not the
-    // dpr-scaled one the rest of the background uses — and every offset is
-    // rounded to a whole device pixel.  A CSS-px band drawn into a
-    // `setTransform(dpr,…)` context at a fractional offset is what made the
-    // field browser-dependent: measured, that turned 296 lit device pixels at
-    // mean luma 32.3 into 635 at 14.7, by whichever filter the engine happened
-    // to pick (S1, claim 2c).  1:1 and integer-aligned, there is no filter to
-    // pick.
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // Belt and braces: with a 1:1 integer blit there is nothing to interpolate,
-    // but an explicitly disabled smoother means a future half-pixel slip
-    // degrades into a hard edge rather than quietly back into a filter.
-    ctx.imageSmoothingEnabled = false;
-    ctx.globalAlpha = 1.0;
-    const bw = this.bandPixelWidth;
-    const bh = this.bandPixelHeight;
-    const drawBand = (band: StarBand, shiftX: number, shiftY: number) => {
-        // The ACCUMULATOR stays fractional and only the DRAW is rounded.
-        // Rounding the accumulator instead would quantise slow parallax to a
-        // standstill: the furthest bands move well under half a device pixel
-        // per frame, and each frame's rounding would discard the whole shift.
-        band.offsetX = ((band.offsetX - shiftX * dpr) % bw + bw) % bw;
-        band.offsetY = ((band.offsetY - shiftY * dpr) % bh + bh) % bh;
-        const ox = Math.round(band.offsetX);
-        const oy = Math.round(band.offsetY);
-        ctx.drawImage(band.canvas, ox,      oy);
-        ctx.drawImage(band.canvas, ox - bw, oy);
-        ctx.drawImage(band.canvas, ox,      oy - bh);
-        ctx.drawImage(band.canvas, ox - bw, oy - bh);
-    };
-
-    if (this.milkyWayBand) drawBand(this.milkyWayBand, dx * 0.03, dy * 0.03);
-    for (const band of this.starBands) {
-        drawBand(band, dx * band.speed * 0.2, dy * band.speed * 0.2);
-    }
+    // RENDER STARS — drawn directly from the star arrays, no intermediate
+    // canvas.  See `renderStars`.
+    this.renderStars(ctx, dx, dy, dpr);
 
     // Back to CSS-pixel space for the shooting stars, which are laid out in
     // CSS units like the rest of the renderer.
@@ -525,6 +600,77 @@ public setMapType(type: MapType) {
 
     ctx.restore();
     ctx.globalAlpha = 1.0;
+  }
+
+  /** Draw the whole star field: one linear pass over the star arrays, one
+   *  canvas state change per draw group, zero allocation.
+   *
+   *  NO RESAMPLING IS POSSIBLE IN THIS PATH (S3/S4).  Stars are rasterized
+   *  ONCE, here, at integer DEVICE coordinates under the IDENTITY transform —
+   *  there is no intermediate canvas to be filtered on its way to the screen.
+   *  The previous structure pre-rendered 61 full-viewport band canvases and
+   *  blitted them 4 ways each, which is where the browser-dependent filter
+   *  lived: a CSS-px band drawn into a `setTransform(dpr,…)` context at a
+   *  fractional offset turned 296 lit device pixels at mean luma 32.3 into 635
+   *  at 14.7, by whichever kernel the engine picked (S1, claim 2c).
+   *
+   *  It is also much cheaper.  244 whole-screen blits is 321 MEGApixels of
+   *  mostly-transparent overdraw per frame at 390x844 dpr2, against a budget
+   *  of ~6 000 stars; measured, this path is 6-25x faster and holds 0.07 MB
+   *  where the canvases held 80-1265 MB (S4).
+   *
+   *  Hoisted to a method rather than a closure inside `render` on purpose: a
+   *  function constructed in a per-frame path is rebuilt every frame
+   *  (CLAUDE.md §8, the refill idiom's sibling rule). */
+  private renderStars(ctx: CanvasRenderingContext2D, dx: number, dy: number, dpr: number) {
+    const pw = this.bandPixelWidth;
+    const ph = this.bandPixelHeight;
+    if (pw <= 0 || ph <= 0) return;
+
+    // Advance each depth layer, then snap it to a whole device pixel for the
+    // draw.  The ACCUMULATOR stays fractional and only the DRAW OFFSET is
+    // rounded: rounding the accumulator would quantise slow parallax to a
+    // standstill, since the furthest layers move well under half a device
+    // pixel per frame and each frame's rounding would discard the whole shift.
+    const n = this.bandSpeed.length;
+    for (let b = 0; b < n; b++) {
+        // The milky way is the last layer and rides the raw speed; the depth
+        // bands are scaled by the same 0.2 the pre-render used.
+        const scale = (b === n - 1) ? 1 : 0.2;
+        const sx = dx * this.bandSpeed[b] * scale * dpr;
+        const sy = dy * this.bandSpeed[b] * scale * dpr;
+        this.bandOffsetX[b] = ((this.bandOffsetX[b] - sx) % pw + pw) % pw;
+        this.bandOffsetY[b] = ((this.bandOffsetY[b] - sy) % ph + ph) % ph;
+        this.bandDrawX[b] = Math.round(this.bandOffsetX[b]);
+        this.bandDrawY[b] = Math.round(this.bandOffsetY[b]);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1.0;
+    // Opacity is baked into each group's rgba fill, so `globalAlpha` stays 1
+    // and a group costs exactly one state change.
+    const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
+    const bdx = this.bandDrawX, bdy = this.bandDrawY;
+    const groups = this.starGroups;
+    for (let g = 0; g < groups.length; g++) {
+        const grp = groups[g];
+        ctx.fillStyle = grp.fill;
+        const end = grp.start + grp.count;
+        for (let i = grp.start; i < end; i++) {
+            const b = B[i];
+            // Both terms are integers, so the sum is too — a star always lands
+            // on whole device pixels.  One modulo per axis replaces the old
+            // 4-way tiled blit: a star that scrolls off one edge reappears on
+            // the other, which is the same seamless wrap for a fraction of the
+            // work.
+            let x = X[i] + bdx[b];
+            if (x >= pw) x -= pw;
+            let y = Y[i] + bdy[b];
+            if (y >= ph) y -= ph;
+            const sz = S[i];
+            ctx.fillRect(x, y, sz, sz);
+        }
+    }
   }
 
   private updateAndDrawShootingStars(ctx: CanvasRenderingContext2D, w: number, h: number) {
