@@ -1723,7 +1723,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     motors crossfading — small events lead with the high-frequency motor, a
     crash with the low.  One event is haptic-ONLY (`GameEngine.handleRumble`,
     no camera shake): the plain Blaster, because shaking the camera on the
-    fastest gun in the game would be unplayable.  Note `dual-rumble`
+    fastest gun in the game would be unplayable.  Player weapon fire asks for
+    the `'trigger'` `RumbleKind`, which plays `trigger-rumble` — whose
+    parameters are a superset of `dual-rumble`'s, so ONE effect drives the
+    handles and the trigger — but ONLY when the actuator's `effects` list
+    offers it; everywhere else it falls back to the handle thump.  Adaptive
+    trigger RESISTANCE is a different thing again and is not reachable from
+    the Gamepad API at all (WebHID only).  Note `dual-rumble`
     is the ONLY effect the Gamepad API exposes — the DualSense's adaptive
     triggers, voice-coil haptics and light bar need raw HID reports (WebHID:
     desktop Chromium/Edge only, never Safari or mobile), which this

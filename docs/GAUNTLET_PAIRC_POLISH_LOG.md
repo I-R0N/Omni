@@ -707,6 +707,53 @@ a tuning problem and a platform one.
 
 ---
 
+### G11c — Trigger feedback, where the pad has it (user directive, 2026-08-15)
+
+**Rumble confirmed working** in desktop Edge and desktop Safari with the
+user's DualSense — the first hardware confirmation this feature has had, and
+it also confirms the iPhone result was a platform wall rather than a bug: iOS
+WebKit exposes no `vibrationActuator` at all (`pad has no actuator`), and
+every iOS browser is WebKit.
+
+The user then asked whether trigger feedback is reachable. **Two different
+things share that name**, and only one of them is:
+
+- **`trigger-rumble`** — a Gamepad API effect type, vibration in the trigger.
+  Reachable, IF the actuator lists it.
+- **Adaptive trigger RESISTANCE** — the DualSense's headline feature, a
+  physical clutch. Not in the Gamepad API at any version; WebHID only.
+
+**DECISION G11c-a — ask the actuator, do not consult a support table.**
+`GamepadHapticActuator.effects` is the authority on what a given pad in a
+given browser can play, so `actuatorEffects()` reads it and
+`rumbleEffectFor(kind, supported)` picks. The published compatibility
+picture for `trigger-rumble` is muddled — it was designed around Xbox trigger
+motors, some sources claim DualSense support, and Chromium shipped parts of
+it behind a flag — which is exactly the situation where reading the device
+beats reading the docs.
+
+**DECISION G11c-b — weapon fire is the `'trigger'` kind; impacts stay
+handles.** A shot is felt in the trigger under the finger that pulled it; a
+crash is felt in the whole pad. `trigger-rumble`'s parameters are a SUPERSET
+of `dual-rumble`'s, so one effect carries both and there is no double call to
+throttle against. Everywhere the effect is unavailable — which is most
+places — it degrades to exactly the handle thump that shipped in G11b, so
+nothing regresses for a pad without trigger motors.
+
+The DBG row now NAMES the effects (`ready · dual-rumble+trigger-rumble`), so
+"can this pad do trigger feedback" is answered by looking at the panel rather
+than by guessing.
+
+**Not built: adaptive trigger resistance.** It needs WebHID — desktop
+Chromium/Edge only, a permission click, and on Bluetooth the CRC-checked 0x31
+report that some firmware rejects. It stays in FOR-USER-REVIEW as its own
+milestone, because it is a desktop-only enhancement layer and the input path
+must not depend on it.
+
+**Gates:** typecheck, build, 90/90 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
@@ -1167,10 +1214,10 @@ push, opens on an iPhone) is the fastest way to run these:
   glows cyan instead of magenta. All four are aesthetic calls made from
   captures; every one is a constant and a DBG row away from being changed.
 
-- **HARDWARE CHECK — rumble (G11).** Nothing about this could be verified
-  here: no pad exists in the test environment. On a real pad, check that (a)
-  it buzzes at all — Edge/Chrome desktop is the likeliest yes, iOS Safari the
-  likeliest no, and the DBG row Visual ▸ **Rumble** turns it off; (b) the
+- **HARDWARE CHECK — rumble (G11). PARTLY ANSWERED.** Confirmed working in
+  desktop Edge and desktop Safari; confirmed IMPOSSIBLE on iPhone (iOS WebKit
+  exposes no actuator, and every iOS browser is WebKit — the route there is a
+  native build). Still open: (b) the
   curve feels right — nothing below an enemy collision buzzes, a high-speed
   crash is the loudest thing; (c) a firefight does not become one continuous
   drone (there is a minimum gap and a stronger-only interrupt rule, but they

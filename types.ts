@@ -1809,6 +1809,16 @@ export interface WaveAnnouncement {
  * the MOUSE from dragging the ship around, since on those schemes steering
  * is the keys' or the stick's job and a click should only shoot.
  */
+/** Which motors an impact should reach.
+ *
+ *  `impact` is the default and plays `dual-rumble` — the handle motors, the
+ *  only effect every pad has.  `trigger` asks for `trigger-rumble` INSTEAD
+ *  when the pad and browser offer it: its parameters are a superset, so one
+ *  effect drives the handles and the trigger together.  Falls back to
+ *  `impact` wherever trigger-rumble is not in the actuator's `effects` list,
+ *  which is most places. */
+export type RumbleKind = 'impact' | 'trigger';
+
 export type ControlScheme =
   | 'touch'
   | 'joystick-left'   // stick under the left thumb, fire button under the right

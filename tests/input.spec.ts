@@ -1187,6 +1187,89 @@ test.describe('rumble — force feedback rides the screen shake', () => {
     watch.assertClean();
   });
 
+
+  test('a weapon shot kicks the TRIGGER where the pad has one, and thumps where it does not', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Which effect an event plays is a pure decision — testable without a
+    // pad that has trigger motors, which is every pad available here.
+    const choice = await engine(page, e => ({
+      triggerOnCapablePad: e.input.rumbleEffectFor('trigger', ['dual-rumble', 'trigger-rumble']),
+      triggerOnPlainPad: e.input.rumbleEffectFor('trigger', ['dual-rumble']),
+      impactOnCapablePad: e.input.rumbleEffectFor('impact', ['dual-rumble', 'trigger-rumble']),
+    }));
+    expect(choice.triggerOnCapablePad).toBe('trigger-rumble');
+    // The fallback is the whole point: most pads and most browsers lack it.
+    expect(choice.triggerOnPlainPad).toBe('dual-rumble');
+    // A crash is not a trigger event even on a pad that could play one.
+    expect(choice.impactOnCapablePad).toBe('dual-rumble');
+
+    // End to end, with a stand-in actuator that CLAIMS trigger motors.
+    const withTriggers = await engine(page, e => {
+      const calls: any[] = [];
+      const act: any = {
+        effects: ['dual-rumble', 'trigger-rumble'],
+        playEffect: (type: string, params: any) => { calls.push({ type, params }); return Promise.resolve(); },
+      };
+      e.input.currentActuator = () => act;
+      // The readout reports "no pad" before it looks at the actuator, and in
+      // real life the two agree — only a stubbed actuator can decouple them.
+      e.input.padIndex = 0;
+      const reset = () => { e.input.rumbleUntilMs = -Infinity; e.input.rumbleT = 0; };
+
+      reset();
+      e.player.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(
+        e.currentMap.entities, e.player,
+        { x: e.player.position.x + 400, y: e.player.position.y },
+        e.handleScreenShake, false, e.handleRumble,
+      );
+      const shot = calls[calls.length - 1];
+
+      reset();
+      e.handleScreenShake(20);          // a crash — impact kind
+      const crash = calls[calls.length - 1];
+
+      const readout = e.input.rumbleDebugInfo();
+      e.input.padIndex = null;
+      return { shot, crash, readout };
+    });
+
+    // The shot reaches the trigger under the finger that pulled it...
+    expect(withTriggers.shot.type).toBe('trigger-rumble');
+    expect(withTriggers.shot.params.rightTrigger).toBeGreaterThan(0);
+    expect(withTriggers.shot.params.leftTrigger).toBe(0);
+    // ...and the crash stays in the handles.
+    expect(withTriggers.crash.type).toBe('dual-rumble');
+    expect(withTriggers.crash.params.rightTrigger).toBe(0);
+    // The DBG row names what the pad offers, so "can it do triggers" is
+    // answered by looking rather than by guessing at support tables.
+    expect(withTriggers.readout).toContain('trigger-rumble');
+
+    // And on an ordinary pad the same shot is an ordinary thump.
+    const plain = await engine(page, e => {
+      const calls: any[] = [];
+      e.input.currentActuator = () => ({
+        effects: ['dual-rumble'],
+        playEffect: (type: string, params: any) => { calls.push({ type, params }); return Promise.resolve(); },
+      });
+      e.input.rumbleUntilMs = -Infinity;
+      e.input.rumbleT = 0;
+      e.player.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(
+        e.currentMap.entities, e.player,
+        { x: e.player.position.x + 400, y: e.player.position.y },
+        e.handleScreenShake, false, e.handleRumble,
+      );
+      return calls[calls.length - 1];
+    });
+    expect(plain.type).toBe('dual-rumble');
+    expect(plain.params.strongMagnitude).toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
+
   test('the DBG readout says WHY there is no rumble', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
@@ -1220,7 +1303,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
 
     expect(rest.toggledOff).toBe('off (DBG)');
     expect(rest.noActuator).toBe('pad has no actuator');
-    expect(rest.ready).toBe('ready');
+    expect(rest.ready).toContain('ready');
     expect(rest.refused).toBe('browser refused');
 
     watch.assertClean();

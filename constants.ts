@@ -1079,6 +1079,10 @@ export const INPUT_CONSTANTS = {
      *  transient. */
     STRONG_AT_MIN: 0.25,
     WEAK_AT_MAX: 0.55,
+    /** Trigger-motor force, as a multiplier on the effect's overall
+     *  magnitude.  A trigger has a far shorter throw than a handle motor, so
+     *  the same number reads weaker there.  Clamped to 1 at the top. */
+    TRIGGER_FORCE_MULT: 1.6,
     /** Haptic-only tick for a weapon whose recoil deliberately shakes NO
      *  camera — the plain Blaster.  Screen shake on every shot of the
      *  fastest gun in the game would be unplayable; a tick in the hand is

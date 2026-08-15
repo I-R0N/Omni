@@ -1,6 +1,6 @@
 
 
-import { Vector2, JoystickHUDState, FireButtonHUDState, ControlScheme } from '../../types';
+import { Vector2, JoystickHUDState, FireButtonHUDState, ControlScheme, RumbleKind } from '../../types';
 import { INPUT_CONSTANTS, CONTROL_SCHEME_RULES } from '../../constants';
 
 /** One frame of pad state, reduced to what the mapping layer cares about.
@@ -417,6 +417,23 @@ export class InputSystem {
     };
   }
 
+  /** Effect types this pad's actuator says it supports.  Chromium exposes
+   *  `effects`; where it is absent, assume the one effect every actuator
+   *  has.  Read rather than assumed, because `trigger-rumble` depends on the
+   *  pad having trigger motors AND the browser having shipped it. */
+  public actuatorEffects(): readonly string[] {
+    const act = this.currentActuator() as unknown as { effects?: readonly string[] } | null;
+    const list = act?.effects;
+    return Array.isArray(list) && list.length ? list : ['dual-rumble'];
+  }
+
+  /** Which effect type an event of this kind should actually play.  Pure, so
+   *  the fallback is testable without a pad that has trigger motors. */
+  public rumbleEffectFor(kind: RumbleKind, supported: readonly string[]): string {
+    if (kind === 'trigger' && supported.includes('trigger-rumble')) return 'trigger-rumble';
+    return 'dual-rumble';
+  }
+
   /** The adopted pad's haptic actuator, or null.  Its own method so a test
    *  can stand a fake device in front of it — the one part of this that a
    *  headless browser cannot provide. */
@@ -435,13 +452,23 @@ export class InputSystem {
    * with no actuator, or in a browser that does not implement the effect —
    * which today is most of them, so this must never be load-bearing.
    */
-  public rumble(amount: number) {
+  public rumble(amount: number, kind: RumbleKind = 'impact') {
     const now = performance.now();
     const params = this.rumbleParamsFor(amount, now);
     if (!params) return;
 
     const act = this.currentActuator();
     if (!act) return;
+
+    // A weapon shot wants the TRIGGER to kick, which is what the trigger
+    // motors are for.  `trigger-rumble`'s parameters are a superset of
+    // `dual-rumble`'s, so one effect drives the handles and the trigger
+    // together — and where the pad or the browser lacks it, this silently
+    // becomes the ordinary handle thump.
+    const effect = this.rumbleEffectFor(kind, this.actuatorEffects());
+    const triggerForce = effect === 'trigger-rumble'
+      ? Math.min(1, params.strongMagnitude * INPUT_CONSTANTS.RUMBLE.TRIGGER_FORCE_MULT)
+      : 0;
 
     const R = INPUT_CONSTANTS.RUMBLE;
     this.rumbleUntilMs = now + params.duration;
@@ -453,11 +480,14 @@ export class InputSystem {
       // effect type.  Swallow it: an unhandled rejection would put an error
       // in the console, which every suite asserts is clean — and more to the
       // point, a missing motor is not a game problem.
-      const p = act.playEffect('dual-rumble', {
+      const p = act.playEffect(effect, {
         startDelay: 0,
         duration: params.duration,
         strongMagnitude: params.strongMagnitude,
         weakMagnitude: params.weakMagnitude,
+        // Ignored by `dual-rumble`; the fire trigger is the right one.
+        leftTrigger: 0,
+        rightTrigger: triggerForce,
       });
       if (p && typeof (p as Promise<unknown>).catch === 'function') {
         (p as Promise<unknown>).catch(() => { this.rumbleUnsupported = true; });
@@ -987,7 +1017,10 @@ export class InputSystem {
     if (this.padIndex === null) return 'no pad';
     if (this.rumbleUnsupported) return 'browser refused';
     if (!this.currentActuator()) return 'pad has no actuator';
-    return performance.now() < this.rumbleUntilMs ? 'playing' : 'ready';
+    // Name the effects, so "can this pad do trigger feedback" is answered by
+    // looking rather than by guessing at browser support tables.
+    const effects = this.actuatorEffects().join('+');
+    return (performance.now() < this.rumbleUntilMs ? 'playing · ' : 'ready · ') + effects;
   }
 
   /** DBG readout, line 2: the numbers that tell you whether the pad is

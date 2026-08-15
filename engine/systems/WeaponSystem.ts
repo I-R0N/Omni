@@ -1,4 +1,4 @@
-import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig, RumbleKind } from '../../types';
 import {
   INPUT_CONSTANTS,
   WEAPONS,
@@ -100,13 +100,13 @@ export class WeaponSystem {
     entities: GameEntity[],
     player: GameEntity,
     target: Vector2,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, rumbleKind?: RumbleKind) => void,
     charged: boolean = false,
     /** Haptic-only feedback: rumble WITHOUT a camera shake.  The plain
      *  Blaster is the case that needs it — it is the fastest gun in the game,
      *  so shaking the camera on every shot would be unplayable, but the hand
      *  should still feel each one. */
-    onRumble?: (amount: number) => void,
+    onRumble?: (amount: number, kind?: RumbleKind) => void,
   ): boolean {
     // Weaponless flight (no gun mounted) is a legal outfit — nothing to
     // fire.  The weight system pays this back as an acceleration boost.
@@ -134,20 +134,23 @@ export class WeaponSystem {
     }
     player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
 
+    // Every player shot asks for the TRIGGER kind: on a pad with trigger
+    // motors the recoil is felt in the trigger under the finger that pulled
+    // it, and everywhere else it falls back to the ordinary handle thump.
     if (onShake) {
       if (config.type === WeaponType.SHOTGUN) {
-        onShake(isCharged ? 8 : 5);
+        onShake(isCharged ? 8 : 5, 'trigger');
       } else if (config.type === WeaponType.CANNON) {
-        onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM);
+        onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM, 'trigger');
       } else if (config.type === WeaponType.BURST) {
-        onShake(3);
+        onShake(3, 'trigger');
       } else if (config.type === WeaponType.BLASTER && isCharged) {
-        onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+        onShake(COLLISION_CONFIG.SHAKE.MEDIUM, 'trigger');
       }
     }
-    // The plain Blaster shakes NO camera by design; it still ticks the pad.
+    // The plain Blaster shakes NO camera by design; it still kicks the pad.
     if (onRumble && config.type === WeaponType.BLASTER && !isCharged) {
-      onRumble(INPUT_CONSTANTS.RUMBLE.WEAPON_TICK);
+      onRumble(INPUT_CONSTANTS.RUMBLE.WEAPON_TICK, 'trigger');
     }
 
     if (config.type === WeaponType.BURST && config.burstCount) {
