@@ -261,6 +261,78 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
+  test('draws every star at WHOLE device pixels, dithered or not', async ({ page }) => {
+    // The S3 guarantee, pinned against the actual draw calls rather than
+    // inferred from the storage types. S8 added a sub-pixel dither to fix
+    // low-speed jitter, and the whole point of that fix is that it changes
+    // WHEN a star crosses a pixel boundary and never WHERE it lands — a
+    // fractional coordinate here would put the antialiasing back and undo S3.
+    //
+    // Both modes are checked, because the dither is a DBG toggle and the
+    // undithered path is still shipped code.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const audit = await page.evaluate(async () => {
+      const e = (window as any).__omniEngine;
+      const bg = e.renderer.backgroundManager;
+      const ctx = e.renderer.ctx;
+      const proto = Object.getPrototypeOf(ctx);
+      const real = proto.fillRect;
+
+      const run = (label: string) => new Promise<any>(resolve => {
+        let calls = 0, fractional = 0, sample: any = null;
+        let inStars = false;
+        const realStars = bg.renderStars.bind(bg);
+        bg.renderStars = function (...args: any[]) {
+          inStars = true;
+          try { return realStars(...args); } finally { inStars = false; }
+        };
+        proto.fillRect = function (x: number, y: number, w: number, h: number) {
+          if (inStars) {
+            calls++;
+            if (!Number.isInteger(x) || !Number.isInteger(y)
+                || !Number.isInteger(w) || !Number.isInteger(h)) {
+              fractional++;
+              if (!sample) sample = { x, y, w, h };
+            }
+          }
+          return real.call(this, x, y, w, h);
+        };
+        // Drift slowly — this is the regime the dither exists for, and the one
+        // where a fractional coordinate would be most likely to appear.
+        let n = 0;
+        const tick = () => {
+          e.player.velocity.x = 0.05;
+          if (++n >= 12) {
+            proto.fillRect = real;
+            bg.renderStars = realStars;
+            resolve({ label, calls, fractional, sample });
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+
+      const on = await run('dither-on');
+      e.dbg.toggleStarDither();
+      const off = await run('dither-off');
+      e.dbg.toggleStarDither();
+      return { on, off };
+    });
+
+    // The audit actually observed the star draw path.
+    expect(audit.on.calls).toBeGreaterThan(1000);
+    expect(audit.off.calls).toBeGreaterThan(1000);
+
+    expect(audit.on.fractional, `fractional star rect: ${JSON.stringify(audit.on.sample)}`).toBe(0);
+    expect(audit.off.fractional, `fractional star rect: ${JSON.stringify(audit.off.sample)}`).toBe(0);
+
+    watch.assertClean();
+  });
+
   test('varies density by map REGION without ever emptying the sky', async ({ page }) => {
     // S7. Density is gated by a world-space field sampled at the camera, and
     // the gate is a PREFIX of each fill group (groups are sorted by a stable

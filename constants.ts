@@ -1795,6 +1795,29 @@ export function cycleStarRegion(): StarRegionStep {
   return STAR_REGION_CYCLE[activeStarRegionIndex];
 }
 
+// ─── DBG: star sub-pixel DITHER ──────────────────────────────────────────────
+//
+// Stars are snapped to whole device pixels (S3), which is what removes the
+// browser-dependent resampling — but a pixel-snapped field can only MOVE in
+// whole-pixel steps.  At low scroll speeds that means it holds still for many
+// frames and then jumps a pixel: measured at 390x844 dpr2, a mid depth layer's
+// drawn position changed in only 1% of frames at ship speed 2 and 6% at speed
+// 15, so the field was frozen 94-99% of the time and then lurched.  That is the
+// "jitter at low ship speeds" this exists to fix.
+//
+// The fix is a per-star sub-pixel PHASE.  Each star rounds at a different
+// moment within the pixel, so at any instant the share of stars that have
+// already stepped equals the field's true sub-pixel offset.  Every star still
+// lands on a whole device pixel — the S3 guarantee is untouched — but the FIELD
+// advances continuously instead of in lockstep.  It is spatial dithering
+// applied to motion.
+//
+// ON by default; the toggle is here to A/B it, because "smooth" is a judgement
+// and the artifact it fixes is invisible in a still frame.
+let starDitherEnabled = true;
+export function isStarDither(): boolean { return starDitherEnabled; }
+export function toggleStarDither(): boolean { starDitherEnabled = !starDitherEnabled; return starDitherEnabled; }
+
 // ─── DBG: star size floor ────────────────────────────────────────────────────
 //
 // Star bands are generated at DEVICE resolution and blitted 1:1 at whole

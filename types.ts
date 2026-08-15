@@ -1671,6 +1671,8 @@ export interface EngineStats {
   starBandsName?: string;
   /** DBG: active star-region density variation ('Medium' / 'Off' / …). */
   starRegionName?: string;
+  /** DBG: star sub-pixel motion dither enabled. */
+  starDitherEnabled?: boolean;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).

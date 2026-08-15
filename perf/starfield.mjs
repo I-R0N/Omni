@@ -8,27 +8,34 @@
  *
  *  WHAT IS MEASURED, AND HOW MUCH EACH NUMBER IS WORTH
  *
- *   - STRUCTURE (band count, canvas dimensions, star count, backing-store
- *     bytes) is read straight off the live BackgroundManager.  Exact, and
- *     browser independent.
- *   - DENSITY (lit source pixels per band, stars per 10k CSS px^2) is counted
- *     out of the band canvases themselves with getImageData.  Exact.
- *   - RESAMPLING is the interesting one.  A band canvas is CSS-px sized and
- *     blitted into a `setTransform(dpr,0,0,dpr,0,0)` context at a FRACTIONAL
- *     scroll offset, so a 1-CSS-px star lands across several device pixels
- *     with partial alpha, by whatever filter the browser chose.  The probe
- *     replays exactly that blit at an integer offset and at a fractional one,
- *     reads the device-pixel result back, and reports the alpha histogram.
- *     Run it under two engines and the difference in those histograms IS the
- *     cross-browser delta, measured rather than inferred.
- *   - DRAW CALLS are counted by wrapping `drawImage` on the live render
- *     context for a fixed number of frames.  Exact.
+ *   - STRUCTURE (depth-layer count, device-pixel scene, bytes held) is read
+ *     straight off the live BackgroundManager.  Exact, browser independent.
+ *   - DENSITY is the manager's own star count (exact), plus lit-pixel coverage
+ *     measured by rendering the field ONCE into a scratch canvas of the real
+ *     device size and counting what landed — the composed field the player
+ *     sees, overlaps included.
+ *   - THE REAL BLIT PATH is the S3 acceptance check: `drawImage` is wrapped on
+ *     the LIVE context and the transform in force is read back, so "no filter
+ *     is in the path" is observed rather than asserted.  Since S4 removed the
+ *     band canvases entirely there is no blit left to align, and it reports so.
+ *   - `--bench` A/Bs the pre-S4 structure against the shipped one.  It
+ *     RECONSTRUCTS the band canvases from live star data, because keeping the
+ *     experiment runnable matters more than keeping the old code.
+ *   - DRAW CALLS are counted by wrapping `drawImage` for a fixed number of
+ *     frames.  Exact.
+ *
+ *  A clearly-labelled COUNTERFACTUAL section replays the OLD fractional,
+ *  dpr-scaled blit so the filter's effect stays visible for comparison.  It
+ *  measures what the code no longer does, and says so.
  *
  *  Absolute frame TIME is deliberately not reported here: this container
  *  rasterizes canvas in software (see perf/README.md), so a millisecond
  *  figure for a fill-rate-bound background layer would be the rasterizer's
  *  number and not the device's.  Draw-call count and byte count are the
  *  device-independent halves of that cost, and they are what this reports.
+ *
+ *  Sibling probes: `starfield-regions.mjs` (the S7 region field, as ASCII)
+ *  and `starfield-motion.mjs` (the S8 low-speed jitter).
  *
  *  Usage:
  *    npx vite build && npx vite preview --port 4183 --strictPort &
@@ -130,10 +137,9 @@ const PROBE = () => {
   const bandW = bg.bandPixelWidth || 0;
   const bandH = bg.bandPixelHeight || 0;
 
-  // ── density: count LIT pixels in the source band canvases ───────────────
-  // Every star is drawn with fillRect/arc into its band canvas, so a lit
-  // source pixel is a star pixel.  Counting them (rather than trusting the
-  // loop bound) also catches stars that overlap or land out of bounds.
+  // ── density: count LIT pixels in the COMPOSED field ─────────────────────
+  // Counting drawn pixels (rather than trusting the loop bound) also catches
+  // stars that overlap or land out of bounds.
   const litOf = (c) => {
     const g = c.getContext('2d', { willReadFrequently: true });
     const d = g.getImageData(0, 0, c.width, c.height).data;
@@ -155,15 +161,16 @@ const PROBE = () => {
   const scratch = document.createElement('canvas');
   scratch.width = bandW; scratch.height = bandH;
   const sctx = scratch.getContext('2d', { willReadFrequently: true });
-  bg.renderStars(sctx, 0, 0, bg.sceneDpr);
+  bg.renderStars(sctx, 0, 0, bg.sceneDpr, e.camera.position);
   const composed = litOf(scratch);
   const sampled = [{ band: 'composed', ...composed }];
   const meanLitPerBand = composed.lit;
 
-  // ── star SIZE as actually drawn, in source (CSS) pixels ─────────────────
-  // Walk one band's alpha mask and measure connected-run widths on a scanline.
-  // A star floored to `Math.max(1, size)` is a 1x1 fillRect, so a field of
-  // exclusively 1-px runs is the claim "every star is one CSS pixel".
+  // ── star SIZE as actually drawn, in DEVICE pixels ───────────────────────
+  // Walk the composed field's alpha mask and measure connected-run widths on a
+  // scanline.  Before S3 the field was 93.8% 2px runs — the signature of a 1x1
+  // fillRect antialiased at a fractional origin.  Crisp stars are 1px runs,
+  // plus whatever `round(size x dpr)` legitimately makes wider.
   const runHist = {};
   if (bandW > 0) {
     const c = scratch;
@@ -422,7 +429,7 @@ const BENCH = (iters) => {
   // A/B of two structures rather than an A/B of this file's opinion of them
   // (tests/README.md harness rule 6, which applies to probes too).
   const n = bg.starCount + bg.milkyWayStarCount;
-  const pathDirect = () => { bg.renderStars(g, 0, 0, bg.sceneDpr); };
+  const pathDirect = () => { bg.renderStars(g, 0, 0, bg.sceneDpr, e.camera.position); };
 
   const time = (fn) => {
     for (let w = 0; w < 3; w++) { fn(); flush(); }         // warm up

@@ -35,6 +35,7 @@ import {
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
     cycleStarDensity, cycleStarSize, cycleStarBands, cycleStarRegion,
+    toggleStarDither,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -577,6 +578,17 @@ export class DebugControls {
    *  drawn, so it takes effect on the very next frame with no rebuild. */
   cycleStarRegion() {
     cycleStarRegion();
+  }
+
+  /** DBG: toggle the star sub-pixel DITHER.
+   *
+   *  ON (default) staggers WHEN each star crosses to the next device pixel,
+   *  so a slowly scrolling field advances continuously.  OFF is the pre-S8
+   *  behaviour where a whole depth layer steps on one frame — measured at 1%
+   *  of frames moving at ship speed 2, which is the low-speed jitter.
+   *  Draw-time, so it flips instantly with no rebuild. */
+  toggleStarDither() {
+    toggleStarDither();
   }
 
   /** DBG: cycle the SUBSTEP CAP (5 default / 3 / 2).

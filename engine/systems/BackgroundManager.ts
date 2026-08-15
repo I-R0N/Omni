@@ -3,7 +3,7 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, getActiveStarRegion,
+  getActiveStarBands, getActiveStarRegion, isStarDither,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -90,6 +90,13 @@ export class BackgroundManager {
   private starY: Int32Array = new Int32Array(0);
   /** Star edge length in DEVICE px (>= 1, always integral). */
   private starSize: Uint8Array = new Uint8Array(0);
+  /** Per-star sub-pixel PHASE, 0..255 mapping to [0, 1) of a device pixel.
+   *  Staggers WHEN each star crosses to the next pixel, so a slowly scrolling
+   *  field advances continuously instead of every star in a layer jumping on
+   *  the same frame.  Uint8 is ample: 1/256 px of phase precision is orders of
+   *  magnitude below anything visible, and it keeps both axes to 48 KB. */
+  private starDitherX: Uint8Array = new Uint8Array(0);
+  private starDitherY: Uint8Array = new Uint8Array(0);
   /** Which depth layer each star rides.  Uint16, not Uint8: the layer count is
    *  DBG-cyclable up to 480, and a Uint8 would wrap silently past 255 —
    *  scattering the far layers' stars onto near ones with no error anywhere. */
@@ -488,6 +495,8 @@ public setMapType(type: MapType) {
     this.starY = new Int32Array(total);
     this.starSize = new Uint8Array(total);
     this.starBandIdx = new Uint16Array(total);
+    this.starDitherX = new Uint8Array(total);
+    this.starDitherY = new Uint8Array(total);
     this.starGroups = [];
     let cursor = 0;
     for (let g = 0; g < NUM_GROUPS; g++) {
@@ -517,6 +526,10 @@ public setMapType(type: MapType) {
             this.starY[cursor] = gY[g][j];
             this.starSize[cursor] = gS[g][j];
             this.starBandIdx[cursor] = gB[g][j];
+            // Independent phases per axis, so diagonal drift does not make the
+            // two axes step together and reintroduce the lockstep.
+            this.starDitherX[cursor] = (Math.random() * 256) | 0;
+            this.starDitherY[cursor] = (Math.random() * 256) | 0;
             cursor++;
         }
     }
@@ -738,6 +751,9 @@ public setMapType(type: MapType) {
     // and a group costs exactly one state change.
     const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
     const bdx = this.bandDrawX, bdy = this.bandDrawY;
+    const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
+    const DX = this.starDitherX, DY = this.starDitherY;
+    const dither = isStarDither();
     const groups = this.starGroups;
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
@@ -745,19 +761,34 @@ public setMapType(type: MapType) {
         const gated = grp.count - grp.mwCount;
         const end = grp.start + grp.mwCount
                   + (frac >= 1 ? gated : Math.round(gated * frac));
-        for (let i = grp.start; i < end; i++) {
-            const b = B[i];
-            // Both terms are integers, so the sum is too — a star always lands
-            // on whole device pixels.  One modulo per axis replaces the old
-            // 4-way tiled blit: a star that scrolls off one edge reappears on
-            // the other, which is the same seamless wrap for a fraction of the
-            // work.
-            let x = X[i] + bdx[b];
-            if (x >= pw) x -= pw;
-            let y = Y[i] + bdy[b];
-            if (y >= ph) y -= ph;
-            const sz = S[i];
-            ctx.fillRect(x, y, sz, sz);
+        if (dither) {
+            for (let i = grp.start; i < end; i++) {
+                const b = B[i];
+                // The star's own sub-pixel phase decides WHEN it crosses to the
+                // next pixel, so the layer's stars step at 256 different moments
+                // instead of all on one frame.  `| 0` truncates, and every term
+                // is non-negative here, so this is a floor to a WHOLE device
+                // pixel — the S3 guarantee survives; only the timing changed.
+                let x = (X[i] + bofx[b] + DX[i] * (1 / 256)) | 0;
+                if (x >= pw) x -= pw;
+                let y = (Y[i] + bofy[b] + DY[i] * (1 / 256)) | 0;
+                if (y >= ph) y -= ph;
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
+            }
+        } else {
+            for (let i = grp.start; i < end; i++) {
+                const b = B[i];
+                // Undithered: every star in a layer shares one rounded offset,
+                // so the whole layer steps on the same frame.  Kept behind the
+                // DBG toggle as the A/B for the dither above.
+                let x = X[i] + bdx[b];
+                if (x >= pw) x -= pw;
+                let y = Y[i] + bdy[b];
+                if (y >= ph) y -= ph;
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
+            }
         }
     }
   }

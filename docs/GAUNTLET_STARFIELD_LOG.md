@@ -27,6 +27,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S7 — Non-uniform density by map region** (user request). Flow field
       evaluated and rejected with reasons; purpose-built torus-periodic field
       instead. Costs one field sample per frame.
+- [x] **S8 — Fix the low-speed jitter S3 introduced** (user report). Per-star
+      sub-pixel dither: coherent whole-layer jumps at low speed 3–9% of frames
+      → 0%, with the whole-device-pixel guarantee intact.
 
 ---
 
@@ -596,6 +599,73 @@ emptiest  field 0.003 at   600, 1500 —  7 325 stars (30.4% of budget)
 A diagonal walk across the map ranges 51%–75% of budget, so ordinary travel
 does read as a changing sky rather than as a constant one.
 
+## S8 — the low-speed jitter, which S3 caused
+
+User report: *"there is noticeable jittering at low ship speeds."*
+
+**This one is mine.** S3 snapped every star to a whole device pixel, which is
+what removed the browser-dependent resampling — and a pixel-snapped field can
+only MOVE in whole-pixel steps. At speed it does not matter, because the step is
+smaller than the motion. At a drift it IS the motion.
+
+Camera was ruled out first: it hard-snaps to the player with no lerp, and world
+entities draw at fractional positions, so the star field was the only thing in
+the frame that quantises.
+
+### Measured, with `perf/starfield-motion.mjs` (new)
+
+The first metric tried — the share of ALL stars moving each frame — showed
+almost nothing, and that was the metric being wrong rather than the artifact
+being absent. With 240 depth layers stepping at different times, the whole-field
+average is a smooth trickle even when every individual layer is lurching.
+
+What the eye actually catches is **coherence**: ~100 bright foreground stars
+jumping *together* reads as a twitch in one depth plane. So the probe measures
+the NEAREST layer — brightest, largest, fastest-scrolling, and therefore first
+to step:
+
+```
+                    nearest layer, share that moved on one frame
+   ship speed     worst frame              frames where MOST moved together
+                 before   after              before   after
+       2          100%     10%                 3%      0%
+       6          100%     20%                 9%      0%
+      15          100%     56%                29%      2%
+      40          100%    100%                69%     86%
+     120          100%    100%               100%    100%
+```
+
+Before, the worst frame is **100% at every speed** — the layer always moves as
+one body, it is only a question of how often. After, at drift speeds it never
+does. The two converge at 40+ because there the layer genuinely moves a pixel
+every frame, which is correct rather than an artifact.
+
+### The fix
+
+A per-star sub-pixel **phase**. Each star crosses to the next pixel at its own
+moment within the pixel, so at any instant the share of a layer that has already
+stepped equals the layer's true sub-pixel offset. Spatial dithering, applied to
+motion.
+
+**The S3 guarantee is untouched, and that is the point of doing it this way.**
+`(X[i] + bandOffsetX[b] + phase) | 0` is still a floor to a whole device pixel —
+every star still lands exactly on the pixel grid. Only the TIMING of the
+transition moved. A test now pins this against the real `fillRect` calls in both
+dither modes, rather than inferring it from the storage types.
+
+Phases are `Uint8` (1/256 px), independent per axis so diagonal drift does not
+resynchronise the two. 48 KB for the pair.
+
+### An instrument bug worth recording
+
+The first before/after run showed the undithered path frozen 100% of frames at
+*every* speed including cruise — which is impossible, and was the probe's fault:
+the player had died partway through the sweep, the camera stopped following, and
+a stationary camera looks exactly like a stuck field. The probe now keeps the
+pilot alive and resets position per run. **A measurement that confirms your
+hypothesis too strongly is a reason to check the measurement**, and this one
+would have made the fix look far better than it is.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -689,6 +759,20 @@ rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
 
+**D19 — Fix the jitter with a per-star dither rather than by unsnapping the
+field.** Beat: dropping back to fractional positions, which is the obvious fix
+and restores perfectly smooth motion. It also restores the antialiasing —
+a fractional `fillRect` origin is exactly the source smear S1 measured at 93.8%
+of runs and S3 removed — so it would trade the whole gauntlet's result for
+smooth drift. The dither keeps both: whole-pixel stars, continuous motion.
+
+**D20 — Measure COHERENCE in the nearest layer, not the whole-field average.**
+Beat: the whole-field average, which was the first metric and showed the fix
+doing almost nothing. It was diluted across 240 layers stepping independently.
+The artifact is a lump of bright stars moving as one body, so the metric has to
+be per layer and has to be about simultaneity — otherwise it measures something
+real that is not what anyone is complaining about.
+
 **D16 — Reject the flow field as the density source, and say so in the code.**
 Beat: using it as asked. It is a normalised DIRECTION field with no density
 signal in its magnitude, it re-bakes on tile destruction and breathes over time,
@@ -745,6 +829,14 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 ---
 
 ## FOR-USER-REVIEW
+
+- **S8 — the low-speed jitter should be gone.** It was mine: S3's pixel
+  snapping is what made the sky crisp, and a snapped field can only move in
+  whole-pixel steps, so at a drift it froze and lurched. Stars now cross pixel
+  boundaries at staggered moments — still landing on whole pixels, so nothing
+  about the crispness changed. Visual ▸ **Star smooth** toggles it if you want
+  to compare. If jitter persists with it ON, it is something other than the star
+  field and I would want to know what it looks like.
 
 - **S7 — the sky now thins out in some parts of the map.** Default is
   **Medium**: the emptiest regions keep 30% of the stars, the richest ~100%, and
@@ -873,6 +965,27 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 8 — S8 (the low-speed jitter)
+
+Ruled out the camera first (hard snap, no lerp; world entities draw fractional),
+which left the star field as the only quantised thing in the frame — and the
+quantisation was mine, from S3.
+
+Built `perf/starfield-motion.mjs`. Two things went wrong with it before it gave
+a usable answer, both recorded above: the first metric measured the whole field
+and was diluted to invisibility by 240 layers, and the first before/after run
+was contaminated by the player dying mid-sweep (a stationary camera reads as a
+stuck field). Fixed both, then the artifact and the fix were unambiguous.
+
+Shipped the per-star sub-pixel dither, ON by default, with a DBG toggle so the
+A/B stays available — and a test pinning that stars still land on whole device
+pixels in BOTH modes, since that is the S3 result this could have quietly
+undone.
+
+Also fixed the two `perf/starfield.mjs` call sites that still used the pre-S7
+`renderStars` signature, and its header comment, which had gone stale describing
+band canvases that no longer exist.
 
 ### Iteration 7 — S7 (non-uniform density by map region)
 
