@@ -77,8 +77,14 @@ export interface SynthCtx {
   noise: AudioBuffer;
 }
 
+/** Where recorded takes live.  `public/` is served at the site root, so a
+ *  file at `public/assets/sfx/foo.wav` is fetched from `/assets/sfx/foo.wav`
+ *  — the same convention `assets.ts` uses for sprites. */
+const SFX_ASSET_DIR = '/assets/sfx/';
+
 /** A one-shot sound.  `render` returns the voice's duration in seconds so
- *  the manager can retire it without a timer. */
+ *  the manager can retire it without a timer.  With `sample` set and the
+ *  file decoded, the recording plays instead and `render` is the fallback. */
 export interface SfxDef {
   tier: SfxTier;
   /** Relative mix level, 0..1, before master volume (inventory `mix`). */
@@ -97,6 +103,19 @@ export interface SfxDef {
   jitter?: number;
   /** World-positioned (panned + distance-attenuated) vs UI-flat. */
   positional?: boolean;
+  /** Recorded asset(s) for this id — bare filenames under
+   *  `public/assets/sfx/`.  When one has DECODED, it replaces `render` for
+   *  this voice; until then (and forever, if the file is missing or the
+   *  browser cannot decode it) the synth draft plays instead.  That
+   *  fallback is what keeps the id contract honest: a sample is a registry
+   *  change and never a trigger-site change, and a missing file degrades
+   *  to a sound rather than to silence.
+   *
+   *  Several filenames = VARIANTS, cycled round-robin per trigger.  Bulk-
+   *  fired ids machine-gun without variation, which is what `jitter` is
+   *  for on the synth side; a handful of takes is the sampled equivalent
+   *  and the two stack (jitter still detunes the chosen take). */
+  sample?: string | string[];
   /** Audible radii in world units, overriding the global defaults.  Exists
    *  so AMBIENT events — shards colliding with each other somewhere the
    *  player is not — carry only in close proximity, while the same
@@ -154,6 +173,10 @@ export class AudioSystem {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
+  /** Decoded recorded takes, per id.  Absent or all-null → synth draft. */
+  private samples = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
+  private samplesRequested = false;
+  private samplesLoaded = 0;
   private gestureBound = false;
   /** iOS session-category shim — see claimPlaybackSession(). */
   private silentEl: HTMLAudioElement | null = null;
@@ -321,7 +344,59 @@ export class AudioSystem {
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
     if (this.ctx.state !== 'running') void this.ctx.resume();
+    // Decode every declared sample NOW, once, off the critical path.  This
+    // is the whole reason preloading exists: `decodeAudioData` on first
+    // COLLISION would land the decode inside a frame the player is already
+    // being hit in.  Fetch + decode are async and land whenever they land;
+    // until then every id plays its synth draft, so nothing waits on this.
+    void this.preloadSamples();
     return true;
+  }
+
+  /** Fetch + decode every `sample` declared in the registry.  Idempotent,
+   *  parallel, and FAILURE-TOLERANT by design — a 404 or an undecodable
+   *  file leaves that id on its synth draft and logs nothing to the player.
+   *  The standalone single-file build takes exactly that path today: its
+   *  inliner carries images, not audio, so the standalone game is the
+   *  procedural game. */
+  private async preloadSamples(): Promise<void> {
+    if (!this.ctx || this.samplesRequested) return;
+    this.samplesRequested = true;
+    const jobs: Promise<void>[] = [];
+    for (const [id, def] of this.defs) {
+      if (!def.sample) continue;
+      const names = Array.isArray(def.sample) ? def.sample : [def.sample];
+      const slots: (AudioBuffer | null)[] = names.map(() => null);
+      this.samples.set(id, { bufs: slots, next: 0 });
+      names.forEach((name, i) => {
+        jobs.push((async () => {
+          try {
+            const res = await fetch(`${SFX_ASSET_DIR}${name}`);
+            if (!res.ok) return;                       // missing → synth draft
+            const bytes = await res.arrayBuffer();
+            slots[i] = await this.ctx!.decodeAudioData(bytes);
+            this.samplesLoaded++;
+          } catch {
+            /* undecodable → synth draft.  Deliberately silent. */
+          }
+        })());
+      });
+    }
+    await Promise.all(jobs);
+  }
+
+  /** Next decoded take for an id, or null while none has landed.  Cycles
+   *  round-robin and SKIPS slots still loading, so a partially-decoded set
+   *  is usable the moment its first take arrives. */
+  private takeSample(id: string): AudioBuffer | null {
+    const set = this.samples.get(id);
+    if (!set) return null;
+    const n = set.bufs.length;
+    for (let k = 0; k < n; k++) {
+      const buf = set.bufs[(set.next + k) % n];
+      if (buf) { set.next = (set.next + k + 1) % n; return buf; }
+    }
+    return null;
   }
 
   public get unlocked(): boolean { return this.ctx !== null; }
@@ -465,7 +540,29 @@ export class AudioSystem {
     s.pitch = (opts?.pitch ?? 1) * (def.jitter ? 1 + (Math.random() * 2 - 1) * def.jitter : 1);
     s.param = opts?.param ?? 0;
     s.noise = this.noiseBuf;
-    const dur = Math.max(0.01, def.render(s));
+    // A decoded take REPLACES the draft; otherwise the draft plays.  One
+    // BufferSourceNode is cheaper than any synth here builds (the drafts
+    // run three to six nodes each), so this branch can only reduce the
+    // per-voice cost — and every budget above it (retrigger collapse,
+    // polyphony, tier thinning, attenuation) has already been applied, so
+    // a sample obeys the same ceilings as the synth it replaced.
+    const buf = this.takeSample(id);
+    let dur: number;
+    if (buf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      // The call site's pitch (shard SIZE, in the case of contact) and the
+      // def's jitter both ride playbackRate, so one take spans pebble-tap
+      // to boulder-slam exactly as the synth's f0 sweep did.  Rate scales
+      // duration, so the voice's retirement has to scale with it too.
+      src.playbackRate.value = s.pitch;
+      src.connect(voiceGain);
+      src.start(now);
+      dur = buf.duration / Math.max(0.01, s.pitch);
+    } else {
+      dur = Math.max(0.01, def.render(s));
+    }
+    dur = Math.max(0.01, dur);
 
     const endsAt = now + dur + AUDIO_CONSTANTS.VOICE_RELEASE_PAD;
     st.ends.push(endsAt);
@@ -577,6 +674,13 @@ export class AudioSystem {
   // ── Introspection (headless smokes + the DBG panel) ───────────────────────
 
   public playsOf(id: string): number { return this.perId.get(id) ?? 0; }
+  /** How many recorded takes decoded successfully.  0 with samples declared
+   *  means every id is on its synth draft — the normal state until files
+   *  are dropped in, and the state the standalone build stays in. */
+  public get sampleCount(): number { return this.samplesLoaded; }
+  /** True once a decoded take exists for this id, i.e. `play` will use the
+   *  recording rather than the draft. */
+  public hasSample(id: string): boolean { return this.takeSample(id) !== null; }
   /** Live voice count for one id — the quantity `poly` bounds. */
   public liveVoicesOf(id: string): number {
     const st = this.ids.get(id);

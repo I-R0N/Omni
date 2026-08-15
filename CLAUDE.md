@@ -1632,7 +1632,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   frequency + envelope, variation, polyphony + throttle, mix level,
   positional vs UI-flat.  `SfxRegistry` holds the procedural draft for
   each id; replacing a draft with a recorded asset is a registry change
-  and NEVER a call-site change.  A headless smoke parses the document
+  and NEVER a call-site change — `SfxDef.sample` names one or more `.wav`
+  files under `public/assets/sfx/` (several = variants, cycled
+  round-robin) and the draft stays as the FALLBACK, so a missing or
+  undecodable file degrades to a different sound rather than to silence,
+  and the standalone build — whose inliner carries images, not audio —
+  stays fully audible on the drafts.  Files are fetched and DECODED ONCE
+  at unlock, never on first trigger: a `decodeAudioData` inside the frame
+  a collision lands in is the one way this path could cost frames.  Pitch
+  rides `playbackRate`, so the call site's existing `{gain, pitch}`
+  (shard size, impact speed) still spans one take from pebble-tap to
+  boulder-slam.  A headless smoke parses the document
   and asserts registry↔document parity in BOTH directions, so adding a
   sound means adding its row first.  Systems that need to make a sound
   expose ONE generic sink (`PhysicsSystem.sfx`, `ShardSystem.sfx`,

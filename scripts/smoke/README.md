@@ -1,7 +1,7 @@
 # Audio smoke suites (Phase 3 Pair B)
 
 Headless assertions for the SFX system and explosion variety, written
-during the Pair B session. **165 assertions across six suites.**
+during the Pair B session. **180 assertions across seven suites.**
 
 They are plain Node scripts driving Playwright against a built preview of
 the real game. They predate the project's own harness: roadmap 5b has
@@ -38,6 +38,7 @@ prints one line per assertion.
 | `b4.mjs` | 28 | Explosion variety: each entity class compared *against the others* on debris count/speed/size/lifetime/hue and ring shape, the particle budget, `MAX_PARTICLES` under 60 simultaneous deaths, and audio+visual firing together. |
 | `b5.mjs` | 27 | Validation: a muted-vs-unmuted frame-time A/B on an identical heavy scene, a `play()` microbenchmark, a 390 px phone-scale check of the settings row, and a full gameplay loop with audio asserted throughout. |
 | `ios.mjs` | 12 | iOS recovery: both audio-session paths (modern `navigator.audioSession` and the forced pre-16.4 fallback), that the silent-WAV shim decodes, and that a *later* gesture recovers a suspended context. |
+| `sample.mjs` | 15 | The recorded-sample path: decode-at-unlock (never on first trigger), round-robin variants, that every budget still applies to a recording, the per-voice and frame-time cost against the synth drafts, and the 404 fallback — which is the state of the repo until wav files are dropped in. Generates its own wavs, so it needs no committed assets. |
 | `tone.mjs` | 21 | Tonal regression guard: renders every material voice and every loop through an `OfflineAudioContext` and asserts nothing bulk-fired sits in the fatiguing band, that the material brightness ordering survives, and that the portal and station beds are distinguishable by character. |
 
 ## Two things worth knowing before trusting a result
