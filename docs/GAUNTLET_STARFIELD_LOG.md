@@ -35,6 +35,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S10 — Crisp mode removed; the sky is now SEEDED** (user report). Star
       motion is sub-pixel, full stop. Star generation is deterministic per map,
       so a DBG knob no longer reshuffles the whole sky.
+- [x] **S11 — Parallax SPREAD is its own parameter** (user request). Depth
+      RANGE and layer COUNT were conflated in one hardcoded `2.0`; they are now
+      independent knobs.
 
 ---
 
@@ -809,6 +812,73 @@ and requires a position fingerprint of the whole field to come back identical.
 Nebula puffs and shooting stars deliberately keep `Math.random` — they are not
 part of the comparison, and seeding them would freeze motion that should vary.
 
+## S11 — the parallax spread was hiding inside a constant
+
+> *"There should be an angle rate of change parameter as well for the parallax
+> effect… the total angle between the top and bottom layer is divided evenly by
+> the number of layers causing each layer to move a smaller amount relative to
+> each other. I think I am looking to adjust both the total angle parameter and
+> the total number of layers."*
+
+**The diagnosis was right and the parameter did not exist.** Band speed was:
+
+```ts
+this.bandSpeed[b] = 0.02 + (tMid * tMid) * 2.0;      // tMid = (b + 0.5) / layers
+```
+
+`tMid` spans 0..1 whatever the layer count is, so **the span from farthest to
+nearest is fixed at [0.02, 2.02] regardless of `layers`** — the depth range was
+welded into a literal `2.0`, and the only exposed control subdivided it. Adding
+layers therefore makes neighbouring layers MORE alike, which reads as less
+separation, not more. Exactly the reported confusion, and it was a missing
+parameter rather than a misunderstanding.
+
+One refinement to the model: the range is not divided *evenly*. The curve is
+quadratic, so the step between adjacent layers is `spread × (2b + 2) / layers²`
+— near layers are spread wide, far layers bunch together, which is what real
+distance does. That is worth keeping.
+
+### What shipped
+
+```ts
+speed(b) = DEPTH_FLOOR + ((b + 0.5) / layers)² × SPREAD
+```
+
+`STAR_PARALLAX_CYCLE` (DBG ▸ Visual ▸ **Parallax**): `2 / 4 / 8 / 1 / 0.5×`,
+default 2 = the original behaviour. `DEPTH_FLOOR` (0.02) is now named rather
+than inlined: it is where the farthest layer sits, deliberately not zero,
+because a layer pinned to the camera reads as a texture stuck to the screen
+rather than as distant sky.
+
+The milky way moved from a hardcoded `0.03` to a fixed DEPTH on the same curve
+(`MILKY_WAY_DEPTH`, chosen to reproduce 0.03 at the default spread), so it holds
+its place in the stack when the spread changes instead of drifting relative to
+everything else.
+
+Verified against the live engine before writing the test:
+
+```
+before        : layers 241, spread hi 2.01
+after depth   : layers 121, spread hi 2.00     <- count changed, spread held
+after parallax: layers 121, spread hi 3.99     <- spread changed, count held
+```
+
+Pinned by a test asserting exactly that independence in both directions.
+
+### A test bug worth recording (second time for this one)
+
+The independence test first failed with "timed out waiting for: layer count
+change" — and the mechanism was fine. `waitForEngine` serialises its predicate
+with `toString()`, so an arrow function closing over a test-side variable
+references a name that does not exist in the page and can never resolve. The
+fix is to inline the expected value with `new Function`, which this file already
+does in three other places.
+
+**This is the second time the same gotcha has cost a debugging cycle in this
+gauntlet** (the first was reading `__omniStats` in the same tick as a DBG
+cycle). The harness rule that would have caught both: *a predicate handed to
+`waitForEngine`/`waitForStats` must be self-contained — no closure state.*
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -901,6 +971,19 @@ another machine rather than believed from a ledger table, so the bench now
 rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
+
+**D27 — Make SPREAD a parameter rather than widening the layer-count cycle.**
+Beat: adding bigger entries to `STAR_BANDS_CYCLE` and hoping more layers reads
+as more depth. It does the opposite — the span is fixed, so extra layers only
+make neighbours more similar. The two quantities are genuinely orthogonal and
+the UI now says so; conflating them is what produced the confusion in the first
+place.
+
+**D28 — Express the milky way as a DEPTH on the shared curve, not a fixed
+speed.** Beat: leaving it at `0.03`. A hardcoded rate keeps its absolute speed
+while every other layer's changes with the spread, so the galactic band would
+slide forward and backward through the depth stack as an unrelated knob moved.
+Anchoring it to a `t` keeps its position in the stack invariant.
 
 **D24 — Delete `crisp` rather than keep it as a non-default option.** Beat:
 leaving it in the cycle for anyone who prefers sharpness. Same reasoning as D21
@@ -1013,6 +1096,13 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 ---
 
 ## FOR-USER-REVIEW
+
+- **S11 — there is now a Parallax knob, and it is the one you were missing.**
+  Visual ▸ **Parallax** (2 / 4 / 8 / 1 / 0.5×) sets the total depth range;
+  Visual ▸ **Star depth** sets how many layers that range is cut into. Raising
+  layers alone genuinely does make the field read flatter — the endpoints were
+  fixed, so you were subdividing the same span. Raise Parallax to deepen it.
+  Default 2× is unchanged from before, so nothing moves until you touch it.
 
 - **S10 — depth does what you thought; the sky no longer reshuffles.** Your
   reading was right: it is the number of parallax layers, and the star count is
@@ -1160,6 +1250,20 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 11 — S11 (parallax spread as its own parameter)
+
+The user's model of the system was correct and the parameter simply was not
+there — the depth range was welded into a literal `2.0` next to the one control
+that subdivided it. Added `STAR_PARALLAX_CYCLE`, named `DEPTH_FLOOR`, and
+re-expressed the milky way as a depth rather than a fixed rate.
+
+Checked the mechanism against the live engine before writing the test, which is
+what made the subsequent test failure obviously a TEST bug rather than a product
+one — the diagnostic already showed both knobs behaving independently.
+
+That failure was the closure-serialisation gotcha for the second time this
+gauntlet. Recorded above as a harness rule so the third time does not happen.
 
 ### Iteration 10 — S10 (crisp removed; seeded sky)
 

@@ -248,6 +248,12 @@ test.describe('the star field', () => {
     // outrun a far one. Offsets wrap, so compare the SPEED table that drives
     // them plus the fact that the field moved at all.
     expect(speeds[NUM_BANDS - 1]).toBeGreaterThan(speeds[0] * 10);
+
+    // SPREAD and LAYER COUNT are independent knobs, and this is the assertion
+    // that says so. The span from farthest to nearest is set by the spread
+    // alone, so it must NOT move when the layer count does — adding layers
+    // subdivides the same range. Conflating the two is the natural reading of
+    // a "depth" control, and it is why more layers looks like LESS separation.
     expect(after.some((v, i) => v !== before[i])).toBe(true);
 
     // Every offset stays inside the wrap window — an offset that escaped it
@@ -502,6 +508,63 @@ test.describe('the star field', () => {
       return { kept, expected: bg.milkyWayStarCount };
     });
     expect(mw.kept).toBe(mw.expected);
+
+    watch.assertClean();
+  });
+
+  test('parallax SPREAD is independent of the layer COUNT', async ({ page }) => {
+    // The two were conflated before the spread became its own parameter: the
+    // span between the farthest and nearest layer is set by SPREAD, so adding
+    // LAYERS cuts the same range more finely rather than deepening it. That is
+    // why raising the layer count reads as less separation, not more.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const span = () => engine(page, e => {
+      const sp = e.renderer.backgroundManager.bandSpeed;
+      // Last entry is the milky way; the depth layers are everything before it.
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < sp.length - 1; i++) { lo = Math.min(lo, sp[i]); hi = Math.max(hi, sp[i]); }
+      return { lo, hi, layers: sp.length - 1 };
+    });
+
+    const a = await span();
+
+    // Change the LAYER COUNT. The endpoints must hold.
+    //
+    // The predicate is built with `new Function` so the expected value is
+    // INLINED: `waitForEngine` serialises the callback with toString(), so an
+    // arrow closing over a test-side variable references a name that does not
+    // exist in the page and never resolves.
+    await engine(page, e => e.dbg.cycleStarBands());
+    await waitForEngine(
+      page,
+      new Function('e', `return e.renderer.backgroundManager.bandSpeed.length - 1 !== ${a.layers}`) as any,
+      'the layer count to change',
+    );
+    const b = await span();
+
+    expect(b.layers).not.toBe(a.layers);
+    // Endpoints move only by the half-step sampling offset ((b+0.5)/N), which
+    // shrinks as layers grow — so allow a small tolerance, not equality.
+    expect(Math.abs(b.hi - a.hi)).toBeLessThan(a.hi * 0.05);
+    expect(Math.abs(b.lo - a.lo)).toBeLessThan(0.05);
+
+    // Now change the SPREAD. THAT must move the far end substantially.
+    await engine(page, e => e.dbg.cycleStarParallax());
+    await waitForEngine(
+      page,
+      new Function('e', `return Math.abs(e.renderer.backgroundManager.bandSpeed[e.renderer.backgroundManager.bandSpeed.length - 2] - ${b.hi}) > ${b.hi * 0.2}`) as any,
+      'the parallax spread to change',
+    );
+    const c = await span();
+
+    expect(c.layers).toBe(b.layers);          // spread did not touch the count
+    expect(c.hi).toBeGreaterThan(b.hi * 1.5); // …but it moved the near end a lot
+    // The floor is the far end and stays put: it is where the sky sits, not
+    // how deep it goes.
+    expect(Math.abs(c.lo - b.lo)).toBeLessThan(0.05);
 
     watch.assertClean();
   });

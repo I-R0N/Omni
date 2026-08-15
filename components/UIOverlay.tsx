@@ -113,6 +113,7 @@ interface UIOverlayProps {
   onCycleStarDensity?: () => void;
   onCycleStarSize?: () => void;
   onCycleStarBands?: () => void;
+  onCycleStarParallax?: () => void;
   onCycleStarRegion?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
@@ -277,6 +278,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleStarDensity,
   onCycleStarSize,
   onCycleStarBands,
+  onCycleStarParallax,
   onCycleStarRegion,
   onApplyCorrosion,
   onApplyDisable,
@@ -1210,6 +1212,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Parallax DEPTH LAYERS (240 / 120 / 480 / 60). The star budget is split evenly across them, so this changes how finely depth is quantised, not how many stars there are — more layers means a smoother near-to-far gradient as the camera moves. Frozen at 60 for as long as a layer was a full-viewport canvas (60 of those cost 80–316 MB); a layer is now five numbers, so 240 costs ~10 KB. Regenerates the field immediately.')}
                 {ctrlRow('Star regions', onCycleStarRegion, stats.starRegionName ?? 'Medium',
                   'Non-uniform star density across the MAP (Medium / Strong / Soft / Off). Rich regions fill the sky in, voids thin it out as you fly — a region is roughly 4–7 screens across, so it reads over a few seconds of travel. The emptiest region keeps 30% of the stars (10% on Strong); never 0, because a totally empty sky reads as a rendering failure rather than as a void. The Milky Way is exempt — it is a landmark. Deliberately NOT driven by the asteroid flow field: that is a direction field with no density signal, and it re-bakes when you destroy a tile, which would make the sky reshuffle when you shoot a rock. Takes effect on the next frame, no rebuild.')}
+                {ctrlRow('Parallax', onCycleStarParallax, stats.starParallaxName ?? '2x',
+                  'PARALLAX SPREAD — how much faster the nearest depth layer scrolls than the farthest (2 / 4 / 8 / 1 / 0.5x). This is the total depth "angle" of the field and it is INDEPENDENT of Star depth: the span between farthest and nearest is set here, so adding LAYERS cuts the same range more finely rather than deepening it — which is why more layers reads as LESS separation between neighbours, not more. Raise this to make the field read as genuinely deeper. The curve is quadratic, so near layers are spread wide and far layers bunch together, the way real distance behaves.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

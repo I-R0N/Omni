@@ -121,7 +121,14 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    `CREDITS_PER_DROP` rather than importing it. A test that imports the value
    it checks is asserting that a constant equals itself; hard-coding means a
    tuning change has to touch this file, which is the alarm working.
-8. **Respect the phase machine.** A boss's traits are a function of its
+8. **A polled predicate must be SELF-CONTAINED.** `waitForEngine` /
+   `waitForStats` serialise the callback with `toString()` and re-create it
+   inside the page, so an arrow closing over a test-side variable references a
+   name that does not exist there and can never resolve — it fails as a
+   *timeout*, which reads like a product bug. Inline the expected value with
+   `new Function('e', \`return … \${expected}\`)`. This cost two debugging
+   cycles in the star-field gauntlet before it was written down.
+9. **Respect the phase machine.** A boss's traits are a function of its
    health, and `updateBosses` stamps a phase one frame after the transition.
    Poll for `bossPhase` instead of reading traits in the same breath as
    setting health.

@@ -1671,6 +1671,16 @@ export const SHOOTING_STAR_CONSTANTS = {
 // scene size as `canvas.width / effectiveDpr()`, which is exactly the CSS
 // viewport, so the two agree by construction.
 export const STARFIELD_CONSTANTS = {
+  /** Scroll rate of the FARTHEST depth layer, as a fraction of camera motion.
+   *  Not zero: a layer pinned to the camera reads as a texture stuck to the
+   *  screen rather than as distant sky. */
+  DEPTH_FLOOR: 0.02,
+  /** Where the milky way sits in the depth range, as a `t` in [0, 1] on the
+   *  same quadratic curve the depth layers use.  Expressed as a DEPTH rather
+   *  than a fixed speed so it keeps its place in the stack when the parallax
+   *  spread is changed — a hardcoded rate would drift relative to everything
+   *  else.  0.0707 reproduces its original 0.03 at the default spread. */
+  MILKY_WAY_DEPTH: 0.0707,
   /** Milky-way stars per 1000 CSS px of viewport WIDTH.  The milky way is a
    *  LINE feature — its stars are placed along a diagonal spanning the
    *  viewport width — so it scales linearly with width, where the star field
@@ -1703,6 +1713,39 @@ export function getActiveStarBandsName(): string { return `${STAR_BANDS_CYCLE[ac
 export function cycleStarBands(): number {
   activeStarBandsIndex = (activeStarBandsIndex + 1) % STAR_BANDS_CYCLE.length;
   return STAR_BANDS_CYCLE[activeStarBandsIndex];
+}
+
+// ─── DBG: PARALLAX SPREAD ────────────────────────────────────────────────────
+//
+// How much faster the NEAREST depth layer scrolls than the farthest — the total
+// depth "angle" of the field, independent of how many layers that range is cut
+// into.
+//
+//     speed(b) = DEPTH_FLOOR + ((b + 0.5) / layers)^2 * SPREAD
+//
+// The two knobs are genuinely separate and were conflated before this existed:
+//
+//   * SPREAD (this one) sets the total range from farthest to nearest.
+//   * Star depth sets how many LAYERS that range is cut into.
+//
+// So raising the layer count alone does NOT make the field more three
+// dimensional — it makes the steps between neighbouring layers finer while the
+// endpoints stay put, which reads as LESS separation, not more.  Raising the
+// spread is what actually deepens the effect.  (The cut is quadratic rather
+// than even, so the step between adjacent layers is proportional to b/layers^2:
+// near layers are spread wide, far layers bunch together, which is what real
+// distance does.)
+//
+// 2.0 IS THE DEFAULT and reproduces the field's original behaviour.  The
+// nearest layer then scrolls at ~0.40x camera motion once the shared 0.2 draw
+// scale is applied, so stars always trail the world rather than racing it.
+export const STAR_PARALLAX_CYCLE: ReadonlyArray<number> = [2.0, 4.0, 8.0, 1.0, 0.5] as const;
+let activeStarParallaxIndex = 0;
+export function getActiveStarParallax(): number { return STAR_PARALLAX_CYCLE[activeStarParallaxIndex]; }
+export function getActiveStarParallaxName(): string { return `${STAR_PARALLAX_CYCLE[activeStarParallaxIndex]}x`; }
+export function cycleStarParallax(): number {
+  activeStarParallaxIndex = (activeStarParallaxIndex + 1) % STAR_PARALLAX_CYCLE.length;
+  return STAR_PARALLAX_CYCLE[activeStarParallaxIndex];
 }
 
 // ─── DBG: star density ───────────────────────────────────────────────────────

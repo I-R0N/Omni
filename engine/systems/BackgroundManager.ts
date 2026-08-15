@@ -3,7 +3,7 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, getActiveStarRegion,
+  getActiveStarBands, getActiveStarRegion, getActiveStarParallax,
   STAR_REGION_FADE,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
@@ -426,16 +426,27 @@ public setMapType(type: MapType) {
       Math.round((width / 1000) * STARFIELD_CONSTANTS.MILKY_WAY_PER_1K_WIDTH),
     );
 
-    // Depth layers.  Speed increases quadratically from background (slow) to
-    // foreground (fast); the milky way sits at a fixed slow drift.
+    // Depth layers.  Speed rises quadratically from background (slow) to
+    // foreground (fast), spanning DEPTH_FLOOR .. DEPTH_FLOOR + SPREAD.
+    //
+    // SPREAD and LAYER COUNT are independent, and conflating them is the
+    // natural mistake: the span between the farthest and nearest layer is set
+    // by SPREAD alone, so adding layers subdivides the SAME range more finely
+    // rather than deepening it.  More layers therefore reads as LESS separation
+    // between neighbours, not more.
+    const spread = getActiveStarParallax();
+    const floor = STARFIELD_CONSTANTS.DEPTH_FLOOR;
     this.bandSpeed = new Float64Array(TOTAL_BANDS);
     this.bandOffsetX = new Float64Array(TOTAL_BANDS);
     this.bandOffsetY = new Float64Array(TOTAL_BANDS);
     for (let b = 0; b < NUM_BANDS; b++) {
         const tMid = (b + 0.5) / NUM_BANDS;
-        this.bandSpeed[b] = 0.02 + (tMid * tMid) * 2.0;
+        this.bandSpeed[b] = floor + (tMid * tMid) * spread;
     }
-    this.bandSpeed[MW_BAND] = 0.03;
+    // The milky way rides the same curve at a fixed DEPTH, so it holds its
+    // place in the stack as the spread changes.
+    const mwT = STARFIELD_CONSTANTS.MILKY_WAY_DEPTH;
+    this.bandSpeed[MW_BAND] = floor + mwT * mwT * spread;
 
     // ── generate into per-group buckets, then flatten ──────────────────────
     // Generation runs on map load and on resize only, so allocating here is

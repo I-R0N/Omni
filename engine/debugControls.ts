@@ -35,6 +35,7 @@ import {
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
     cycleStarDensity, cycleStarSize, cycleStarBands, cycleStarRegion,
+    cycleStarParallax,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -566,6 +567,18 @@ export class DebugControls {
    *  numbers, so 240 costs about 10 KB and 240 float updates per frame. */
   cycleStarBands() {
     cycleStarBands();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the PARALLAX SPREAD — how much faster the nearest depth layer
+   *  scrolls than the farthest.
+   *
+   *  Independent of the layer COUNT, and the two are easy to conflate: the
+   *  span between farthest and nearest is set here, so adding layers cuts the
+   *  SAME range more finely rather than deepening it.  Raising the spread is
+   *  what actually makes the field read as deeper. */
+  cycleStarParallax() {
+    cycleStarParallax();
     this.g.renderer.invalidateBackground();
   }
 

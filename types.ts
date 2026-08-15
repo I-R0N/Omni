@@ -1669,6 +1669,8 @@ export interface EngineStats {
   starSizeName?: string;
   /** DBG: active parallax depth-layer count. */
   starBandsName?: string;
+  /** DBG: active parallax SPREAD (nearest-vs-farthest scroll range). */
+  starParallaxName?: string;
   /** DBG: active star-region density variation ('Medium' / 'Off' / …). */
   starRegionName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
