@@ -20,8 +20,9 @@ import { nextId } from './systems/IdAllocator';
 import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER } from '../constants';
+import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -67,7 +68,11 @@ const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
  *  straight past it through `window.__omniEngine` — so widening it changes
  *  nothing at runtime.  The real public API is what `App.tsx` calls. */
 export class GameEngine {
-  private input: InputSystem;
+  /** Not `private`: DebugControls reaches it for the joystick DBG toggle,
+   *  and the Playwright suites drive the pad mapping through it (CLAUDE.md
+   *  §8 — `private` is compile-time only, so the suites could read it either
+   *  way; this just stops the compiler disagreeing with the debug menu). */
+  input: InputSystem;
   physics: PhysicsSystem;
   renderer: RenderSystem;
   private ai: AISystem;
@@ -867,6 +872,8 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      minimapMaterialName: getActiveMinimapMaterialName(),
+      rockPaletteName: getActiveRockPaletteName(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
@@ -885,6 +892,16 @@ export class GameEngine {
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
+      gamepadInfo: this.input.padDebugName(),
+      gamepadAxes: this.input.padDebugAxes(),
+      rumbleInfo: this.input.rumbleDebugInfo(),
+      joystickForceVisible: this.input.joystickForceVisible,
+      controlScheme: this.input.getControlScheme(),
+      rumbleEnabled: this.input.rumbleEnabled,
+      adaptiveTriggersSupported: this.input.adaptiveTriggersSupported(),
+      adaptiveTriggersConnected: this.input.adaptiveTriggersConnected(),
+      adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
+      adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1241,6 +1258,49 @@ export class GameEngine {
     this.currentWeaponIndex = this.weapons.cycleWeapon(this.player);
   }
 
+  /**
+   * Pick the control scheme (user directive, G9).  A PREFERENCE, like
+   * difficulty: it deliberately survives `restartGame()` and every map load,
+   * because it describes the player's hands, not the run.
+   */
+  public setControlScheme(scheme: ControlScheme) {
+    this.input.setControlScheme(scheme);
+  }
+
+  /**
+   * Toggle the DualSense adaptive-trigger link (WebHID).
+   *
+   * Routed through the engine like every other UI action, but note what it is
+   * NOT: it is not a control scheme and it is not a prerequisite for
+   * anything.  The pad plays identically without it — this only changes what
+   * the right trigger FEELS like — so nothing in the sim may branch on it,
+   * and a platform without WebHID loses no functionality.
+   *
+   * Must be reached from a real click: `requestDevice` needs a user gesture.
+   */
+  public toggleAdaptiveTriggers(): Promise<boolean> {
+    return this.input.adaptiveTriggersConnected()
+      ? this.input.disconnectAdaptiveTriggers().then(() => false)
+      : this.input.connectAdaptiveTriggers();
+  }
+
+  /** DBG: step the trigger wire encoding, and pulse the pad's motors over the
+   *  SAME HID path to prove the transport independently of the encoding.
+   *  Both exist because a DualSense answers a report it dislikes with
+   *  silence, so "nothing happened" needs to be bisected rather than
+   *  re-guessed. */
+  /** How close the ship is to its speed cap, 0..1 — what the thrust
+   *  trigger's resistance reports. */
+  private lastMaxSpeed: number = PHYSICS_CONSTANTS.MAX_SPEED;
+  private playerSpeedFraction(): number {
+    const v = this.player.velocity;
+    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastMaxSpeed)));
+  }
+
+  public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
+  public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
+
   public setDifficulty(level: number) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
       this.difficultyLevel = clamped;
@@ -1304,11 +1364,93 @@ export class GameEngine {
       }
   }
 
+  /**
+   * Sample the gamepad once per rendered frame and spend the edges that do
+   * not belong to a sim step (Pair C, c2).
+   *
+   * Runs BEFORE every freeze short-circuit in `loop`, which is the point: the
+   * pause button has to work from inside the paused state, and a pad that
+   * connects while the menu is up should still say so.  What is gated is the
+   * FIRE queue — a trigger held through a station visit must not bank a shot
+   * that lands the instant you undock.
+   */
+  private pollGamepad() {
+    const frozen = this.gameState !== GameState.PLAYING || this.dockedAtStation
+                || this.stageClearPending || this.deathPending;
+    this.input.pollGamepad(!frozen);
+
+    const conn = this.input.consumePadConnectionEvent();
+    if (conn) {
+      this.pushPlayerMessage(
+        conn.connected ? 'GAMEPAD CONNECTED' : 'GAMEPAD DISCONNECTED',
+        conn.connected ? '#7dd3fc' : '#fca5a5',
+        INPUT_CONSTANTS.GAMEPAD.HINT_LIFETIME,
+      );
+    }
+
+    if (this.input.consumePausePress()) {
+      // pauseGame() is already a no-op while docked (one full-screen overlay
+      // at a time), so this needs no docked branch of its own.
+      if (this.gameState === GameState.PLAYING) this.pauseGame();
+      else if (this.gameState === GameState.PAUSED) this.resumeGame();
+    }
+
+    // Both of these are DRAINED every frame whether or not they can be spent,
+    // so a press made against a frozen world cannot fire later out of context.
+    // The one exception is INTERACT while docked — the docked branch below is
+    // its consumer, and undocking is exactly what it is for.
+    const cycle = this.input.consumeCyclePress();
+    if (cycle && !frozen) this.cycleWeapon();
+    if (frozen && !this.dockedAtStation) this.input.consumeInteractPress();
+  }
+
+  /**
+   * BACK, pressed with a full-screen overlay up (G15).
+   *
+   * The menu-nav driver owns CONFIRM — it clicks whatever has focus, which
+   * needs no game knowledge at all — but BACK means something different on
+   * each screen, and only the engine knows which is up.  Deliberately does
+   * NOT dismiss the death or stage-clear screens: those are decisions
+   * (respawn / restart / quit; descend / return), and a button that quietly
+   * picks one for you is worse than no button.
+   */
+  public menuBack() {
+    if (this.dockedAtStation) { this.undock(); return; }
+    if (this.gameState === GameState.PAUSED) { this.resumeGame(); return; }
+  }
+
+  /**
+   * Per-frame upkeep for the onscreen joystick (Pair C, c2): advance the
+   * release fade, and hand InputSystem the LIVE minimap rect.
+   *
+   * The rect is pushed rather than looked up because the stick must not claim
+   * a touch that belongs to the minimap toggle, and the minimap changes size
+   * at runtime (75 px collapsed, 280 px expanded) — a constant in
+   * INPUT_CONSTANTS could only be right for one of those.  This keeps HUD
+   * layout knowledge in the engine, where it already lives (the fire-event
+   * handler computes the same rect to catch the toggle tap).
+   */
+  private tickJoystick(frameTime: number) {
+    this.input.tickJoystick(frameTime);
+
+    const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
+    const size = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
+    this.input.setStickExclusion(
+      MARGIN,
+      window.innerHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
+      size,
+      size,
+    );
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
+
+    this.pollGamepad();
+    this.tickJoystick(frameTime);
 
     // HUD score ticker — roll the displayed total up toward the true
     // score by integer steps (≥1, ≤ a fraction of the gap) so awards
@@ -1443,6 +1585,8 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      minimapMaterialName: getActiveMinimapMaterialName(),
+      rockPaletteName: getActiveRockPaletteName(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
@@ -1461,6 +1605,16 @@ export class GameEngine {
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
+      gamepadInfo: this.input.padDebugName(),
+      gamepadAxes: this.input.padDebugAxes(),
+      rumbleInfo: this.input.rumbleDebugInfo(),
+      joystickForceVisible: this.input.joystickForceVisible,
+      controlScheme: this.input.getControlScheme(),
+      rumbleEnabled: this.input.rumbleEnabled,
+      adaptiveTriggersSupported: this.input.adaptiveTriggersSupported(),
+      adaptiveTriggersConnected: this.input.adaptiveTriggersConnected(),
+      adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
+      adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
@@ -1520,7 +1674,7 @@ export class GameEngine {
     // routes through undock() as well.
     if (this.dockedAtStation) {
         const eDown = this.input.isKeyDown('KeyE');
-        if (eDown && !this.dockKeyHeld) this.undock();
+        if ((eDown && !this.dockKeyHeld) || this.input.consumeInteractPress()) this.undock();
         this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
@@ -1812,7 +1966,21 @@ export class GameEngine {
       this.weapons.updateEnemyShooting(this.currentMap.entities, this.entityIndex.enemies, this.player, dt);
   }
 
-  handleScreenShake = (amount: number) => {
+  /** Haptic feedback with NO camera shake.  Most impacts want both and go
+   *  through `handleScreenShake`; a few — the plain Blaster's shot — want the
+   *  hand to feel something the camera must not react to. */
+  handleRumble = (amount: number, kind: RumbleKind = 'impact') => {
+      this.input.rumble(amount, kind);
+  }
+
+  handleScreenShake = (amount: number, rumbleKind: RumbleKind = 'impact') => {
+      // Force feedback rides this call — every impact in the game already
+      // funnels through it with magnitudes tuned against each other, so the
+      // hand feels what the camera feels.  Deliberately ABOVE the
+      // screen-shake toggle: wanting a crash in the hand and wanting the
+      // camera to lurch are different preferences.
+      this.input.rumble(amount, rumbleKind);
+
       if (!this.screenShakeEnabled) return;
       // Prioritize larger shakes
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
@@ -2634,6 +2802,10 @@ export class GameEngine {
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
     const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult() * this.moduleThrustMult;
     const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult() * this.moduleSpeedMult;
+    // Cached for the thrust trigger's resistance, which reports how close the
+    // ship is to its cap.  Read here rather than recomputed, so the number the
+    // hand feels is the number the sim is enforcing.
+    this.lastMaxSpeed = maxSpeed;
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -2774,7 +2946,12 @@ export class GameEngine {
             }
         }
 
-        if (!this.minimapExpanded) {
+        // Whether a TAP is a shot is the scheme's call (G9): under the
+        // joystick scheme shooting is the fire button's job, and a tap that
+        // both aims and fires cannot coexist with a thumb that drags to aim.
+        // The tap still reached the minimap toggle, the loadout slots and
+        // `claimTapNear` above — those are not weapons.
+        if (!this.minimapExpanded && this.input.tapFires()) {
             this.handleShooting(evt, false);
         }
     });
@@ -2783,10 +2960,21 @@ export class GameEngine {
     // released.  Fire a charged shot.
     const chargeReleaseEvents = this.input.getChargeReleaseEvents();
     chargeReleaseEvents.forEach(evt => {
-        if (!this.minimapExpanded) {
+        if (!this.minimapExpanded && this.input.tapFires()) {
             this.handleShooting(evt, true);
         }
     });
+
+    // DEVICE shots — the onscreen fire button and the pad's trigger.  These
+    // bypass the tap handler entirely (see InputSystem.getDeviceFireEvents):
+    // a synthesised shot is aimed at the world, so it must not be offered to
+    // the HUD widgets a real tap would hit on the way past.  The expanded
+    // minimap does not block them either — the player pressed a weapon
+    // control, not the map.
+    const deviceFires = this.input.getDeviceFireEvents();
+    for (let i = 0; i < deviceFires.length; i++) this.handleShooting(deviceFires[i], false);
+    const deviceCharges = this.input.getDeviceChargeEvents();
+    for (let i = 0; i < deviceCharges.length; i++) this.handleShooting(deviceCharges[i], true);
 
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
@@ -2794,6 +2982,34 @@ export class GameEngine {
     this.player.chargeProgress = (this.player.overchargeUnlocked && this.player.currentWeapon !== undefined && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
+
+    // Adaptive triggers follow the SAME state the charge ring does, which is
+    // why the sync sits here rather than on the weapon-change path: what the
+    // trigger should feel like is a function of what the player is holding
+    // RIGHT NOW, and "charging" is a state no weapon-change event fires for.
+    // Three cases, in order of precedence: nothing to fire (no gun, or EMP'd
+    // — the trigger goes slack, which is the disable made physical), winding
+    // up a charged shot (a hard wall), or the equipped gun's own profile.
+    // The call is a struct compare when nothing changed; it is a no-op
+    // entirely unless the player has opted into WebHID.
+    const thrustScheme = this.input.usesTriggerThrust();
+    this.input.setTriggerProfile(
+      // Under trigger-thrust the RIGHT trigger is a throttle too, so a weapon
+      // profile on it would be describing a control the player is not using.
+      thrustScheme ? THRUST_TRIGGER(this.playerSpeedFraction())
+      : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
+      : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
+      : WEAPON_TRIGGERS[this.player.currentWeapon]);
+
+    // The LEFT trigger is the throttle under the trigger-thrust scheme, and
+    // its resistance reports what the engine is doing: it stiffens as the
+    // ship approaches its top speed, so "already flat out" is something the
+    // hand knows without reading the HUD.  Released under every other scheme
+    // — a clutch on a control that does nothing is just a stiff trigger.
+    this.input.setThrustTriggerProfile(
+      thrustScheme && !this.player.isExploding
+        ? THRUST_TRIGGER(this.playerSpeedFraction())
+        : TRIGGER_OFF);
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
     // EMP-disabled (Stage 3c) so an in-flight burst halts too.
@@ -3251,10 +3467,10 @@ export class GameEngine {
     // actually in range, so tapping the ship in open space still shoots.
     // E stays as the keyboard equivalent.
     //
-    // A CONTROLLER button is the third path the user asked for; it is
-    // deliberately NOT wired here because Pair C (c2) owns the gamepad layer
-    // in InputSystem, and adding a second polling path would collide with it.
-    // When c2 lands, OR its button into `selected` below — nothing else moves.
+    // A CONTROLLER button is the third path, and c2 wired it exactly as the
+    // hole was left: the pad polls ONCE per frame in GameEngine.pollGamepad
+    // and latches an edge, which is OR'd into `selected` below.  Nothing else
+    // moved — no second polling path, no second arbitration.
     // Prompt AT the ship — the control lives there now, so the instruction
     // does too.  Cleared whenever nothing is in range.
     this.player.interactPrompt = portal
@@ -3263,6 +3479,13 @@ export class GameEngine {
            : 'TAP SHIP TO ENTER')
         : station ? 'TAP SHIP TO DOCK'
         : undefined;
+
+    // Drained EVERY step, spent only when something is in range: a press in
+    // open space is a press in open space, not a charge banked against the
+    // next station you happen to fly past.  (The tap path gets this for free —
+    // `claimTapNear` is only called while in range, and an unclaimed tap just
+    // shoots.)
+    const padInteract = this.input.consumeInteractPress();
 
     let selected = false;
     if (station || portal) {
@@ -3273,6 +3496,7 @@ export class GameEngine {
                 INPUT_CONSTANTS.SHIP_SELECT_RADIUS,
             );
         }
+        if (!selected && padInteract) selected = true;
     }
     const eDown = this.input.isKeyDown('KeyE');
     if (selected || (eDown && !this.dockKeyHeld)) {
@@ -3989,6 +4213,7 @@ export class GameEngine {
           { x: worldX, y: worldY },
           this.handleScreenShake,
           charged,
+          this.handleRumble,
       );
 
       // Keep the HUD weapon index aligned with the player's current weapon in
@@ -4725,6 +4950,8 @@ export class GameEngine {
               rebuilds:  this.ffOverlayRebuilds,
               sampleN:   this.ffOverlaySampleN,
           },
+          this.input.getJoystickState(),
+          this.input.getFireButtonState(),
       );
   }
 

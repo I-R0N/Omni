@@ -1593,6 +1593,14 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  /** DBG minimap MATERIAL mode name (decision #43, G5): 'Flow' / 'Dots' /
+   *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
+   *  nothing. */
+  minimapMaterialName?: string;
+  /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
+   *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
+   *  so a change applies to newly generated rock. */
+  rockPaletteName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;
@@ -1651,6 +1659,40 @@ export interface EngineStats {
   // interaction feels better.  'collide' (default): fly into the snitch.
   // 'shoot': any player-owned projectile within its catch radius nabs it.
   snitchCatchMode?: 'collide' | 'shoot';
+  /** DBG live gamepad readout (Pair C, c2) — a readout, not a toggle: the pad
+   *  has nothing to switch, and what a hardware check needs to see is whether
+   *  the axes are reaching the sim.  `gamepadInfo` names the adopted pad
+   *  (`'none'` when there isn't one); `gamepadAxes` carries the post-deadzone
+   *  thrust, the held aim heading, and a live FIRE flag. */
+  gamepadInfo?: string;
+  gamepadAxes?: string;
+  /** DBG: force the touch joystick to draw with no touch session, so its
+   *  size and placement can be checked on a desktop browser. */
+  joystickForceVisible?: boolean;
+  /** DBG: gamepad force feedback on/off. */
+  rumbleEnabled?: boolean;
+  /** DBG: WHY there is or is not force feedback right now — 'ready',
+   *  'playing', 'no pad', 'pad has no actuator', 'browser refused', or
+   *  'off (DBG)'.  Rumble cannot be checked anywhere but on hardware, so the
+   *  panel has to separate the reasons rather than leave silence to cover
+   *  all of them. */
+  rumbleInfo?: string;
+  /** Adaptive triggers (DualSense over WebHID).  `supported` is false on
+   *  every mobile browser and on Safari, and the UI uses it to decide whether
+   *  to OFFER the control at all — a button that can only ever fail is worse
+   *  than no button.  `info` is the DBG line: unsupported / not connected /
+   *  the transport plus the head of the last report sent. */
+  adaptiveTriggersSupported?: boolean;
+  adaptiveTriggersConnected?: boolean;
+  adaptiveTriggerInfo?: string;
+  /** The head of the last output report actually sent, as hex.  The only
+   *  window into a transport that reports nothing back: a pad discards a
+   *  malformed report in silence, so the bytes on the wire are the evidence a
+   *  correction would be made from. */
+  adaptiveTriggerReport?: string;
+  /** The active control scheme (menu selection).  Drives the menu's own
+   *  selector, the help panel's highlight, and the two touch HUD widgets. */
+  controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
@@ -1769,10 +1811,70 @@ export interface WaveAnnouncement {
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).
+/**
+ * Which control scheme the player picked (main menu, or the pause menu).
+ *
+ * The distinction that actually matters is the TOUCH MODEL — the two touch
+ * schemes are mutually exclusive ways to drive the same ship, and blending
+ * them (which is what shipped first) means the joystick and the drag-to-fly
+ * gesture fight over the same finger.  Keyboard and controller do NOT
+ * disable touch: they pick the standard touch model and additionally stop
+ * the MOUSE from dragging the ship around, since on those schemes steering
+ * is the keys' or the stick's job and a click should only shoot.
+ */
+/** Which motors an impact should reach.
+ *
+ *  `impact` is the default and plays `dual-rumble` — the handle motors, the
+ *  only effect every pad has.  `trigger` asks for `trigger-rumble` INSTEAD
+ *  when the pad and browser offer it: its parameters are a superset, so one
+ *  effect drives the handles and the trigger together.  Falls back to
+ *  `impact` wherever trigger-rumble is not in the actuator's `effects` list,
+ *  which is most places. */
+export type RumbleKind = 'impact' | 'trigger';
+
+export type ControlScheme =
+  | 'touch'
+  | 'joystick-left'   // stick under the left thumb, fire button under the right
+  | 'joystick-right'  // mirrored, for a left-handed grip
+  | 'keyboard'
+  | 'gamepad'
+  /** Controller with the LEFT TRIGGER as an analogue throttle; the left
+   *  stick steers only.  Its own scheme rather than a toggle because it
+   *  changes what a stick deflection MEANS. */
+  | 'gamepad-thrust';
+
 export interface PlayerHUDMessage {
   id: string;
   text: string;
   color: string;
   lifetime: number;
   maxLifetime: number;
+}
+
+/** Render-side view of the onscreen FIRE button — the joystick scheme's
+ *  shooting control.  Null in every other scheme, and (like the joystick)
+ *  null when there is no touch session, so it never ghosts onto a desktop. */
+export interface FireButtonHUDState {
+  x: number;
+  y: number;
+  radius: number;
+  pressed: boolean;
+  /** 0→1 charge progress while held, for the ring around the button. */
+  charge: number;
+}
+
+/** Render-side view of the onscreen joystick (Pair C, c2).  Produced by
+ *  `InputSystem.getJoystickState()` and handed to the HUD pass; NULL whenever
+ *  there is no live touch session, which is how the widget stays off mouse
+ *  and gamepad instead of ghosting there. */
+export interface JoystickHUDState {
+  /** Where the thumb landed — the stick floats, so this is not a constant. */
+  originX: number;
+  originY: number;
+  /** Where the thumb is now, clamped to the ring. */
+  knobX: number;
+  knobY: number;
+  /** 1 while held, decaying to 0 after release. Drives alpha. */
+  fade: number;
+  held: boolean;
 }

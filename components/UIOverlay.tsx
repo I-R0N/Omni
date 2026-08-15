@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype } from '../types';
+import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype, ControlScheme } from '../types';
+import { CONTROL_SCHEMES, controlSchemeDef } from '../constants';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
 // single-element "Test Maps" showcases (plus the multi-material Tile Heavy
@@ -79,6 +80,14 @@ interface UIOverlayProps {
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
+  onToggleJoystickDebug?: () => void;
+  onCycleMinimapMaterial?: () => void;
+  onCycleRockPalette?: () => void;
+  onToggleRumble?: () => void;
+  onSetControlScheme?: (scheme: ControlScheme) => void;
+  onToggleAdaptiveTriggers?: () => void;
+  onCycleTriggerEncoding?: () => void;
+  onTestTriggerLink?: () => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -239,6 +248,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleScreenShake,
   onToggleTileOutlines,
   onToggleChevronMode,
+  onToggleJoystickDebug,
+  onCycleMinimapMaterial,
+  onCycleRockPalette,
+  onToggleRumble,
+  onSetControlScheme,
+  onToggleAdaptiveTriggers,
+  onCycleTriggerEncoding,
+  onTestTriggerLink,
   onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -327,7 +344,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'menudebug' is the MAIN MENU's debug dropdown — the map / enemy-test
     // buttons that used to sit on the front door.  Collapsed by default: the
     // menu is difficulty + START, and everything else is a debug override.
+    // 'menuhelp' / 'pausehelp' are the Controls & Basics widget (Pair C, c1)
+    // in the two menus that host it.  Two keys rather than one so opening it
+    // to read the controls mid-run does not also unfold the front door.
     fieldmaps: true, switchmap: true, debug: true, menudebug: true,
+    menuhelp: true, pausehelp: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -885,6 +906,222 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
     </>
   );
+  /**
+   * Control-scheme picker (user directive, G9).  Shared by the main menu —
+   * where it is the choice made at game start — and the pause menu, so a
+   * player who picked wrong is one tap from fixing it rather than one
+   * restart.
+   *
+   * A 2x2 grid rather than a row: four labels plus a caption each do not fit
+   * a 390px row, and the caption is the part that makes the choice
+   * legible without reading the help panel.
+   */
+  const renderSchemePicker = () => {
+    const active = stats.controlScheme ?? 'touch';
+    return (
+      <div data-testid="scheme-picker" className="w-full grid grid-cols-2 gap-2">
+        {CONTROL_SCHEMES.map((scheme, i) => (
+          <button
+            key={scheme.id}
+            data-testid={`scheme-${scheme.id}`}
+            onClick={() => onSetControlScheme && onSetControlScheme(scheme.id)}
+            className={`px-2 py-2 rounded-lg border text-left transition-all ${
+              // Five options into a 2-up grid: the odd one out spans the row
+              // rather than leaving a hole.
+              i === CONTROL_SCHEMES.length - 1 && CONTROL_SCHEMES.length % 2 === 1 ? 'col-span-2 ' : ''
+            }${
+              active === scheme.id
+                ? 'bg-sky-600 border-sky-400 text-white shadow-lg'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-sky-400 hover:text-white'
+            }`}
+          >
+            <div className="text-xs font-bold">{scheme.label}</div>
+            <div className={`text-[9px] leading-tight mt-0.5 ${active === scheme.id ? 'text-sky-100' : 'text-slate-500'}`}>
+              {scheme.blurb}
+            </div>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  /**
+   * The same choice as a DROPDOWN (user directive), for the pause menu.
+   *
+   * A native `<select>` rather than a custom menu: on a phone it opens the
+   * OS picker, which is a better target than anything drawn here, and it
+   * comes with keyboard and screen-reader behaviour for free.  The pause menu
+   * is already a long scroll — five buttons with captions would push the rest
+   * of it further down for a setting most players touch once.
+   */
+  const renderSchemeDropdown = () => {
+    const active = stats.controlScheme ?? 'touch';
+    return (
+      <div className="w-full flex flex-col gap-1">
+        <select
+          data-testid="scheme-select"
+          value={active}
+          onChange={ev => onSetControlScheme && onSetControlScheme(ev.target.value as ControlScheme)}
+          className="w-full bg-slate-900 border border-slate-600 text-white text-xs rounded-lg px-2 py-2 focus:border-sky-400 focus:outline-none"
+        >
+          {CONTROL_SCHEMES.map(scheme => (
+            <option key={scheme.id} value={scheme.id}>{scheme.label}</option>
+          ))}
+        </select>
+        <span className="text-slate-500 text-[10px] leading-tight">
+          {controlSchemeDef(active).blurb}
+        </span>
+      </div>
+    );
+  };
+
+  /**
+   * DualSense adaptive triggers (WebHID) — an OPT-IN extra, rendered only
+   * where it can work.
+   *
+   * Three deliberate choices, all of them about not letting a desktop-only
+   * enhancement leak into the platforms that cannot have it:
+   *
+   *  - It renders NOTHING when WebHID is absent (every mobile browser, and
+   *    Safari).  A greyed-out row explaining an unavailable feature is worse
+   *    than silence: it makes the pause menu longer on exactly the device
+   *    where screen space is scarcest, to say "no".
+   *  - It sits UNDER the scheme dropdown, not in it.  It is not a control
+   *    scheme — the pad plays identically without it — so making it a
+   *    sixth option would imply a choice between it and something else.
+   *  - The button is a real user gesture, because `requestDevice` requires
+   *    one; nothing here can be triggered by the game.
+   */
+  const renderAdaptiveTriggers = () => {
+    if (!stats.adaptiveTriggersSupported) return null;
+    // Rendered in BOTH menus (see the call sites).  It is one component with
+    // no internal state, so two call sites cost nothing and the alternative —
+    // one copy, at the bottom of the pause menu's scroll — is a control
+    // players report as missing.
+    const on = !!stats.adaptiveTriggersConnected;
+    return (
+      <div className="w-full flex flex-col gap-1">
+        <button
+          data-testid="adaptive-triggers-toggle"
+          onClick={() => onToggleAdaptiveTriggers && onToggleAdaptiveTriggers()}
+          className={`pointer-events-auto cursor-pointer w-full px-2 py-2 rounded-lg border text-xs font-bold transition-all ${
+            on
+              ? 'bg-amber-600 border-amber-400 text-white'
+              : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-400 hover:text-white'
+          }`}
+        >
+          {on ? 'Adaptive Triggers — ON' : 'Connect DualSense Triggers'}
+        </button>
+        <span className="text-slate-500 text-[10px] leading-tight">
+          {on
+            ? 'The right trigger takes on each weapon’s own resistance.'
+            : 'Optional, desktop only. Adds per-weapon trigger resistance on a PS5 pad; everything else works without it.'}
+        </span>
+      </div>
+    );
+  };
+
+  /**
+   * Controls & basics (Pair C, c1).
+   *
+   * Shared verbatim by the main menu and the pause menu — same widget in both
+   * places, the pattern `renderTestPanel` / `renderShipStatus` already set.
+   * It is deliberately a COLLAPSIBLE SECTION rather than a sixth full-screen
+   * overlay: the game already has five, and how they cohere is 5d's job, not
+   * a help panel's.
+   *
+   * Everything here describes what SHIPPED.  The gamepad and touch-stick rows
+   * are the mappings G2/G3 actually bound, not a wishlist — a help screen that
+   * lies is worse than none.  The gamepad block lights up when a pad is
+   * actually connected (`stats.gamepadInfo`), which is the one thing here the
+   * engine knows and the reader might not.
+   */
+  const renderHelpPanel = () => {
+    const padOn = !!stats.gamepadInfo && stats.gamepadInfo !== 'none';
+    const scheme = stats.controlScheme ?? 'touch';
+
+    // The ACTIVE scheme's block is the one the player is reading for, so it
+    // is marked; the others stay visible because switching is one tap away
+    // and the point of the panel is to make that choice an informed one.
+    const group = (
+      title: string, accent: string, rows: [string, string][],
+      live?: React.ReactNode, activeFor?: ControlScheme[],
+    ) => (
+      <div className={`w-full ${activeFor && !activeFor.includes(scheme) ? 'opacity-45' : ''}`}>
+        <h4 className={`${accent} text-[11px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-2`}>
+          {title}
+          {activeFor && activeFor.includes(scheme) && (
+            <span className="text-[9px] normal-case tracking-normal bg-white/10 px-1.5 py-0.5 rounded">active</span>
+          )}
+          {live}
+        </h4>
+        <div className="flex flex-col gap-1">
+          {rows.map(([control, what]) => (
+            <div key={control} className="flex gap-2 text-[11px] leading-snug">
+              {/* Fixed-basis control column so the descriptions line up, but
+                  `min-w-0` + wrapping on both halves so a 390px screen never
+                  pushes the row sideways. */}
+              <span className="text-slate-200 font-mono shrink-0 basis-[7.5rem] break-words">{control}</span>
+              <span className="text-slate-400 min-w-0">{what}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    return (
+      <div data-testid="help-panel" className="w-full flex flex-col gap-4 text-left">
+        {group('Touch', 'text-sky-300', [
+          ['Drag anywhere', 'Fly and aim at once — direction and speed from the screen centre.'],
+          ['Tap', 'Shoot where you tapped.'],
+          ['Hold 1s, release', 'Charged shot (needs an Overcharge core installed).'],
+          ['Tap your ship', 'Dock at a station, or enter a portal you are next to.'],
+          ['Tap the minimap', 'Expand it. Tap a weapon slot to switch weapons.'],
+        ], null, ['touch'])}
+
+        {group('Joystick touch', 'text-sky-300', [
+          ['Stick thumb', 'Drag to fly. The stick appears wherever your thumb lands.'],
+          ['Aim', 'The ship points where it flies — the stick aims it. No second gesture.'],
+          ['Fire button', 'Shoot. Hold it for a charged shot — the ring shows the charge.'],
+          ['Handedness', 'Two versions: stick left + fire right, or the mirror of it.'],
+          ['Tap your ship', 'Dock, or enter a portal. Tapping elsewhere does not shoot.'],
+        ], null, ['joystick-left', 'joystick-right'])}
+
+        {group('Keyboard & mouse', 'text-emerald-300', [
+          ['W A S D / arrows', 'Fly.'],
+          ['Mouse', 'Aims. Click to shoot.'],
+          ['Hold 1s, release', 'Charged shot.'],
+          ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
+          ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
+        ], null, ['keyboard'])}
+
+        {group('Gamepad', 'text-violet-300', [
+          ['Left stick / D-pad', 'Fly.'],
+          ['Right stick', 'Aim.'],
+          ['Right trigger', 'Shoot — the moment you reach the break point. Hold for a charged shot. (Bottom face button too.)'],
+          ['Left trigger', 'Throttle, on the trigger-thrust scheme: the stick steers, the trigger decides how hard.'],
+          ['Left face button', 'Dock, enter a portal, or undock. □ on PlayStation, X on Xbox.'],
+          ['Right shoulder', 'Switch weapon. (Top face button too.)'],
+          ['Start / Options', 'Pause.'],
+          ['In menus', 'D-pad moves, bottom face button selects, right face button goes back.'],
+          ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
+        ], padOn ? (
+          <span className="text-violet-200/80 font-mono text-[9px] normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded">
+            connected
+          </span>
+        ) : null, ['gamepad', 'gamepad-thrust'])}
+
+        {group('The run', 'text-amber-300', [
+          ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
+          ['Stations', 'Dock to repair, buy modules, and outfit the ship. Outfitting needs a drydock.'],
+          ['Portals', 'The rifts on the hub lead to wave arenas. The return rift brings you home.'],
+          ['Waves', 'Clear the field to advance. Every sixth wave is a boss; killing it opens a way down.'],
+          ['Death', 'Costs a slice of the salvage you are still carrying — spent money is safe.'],
+        ])}
+      </div>
+    );
+  };
+
   // Human label for the cycling blend-alpha buttons.  Mirrors the
   // four-step cycle Off / Slow / Med / Fast across both Tile and
   // Shard blend knobs; the underlying values differ per cycle (see
@@ -1006,6 +1243,24 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
                   'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-CATCH ramp. The first snitch flies at 0.05× player cruise and gains 0.05× each time one is CAUGHT (capped at 1.2×) — deferring the catch keeps it slow. This knob scales that for testing.')}
+                {statRow('Gamepad', stats.gamepadInfo ?? 'none',
+                  (stats.gamepadInfo && stats.gamepadInfo !== 'none') ? 'text-sky-300' : 'text-slate-400')}
+                {statRow('  ↳ axes', stats.gamepadAxes ?? '—', 'text-slate-400')}
+                {statRow('  ↳ rumble', stats.rumbleInfo ?? '—',
+                  stats.rumbleInfo === 'ready' || stats.rumbleInfo === 'playing'
+                    ? 'text-emerald-300' : 'text-slate-400')}
+                {/* Adaptive triggers cannot be checked without hardware AND a
+                    byte layout that no browser validates — the pad silently
+                    drops a malformed report — so the row shows the head of
+                    what was actually sent, not just a connected flag. */}
+                {statRow('  ↳ triggers', stats.adaptiveTriggerInfo ?? '—',
+                  stats.adaptiveTriggersConnected ? 'text-emerald-300' : 'text-slate-400')}
+                {statRow('  ↳ report', stats.adaptiveTriggerReport ?? '—', 'text-slate-400')}
+                {ctrlRow('  ↳ trig enc', onCycleTriggerEncoding,
+                  stats.adaptiveTriggerInfo?.includes('simple') ? 'simple' : 'zones',
+                  'Which wire encoding the trigger effects are sent in. TWO conventions are in wide use and a DualSense silently discards the one its firmware does not understand, so this is a diagnostic rather than a preference. "zones" = modes 0x21/0x25, parameters packed into ten travel zones (what the console appears to use). "simple" = modes 0x01/0x02, raw byte parameters (what most samples send). If one gives no resistance, try the other.')}
+                {ctrlRow('  ↳ HID buzz', onTestTriggerLink, 'Test',
+                  'Pulses the pad MOTORS through the HID output report — the same framing and CRC the trigger effects ride, but with an encoding that is not in dispute. If this buzzes and the triggers stay limp, the transport is fine and the effect encoding is wrong (try "trig enc"). If it does not buzz, nothing is reaching the pad at all — read the error on the triggers row.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
@@ -1215,6 +1470,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Chevrons', onToggleChevronMode,
                   stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
                   'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
+                {ctrlRow('Rumble', onToggleRumble,
+                  stats.rumbleEnabled === false ? 'Off' : 'On',
+                  'Gamepad force feedback. Rides the SCREEN SHAKE — every impact already funnels through one call with magnitudes tuned against each other, so the hand feels what the camera feels. Separate from the Screen shake toggle: the camera lurching and the pad buzzing are different preferences. Only dual-rumble is reachable from a browser; the DualSense adaptive triggers need WebHID (desktop Chromium only).')}
+                {ctrlRow('Rock palette', onCycleRockPalette,
+                  stats.rockPaletteName ?? 'mixed',
+                  'Rock body colour family. Mixed (default): mostly slate with rust and mineral running through it, so a field reads as ROCK with variation. Slate: the old single flat grey. Rust / mineral: the pure warm and cool families, kept for regional-identity work and for judging them side by side. Shades are rolled per instance AT SPAWN — reload the map to repaint a whole field.')}
+                {ctrlRow('Minimap mat', onCycleMinimapMaterial,
+                  stats.minimapMaterialName ?? 'Flow',
+                  'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.')}
+                {ctrlRow('Joystick', onToggleJoystickDebug,
+                  stats.joystickForceVisible === true ? 'Forced' : 'Touch',
+                  'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}
@@ -1652,7 +1919,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="station">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1786,7 +2053,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         return (
           <div
             style={OVERLAY_FADE_IN}
-            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="death"
           >
             <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
@@ -1878,7 +2145,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         return (
           <div
             style={OVERLAY_FADE_IN}
-            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="stage-clear"
           >
             <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
@@ -1977,7 +2244,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           controls that matter sit dead centre at every screen size, and an
           expanded debug list scrolls instead of pushing START off-screen. */}
       {stats.gameState === GameState.MENU && (
-        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6`}>
+        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6`} data-overlay="menu">
           <div className="w-full max-w-xs flex flex-col items-center gap-8 my-auto">
 
             <div className="text-center">
@@ -2016,6 +2283,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
+            {/* Controls — the choice made at game start (user directive).
+                Sits with DIFFICULTY because it is the same kind of thing: a
+                preference that shapes the whole run and survives restarts. */}
+            <div className="w-full flex flex-col items-center gap-3">
+              <span className="text-slate-200 text-sm tracking-wide">Controls</span>
+              {renderSchemePicker()}
+              {/* Also here, not only in the pause menu: this is where a
+                  player sets their hands up before playing, and the pause
+                  menu's copy sits below the whole outfitting panel — far
+                  enough down a long scroll to read as missing. */}
+              {renderAdaptiveTriggers()}
+            </div>
+
             <button
               data-testid="menu-start"
               onClick={onStart}
@@ -2023,6 +2303,24 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             >
               START
             </button>
+
+            {/* Controls & basics — the same widget the pause menu shows.
+                Collapsed by default: the front door stays DIFFICULTY / START,
+                and help is one tap away rather than in the way. */}
+            <div className="w-full text-center">
+              <button
+                data-testid="menu-help-toggle"
+                onClick={() => toggleSection('menuhelp')}
+                className="pointer-events-auto cursor-pointer text-sky-300/80 text-[11px] uppercase tracking-widest select-none hover:text-sky-200 py-2 px-3"
+              >
+                Controls &amp; Basics {collapsed.menuhelp ? '▸' : '▾'}
+              </button>
+              {!collapsed.menuhelp && (
+                <div className={`mt-2 w-full ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                  {renderHelpPanel()}
+                </div>
+              )}
+            </div>
 
             {/* Debug dropdown — the map picker and enemy test rows, collapsed
                 by default so they are reachable without being a front-door
@@ -2061,7 +2359,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="pause">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -2131,6 +2429,31 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <p className="text-slate-500 text-[11px] text-center">
               Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
             </p>
+
+            {/* Controls — changeable mid-run, so picking wrong at the front
+                door costs a tap rather than a restart. */}
+            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
+              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Controls</h3>
+              {renderSchemeDropdown()}
+              {renderAdaptiveTriggers()}
+            </div>
+
+            {/* Controls & basics — the same widget the main menu shows, so
+                the answer is in the same words wherever you look for it. */}
+            <div className="text-center">
+              <button
+                data-testid="pause-help-toggle"
+                onClick={() => toggleSection('pausehelp')}
+                className="pointer-events-auto cursor-pointer text-sky-300/80 text-[11px] uppercase tracking-widest select-none hover:text-sky-200 py-2 px-3"
+              >
+                Controls &amp; Basics {collapsed.pausehelp ? '▸' : '▾'}
+              </button>
+              {!collapsed.pausehelp && (
+                <div className={`mt-2 mx-auto w-full max-w-xs ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                  {renderHelpPanel()}
+                </div>
+              )}
+            </div>
 
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}

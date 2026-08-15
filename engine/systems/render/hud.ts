@@ -20,12 +20,13 @@
  *  not known at design time.
  */
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType } from '../../../types';
+import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType, JoystickHUDState, FireButtonHUDState } from '../../../types';
 import {
     COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS,
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
+    INPUT_CONSTANTS, getActiveMinimapMaterial,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -57,12 +58,22 @@ export function buildMinimapStaticLayer(r: RenderSystem, entities: GameEntity[],
     const scale = (res / 2) / range;
     const center = res / 2;
 
+    // Rebaking the terrain layer means the flow field was rebaked too — drop
+    // the streamline cache so it retraces against the new obstacles.
+    r._minimapFlowCache = null;
+
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         // Stage 5 fix: only static tiles render via the minimap
         // STRUCTURE pass.  Mobile shards (STRUCTURE+finite mass) are
         // not pinned to grid cells.
         if (!e.active || e.type !== EntityType.STRUCTURE || e.mass !== Infinity) continue;
+        // NEBULA IS OFF THE MINIMAP ENTIRELY (user directive, decision #43).
+        // It is a soft, drifting, low-contrast cloud that the map rendered as
+        // hard 2px dots — the densest thing on the map standing in for the
+        // vaguest thing in the world.  Nebula shards were already excluded
+        // from the dynamic buffer; this is the other half.
+        if (e.shardVariant === 'nebula-tile') continue;
         cx.fillStyle = e.color;
         // Map space: entity position is absolute.  Map center = (0,0).
         const dotX = center + e.position.x * scale;
@@ -147,11 +158,18 @@ export function renderIndicators(
 
         // Offscreen-only mode: the player can already see an on-screen
         // entity, so its arrow is redundant clutter — skip it.
-        // PORTALS ARE EXEMPT: their arrow is already range-gated to
-        // PORTAL_CONSTANTS.INDICATOR_RANGE, and inside that range it is a
-        // deliberate, labelled navigation cue that should stay on screen
-        // while the player lines up the approach.
-        if (r.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
+        //
+        // PORTALS USED TO BE EXEMPT, and are no longer (decision #46b,
+        // gauntlet step 5 G6).  The exemption meant that approaching a rift
+        // gave you the rift ON SCREEN, its own world-space destination tag,
+        // AND an edge arrow naming the same destination a second time — the
+        // arrow at its least useful, at the moment it was loudest.  The
+        // range gate stays, so a portal still does not put a permanent arrow
+        // on the edge from across the map; between those two rules the arrow
+        // now covers exactly the case it is good for — the rift is close
+        // enough to matter but not yet visible.  Long-range discovery is the
+        // minimap's job, which G5 just made materially better at it.
+        if (r.chevronsOffscreenOnly && item.onScreen) continue;
 
         const isBoss   = t.isBoss === true;
         const isBubble = t.enemyShape === 'bubble';
@@ -251,11 +269,20 @@ export function renderIndicators(
         // the player picks which rift to fly to) and a boss names itself —
         // both would be ambiguous unlabelled.  Ordinary enemies get NO
         // distance text any more: their size already carries it, and a dozen
-        // little "1234m" strings was most of the old clutter.  POIs keep the
-        // far-only distance readout.
+        // little "1234m" strings was most of the old clutter.  Other POIs
+        // keep the far-only distance readout.
+        //
+        // PORTALS NO LONGER PRINT A DISTANCE (G6).  They were the wordiest
+        // contact on the screen — name AND number, while an enemy prints
+        // nothing — and the number was the redundant half: a portal arrow
+        // only appears inside INDICATOR_RANGE now, and the size ramp already
+        // says how far through that range you are.  The NAME stays, because
+        // an unlabelled arrow is ambiguous the moment a second rift is on
+        // the same edge, which on the hub is the normal case.
         const portalName = isPortal ? (t.name ?? '')
             : isBoss ? (t.enemySubtype ? (BOSS_DEFS[t.enemySubtype]?.name ?? 'BOSS') : 'BOSS') : '';
-        const showDist = t.type !== EntityType.ENEMY && item.distSq > TEXT_THRESHOLD_POI;
+        const showDist = t.type !== EntityType.ENEMY && !isPortal
+            && item.distSq > TEXT_THRESHOLD_POI;
 
         if (showDist || portalName) {
              ctx.rotate(-angle);
@@ -341,6 +368,107 @@ export function renderPlayerMessages(
  * dim dashed outline.  The charge ring stays on the player ship
  * (chargeProgress) — not drawn here.
  */
+/**
+ * The floating touch joystick (Pair C, c2 second half).
+ *
+ * Deliberately quiet: a thin ring where the thumb landed, a filled knob
+ * where it is now, and a line between them.  It is drawn UNDER nothing and
+ * over the world, at the very end of the HUD pass, because it sits under an
+ * actual thumb — anything more elaborate is hidden by the hand holding it.
+ *
+ * `state` is null whenever there is no live touch session, which is the
+ * normal case on mouse and pad, so nothing ghosts onto a device with no
+ * thumb.  Alpha rides `fade` so a release dissolves rather than snaps.
+ */
+export function renderJoystick(
+    ctx: CanvasRenderingContext2D,
+    state: JoystickHUDState,
+) {
+    const J = INPUT_CONSTANTS.JOYSTICK;
+    const a = Math.max(0, Math.min(1, state.fade));
+    if (a <= 0) return;
+
+    ctx.save();
+    ctx.lineCap = 'round';
+
+    // Outer ring — the throttle boundary.
+    ctx.globalAlpha = a * J.RING_ALPHA;
+    ctx.strokeStyle = J.COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(state.originX, state.originY, J.RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Stem from origin to knob: the only part that reads as a DIRECTION,
+    // and the reason the widget is legible at a glance under a thumb.
+    const dx = state.knobX - state.originX;
+    const dy = state.knobY - state.originY;
+    if (dx !== 0 || dy !== 0) {
+        ctx.globalAlpha = a * J.RING_ALPHA * 1.4;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(state.originX, state.originY);
+        ctx.lineTo(state.knobX, state.knobY);
+        ctx.stroke();
+    }
+
+    // Knob.
+    ctx.globalAlpha = a * J.KNOB_ALPHA;
+    ctx.fillStyle = J.COLOR;
+    ctx.beginPath();
+    ctx.arc(state.knobX, state.knobY, J.KNOB_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = a * (J.KNOB_ALPHA + 0.25);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = J.COLOR;
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+/**
+ * The onscreen FIRE button — the joystick scheme's shooting control (G9).
+ *
+ * Unlike the joystick it is drawn from the first frame, because a control
+ * that only appears once pressed cannot be found, and in this scheme it is
+ * the only way to shoot.  The ring around it doubles as the CHARGE readout,
+ * filling over the same window as the ring on the ship, so the two agree.
+ */
+export function renderFireButton(
+    ctx: CanvasRenderingContext2D,
+    state: FireButtonHUDState,
+) {
+    const B = INPUT_CONSTANTS.FIRE_BUTTON;
+    ctx.save();
+
+    // Body.
+    ctx.globalAlpha = state.pressed ? B.PRESSED_ALPHA : B.IDLE_ALPHA;
+    ctx.fillStyle = B.COLOR;
+    ctx.beginPath();
+    ctx.arc(state.x, state.y, state.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rim.
+    ctx.globalAlpha = state.pressed ? 0.9 : 0.5;
+    ctx.strokeStyle = B.COLOR;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Charge arc — starts at 12 o'clock and sweeps clockwise, same
+    // direction as the ship's ring.
+    if (state.charge > 0) {
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = state.charge >= 1 ? '#fde047' : '#fca5a5';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(state.x, state.y, state.radius + 4, -Math.PI / 2,
+                -Math.PI / 2 + Math.PI * 2 * state.charge);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
 export function renderLoadoutHUD(
     ctx: CanvasRenderingContext2D,
     player: GameEntity,
@@ -412,6 +540,161 @@ export function renderLoadoutHUD(
     }
 
     ctx.globalAlpha = 1;
+    ctx.restore();
+}
+
+/**
+ * The minimap's MATERIAL layer: streamlines through the asteroid flow field
+ * (decision #43, gauntlet step 5 G5).
+ *
+ * Replaces the per-shard dot spray.  A dot per shard answers "where is every
+ * rock", which at a few thousand shards is a uniform grey wash on a 75 px
+ * square; the field answers "which way is the material going", which is the
+ * only useful thing a map that small can say about material it cannot draw
+ * individually.
+ *
+ * Two things make it cheap enough to run inside a per-frame draw:
+ *
+ *  1. **The geometry is cached in WORLD space** and rebuilt only when the
+ *     seed lattice actually changes — that is, when the camera crosses a
+ *     lattice cell, when the zoom changes, or on map load.  Panning within a
+ *     cell reuses the last trace; the per-frame cost is a transform and a
+ *     `lineTo` per point.
+ *  2. **The lattice spacing scales with the shown range**, so the same 49
+ *     lines are traced whether the map is showing 1 000 units or 8 000.  A
+ *     fixed world spacing would either be invisible zoomed out or thousands
+ *     of lines zoomed in.
+ *
+ * Seeds are snapped to world multiples of the spacing, which is what makes
+ * the pattern world-ANCHORED: it slides under the moving window instead of
+ * being painted on the glass, and only the SET of visible lines changes (at
+ * cell boundaries) rather than every line's position.
+ */
+function renderMinimapFlow(
+    r: RenderSystem,
+    ctx: CanvasRenderingContext2D,
+    camera: CameraState,
+    centerX: number,
+    centerY: number,
+    scale: number,
+    range: number,
+) {
+    const F = MINIMAP_CONSTANTS.FLOW;
+    const flow = r.flowFieldForMinimap();
+    if (!flow) return;
+
+    const spacing = range / F.SEEDS_PER_HALF;
+    const side = F.SEEDS_PER_HALF * 2 + 1;
+    const lines = side * side;
+    const pts = F.STEPS + 1;
+
+    // Lattice origin: the seed cell the camera is standing in.  Integer cell
+    // indices are what the cache is keyed on — panning inside one cell must
+    // not retrace anything.
+    const cellX = Math.floor(camera.position.x / spacing);
+    const cellY = Math.floor(camera.position.y / spacing);
+
+    let cache = r._minimapFlowCache;
+    const need = lines * pts * 2;
+    if (!cache || cache.data.length !== need) {
+        cache = r._minimapFlowCache = { data: new Float64Array(need), cellX: NaN, cellY: NaN, spacing: 0 };
+    }
+
+    if (cache.cellX !== cellX || cache.cellY !== cellY || cache.spacing !== spacing) {
+        cache.cellX = cellX;
+        cache.cellY = cellY;
+        cache.spacing = spacing;
+        const step = spacing * F.STEP_FRAC;
+        let w = 0;
+        for (let iy = 0; iy < side; iy++) {
+            for (let ix = 0; ix < side; ix++) {
+                let px = (cellX + ix - F.SEEDS_PER_HALF) * spacing;
+                let py = (cellY + iy - F.SEEDS_PER_HALF) * spacing;
+                cache.data[w++] = px;
+                cache.data[w++] = py;
+                for (let k = 0; k < F.STEPS; k++) {
+                    // The sampler returns a shared scratch vector — consume it
+                    // before the next call (FlowFieldGrid's contract).
+                    const v = flow.sampleAsteroidFlow(px, py);
+                    px += v.x * step;
+                    py += v.y * step;
+                    cache.data[w++] = px;
+                    cache.data[w++] = py;
+                }
+            }
+        }
+    }
+
+    // Draw.  World → minimap goes through the TORUS delta, not a raw
+    // subtraction: a streamline seeded just across the wrap seam is a few
+    // hundred units away, not a map-width away.
+    const data = cache.data;
+    const camX = camera.position.x;
+    const camY = camera.position.y;
+    const nowSec = performance.now() / 1000;
+
+    // A segment longer than this in screen px cannot be real: the step length
+    // is fixed, so an apparent jump means the two ends resolved to opposite
+    // sides of the WRAP SEAM.  Drawn naively that is a chord straight across
+    // the minimap — which is exactly what the first version did, and it read
+    // as a pair of hard straight lines cutting through the field.  Break the
+    // path there instead.
+    const stepPx = spacing * F.STEP_FRAC * scale;
+    const seamBreak = Math.max(4, stepPx * 3);
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = F.COLOR;
+
+    // Pass 1 — the quiet lines.
+    ctx.globalAlpha = F.ALPHA;
+    ctx.lineWidth = F.WIDTH;
+    ctx.beginPath();
+    for (let l = 0; l < lines; l++) {
+        const base = l * pts * 2;
+        const x0 = centerX + wrapDeltaX(camX, data[base]) * scale;
+        const y0 = centerY + wrapDeltaY(camY, data[base + 1]) * scale;
+        const xN = centerX + wrapDeltaX(camX, data[base + (pts - 1) * 2]) * scale;
+        const yN = centerY + wrapDeltaY(camY, data[base + (pts - 1) * 2 + 1]) * scale;
+        // A dead-calm cell traces a smudge; drop it rather than draw noise.
+        if (Math.abs(xN - x0) + Math.abs(yN - y0) < F.MIN_PX) continue;
+        let px = x0;
+        let py = y0;
+        ctx.moveTo(px, py);
+        for (let k = 1; k < pts; k++) {
+            const x = centerX + wrapDeltaX(camX, data[base + k * 2]) * scale;
+            const y = centerY + wrapDeltaY(camY, data[base + k * 2 + 1]) * scale;
+            if (Math.abs(x - px) > seamBreak || Math.abs(y - py) > seamBreak) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            px = x;
+            py = y;
+        }
+    }
+    ctx.stroke();
+
+    // Pass 2 — a bright segment travelling downstream along each line.  This
+    // is what makes the layer say which WAY the material is going; a static
+    // hatch would only say "there is a current here".  The phase is offset per
+    // line so the field shimmers rather than blinking in lockstep.
+    ctx.globalAlpha = F.PULSE_ALPHA;
+    ctx.lineWidth = F.PULSE_WIDTH;
+    ctx.beginPath();
+    for (let l = 0; l < lines; l++) {
+        const base = l * pts * 2;
+        const phase = (nowSec * F.PULSE_HZ + (l % 7) / 7 + (l % 3) / 3) % 1;
+        const k = Math.min(pts - 2, Math.floor(phase * (pts - 1)));
+        const ax = centerX + wrapDeltaX(camX, data[base + k * 2]) * scale;
+        const ay = centerY + wrapDeltaY(camY, data[base + k * 2 + 1]) * scale;
+        const bx = centerX + wrapDeltaX(camX, data[base + (k + 1) * 2]) * scale;
+        const by = centerY + wrapDeltaY(camY, data[base + (k + 1) * 2 + 1]) * scale;
+        if (Math.abs(bx - ax) + Math.abs(by - ay) < 0.5) continue;
+        if (Math.abs(bx - ax) > seamBreak || Math.abs(by - ay) > seamBreak) continue;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+    }
+    ctx.stroke();
+
     ctx.restore();
 }
 
@@ -506,6 +789,16 @@ export function renderMinimap(
             mapX + sw1 * dScaleX, mapY + sh1 * dScaleY, sw2 * dScaleX, sh2 * dScaleY);
     }
 
+    // ── Material layer (decision #43, G5) ──────────────────────────────
+    // 'flow' traces the asteroid field; 'dots' is the old per-shard spray
+    // (handled in the entity loop below); 'off' draws neither.  Drawn after
+    // the terrain blit and before the contacts, so it reads as a property of
+    // the terrain rather than as another thing to look at.
+    const materialMode = getActiveMinimapMaterial();
+    if (materialMode === 'flow') {
+        renderMinimapFlow(r, ctx, camera, centerX, centerY, scale, range);
+    }
+
     // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
     // Enemy blips pulse so they pop against the static layer; the phase
     // uses performance.now() (render-side animation, frame-rate smooth).
@@ -541,13 +834,25 @@ export function renderMinimap(
                 : enemyPulseAlpha;
             const mult = bb ? bb.CLAMPED_ALPHA_MULT : blip.CLAMPED_ALPHA_MULT;
             ctx.globalAlpha = clamped ? alpha * mult : alpha;
-            ctx.fillStyle = entity.color;
+            // FAITHFULNESS (G5): contacts wear the INDICATOR LEGEND's colour,
+            // not `entity.color`.  §8 already fixed that legend for the arrows
+            // — red enemy, purple bubble, yellow rival, and a boss in the
+            // shared enemy red with its RING doing the distinguishing.  The
+            // minimap is the same kind of abstracted contact readout, so it
+            // has to speak the same language: a contact that is red on the
+            // edge of the screen and teal on the map is two contacts as far
+            // as the player is concerned.
+            const ic = UI_CONSTANTS.INDICATORS.COLORS;
+            const contactColor = entity.enemyShape === 'bubble' ? ic.BUBBLE
+                               : entity.isRival === true ? ic.RIVAL
+                               : ic.ENEMY;
+            ctx.fillStyle = contactColor;
             ctx.beginPath();
             ctx.arc(centerX + ex, centerY + ey, bb ? bb.RADIUS : blip.RADIUS, 0, Math.PI * 2);
             ctx.fill();
             if (bb) {
                 ctx.globalAlpha = (clamped ? alpha * mult : alpha) * bb.RING_ALPHA;
-                ctx.strokeStyle = entity.color;
+                ctx.strokeStyle = contactColor;
                 ctx.lineWidth = bb.RING_WIDTH;
                 ctx.beginPath();
                 ctx.arc(centerX + ex, centerY + ey, bb.RING_RADIUS, 0, Math.PI * 2);
@@ -625,13 +930,49 @@ export function renderMinimap(
 
         if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
-        ctx.fillStyle = entity.color;
+        // ── Mobile material (shards) ──────────────────────────────────
+        // Only in 'dots' mode.  The default is the flow layer above: a dot
+        // per shard is a few thousand identical marks that average out to a
+        // grey wash, and it answers a question ("where is that rock") the
+        // player never asks of a 75px map.
+        if (entity.type === EntityType.STRUCTURE) {
+            if (materialMode !== 'dots') continue;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = entity.color;
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            continue;
+        }
 
-        let dotRadius = 1.5;
-        if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
+        // ── The remaining POIs: stations and the snitch ───────────────
+        // FAITHFULNESS (G5): every contact wears the identity it has
+        // everywhere else, so the map reads with the same vocabulary as the
+        // world and the indicator arrows.
+        //   · STATION — indigo SQUARE.  Square because it is built, fixed and
+        //     safe: the one contact that is not alive and not a threat, and
+        //     the only rectilinear thing on a map of dots and diamonds.  The
+        //     colour is the indicator legend's, not `entity.color`, which is
+        //     the hull tint and differs per station variant.
+        //   · SNITCH — its own gold, and a dot, because it is a moving thing
+        //     like an enemy but not a threat.
+        // Portals and bosses are handled above; drops stay excluded entirely
+        // (CLAUDE.md §8) and never reach this buffer.
+        if (entity.isStation === true) {
+            const s = MINIMAP_CONSTANTS.STATION_BLIP;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = UI_CONSTANTS.INDICATORS.COLORS.STATION;
+            ctx.fillRect(dotX - s.HALF, dotY - s.HALF, s.HALF * 2, s.HALF * 2);
+            ctx.strokeStyle = `rgba(255,255,255,${s.OUTLINE_ALPHA})`;
+            ctx.lineWidth = s.OUTLINE_WIDTH;
+            ctx.strokeRect(dotX - s.HALF, dotY - s.HALF, s.HALF * 2, s.HALF * 2);
+            continue;
+        }
 
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = entity.isSnitch === true ? SNITCH_CONSTANTS.CORE_COLOR : entity.color;
         ctx.beginPath();
-        ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+        ctx.arc(dotX, dotY, entity.type === EntityType.INTERACTABLE ? 3 : 1.5, 0, Math.PI * 2);
         ctx.fill();
     }
 

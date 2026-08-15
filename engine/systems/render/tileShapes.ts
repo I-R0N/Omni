@@ -35,6 +35,7 @@ import {
     ASSETS, SHARD_VARIANTS, SHARD_LOD_CONSTANTS, MATERIAL_DAMAGE_CRACKS,
     METAL_HEX_CELLS, NEBULA_CONSTANTS, REGEN_POP_CONSTANTS, PLASTIC_SHARD_AUTOMATA,
     getPlasticShardBaseShade, isPlasticAutomataBrighten, metalDensityBrightness,
+    METAL_AGGREGATION_BRIGHT_CEIL, METAL_BRIGHT_TARGET,
     getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness,
     getActiveMetalGlowBrightness,
 } from '../../../constants';
@@ -248,10 +249,32 @@ export function tileFillColor(rs: RenderSystem, entity: GameEntity): string {
   const f = metalDensityBrightness(entity.densityTier ?? 1);
   if (f === 1) return entity.color;
   if (entity.materialAutomataCachedColor !== undefined) return entity.materialAutomataCachedColor;
-  const [r, g, b] = hexToRgb(entity.color);
-  const out = rgbToHex(r * f, g * f, b * f);
+  const out = metalBrightHex(entity.color, f);
   entity.materialAutomataCachedColor = out;
   return out;
+}
+
+/**
+ * Density brightening for metal, toward a SHINY STEEL-BLUE rather than
+ * toward white (material-palette-residual, decision #30 → G7).
+ *
+ * The old form multiplied every channel by `f`. That looks like brightening
+ * but it is really a march toward the ceiling on all three channels at once:
+ * as the highest channel clips, the gaps between channels shrink, saturation
+ * falls, and dense metal ends up pale near-white. Interpolating toward an
+ * explicit blue endpoint keeps the material recognisably BLUE at every
+ * density, and it gives the "shiny metal" direction a colour to aim at
+ * instead of a brightness knob to turn up.
+ *
+ * `f` is remapped from its 1 → CEIL range onto a 0 → 1 mix so the density
+ * curve (and everything keyed to it) is unchanged.
+ */
+export function metalBrightHex(baseHex: string, f: number): string {
+  const span = METAL_AGGREGATION_BRIGHT_CEIL - 1;
+  const t = span > 0 ? Math.max(0, Math.min(1, (f - 1) / span)) : 0;
+  const [r, g, b] = hexToRgb(baseHex);
+  const [tr, tg, tb] = hexToRgb(METAL_BRIGHT_TARGET);
+  return rgbToHex(r + (tr - r) * t, g + (tg - g) * t, b + (tb - b) * t);
 }
 
 export function materialAutomataColor(rs: RenderSystem, entity: GameEntity): string {
@@ -807,14 +830,16 @@ export function drawTileShape(
             const deeperCells = cells.length >= METAL_HEX_CELLS
                 ? total % METAL_HEX_CELLS
                 : 0;
-            const [mr, mg, mb] = hexToRgb(entity.color);
             for (let ci = 0; ci < cells.length; ci++) {
                 const c = cells[ci];
                 const depth = ci < deeperCells ? baseDepth + 1 : baseDepth;
                 const f = metalDensityBrightness(depth);
+                // Same de-white lerp as the tile body (G7) — the lattice
+                // cells ARE the density readout, so they must climb toward
+                // the same steel-blue rather than toward white.
                 ctx.fillStyle = isFlash
                     ? '#cbd5e1'
-                    : (f === 1 ? entity.color : rgbToHex(mr * f, mg * f, mb * f));
+                    : (f === 1 ? entity.color : metalBrightHex(entity.color, f));
                 const ccx = c.ix * ux - cmx;
                 const ccy = c.iy * uy - cmy;
                 ctx.beginPath();
