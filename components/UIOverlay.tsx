@@ -110,6 +110,7 @@ interface UIOverlayProps {
   onCycleRenderScale?: () => void;
   renderScaleName?: string;
   onCycleSwarmMove?: () => void;
+  onCycleStarDensity?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -270,6 +271,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleRenderScale,
   renderScaleName,
   onCycleSwarmMove,
+  onCycleStarDensity,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -1194,6 +1196,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
+                {ctrlRow('Star density', onCycleStarDensity, stats.starDensityName ?? '185',
+                  'Background star-field density, in stars per 10,000 CSS px² (185 / 320 / 729 / 90). The count is DERIVED from viewport area at this density, so a phone and a desktop window now show the same sky per unit area — they used to share one absolute 24,000-star budget, which made the smaller window ~4× denser. 185 is what a 1440×900 desktop showed before the fix; 729 is what a 390×844 phone showed, kept here so the two can be compared by looking. Regenerates the bands immediately.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

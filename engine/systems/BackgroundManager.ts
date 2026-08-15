@@ -1,6 +1,9 @@
 
 import { MapType, Vector2, GameEntity } from '../../types';
-import { COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr } from '../../constants';
+import {
+  COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
+  STARFIELD_CONSTANTS, getActiveStarDensity,
+} from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
@@ -46,6 +49,13 @@ export class BackgroundManager {
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
   private initialized: boolean = false;
+  // Derived star budget for the CURRENT scene size, kept as fields rather than
+  // recomputed, because they are the numbers the density invariant is stated
+  // in and `tests/starfield.spec.ts` reads them straight off the live manager
+  // instead of counting pixels (tests/README.md harness rule 3).
+  private starsPerBand: number = 0;
+  private starCount: number = 0;
+  private milkyWayStarCount: number = 0;
   // World-space seed positions shared with the nebula tile generator.
   // When non-null, `initContent` places one background-nebula puff at
   // each position (with the original random parallax depth 0.2–1.0,
@@ -93,6 +103,16 @@ export class BackgroundManager {
       this.createPuffVariants();
     }
     for (const puff of this.nebulaPuffs) puff.cachedCanvas = undefined;
+    this.initialized = false;
+  }
+
+  /** Force the next `render` to regenerate the star bands and nebula puffs.
+   *
+   *  The scene is otherwise rebuilt only when the viewport SIZE changes, so a
+   *  knob that changes what generation produces — today the DBG star-density
+   *  cycle — has to say so explicitly or it would not take effect until the
+   *  window was resized. */
+  public invalidateContent() {
     this.initialized = false;
   }
 
@@ -238,7 +258,15 @@ public setMapType(type: MapType) {
     const mwCtx = mwCanvas.getContext('2d')!;
     const mwAngle = (Math.random() - 0.5);
     const mwColors = ['#8b5cf6', '#3b82f6', '#fbbf24', '#f472b6'];
-    for (let i = 0; i < 80; i++) {
+    // Linear in WIDTH, not area: the milky way's stars are strung along a
+    // diagonal that spans the viewport width, so keeping its along-band
+    // density constant means scaling with width.  (The star field proper is
+    // an AREA feature and scales with area — see below.)
+    this.milkyWayStarCount = Math.max(
+      1,
+      Math.round((width / 1000) * STARFIELD_CONSTANTS.MILKY_WAY_PER_1K_WIDTH),
+    );
+    for (let i = 0; i < this.milkyWayStarCount; i++) {
         const x = Math.random() * width;
         const y = (height / 2) + Math.tan(mwAngle) * (x - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
         const size = 0.3 + Math.pow(Math.random(), 3) * 0.6;
@@ -250,11 +278,27 @@ public setMapType(type: MapType) {
     mwCtx.globalAlpha = 1.0;
     this.milkyWayBand = { canvas: mwCanvas, speed: 0.03, offsetX: 0, offsetY: 0 };
 
-    // Pre-render 8 star bands. Each band gets 1500 stars = 12,000 total.
-    // Speed increases quadratically from background (slow) to foreground (fast).
+    // Pre-render the parallax star bands.  Speed increases quadratically from
+    // background (slow) to foreground (fast).
+    //
+    // The star BUDGET is derived from viewport AREA at a target density
+    // (STAR_DENSITY_CYCLE, stars per 10k CSS px^2) and then split evenly
+    // across the bands — it is NOT a fixed count.  A fixed count made a
+    // smaller window a denser sky: measured 729 stars per 10k CSS px^2 on a
+    // 390x844 phone against 185 on a 1440x900 desktop, from the same absolute
+    // 24 000.  Deriving from area is what makes the two agree.
     this.starBands = [];
-    const NUM_BANDS = 60;
-    const STARS_PER_BAND = 400;
+    const NUM_BANDS = STARFIELD_CONSTANTS.NUM_BANDS;
+    this.starCount = Math.max(
+      NUM_BANDS,
+      Math.round(((width * height) / 1e4) * getActiveStarDensity()),
+    );
+    // Every band carries the same share, so the density invariant holds per
+    // band as well as in total.  Round-off is absorbed by the total below
+    // rather than by band 0, which would make the furthest layer denser.
+    const STARS_PER_BAND = Math.max(1, Math.round(this.starCount / NUM_BANDS));
+    this.starsPerBand = STARS_PER_BAND;
+    this.starCount = STARS_PER_BAND * NUM_BANDS;
     for (let b = 0; b < NUM_BANDS; b++) {
         const tMid = (b + 0.5) / NUM_BANDS;
         const speed = 0.02 + (tMid * tMid) * 2.0;

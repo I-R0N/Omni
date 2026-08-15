@@ -34,6 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
+    cycleStarDensity,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -525,6 +526,22 @@ export class DebugControls {
   /** DBG: cycle the gnat (Swarm) movement mode to feel each side-by-side. */
   cycleSwarmMove() {
     cycleSwarmMove();
+  }
+
+  /** DBG: cycle the star-field DENSITY (stars per 10k CSS px^2).
+   *
+   *  Aesthetic, so it is a cycle rather than an edit.  185 (the default) is
+   *  the density a 1440x900 desktop window showed before the star count was
+   *  derived from area; 729 is what a 390x844 phone showed from the same
+   *  absolute 24 000 stars, and is kept in the table so the two can be A/B'd
+   *  directly rather than argued about.
+   *
+   *  Star COUNT is a generation-time input, so this has to invalidate the
+   *  background: the bands are otherwise regenerated only on a viewport
+   *  resize and the change would not show up until the window moved. */
+  cycleStarDensity() {
+    cycleStarDensity();
+    this.g.renderer.invalidateBackground();
   }
 
   /** DBG: cycle the SUBSTEP CAP (5 default / 3 / 2).

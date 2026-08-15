@@ -1655,6 +1655,55 @@ export const SHOOTING_STAR_CONSTANTS = {
   SPEED_MAX: 900
 };
 
+// ─── The star field ──────────────────────────────────────────────────────────
+//
+// DENSITY IS PER UNIT AREA, NOT A FIXED COUNT.  The star count used to be
+// absolute — 60 bands x 400 stars = 24 000 stars over whatever the viewport
+// happened to be — so a smaller window was a denser sky.  Measured (gauntlet
+// star field, S1): a 390x844 phone showed 729 stars per 10k CSS px^2 against
+// 185 on a 1440x900 desktop window, a 3.95x density delta over a 3.94x area
+// ratio.  On the phone that put 26.9% of every pixel on screen inside a star,
+// which reads as TV static rather than as a sky.
+//
+// The unit is CSS px^2, not device px^2, and that is deliberate: a star should
+// subtend the same apparent size whatever the display's pixel ratio, and CSS
+// px is the unit that means "apparent size".  `BackgroundManager` derives its
+// scene size as `canvas.width / effectiveDpr()`, which is exactly the CSS
+// viewport, so the two agree by construction.
+export const STARFIELD_CONSTANTS = {
+  /** Parallax depth layers.  Each is one pre-rendered canvas scrolling at its
+   *  own speed; the star BUDGET is split evenly across them, so changing this
+   *  changes the smoothness of the parallax and not the density. */
+  NUM_BANDS: 60,
+  /** Milky-way stars per 1000 CSS px of viewport WIDTH.  The milky way is a
+   *  LINE feature — its stars are placed along a diagonal spanning the
+   *  viewport width — so it scales linearly with width, where the star field
+   *  proper scales with area.  Anchored to the phone's current count (80 at
+   *  390 px wide): it is an authored feature that should still read on the
+   *  target device, and it spent its whole life buried under the haze that
+   *  the density fix above removes. */
+  MILKY_WAY_PER_1K_WIDTH: 205,
+} as const;
+
+// ─── DBG: star density ───────────────────────────────────────────────────────
+//
+// Stars per 10 000 CSS px^2.  An AESTHETIC call, so it ships as a cycle rather
+// than as an edit (the repo's established pattern for a look that should be
+// overturned by looking rather than by arguing).
+//
+// 185 IS THE DEFAULT: it is the density a 1440x900 desktop window shows today,
+// i.e. the sparser of the two skies the user has actually been looking at, and
+// the one that reads as a star field in the S1 side-by-side.  729 — the phone's
+// current density — is kept one tap away so the two can be A/B'd directly.
+export const STAR_DENSITY_CYCLE: ReadonlyArray<number> = [185, 320, 729, 90] as const;
+let activeStarDensityIndex = 0;
+export function getActiveStarDensity(): number { return STAR_DENSITY_CYCLE[activeStarDensityIndex]; }
+export function getActiveStarDensityName(): string { return `${STAR_DENSITY_CYCLE[activeStarDensityIndex]}`; }
+export function cycleStarDensity(): number {
+  activeStarDensityIndex = (activeStarDensityIndex + 1) % STAR_DENSITY_CYCLE.length;
+  return STAR_DENSITY_CYCLE[activeStarDensityIndex];
+}
+
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.OVERWORLD]: {
     maxSpeed: 120,

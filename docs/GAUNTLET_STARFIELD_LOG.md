@@ -10,7 +10,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 
 - [x] **S1 — Verify and measure.** Confirm or refute the prior session's four
       claims; capture density / star size / brightness / memory / draw cost.
-- [ ] **S2 — Density derived from area.**
+- [x] **S2 — Density derived from area.** Star count is now
+      `area × STAR_DENSITY_CYCLE[i]`; density delta 3.95× → 0.96×. Pinned by
+      `tests/starfield.spec.ts` (4 tests).
 - [ ] **S3 — Kill the resampling.**
 - [ ] **S4 — Memory and draw calls.**
 - [ ] **S5 — Docs + validation.**
@@ -191,6 +193,54 @@ it, not resampling, may be the dominant term in the user's screenshot.
 
 ---
 
+## S2 — density derived from area
+
+Star count is now `(width × height / 10⁴) × density`, split evenly across the
+same 60 parallax bands. The unit is **stars per 10 000 CSS px²**.
+
+```
+                      before                    after
+              stars/10k   lit px/10k     stars/10k   lit px/10k
+390x844         729         2692.92         184         658.65
+1440x900        185          681.33         185         683.95
+ratio          3.94x          3.95x        1.00x          0.96x
+```
+
+The residual 4% in lit pixels (not present in the star counts, which match to
+0.5%) is per-star footprint, not density: a smaller canvas clips proportionally
+more stars at its edges, and the per-band budget is a whole number of stars.
+Both are sub-1% effects that compound to under 4%, and neither is worth
+chasing.
+
+**CSS px², not device px².** A star should subtend the same apparent size
+whatever the display's pixel ratio, and CSS px is the unit that means
+"apparent size". `BackgroundManager` derives its scene as
+`canvas.width / effectiveDpr()` and `App.tsx` sizes the canvas as
+`cssWidth × effectiveDpr()`, so scene width *is* CSS width — confirmed by
+measurement: the band canvas is 390×844 at dpr 1, 2 and 3 alike.
+
+**The milky way scales with WIDTH, not area.** Its stars are strung along a
+diagonal spanning the viewport, so it is a line feature; keeping its along-band
+density constant means scaling linearly with width. Anchored to the phone's
+current count (80 stars at 390 px wide → `MILKY_WAY_PER_1K_WIDTH: 205`).
+
+**Pinned by `tests/starfield.spec.ts`** (4 tests, new file — no existing test
+was edited):
+
+1. count = density × area at 390×844, and the 60-band structure survives;
+2. **the regression this file exists for** — 390×844 vs 1000×1100 (3.5× the
+   area) must agree on density within 3%;
+3. the milky way doubles when width doubles at constant area;
+4. the DBG cycle regenerates the bands immediately, without a resize.
+
+### Default: 185 stars per 10k CSS px²
+
+Aesthetic, so it ships as a cycle — `STAR_DENSITY_CYCLE = [185, 320, 729, 90]`,
+DBG ▸ Visual ▸ "Star density". 185 is the density a 1440×900 desktop window
+showed *before* this change, and 729 is what the phone showed from the same
+absolute budget; both endpoints of the bug are in the table so the call can be
+overturned by looking.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -211,12 +261,42 @@ be run in this container has not survived, it is untested, and saying so is
 worth more than a confident sentence backed by an inference. The mechanism
 measurement is strong enough to justify S3 on its own.
 
+**D3 — Default to the DESKTOP density (185), not the phone's (729) and not a
+midpoint.** Beat: keeping the phone's current density as the default (least
+visual change on the target device), and beat splitting the difference at ~320.
+The phone's density puts 26.9% of every pixel inside a star, which is the
+defect, not a preference — matching it would be fixing the desktop *to* the
+bug. A midpoint would be a number nobody has ever looked at, chosen to avoid
+committing. 185 is the one density in evidence that a human has actually seen
+rendered and not filed a bug about. Both endpoints stay one tap apart in the
+cycle, which is what makes this safe to be wrong about.
+
+**D4 — Scale the milky way with WIDTH while the star field scales with AREA.**
+Beat: scaling both by area, for uniformity. Uniformity would be wrong here —
+the milky way's stars are distributed along a diagonal LINE spanning the
+viewport, so area scaling would make its along-band density fall as the
+window widened, which is the same class of bug S2 exists to fix, just on a
+different axis. Anchored to the phone's count rather than the desktop's (unlike
+D3) because it is an authored feature that should read on the target device,
+and it has spent its whole life invisible under the haze S2 removes.
+
+**D5 — Split the budget evenly across bands and absorb the round-off in the
+total.** Beat: giving band 0 the remainder. A remainder in one band makes the
+furthest parallax layer measurably denser than the rest, which is exactly the
+artifact the density work is trying to remove — and it would be invisible in
+any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
+
 ---
 
 ## FOR-USER-REVIEW
 
-*(S1 raises nothing to decide yet — it is measurement only. S3's visual call
-lands here.)*
+- **S2 — the sky got much sparser on the phone, and that is the change.**
+  390×844 went from 24 000 stars to ~6 000 (`perf/out/shots/before/` vs
+  `perf/out/shots/s2/`). The before shot reads as TV static; the after reads as
+  a star field. The desktop is essentially unchanged, by construction — 185 is
+  its existing density. If the phone now looks too empty, **pause ▸ Debug Menu
+  ▸ Visual ▸ Star density** cycles 185 → 320 → 729 → 90; 729 is exactly what
+  the phone showed before. Tell me which one and it becomes the default.
 
 - **The WebKit gap.** The Edge-vs-Safari delta cannot be reproduced in this
   container (proxy blocks Playwright's WebKit download). If you can re-shoot
@@ -242,3 +322,21 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 2 — S2 (density derived from area)
+
+`STARFIELD_CONSTANTS` + `STAR_DENSITY_CYCLE` in `constants.ts`;
+`BackgroundManager.initContent` derives its budget from area and the milky way
+from width; `invalidateContent()` + a `RenderSystem.invalidateBackground()`
+pass-through so the DBG cycle takes effect without a resize; DBG row under
+Visual. New suite `tests/starfield.spec.ts`.
+
+One test assertion was written too tight and corrected before it landed: an
+exact `round(density) === 185` fails at 184.1, because the budget is split into
+a whole number of stars per band. Replaced with a within-1%-and-never-above
+bound, which is the honest statement of what the code guarantees. No product
+behaviour changed and no pre-existing test was touched.
+
+Measured after: density ratio phone-vs-desktop 3.95× → 0.96×. Memory and draw
+calls deliberately unchanged — 80.3 MB and 244 draws/frame are S4's subject,
+and moving them here would have confounded the density measurement.
