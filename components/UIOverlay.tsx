@@ -1094,16 +1094,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         {group('Gamepad', 'text-violet-300', [
           ['Left stick / D-pad', 'Fly.'],
           ['Right stick', 'Aim.'],
-          ['Right trigger', 'Shoot. Hold for a charged shot. (Bottom face button too.)'],
+          ['Right trigger', 'Shoot — the moment you reach the break point. Hold for a charged shot. (Bottom face button too.)'],
+          ['Left trigger', 'Throttle, on the trigger-thrust scheme: the stick steers, the trigger decides how hard.'],
           ['Left face button', 'Dock, enter a portal, or undock. □ on PlayStation, X on Xbox.'],
           ['Right shoulder', 'Switch weapon. (Top face button too.)'],
           ['Start / Options', 'Pause.'],
+          ['In menus', 'D-pad moves, bottom face button selects, right face button goes back.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], padOn ? (
           <span className="text-violet-200/80 font-mono text-[9px] normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded">
             connected
           </span>
-        ) : null, ['gamepad'])}
+        ) : null, ['gamepad', 'gamepad-thrust'])}
 
         {group('The run', 'text-amber-300', [
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
@@ -1913,7 +1915,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="station">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -2047,7 +2049,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         return (
           <div
             style={OVERLAY_FADE_IN}
-            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="death"
           >
             <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
@@ -2139,7 +2141,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         return (
           <div
             style={OVERLAY_FADE_IN}
-            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="stage-clear"
           >
             <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
@@ -2238,7 +2240,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           controls that matter sit dead centre at every screen size, and an
           expanded debug list scrolls instead of pushing START off-screen. */}
       {stats.gameState === GameState.MENU && (
-        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6`}>
+        <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6`} data-overlay="menu">
           <div className="w-full max-w-xs flex flex-col items-center gap-8 my-auto">
 
             <div className="text-center">
@@ -2348,7 +2350,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
-          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`}>
+          className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="pause">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">

@@ -26,24 +26,25 @@
  *  `dualsense_output_report_common` (hid-playstation) field for field, which
  *  is a maintained driver against real hardware rather than a forum post.
  *
- *  What is NOT settled is how the 11-byte trigger block encodes an effect.
- *  Two conventions are in wide use and both are reported working, on
- *  different firmware:
+ *  How the 11-byte trigger block encodes an effect had two candidates, and
+ *  hardware settled it:
  *
- *    'simple'  modes 0x01/0x02, parameters as raw bytes (start, end, force).
- *              The older convention, still what most Python/JS samples send.
- *    'zones'   modes 0x21/0x25, parameters bit-packed into ten 0–9 travel
- *              zones with a 0–8 strength each.  What the console itself
- *              appears to use, and the more likely of the two on current
- *              firmware.
+ *    'zones'   modes 0x21/0x25/0x26, parameters bit-packed into ten 0–9
+ *              travel zones with a 0–8 force each.  **CONFIRMED WORKING** on
+ *              the DualSense over USB, and the default.  Only this encoding
+ *              can express the three richer shapes (vibration, slope,
+ *              texture), because all three are per-zone by nature.
+ *    'simple'  modes 0x01/0x02, parameters as raw bytes.  Kept because a pad
+ *              SILENTLY DISCARDS an effect it does not understand, so a
+ *              firmware that disagrees would otherwise present as a dead
+ *              feature with no way to tell from a dead transport.  It can
+ *              only say "wall" and "click", so the richer shapes degrade to
+ *              their nearest equivalent rather than vanishing.
  *
- *  A pad SILENTLY DISCARDS an effect it does not understand, so guessing
- *  between them costs a hardware round trip per guess.  Both are implemented
- *  and selectable at runtime (DBG ▸ "Trig enc") so the question is settled by
- *  one sitting with the pad instead of a series of commits.  Profiles are
- *  therefore authored in NORMALISED units (0..1 of travel, 0..1 of strength)
- *  and converted here — the game's intent does not change with the wire
- *  format.
+ *  Profiles are authored in NORMALISED units (0..1 of travel, 0..1 of
+ *  strength) and converted here — the game's intent does not change with the
+ *  wire format, and wire units in `constants.ts` are what once let an
+ *  out-of-range value look reasonable.
  */
 
 /** CRC-32 (IEEE 802.3, reflected, init/xor 0xFFFFFFFF) — what the DualSense
@@ -79,14 +80,35 @@ export const TRIGGER_ENCODINGS: TriggerEncoding[] = ['zones', 'simple'];
 
 /** What an effect DOES, independent of how it is encoded.  This is the
  *  vocabulary the game's profile table is written in. */
+export type TriggerKind = 'off' | 'resistance' | 'weapon' | 'vibration' | 'slope' | 'texture';
+
 export interface TriggerProfile {
-  kind: 'off' | 'resistance' | 'weapon';
+  /** What SHAPE the resistance takes:
+   *
+   *   'off'        no resistance — a free pull.
+   *   'resistance' a uniform wall from `start` onward.
+   *   'weapon'     resists from `start` and GIVES WAY at `end`.  A click.
+   *   'vibration'  a buzz at `frequency` from `start` onward.  A rattle.
+   *   'slope'      resistance that RAMPS from `strength` at `start` to
+   *                `endStrength` at `end` — the pull gets harder (or
+   *                easier) the further it goes.
+   *   'texture'    a hand-authored force per travel zone (`zones`), for
+   *                notches and anything the four shapes above cannot say. */
+  kind: TriggerKind;
   /** Where along the trigger's travel the effect begins, 0..1. */
   start: number;
-  /** Where a `weapon` effect gives way, 0..1.  Unused by `resistance`. */
+  /** Where a `weapon` effect gives way / a `slope` finishes ramping, 0..1. */
   end: number;
-  /** How hard, 0..1. */
+  /** How hard, 0..1.  For `slope`, the force at `start`. */
   strength: number;
+  /** `slope` only: the force at `end`.  Below `strength` ramps DOWN. */
+  endStrength?: number;
+  /** `vibration` only: 0..1 of the pad's usable range (roughly 0–60 Hz on a
+   *  DualSense — low reads as a chug, high as a hiss). */
+  frequency?: number;
+  /** `texture` only: force per zone, 0..1, index 0 at rest.  Short arrays
+   *  leave the remaining zones free. */
+  zones?: readonly number[];
 }
 
 export const TRIGGER_OFF: TriggerProfile = { kind: 'off', start: 0, end: 0, strength: 0 };
@@ -147,64 +169,151 @@ export function writeTriggerEffect(
 ): void {
   // OFF is the same in both encodings: mode 0, parameters clear.  That is
   // what releases the clutch, so it must never be skipped as a no-op.
-  if (p.kind === 'off' || p.strength <= 0) {
+  //
+  // The test is EFFECTIVE strength, not `strength`: a slope ramping UP from
+  // nothing (strength 0, endStrength 1) is a real effect and the most natural
+  // way to author one, and a texture carries its forces in `zones` where
+  // `strength` is not consulted at all.
+  if (p.kind === 'off' || effectiveStrength(p) <= 0) {
     for (let i = 0; i < 11; i++) d[at + i] = 0;
     return;
   }
 
   if (encoding === 'simple') {
-    // Raw-byte convention: parameters are positions and force over the full
-    // 0–255 travel.
-    if (p.kind === 'resistance') {
-      d[at] = 0x01;
-      d[at + 1] = clampInt(clamp01(p.start) * 255, 0, 255);
-      d[at + 2] = clampInt(clamp01(p.strength) * 255, 0, 255);
-    } else {
-      const start = clampInt(clamp01(p.start) * 255, 0, 254);
-      d[at] = 0x02;
-      d[at + 1] = start;
-      // A break at or before the start has nothing to give way at.
-      d[at + 2] = clampInt(clamp01(p.end) * 255, start + 1, 255);
-      d[at + 3] = clampInt(clamp01(p.strength) * 255, 0, 255);
-    }
+    writeSimpleEffect(d, at, p);
     return;
   }
+  writeZonesEffect(d, at, p);
+}
 
-  // 'zones': the trigger's travel is ten zones.  An effect names which zones
-  // are active as a bitmask, and (for resistance) how hard each one pushes as
-  // a 3-bit force packed into a 30-bit field, low zone first.
-  if (p.kind === 'resistance') {
-    const from = clampInt(clamp01(p.start) * 9, 0, 9);
-    const force = clampInt(clamp01(p.strength) * 8, 1, 8) - 1;
-    let activeZones = 0;
-    // Two 16-bit halves rather than one 32-bit number: `<<` is a SIGNED
-    // 32-bit op in JS, so packing zone 9 (bit 27..29) into a single integer
-    // and shifting it back out is a sign-extension bug waiting to happen.
-    let forceLo = 0, forceHi = 0;
-    for (let z = from; z < 10; z++) {
-      activeZones |= 1 << z;
-      const bit = 3 * z;
-      if (bit < 24) forceLo |= force << bit;
-      else forceHi |= force << (bit - 24);
+/** The older convention: modes 0x01/0x02 with raw byte parameters.  It can
+ *  only say "wall" and "click", so the three richer shapes degrade to their
+ *  nearest equivalent rather than being dropped — a pad on this encoding
+ *  should still feel SOMETHING per weapon. */
+function writeSimpleEffect(d: Uint8Array, at: number, p: TriggerProfile): void {
+  const byte = (v: number) => clampInt(clamp01(v) * 255, 0, 255);
+  if (p.kind === 'weapon') {
+    const start = clampInt(clamp01(p.start) * 255, 0, 254);
+    d[at] = 0x02;
+    d[at + 1] = start;
+    d[at + 2] = clampInt(clamp01(p.end) * 255, start + 1, 255);
+    d[at + 3] = byte(p.strength);
+    return;
+  }
+  // wall / vibration / slope / texture all collapse to a constant push; the
+  // strength picked is the one that best represents the effect's body.
+  d[at] = 0x01;
+  d[at + 1] = byte(p.kind === 'texture' ? textureStart(p) : p.start);
+  d[at + 2] = byte(effectiveStrength(p));
+}
+
+/** A texture's first non-zero zone — where the player first feels it. */
+function textureStart(p: TriggerProfile): number {
+  const z = p.zones ?? [];
+  for (let i = 0; i < z.length; i++) if (z[i] > 0) return i / 9;
+  return p.start;
+}
+
+/** One number standing in for an effect's overall firmness. */
+function effectiveStrength(p: TriggerProfile): number {
+  if (p.kind === 'slope') return Math.max(p.strength, p.endStrength ?? p.strength);
+  if (p.kind === 'texture') {
+    const z = p.zones ?? [];
+    let max = 0;
+    for (let i = 0; i < z.length; i++) if (z[i] > max) max = z[i];
+    return max;
+  }
+  return p.strength;
+}
+
+/** Pack a per-zone force table into the 0x21 layout: a 10-bit ACTIVE mask
+ *  followed by ten 3-bit forces, low zone first.
+ *
+ *  The forces are split across two 16-bit halves rather than one 32-bit
+ *  number because `<<` is a SIGNED 32-bit operation in JS — zone 9 occupies
+ *  bits 27..29, and shifting that back out of a single integer is a
+ *  sign-extension bug waiting to happen. */
+function packZoneForces(d: Uint8Array, at: number, force: (zone: number) => number): void {
+  let activeZones = 0;
+  let lo = 0, hi = 0;
+  for (let z = 0; z < 10; z++) {
+    const f = force(z);
+    if (f <= 0) continue;
+    activeZones |= 1 << z;
+    const level = clampInt(clamp01(f) * 8, 1, 8) - 1;
+    const bit = 3 * z;
+    if (bit < 24) lo |= level << bit;
+    else hi |= level << (bit - 24);
+  }
+  d[at + 1] = activeZones & 0xff;
+  d[at + 2] = (activeZones >>> 8) & 0xff;
+  d[at + 3] = lo & 0xff;
+  d[at + 4] = (lo >>> 8) & 0xff;
+  d[at + 5] = (lo >>> 16) & 0xff;
+  d[at + 6] = hi & 0xff;
+}
+
+/** The convention the hardware confirmed: the travel is ten zones, and an
+ *  effect names which are active plus how hard each pushes. */
+function writeZonesEffect(d: Uint8Array, at: number, p: TriggerProfile): void {
+  const zoneOf = (t: number) => clampInt(clamp01(t) * 9, 0, 9);
+
+  switch (p.kind) {
+    case 'weapon': {
+      // A weapon effect names only its start and stop zones; the pad fills in
+      // the resistance between them.  Start is bounded to 2..7 and the stop
+      // must sit above it — the hardware ignores anything else.
+      const start = Math.max(2, Math.min(7, zoneOf(p.start)));
+      const end = Math.max(start + 1, Math.min(8, zoneOf(p.end)));
+      const zones = (1 << start) | (1 << end);
+      d[at] = 0x25;
+      d[at + 1] = zones & 0xff;
+      d[at + 2] = (zones >>> 8) & 0xff;
+      d[at + 3] = clampInt(clamp01(p.strength) * 8, 1, 8) - 1;
+      return;
     }
-    d[at] = 0x21;
-    d[at + 1] = activeZones & 0xff;
-    d[at + 2] = (activeZones >>> 8) & 0xff;
-    d[at + 3] = forceLo & 0xff;
-    d[at + 4] = (forceLo >>> 8) & 0xff;
-    d[at + 5] = (forceLo >>> 16) & 0xff;
-    d[at + 6] = forceHi & 0xff;
-  } else {
-    // A weapon effect names only its start and stop zones; the pad fills in
-    // the resistance between them.  Start is bounded to 2..7 and the stop
-    // must sit above it — the hardware ignores anything else.
-    const start = clampInt(clamp01(p.start) * 9, 2, 7);
-    const end = clampInt(clamp01(p.end) * 9, start + 1, 8);
-    const zones = (1 << start) | (1 << end);
-    d[at] = 0x25;
-    d[at + 1] = zones & 0xff;
-    d[at + 2] = (zones >>> 8) & 0xff;
-    d[at + 3] = clampInt(clamp01(p.strength) * 8, 1, 8) - 1;
+    case 'resistance': {
+      const from = zoneOf(p.start);
+      d[at] = 0x21;
+      packZoneForces(d, at, z => (z >= from ? p.strength : 0));
+      return;
+    }
+    case 'slope': {
+      // Linear ramp between the two strengths.  Quantised to ten zones and
+      // eight levels, so a shallow ramp over a short span reads as a step —
+      // worth knowing before authoring one across two adjacent zones.
+      const from = zoneOf(p.start);
+      const to = Math.max(from + 1, zoneOf(p.end));
+      const s0 = p.strength;
+      const s1 = p.endStrength ?? p.strength;
+      d[at] = 0x21;
+      packZoneForces(d, at, z => {
+        if (z < from) return 0;
+        if (z >= to) return s1;
+        return s0 + (s1 - s0) * ((z - from) / (to - from));
+      });
+      return;
+    }
+    case 'texture': {
+      const z = p.zones ?? [];
+      d[at] = 0x21;
+      packZoneForces(d, at, i => z[i] ?? 0);
+      return;
+    }
+    case 'vibration': {
+      // A buzz rather than a push: active zones, then FREQUENCY and
+      // AMPLITUDE as plain bytes.  This is the one shape whose character is
+      // set by a number that is not a force.
+      const from = zoneOf(p.start);
+      let zones = 0;
+      for (let z = from; z < 10; z++) zones |= 1 << z;
+      d[at] = 0x26;
+      d[at + 1] = zones & 0xff;
+      d[at + 2] = (zones >>> 8) & 0xff;
+      d[at + 3] = clampInt(clamp01(p.strength) * 8, 1, 8) - 1;
+      d[at + 9] = clampInt(clamp01(p.frequency ?? 0.5) * 255, 1, 255);
+      return;
+    }
   }
 }
 

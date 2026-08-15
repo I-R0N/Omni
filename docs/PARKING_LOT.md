@@ -5,6 +5,52 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Minimal Bluetooth control style — one stick, two buttons (2026-08-15)
+
+A sixth control scheme for the smallest pads: **one analogue stick and two
+buttons**, nothing else. The stick does aiming, flying AND acceleration
+together; button A shoots and charges; button B is ACTIONS (dock / enter
+portal / cycle weapon).
+
+Why it is worth building: the cheap clip-on Bluetooth gamepads people
+actually pair with a phone are frequently this shape, or close to it, and the
+existing `gamepad` scheme assumes a full standard layout — two sticks, two
+triggers, four face buttons, a D-pad. On a two-button pad most of that is
+missing, and the parts that ARE missing are the ones the scheme leans on
+hardest (the right stick IS the aim, since G2-a routed the pad through the
+synthetic pointer).
+
+What the design has to answer, and none of it is hard so much as it is a set
+of decisions:
+
+- **One stick doing three jobs.** Direction and throttle already come from
+  one deflection under `gamepad`, so that half is solved. Aim is the problem:
+  the ship would have to AIM WHERE IT FLIES, exactly as the joystick touch
+  schemes already do (`pointerAims: false`, the stick writes the synthetic
+  pointer). So the mechanism exists — this scheme reuses the joystick
+  schemes' rule with a pad as the source.
+- **Two buttons for four actions.** Shoot and charge already share one
+  control everywhere (`CHARGE_FULL` on a hold). Actions is the crowded one:
+  dock / enter portal is already ONE arbitrated trigger (`updateInteractables`
+  nearest-wins), which leaves weapon cycling. A hold on button B is the
+  obvious answer and matches the shoot/charge precedent.
+- **Pause with no Options button.** The one genuinely new gap. Either a
+  two-button chord, a long hold on B, or accept that pause is a screen tap on
+  a device that has a screen.
+
+Cost is small because the pieces are all built: `CONTROL_SCHEME_RULES` gets a
+row, `INPUT_CONSTANTS.GAMEPAD.BUTTONS` gets a remap, and the `pointerAims:
+false` path is already exercised by two shipped schemes. The reason it is
+parked rather than done is that **nobody has one of these pads to test with**,
+and G12 is a standing lesson in what shipping an untestable input path costs.
+
+Related: the gamepad menu navigation (G15) assumes a D-pad. A two-button pad
+would need the stick as its nav source — worth doing anyway, since stick nav
+is a ~10-line addition to `tickMenuNav` and is what most players will reach
+for first.
+
+---
+
 ## Bulwark difficulty note (level design)
 
 **Context:** The BULWARK enemy (Stage 0 core roster) is a comparatively HARD

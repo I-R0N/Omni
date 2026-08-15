@@ -38,12 +38,26 @@ const BTN = {
 };
 
 /** One frame of pad state: sticks at rest, nothing pressed, unless overridden. */
-function pad(opts: { lx?: number; ly?: number; rx?: number; ry?: number; down?: number[] } = {}) {
+function pad(opts: {
+  lx?: number; ly?: number; rx?: number; ry?: number;
+  down?: number[];
+  /** Partial ANALOG trigger travel, e.g. { 7: 0.2 } for R2 barely moved.  A
+   *  real DualSense also reports `pressed` true at that deflection, which is
+   *  the trap the fire point exists to avoid, so this sets BOTH. */
+  analog?: Record<number, number>;
+} = {}) {
   const pressed: boolean[] = new Array(17).fill(false);
-  for (const b of opts.down ?? []) pressed[b] = true;
+  const values: number[] = new Array(17).fill(0);
+  for (const b of opts.down ?? []) { pressed[b] = true; values[b] = 1; }
+  for (const [b, v] of Object.entries(opts.analog ?? {})) {
+    const i = Number(b);
+    values[i] = v;
+    pressed[i] = v > 0;
+  }
   return {
     axes: [opts.lx ?? 0, opts.ly ?? 0, opts.rx ?? 0, opts.ry ?? 0],
     pressed,
+    values,
   };
 }
 
@@ -678,6 +692,86 @@ test.describe('fire — on the PRESS for a device control', () => {
     expect(r.charged).toBe(1);
 
     watch.assertClean();
+  });
+
+  test('a half-pulled trigger holds fire until the profile\'s break point', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The bug this replaces: `pressed` is set by Chrome as soon as a
+    // DualSense trigger leaves rest, so reading the boolean fired the gun on
+    // the first millimetre — before the adaptive clutch had resisted
+    // anything, which made the whole per-weapon feel table meaningless.
+    const r = await engine(page, (e: any, arg: any) => {
+      e.input.getDeviceFireEvents();
+      const firePoint = e.input.padFirePoint();
+
+      // Just off rest: `pressed` is true, travel is not.
+      e.input.applyPadSnapshot(arg.creep, true);
+      const onCreep = e.input.getDeviceFireEvents().length;
+
+      // Short of the break.
+      e.input.applyPadSnapshot(arg.partial, true);
+      const onPartial = e.input.getDeviceFireEvents().length;
+
+      // Through it.
+      e.input.applyPadSnapshot(arg.full, true);
+      const onFull = e.input.getDeviceFireEvents().length;
+
+      return { firePoint, onCreep, onPartial, onFull };
+    }, {
+      creep: pad({ analog: { 7: 0.05 } }),
+      partial: pad({ analog: { 7: 0.2 } }),
+      full: pad({ analog: { 7: 1 } }),
+    });
+
+    // The starting Blaster is a RATTLE, not a click — it has no break, so
+    // the fire point is where its buzz starts (0.30), inside the clamp band.
+    expect(r.firePoint).toBeCloseTo(0.30, 5);
+    // And the shape's moment differs by shape, which is the point of the
+    // switch: a slope fires at the TOP of its ramp, not the bottom.
+    expect(r.onCreep).toBe(0);
+    expect(r.onPartial).toBe(0);
+    expect(r.onFull).toBe(1);
+
+    watch.assertClean();
+  });
+
+  test('the fire point is CLAMPED, so no profile can strand the shot', async ({ page }) => {
+    await boot(page);
+    await startRun(page);
+
+    // A deep profile must still be reachable on a pad with NO adaptive
+    // triggers, where there is no physical cue that the break has arrived —
+    // and it is the same number in both cases, because branching on whether
+    // the WebHID link is open would put an optional desktop-only transport
+    // underneath the sim.
+    const r = await engine(page, (e: any) => {
+      const read = (p: any) => { e.input.setTriggerProfile(p); return e.input.padFirePoint(); };
+      return {
+        tooDeep: read({ kind: 'weapon', start: 0.9, end: 1, strength: 1 }),
+        tooShallow: read({ kind: 'weapon', start: 0, end: 0.02, strength: 1 }),
+        held: read({ kind: 'resistance', start: 0.35, end: 0, strength: 0.6 }),
+        buzz: read({ kind: 'vibration', start: 0.4, end: 0, strength: 0.5, frequency: 0.3 }),
+        ramp: read({ kind: 'slope', start: 0.3, end: 0.7, strength: 0.2, endStrength: 0.9 }),
+        notched: read({ kind: 'texture', start: 0.3, end: 0, strength: 0.6, zones: [0, 0, 0.7, 0, 0.7] }),
+        none: read({ kind: 'off', start: 0, end: 0, strength: 0 }),
+      };
+    });
+
+    expect(r.tooDeep).toBeCloseTo(0.75, 5);
+    expect(r.tooShallow).toBeCloseTo(0.25, 5);
+    // A held weapon has no break — the wall it puts up at `start` is the cue,
+    // and a buzz is the same story.
+    expect(r.held).toBeCloseTo(0.35, 5);
+    expect(r.buzz).toBeCloseTo(0.40, 5);
+    // A ramp's moment is the TOP of the pull, not where it starts climbing.
+    expect(r.ramp).toBeCloseTo(0.70, 5);
+    // A texture fires past its LAST notch (zone 4 of 9), so every notch is
+    // felt on the way in rather than after the shot.
+    expect(r.notched).toBeCloseTo(4 / 9, 5);
+    // No gun, no profile: the plain threshold.
+    expect(r.none).toBeCloseTo(0.35, 5);
   });
 
   test('the aim moving during a hold does NOT cancel the shot', async ({ page }) => {
@@ -1373,6 +1467,85 @@ test.describe('rumble — force feedback rides the screen shake', () => {
  * tests pin the SHAPE (which bytes move, and to what) so a corrected offset
  * changes one table and one expectation rather than being unrecoverable.
  */
+test.describe('trigger thrust — the stick steers, the trigger throttles', () => {
+  test('the stick supplies DIRECTION and the trigger supplies magnitude', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e: any, arg: any) => {
+      const read = (scheme: string, snap: any) => {
+        e.setControlScheme(scheme);
+        e.input.applyPadSnapshot(snap, true);
+        const v = e.input.getMovementVector();
+        return { x: +v.x.toFixed(4), y: +v.y.toFixed(4) };
+      };
+      return {
+        // Plain `gamepad`: the stick's own magnitude is the throttle, so a
+        // half-deflected stick is half thrust and L2 does nothing.
+        padHalf: read('gamepad', arg.halfStick),
+        // `gamepad-thrust`: same half-deflected stick, but the magnitude now
+        // comes from the trigger — full stick or half, the answer is the
+        // trigger's number along the stick's heading.
+        thrustHalfStickFullPull: read('gamepad-thrust', arg.halfStickFullPull),
+        thrustFullStickHalfPull: read('gamepad-thrust', arg.fullStickHalfPull),
+        // A heading with no throttle is aiming, not flying.
+        thrustNoPull: read('gamepad-thrust', arg.halfStick),
+        // A throttle with no heading has nothing to push against.
+        thrustNoStick: read('gamepad-thrust', arg.pullOnly),
+      };
+    }, {
+      halfStick: pad({ lx: 0.5 }),
+      halfStickFullPull: pad({ lx: 0.5, analog: { 6: 1 } }),
+      fullStickHalfPull: pad({ lx: 1, analog: { 6: 0.5 } }),
+      pullOnly: pad({ analog: { 6: 1 } }),
+    });
+
+    // Deadzone rescale: 0.5 deflection past an 0.18 radial deadzone.
+    expect(r.padHalf.x).toBeCloseTo((0.5 - 0.18) / (1 - 0.18), 3);
+    expect(r.padHalf.y).toBeCloseTo(0, 5);
+
+    // Full pull, half stick → full thrust, because the stick only steers now.
+    expect(r.thrustHalfStickFullPull.x).toBeCloseTo(1, 3);
+    // Half pull → half thrust, regardless of how far the stick went.
+    expect(r.thrustFullStickHalfPull.x)
+      .toBeCloseTo((0.5 - 0.06) / (1 - 0.06), 3);
+
+    expect(r.thrustNoPull).toEqual({ x: 0, y: 0 });
+    expect(r.thrustNoStick).toEqual({ x: 0, y: 0 });
+
+    watch.assertClean();
+  });
+
+  test('the left trigger is released under every scheme that does not use it', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e: any) => {
+      const seen: any[] = [];
+      e.input.setThrustTriggerProfile = (p: any) => { seen.push(p); };
+      const last = () => seen[seen.length - 1];
+
+      e.setControlScheme('gamepad');
+      e.updateGameLogic(1 / 120);
+      const plain = last();
+
+      e.setControlScheme('gamepad-thrust');
+      e.updateGameLogic(1 / 120);
+      const thrust = last();
+
+      return { plainKind: plain.kind, thrustKind: thrust.kind, usesThrust: e.input.usesTriggerThrust() };
+    });
+
+    // A clutch on a control that does nothing is just a stiff trigger.
+    expect(r.plainKind).toBe('off');
+    // And where it IS the throttle, it ramps with the ship's speed.
+    expect(r.thrustKind).toBe('slope');
+    expect(r.usesThrust).toBe(true);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('adaptive triggers — the DualSense output report', () => {
   test('CRC-32 matches the published check vector', async ({ page }) => {
     const watch = await boot(page);
@@ -1462,6 +1635,97 @@ test.describe('adaptive triggers — the DualSense output report', () => {
 
     // The whole point of shipping both: they must actually differ on the wire.
     expect(r.weaponZones).not.toEqual(r.weaponSimple);
+  });
+
+  test('the three richer shapes each pack their own zone table', async ({ page }) => {
+    const watch = await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const off = { kind: 'off', start: 0, end: 0, strength: 0 };
+      const block = (p: any) =>
+        Array.from(hid.buildTriggerData(p, off, 'zones') as Uint8Array).slice(10, 21);
+
+      // Decode the 10-bit active mask + ten 3-bit forces back out, so the
+      // assertions read as "which zones push, and how hard" rather than as
+      // four opaque bytes.  Two 16-bit halves on the way out for the same
+      // reason they go in that way: `<<` is signed 32-bit in JS.
+      const decode = (b: number[]) => {
+        const active = b[1] | (b[2] << 8);
+        const lo = b[3] | (b[4] << 8) | (b[5] << 16);
+        const hi = b[6];
+        const forces: number[] = [];
+        for (let z = 0; z < 10; z++) {
+          if (!(active & (1 << z))) { forces.push(0); continue; }
+          const bit = 3 * z;
+          forces.push(bit < 24 ? (lo >>> bit) & 0x7 : (hi >>> (bit - 24)) & 0x7);
+        }
+        return { mode: b[0], active, forces };
+      };
+
+      return {
+        buzz: block({ kind: 'vibration', start: 0.4, end: 0, strength: 1, frequency: 0.5 }),
+        ramp: decode(block({ kind: 'slope', start: 0, end: 1, strength: 0, endStrength: 1 })),
+        notches: decode(block({ kind: 'texture', start: 0, end: 0, strength: 1, zones: [0, 0, 1, 0, 1] })),
+        wall: decode(block({ kind: 'resistance', start: 0.5, end: 0, strength: 1 })),
+      };
+    });
+
+    // VIBRATION is the one shape whose character is not a force: mode 0x26,
+    // and the frequency rides its own byte rather than the packed table.
+    expect(r.buzz[0]).toBe(0x26);
+    expect(r.buzz[9]).toBe(128);
+
+    // SLOPE ramps across the travel and holds at the top.
+    expect(r.ramp.mode).toBe(0x21);
+    expect(r.ramp.forces[0]).toBe(0);          // zero force = inactive zone
+    expect(r.ramp.forces[9]).toBe(7);          // 8 levels, encoded 0..7
+    for (let z = 2; z < 10; z++) {
+      expect(r.ramp.forces[z]).toBeGreaterThanOrEqual(r.ramp.forces[z - 1]);
+    }
+
+    // TEXTURE is authored zone by zone: exactly the named ones push.
+    expect(r.notches.active).toBe((1 << 2) | (1 << 4));
+    expect(r.notches.forces[2]).toBe(7);
+    expect(r.notches.forces[3]).toBe(0);
+    expect(r.notches.forces[4]).toBe(7);
+
+    // And the plain WALL is still a wall: everything from its zone onward,
+    // at one force.
+    expect(r.wall.active).toBe(0b1111100000);
+    expect(r.wall.forces[5]).toBe(7);
+    expect(r.wall.forces[4]).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the simple encoding DEGRADES the rich shapes rather than dropping them', async ({ page }) => {
+    await boot(page);
+
+    // A firmware that only speaks 0x01/0x02 should still feel something per
+    // weapon.  Silence would be indistinguishable from the bug this whole
+    // encoding switch exists to diagnose.
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const off = { kind: 'off', start: 0, end: 0, strength: 0 };
+      const block = (p: any) =>
+        Array.from(hid.buildTriggerData(p, off, 'simple') as Uint8Array).slice(10, 14);
+      return {
+        buzz: block({ kind: 'vibration', start: 0.4, end: 0, strength: 0.5, frequency: 0.3 }),
+        ramp: block({ kind: 'slope', start: 0.2, end: 0.8, strength: 0.2, endStrength: 1 }),
+        notches: block({ kind: 'texture', start: 0, end: 0, strength: 1, zones: [0, 0, 0.5, 0, 1] }),
+      };
+    });
+
+    // All three collapse to a constant wall — mode 0x01, never mode 0.
+    expect(r.buzz[0]).toBe(0x01);
+    expect(r.ramp[0]).toBe(0x01);
+    expect(r.notches[0]).toBe(0x01);
+    // A slope's stand-in firmness is its STRONGEST point, not its start —
+    // otherwise the Cannon would degrade to the lightest gun in the table.
+    expect(r.ramp[2]).toBe(255);
+    // A texture starts where its first notch is, not at zone 0.
+    expect(r.notches[1]).toBe(Math.round((2 / 9) * 255));
   });
 
   test('an OFF profile clears all eleven bytes — releasing is an instruction', async ({ page }) => {
@@ -1598,9 +1862,9 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       };
     });
 
-    // The starting Blaster: the lightest click in the table.
-    expect(r.armedKind).toBe('weapon');
-    expect(r.armedStrength).toBeCloseTo(0.35, 5);
+    // The starting Blaster: a low rattle, because a click 7x/s is fatigue.
+    expect(r.armedKind).toBe('vibration');
+    expect(r.armedStrength).toBeCloseTo(0.45, 5);
     expect(r.disabledKind).toBe('off');
     expect(r.weaponlessKind).toBe('off');
 
@@ -1637,5 +1901,192 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       .toHaveCount(r.supported ? 1 : 0);
 
     watch.assertClean();
+  });
+});
+
+/**
+ * GAMEPAD MENU NAVIGATION — a D-pad and two buttons over every overlay.
+ *
+ * Driven end to end through the REAL DOM: the driver's whole design premise
+ * is that focus is the browser's focus and movement is geometric over
+ * whatever the panels happen to render, so a test that stubbed either would
+ * be testing something else.  The pad half still goes through
+ * `applyPadSnapshot`, which is the only part of a gamepad that is reachable
+ * headless.
+ */
+test.describe('menu navigation — the pad reaches every control', () => {
+  /** Press a D-pad direction and let the driver's rAF pass run. */
+  async function navPress(page: any, button: number) {
+    await engine(page, (e: any, b: number) => {
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed: [], values: [] }, false);
+      const pressed: boolean[] = new Array(17).fill(false);
+      pressed[b] = true;
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+    }, button);
+    // Two frames: one for the driver to drain, one for focus to settle.
+    await page.evaluate(() => new Promise(r =>
+      requestAnimationFrame(() => requestAnimationFrame(r))));
+  }
+
+  test('the D-pad moves focus inside the live overlay, and CONFIRM activates it',
+    async ({ page }) => {
+      const watch = await boot(page);
+
+      // The main menu: START is the control that matters, and it must be
+      // reachable without a single tap.
+      const first = await page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null;
+        return el ? el.tagName : 'NONE';
+      });
+      expect(first).toBe('BODY');
+
+      // First press adopts focus rather than moving it — there is nothing to
+      // move FROM, and skipping the topmost control would be a silent loss.
+      await navPress(page, 13); // D-pad down
+      const adopted = await page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null;
+        return {
+          inOverlay: !!el?.closest('[data-overlay="menu"]'),
+          tag: el?.tagName ?? 'NONE',
+        };
+      });
+      expect(adopted.inOverlay).toBe(true);
+      expect(adopted.tag).toBe('BUTTON');
+
+      // Walk to START and press Cross.  Driving the real buttons rather than
+      // asserting a focus index: the menu's contents are free to change, and
+      // a test that pinned "the fourth control" would break on a rename.
+      await page.evaluate(() => {
+        const start = Array.from(document.querySelectorAll('button'))
+          .find(b => /start/i.test(b.textContent || ''));
+        (start as HTMLElement | undefined)?.focus();
+      });
+      await engine(page, (e: any) => {
+        const pressed: boolean[] = new Array(17).fill(false);
+        e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+        pressed[0] = true; // Cross
+        e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+      });
+      await waitForStats(page, s => s.gameState === 'PLAYING', 'the run started by the pad');
+
+      watch.assertClean();
+    });
+
+  test('BACK resumes a paused run, and is inert with no overlay up', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Inert in flight: BACK must not do anything to a running game, or a
+    // stray thumb pauses the fight.
+    await engine(page, (e: any) => {
+      const pressed: boolean[] = new Array(17).fill(false);
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+      pressed[1] = true; // Circle
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+    });
+    await page.evaluate(() => new Promise(r =>
+      requestAnimationFrame(() => requestAnimationFrame(r))));
+    expect((await stats(page)).gameState).toBe('PLAYING');
+
+    await engine(page, (e: any) => e.pauseGame());
+    await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+
+    await engine(page, (e: any) => {
+      const pressed: boolean[] = new Array(17).fill(false);
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+      pressed[1] = true;
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
+    });
+    await waitForStats(page, s => s.gameState === 'PLAYING', 'the resumed run');
+
+    watch.assertClean();
+  });
+
+  test('a held direction steps ONCE, then repeats', async ({ page }) => {
+    const watch = await boot(page);
+
+    // The repeat is resolved in InputSystem, where every frame is visible —
+    // a consumer that renders on a stats push would miss both the edge and
+    // the window.  Held for one frame is one step, not one per frame.
+    const r = await engine(page, (e: any) => {
+      e.input.consumeNavSteps();
+      const held: boolean[] = new Array(17).fill(false);
+      held[13] = true;
+      const snap = { axes: [0, 0, 0, 0], pressed: held, values: [] };
+
+      e.input.applyPadSnapshot(snap, false);
+      const onEdge = e.input.consumeNavSteps().length;
+
+      // Three more frames inside the repeat delay: still nothing.
+      for (let i = 0; i < 3; i++) e.input.applyPadSnapshot(snap, false);
+      const duringDelay = e.input.consumeNavSteps().length;
+
+      // Rewind past the delay rather than sleeping for it.
+      e.input.padNavNextAt = performance.now() - 1;
+      e.input.applyPadSnapshot(snap, false);
+      const afterDelay = e.input.consumeNavSteps().length;
+
+      // A CHANGE of direction restarts the clock, so rolling a thumb around
+      // the pad steps once per direction rather than machine-gunning.
+      const right: boolean[] = new Array(17).fill(false);
+      right[15] = true;
+      e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed: right, values: [] }, false);
+      const onTurn = e.input.consumeNavSteps();
+
+      return { onEdge, duringDelay, afterDelay, onTurn };
+    });
+
+    expect(r.onEdge).toBe(1);
+    expect(r.duringDelay).toBe(0);
+    expect(r.afterDelay).toBe(1);
+    expect(r.onTurn).toEqual([{ x: 1, y: 0 }]);
+
+    watch.assertClean();
+  });
+
+  test('geometry, not DOM order, decides where a direction goes', async ({ page }) => {
+    await boot(page);
+
+    // The panels are grids of hexes, rows of chips and columns of rows on one
+    // screen; DOM order is the right answer for none of them.  Pinned against
+    // a synthetic 2x2 so the expectation is about the RULE rather than about
+    // whatever the menu currently contains.
+    const r = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:0;top:0;width:200px;height:200px';
+      const at = (x: number, y: number, id: string) => {
+        const b = document.createElement('button');
+        b.id = id;
+        b.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:80px;height:40px`;
+        host.appendChild(b);
+        return b;
+      };
+      // Appended in an order that DISAGREES with the layout, so a DOM-order
+      // implementation would give different answers.
+      const br = at(100, 100, 'br');
+      const tl = at(0, 0, 'tl');
+      const bl = at(0, 100, 'bl');
+      const tr = at(100, 0, 'tr');
+      document.body.appendChild(host);
+
+      const { pickNext } = (window as any).__omniMenuNav;
+      const list = [br, tl, bl, tr];
+      const out = {
+        rightOfTL: pickNext(tl, list, 1, 0)?.id,
+        downOfTL: pickNext(tl, list, 0, 1)?.id,
+        leftOfBR: pickNext(br, list, -1, 0)?.id,
+        upOfBR: pickNext(br, list, 0, -1)?.id,
+        // Nothing above the top row: movement never wraps or reverses.
+        upOfTL: pickNext(tl, list, 0, -1)?.id ?? null,
+      };
+      host.remove();
+      return out;
+    });
+
+    expect(r.rightOfTL).toBe('tr');
+    expect(r.downOfTL).toBe('bl');
+    expect(r.leftOfBR).toBe('bl');
+    expect(r.upOfBR).toBe('tr');
+    expect(r.upOfTL).toBeNull();
   });
 });

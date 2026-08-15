@@ -175,7 +175,9 @@ test.describe('controls & basics — reachable from both menus', () => {
     // Every scheme is reachable from it, including both handednesses.
     const options = await select.locator('option').evaluateAll(
       els => els.map(e => (e as HTMLOptionElement).value));
-    expect(options).toEqual(['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad']);
+    expect(options).toEqual([
+      'touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad', 'gamepad-thrust',
+    ]);
 
     await select.selectOption('joystick-right');
     await waitForStats(page, s => s.controlScheme === 'joystick-right', 'the mirrored scheme');

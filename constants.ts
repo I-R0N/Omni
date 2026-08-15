@@ -1182,6 +1182,15 @@ export const INPUT_CONSTANTS = {
     /** Analogue triggers report 0→1 on their button `value`; over this counts
      *  as pressed. High enough that a resting finger is not a shot. */
     TRIGGER_THRESHOLD: 0.35,
+    /** Band the trigger's FIRE POINT is clamped into.  The fire point tracks
+     *  the adaptive-trigger profile's break — that is what makes the clutch
+     *  giving way and the gun going off the same event — but the SAME number
+     *  has to feel right on a pad with no WebHID and therefore no physical
+     *  cue, so no profile may push the shot into the last sliver of travel
+     *  (unreachable-feeling) or the first (fires as the trigger leaves rest,
+     *  which is the bug this band exists to prevent recurring). */
+    FIRE_POINT_MIN: 0.25,
+    FIRE_POINT_MAX: 0.75,
     /** Distance (CSS px) from screen centre at which the pad parks its
      *  synthetic pointer. Matches THROTTLE_DISTANCE so the aim reticle sits
      *  where a mouse at full throttle would, and — load-bearing — is well
@@ -1197,7 +1206,23 @@ export const INPUT_CONSTANTS = {
       CYCLE_WEAPON: [5, 3],   // R1, Triangle
       PAUSE:        [9],      // Options
       DPAD:         [12, 13, 14, 15], // up, down, left, right — digital thrust
+      THROTTLE:     [6],      // L2 — analogue thrust under `gamepad-thrust`
+      // MENU navigation.  These reuse buttons that are already bound in
+      // flight, which is safe because they are only ever SPENT while a
+      // full-screen overlay is up and the world is frozen: Cross cannot fire
+      // (the FIRE queue is gated on the world) and the D-pad cannot thrust.
+      CONFIRM:      [0],      // Cross — activate the focused control
+      BACK:         [1],      // Circle — dismiss / resume / undock
     },
+    /** Menu D-pad auto-repeat: the first step is immediate, then a held
+     *  direction waits DELAY before repeating every INTERVAL.  Without the
+     *  delay a single press walks several items; without the repeat, a long
+     *  list is a lot of presses. */
+    MENU_REPEAT_DELAY_MS: 420,
+    MENU_REPEAT_INTERVAL_MS: 110,
+    /** Below this the throttle reads as released, so a trigger that rests a
+     *  hair off zero does not creep the ship forward. */
+    THROTTLE_DEADZONE: 0.06,
   },
 };
 
@@ -2865,40 +2890,90 @@ export const WEAPON_LIST = [
 // force), and the design intent — "the Cannon is the deepest pull in the
 // game" — is true in both.  engine/systems/DualSenseHID.ts converts.
 //
-// Two kinds carry all seven:
-//   'weapon'      — resistance from `start` that GIVES WAY at `end`.  A click.
-//                   Where the break sits is the gun's commitment: the Blaster
-//                   breaks almost immediately, the Cannon makes you push.
-//   'resistance'  — constant push from `start`, no break.  The two sustained
-//                   weapons (Laser, Lightning), which are held rather than
-//                   clicked, so a per-shot click would fight the cadence.
-//
-// The table is DESKTOP-CHROMIUM-ONLY in effect and inert everywhere else;
-// nothing in the sim reads it.
+// Six shapes are available (see TriggerKind); these seven use five of them.
+// The rule followed here: a gun's trigger should say what the gun IS before
+// it says anything else, so cadence picks the shape and the numbers only
+// separate guns that already share one.
 export const WEAPON_TRIGGERS: Record<WeaponType, TriggerProfile> = {
-  // 7 shots/s.  A stiff click 7x/s is fatigue, not feedback — so the
-  // lightest strength in the table and the earliest break in it.
-  [WeaponType.BLASTER]:   { kind: 'weapon',     start: 0.25, end: 0.45, strength: 0.35 },
-  // Three-round burst: a firmer, slightly later click, one per burst.
-  [WeaponType.BURST]:     { kind: 'weapon',     start: 0.35, end: 0.60, strength: 0.55 },
-  // 1.5 shots/s slug.  Commits per shot, and the trigger should say so.
-  [WeaponType.SHOTGUN]:   { kind: 'weapon',     start: 0.45, end: 0.80, strength: 0.80 },
-  // Held beam — constant push, no break.
-  [WeaponType.BOUNCER]:   { kind: 'resistance', start: 0.30, end: 0,    strength: 0.45 },
-  // Held chain — heavier than the beam, still no break.
-  [WeaponType.LIGHTNING]: { kind: 'resistance', start: 0.35, end: 0,    strength: 0.60 },
-  // Lock-and-release: firm to reach, then it lets go early.
-  [WeaponType.HOMING]:    { kind: 'weapon',     start: 0.45, end: 0.65, strength: 0.65 },
-  // Artillery.  The deepest, heaviest pull in the game.
-  [WeaponType.CANNON]:    { kind: 'weapon',     start: 0.60, end: 0.90, strength: 1.0 },
+  // 7 shots/s.  A CLICK 7x/s is not feedback, it is fatigue — and it is also
+  // a lie, because the gun is not asking you to commit to each shot.  A
+  // low-frequency RATTLE is what an automatic weapon feels like.
+  [WeaponType.BLASTER]: {
+    kind: 'vibration', start: 0.30, end: 0, strength: 0.45, frequency: 0.30,
+  },
+  // Three-round burst: a click, but a TEXTURED one — three notches on the
+  // way down, so the trigger says how many rounds are coming.
+  [WeaponType.BURST]: {
+    kind: 'texture', start: 0.30, end: 0.70, strength: 0.6,
+    zones: [0, 0, 0.7, 0, 0.7, 0, 0.7],
+  },
+  // 1.5 shots/s slug.  Commits per shot, and the trigger should say so: a
+  // firm break with nothing before it, so the whole pull is the commitment.
+  [WeaponType.SHOTGUN]: {
+    kind: 'weapon', start: 0.42, end: 0.62, strength: 0.80,
+  },
+  // Held beam — a smooth wall.  No break, because there is no per-shot
+  // moment to mark; you are leaning on it.
+  [WeaponType.BOUNCER]: {
+    kind: 'resistance', start: 0.30, end: 0, strength: 0.45,
+  },
+  // Held chain.  A fast, fine BUZZ over the wall — electricity, not recoil.
+  [WeaponType.LIGHTNING]: {
+    kind: 'vibration', start: 0.35, end: 0, strength: 0.60, frequency: 0.85,
+  },
+  // Lock-and-release.  The pull gets HARDER as it goes (the lock winding up)
+  // and then the shot leaves at the top.
+  [WeaponType.HOMING]: {
+    kind: 'slope', start: 0.30, end: 0.65, strength: 0.25, endStrength: 0.85,
+  },
+  // Artillery.  The deepest, heaviest pull in the game, ramping the whole
+  // way — the one gun where reaching the shot is work.
+  [WeaponType.CANNON]: {
+    kind: 'slope', start: 0.25, end: 0.75, strength: 0.35, endStrength: 1.0,
+  },
 };
 
+// LEFT trigger under the trigger-thrust scheme.  A SLOPE that stiffens with
+// the ship's speed: free at rest, and a real push once you are near the cap,
+// so "already flat out" is something the hand knows.  Quantised by the caller
+// for the same reason the charge ramp is — each step is an HID write.
+export const THRUST_TRIGGER_STEPS = 5;
+export function THRUST_TRIGGER(speedFraction: number): TriggerProfile {
+  const q = Math.round(Math.max(0, Math.min(1, speedFraction)) * THRUST_TRIGGER_STEPS) / THRUST_TRIGGER_STEPS;
+  return {
+    kind: 'slope',
+    start: 0.10,
+    end: 0.90,
+    // A light detent at the bottom always, so the throttle has a bite point.
+    strength: 0.15 + 0.25 * q,
+    endStrength: 0.25 + 0.55 * q,
+  };
+}
+
 // Held CHARGE (Overcharge).  Overrides the weapon profile while a charged
-// shot is winding up: a hard constant wall from the very top of the travel,
-// so holding the trigger down is a physical act and the release reads as a
-// release.  No break — the break would be indistinguishable from firing.
-export const CHARGE_TRIGGER: TriggerProfile =
-  { kind: 'resistance', start: 0.15, end: 0, strength: 0.85 };
+// shot winds up — and unlike every profile above, it is not static: the
+// trigger STIFFENS as the ring fills, so the charge is something the hand
+// feels building rather than a wall that simply appeared.  This is the one
+// thing an adaptive trigger can say that no other output in the game can,
+// which is why it gets the only state-driven profile.
+//
+// `chargeTrigger(t)` is called with the charge fraction and QUANTISED by the
+// caller: each distinct profile is an HID write, and the pad's endpoint is
+// not a frame buffer.
+export const CHARGE_TRIGGER_MAX_STRENGTH = 0.95;
+export const CHARGE_TRIGGER_STEPS = 5;
+export function chargeTrigger(t: number): TriggerProfile {
+  const q = Math.round(Math.max(0, Math.min(1, t)) * CHARGE_TRIGGER_STEPS) / CHARGE_TRIGGER_STEPS;
+  return {
+    kind: 'slope',
+    start: 0.12,
+    end: 0.85,
+    // Already firm at the bottom so the wall is there the moment the hold
+    // starts; the RAMP is what grows.
+    strength: 0.30 + 0.30 * q,
+    endStrength: 0.45 + (CHARGE_TRIGGER_MAX_STRENGTH - 0.45) * q,
+  };
+}
 
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
@@ -3401,6 +3476,7 @@ export const CONTROL_SCHEMES: ReadonlyArray<{
   { id: 'joystick-right', label: 'Joystick (left-handed)',  blurb: 'Stick right · fire button left' },
   { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
   { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
+  { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'L2 throttles · left stick steers only' },
 ] as const;
 
 export function controlSchemeDef(id: ControlScheme) {
@@ -3423,12 +3499,21 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
   /** Which side of the screen the stick lives on; the fire button takes the
    *  other.  Undefined for schemes with neither. */
   stickSide?: 'left' | 'right';
+  /** Does the LEFT TRIGGER act as an analogue throttle, with the left stick
+   *  reduced to steering only?  A separate scheme rather than a toggle
+   *  because it changes what a stick deflection MEANS — under `gamepad` the
+   *  stick's magnitude is thrust, here it is discarded — and two answers to
+   *  that cannot be live at once. */
+  triggerThrust?: boolean;
 }> = {
   touch:            { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true,  pointerAims: true },
   'joystick-left':  { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'left'  },
   'joystick-right': { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'right' },
   keyboard:         { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
   gamepad:          { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
+  // Same as `gamepad` in every touch respect — the trigger changes what the
+  // LEFT STICK means, not what a finger means, so touch stays exactly alive.
+  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true },
 };
 
 // ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────

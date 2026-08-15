@@ -53,9 +53,15 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           plus input / help / minimap / maps (step 5),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  98 tests
+                          anti-flake rules).  108 tests
 
 components/
+  menuNav.ts              GAMEPAD MENU NAVIGATION (G15) — the D-pad
+                          focus driver.  Drives DOM focus, not React
+                          state, and moves GEOMETRICALLY over whatever
+                          the live `[data-overlay]` panel renders, so a
+                          new screen is navigable the day it is added
+                          and no focus order is authored anywhere
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
                           UI, dock affordance, death/run-summary screen;
                           debug panel lives inside the pause menu)
@@ -1782,12 +1788,40 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     0x21/0x25, parameters packed into ten travel zones) and `'simple'` (modes
     0x01/0x02, raw byte parameters) are both reported working on different
     firmware, and a pad silently DISCARDS the one it does not understand — so
-    both ship, selectable at DBG ▸ "trig enc", because the only instrument
-    that can tell them apart is a pad in a hand.  DBG ▸ "HID buzz" pulses the
+    `'zones'` is CONFIRMED WORKING on hardware and is the default; `'simple'`
+    stays selectable at DBG ▸ "trig enc" because a pad silently discards an
+    effect it does not understand, so a firmware that disagrees would
+    otherwise present as a dead feature.  Only `'zones'` can express the three
+    richer SHAPES — `vibration` (a buzz at a frequency), `slope` (resistance
+    ramping between two strengths) and `texture` (a hand-authored force per
+    travel zone) — because all three are per-zone by nature; under `'simple'`
+    they degrade to their nearest constant wall rather than vanishing.  Two
+    profiles are STATE-DRIVEN rather than static, which is the thing an
+    adaptive trigger can say that no other output in the game can:
+    `chargeTrigger(t)` stiffens as the charge ring fills, and
+    `THRUST_TRIGGER(speed)` stiffens as the ship nears its cap.  Both are
+    QUANTISED by the caller — each distinct profile is an HID write, and the
+    pad's endpoint is not a frame buffer.  DBG ▸ "HID buzz" pulses the
     pad's MOTORS through the same framing and CRC to bisect transport from
     encoding.  `window.__omniHid` exposes the pure builders so
     `tests/input.spec.ts` can pin CRC-32 against its published vector
     (`0xCBF43926`), the corrected offsets, and both encodings' bytes.
+  - **MENU NAVIGATION is a D-pad and two buttons over DOM FOCUS** (G15,
+    `components/menuNav.ts`).  Five overlays and several hundred controls,
+    most of them generated (hex flowers, inventory honeycomb, debug rows), so
+    a hand-authored focus order per screen would be wrong within a week.
+    Three rules instead: focus IS DOM focus (the browser's job already —
+    survives re-renders, brings the focus ring and screen-reader behaviour,
+    and opens a `<select>` with the OS picker); movement is GEOMETRIC over the
+    live candidate set, since one rule then serves the 2-up grids, the chip
+    rows and the row columns that share a screen; and the driver scopes itself
+    by `[data-overlay]` CONTAINER, never by game state, so a new overlay is
+    navigable the day it is tagged.  It is installed from `App.tsx`, not
+    UIOverlay — it must not be rebuilt on every stats push.  CONFIRM clicks
+    whatever has focus and so needs no game knowledge; BACK is the one action
+    that differs per screen and lives on `GameEngine.menuBack()`, which
+    deliberately does NOTHING on the death and stage-clear screens (those are
+    decisions, and a button that quietly picks one is worse than no button).
   - **The pad is POLLED once per rendered frame**, from
     `GameEngine.pollGamepad` at the top of `loop` — above every freeze
     short-circuit, so the pause button works from inside the paused state.
@@ -1795,6 +1829,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the sim substep loop.  Adoption is by polling too, not by trusting
     `gamepadconnected`: the spec lets a browser withhold a pad until its
     first button press, and Safari does.
+  - **The trigger's FIRE POINT is the adaptive profile's own break** (G14).
+    Reading the browser's `pressed` flag fires the gun as the trigger leaves
+    rest — Chrome sets it at a hair's deflection — so the snapshot carries
+    ANALOG button values and the fire test is `value >= padFirePoint()`.  That
+    point is derived from the live `TriggerProfile`, and which end of the
+    effect it takes depends on the shape: `weapon` and `slope` fire at the far
+    end (a click is felt when it GIVES WAY; a ramp's payoff is the top of the
+    pull), `texture` past its LAST notch, `resistance` and `vibration` at the
+    near end (neither has a break).  Clamped to
+    `GAMEPAD.FIRE_POINT_MIN/MAX`, because the SAME number has to feel right on
+    a pad with no WebHID and therefore no physical cue — branching on whether
+    the HID link is open would put an optional desktop-only transport
+    underneath the sim.
   - **A DEDICATED fire control fires on PRESS; a POINTER gesture fires on
     release** (G13).  The split is about the control, not the device: a tap
     fires on release because it MUST — until the finger lifts, a tap and a
@@ -1814,6 +1861,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     they can be spent, so no press fires later out of context.
   - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
     which must exceed `SHIP_SELECT_RADIUS` — see §5.
+  - **`gamepad-thrust` makes the LEFT TRIGGER an analogue throttle** (G15):
+    the left stick supplies DIRECTION only and the trigger supplies
+    magnitude.  Its own scheme rather than a toggle because it changes what a
+    stick deflection MEANS — under `gamepad` the deflection IS the throttle —
+    and two answers to that cannot be live at once.  Its trigger resistance
+    ramps with the ship's speed fraction, so "already flat out" is something
+    the hand knows; every other scheme leaves the left trigger RELEASED,
+    since a clutch on a control that does nothing is just a stiff trigger.
   - **The CONTROL SCHEME decides which touch model is live** (G9).  The
     joystick and the standard drag-to-fly gesture are mutually exclusive —
     they compete for the same finger — so they are separate schemes rather

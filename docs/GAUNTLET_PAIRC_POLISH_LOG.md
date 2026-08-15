@@ -35,6 +35,8 @@ tuning (step 6).
 | G12 | DualSense adaptive triggers over WebHID (user directive) | **done** |
 | G12b | Trigger report corrections + the bisection tooling (hardware report) | **done** |
 | G13 | Fire on trigger PRESS, not release (user directive) | **done** |
+| G14 | Fire AT the break point + the three richer trigger shapes | **done** |
+| G15 | Trigger thrust, gamepad menu navigation, parking-lot entry | **done** |
 
 ---
 
@@ -961,6 +963,133 @@ opposite of what the code does.
 
 ---
 
+### G14 — Fire at the break, and three shapes the clutch can make (2026-08-15)
+
+**Hardware result: `zones` works, and so does the HID buzz.** The transport,
+the corrected offsets and the Bluetooth framing are all confirmed; `zones` is
+now the default and `simple` stays on the DBG cycle for a firmware that
+disagrees. That closes G12/G12b.
+
+**BUG — the gun fired as the trigger left its rest position**, on both
+encodings. Cause: `pollGamepad` reduced a trigger to `value > TRIGGER_THRESHOLD
+|| b.pressed`, and Chrome sets `pressed` on a DualSense trigger at a hair's
+deflection — so the `||` collapsed the threshold to nearly zero. G13 had made
+the shot land on the press; this made "the press" mean "any movement at all".
+
+**DECISION G14-a — the fire point IS the profile's break.** The snapshot now
+carries ANALOG button values and fire tests `value >= padFirePoint()`, read
+off the live `TriggerProfile`. Which END of the effect that is depends on the
+shape, and this is the part worth getting right rather than averaging:
+`weapon` and `slope` fire at the FAR end (a click is felt when it gives way; a
+ramp's payoff is the top of the pull), `texture` past its LAST notch (firing
+on the first would leave two more notches after the shot with nothing to
+mean), `resistance` and `vibration` at the NEAR end (neither has a break, so
+the moment is where the wall or the buzz begins).
+
+*Alternative rejected:* a fixed threshold around 0.4. It fixes the bug and
+throws away the reason the profile table exists — the clutch would give way
+somewhere and the gun would go off somewhere else.
+
+**DECISION G14-b — clamp the fire point, do not branch on the HID link.** A
+deep profile has to stay reachable on a pad with NO adaptive triggers, where
+there is no physical cue that the break arrived. The tempting fix is
+"profile break when connected, fixed threshold otherwise", which would put an
+optional, desktop-only, permission-gated transport underneath a sim rule.
+Instead the same number serves both, clamped to `FIRE_POINT_MIN/MAX`
+(0.25–0.75), and the two profiles that sat outside the band were retuned.
+
+**The three richer shapes.** `vibration` (mode 0x26 — a buzz whose character
+is a FREQUENCY, the one parameter in the feature that is not a force),
+`slope` (0x21 with a ramped zone table) and `texture` (0x21 with a
+hand-authored one). All three are per-zone by nature, so they exist only
+under `zones`; under `simple` they degrade to their nearest constant wall
+rather than vanishing, because silence is indistinguishable from the bug this
+whole encoding switch exists to diagnose.
+
+Retuned with them: the Blaster is a low RATTLE, not a click (a click 7x/s is
+fatigue, and it also lies — the gun is not asking you to commit per shot);
+Burst is three NOTCHES; Lightning is a fast fine buzz over its wall; Homing
+and the Cannon are RAMPS. Shotgun keeps the honest click.
+
+**DECISION G14-c — two profiles are STATE-DRIVEN, and quantised.**
+`chargeTrigger(t)` stiffens as the charge ring fills; `THRUST_TRIGGER(speed)`
+stiffens as the ship nears its cap. This is the thing an adaptive trigger can
+say that no other output in the game can — a static profile is just a nicer
+button. Both quantise to five steps at the CALLER, because each distinct
+profile is an HID write and the pad's endpoint is not a frame buffer.
+
+**BUG found by the new tests:** the OFF early-out tested `strength <= 0`,
+which silently swallowed a slope ramping UP from nothing — the most natural
+way to author one. Now tests EFFECTIVE strength.
+
+**Gates:** typecheck, build, 104/104 tests.
+
+---
+
+### G15 — Trigger thrust, and a pad that can reach the menus (2026-08-15)
+
+**Trigger thrust.** `gamepad-thrust`: the left stick supplies DIRECTION only
+and L2 supplies magnitude.
+
+**DECISION G15-a — a scheme, not a toggle.** It changes what a stick
+deflection MEANS — under `gamepad` the deflection IS the throttle, here it is
+discarded — and two answers to that cannot be live at once. It matches
+`gamepad` in every touch respect, because the trigger changes what a STICK
+means, not what a finger means.
+
+**DECISION G15-b — the throttle's resistance reports SPEED, not throttle
+position.** The trigger already knows where it is; the hand is holding it.
+What it does not know is whether the ship is doing anything with it, so the
+clutch stiffens as the ship approaches its cap and "already flat out" becomes
+something felt rather than read. Every other scheme leaves the left trigger
+RELEASED — a clutch on a control that does nothing is just a stiff trigger.
+
+**Menu navigation.** A D-pad and two buttons over every overlay.
+
+**DECISION G15-c — drive DOM FOCUS, not React state.** Focus is already the
+browser's job: it survives re-renders, brings a focus ring and screen-reader
+behaviour, and opens a `<select>` with the OS picker exactly as a tap does.
+Nothing in the driver re-renders anything.
+
+**DECISION G15-d — move GEOMETRICALLY, not in DOM order.** There are five
+overlays and several hundred controls, most of them generated — the hex
+flowers, the inventory honeycomb, the debug rows. A hand-authored focus order
+per screen would be wrong within a week of anyone touching the UI, and DOM
+order is the right answer for none of the 2-up grids, chip rows and row
+columns that share a screen. One scored rule (distance along the direction,
+plus cross-axis drift at a penalty) serves all three.
+
+*Alternative rejected:* `roving tabindex` with authored order. More code, per
+screen, and it goes stale silently.
+
+**DECISION G15-e — scope by CONTAINER, never by game state.** The driver
+finds the live `[data-overlay]` element. It therefore knows nothing about
+which screen is up, and a new overlay is navigable the day it is tagged.
+
+**DECISION G15-f — CONFIRM is generic, BACK is not.** CONFIRM clicks whatever
+has focus, which needs no game knowledge at all. BACK means something
+different per screen, so it lives on `GameEngine.menuBack()` — and does
+NOTHING on the death and stage-clear screens, because those are decisions
+(respawn / restart / quit; descend / return) and a button that quietly picks
+one for you is worse than no button.
+
+The reused buttons (Cross, the D-pad) are safe because menu edges are only
+ever SPENT while an overlay is up and the world is frozen: the FIRE queue is
+gated on the world, and the D-pad cannot thrust.
+
+**Parking lot: the one-stick two-button scheme** (user request) is written up
+in `docs/PARKING_LOT.md` — including that its pieces mostly exist already
+(the joystick schemes' aim-where-you-fly rule, the arbitrated interact
+trigger), that pause with no Options button is the one genuinely new gap, and
+that it is parked rather than built because nobody here has such a pad and
+G12 is a standing lesson in what shipping an untestable input path costs.
+NOTE: the gauntlet brief froze `docs/PARKING_LOT.md`; this edit is on the
+explicit later instruction to park the item, which supersedes it.
+
+**Gates:** typecheck, build, 108/108 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
@@ -1351,6 +1480,27 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G13-a** — dedicated fire controls fire on PRESS; pointer gestures fire on
   release. Beat: G2-c's "one fire model across all three devices", which made
   the pad inherit a release-wait that only the tap's drag ambiguity justifies.
+- **G14-a** — the fire point IS the adaptive profile's break, per shape.
+  Beat: a fixed threshold, which fixes the bug and throws away the reason the
+  profile table exists.
+- **G14-b** — clamp the fire point rather than branching on the HID link.
+  Beat: "profile break when connected, fixed threshold otherwise", which puts
+  an optional desktop-only transport underneath a sim rule.
+- **G14-c** — charge and thrust profiles are state-driven and quantised at the
+  caller. Beat: static profiles (a nicer button), and per-frame writes (the
+  pad's endpoint is not a frame buffer).
+- **G15-a** — trigger thrust is a SCHEME. Beat: a toggle, which would leave
+  two readings of a stick deflection live at once.
+- **G15-b** — the throttle's resistance reports the ship's SPEED. Beat:
+  reporting throttle position, which the hand already knows.
+- **G15-c/d/e** — menu nav drives DOM focus, moves geometrically, and scopes
+  itself by `[data-overlay]` container. Beat: roving tabindex with an
+  authored order per screen (more code, goes stale silently), DOM order (right
+  for none of the layouts on a single screen), and switching on game state
+  (a new overlay would need driver changes).
+- **G15-f** — CONFIRM is generic, BACK is per-screen and inert on the two
+  DECISION screens. Beat: a back button that quietly picks respawn or
+  descend for you.
 - **G13-b** — the press pays the ordinary shot, the release still pays the
   charged one. Beat: suppressing the press shot when a charge might follow
   (nothing at press time knows), and paying both (doubles every held shot).
@@ -1461,9 +1611,24 @@ push, opens on an iPhone) is the fastest way to run these:
   drone (there is a minimum gap and a stronger-only interrupt rule, but they
   are guesses).
 
-- **HARDWARE CHECK — adaptive triggers (G12b). THE ONE OPEN QUESTION IS WHICH
-  WIRE ENCODING THIS FIRMWARE HONOURS, AND FIVE MINUTES WITH THE PAD SETTLES
-  IT.** Two certain bugs are fixed (trigger blocks were one byte late; the
+- **HARDWARE CHECK — the trigger FEEL, now that the wire is settled (G14).**
+  `zones` confirmed; the transport is proven. What is unverified is the
+  AUTHORING: seven profiles across five shapes, none of which has been felt.
+  Specifically: is the Blaster's rattle better than a click, or is it mush?
+  Do Burst's three notches read as three? Is the Cannon's ramp a satisfying
+  deep pull or just heavy? And the two state-driven ones — does the charge
+  wall growing under the finger read as charging, and does the thrust trigger
+  stiffening near top speed read as speed? Every number is in
+  `WEAPON_TRIGGERS` / `chargeTrigger` / `THRUST_TRIGGER`.
+- **HARDWARE CHECK — trigger thrust (G15).** Pick *Controller (trigger
+  thrust)*. Does flying with the stick for heading and L2 for throttle beat
+  the stick doing both? It is the scheme's whole premise and it may simply
+  feel worse.
+- **HARDWARE CHECK — menu navigation (G15).** D-pad through the pause menu,
+  the station panels and the hex flowers. The geometric rule is pinned by a
+  test against a synthetic grid, but whether it FEELS right on the real hex
+  honeycomb — where the rows are offset — is a looking question.
+- **SUPERSEDED — the encoding question (G12b).** Two certain bugs are fixed (trigger blocks were one byte late; the
   Bluetooth report was 24 bytes short, so it was being dropped outright).
   What remains is a genuine fork nothing here can resolve. Do this in order:
   1. Connect (pause ▸ Controls ▸ *Connect DualSense Triggers*). **USB-C

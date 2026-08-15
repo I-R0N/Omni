@@ -12,6 +12,11 @@ export interface PadSnapshot {
   axes: readonly number[];
   /** Pressed state per button index. */
   pressed: readonly boolean[];
+  /** ANALOG position per button, 0..1.  Digital buttons report 0 or 1; the
+   *  two triggers report their real travel, which `pressed` cannot express —
+   *  Chrome sets `pressed` on a DualSense trigger at a tiny deflection, so a
+   *  boolean read fires the gun the instant the trigger moves. */
+  values?: readonly number[];
 }
 
 export class InputSystem {
@@ -117,6 +122,20 @@ export class InputSystem {
   private padPausePresses: number = 0;
   /** Connect / disconnect, drained once by the engine to raise a HUD hint. */
   private padConnectionEvent: { connected: boolean; id: string } | null = null;
+
+  // ── Menu navigation (G15) ─────────────────────────────────────────────
+  // A pad has to be able to reach every control the game has, not just the
+  // ones in flight.  These are latched the same way the in-flight edges are —
+  // counters and steps, drained by the engine — so the menu layer never
+  // reads raw pad state and a press cannot be silently lost between frames.
+  /** Queued nav steps, most recent last.  A STEP, not a held direction: the
+   *  repeat is resolved here so the consumer sees discrete moves. */
+  private padNavSteps: { x: number; y: number }[] = [];
+  /** Which direction is currently held, and when it next repeats. */
+  private padNavHeld: { x: number; y: number } = { x: 0, y: 0 };
+  private padNavNextAt: number = 0;
+  private padConfirmPresses: number = 0;
+  private padBackPresses: number = 0;
 
   constructor() {
     this.keys = new Set();
@@ -382,6 +401,11 @@ export class InputSystem {
   // identically on a platform where WebHID does not exist (every mobile
   // browser, and Safari).  See engine/systems/DualSenseHID.ts.
   private hid: DualSenseHID = new DualSenseHID();
+  /** Analogue throttle from the LEFT trigger, 0..1.  Only read under a
+   *  scheme with `triggerThrust`. */
+  private padThrottle: number = 0;
+  /** Left-trigger profile — the throttle's own resistance. */
+  private thrustProfile: TriggerProfile = TRIGGER_OFF;
   /** The profile currently pushed to the pad, so the per-frame sync can
    *  compare before touching an async path at all. */
   private triggerProfile: TriggerProfile = TRIGGER_OFF;
@@ -427,7 +451,22 @@ export class InputSystem {
   public setTriggerProfile(profile: TriggerProfile): void {
     this.triggerProfile = profile;
     if (!this.hid.isConnected()) return;
-    void this.hid.applyTriggers(profile, TRIGGER_OFF);
+    void this.hid.applyTriggers(profile, this.thrustProfile);
+  }
+
+  /** Set the LEFT trigger's feel.  Separate setter because the two triggers
+   *  are driven by different things — the right by what gun is held, the left
+   *  by how fast the ship is going — and neither should have to know the
+   *  other's state to write its own. */
+  public setThrustTriggerProfile(profile: TriggerProfile): void {
+    this.thrustProfile = profile;
+    if (!this.hid.isConnected()) return;
+    void this.hid.applyTriggers(this.triggerProfile, profile);
+  }
+
+  /** Is the left trigger the throttle right now? */
+  public usesTriggerThrust(): boolean {
+    return !!this.rules.triggerThrust;
   }
 
   /** DBG readout: whether the WebHID path is unsupported, idle, or live —
@@ -835,6 +874,12 @@ export class InputSystem {
   private resetPadState() {
     this.padMove.x = 0;
     this.padMove.y = 0;
+    this.padThrottle = 0;
+    this.padNavSteps.length = 0;
+    this.padNavHeld.x = 0;
+    this.padNavHeld.y = 0;
+    this.padConfirmPresses = 0;
+    this.padBackPresses = 0;
     this.padFireDown = false;
     this.padPrev.length = 0;
     // A different pad may well support what the last one did not.
@@ -875,6 +920,129 @@ export class InputSystem {
       if (snap.pressed[indices[i]]) return true;
     }
     return false;
+  }
+
+  /**
+   * Turn the held D-pad into discrete NAV STEPS, with auto-repeat.
+   *
+   * Resolved here rather than in the menu layer for the same reason button
+   * edges are: `pollGamepad` is the only thing that sees every frame, and a
+   * consumer that renders on a stats push would miss both the edge and the
+   * repeat window.
+   */
+  private tickMenuNav(snap: PadSnapshot) {
+    const G = INPUT_CONSTANTS.GAMEPAD;
+    const [up, down, left, right] = G.BUTTONS.DPAD;
+    let x = 0, y = 0;
+    if (snap.pressed[up]) y -= 1;
+    if (snap.pressed[down]) y += 1;
+    if (snap.pressed[left]) x -= 1;
+    if (snap.pressed[right]) x += 1;
+
+    if (x === 0 && y === 0) {
+      this.padNavHeld.x = 0;
+      this.padNavHeld.y = 0;
+      return;
+    }
+    const now = performance.now();
+    // A CHANGE of direction restarts the repeat clock, so rolling the thumb
+    // around the pad steps once per direction rather than machine-gunning.
+    if (x !== this.padNavHeld.x || y !== this.padNavHeld.y) {
+      this.padNavHeld.x = x;
+      this.padNavHeld.y = y;
+      this.padNavSteps.push({ x, y });
+      this.padNavNextAt = now + G.MENU_REPEAT_DELAY_MS;
+      return;
+    }
+    if (now >= this.padNavNextAt) {
+      this.padNavSteps.push({ x, y });
+      this.padNavNextAt = now + G.MENU_REPEAT_INTERVAL_MS;
+    }
+  }
+
+  /** Drain queued menu nav steps.  Returns the array and empties it. */
+  public consumeNavSteps(): { x: number; y: number }[] {
+    if (this.padNavSteps.length === 0) return this.padNavSteps;
+    const out = this.padNavSteps.slice();
+    this.padNavSteps.length = 0;
+    return out;
+  }
+
+  public consumeConfirmPress(): boolean {
+    if (this.padConfirmPresses === 0) return false;
+    this.padConfirmPresses--;
+    return true;
+  }
+
+  public consumeBackPress(): boolean {
+    if (this.padBackPresses === 0) return false;
+    this.padBackPresses--;
+    return true;
+  }
+
+  /** Deepest ANALOG position across a group, 0..1.  Falls back to the
+   *  boolean when a snapshot carries no values (older tests, odd drivers). */
+  private padGroupValue(snap: PadSnapshot, indices: readonly number[]): number {
+    let v = 0;
+    for (let i = 0; i < indices.length; i++) {
+      const idx = indices[i];
+      const analog = snap.values ? (snap.values[idx] ?? 0) : (snap.pressed[idx] ? 1 : 0);
+      if (analog > v) v = analog;
+    }
+    return v;
+  }
+
+  /**
+   * How far the trigger must be pulled to fire, 0..1 — THE SAME POINT the
+   * adaptive-trigger profile breaks at.
+   *
+   * This is the whole reason G13 (fire on press) and G12 (adaptive triggers)
+   * belong together.  A `weapon` profile resists and then GIVES WAY at `end`;
+   * a `resistance` profile puts up a wall at `start`.  Either way the trigger
+   * has a physical moment, and the gun should go off AT it — reading the
+   * browser's `pressed` flag instead fires the shot as the trigger leaves its
+   * rest position, before the clutch has done anything at all.
+   *
+   * Clamped to a band on purpose: this must ALSO feel right on a pad with no
+   * WebHID and therefore no physical cue, and it is the same number in both
+   * cases.  Branching on whether the HID link is open would make the sim
+   * depend on an optional desktop-only transport, which is the one thing that
+   * layer is not allowed to do.
+   */
+  private padFirePoint(): number {
+    const p = this.triggerProfile;
+    const T = INPUT_CONSTANTS.GAMEPAD;
+    // Each shape has one moment that reads as "now" to the hand, and it is
+    // not always the same end of the effect:
+    //   weapon / slope — the far end.  A click is felt when it GIVES WAY; a
+    //                    ramp's payoff is the top of the pull.
+    //   texture        — past the LAST notch: you push through the whole
+    //                    texture, and firing on the first one would leave two
+    //                    more notches after the shot with nothing to mean.
+    //   resistance /
+    //   vibration      — the near end.  Neither has a break, so the moment is
+    //                    where the wall or the buzz begins.
+    let raw: number;
+    switch (p.kind) {
+      case 'weapon':
+      case 'slope':
+        raw = p.end;
+        break;
+      case 'texture': {
+        const z = p.zones ?? [];
+        let last = -1;
+        for (let i = 0; i < z.length; i++) if (z[i] > 0) last = i;
+        raw = last >= 0 ? last / 9 : p.start;
+        break;
+      }
+      case 'resistance':
+      case 'vibration':
+        raw = p.start;
+        break;
+      default:
+        raw = T.TRIGGER_THRESHOLD;
+    }
+    return Math.max(T.FIRE_POINT_MIN, Math.min(T.FIRE_POINT_MAX, raw));
   }
 
   /** Rising edge across the whole group: true only on the frame the group
@@ -945,6 +1113,9 @@ export class InputSystem {
     }
 
     // 3. Buttons.
+    if (this.padGroupEdge(snap, G.BUTTONS.CONFIRM)) this.padConfirmPresses++;
+    if (this.padGroupEdge(snap, G.BUTTONS.BACK)) this.padBackPresses++;
+    this.tickMenuNav(snap);
     if (this.padGroupEdge(snap, G.BUTTONS.INTERACT)) this.padInteractPresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.CYCLE_WEAPON)) this.padCyclePresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.PAUSE)) this.padPausePresses++;
@@ -970,7 +1141,18 @@ export class InputSystem {
     // What the pad does NOT inherit is the tap's drag-cancel: a thumb on the
     // right stick moves the aim far past TAP_DISTANCE_LIMIT during any hold,
     // which would swallow every pad shot.
-    const fireHeld = fireEnabled && this.padAnyPressed(snap, G.BUTTONS.FIRE);
+    // 3b. THROTTLE (trigger-thrust scheme).  Read every frame regardless of
+    // scheme — the read is one array index, and gating it would mean the
+    // value is stale on the frame a scheme change makes it live.
+    const throttleRaw = this.padGroupValue(snap, G.BUTTONS.THROTTLE);
+    this.padThrottle = throttleRaw < G.THROTTLE_DEADZONE ? 0
+      : (throttleRaw - G.THROTTLE_DEADZONE) / (1 - G.THROTTLE_DEADZONE);
+
+    // ANALOG, not the boolean: `pressed` goes true almost as soon as a
+    // DualSense trigger leaves rest, so reading it fires the gun before the
+    // clutch has resisted anything.  A digital face button reports 1, which
+    // clears any threshold, so it is unaffected.
+    const fireHeld = fireEnabled && this.padGroupValue(snap, G.BUTTONS.FIRE) >= this.padFirePoint();
     if (fireHeld && !this.padFireDown) {
       this.padFireDown = true;
       this.padFireStart = performance.now();
@@ -1053,21 +1235,29 @@ export class InputSystem {
     // `value` against TRIGGER_THRESHOLD rather than `pressed`, which some
     // drivers only set at full travel.
     const pressed: boolean[] = this.padPressedBuf;
+    const values: number[] = this.padValuesBuf;
     const btns = pad.buttons;
     for (let i = 0; i < btns.length; i++) {
       const b = btns[i];
       pressed[i] = b.value > INPUT_CONSTANTS.GAMEPAD.TRIGGER_THRESHOLD || b.pressed;
+      // A digital button with no analogue reading at all is promoted to 1;
+      // anything that reports real travel keeps it.  Both DualSense triggers
+      // report travel, so they are never promoted.
+      values[i] = b.value > 0 ? b.value : (b.pressed ? 1 : 0);
     }
     if (pressed.length > btns.length) pressed.length = btns.length;
+    if (values.length > btns.length) values.length = btns.length;
 
     this.padSnapshot.axes = pad.axes;
     this.padSnapshot.pressed = pressed;
+    this.padSnapshot.values = values;
     this.applyPadSnapshot(this.padSnapshot, fireEnabled);
   }
 
   /** Reused across frames — see the refill idiom, CLAUDE.md §8. */
   private padPressedBuf: boolean[] = [];
-  private padSnapshot: { axes: readonly number[]; pressed: readonly boolean[] } =
+  private padValuesBuf: number[] = [];
+  private padSnapshot: { axes: readonly number[]; pressed: readonly boolean[]; values?: readonly number[] } =
     { axes: [], pressed: [] };
 
   /** True while a pad is adopted. */
@@ -1138,6 +1328,7 @@ export class InputSystem {
     if (this.padIndex === null) return '—';
     return `L ${this.padMove.x.toFixed(2)},${this.padMove.y.toFixed(2)}` +
            ` A ${this.padAim.x.toFixed(2)},${this.padAim.y.toFixed(2)}` +
+           (this.rules.triggerThrust ? ` T ${this.padThrottle.toFixed(2)}` : '') +
            (this.padFireDown ? ' FIRE' : '');
   }
 
@@ -1169,7 +1360,24 @@ export class InputSystem {
     //    is analogue like the pointer branch (magnitude IS throttle) but,
     //    like the keyboard, it does not require a held gesture — so it must
     //    be consulted before the pointer, whose branch is gated on mouseDown.
-    if (this.padMove.x !== 0 || this.padMove.y !== 0) {
+    //
+    //    Under `gamepad-thrust` the stick's MAGNITUDE is discarded and the
+    //    left trigger supplies it instead: the stick says where, the throttle
+    //    says how hard.  That is why this is a scheme and not a toggle — the
+    //    two readings of a stick deflection cannot both be live.
+    if (this.rules.triggerThrust) {
+      const mag = Math.sqrt(this.padMove.x * this.padMove.x + this.padMove.y * this.padMove.y);
+      if (mag > 0 && this.padThrottle > 0) {
+        return {
+          x: (this.padMove.x / mag) * this.padThrottle,
+          y: (this.padMove.y / mag) * this.padThrottle,
+        };
+      }
+      // A throttle with no heading has nothing to push against; a heading
+      // with no throttle is aiming, not flying.  Either way: no thrust.  The
+      // pointer branch below is still reachable, so touch keeps working.
+      if (mag > 0 || this.padThrottle > 0) return { x: 0, y: 0 };
+    } else if (this.padMove.x !== 0 || this.padMove.y !== 0) {
       return { x: this.padMove.x, y: this.padMove.y };
     }
 

@@ -5,6 +5,7 @@ import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
+import { installMenuNav, pickNext } from './components/menuNav';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -58,6 +59,10 @@ const App: React.FC = () => {
     // test vector, so a suite can pin them without hardware.  Nothing in the
     // game reads this.
     (window as any).__omniHid = { crc32, buildTriggerData, buildRumbleData, buildOutputReport };
+    // Debug handle #4: the menu driver's geometric step rule, so a suite can
+    // pin it against a synthetic layout instead of against whatever the menu
+    // happens to contain this week.
+    (window as any).__omniMenuNav = { pickNext };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -95,9 +100,21 @@ const App: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
 
+    // Gamepad menu navigation (G15).  Installed here rather than inside
+    // UIOverlay because it drives DOM FOCUS, not React state: it must not be
+    // torn down and rebuilt every time the HUD re-renders, which is every
+    // stats push.
+    const uninstallNav = installMenuNav({
+      steps: () => engine.input.consumeNavSteps(),
+      confirm: () => engine.input.consumeConfirmPress(),
+      back: () => engine.input.consumeBackPress(),
+      onBack: () => engine.menuBack(),
+    });
+
     // Cleanup
     return () => {
       engine.stop();
+      uninstallNav();
       window.removeEventListener('resize', handleResize);
     };
   }, []);

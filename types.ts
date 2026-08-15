@@ -1837,7 +1837,11 @@ export type ControlScheme =
   | 'joystick-left'   // stick under the left thumb, fire button under the right
   | 'joystick-right'  // mirrored, for a left-handed grip
   | 'keyboard'
-  | 'gamepad';
+  | 'gamepad'
+  /** Controller with the LEFT TRIGGER as an analogue throttle; the left
+   *  stick steers only.  Its own scheme rather than a toggle because it
+   *  changes what a stick deflection MEANS. */
+  | 'gamepad-thrust';
 
 export interface PlayerHUDMessage {
   id: string;
