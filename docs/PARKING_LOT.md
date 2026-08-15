@@ -5,6 +5,75 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Controller schemes — refinement pass (parked 2026-08-15)
+
+Both pad schemes are SHIPPED AND UNTUNED. The wire format is settled
+(`zones`, confirmed on hardware) and the plumbing is covered by tests, but
+every judgement call below was made without a pad in hand and none of it has
+been felt. Parked deliberately: these are looking-and-feeling questions, and
+guessing at them from here is how G12 shipped three bugs.
+
+### PS5 / full-pad scheme (`gamepad`)
+
+The seven adaptive-trigger profiles in `WEAPON_TRIGGERS` plus the two
+state-driven ones (`chargeTrigger`, `THRUST_TRIGGER`) are authored, not
+tuned. Open:
+
+- **Is the Blaster's rattle better than a click?** It fires 7x/s, so a click
+  is fatigue — but a low-frequency `vibration` may just read as mush. This is
+  the single most likely wrong call in the table.
+- **Do Burst's three notches read as three?** `texture` quantises to ten
+  travel zones; three notches inside one pull may blur into one texture.
+- **Is the Cannon's ramp a deep pull or just heavy?** And does Homing's
+  shallower ramp feel distinct from it, or are two `slope` guns one gun?
+- **Do the state-driven pair land?** Does the charge wall growing under the
+  finger read as CHARGING, and does the thrust trigger stiffening near the
+  cap read as SPEED? Both are quantised to five steps — possibly too coarse
+  to feel as a ramp, possibly too fine to be worth the HID writes.
+- **Fire point.** It tracks each profile's break, clamped to 0.25–0.75. Are
+  the clamps in the right place, and does a shape with no break (`resistance`,
+  `vibration`) firing at its START feel right, or should it also fire deep?
+
+Every number is in `constants.ts`; the shapes are in
+`engine/systems/DualSenseHID.ts`. The `simple` encoding stays on the DBG
+cycle in case a firmware disagrees.
+
+### Minimal-pad scheme (`gamepad-thrust`)
+
+Built for cheap clip-on Bluetooth pads: EITHER stick steers and aims (larger
+deflection wins), EITHER trigger throttles, and the gun is therefore on the
+FACE button — if either trigger may be the throttle, neither can be the gun.
+Open:
+
+- **Does the premise hold?** Stick-for-heading + trigger-for-throttle versus
+  the stick doing both. The whole scheme rests on this and it may simply feel
+  worse.
+- **Both sticks doing the same job** — forgiving, or sloppy? On a full pad
+  the right stick now flies rather than aims, which is a real change in what
+  a DualSense feels like under this scheme.
+- **Losing R2-as-gun on a full pad.** Plain `gamepad` is the escape hatch,
+  but if the trade annoys, the alternative is a third scheme (left trigger
+  throttles, right trigger fires) — which is more schemes for one axis of
+  difference, and worth resisting unless the feel demands it.
+- **Aim-where-you-fly.** Correct for a one-stick pad, but on a two-stick pad
+  it discards independent aim entirely. Possibly the scheme should use the
+  second stick for aim WHEN it is present — except "present" is not
+  detectable (see below), so it would have to be inferred from use.
+- **No device detection is possible.** The Gamepad API reports a fixed 17
+  buttons under the standard mapping whether or not the hardware has them, so
+  "does this pad have an L2" is unanswerable. Anything adaptive here has to
+  be inferred from what the player actually moves, which is a design in its
+  own right.
+
+### Related, already parked
+
+The one-stick/two-button scheme above (its own entry) is the next step past
+`gamepad-thrust` — same motivation, fewer controls still. If the minimal
+scheme's premise holds, that entry gets easier; if it does not, both should
+be reconsidered together.
+
+---
+
 ## Minimal Bluetooth control style — one stick, two buttons (2026-08-15)
 
 A sixth control scheme for the smallest pads: **one analogue stick and two

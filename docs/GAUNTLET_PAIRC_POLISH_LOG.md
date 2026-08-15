@@ -1677,26 +1677,14 @@ push, opens on an iPhone) is the fastest way to run these:
   drone (there is a minimum gap and a stronger-only interrupt rule, but they
   are guesses).
 
-- **HARDWARE CHECK — the trigger FEEL, now that the wire is settled (G14).**
-  `zones` confirmed; the transport is proven. What is unverified is the
-  AUTHORING: seven profiles across five shapes, none of which has been felt.
-  Specifically: is the Blaster's rattle better than a click, or is it mush?
-  Do Burst's three notches read as three? Is the Cannon's ramp a satisfying
-  deep pull or just heavy? And the two state-driven ones — does the charge
-  wall growing under the finger read as charging, and does the thrust trigger
-  stiffening near top speed read as speed? Every number is in
-  `WEAPON_TRIGGERS` / `chargeTrigger` / `THRUST_TRIGGER`.
-- **HARDWARE CHECK — trigger thrust (G15/G16).** Pick *Controller (trigger
-  thrust)*. Does flying with a stick for heading and a trigger for throttle
-  beat the stick doing both? It is the scheme's whole premise and it may
-  simply feel worse. Also worth checking now that EITHER stick works: does
-  having both sticks do the same job read as forgiving, or as sloppy? And on
-  a full DualSense, does losing R2-as-gun (it is a throttle here) annoy —
-  the plain *Controller* scheme is the escape hatch if so.
-- **HARDWARE CHECK — menu navigation (G15).** D-pad through the pause menu,
-  the station panels and the hex flowers. The geometric rule is pinned by a
-  test against a synthetic grid, but whether it FEELS right on the real hex
-  honeycomb — where the rows are offset — is a looking question.
+- **PARKED — controller-scheme refinement (user call, 2026-08-15).** The
+  trigger-feel questions (are the seven profiles well authored? do the two
+  state-driven ones land?) and the minimal-pad questions (does
+  stick-plus-trigger beat the stick doing both? is losing R2-as-gun a
+  problem?) are moved to `docs/PARKING_LOT.md` — "Controller schemes —
+  refinement pass". Both schemes are shipped, tested and untuned; the
+  remaining work is looking-and-feeling, not building, and the user has
+  called it good for now.
 - **SUPERSEDED — the encoding question (G12b).** Two certain bugs are fixed (trigger blocks were one byte late; the
   Bluetooth report was 24 bytes short, so it was being dropped outright).
   What remains is a genuine fork nothing here can resolve. Do this in order:
