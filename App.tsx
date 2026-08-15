@@ -4,6 +4,7 @@ import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
 import UIOverlay from './components/UIOverlay';
+import { crc32, buildTriggerData, buildOutputReport, TRIGGER_MODE } from './engine/systems/DualSenseHID';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -48,6 +49,15 @@ const App: React.FC = () => {
     // too: it is what the headless smoke scripts drive, and it costs one
     // assignment.  Read/poke at your own risk — nothing in the game reads it.
     (window as any).__omniEngine = engine;
+
+    // Debug handle #3, and the one with the strongest case: the DualSense
+    // output-report builders are the only code in the input layer that can be
+    // WRONG IN A WAY NOTHING REPORTS — a pad silently discards a report with
+    // a bad CRC or a bad byte layout, so "no trigger resistance" and "no pad
+    // connected" look identical.  They are pure, and CRC-32 has a published
+    // test vector, so a suite can pin them without hardware.  Nothing in the
+    // game reads this.
+    (window as any).__omniHid = { crc32, buildTriggerData, buildOutputReport, TRIGGER_MODE };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -249,6 +259,14 @@ const App: React.FC = () => {
 
   const handleSetControlScheme = (scheme: ControlScheme) => {
       if (engineRef.current) engineRef.current.setControlScheme(scheme);
+  };
+
+  const handleToggleAdaptiveTriggers = () => {
+      // Fire-and-forget: the outcome arrives on the next EngineStats push
+      // (`adaptiveTriggersConnected`), so there is no result to hold here, and
+      // a cancelled device picker is a rejected-then-swallowed promise rather
+      // than an error state to render.
+      if (engineRef.current) void engineRef.current.toggleAdaptiveTriggers();
   };
 
   const handleToggleRepelPush = () => {
@@ -541,6 +559,7 @@ const App: React.FC = () => {
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
+        onToggleAdaptiveTriggers={handleToggleAdaptiveTriggers}
         onToggleRepelPush={handleToggleRepelPush}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}

@@ -2,6 +2,7 @@
 
 import { Vector2, JoystickHUDState, FireButtonHUDState, ControlScheme, RumbleKind } from '../../types';
 import { INPUT_CONSTANTS, CONTROL_SCHEME_RULES } from '../../constants';
+import { DualSenseHID, TriggerEffect, TRIGGER_OFF } from './DualSenseHID';
 
 /** One frame of pad state, reduced to what the mapping layer cares about.
  *  `applyPadSnapshot` takes this rather than a live `Gamepad` so the whole
@@ -371,6 +372,71 @@ export class InputSystem {
   /** Set once a `playEffect` call has been rejected or thrown, so an
    *  unsupported browser is asked exactly once instead of every impact. */
   private rumbleUnsupported: boolean = false;
+
+  // ── Adaptive triggers (DualSense over WebHID) ─────────────────────────
+  // A SECOND, OPTIONAL transport to the same pad, and deliberately the only
+  // thing in the input layer that is allowed to be platform-specific.  It is
+  // output-only and opt-in, it never becomes a source of input, and every
+  // method below is a no-op until the player has connected a pad through the
+  // browser's device picker — so touch, keyboard and the Gamepad API behave
+  // identically on a platform where WebHID does not exist (every mobile
+  // browser, and Safari).  See engine/systems/DualSenseHID.ts.
+  private hid: DualSenseHID = new DualSenseHID();
+  /** The profile currently pushed to the pad, so the per-frame sync can
+   *  compare before touching an async path at all. */
+  private triggerProfile: TriggerEffect = TRIGGER_OFF;
+
+  /** Is the adaptive-trigger path even reachable in this browser?  The UI
+   *  uses this to decide whether to OFFER the control, since a button that
+   *  can only ever fail is worse than no button. */
+  public adaptiveTriggersSupported(): boolean {
+    return DualSenseHID.isSupported();
+  }
+
+  public adaptiveTriggersConnected(): boolean {
+    return this.hid.isConnected();
+  }
+
+  /** Open a pad.  MUST be called from a user gesture (the browser enforces
+   *  it), which is why this is a UI callback and not something the engine
+   *  attempts on its own. */
+  public async connectAdaptiveTriggers(): Promise<boolean> {
+    const ok = await this.hid.connect();
+    if (ok) {
+      // Push the current profile immediately, so connecting mid-flight is
+      // felt at once rather than at the next weapon change.
+      this.hid.applyTriggers(this.triggerProfile, TRIGGER_OFF, true);
+    }
+    return ok;
+  }
+
+  /** Close the pad, releasing the clutch on the way out. */
+  public async disconnectAdaptiveTriggers(): Promise<void> {
+    await this.hid.disconnect();
+  }
+
+  /**
+   * Set the right trigger's feel.  Called every frame by the engine with the
+   * profile for what the player is currently holding; the redundant-write
+   * check lives inside `DualSenseHID.applyTriggers`, so an unchanged profile
+   * costs one struct compare and creates no promise.
+   *
+   * The left trigger is always released — the game binds nothing to it, and a
+   * clutch on a control that does nothing is just a stiff trigger.
+   */
+  public setTriggerProfile(profile: TriggerEffect): void {
+    this.triggerProfile = profile;
+    if (!this.hid.isConnected()) return;
+    void this.hid.applyTriggers(profile, TRIGGER_OFF);
+  }
+
+  /** DBG readout: whether the WebHID path is unsupported, idle, or live —
+   *  and, when live, the head of the last report actually sent, because a
+   *  wrong byte layout is otherwise indistinguishable from a dead pad. */
+  public adaptiveTriggerDebugInfo(): string {
+    const info = this.hid.debugInfo();
+    return this.hid.isConnected() ? `${info} · ${this.hid.lastReportHex()}` : info;
+  }
 
   /**
    * Map a SCREEN-SHAKE amount onto a dual-rumble effect, or null if this one
@@ -1189,5 +1255,9 @@ export class InputSystem {
 
     window.removeEventListener('gamepadconnected', this.handleGamepadConnected);
     window.removeEventListener('gamepaddisconnected', this.handleGamepadDisconnected);
+
+    // A pad left holding a stiff trigger stays stiff in whatever the player
+    // opens next — the clutch is physical state, not page state.
+    void this.hid.disconnect();
   }
 }

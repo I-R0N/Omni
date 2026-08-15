@@ -85,6 +85,7 @@ interface UIOverlayProps {
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
+  onToggleAdaptiveTriggers?: () => void;
   onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -250,6 +251,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleRockPalette,
   onToggleRumble,
   onSetControlScheme,
+  onToggleAdaptiveTriggers,
   onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -970,6 +972,48 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   };
 
   /**
+   * DualSense adaptive triggers (WebHID) — an OPT-IN extra, rendered only
+   * where it can work.
+   *
+   * Three deliberate choices, all of them about not letting a desktop-only
+   * enhancement leak into the platforms that cannot have it:
+   *
+   *  - It renders NOTHING when WebHID is absent (every mobile browser, and
+   *    Safari).  A greyed-out row explaining an unavailable feature is worse
+   *    than silence: it makes the pause menu longer on exactly the device
+   *    where screen space is scarcest, to say "no".
+   *  - It sits UNDER the scheme dropdown, not in it.  It is not a control
+   *    scheme — the pad plays identically without it — so making it a
+   *    sixth option would imply a choice between it and something else.
+   *  - The button is a real user gesture, because `requestDevice` requires
+   *    one; nothing here can be triggered by the game.
+   */
+  const renderAdaptiveTriggers = () => {
+    if (!stats.adaptiveTriggersSupported) return null;
+    const on = !!stats.adaptiveTriggersConnected;
+    return (
+      <div className="w-full flex flex-col gap-1">
+        <button
+          data-testid="adaptive-triggers-toggle"
+          onClick={() => onToggleAdaptiveTriggers && onToggleAdaptiveTriggers()}
+          className={`pointer-events-auto cursor-pointer w-full px-2 py-2 rounded-lg border text-xs font-bold transition-all ${
+            on
+              ? 'bg-amber-600 border-amber-400 text-white'
+              : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-400 hover:text-white'
+          }`}
+        >
+          {on ? 'Adaptive Triggers — ON' : 'Connect DualSense Triggers'}
+        </button>
+        <span className="text-slate-500 text-[10px] leading-tight">
+          {on
+            ? 'The right trigger takes on each weapon’s own resistance.'
+            : 'Optional, desktop only. Adds per-weapon trigger resistance on a PS5 pad; everything else works without it.'}
+        </span>
+      </div>
+    );
+  };
+
+  /**
    * Controls & basics (Pair C, c1).
    *
    * Shared verbatim by the main menu and the pause menu — same widget in both
@@ -1195,6 +1239,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('  ↳ rumble', stats.rumbleInfo ?? '—',
                   stats.rumbleInfo === 'ready' || stats.rumbleInfo === 'playing'
                     ? 'text-emerald-300' : 'text-slate-400')}
+                {/* Adaptive triggers cannot be checked without hardware AND a
+                    byte layout that no browser validates — the pad silently
+                    drops a malformed report — so the row shows the head of
+                    what was actually sent, not just a connected flag. */}
+                {statRow('  ↳ triggers', stats.adaptiveTriggerInfo ?? '—',
+                  stats.adaptiveTriggersConnected ? 'text-emerald-300' : 'text-slate-400')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
@@ -2364,6 +2414,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
               <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Controls</h3>
               {renderSchemeDropdown()}
+              {renderAdaptiveTriggers()}
             </div>
 
             {/* Controls & basics — the same widget the main menu shows, so

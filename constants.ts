@@ -7,6 +7,10 @@ import {
   PerMapVariantSpawn,
 } from './engine/systems/ShardSystem.types';
 import { ASSETS } from './assets';
+// The trigger-effect vocabulary is the HID protocol's own — wire values, not
+// game config — so it lives with the transport.  Safe direction: DualSenseHID
+// imports nothing, so this cannot cycle.
+import { TRIGGER_MODE, TriggerEffect } from './engine/systems/DualSenseHID';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -2847,6 +2851,48 @@ export const WEAPON_LIST = [
 
 // (WEAPON_SLOT_LABELS deleted with the 8-cell ammo strip — the 2-slot
 // loadout HUD is wide enough to render full weapon names.)
+
+// ── Adaptive-trigger profiles (DualSense, WebHID) ─────────────────────────
+// What the RIGHT trigger feels like per equipped weapon.  This is the one
+// piece of hardware feedback the Gamepad API cannot express at all — rumble
+// says "something happened", a trigger clutch says "this is what you are
+// holding" — so the table is written to make the guns distinguishable BY
+// FEEL rather than to make each one maximally dramatic.
+//
+// Two modes carry all seven:
+//   WEAPON     — resistance from `start` that GIVES WAY at `end`.  A click.
+//                Where the break sits is the gun's commitment: the Blaster
+//                breaks almost immediately, the Cannon makes you push.
+//   RESISTANCE — constant push from `start`, no break.  The two sustained
+//                weapons (Laser, Lightning), which are held rather than
+//                clicked, so a per-shot click would fight the cadence.
+//
+// The table is DESKTOP-CHROMIUM-ONLY in effect (see engine/systems/
+// DualSenseHID.ts) and inert everywhere else; nothing in the sim reads it.
+export const WEAPON_TRIGGERS: Record<WeaponType, TriggerEffect> = {
+  // 7 shots/s.  A stiff click 7×/s is fatigue, not feedback — so the
+  // lightest force in the table and the earliest break in it.
+  [WeaponType.BLASTER]:   { mode: TRIGGER_MODE.WEAPON,     start: 30,  end: 50,  force: 90 },
+  // Three-round burst: a firmer, slightly later click, one per burst.
+  [WeaponType.BURST]:     { mode: TRIGGER_MODE.WEAPON,     start: 40,  end: 70,  force: 140 },
+  // 1.5 shots/s slug.  Commits per shot, and the trigger should say so.
+  [WeaponType.SHOTGUN]:   { mode: TRIGGER_MODE.WEAPON,     start: 60,  end: 110, force: 200 },
+  // Held beam — constant push, no break.
+  [WeaponType.BOUNCER]:   { mode: TRIGGER_MODE.RESISTANCE, start: 40,  end: 0,   force: 110 },
+  // Held chain — heavier than the beam, still no break.
+  [WeaponType.LIGHTNING]: { mode: TRIGGER_MODE.RESISTANCE, start: 50,  end: 0,   force: 150 },
+  // Lock-and-release: firm to reach, then it lets go early.
+  [WeaponType.HOMING]:    { mode: TRIGGER_MODE.WEAPON,     start: 55,  end: 75,  force: 160 },
+  // Artillery.  The deepest, heaviest pull in the game.
+  [WeaponType.CANNON]:    { mode: TRIGGER_MODE.WEAPON,     start: 80,  end: 150, force: 255 },
+};
+
+// Held CHARGE (Overcharge).  Overrides the weapon profile while a charged
+// shot is winding up: a hard constant wall from the very top of the travel,
+// so holding the trigger down is a physical act and the release reads as a
+// release.  No break — the break would be indistinguishable from firing.
+export const CHARGE_TRIGGER: TriggerEffect =
+  { mode: TRIGGER_MODE.RESISTANCE, start: 20, end: 0, force: 210 };
 
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.

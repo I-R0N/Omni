@@ -1677,6 +1677,14 @@ export interface EngineStats {
    *  panel has to separate the reasons rather than leave silence to cover
    *  all of them. */
   rumbleInfo?: string;
+  /** Adaptive triggers (DualSense over WebHID).  `supported` is false on
+   *  every mobile browser and on Safari, and the UI uses it to decide whether
+   *  to OFFER the control at all — a button that can only ever fail is worse
+   *  than no button.  `info` is the DBG line: unsupported / not connected /
+   *  the transport plus the head of the last report sent. */
+  adaptiveTriggersSupported?: boolean;
+  adaptiveTriggersConnected?: boolean;
+  adaptiveTriggerInfo?: string;
   /** The active control scheme (menu selection).  Drives the menu's own
    *  selector, the help panel's highlight, and the two touch HUD widgets. */
   controlScheme?: ControlScheme;

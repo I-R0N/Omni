@@ -32,6 +32,7 @@ tuning (step 6).
 | G9 | Control-scheme selection (user directive, post-queue) | **done** |
 | G10 | Stick-driven aim, handedness, pause dropdown (user directive) | **done** |
 | G11 | Gamepad rumble + two pad legibility fixes (user directive) | **done** |
+| G12 | DualSense adaptive triggers over WebHID (user directive) | **done** |
 
 ---
 
@@ -754,6 +755,84 @@ must not depend on it.
 
 ---
 
+### G12 — Adaptive triggers over WebHID (user directive, 2026-08-15)
+
+The user asked for the WebHID path explicitly, with one condition attached:
+*"this should not hinder mobile functionality at all, whether using a
+controller plus touch or any other control method."* That condition is the
+design, not a caveat on it — every decision below falls out of it.
+
+**DECISION G12-a — quarantine it in its own module, importing nothing.**
+`engine/systems/DualSenseHID.ts` holds the CRC-32, the report builders and
+the device wrapper, and depends on no other file in the repo. Two things fall
+out: `constants.ts` can take the trigger-mode vocabulary from it without a
+cycle (those mode numbers are WIRE VALUES, not game config, so they belong
+with the transport), and the whole platform-specific surface is one file
+somebody can read end to end.
+
+*Alternative rejected:* folding it into `InputSystem`. That file is the one
+place where "three input devices, one set of inputs" is enforced; putting a
+desktop-Chromium-only transport inside it invites the next change to branch
+on platform in the middle of the shared path.
+
+**DECISION G12-b — output only. Input is ALWAYS the Gamepad API.**
+This module never reads the pad. Besides keeping the input path single, it
+sidesteps a known hazard: opening a DualSense over Bluetooth can flip its
+input-report mode and disturb what the Gamepad API sees. The failure mode
+that would have caused — connect for triggers, lose your sticks — is exactly
+the "hinders other control methods" outcome the user ruled out.
+
+**DECISION G12-c — nothing in the sim may branch on it, so it is not a
+control scheme.** The pad plays identically with the link open or closed;
+only the FEEL of the right trigger changes. So it is a button under the
+scheme dropdown rather than a sixth scheme (a sixth scheme would imply a
+choice between it and something else), and `EngineStats.adaptiveTriggers-
+Supported` gates whether the control renders AT ALL.
+
+*Alternative rejected:* rendering it disabled-with-explanation on
+unsupported browsers. That makes the pause menu longer on precisely the
+device where screen space is scarcest, in order to say "no".
+
+**DECISION G12-d — the profile syncs from what the player is HOLDING, beside
+the charge ring.** Not from a weapon-change event: "charging" is a state no
+such event fires for, and it is the single best use of a clutch. Precedence
+is no-gun-or-EMP'd → released, charging → a hard wall, else the gun's own
+profile. Releasing the trigger under an EMP is the disable made physical, for
+free. Cost when nothing changed is one struct compare — the redundant-write
+check lives inside `applyTriggers`, so no promise is created.
+
+**DECISION G12-e — the byte offsets are UNVERIFIED, and the design says so
+out loud.** They come from public reverse-engineering; there is no pad in
+this environment or in CI. What makes that acceptable rather than reckless is
+that a pad **silently discards** a report with a bad CRC or a bad layout — so
+"wrong offsets" and "no pad" feel identical, and guessing would be
+unfalsifiable. Three mitigations: every offset lives in ONE `REPORT` table,
+the DBG row shows the head of the report ACTUALLY SENT, and the pure builders
+are exposed on `window.__omniHid` so the suite can pin CRC-32 against its
+published vector (`0xCBF43926`) and pin the report SHAPE — which bytes move,
+and that no others do (a stray byte in this report is another feature
+entirely: lightbar, mic LED, volume).
+
+**Profiles** (`WEAPON_TRIGGERS`): written to make the guns distinguishable by
+feel, not to make each maximally dramatic. The Blaster fires 7×/s, so it gets
+the lightest force and earliest break in the table — a stiff click 7×/s is
+fatigue, not feedback. Laser and Lightning are HELD, so they take constant
+resistance with no break, because a per-shot click would fight the cadence.
+The Cannon is the deepest pull in the game.
+
+**Tests: +6.** CRC-32 against the published vector, the weapon-mode byte
+layout (including that nothing outside the two effect blocks moves),
+resistance mode plus the degenerate-break guard, USB-bare vs Bluetooth
+framing with an independently recomputed CRC, the sync's three cases, and —
+the one that guards the user's actual condition — that an unsupported browser
+offers no control and reports why. Headless Chromium has no `navigator.hid`,
+which is the same shape every mobile browser and Safari present, so the
+DEFAULT test state is the mobile state.
+
+**Gates:** typecheck, build, 96/96 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
@@ -1116,6 +1195,23 @@ Consolidated as they are made; each one names the alternative it beat.
   (four permanent arrows on the hub's edge competing with threats), and
   direction 3, a waypoint navigation layer (a new HUD language in the session
   that spent G4/G5 reducing them; it belongs with the persistence work).
+- **G12-a** — WebHID lives in its own module that imports nothing. Beat:
+  folding it into `InputSystem`, i.e. a platform branch inside the one file
+  that enforces "three devices, one set of inputs".
+- **G12-b** — output only; input stays the Gamepad API. Beat: reading the pad
+  over HID too, which can flip a Bluetooth DualSense's input-report mode and
+  cost the player their sticks to gain trigger resistance.
+- **G12-c** — a button under the scheme dropdown, rendered only where WebHID
+  exists. Beat: a sixth control scheme (implies a trade-off that does not
+  exist), and a disabled row explaining itself (longer pause menu on the
+  device with the least room, to say "no").
+- **G12-d** — sync the profile from what is HELD, beside the charge ring.
+  Beat: a weapon-change hook, which cannot see "charging" — the state a
+  clutch is best at.
+- **G12-e** — pin CRC-32 and the report SHAPE via `window.__omniHid`, and put
+  the sent bytes in the DBG row. Beat: shipping unverifiable offsets with no
+  way to correct them, on hardware that answers a malformed report with
+  silence.
 
 ---
 
@@ -1223,14 +1319,25 @@ push, opens on an iPhone) is the fastest way to run these:
   drone (there is a minimum gap and a stronger-only interrupt rule, but they
   are guesses).
 
-- **OPTIONAL, NOT BUILT — WebHID for the DualSense's real haptics.** Adaptive
-  trigger resistance, the voice-coil haptics and the light bar are reachable
-  ONLY through raw HID output reports: `navigator.hid`, Chrome/Edge desktop
-  only, behind a one-time permission click, and on Bluetooth it needs the
-  CRC-checked 0x31 report that some firmware rejects (USB-C is reliable).
-  Since the user plays in Edge, this is genuinely available to them — as a
-  desktop-only enhancement layer on top of the portable `dual-rumble` path,
-  never as a replacement for it. Say the word and it is its own milestone.
+- **HARDWARE CHECK — adaptive triggers (G12). THE BYTE LAYOUT IS UNVERIFIED
+  AND THIS IS THE ONLY WAY TO FIND OUT.** Built and shipped; the CRC and the
+  report shape are pinned by tests, but the OFFSETS inside the report come
+  from public reverse-engineering and no pad exists in this environment. A
+  DualSense silently discards a malformed report, so a wrong offset and a
+  disconnected pad feel exactly the same. To check: desktop Edge or Chrome,
+  pad connected (**USB-C is the reliable transport**; Bluetooth needs the
+  CRC-checked 0x31 report that some firmware rejects), pause ▸ Controls ▸
+  *Connect DualSense Triggers*, pick the pad in the browser dialog. Then:
+  (a) does the right trigger stiffen at all? (b) do the guns feel DIFFERENT
+  from each other — Blaster light and early, Cannon deep and heavy, Laser and
+  Lightning a constant push with no click? (c) does holding a charged shot
+  put up a wall, and does an EMP make the trigger go slack? If (a) fails,
+  read pause ▸ Debug Menu ▸ `↳ triggers`: it shows the transport and the head
+  of the report actually sent, which is what a correction would be made
+  from — every offset is in one `REPORT` table in
+  `engine/systems/DualSenseHID.ts`.
+  **Not built, still available:** the voice-coil haptics and the light bar,
+  reachable through the same transport.
 
 - **OPEN QUESTION — should a held FIRE CONTROL auto-repeat?** Today none of
   them do: the pad trigger and the onscreen fire button both use the same

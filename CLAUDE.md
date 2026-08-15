@@ -53,7 +53,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           plus input / help / minimap / maps (step 5),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  74 tests
+                          anti-flake rules).  96 tests
 
 components/
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
@@ -136,6 +136,14 @@ engine/
                           pointer / fire queues the mouse feeds, so
                           nothing downstream knows which device is
                           driving (see §8)
+    DualSenseHID.ts       DualSense ADAPTIVE TRIGGERS over WebHID (G12) —
+                          the CRC-32, the output-report builders and the
+                          device wrapper.  Output-only, opt-in behind a
+                          user gesture, inert where WebHID is absent
+                          (every mobile browser, and Safari), and imports
+                          nothing, so `constants.ts` can take the
+                          trigger-mode vocabulary from it without a
+                          cycle.  See §8
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
     RenderSystem.ts       Canvas2D draw pass (~1580 lines).  After the 5f
@@ -1675,9 +1683,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   full-screen overlay on purpose.  Keep it accurate to what is BOUND: where
   the game has no binding (there is no keyboard weapon-cycle or pause key),
   the panel says nothing rather than inventing one.
-- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
-  `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so the headless
+- **`window.__omniEngine` / `window.__omniStats` / `window.__omniHid` are
+  debug handles.**
+  `App.tsx` assigns the live engine, the latest `EngineStats` payload, and the
+  pure DualSense output-report builders to `window`.  NOTHING in the game reads them — they exist so the headless
   Playwright suites in `tests/` can drive the real engine in a real browser
   (§7; the "without a test runner being added" rationale is superseded —
   roadmap 5b adopted one, and these handles are what it drives).  Two
@@ -1686,7 +1695,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   engine internals (`runTimeSec`, `waves.waveOffset`) and call private
   methods (`physics.resolveCollision`) straight off the handle.  That is
   intended, and is what lets a test measure damage arithmetic in situ
-  instead of reimplementing it.
+  instead of reimplementing it.  `__omniHid` is the same idea with a sharper
+  motive: those builders are the one place in the input layer that can be
+  wrong with NO symptom to read (a pad discards a malformed report in
+  silence), and they are pure with a published CRC test vector, so they are
+  pinnable without hardware.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk
@@ -1729,14 +1742,40 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     handles and the trigger — but ONLY when the actuator's `effects` list
     offers it; everywhere else it falls back to the handle thump.  Adaptive
     trigger RESISTANCE is a different thing again and is not reachable from
-    the Gamepad API at all (WebHID only).  Note `dual-rumble`
-    is the ONLY effect the Gamepad API exposes — the DualSense's adaptive
-    triggers, voice-coil haptics and light bar need raw HID reports (WebHID:
+    the Gamepad API at all — it is the WebHID path below.  Note `dual-rumble`
+    is the ONLY effect the Gamepad API exposes; the DualSense's voice-coil
+    haptics and light bar need raw HID reports (WebHID:
     desktop Chromium/Edge only, never Safari or mobile), which this
     deliberately does not do.  `playEffect` REJECTS on a browser that knows
     the method but not the effect, so the rejection is swallowed and the pad
     is asked exactly once — an unhandled rejection would fail every suite's
     clean-console assertion.
+  - **ADAPTIVE TRIGGERS are a SECOND, OPTIONAL transport to the same pad**
+    (`engine/systems/DualSenseHID.ts`, G12) — and the only platform-specific
+    thing in the input layer, deliberately quarantined behind four rules so it
+    cannot become one.  It is **output-only** (input is always the Gamepad
+    API, which also sidesteps the hazard that opening a DualSense over
+    Bluetooth can flip its input-report mode), **opt-in behind a user gesture**
+    (`navigator.hid.requestDevice` requires a click and shows a device
+    picker), **inert where unsupported** (`isSupported()` is false on every
+    mobile browser and on Safari, and every method no-ops with no device
+    open), and **nothing in the sim may branch on it** — the pad plays
+    identically without it, which is why it is not a control scheme and why
+    the UI control renders only where `EngineStats.adaptiveTriggersSupported`
+    is true.  `WEAPON_TRIGGERS` (per gun) and `CHARGE_TRIGGER` (while a
+    charged shot winds up) are the profile table; the sync sits beside the
+    charge-ring update in `updateGameLogic`, because what the trigger should
+    feel like is a function of what the player is holding RIGHT NOW and
+    "charging" fires no weapon-change event.  Precedence: no gun or EMP'd →
+    released (the disable made physical), charging → a hard wall, otherwise
+    the gun's own profile.  The byte offsets in `REPORT` come from public
+    reverse-engineering and are **UNVERIFIED** — there is no pad in CI, and a
+    pad silently DISCARDS a report with a bad CRC or layout, so a malformed
+    report and an absent pad feel identical.  Hence the two mitigations: the
+    offsets live in ONE table, and `window.__omniHid` exposes the pure
+    builders so `tests/input.spec.ts` can pin CRC-32 against its published
+    vector (`0xCBF43926`) plus the report SHAPE — which bytes move, and that
+    no others do.
   - **The pad is POLLED once per rendered frame**, from
     `GameEngine.pollGamepad` at the top of `loop` — above every freeze
     short-circuit, so the pause button works from inside the paused state.

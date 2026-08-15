@@ -1347,3 +1347,219 @@ test.describe('rumble — force feedback rides the screen shake', () => {
     watch.assertClean();
   });
 });
+
+/**
+ * ADAPTIVE TRIGGERS — the DualSense output report (WebHID).
+ *
+ * These tests deliberately stop at the page boundary: no browser in CI has a
+ * pad, and `navigator.hid` may not exist at all.  What they DO cover is the
+ * half that can be silently wrong on real hardware with no symptom to read —
+ * the pad discards a report with a bad CRC or a bad byte layout without
+ * complaint, so a malformed report and an absent pad are indistinguishable by
+ * feel.  The builders are pure, and CRC-32 has a published vector, so both
+ * are pinnable here.
+ *
+ * The BYTE OFFSETS themselves come from public reverse-engineering and cannot
+ * be verified without hardware — see engine/systems/DualSenseHID.ts.  These
+ * tests pin the SHAPE (which bytes move, and to what) so a corrected offset
+ * changes one table and one expectation rather than being unrecoverable.
+ */
+test.describe('adaptive triggers — the DualSense output report', () => {
+  test('CRC-32 matches the published check vector', async ({ page }) => {
+    const watch = await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const bytes = (s: string) => Array.from(s, c => c.charCodeAt(0));
+      return {
+        // The standard IEEE-802.3 check value.  This is what separates "a
+        // CRC" from "the CRC the pad expects" — a reflected/unreflected mixup
+        // produces a plausible-looking number that the pad rejects.
+        check: hid.crc32(bytes('123456789')),
+        empty: hid.crc32([]),
+      };
+    });
+
+    expect(r.check).toBe(0xcbf43926);
+    expect(r.empty).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('a weapon-mode effect writes mode, start, end and force — and nothing else', async ({ page }) => {
+    const watch = await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const d = Array.from(hid.buildTriggerData(
+        { mode: hid.TRIGGER_MODE.WEAPON, start: 80, end: 150, force: 255 },
+        { mode: hid.TRIGGER_MODE.OFF, start: 0, end: 0, force: 0 },
+      ) as Uint8Array);
+      return {
+        len: d.length,
+        flag0: d[0],
+        right: d.slice(11, 15),
+        left: d.slice(22, 26),
+        // Everything outside the two effect blocks and the flag bytes must
+        // stay zero: a stray byte in this report is another feature entirely
+        // (lightbar, mic LED, volume) fired by accident.
+        strayCount: d.filter((b, i) => b !== 0 && i !== 0 && !(i >= 11 && i < 22) && !(i >= 22 && i < 33)).length,
+      };
+    });
+
+    expect(r.len).toBe(47);
+    // Both trigger actuators enabled — the OFF effect is an instruction to
+    // release, so it still needs its enable bit set.
+    expect(r.flag0).toBe(0x04 | 0x08);
+    expect(r.right).toEqual([2, 80, 150, 255]);
+    expect(r.left).toEqual([0, 0, 0, 0]);
+    expect(r.strayCount).toBe(0);
+  });
+
+  test('resistance mode writes start and force, and end never inverts the click', async ({ page }) => {
+    await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const off = { mode: hid.TRIGGER_MODE.OFF, start: 0, end: 0, force: 0 };
+      const res = Array.from(hid.buildTriggerData(
+        { mode: hid.TRIGGER_MODE.RESISTANCE, start: 40, end: 0, force: 110 }, off) as Uint8Array);
+      // A weapon effect whose end is at or before its start has no break to
+      // give way at; the builder pushes end past start rather than emitting a
+      // degenerate effect the pad may interpret freely.
+      const degenerate = Array.from(hid.buildTriggerData(
+        { mode: hid.TRIGGER_MODE.WEAPON, start: 60, end: 60, force: 100 }, off) as Uint8Array);
+      return { res: res.slice(11, 15), degenerate: degenerate.slice(11, 15) };
+    });
+
+    // RESISTANCE takes two parameters, not three — byte 3 stays clear.
+    expect(r.res).toEqual([1, 40, 110, 0]);
+    expect(r.degenerate).toEqual([2, 60, 61, 100]);
+  });
+
+  test('USB sends the block bare; Bluetooth wraps it in a sequence tag and a CRC', async ({ page }) => {
+    await boot(page);
+
+    const r = await page.evaluate(() => {
+      const hid = (window as any).__omniHid;
+      const data = hid.buildTriggerData(
+        { mode: hid.TRIGGER_MODE.WEAPON, start: 30, end: 50, force: 90 },
+        { mode: hid.TRIGGER_MODE.OFF, start: 0, end: 0, force: 0 },
+      ) as Uint8Array;
+
+      const usb = hid.buildOutputReport(data, false, 0);
+      const bt = hid.buildOutputReport(data, true, 3);
+      const btBytes = Array.from(bt.bytes as Uint8Array);
+
+      // Recompute the CRC the way the pad does: over the 0xA2 seed byte, the
+      // report id, and the payload ahead of the trailing four bytes.
+      const crcInput = [0xa2, 0x31, btBytes[0], btBytes[1], ...Array.from(data as Uint8Array)];
+      const expected = hid.crc32(crcInput);
+      const at = btBytes.length - 4;
+      const trailer = (btBytes[at] | (btBytes[at + 1] << 8) | (btBytes[at + 2] << 16) | (btBytes[at + 3] << 24)) >>> 0;
+
+      return {
+        usbId: usb.reportId,
+        usbLen: (usb.bytes as Uint8Array).length,
+        usbBare: (usb.bytes as Uint8Array) === data,
+        btId: bt.reportId,
+        btLen: btBytes.length,
+        seqByte: btBytes[0],
+        tagByte: btBytes[1],
+        crcMatches: trailer === expected,
+      };
+    });
+
+    expect(r.usbId).toBe(0x02);
+    expect(r.usbLen).toBe(47);
+    expect(r.usbBare).toBe(true);
+
+    expect(r.btId).toBe(0x31);
+    // 2 framing bytes + the 47-byte block + a 4-byte CRC.
+    expect(r.btLen).toBe(53);
+    // The sequence counter lives in the HIGH nibble, so 3 reads as 0x30 — a
+    // low-nibble version is the kind of mistake the pad answers with silence.
+    expect(r.seqByte).toBe(0x30);
+    expect(r.tagByte).toBe(0x10);
+    expect(r.crcMatches).toBe(true);
+  });
+
+  test('the sync follows what the player is HOLDING — gun, charge, or nothing', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The profile is pushed unconditionally; whether it reaches a pad is the
+    // HID layer's business, so this asserts on what InputSystem was TOLD.
+    const r = await engine(page, (e: any) => {
+      const seen: any[] = [];
+      e.input.setTriggerProfile = (p: any) => { seen.push(p); };
+      const last = () => seen[seen.length - 1];
+
+      e.updateGameLogic(1 / 120);
+      const armed = last();
+
+      // EMP: the trigger goes slack, which is the disable made physical.
+      // Applied as a real status effect, not by poking the flag —
+      // `systemsDisabled` is DERIVED and recomputed from the effect list on
+      // every step, so a poked value is gone before the sync reads it.
+      e.debugApplyDisable();
+      e.updateGameLogic(1 / 120);
+      const disabled = last();
+      e.player.statusEffects = [];
+
+      // Weaponless flight is legal (the Blaster is removable) — nothing to
+      // fire, nothing to resist.
+      const weapon = e.player.currentWeapon;
+      e.player.currentWeapon = undefined;
+      e.updateGameLogic(1 / 120);
+      const weaponless = last();
+      e.player.currentWeapon = weapon;
+
+      return {
+        armedMode: armed.mode, armedForce: armed.force,
+        disabledMode: disabled.mode,
+        weaponlessMode: weaponless.mode,
+      };
+    });
+
+    // The starting Blaster: the lightest click in the table.
+    expect(r.armedMode).toBe(2);
+    expect(r.armedForce).toBe(90);
+    expect(r.disabledMode).toBe(0);
+    expect(r.weaponlessMode).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('an unsupported browser offers no control and reports why', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Headless Chromium exposes no `navigator.hid`, which is exactly the
+    // shape every mobile browser and Safari present — so the DEFAULT state
+    // here is the one that matters most: the enhancement is invisible and
+    // inert, and nothing else about the input layer has changed.
+    const r = await engine(page, (e: any) => ({
+      supported: e.input.adaptiveTriggersSupported(),
+      connected: e.input.adaptiveTriggersConnected(),
+      info: e.input.adaptiveTriggerDebugInfo(),
+    }));
+
+    expect(r.connected).toBe(false);
+    if (!r.supported) {
+      expect(r.info).toContain('unsupported');
+    } else {
+      // A browser that HAS WebHID still starts disconnected — nothing is
+      // opened without the player asking.
+      expect(r.info).toContain('not connected');
+    }
+
+    // The pause-menu control renders only where it can work.
+    await engine(page, (e: any) => e.pauseGame());
+    await expect(page.getByTestId('scheme-select')).toBeVisible();
+    await expect(page.getByTestId('adaptive-triggers-toggle'))
+      .toHaveCount(r.supported ? 1 : 0);
+
+    watch.assertClean();
+  });
+});
