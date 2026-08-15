@@ -35,7 +35,6 @@ import {
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
     cycleStarDensity, cycleStarSize, cycleStarBands, cycleStarRegion,
-    cycleStarMotion,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -580,16 +579,6 @@ export class DebugControls {
     cycleStarRegion();
   }
 
-  /** DBG: cycle star MOTION — 'smooth' (sub-pixel, default) vs 'crisp'
-   *  (snapped to whole device pixels).
-   *
-   *  A real trade, not a preference dressed up as one: a snapped 1-pixel star
-   *  is maximally sharp but can only move in whole-pixel steps, so it visibly
-   *  jitters at low ship speeds; a sub-pixel star moves continuously but is
-   *  antialiased, so it is softer.  Draw-time, so it flips instantly. */
-  cycleStarMotion() {
-    cycleStarMotion();
-  }
 
   /** DBG: cycle the SUBSTEP CAP (5 default / 3 / 2).
    *

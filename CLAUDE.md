@@ -1646,15 +1646,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   smaller window a denser sky — measured at 3.95× between a 390×844 phone
   and a 1440×900 desktop, which put 26.9% of the phone's pixels inside a
   star.  `tests/starfield.spec.ts` fails if the two disagree by >3%.
-  (2) **Stars are rasterized ONCE, at integer device coordinates, under the
-  IDENTITY transform.**  There is no intermediate canvas — a star's
+  (2) **Stars are rasterized ONCE, SUB-PIXEL, under the IDENTITY transform.**  There is no intermediate canvas — a star's
   position AND size are whole device pixels, so nothing can resample it.
-  Both halves matter: a 1×1 `fillRect` at a *fractional* origin is
-  antialiased into a 2×2 smear before any scaling happens, so snapping the
-  draw offset without snapping the star position fixes nothing.  Anything
-  that reintroduces a pre-rendered layer blitted at a fractional or
-  dpr-scaled offset reintroduces a browser-dependent look, because the
-  `drawImage` filter kernel is not specified.  `effectiveDpr()` is a
+  Positions are deliberately FRACTIONAL: a pixel-snapped star cannot move in
+  less than whole-pixel steps, which froze 99% of the field per frame at low
+  ship speed and read as jitter (three milestones were spent learning this —
+  S8/S9/S10).  Snapping was never load-bearing for correctness; the
+  cross-browser bug was the `drawImage` BLIT FILTER on the old pre-rendered
+  band canvases, and S4 deleted those.  What is left is `fillRect` coverage
+  antialiasing on an axis-aligned rect, which is analytic and consistent
+  across engines.  Anything that reintroduces a pre-rendered layer blitted at
+  a fractional or dpr-scaled offset brings the browser-dependence back,
+  because the `drawImage` filter kernel is not specified.  SIZES stay
+  integral — a fractional size softens edges without buying any smoothness.
+  Star generation is SEEDED per map (`starRand`), so a regeneration
+  reproduces the same sky; an unseeded field makes every DBG star cycle an
+  unfair A/B, which is how a knob that changes nothing about star count came
+  to look like it did.  `effectiveDpr()` is a
   GENERATION input here, not just a draw-time one, so `sceneDpr` is part of
   the rebuild guard — a render-scale cap change must regenerate the field.
   (3) **Star density varies by MAP REGION, and the field's wave vectors must

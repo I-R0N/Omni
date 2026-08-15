@@ -3,7 +3,7 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, getActiveStarRegion, getActiveStarMotion,
+  getActiveStarBands, getActiveStarRegion,
   STAR_REGION_FADE,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
@@ -86,10 +86,6 @@ export class BackgroundManager {
   /** Scroll accumulators, in DEVICE px.  Fractional — see `renderStars`. */
   private bandOffsetX: Float64Array = new Float64Array(0);
   private bandOffsetY: Float64Array = new Float64Array(0);
-  /** Per-frame integer draw offsets, derived from the accumulators above.
-   *  Preallocated and overwritten in place; never rebuilt per frame. */
-  private bandDrawX: Int32Array = new Int32Array(0);
-  private bandDrawY: Int32Array = new Int32Array(0);
   /** Star position within its band, in DEVICE px, always integral. */
   private starX: Int32Array = new Int32Array(0);
   private starY: Int32Array = new Int32Array(0);
@@ -136,6 +132,8 @@ export class BackgroundManager {
   // `setNebulaClusterCenters`, which GameEngine calls after loading
   // a map whose init recorded its cluster centers.
   private nebulaClusterCenters: Vector2[] | null = null;
+  /** Deterministic PRNG state for star generation — see `starRand`. */
+  private starSeed: number = 0;
   // Reusable output for applyLensing — avoids a heap allocation per puff
   private _lensedX: number = 0;
   private _lensedY: number = 0;
@@ -267,6 +265,34 @@ public setMapType(type: MapType) {
     }
   }
 
+  /** Star-field PRNG (mulberry32).  Deliberately NOT `Math.random`.
+   *
+   *  The field is regenerated whenever anything about generation changes — the
+   *  viewport, the pixel ratio, the density, the depth-layer count.  With an
+   *  unseeded source, every one of those produced a completely NEW random sky,
+   *  which made the DBG cycles almost impossible to judge: changing depth
+   *  reshuffled every star, so it LOOKED like the star count had changed even
+   *  though it was identical to within 0.03% (measured).  Knobs that exist to be
+   *  compared by looking have to hold everything else still.
+   *
+   *  Seeded per MAP, so different maps get different skies and the same map is
+   *  reproducible across a regeneration. */
+  private starRand(): number {
+    this.starSeed = (this.starSeed + 0x6D2B79F5) >>> 0;
+    let t = this.starSeed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /** Stable per-map seed, so the sky is this map's sky every time. */
+  private seedStarsFor(mapType: MapType): number {
+    const s = String(mapType);
+    let h = 0x9e3779b9;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+    return h >>> 0;
+  }
+
   /** Device-pixel size for a star whose designed size is `sizeCss` CSS px.
    *
    *  Always an INTEGER, and always at least 1, so the star fills whole device
@@ -325,6 +351,12 @@ public setMapType(type: MapType) {
         }
     }
 
+    // Seed the star PRNG for THIS map.  Everything below draws from it, so a
+    // regeneration (resize, ratio change, density or depth cycle) reproduces the
+    // same sky instead of rolling a new one — which is what makes the DBG knobs
+    // comparable by looking.
+    this.starSeed = this.seedStarsFor(this.mapType);
+
     // Realistic stellar colour distribution based on spectral class frequency.
     // Heavily weighted toward white/warm-white (most common), with a visible
     // minority of blue, orange and red stars for depth and variety.  The last
@@ -344,7 +376,7 @@ public setMapType(type: MapType) {
         '#f472b6',   // 11
     ];
     const starColorIdx = (): number => {
-        const r = Math.random();
+        const r = this.starRand();
         if (r < 0.50) return 0;
         if (r < 0.65) return 1;
         if (r < 0.74) return 2;
@@ -399,8 +431,6 @@ public setMapType(type: MapType) {
     this.bandSpeed = new Float64Array(TOTAL_BANDS);
     this.bandOffsetX = new Float64Array(TOTAL_BANDS);
     this.bandOffsetY = new Float64Array(TOTAL_BANDS);
-    this.bandDrawX = new Int32Array(TOTAL_BANDS);
-    this.bandDrawY = new Int32Array(TOTAL_BANDS);
     for (let b = 0; b < NUM_BANDS; b++) {
         const tMid = (b + 0.5) / NUM_BANDS;
         this.bandSpeed[b] = 0.02 + (tMid * tMid) * 2.0;
@@ -430,12 +460,12 @@ public setMapType(type: MapType) {
         gY[g].push(yDev);
         gS[g].push(this.starDevicePx(sizeCss, dpr));
         gB[g].push(band);
-        gT[g].push(band === MW_BAND ? -1 : Math.random());
+        gT[g].push(band === MW_BAND ? -1 : this.starRand());
     };
 
     // WHOLE DEVICE PIXELS, both position and size.
     //
-    // This used to be `fillRect(Math.random() * width, …, max(1, size), …)` in
+    // This used to be `fillRect(this.starRand() * width, …, max(1, size), …)` in
     // CSS space.  The rect was 1x1, but its ORIGIN was fractional, so Canvas2D
     // antialiased every star into a 2x2 block of partial-alpha pixels before
     // anything else touched it — measured at 93.8% of scanline runs being 2px
@@ -451,39 +481,39 @@ public setMapType(type: MapType) {
         // closest band (b=NUM_BANDS-1) brightest at 95%, linear between.
         const bandBrightness = 0.25 + tMid * 0.70;
         for (let i = 0; i < STARS_PER_BAND; i++) {
-            const t = (b + Math.random()) / NUM_BANDS;
+            const t = (b + this.starRand()) / NUM_BANDS;
             // Power-law size distribution: many tiny stars, fewer large ones.
             // Math.pow(r, 3) skews heavily toward small values so the field has
             // dense background haze but visible coloured foreground stars.
-            const sizeBase = 0.3 + Math.pow(Math.random(), 3) * 0.6;
+            const sizeBase = 0.3 + Math.pow(this.starRand(), 3) * 0.6;
             const size = sizeBase * (0.5 + t * 0.8);
             // Within-band variation scaled against the band's brightness cap,
             // so parallax depth maps directly to perceived brightness.
-            const variation = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
+            const variation = Math.min(1.0, 0.2 + this.starRand() * 0.7 + size * 0.04);
             emit(
-                Math.floor(Math.random() * pw),
-                Math.floor(Math.random() * ph),
+                Math.floor(this.starRand() * pw),
+                Math.floor(this.starRand() * ph),
                 size, b, starColorIdx(), bandBrightness * variation,
             );
         }
     }
 
-    const mwAngle = (Math.random() - 0.5);
+    const mwAngle = (this.starRand() - 0.5);
     for (let i = 0; i < this.milkyWayStarCount; i++) {
         // Laid out in CSS space (where the design constants live), then
         // snapped to whole device pixels like every other star.
-        const xCss = Math.random() * width;
+        const xCss = this.starRand() * width;
         const yCss = (height / 2) + Math.tan(mwAngle) * (xCss - width / 2)
-                   + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
-        const size = 0.3 + Math.pow(Math.random(), 3) * 0.6;
+                   + ((this.starRand() + this.starRand() + this.starRand() - 1.5) * 40);
+        const size = 0.3 + Math.pow(this.starRand(), 3) * 0.6;
         // 30% of milky-way stars take one of the four accent hues.
-        const colorIdx = Math.random() > 0.7
-            ? 8 + Math.floor(Math.random() * 4)
+        const colorIdx = this.starRand() > 0.7
+            ? 8 + Math.floor(this.starRand() * 4)
             : starColorIdx();
         emit(
             Math.round(xCss * dpr), Math.round(yCss * dpr),
             size, MW_BAND, colorIdx,
-            Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04),
+            Math.min(1.0, 0.2 + this.starRand() * 0.7 + size * 0.04),
         );
     }
 
@@ -713,11 +743,9 @@ public setMapType(type: MapType) {
     const ph = this.bandPixelHeight;
     if (pw <= 0 || ph <= 0) return;
 
-    // Advance each depth layer, then snap it to a whole device pixel for the
-    // draw.  The ACCUMULATOR stays fractional and only the DRAW OFFSET is
-    // rounded: rounding the accumulator would quantise slow parallax to a
-    // standstill, since the furthest layers move well under half a device
-    // pixel per frame and each frame's rounding would discard the whole shift.
+    // Advance each depth layer.  The offsets stay FRACTIONAL all the way to the
+    // draw: stars are positioned sub-pixel, so there is nothing to round, and
+    // rounding here is what used to make slow parallax jitter.
     const n = this.bandSpeed.length;
     for (let b = 0; b < n; b++) {
         // The milky way is the last layer and rides the raw speed; the depth
@@ -727,8 +755,6 @@ public setMapType(type: MapType) {
         const sy = dy * this.bandSpeed[b] * scale * dpr;
         this.bandOffsetX[b] = ((this.bandOffsetX[b] - sx) % pw + pw) % pw;
         this.bandOffsetY[b] = ((this.bandOffsetY[b] - sy) % ph + ph) % ph;
-        this.bandDrawX[b] = Math.round(this.bandOffsetX[b]);
-        this.bandDrawY[b] = Math.round(this.bandOffsetY[b]);
     }
 
     // REGION GATING (S7).  Star density varies by where in the MAP the camera
@@ -748,9 +774,7 @@ public setMapType(type: MapType) {
     // Opacity is baked into each group's rgba fill, so `globalAlpha` stays 1
     // and a group costs one state change (plus the fade band's, below).
     const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
-    const bdx = this.bandDrawX, bdy = this.bandDrawY;
     const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
-    const crisp = getActiveStarMotion() === 'crisp';
     const groups = this.starGroups;
     const FADE_STEPS = STAR_REGION_FADE.STEPS;
 
@@ -782,37 +806,20 @@ public setMapType(type: MapType) {
             }
             if (runEnd <= runStart) { if (step === 0) { runEnd = solidEnd; } continue; }
 
-            if (crisp) {
-                // SNAPPED: whole device pixels, maximum sharpness.  Every star
-                // in a layer shares one rounded offset, so the layer steps as a
-                // body — visible as jitter at low ship speeds.  See the S9
-                // note in the ledger for why this is no longer the default.
-                for (let i = runStart; i < runEnd; i++) {
-                    const b = B[i];
-                    let x = X[i] + bdx[b];
-                    if (x >= pw) x -= pw;
-                    let y = Y[i] + bdy[b];
-                    if (y >= ph) y -= ph;
-                    const sz = S[i];
-                    ctx.fillRect(x, y, sz, sz);
-                }
-            } else {
-                // SUB-PIXEL: the exact fractional position, so the field moves
-                // continuously at any speed.  Canvas antialiases the rect
-                // across the pixels it straddles — that is COVERAGE
-                // antialiasing on an axis-aligned rect, which is analytic and
-                // consistent across engines, unlike the drawImage resampling
-                // filter this gauntlet started by removing (and which S4
-                // deleted from this path entirely).
-                for (let i = runStart; i < runEnd; i++) {
-                    const b = B[i];
-                    let x = X[i] + bofx[b];
-                    if (x >= pw) x -= pw;
-                    let y = Y[i] + bofy[b];
-                    if (y >= ph) y -= ph;
-                    const sz = S[i];
-                    ctx.fillRect(x, y, sz, sz);
-                }
+            // SUB-PIXEL: the exact fractional position, so the field moves
+            // continuously at any speed.  Canvas antialiases the rect across
+            // the pixels it straddles — coverage antialiasing on an
+            // axis-aligned rect, which is analytic and consistent across
+            // engines, unlike the drawImage resampling filter this gauntlet
+            // began by removing (and which S4 deleted from this path).
+            for (let i = runStart; i < runEnd; i++) {
+                const b = B[i];
+                let x = X[i] + bofx[b];
+                if (x >= pw) x -= pw;
+                let y = Y[i] + bofy[b];
+                if (y >= ph) y -= ph;
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
             }
             if (band <= 0) break;   // nothing gated — the solid run was all of it
         }

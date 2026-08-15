@@ -19,7 +19,7 @@
  *  file, which is the alarm working.
  */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine, waitForStats } from './helpers';
+import { boot, engine, startRun, waitForEngine } from './helpers';
 
 /** Default step of `STAR_DENSITY_CYCLE` — stars per 10 000 CSS px². */
 const DEFAULT_DENSITY = 729;
@@ -261,89 +261,102 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('CRISP mode lands on whole device pixels; SMOOTH mode is genuinely sub-pixel', async ({ page }) => {
-    // The two halves of the motion trade, pinned against the real draw calls
-    // rather than inferred from the storage types.
+  test('draws stars SUB-PIXEL, and at integral sizes', async ({ page }) => {
+    // Star POSITION is fractional on purpose: that is what makes the field
+    // scroll continuously instead of stepping, and stepping is what made it
+    // jitter at low ship speeds. If this ever quietly snapped, the jitter
+    // would be back with nothing in the code saying so.
     //
-    // CRISP is the S3 behaviour: whole device pixels, so no antialiasing and
-    // no browser-dependent softness. A fractional coordinate there would
-    // silently undo it.
-    // SMOOTH is the default and is fractional ON PURPOSE — that is what makes
-    // the field scroll continuously instead of stepping. Asserting it really
-    // is fractional matters just as much: if it quietly snapped, the low-speed
-    // jitter would be back and the mode would be a lie.
+    // Star SIZE stays integral in the same breath — a fractional size
+    // antialiases the star's EDGES without buying any motion smoothness, so
+    // it would be softness for nothing.
     const watch = await boot(page);
     await startRun(page);
     await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
-    const audit = await page.evaluate(async () => {
+    const audit = await page.evaluate(() => new Promise<any>(resolve => {
       const e = (window as any).__omniEngine;
       const bg = e.renderer.backgroundManager;
       const ctx = e.renderer.ctx;
       const proto = Object.getPrototypeOf(ctx);
       const real = proto.fillRect;
-
-      const run = () => new Promise<any>(resolve => {
-        let calls = 0, fractional = 0, sample: any = null;
-        let inStars = false;
-        const realStars = bg.renderStars.bind(bg);
-        bg.renderStars = function (...args: any[]) {
-          inStars = true;
-          try { return realStars(...args); } finally { inStars = false; }
-        };
-        proto.fillRect = function (x: number, y: number, w: number, h: number) {
-          if (inStars) {
-            calls++;
-            if (!Number.isInteger(x) || !Number.isInteger(y)) {
-              fractional++;
-              if (!sample) sample = { x, y, w, h };
-            }
-            // Size is integral in BOTH modes — only position is in question.
-            if (!Number.isInteger(w) || !Number.isInteger(h)) {
-              fractional++;
-              if (!sample) sample = { x, y, w, h };
-            }
+      let calls = 0, fractionalPos = 0, fractionalSize = 0, sample: any = null;
+      let inStars = false;
+      const realStars = bg.renderStars.bind(bg);
+      bg.renderStars = function (...args: any[]) {
+        inStars = true;
+        try { return realStars(...args); } finally { inStars = false; }
+      };
+      proto.fillRect = function (x: number, y: number, w: number, h: number) {
+        if (inStars) {
+          calls++;
+          if (!Number.isInteger(x) || !Number.isInteger(y)) fractionalPos++;
+          if (!Number.isInteger(w) || !Number.isInteger(h)) {
+            fractionalSize++;
+            if (!sample) sample = { x, y, w, h };
           }
-          return real.call(this, x, y, w, h);
-        };
-        let n = 0;
-        const tick = () => {
-          // Drift slowly: the regime the motion mode exists for.
-          e.player.velocity.x = 0.05;
-          if (++n >= 12) {
-            proto.fillRect = real;
-            bg.renderStars = realStars;
-            resolve({ calls, fractional, sample });
-            return;
-          }
-          requestAnimationFrame(tick);
-        };
+        }
+        return real.call(this, x, y, w, h);
+      };
+      let n = 0;
+      const tick = () => {
+        e.player.velocity.x = 0.05;   // drift: the regime this is about
+        if (++n >= 12) {
+          proto.fillRect = real;
+          bg.renderStars = realStars;
+          resolve({ calls, fractionalPos, fractionalSize, sample });
+          return;
+        }
         requestAnimationFrame(tick);
-      });
+      };
+      requestAnimationFrame(tick);
+    }));
 
-      // Default is 'smooth'; cycle to reach 'crisp'.
-      const smooth = await run();
-      e.dbg.cycleStarMotion();
-      const crisp = await run();
-      e.dbg.cycleStarMotion();
-      return { smooth, crisp };
+    expect(audit.calls).toBeGreaterThan(1000);
+    // Genuinely sub-pixel — a zero here means the field silently snapped.
+    expect(audit.fractionalPos).toBeGreaterThan(0);
+    // …and sizes are whole pixels.
+    expect(audit.fractionalSize,
+      `star drawn at a fractional SIZE: ${JSON.stringify(audit.sample)}`).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('regenerates the SAME sky — a DBG knob must not reshuffle the stars', async ({ page }) => {
+    // Generation used unseeded Math.random, so every regeneration produced a
+    // completely new random sky. That made the DBG cycles nearly impossible to
+    // judge: changing the depth-layer count reshuffled every star, so it LOOKED
+    // like the star count had changed when it was identical to within 0.03%.
+    // Knobs that exist to be compared by looking have to hold everything else
+    // still, so star generation is seeded per map.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const snapshot = () => engine(page, e => {
+      const bg = e.renderer.backgroundManager;
+      // A cheap fingerprint of the whole field: positions of a spread sample.
+      let h = 0;
+      for (let i = 0; i < bg.starX.length; i += 37) {
+        h = (Math.imul(h ^ bg.starX[i], 0x01000193) ^ bg.starY[i]) >>> 0;
+      }
+      return { hash: h, count: bg.starX.length, layers: bg.bandSpeed.length };
     });
 
-    expect(audit.smooth.calls).toBeGreaterThan(1000);
-    expect(audit.crisp.calls).toBeGreaterThan(1000);
+    const before = await snapshot();
 
-    // CRISP: not one fractional coordinate.
-    expect(audit.crisp.fractional,
-      `crisp mode drew a fractional rect: ${JSON.stringify(audit.crisp.sample)}`).toBe(0);
+    // Cycle DEPTH and come all the way back around to the same setting.
+    const steps = 4;   // STAR_BANDS_CYCLE length
+    for (let i = 0; i < steps; i++) {
+      await engine(page, e => e.dbg.cycleStarBands());
+      await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'regeneration');
+    }
+    const after = await snapshot();
 
-    // SMOOTH: genuinely sub-pixel. Most stars sit at fractional offsets, so a
-    // count of zero would mean the mode silently snapped.
-    expect(audit.smooth.fractional).toBeGreaterThan(0);
-
-    // And the cycle returned to where it started. Polled rather than read
-    // inline: `__omniStats` is republished once per frame, so a read taken in
-    // the same tick as the cycle still holds the previous payload.
-    await waitForStats(page, s => s.starMotionName === 'Smooth', 'motion mode back to Smooth');
+    expect(after.layers).toBe(before.layers);
+    expect(after.count).toBe(before.count);
+    // THE POINT: same seed, same sky. An unseeded generator fails this.
+    expect(after.hash).toBe(before.hash);
 
     watch.assertClean();
   });

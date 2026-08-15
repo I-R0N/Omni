@@ -1795,45 +1795,24 @@ export function cycleStarRegion(): StarRegionStep {
   return STAR_REGION_CYCLE[activeStarRegionIndex];
 }
 
-// ─── DBG: star MOTION — sub-pixel vs pixel-snapped ───────────────────────────
+// STAR MOTION IS SUB-PIXEL, AND THERE IS NO LONGER A CHOICE ABOUT IT.
 //
-// The trade this knob exposes is real and unavoidable for 1-pixel stars:
-// a pixel-SNAPPED star is maximally sharp but can only MOVE in whole-pixel
-// steps, so at low scroll speeds it holds still and then jumps.  A sub-pixel
-// star moves continuously but is antialiased across the pixels it straddles,
-// so it is softer.  You cannot have both.
+// Stars are drawn at their exact fractional position, so the field scrolls
+// continuously at any speed.  Canvas antialiases the rect across the pixels it
+// straddles, which makes a star marginally softer than a pixel-snapped one.
 //
-// SMOOTH IS THE DEFAULT, and the reason it is safe now is worth stating: the
-// cross-browser bug this gauntlet started from was the drawImage BLIT FILTER
-// on the old pre-rendered band canvases, whose kernel the canvas spec leaves
-// unspecified.  S4 deleted those canvases outright, so there is no drawImage
-// in the star path at all.  What remains is fillRect coverage antialiasing on
-// an axis-aligned rect, which is analytic area coverage and consistent across
-// engines in a way a resampling filter never was.  Snapping was therefore
-// buying sharpness, not correctness — and it cost smooth motion, which two
-// rounds of user testing found worse than the softness.
+// A 'crisp' pixel-snapped mode existed briefly and was REMOVED after testing:
+// snapping is what made the field jitter at low ship speeds (measured at 99% of
+// stars frozen on any given frame at ship speed 2), and no amount of sharpness
+// paid for that.  A per-star dither was tried before it and was worse still.
+// Both are recorded in docs/GAUNTLET_STARFIELD_LOG.md (S8, S9, S10) so the dead
+// ends are not re-explored.
 //
-//   'smooth' — exact fractional position.  Continuous motion at any speed.
-//              Stars are antialiased, so slightly softer.  DEFAULT.
-//   'crisp'  — snapped to whole device pixels.  Maximum sharpness; visibly
-//              steps at low ship speeds.  This was the S3 behaviour.
-//
-// (A third option was tried and REMOVED: a per-star sub-pixel dither, which
-// staggered WHEN each star crossed a pixel boundary so no layer stepped as one
-// body.  It measured well and looked worse — uncorrelated per-star stepping
-// reads as the whole sky fizzing, which is more objectionable than a coherent
-// layer step.  See S9 in docs/GAUNTLET_STARFIELD_LOG.md.)
-export type StarMotionMode = 'smooth' | 'crisp';
-export const STAR_MOTION_CYCLE: ReadonlyArray<StarMotionMode> = ['smooth', 'crisp'] as const;
-let activeStarMotionIndex = 0;
-export function getActiveStarMotion(): StarMotionMode { return STAR_MOTION_CYCLE[activeStarMotionIndex]; }
-export function getActiveStarMotionName(): string {
-  return STAR_MOTION_CYCLE[activeStarMotionIndex] === 'smooth' ? 'Smooth' : 'Crisp';
-}
-export function cycleStarMotion(): StarMotionMode {
-  activeStarMotionIndex = (activeStarMotionIndex + 1) % STAR_MOTION_CYCLE.length;
-  return STAR_MOTION_CYCLE[activeStarMotionIndex];
-}
+// Snapping was never load-bearing for correctness, which is the part worth
+// remembering: the cross-browser bug this gauntlet started from was the
+// `drawImage` BLIT FILTER on the old pre-rendered band canvases, and those
+// canvases are gone.  What remains is fillRect coverage antialiasing on an
+// axis-aligned rect — analytic, and consistent across engines.
 
 // How the region field's edge is FADED, so gated stars never pop.
 //

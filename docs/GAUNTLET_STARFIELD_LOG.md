@@ -32,6 +32,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S9 — Sub-pixel motion by default; fade the region edge** (user report).
       S8's dither REMOVED. Position error at low speed 0.23 px → 0.000; region
       stars fade instead of popping.
+- [x] **S10 — Crisp mode removed; the sky is now SEEDED** (user report). Star
+      motion is sub-pixel, full stop. Star generation is deterministic per map,
+      so a DBG knob no longer reshuffles the whole sky.
 
 ---
 
@@ -751,6 +754,61 @@ and because the field changes over seconds of travel, each crossing takes about
 a second. Costs 6 extra `fillStyle` writes per group — state changes, not
 per-star work — and allocates nothing per frame.
 
+## S10 — crisp abandoned, and the sky stops reshuffling
+
+> *"Star motion at smooth looks good. Crisp does not - this still jitters so
+> let's abandon this."*
+> *"Can you elaborate on star depth? This changes the visible stars on the
+> screen when adjusted without adjusting the density."*
+
+### Crisp is gone
+
+Confirmed by testing rather than argued about: pixel-snapping cannot be made to
+move smoothly, so the mode had no future. `STAR_MOTION_CYCLE` is deleted and the
+draw loop has one path. Motion is sub-pixel, full stop.
+
+That closes a three-milestone arc — S3 snapped, S8 dithered the snap, S9 made
+snapping optional, S10 removes it — and the through-line is one mistake: I
+treated snapping as a CORRECTNESS requirement when it was only ever buying
+sharpness. The correctness fix was S4 deleting the band canvases and with them
+every `drawImage` in the star path.
+
+### Star depth: the knob was right, the sky was lying
+
+The reported symptom was that changing depth appears to change how many stars
+are on screen. **It does not.** Measured at 390×844 dpr2, camera parked so the
+region field is identical:
+
+```
+layers  perBand  starCount  on screen   solid  faded   total ink
+   241      100      24000      17776    9372   8404       4627
+   121      200      24000      17775    9372   8403       4625
+   481       50      24000      17779    9379   8400       4645
+    61      400      24000      17781    9381   8400       4635
+```
+
+Star count is identical at every setting; on-screen count varies by 0.03% and
+total ink by 0.4% — rounding, not signal. The user's reading of the knob ("the
+number of parallax layers") is exactly what it is.
+
+**The real defect was elsewhere, and it affected every knob.** Star generation
+used unseeded `Math.random`, and the field regenerates whenever any generation
+input changes — viewport, pixel ratio, density, depth. So every cycle produced a
+completely NEW random sky with the same statistics, and the eye reads "different
+stars" as "different number of stars".
+
+That is a wart on the whole DBG surface, not just on depth: these knobs exist so
+an aesthetic call can be settled **by looking**, and an A/B where the entire
+sample is replaced between A and B cannot settle anything.
+
+Star generation is now seeded per map (mulberry32, seeded from a hash of the
+`MapType`). A regeneration reproduces the same sky; different maps still get
+different skies. Pinned by a test that cycles depth all the way around the cycle
+and requires a position fingerprint of the whole field to come back identical.
+
+Nebula puffs and shooting stars deliberately keep `Math.random` — they are not
+part of the comparison, and seeding them would freeze motion that should vary.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -844,6 +902,26 @@ rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
 
+**D24 — Delete `crisp` rather than keep it as a non-default option.** Beat:
+leaving it in the cycle for anyone who prefers sharpness. Same reasoning as D21
+one milestone earlier, and the fact that this is the second time says something:
+a knob whose every setting has been tested and rejected is not a choice, it is
+an unfinished decision left in the UI. The trade is documented in
+`constants.ts` where the code is, so the reasoning survives the deletion.
+
+**D25 — Seed star generation per MAP, not globally and not per regeneration.**
+Beat two alternatives. A single global seed would give every map the identical
+sky, losing free variety for nothing. Re-seeding per regeneration is what the
+code already did (via `Math.random`) and is the bug. Hashing the `MapType`
+keeps each map's sky its own and stable, which is what makes the DBG cycles
+comparable.
+
+**D26 — Seed only the STARS, leaving nebula puffs and shooting stars random.**
+Beat: seeding all of `initContent` for consistency. Shooting stars are transient
+motion that should differ every time, and puff placement is already anchored to
+map cluster centres. Only the star field is the thing being A/B'd, so only it
+needs to hold still.
+
 **D21 — Remove the S8 dither outright rather than demote it to a non-default
 option.** Beat: keeping it as a third motion mode. It is disproved, not merely
 unfashionable — it looks worse than both alternatives, and a cycle entry implies
@@ -936,8 +1014,15 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 
 ## FOR-USER-REVIEW
 
-- **S9 — the jitter fix is now sub-pixel motion, and the sky is slightly
-  softer as a result.** This is the trade and it is unavoidable for 1-pixel
+- **S10 — depth does what you thought; the sky no longer reshuffles.** Your
+  reading was right: it is the number of parallax layers, and the star count is
+  identical at every setting (24 000, measured; on-screen count within 0.03%).
+  What was misleading you is fixed — generation is now seeded per map, so
+  changing depth (or density, or resizing) rebuilds the SAME sky instead of
+  rolling a new one. Every star knob is now a fair A/B.
+
+- **S9 (crisp since REMOVED) — the jitter fix is sub-pixel motion, and the sky
+  is slightly softer as a result.** This is the trade and it is unavoidable for 1-pixel
   stars: crisp stars cannot move smoothly, smooth stars cannot be perfectly
   crisp. Default is now **Smooth** (zero position error at every speed);
   Visual ▸ **Star motion** ▸ Crisp restores the sharper, stepping version.
@@ -1075,6 +1160,22 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 10 — S10 (crisp removed; seeded sky)
+
+Crisp deleted on user testing — three milestones of trying to make pixel-snapped
+stars move smoothly, ended by accepting that they cannot.
+
+The depth question turned out to be the more interesting one. Measuring first
+was what made it answerable: the knob does exactly what its name says and the
+star count is constant to within 0.03%, so the surprise had to be coming from
+somewhere else — and it was the unseeded generator replacing the entire sky on
+every regeneration. That is a defect in how EVERY star knob presents itself, not
+just depth, and it had been there since S2 shipped the first cycle.
+
+Worth noting for the next session: I built five DBG cycles across this gauntlet
+specifically so aesthetic calls could be settled by looking, and did not notice
+until S10 that they were reshuffling the sample between A and B.
 
 ### Iteration 9 — S9 (dither removed; region edge faded)
 
