@@ -364,7 +364,10 @@ export class InputSystem {
    *  minimum-gap rule below as "one just finished at time zero", which
    *  swallows the first impact of the session. */
   private rumbleUntilMs: number = -Infinity;
-  private rumbleMag: number = 0;
+  /** Normalised intensity (0..1) of the effect currently playing — what the
+   *  interrupt rule compares against, so it is the same quantity on both
+   *  sides rather than a magnitude versus a curve input. */
+  private rumbleT: number = 0;
   /** Set once a `playEffect` call has been rejected or thrown, so an
    *  unsupported browser is asked exactly once instead of every impact. */
   private rumbleUnsupported: boolean = false;
@@ -387,6 +390,8 @@ export class InputSystem {
     if (!this.rumbleEnabled || this.rumbleUnsupported) return null;
     if (amount < R.MIN_SHAKE) return null;
 
+    // Normalised intensity, 0 at the smallest event the game emits and 1 at a
+    // high-speed crash.
     const t = Math.max(0, Math.min(1,
       (amount - R.MIN_SHAKE) / Math.max(1e-6, R.FULL_SHAKE - R.MIN_SHAKE)));
 
@@ -394,19 +399,21 @@ export class InputSystem {
     // stronger one.  Without this, a crash's long thump is chopped up by the
     // stream of small hits that always follows it.
     if (nowMs < this.rumbleUntilMs) {
-      // Still playing: only a meaningfully stronger hit cuts in.
-      if (t < this.rumbleMag + R.INTERRUPT_DELTA) return null;
+      if (t < this.rumbleT + R.INTERRUPT_DELTA) return null;
     } else if (nowMs < this.rumbleUntilMs + R.MIN_INTERVAL_MS) {
       // Just finished: leave a gap, or a stream of small hits reads as one
       // continuous drone rather than as separate impacts.
       return null;
     }
 
-    const duration = R.MIN_MS + (R.MAX_MS - R.MIN_MS) * t;
+    // Overall strength rides a FLOOR, so the smallest qualifying event is
+    // still felt; the balance between the two motors crossfades, so small
+    // events read as a high-frequency tick and big ones as a low thump.
+    const mag = R.MIN_MAGNITUDE + (1 - R.MIN_MAGNITUDE) * t;
     return {
-      duration,
-      strongMagnitude: t,
-      weakMagnitude: t * R.WEAK_FRAC,
+      duration: R.MIN_MS + (R.MAX_MS - R.MIN_MS) * t,
+      strongMagnitude: mag * (R.STRONG_AT_MIN + (1 - R.STRONG_AT_MIN) * t),
+      weakMagnitude: mag * (1 - (1 - R.WEAK_AT_MAX) * t),
     };
   }
 
@@ -436,8 +443,10 @@ export class InputSystem {
     const act = this.currentActuator();
     if (!act) return;
 
+    const R = INPUT_CONSTANTS.RUMBLE;
     this.rumbleUntilMs = now + params.duration;
-    this.rumbleMag = params.strongMagnitude;
+    this.rumbleT = Math.max(0, Math.min(1,
+      (amount - R.MIN_SHAKE) / Math.max(1e-6, R.FULL_SHAKE - R.MIN_SHAKE)));
 
     try {
       // The promise REJECTS on a browser that knows the method but not the
@@ -708,7 +717,7 @@ export class InputSystem {
     this.padPrev.length = 0;
     // A different pad may well support what the last one did not.
     this.rumbleUntilMs = -Infinity;
-    this.rumbleMag = 0;
+    this.rumbleT = 0;
     this.rumbleUnsupported = false;
   }
 

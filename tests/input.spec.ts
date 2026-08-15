@@ -1007,45 +1007,95 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
 
 test.describe('rumble — force feedback rides the screen shake', () => {
   // Mirrors INPUT_CONSTANTS.RUMBLE (harness rule 7).
-  const MIN_SHAKE = 4;
+  const MIN_SHAKE = 1;
   const FULL_SHAKE = 20;
+  const MIN_MAGNITUDE = 0.14;
   const MIN_INTERVAL_MS = 70;
+  const WEAPON_TICK = 2;
 
-  test('maps shake amount onto an effect, and ignores the small stuff', async ({ page }) => {
+  test('every impact ticks, and the curve runs tick → thump', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
     // `rumbleParamsFor` takes `nowMs` so the throttle can be driven without
     // sleeping — the same split as the pad's snapshot mapping: the decision
     // is testable, the device is not.
-    const r = await engine(page, (e, arg: { min: number; full: number }) => {
+    const r = await engine(page, (e, arg: { full: number }) => {
       const at = (amount: number, now: number) => e.input.rumbleParamsFor(amount, now);
       return {
-        // MICRO (1) is every projectile hit. A pad that rattles on every
-        // plink is a pad you switch off.
+        // MICRO (1) — a shard ping, the smallest thing the game emits.
         micro: at(1, 0),
-        justUnder: at(arg.min - 0.01, 0),
+        // The plain Blaster's haptic-only tick.
+        weapon: at(2, 10_000),
+        // A tier-1 kill.
+        tierOneKill: at(3.5, 20_000),
         // MEDIUM (10) — an enemy collision.
-        medium: at(10, 10_000),
+        medium: at(10, 30_000),
         // HEAVY (20) — a high-speed crash, the loudest thing in the game.
-        heavy: at(arg.full, 20_000),
+        heavy: at(arg.full, 40_000),
         // Beyond the top of the curve stays clamped rather than overdriving.
-        beyond: at(arg.full * 3, 30_000),
+        beyond: at(arg.full * 3, 50_000),
       };
-    }, { min: MIN_SHAKE, full: FULL_SHAKE });
+    }, { full: FULL_SHAKE });
 
-    expect(r.micro).toBeNull();
-    expect(r.justUnder).toBeNull();
+    // The three the user asked for all fire now, where they were cut off
+    // before. Each is FELT — a floor, not a zero-strength effect timed
+    // correctly, which is what the first curve produced at its threshold.
+    for (const k of ['micro', 'weapon', 'tierOneKill'] as const) {
+      expect(r[k], `${k} should produce an effect`).not.toBeNull();
+      const total = r[k].strongMagnitude + r[k].weakMagnitude;
+      expect(total, `${k} should be felt`).toBeGreaterThan(MIN_MAGNITUDE);
+      // ...and felt as a TICK: the high-frequency motor leads.
+      expect(r[k].weakMagnitude, `${k} should be buzz-dominant`)
+        .toBeGreaterThan(r[k].strongMagnitude);
+    }
 
-    expect(r.medium).not.toBeNull();
-    expect(r.medium.strongMagnitude).toBeGreaterThan(0);
-    expect(r.medium.strongMagnitude).toBeLessThan(1);
-    // The weak motor is a buzz on top of the thump, not a second thump.
-    expect(r.medium.weakMagnitude).toBeLessThan(r.medium.strongMagnitude);
-
+    // A crash is the other end of the same curve: low-frequency thump.
     expect(r.heavy.strongMagnitude).toBeCloseTo(1, 5);
-    expect(r.heavy.duration).toBeGreaterThan(r.medium.duration);
+    expect(r.heavy.strongMagnitude).toBeGreaterThan(r.heavy.weakMagnitude);
+    expect(r.heavy.duration).toBeGreaterThan(r.micro.duration);
+
+    // Monotonic in between, so the hand can tell a scratch from a wreck.
+    expect(r.medium.strongMagnitude).toBeGreaterThan(r.tierOneKill.strongMagnitude);
+    expect(r.heavy.strongMagnitude).toBeGreaterThan(r.medium.strongMagnitude);
     expect(r.beyond.strongMagnitude).toBeCloseTo(1, 5);
+
+    watch.assertClean();
+  });
+
+  test('the plain Blaster ticks the pad and shakes NO camera', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The fastest gun in the game: a camera shake per shot would be
+    // unplayable, so this is the one feedback path that is haptic-only.
+    const r = await engine(page, e => {
+      const calls: any[] = [];
+      e.input.currentActuator = () => ({
+        playEffect: (t: string, p: any) => { calls.push(p); return Promise.resolve(); },
+      });
+      e.input.rumbleUntilMs = -Infinity;
+      e.input.rumbleT = 0;
+      e.shakeIntensity = 0;
+      e.shakeTimer = 0;
+      e.player.weaponCooldown = 0;
+
+      const fired = e.weapons.firePlayerWeapon(
+        e.currentMap.entities, e.player,
+        { x: e.player.position.x + 400, y: e.player.position.y },
+        e.handleScreenShake, false, e.handleRumble,
+      );
+      return { fired, rumbles: calls.length, shake: e.shakeIntensity, weak: calls[0]?.weakMagnitude ?? 0 };
+    });
+
+    expect(r.fired).toBe(true);
+    expect(r.rumbles).toBe(1);
+    // The camera did not move.
+    expect(r.shake).toBe(0);
+    // And it is a tick, not a thump.
+    expect(r.weak).toBeGreaterThan(0);
+
+    watch.assertClean();
   });
 
   test('a stream of small hits does not become one long drone', async ({ page }) => {
@@ -1057,13 +1107,16 @@ test.describe('rumble — force feedback rides the screen shake', () => {
         const p = e.input.rumbleParamsFor(amount, now);
         // rumbleParamsFor is pure; the engine records the effect when it
         // actually plays one, so mirror that here.
-        if (p) { e.input.rumbleUntilMs = now + p.duration; e.input.rumbleMag = p.strongMagnitude; }
+        if (p) {
+          e.input.rumbleUntilMs = now + p.duration;
+          e.input.rumbleT = (amount - 1) / (20 - 1);   // mirrors the engine's own bookkeeping
+        }
         return p;
       };
       // -Infinity is the "nothing has ever played" sentinel; a plain 0 would
       // be read as "one just finished at time zero" and eat the first hit.
       e.input.rumbleUntilMs = -Infinity;
-      e.input.rumbleMag = 0;
+      e.input.rumbleT = 0;
       const first = at(10, 0);
       return {
         first,
@@ -1098,7 +1151,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
         playEffect: (type: string, params: any) => { calls.push({ type, params }); return Promise.resolve(); },
       });
       e.input.rumbleUntilMs = -Infinity;
-      e.input.rumbleMag = 0;
+      e.input.rumbleT = 0;
       // A high-speed crash, through the engine's own shake funnel.
       e.handleScreenShake(20);
       return { calls, n: calls.length };
@@ -1118,7 +1171,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
         playEffect: () => { n++; return Promise.reject(new Error('unsupported')); },
       });
       e.input.rumbleUntilMs = -Infinity;
-      e.input.rumbleMag = 0;
+      e.input.rumbleT = 0;
       e.handleScreenShake(20);
       return new Promise(resolve => setTimeout(() => {
         e.input.rumbleUntilMs = -Infinity;
@@ -1182,7 +1235,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
       e.input.currentActuator = () => ({
         playEffect: (t: string, p: any) => { calls.push(p); return Promise.resolve(); },
       });
-      const fire = () => { e.input.rumbleUntilMs = -Infinity; e.input.rumbleMag = 0; e.handleScreenShake(20); };
+      const fire = () => { e.input.rumbleUntilMs = -Infinity; e.input.rumbleT = 0; e.handleScreenShake(20); };
 
       fire();
       const withRumble = calls.length;

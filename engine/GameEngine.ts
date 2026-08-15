@@ -1908,6 +1908,13 @@ export class GameEngine {
       this.weapons.updateEnemyShooting(this.currentMap.entities, this.entityIndex.enemies, this.player, dt);
   }
 
+  /** Haptic feedback with NO camera shake.  Most impacts want both and go
+   *  through `handleScreenShake`; a few — the plain Blaster's shot — want the
+   *  hand to feel something the camera must not react to. */
+  handleRumble = (amount: number) => {
+      this.input.rumble(amount);
+  }
+
   handleScreenShake = (amount: number) => {
       // Force feedback rides this call — every impact in the game already
       // funnels through it with magnitudes tuned against each other, so the
@@ -4116,6 +4123,7 @@ export class GameEngine {
           { x: worldX, y: worldY },
           this.handleScreenShake,
           charged,
+          this.handleRumble,
       );
 
       // Keep the HUD weapon index aligned with the player's current weapon in

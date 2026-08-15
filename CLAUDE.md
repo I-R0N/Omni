@@ -1717,7 +1717,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     is called ABOVE the screen-shake toggle (camera lurch and hand buzz are
     different preferences) and has its own DBG row.  `rumbleParamsFor` is pure
     and takes `nowMs`, so the threshold, curve, throttle and interrupt rule are
-    all testable; only the actuator itself is stood in for.  Note `dual-rumble`
+    all testable; only the actuator itself is stood in for.  The curve runs
+    TICK → THUMP: every event the game emits now buzzes (down to a shard
+    ping), riding a magnitude FLOOR so the smallest is felt, with the two
+    motors crossfading — small events lead with the high-frequency motor, a
+    crash with the low.  One event is haptic-ONLY (`GameEngine.handleRumble`,
+    no camera shake): the plain Blaster, because shaking the camera on the
+    fastest gun in the game would be unplayable.  Note `dual-rumble`
     is the ONLY effect the Gamepad API exposes — the DualSense's adaptive
     triggers, voice-coil haptics and light bar need raw HID reports (WebHID:
     desktop Chromium/Edge only, never Safari or mobile), which this

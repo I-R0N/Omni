@@ -655,6 +655,58 @@ is untouched and the work is unchanged in scope.
 
 ---
 
+### G11b — The rumble curve, retuned to feel the small stuff (user directive, 2026-08-14)
+
+The user, testing on an iPhone, asked for "a small rumble for blaster shots,
+small shard hits and killing tier 1 enemies" — all three of which the first
+curve deliberately cut off below `MIN_SHAKE` 4.
+
+**DECISION G11b-a — the answer was a FLOOR and a motor bias, not a lower
+threshold alone.** `MIN_SHAKE` drops to 1 (the smallest amount the game
+emits), but two other changes are what make that good rather than annoying:
+
+- **A magnitude floor.** The old curve started at magnitude 0, so the
+  smallest qualifying event played a correctly-timed effect at zero
+  strength — silence dressed up as a feature. There is now a
+  `MIN_MAGNITUDE` floor: anything worth playing is worth feeling.
+- **The two motors crossfade.** They are different instruments — strong is a
+  low-frequency THUMP, weak a high-frequency BUZZ — so the balance now moves
+  with magnitude instead of being a fixed ratio. A shard ping is nearly all
+  buzz; a crash is nearly all thump with some transient left on top. That is
+  what makes a tick read as a tick rather than as a feeble thump.
+
+**DECISION G11b-b — the Blaster gets a HAPTIC-ONLY path.** Lowering the
+threshold could not have delivered blaster shots on its own: the plain
+Blaster emits **no screen shake at all** (only the charged variant does), so
+there was nothing on the funnel to hook. Shaking the camera on the fastest
+gun in the game would be unplayable, so `GameEngine.handleRumble(amount)`
+now exists beside `handleScreenShake` — same destination, no camera.
+*Alternative rejected:* adding a tiny `onShake` for the Blaster. It would
+have bought the rumble by making every shot lurch the view.
+
+This qualifies G11-a rather than overturning it: shake and rumble still
+coincide almost everywhere, and `handleScreenShake` still implies rumble. The
+invariant was a means (one tuned list, not two), and one deliberate exception
+with a name is cheaper than a parallel table.
+
+**Tests changed, and why.** The G11 test asserted that MICRO and everything
+below 4 produce NOTHING — the exact behaviour this directive reverses. It is
+now "every impact ticks, and the curve runs tick → thump", asserting the
+three events the user named all fire, that each is buzz-dominant, that a
+crash is thump-dominant, and that the curve is monotonic in between so a hand
+can tell a scratch from a wreck. Plus a new test that the plain Blaster fires
+a rumble and moves the camera **zero**.
+
+**Still unverifiable here, and now more consequential:** on the user's actual
+device — iPhone — none of this may be felt at all, because Edge on iOS is
+WebKit and gamepad haptics there are uncertain. The `↳ rumble` DBG row
+distinguishes "browser refused" from "ready", which is the difference between
+a tuning problem and a platform one.
+
+**Gates:** typecheck, build, 89/89 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74

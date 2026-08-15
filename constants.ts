@@ -1051,19 +1051,39 @@ export const INPUT_CONSTANTS = {
   // voice-coil haptics, the light bar — need raw HID reports (WebHID), which
   // is a desktop-Chromium-only path and deliberately not what this drives.
   RUMBLE: {
-    /** Shake amounts below this do not buzz.  MICRO (1) is every projectile
-     *  hit; a pad that rattles on every plink is a pad you turn off. */
-    MIN_SHAKE: 4,
+    /** Shake amounts below this do not buzz.  Set to MICRO (1) — the
+     *  smallest thing the game emits — on user direction: shard pings,
+     *  blaster shots and tier-1 kills should all TICK.  The first version
+     *  cut them off at 4 on the theory that a pad rattling on every plink is
+     *  a pad you switch off; the answer turned out to be a magnitude FLOOR
+     *  and a weak-motor bias instead, so the small stuff is felt as a tick
+     *  rather than skipped or thumped. */
+    MIN_SHAKE: 1,
     /** Shake amount that maps to full strength.  HEAVY (20) is a high-speed
      *  crash, and should be the loudest thing the hand feels. */
     FULL_SHAKE: 20,
-    /** Effect length in ms at MIN_SHAKE and at FULL_SHAKE. */
-    MIN_MS: 90,
+    /** Overall magnitude at MIN_SHAKE.  A FLOOR, not zero: the curve used to
+     *  start at 0, which meant the smallest qualifying event played a
+     *  correctly-timed effect at zero strength — silence, dressed up as a
+     *  feature.  Anything worth playing is worth feeling. */
+    MIN_MAGNITUDE: 0.14,
+    /** Effect length in ms at MIN_SHAKE and at FULL_SHAKE.  Short at the
+     *  bottom: a tick, not a buzz. */
+    MIN_MS: 45,
     MAX_MS: 260,
-    /** The weak (high-frequency) motor runs at this fraction of the strong
-     *  one — a little buzz on top of the thump, rather than both at once,
-     *  which just reads as noise. */
-    WEAK_FRAC: 0.55,
+    /** The two motors are different instruments — strong is a low-frequency
+     *  THUMP, weak a high-frequency BUZZ — so the balance crossfades with
+     *  magnitude instead of being fixed.  A blaster shot is nearly all buzz
+     *  (STRONG_AT_MIN of the heavy motor); a crash is nearly all thump, with
+     *  WEAK_AT_MAX of high-frequency edge left on top so it still has a
+     *  transient. */
+    STRONG_AT_MIN: 0.25,
+    WEAK_AT_MAX: 0.55,
+    /** Haptic-only tick for a weapon whose recoil deliberately shakes NO
+     *  camera — the plain Blaster.  Screen shake on every shot of the
+     *  fastest gun in the game would be unplayable; a tick in the hand is
+     *  exactly what the shake funnel cannot express. */
+    WEAPON_TICK: 2,
     /** Floor on the gap between effects (ms).  playEffect restarts the motors,
      *  so firing one per frame produces a flat drone instead of hits; a new
      *  effect interrupts early ONLY if it is meaningfully stronger. */

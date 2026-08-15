@@ -1,5 +1,6 @@
 import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig } from '../../types';
 import {
+  INPUT_CONSTANTS,
   WEAPONS,
   WEAPON_LIST,
   ENEMY_WEAPON,
@@ -101,6 +102,11 @@ export class WeaponSystem {
     target: Vector2,
     onShake?: (amount: number) => void,
     charged: boolean = false,
+    /** Haptic-only feedback: rumble WITHOUT a camera shake.  The plain
+     *  Blaster is the case that needs it — it is the fastest gun in the game,
+     *  so shaking the camera on every shot would be unplayable, but the hand
+     *  should still feel each one. */
+    onRumble?: (amount: number) => void,
   ): boolean {
     // Weaponless flight (no gun mounted) is a legal outfit — nothing to
     // fire.  The weight system pays this back as an acceleration boost.
@@ -138,6 +144,10 @@ export class WeaponSystem {
       } else if (config.type === WeaponType.BLASTER && isCharged) {
         onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
       }
+    }
+    // The plain Blaster shakes NO camera by design; it still ticks the pad.
+    if (onRumble && config.type === WeaponType.BLASTER && !isCharged) {
+      onRumble(INPUT_CONSTANTS.RUMBLE.WEAPON_TICK);
     }
 
     if (config.type === WeaponType.BURST && config.burstCount) {
