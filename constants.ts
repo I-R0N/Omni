@@ -1715,73 +1715,137 @@ export function cycleStarBands(): number {
   return STAR_BANDS_CYCLE[activeStarBandsIndex];
 }
 
-// ─── DBG: PARALLAX SPREAD ────────────────────────────────────────────────────
+// ─── PER-MAP SKY: ALTITUDE, DENSITY AND PARALLAX ─────────────────────────────
 //
-// How much faster the NEAREST depth layer scrolls than the farthest — the total
-// depth "angle" of the field, independent of how many layers that range is cut
-// into.
+// Every map gets its OWN star density, and its parallax spread follows from
+// that density rather than being set beside it.
 //
-//     speed(b) = DEPTH_FLOOR + ((b + 0.5) / layers)^2 * SPREAD
+// The idea the numbers encode is ALTITUDE.  A map high in deep space shows a
+// dense, distant sky whose layers barely separate as you move.  A map low near
+// a planet or a landing site shows fewer stars, and the ones it does show sweep
+// past with much more depth separation because you are closer to everything.
+// So DENSITY FALLS and PARALLAX RISES as you descend, and the hub's test-portal
+// column is arranged vertically to match: the LOWER a portal sits on the map,
+// the LOWER the density behind it.
 //
-// The two knobs are genuinely separate and were conflated before this existed:
+// The inverse relation is DERIVED, not hand-maintained.  Writing two numbers
+// per map and trusting them to stay anti-correlated is exactly the kind of
+// pairing that drifts the first time someone tunes one of them, so a map
+// declares only its density and `parallaxForDensity` does the rest.  If a map
+// ever needs to break the relation, that is the moment to add an override
+// field — not before.
+export const STAR_DENSITY_RANGE = {
+  /** Lowest sky — closest to a planet.  Below the old 185 floor, per the
+   *  "perhaps a layer lower than this" the range was asked for with. */
+  MIN: 90,
+  /** Densest sky — deep space, far from anything. */
+  MAX: 729,
+} as const;
+
+/** Parallax spread at each end of the density range.  Inverted on purpose:
+ *  sparse skies are NEAR skies, and near things separate more as you move. */
+export const STAR_PARALLAX_RANGE = {
+  AT_MIN_DENSITY: 8,
+  AT_MAX_DENSITY: 1,
+} as const;
+
+/** The inverse relation, in one place.  Linear in density between the two
+ *  endpoints, clamped outside them so a hand-set override cannot produce a
+ *  negative or absurd spread. */
+export function parallaxForDensity(density: number): number {
+  const { MIN, MAX } = STAR_DENSITY_RANGE;
+  const t = Math.max(0, Math.min(1, (density - MIN) / (MAX - MIN)));
+  const { AT_MIN_DENSITY, AT_MAX_DENSITY } = STAR_PARALLAX_RANGE;
+  return AT_MIN_DENSITY + t * (AT_MAX_DENSITY - AT_MIN_DENSITY);
+}
+
+/** Each map's sky, as a single number: stars per 10 000 CSS px^2.
+ *
+ *  Read as ALTITUDE — high value = high above everything = dense distant sky.
+ *  The six showcase fields are the test ladder the hub's portal column steps
+ *  through, so their values are spread evenly across the whole range and their
+ *  ORDER here matches the portals' vertical order on the hub. */
+export const STAR_DENSITY_BY_MAP: Record<MapType, number> = {
+  // The hub is home: high, open, and the densest sky in the game.
+  [MapType.OVERWORLD]:            729,
+
+  // Wave arenas, descending.
+  [MapType.UNIVERSE]:             650,
+  [MapType.RING]:                 520,
+  [MapType.SEVEN_RINGS]:          420,
+  [MapType.POCKET]:               300,
+
+  // The test ladder — evenly spread MIN..MAX, matching the hub column.
+  [MapType.ASTEROID_FIELD]:       729,
+  [MapType.GLASS_FIELD]:          600,
+  [MapType.METAL_FIELD]:          460,
+  [MapType.PLASTIC_FIELD]:        330,
+  [MapType.ROCK_FIELD]:           185,
+  [MapType.NEBULA_FIELD]:          90,
+
+  // Remaining showcase maps — not on the ladder, sensible middles.
+  [MapType.INDESTRUCTIBLE_FIELD]: 400,
+  [MapType.TILE_HEAVY]:           400,
+};
+
+// ─── DBG: star density and parallax ──────────────────────────────────────────
 //
-//   * SPREAD (this one) sets the total range from farthest to nearest.
-//   * Star depth sets how many LAYERS that range is cut into.
+// Both cycles lead with AUTO (0), which means "use this map's own value" — the
+// per-map table above.  The explicit steps are OVERRIDES, for comparing two
+// settings on one map without flying somewhere else.
 //
-// So raising the layer count alone does NOT make the field more three
-// dimensional — it makes the steps between neighbouring layers finer while the
-// endpoints stay put, which reads as LESS separation, not more.  Raising the
-// spread is what actually deepens the effect.  (The cut is quadratic rather
-// than even, so the step between adjacent layers is proportional to b/layers^2:
-// near layers are spread wide, far layers bunch together, which is what real
-// distance does.)
+// The panel shows the resolved number alongside, e.g. `Auto 185`, so the map's
+// current sky is legible without a detour into the source.
 //
-// 2.0 IS THE DEFAULT and reproduces the field's original behaviour.  The
-// nearest layer then scrolls at ~0.40x camera motion once the shared 0.2 draw
-// scale is applied, so stars always trail the world rather than racing it.
-export const STAR_PARALLAX_CYCLE: ReadonlyArray<number> = [2.0, 4.0, 8.0, 1.0, 0.5] as const;
+// A density override does NOT drag parallax with it: the two DBG rows are
+// independent so either can be isolated. The DERIVED inverse relation applies
+// to the per-map values, which is where it belongs.
+export const STAR_DENSITY_CYCLE: ReadonlyArray<number> = [0, 729, 400, 185, 90, 1200] as const;
+let activeStarDensityIndex = 0;
+export function getStarDensityOverride(): number { return STAR_DENSITY_CYCLE[activeStarDensityIndex]; }
+export function cycleStarDensity(): number {
+  activeStarDensityIndex = (activeStarDensityIndex + 1) % STAR_DENSITY_CYCLE.length;
+  return STAR_DENSITY_CYCLE[activeStarDensityIndex];
+}
+/** The density actually used for `mapType` — the override if one is set,
+ *  otherwise the map's own value. */
+export function resolveStarDensity(mapType: MapType): number {
+  const o = getStarDensityOverride();
+  return o > 0 ? o : (STAR_DENSITY_BY_MAP[mapType] ?? STAR_DENSITY_RANGE.MAX);
+}
+export function getActiveStarDensityName(mapType?: MapType): string {
+  const o = getStarDensityOverride();
+  if (o > 0) return `${o}`;
+  return mapType === undefined ? 'Auto' : `Auto ${resolveStarDensity(mapType)}`;
+}
+
+export const STAR_PARALLAX_CYCLE: ReadonlyArray<number> = [0, 2, 4, 8, 1, 0.5] as const;
 let activeStarParallaxIndex = 0;
-export function getActiveStarParallax(): number { return STAR_PARALLAX_CYCLE[activeStarParallaxIndex]; }
-export function getActiveStarParallaxName(): string { return `${STAR_PARALLAX_CYCLE[activeStarParallaxIndex]}x`; }
+export function getStarParallaxOverride(): number { return STAR_PARALLAX_CYCLE[activeStarParallaxIndex]; }
 export function cycleStarParallax(): number {
   activeStarParallaxIndex = (activeStarParallaxIndex + 1) % STAR_PARALLAX_CYCLE.length;
   return STAR_PARALLAX_CYCLE[activeStarParallaxIndex];
 }
-
-// ─── DBG: star density ───────────────────────────────────────────────────────
-//
-// Stars per 10 000 CSS px^2.  An AESTHETIC call, so it ships as a cycle rather
-// than as an edit (the repo's established pattern for a look that should be
-// overturned by looking rather than by arguing).
-//
-// 729 IS THE DEFAULT (user call): it is the star COUNT the 390x844 phone showed
-// before the gauntlet — the "large number of stars" that was liked — and since
-// density is now uniform per unit area, every screen size gets it.
-//
-// Worth knowing when reading this number against the old sky: the count is the
-// same, but the LOOK is not.  Each star used to be a 1-CSS-px fillRect at a
-// FRACTIONAL origin, which Canvas2D antialiased into a ~3.7-pixel smear, so 729
-// stars covered 26.9% of the screen.  A star is now one crisp device pixel, so
-// the same 729 covers ~7.3%.  Same many stars, a quarter of the ink.
-//
-// Cost scales LINEARLY with this number — unlike the old pre-rendered bands,
-// whose cost was flat in star count and linear in LAYER count.  That trade is
-// why raising density is affordable now and raising it used to be free; see the
-// S6 table in docs/GAUNTLET_STARFIELD_LOG.md before going far past 2000.
-export const STAR_DENSITY_CYCLE: ReadonlyArray<number> = [729, 1200, 2000, 185, 400] as const;
-let activeStarDensityIndex = 0;
-export function getActiveStarDensity(): number { return STAR_DENSITY_CYCLE[activeStarDensityIndex]; }
-export function getActiveStarDensityName(): string { return `${STAR_DENSITY_CYCLE[activeStarDensityIndex]}`; }
-export function cycleStarDensity(): number {
-  activeStarDensityIndex = (activeStarDensityIndex + 1) % STAR_DENSITY_CYCLE.length;
-  return STAR_DENSITY_CYCLE[activeStarDensityIndex];
+/** The spread actually used for `mapType`: the override if set, otherwise
+ *  derived from the map's density so the inverse relation always holds. */
+export function resolveStarParallax(mapType: MapType): number {
+  const o = getStarParallaxOverride();
+  if (o > 0) return o;
+  return parallaxForDensity(STAR_DENSITY_BY_MAP[mapType] ?? STAR_DENSITY_RANGE.MAX);
+}
+export function getActiveStarParallaxName(mapType?: MapType): string {
+  const o = getStarParallaxOverride();
+  if (o > 0) return `${o}x`;
+  return mapType === undefined ? 'Auto' : `Auto ${resolveStarParallax(mapType).toFixed(1)}x`;
 }
 
 // ─── DBG: star REGIONS (non-uniform density across the map) ──────────────────
 //
 // Star density varies by WHERE IN THE MAP the camera is, instead of being
 // uniform everywhere: fly into a rich region and the sky fills in, fly into a
-// void and it thins out.
+// void and it thins out.  This modulates whatever the map's own density is —
+// it is a variation ACROSS a map, where STAR_DENSITY_BY_MAP is the difference
+// BETWEEN maps.
 //
 // WHY NOT THE FLOW FIELD (evaluated, rejected — see the S7 decision in
 // docs/GAUNTLET_STARFIELD_LOG.md):
@@ -1795,10 +1859,6 @@ export function cycleStarDensity(): number {
 //   - It would couple the backdrop to a gameplay system.  BackgroundManager
 //     currently knows about toroidal maths, constants and assets, and nothing
 //     else.
-// So the field below is purpose-built for density: a sum of three plane waves
-// with INTEGER wave numbers, which makes it exactly periodic on the torus (the
-// same trick FlowFieldGrid's breathing term uses for seam-continuity), static
-// per map, and free of any dependency on gameplay state.
 //
 // `minFrac` is the share of the star budget still drawn in the emptiest region
 // — never 0, because a completely empty sky reads as a rendering failure rather
@@ -3510,6 +3570,27 @@ export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number
   { targetId: 'arena_ring',        x:     0, y: -4200 },
   { targetId: 'arena_seven_rings', x:     0, y:  4200 },
   { targetId: 'arena_pocket',      x: -4400, y:     0 },
+];
+
+/** TEST PORTALS — a vertical rack beside the home station, one per showcase
+ *  map, stepping the whole star-density range in order.
+ *
+ *  The column is the point: +Y is DOWN, so a portal further down the map leads
+ *  to a LOWER-density sky.  Read as descending altitude — the top of the rack
+ *  is deep space and the bottom is the closest thing the game has to a planet
+ *  approach.  Densities are not repeated here; each target's value lives in
+ *  STAR_DENSITY_BY_MAP, and `tests/starfield.spec.ts` asserts the two tables
+ *  agree so they cannot drift apart.
+ *
+ *  Placed at x = +1400: clear of the home station's CLEARANCE (520) and of the
+ *  player spawn, and spaced 600 apart so only one is ever inside USE_RANGE. */
+export const HUB_TEST_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
+  { targetId: 'field_asteroid', x: 1400, y: -1500 },   // densest sky
+  { targetId: 'field_glass',    x: 1400, y:  -900 },
+  { targetId: 'field_metal',    x: 1400, y:  -300 },
+  { targetId: 'field_plastic',  x: 1400, y:   300 },
+  { targetId: 'field_rock',     x: 1400, y:   900 },
+  { targetId: 'field_nebula',   x: 1400, y:  1500 },   // sparsest sky
 ];
 
 /** Where an arena's return portal sits relative to that map's playerSpawn.

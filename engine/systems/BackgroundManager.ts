@@ -2,8 +2,8 @@
 import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
-  STARFIELD_CONSTANTS, getActiveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, getActiveStarRegion, getActiveStarParallax,
+  STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
+  getActiveStarBands, getActiveStarRegion, resolveStarParallax,
   STAR_REGION_FADE,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
@@ -212,6 +212,13 @@ export class BackgroundManager {
 public setMapType(type: MapType) {
     if (this.mapType === type) return;
     this.mapType = type;
+    // The sky is per-MAP now — density, parallax spread and the generation
+    // seed all key off `mapType` — so a map change has to rebuild it.  Before
+    // the field became map-dependent this was correctly a no-op, which is why
+    // the invalidation was missing: the seeded sky (S10) and the per-map
+    // density (S12) both silently kept the PREVIOUS map's field until
+    // something else (a resize) happened to trigger a rebuild.
+    this.initialized = false;
   }
 
   /**
@@ -408,7 +415,7 @@ public setMapType(type: MapType) {
     // the same absolute 24 000.  Deriving from area is what makes them agree.
     this.starCount = Math.max(
       NUM_BANDS,
-      Math.round(((width * height) / 1e4) * getActiveStarDensity()),
+      Math.round(((width * height) / 1e4) * resolveStarDensity(this.mapType)),
     );
     // Every band carries the same share, so the density invariant holds per
     // band as well as in total.  Round-off is absorbed by the total rather
@@ -434,7 +441,10 @@ public setMapType(type: MapType) {
     // by SPREAD alone, so adding layers subdivides the SAME range more finely
     // rather than deepening it.  More layers therefore reads as LESS separation
     // between neighbours, not more.
-    const spread = getActiveStarParallax();
+    // Per-MAP sky: density is this map's own value (or the DBG override), and
+    // the parallax spread follows from it — sparse skies are NEAR skies and
+    // separate more as you move.  See STAR_DENSITY_BY_MAP.
+    const spread = resolveStarParallax(this.mapType);
     const floor = STARFIELD_CONSTANTS.DEPTH_FLOOR;
     this.bandSpeed = new Float64Array(TOTAL_BANDS);
     this.bandOffsetX = new Float64Array(TOTAL_BANDS);

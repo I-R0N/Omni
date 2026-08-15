@@ -1125,7 +1125,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   out of range instead of being culled the way other POI dots are.  The
   fill carries the portal colour, so an outbound rift (violet) and a
   return rift (sky) read differently at a glance.
-  Showcase maps get NO portals — they stay debug-only.
+  Showcase maps are reachable from the hub's TEST RACK
+  (`HUB_TEST_PORTAL_SITES`) — six portals in a column beside the home
+  station stepping the star-density range — and each therefore carries
+  a return rift too.  (They were menu-only before the star-field
+  gauntlet's S12; a reachable map with no way home is a trap.)
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -1640,6 +1644,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   from AREA.**  Two invariants, both measured into place by the star-field
   gauntlet (`docs/GAUNTLET_STARFIELD_LOG.md`), and both easy to undo by
   accident:
+  (0) **Every map has its OWN density** (`STAR_DENSITY_BY_MAP`, 90–729), read
+  as ALTITUDE: high = deep space = dense distant sky, low = near a planet =
+  sparse sky.  Parallax spread is DERIVED from it inversely
+  (`parallaxForDensity`) rather than declared alongside — two hand-maintained
+  anti-correlated columns drift.  `BackgroundManager.setMapType` MUST
+  invalidate, since density, parallax and the generation seed all key off the
+  map.
   (1) **Density is per CSS px², never an absolute count.**  The budget is
   `(width × height / 10⁴) × STAR_DENSITY_CYCLE[i]`, split across
   `STARFIELD_CONSTANTS.NUM_BANDS` depth layers.  A fixed count makes a

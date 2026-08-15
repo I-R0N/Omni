@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, RETURN_PORTAL_OFFSET } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, HUB_TEST_PORTAL_SITES, RETURN_PORTAL_OFFSET } from '../../constants';
 import { mapDescriptor, HUB_DESCRIPTOR } from './MapDescriptors';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
@@ -480,6 +480,13 @@ export class OverworldMap extends BaseMapLayer {
     for (const p of HUB_PORTAL_SITES) {
       this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
     }
+
+    // The TEST RACK — a vertical column of portals into the showcase maps,
+    // stepping the star-density range from densest at the top to sparsest at
+    // the bottom.  +Y is down, so descending the column is descending altitude.
+    for (const p of HUB_TEST_PORTAL_SITES) {
+      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
+    }
   }
 }
 
@@ -753,6 +760,12 @@ export class AsteroidFieldMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > clearSq;
     });
+ 
+    // A way home.  These maps are reachable from the hub's TEST RACK now, and
+    // a destination you can enter but not leave is a trap rather than a test.
+    // Added AFTER the clearance filter, exactly as the wave arenas do it, or
+    // the rift would be swept up with the terrain.
+    this.addReturnPortal();
   }
 }
 
@@ -790,6 +803,12 @@ abstract class SingleVariantTileFieldMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > clearSq;
     });
+ 
+    // A way home.  These maps are reachable from the hub's TEST RACK now, and
+    // a destination you can enter but not leave is a trap rather than a test.
+    // Added AFTER the clearance filter, exactly as the wave arenas do it, or
+    // the rift would be swept up with the terrain.
+    this.addReturnPortal();
   }
 }
 
@@ -958,6 +977,12 @@ export class TileHeavyMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > clearSq;
     });
+ 
+    // A way home.  These maps are reachable from the hub's TEST RACK now, and
+    // a destination you can enter but not leave is a trap rather than a test.
+    // Added AFTER the clearance filter, exactly as the wave arenas do it, or
+    // the rift would be swept up with the terrain.
+    this.addReturnPortal();
   }
 }
 
@@ -1006,6 +1031,12 @@ export class NebulaFieldMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > clearSq;
     });
+ 
+    // A way home.  These maps are reachable from the hub's TEST RACK now, and
+    // a destination you can enter but not leave is a trap rather than a test.
+    // Added AFTER the clearance filter, exactly as the wave arenas do it, or
+    // the rift would be swept up with the terrain.
+    this.addReturnPortal();
   }
 }
 

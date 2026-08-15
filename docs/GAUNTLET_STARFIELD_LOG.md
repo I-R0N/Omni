@@ -38,6 +38,9 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S11 — Parallax SPREAD is its own parameter** (user request). Depth
       RANGE and layer COUNT were conflated in one hardcoded `2.0`; they are now
       independent knobs.
+- [x] **S12 — Per-map skies + a hub test rack** (user request). Every map has
+      its own density (90–729) with parallax DERIVED inversely; six test portals
+      beside the home station step the range top-to-bottom.
 
 ---
 
@@ -879,6 +882,77 @@ gauntlet** (the first was reading `__omniStats` in the same tick as a DBG
 cycle). The harness rule that would have caught both: *a predicate handed to
 `waitForEngine`/`waitForStats` must be self-contained — no closure state.*
 
+## S12 — a sky per map, and a rack to compare them from
+
+> *"each sub-portal shall have a different value for the star density ranging
+> from the lower end 185 (and perhaps a layer lower than this) up to the max of
+> 729 … add a series of test portals around the player base station that all go
+> to different map types and have the range of densities. Lower densities should
+> have higher parallax multiplier and vice versa. Lower portals (in the future
+> this will correspond to closer to a planet or place to land) should have lower
+> densities of stars."*
+
+### ALTITUDE is the idea the numbers encode
+
+A map high in deep space shows a dense, distant sky whose layers barely
+separate. A map low near a planet shows fewer stars, and they sweep past with
+more depth separation because everything is closer. So density FALLS and
+parallax RISES as you descend — and the hub's portal column is arranged
+vertically to match, because `+Y` is down.
+
+`STAR_DENSITY_BY_MAP` gives every map one number, spanning **90 → 729**. 90 is
+the "layer lower than 185" the range was asked for with.
+
+### The inverse relation is DERIVED, not maintained
+
+`parallaxForDensity()` computes the spread from the density, linear between
+`AT_MIN_DENSITY: 8` and `AT_MAX_DENSITY: 1`. Two numbers per map that must stay
+anti-correlated is exactly the pairing that drifts the first time someone tunes
+one of them, so a map declares density only. The rule the user stated is now an
+invariant rather than a convention.
+
+### The test rack
+
+Six portals at `x = 1400`, `y` stepping −1500 → +1500 beside the home station:
+
+```
+   y = -1500   field_asteroid   729   (densest — deep space)
+   y =  -900   field_glass      600
+   y =  -300   field_metal      460
+   y =  +300   field_plastic    330
+   y =  +900   field_rock       185
+   y = +1500   field_nebula      90   (sparsest — planet approach)
+```
+
+Densities are NOT repeated in the portal table — they live in
+`STAR_DENSITY_BY_MAP` — and a test asserts the rack's vertical order matches
+the declared order, so the two cannot drift.
+
+**These maps had no way home.** The showcase fields were menu-only by design
+("Showcase maps get NO portals — they stay debug-only"), so making them
+portal-reachable turned each into a trap: enter, and the only exit is the menu.
+Every showcase map now calls `addReturnPortal()` after its spawn-clearance
+filter, the same way the wave arenas do. A test flies to **every** destination
+the hub offers and requires a rift home from each — that is the kind of defect
+that otherwise gets found by a player, not by a suite.
+
+### A latent bug this surfaced
+
+`BackgroundManager.setMapType` did not invalidate the field. That was correct
+while the sky was map-independent — but **S10 made the seed per-map and S12 made
+the density per-map**, so since S10 a map change had been silently keeping the
+*previous* map's sky until something else (a resize) forced a rebuild. Fixed
+here. Worth noting that S10 introduced it and S10's own test could not have
+caught it: that test cycles a DBG knob, which invalidates explicitly.
+
+### Debug menu
+
+Both rows now lead with **Auto**, which uses the map's own value and *shows it*
+— `Auto 185`, `Auto 6.0x` — so the current map's sky is legible without opening
+the source. The explicit steps are overrides for comparing two settings on one
+map. A density override deliberately does NOT drag parallax with it: the rows
+stay independent so either can be isolated.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
@@ -971,6 +1045,28 @@ another machine rather than believed from a ledger table, so the bench now
 rebuilds the 61 band canvases from the live star data and A/Bs them against the
 real `renderStars` — not against this file's re-implementation of it (harness
 rule 6 applies to probes too).
+
+**D29 — DERIVE parallax from density rather than declaring both per map.**
+Beat: a table with two columns. The user stated the relation as a rule ("lower
+densities should have higher parallax multiplier and vice versa"), and a rule is
+better encoded than transcribed — two hand-maintained columns drift the first
+time one is tuned, silently and in a way no test would obviously catch. If a map
+ever needs to break the relation, that is the moment to add an override field.
+
+**D30 — Give the showcase maps return portals rather than leaving them
+menu-only.** Beat: keeping the documented "showcase maps get no portals" rule
+and pointing the rack at the four wave arenas instead. The request was for a
+range of DENSITIES across DIFFERENT map types, and four arenas cannot span the
+range at one map each. Making them reachable obliges making them escapable —
+otherwise the rack is six one-way trips. CLAUDE.md §6a updated, since this
+changes a documented invariant.
+
+**D31 — Lead both DBG cycles with AUTO and print the resolved value.** Beat:
+leaving the cycles as pure overrides with the per-map value invisible. The whole
+reason these knobs exist is to settle a look by comparing — and a panel that
+shows `2x` when the map is actually running `6.0x` is worse than no readout.
+`Auto 185` costs one string and removes a class of confusion this gauntlet has
+already produced twice.
 
 **D27 — Make SPREAD a parameter rather than widening the layer-count cycle.**
 Beat: adding bigger entries to `STAR_BANDS_CYCLE` and hoping more layers reads
@@ -1096,6 +1192,15 @@ any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 ---
 
 ## FOR-USER-REVIEW
+
+- **S12 — every map has its own sky, and there is a test rack to compare them.**
+  Six portals in a column beside the home station, `x = +1400`, stepping down
+  from densest (729, deep space) at the top to sparsest (90, planet approach) at
+  the bottom — lower on the map means lower density, as asked. Parallax follows
+  inversely and automatically. The debug rows now read `Auto 185` / `Auto 6.0x`
+  so you can see what the current map is actually running. **Showcase maps got
+  return portals** in the process; they were menu-only before, so the rack would
+  otherwise have been six one-way trips.
 
 - **S11 — there is now a Parallax knob, and it is the one you were missing.**
   Visual ▸ **Parallax** (2 / 4 / 8 / 1 / 0.5×) sets the total depth range;
@@ -1250,6 +1355,24 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 12 — S12 (per-map skies + the hub test rack)
+
+Per-map density with derived parallax; six test portals beside the home station
+stepping the range; return portals for every showcase map so the rack is not six
+one-way trips.
+
+Two things worth recording. First, a self-inflicted scare: the constants edit
+that inserted the per-map block over-reached and deleted the star-REGION cycle
+along with it — caught immediately by typecheck, restored verbatim, no harm, but
+a reminder that a range-based text replacement over a 3 000-line constants file
+is a blunt instrument.
+
+Second, a real latent bug: `setMapType` never invalidated the background. That
+was harmless until S10 made the seed per-map, at which point map changes started
+silently keeping the previous map's sky. S12 would have shipped per-map density
+that only applied on a resize. Fixed, and the "each map gets its OWN sky" test
+now covers it.
 
 ### Iteration 11 — S11 (parallax spread as its own parameter)
 

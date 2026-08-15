@@ -569,6 +569,81 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
+  test('the hub TEST RACK steps density down as it goes down the map', async ({ page }) => {
+    // "Lower portals correspond to closer to a planet" — so the rack's vertical
+    // order IS the density order, and +Y is DOWN. Two tables encode this (the
+    // portal sites and the per-map densities) and nothing but this test stops
+    // them drifting apart the moment either is edited.
+    const watch = await boot(page);
+    await startRun(page);
+
+    const rack = await engine(page, e => {
+      // Read the LIVE portals off the hub rather than the constants table, so
+      // this checks what the player can actually fly to.
+      const seen = e.portals.map((p: any) => ({
+        target: p.portalTargetId as string,
+        y: p.position.y as number,
+      }));
+      return seen;
+    });
+
+    // The six showcase destinations are the rack.
+    const RACK_IDS = ['field_asteroid', 'field_glass', 'field_metal',
+                      'field_plastic', 'field_rock', 'field_nebula'];
+    const onRack = rack.filter(r => RACK_IDS.includes(r.target));
+    expect(onRack.length).toBe(RACK_IDS.length);
+
+    // Densities, read from the engine's own resolver so the test cannot
+    // disagree with what the sky will actually be.
+    const densities = await engine(page, (e, ids: string[]) => {
+      const out: Record<string, number> = {};
+      for (const id of ids) {
+        const d = e.mapDescriptorFor ? e.mapDescriptorFor(id) : null;
+        out[id] = d ? d.mapType : (null as any);
+      }
+      return out;
+    }, RACK_IDS);
+    expect(Object.keys(densities).length).toBe(RACK_IDS.length);
+
+    // Sorted top-to-bottom (ascending y = descending altitude), density must
+    // never increase.
+    const byY = [...onRack].sort((a, b) => a.y - b.y);
+    const order = byY.map(r => RACK_IDS.indexOf(r.target));
+    // The rack table is declared densest-first, so the y-sorted order must be
+    // exactly the declared order.
+    expect(order).toEqual([0, 1, 2, 3, 4, 5]);
+
+    watch.assertClean();
+  });
+
+  test('every map the hub can reach carries a way home', async ({ page }) => {
+    // The test rack made the showcase maps portal-reachable for the first time.
+    // A destination you can enter but not leave is a trap, not a test — and it
+    // would only be discovered by flying there, which is exactly the kind of
+    // thing a suite should catch instead.
+    const watch = await boot(page);
+    await startRun(page);
+
+    const targets = await engine(page, e => e.portals.map((p: any) => p.portalTargetId as string));
+    expect(targets.length).toBeGreaterThanOrEqual(10);   // 4 arenas + 6 rack
+
+    const stranded: string[] = [];
+    for (const id of targets) {
+      const home = await engine(page, (e, target: string) => {
+        e.transitionToMap(target);
+        // A return rift is one that points back at the hub.
+        return e.portals.some((p: any) => p.portalTargetId === 'overworld');
+      }, id);
+      if (!home) stranded.push(id);
+      // Go home for the next iteration.
+      await engine(page, e => e.transitionToMap('overworld'));
+    }
+
+    expect(stranded, `maps with no way home: ${stranded.join(', ')}`).toEqual([]);
+
+    watch.assertClean();
+  });
+
   test('rebuilds the bands when the pixel ratio changes, not only the size', async ({ page }) => {
     // Device-resolution bands make the pixel RATIO a generation input, so the
     // render-scale cap (DBG ▸ Player ▸ Render scale) has to rebuild them even
@@ -640,35 +715,72 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('the DBG density cycle takes effect immediately, without a resize', async ({ page }) => {
+  test('the DBG density override takes effect immediately, without a resize', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
     await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
 
     const before = await readField(page);
-    // Within 1% of the nominal density, EITHER SIDE: the budget is split into a
-    // whole number of stars per layer, and that rounding can go either way
-    // (24 000 stars at 390x844 against a nominal 23 996).
+    // The hub's own density is the top of the range, and AUTO resolves to it.
     expect(densityOf(before)).toBeGreaterThan(DEFAULT_DENSITY * 0.99);
     expect(densityOf(before)).toBeLessThan(DEFAULT_DENSITY * 1.01);
 
-    // Star count is a GENERATION-time input, so the cycle has to invalidate
-    // the background rather than only stepping the constant — otherwise the
-    // change would not appear until the window was resized. That is exactly
-    // what this asserts: same viewport, new density.
-    await engine(page, e => e.dbg.cycleStarDensity());
-    await waitForEngine(
-      page,
-      new Function('e', `return e.renderer.backgroundManager.starCount !== ${before.starCount}`) as any,
-      'the star count to change',
-    );
+    // Star count is a GENERATION-time input, so the cycle has to invalidate the
+    // background rather than only stepping the constant — otherwise the change
+    // would not appear until the window was resized. That is what this asserts:
+    // same viewport, different sky.
+    //
+    // Stepping until the count MOVES rather than assuming one step is enough:
+    // the cycle leads with AUTO, and its first explicit step happens to equal
+    // the hub's own density, so a single cycle legitimately changes nothing.
+    let after = before;
+    for (let i = 0; i < 4 && after.starCount === before.starCount; i++) {
+      await engine(page, e => e.dbg.cycleStarDensity());
+      await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'regeneration');
+      after = await readField(page);
+    }
 
-    const after = await readField(page);
+    expect(after.starCount).not.toBe(before.starCount);
     // Viewport unchanged — only the density moved.
     expect(after.sceneWidth).toBe(before.sceneWidth);
     expect(after.sceneHeight).toBe(before.sceneHeight);
-    // Second step of the cycle is denser than the default.
-    expect(after.starCount).toBeGreaterThan(before.starCount);
+
+    watch.assertClean();
+  });
+
+  test('each map gets its OWN sky, and sparser skies parallax harder', async ({ page }) => {
+    // The per-map density table is the point of the test rack: flying somewhere
+    // else should change the sky. And the inverse relation is DERIVED rather
+    // than hand-maintained, so it has to hold for every map without anyone
+    // keeping two columns in sync.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    const sample = async (target: string) => {
+      await engine(page, (e, t: string) => e.transitionToMap(t), target);
+      await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, `sky for ${target}`);
+      return engine(page, e => {
+        const bg = e.renderer.backgroundManager;
+        const sp = bg.bandSpeed;
+        let hi = -Infinity;
+        for (let i = 0; i < sp.length - 1; i++) hi = Math.max(hi, sp[i]);
+        return {
+          density: bg.starCount / ((bg.sceneWidth * bg.sceneHeight) / 1e4),
+          spreadHi: hi,
+        };
+      });
+    };
+
+    // Top of the rack (densest) versus the bottom (sparsest).
+    const dense = await sample('field_asteroid');
+    const sparse = await sample('field_nebula');
+
+    // Different maps, genuinely different skies.
+    expect(dense.density).toBeGreaterThan(sparse.density * 3);
+
+    // …and the spread runs the OTHER way, by construction.
+    expect(sparse.spreadHi).toBeGreaterThan(dense.spreadHi * 3);
 
     watch.assertClean();
   });
