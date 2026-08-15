@@ -1795,6 +1795,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the sim substep loop.  Adoption is by polling too, not by trusting
     `gamepadconnected`: the spec lets a browser withhold a pad until its
     first button press, and Safari does.
+  - **A DEDICATED fire control fires on PRESS; a POINTER gesture fires on
+    release** (G13).  The split is about the control, not the device: a tap
+    fires on release because it MUST — until the finger lifts, a tap and a
+    drag are the same gesture — while a pad trigger has no such ambiguity and
+    any delay between the pull and the shot reads as lag.  So the pad queues
+    its shot on the press, and a hold past `CHARGE_FULL` adds the CHARGED shot
+    on release (the release no longer owes an ordinary one, or every held shot
+    would double).  This is also what makes an adaptive `weapon` profile mean
+    something — its break point IS the shot now, where before the gun went off
+    after the clutch had already given way.  The onscreen FIRE button
+    deliberately still fires on release, pending a feel call: it is a thumb on
+    a small target, where a press that commits before the thumb has settled is
+    a different trade than a trigger.
   - **FIRE is gated on the world; everything else is drained.**  A trigger
     held through a station visit must not bank a shot that lands on
     undock, and INTERACT / CYCLE are consumed every frame whether or not

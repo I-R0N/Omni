@@ -949,27 +949,43 @@ export class InputSystem {
     if (this.padGroupEdge(snap, G.BUTTONS.CYCLE_WEAPON)) this.padCyclePresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.PAUSE)) this.padPausePresses++;
 
-    // FIRE mirrors the pointer's model exactly — press-and-release is a shot,
-    // holding past CHARGE_FULL and releasing is a charged shot — so the pad
-    // teaches nothing new.  What it does NOT inherit is the tap's drag-cancel:
-    // a thumb on the right stick moves the aim far past TAP_DISTANCE_LIMIT
-    // during any hold, which would swallow every pad shot.
+    // FIRE ON PRESS (user directive, G13).  The pad used to mirror the
+    // pointer's press-and-RELEASE model for consistency's sake, and that was
+    // the wrong thing to be consistent about: the tap fires on release
+    // because it MUST — until the finger lifts, a tap and a drag are the same
+    // gesture — while a trigger has no such ambiguity and every millisecond
+    // between the pull and the shot is felt as lag.  The rule is therefore
+    // about the CONTROL, not the device: a dedicated fire control fires when
+    // it is pressed, a pointer gesture fires when it resolves.
+    //
+    // It also makes the adaptive trigger mean something.  A `weapon` profile
+    // resists and then GIVES WAY at a point in the travel; with the shot on
+    // release, that break had no relationship to when the gun went off.  Now
+    // the break IS the shot.
+    //
+    // Holding still charges: the press shot goes out immediately and a hold
+    // past CHARGE_FULL adds the charged shot on release.  Nothing is lost,
+    // and the release no longer owes the player an ordinary shot.
+    //
+    // What the pad does NOT inherit is the tap's drag-cancel: a thumb on the
+    // right stick moves the aim far past TAP_DISTANCE_LIMIT during any hold,
+    // which would swallow every pad shot.
     const fireHeld = fireEnabled && this.padAnyPressed(snap, G.BUTTONS.FIRE);
     if (fireHeld && !this.padFireDown) {
       this.padFireDown = true;
       this.padFireStart = performance.now();
       this.writePadPointer();
+      // DEVICE queue, not the tap queue: a pad shot must not be offered to
+      // the minimap toggle or the loadout slots on its way to the weapon.
+      // Aiming straight down with the map expanded used to toggle the map
+      // instead of firing, because the synthetic target landed on it.
+      this.deviceFireEvents.push(this.padPointerTarget());
     } else if (!fireHeld && this.padFireDown) {
       this.padFireDown = false;
-      if (fireEnabled) {
-        const held = (performance.now() - this.padFireStart) / 1000;
-        const target = this.padPointerTarget();
-        // DEVICE queue, not the tap queue: a pad shot must not be offered to
-        // the minimap toggle or the loadout slots on its way to the weapon.
-        // Aiming straight down with the map expanded used to toggle the map
-        // instead of firing, because the synthetic target landed on it.
-        if (held >= INPUT_CONSTANTS.CHARGE_FULL) this.deviceChargeEvents.push(target);
-        else this.deviceFireEvents.push(target);
+      // Only the CHARGED shot is owed on release now — the ordinary one was
+      // paid at the press.
+      if (fireEnabled && (performance.now() - this.padFireStart) / 1000 >= INPUT_CONSTANTS.CHARGE_FULL) {
+        this.deviceChargeEvents.push(this.padPointerTarget());
       }
     }
 

@@ -34,6 +34,7 @@ tuning (step 6).
 | G11 | Gamepad rumble + two pad legibility fixes (user directive) | **done** |
 | G12 | DualSense adaptive triggers over WebHID (user directive) | **done** |
 | G12b | Trigger report corrections + the bisection tooling (hardware report) | **done** |
+| G13 | Fire on trigger PRESS, not release (user directive) | **done** |
 
 ---
 
@@ -906,6 +907,60 @@ nothing), and BT framing at 77 bytes with an independently recomputed CRC.
 
 ---
 
+### G13 — The shot lands on the press (user directive, 2026-08-15)
+
+*"The player should fire at trigger press, not trigger release. This may need
+to only happen for the controller settings."*
+
+**DECISION G13-a — the rule is about the CONTROL, not the device.** G2-c made
+the pad copy the pointer's press-and-RELEASE model in the name of "one fire
+model across all three devices". That was the wrong thing to be consistent
+about. A TAP fires on release because it **must**: until the finger lifts, a
+tap and a drag are the same gesture, and the game uses the drag to fly. A
+trigger has no such ambiguity, so the release-wait buys nothing and every
+millisecond of it reads as lag. The consistency worth keeping is that all
+three devices agree on WHAT a shot is; when they agree on WHEN, one of them
+has to be wrong.
+
+*Alternative rejected:* gating this on the `gamepad` control scheme. The pad
+is polled under every scheme (that is the whole point of G9's "controller and
+keyboard keep touch alive"), so a scheme gate would leave the trigger firing
+on release for anyone using a pad while the scheme said `touch`.
+
+**DECISION G13-b — the press pays the ordinary shot, the release still pays
+the charged one.** A hold now yields an immediate shot AND, past
+`CHARGE_FULL`, a charged shot on release. The alternative — suppressing the
+press shot whenever a charge might follow — is unimplementable: nothing at
+press time knows whether the player intends to hold. Paying the ordinary shot
+on release as well was the other option, and it doubles every held shot.
+
+**This also repairs the adaptive triggers.** A `weapon` profile resists and
+then GIVES WAY at a point in the travel. With the shot on release, that break
+had no relationship to when the gun fired — the clutch let go, and then some
+time later, whenever the finger came up, a shot came out. The break is now
+the shot. G12's profile table was describing a feel the game did not have.
+
+**Not changed: the onscreen FIRE button.** Same argument does not obviously
+apply — it is a thumb on a 38px target, and committing at first contact
+rather than when the thumb has settled is a different trade. Routed to
+FOR-USER-REVIEW as a feel call rather than assumed.
+
+**TEST MEANING CHANGED (declared per the gauntlet rules).**
+`input.spec.ts` "holding past CHARGE_FULL releases a charged shot instead"
+asserted `taps === 0` after a press-hold-release. That assertion encoded
+G2-c's model, which this directive overturns — it was correct for the old
+behaviour and is wrong for the new one, so it was rewritten rather than
+accommodated: the replacement reads the fire queue BETWEEN the press and the
+release (the actual claim: the shot exists while the trigger is still down),
+and still pins `onRelease === 0` so the doubling bug has a guard. The
+describe block is renamed from "the pointer model, minus the drag cancel" to
+"on the PRESS for a device control", because the old name now describes the
+opposite of what the code does.
+
+**Gates:** typecheck, build, 98/98 tests.
+
+---
+
 ### G-final — Validation (2026-08-12)
 
 - **Three gates × 3 consecutive runs: green.** typecheck, build, and 74/74
@@ -1293,6 +1348,12 @@ Consolidated as they are made; each one names the alternative it beat.
 - **G12b-c** — bisect with a rumble pulse over the same HID path. Beat:
   another round of "try it now", which cannot separate a dead transport from
   a wrong encoding.
+- **G13-a** — dedicated fire controls fire on PRESS; pointer gestures fire on
+  release. Beat: G2-c's "one fire model across all three devices", which made
+  the pad inherit a release-wait that only the tap's drag ambiguity justifies.
+- **G13-b** — the press pays the ordinary shot, the release still pays the
+  charged one. Beat: suppressing the press shot when a charge might follow
+  (nothing at press time knows), and paying both (doubles every held shot).
 
 ---
 
@@ -1423,6 +1484,13 @@ push, opens on an iPhone) is the fastest way to run these:
   Report which encoding won and it becomes the default, with the cycle kept
   as a DBG row. **Not built, still available:** the voice-coil haptics and the
   light bar, over the same transport.
+
+- **FEEL CALL — should the ONSCREEN FIRE BUTTON also fire on press?** G13
+  moved the pad trigger to press-to-fire; the button was deliberately left on
+  release. The trigger's case is clean (no gesture ambiguity, and the delay
+  reads as lag); the button's is not, because it is a thumb on a 38px target
+  and committing at first contact rather than when the thumb has settled may
+  read as misfiring. One line to change if you want it.
 
 - **OPEN QUESTION — should a held FIRE CONTROL auto-repeat?** Today none of
   them do: the pad trigger and the onscreen fire button both use the same

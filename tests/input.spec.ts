@@ -614,8 +614,8 @@ test.describe('right stick — aim through the synthetic pointer', () => {
   });
 });
 
-test.describe('fire — the pointer model, minus the drag cancel', () => {
-  test('press and release queues one shot, clear of the ship', async ({ page }) => {
+test.describe('fire — on the PRESS for a device control', () => {
+  test('a press queues one shot, clear of the ship', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -646,7 +646,7 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
     watch.assertClean();
   });
 
-  test('holding past CHARGE_FULL releases a charged shot instead', async ({ page }) => {
+  test('the shot lands on the PRESS, and a hold adds a charged shot on release', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -656,16 +656,25 @@ test.describe('fire — the pointer model, minus the drag cancel', () => {
     const r = await engine(page, (e, arg: { press: any; release: any; sec: number }) => {
       e.input.getDeviceFireEvents();
       e.input.getDeviceChargeEvents();
+
       e.input.applyPadSnapshot(arg.press, true);
+      // Read BEFORE the release: this is the whole point of the directive —
+      // the shot must already be queued while the trigger is still down.
+      const onPress = e.input.getDeviceFireEvents().length;
+
       e.input.padFireStart -= arg.sec * 1000;
       e.input.applyPadSnapshot(arg.release, true);
       return {
-        taps: e.input.getDeviceFireEvents().length,
+        onPress,
+        onRelease: e.input.getDeviceFireEvents().length,
         charged: e.input.getDeviceChargeEvents().length,
       };
     }, { press: pad({ down: [BTN.R2] }), release: pad(), sec: CHARGE_FULL + 0.05 });
 
-    expect(r.taps).toBe(0);
+    expect(r.onPress).toBe(1);
+    // The release owes only the CHARGED shot now — the ordinary one was paid
+    // at the press, and paying it twice would double every held shot.
+    expect(r.onRelease).toBe(0);
     expect(r.charged).toBe(1);
 
     watch.assertClean();
