@@ -178,7 +178,32 @@ the two outcomes are opposite and both are plausible:
 
 To run it, the probe must be opened **over `https://`** — see the
 secure-context note above; a LAN `http://` URL will report a false
-negative. Delivery options are recorded in the handoff below.
+negative.
+
+**Delivery: `raw.githack.com`, no PR or build step required.** The probe
+is a standalone file already committed to a public repo, and githack
+re-serves any such file over HTTPS with correct content types:
+
+```
+https://raw.githack.com/i-r0n/Omni/claude/webgpu-feasibility-spike-kfwx1b/docs/webgpu-probe.html
+```
+
+This is the *same mechanism the repo's own PR previews already use to get
+builds onto the iPhone* (`pr-preview.yml:21`), so it is proven for this
+device.
+
+Two dead ends were checked first and are recorded so they are not retried:
+
+- **`pr-preview.yml` does not publish `dist/`.** It publishes only the
+  single inlined `omniverse-standalone.html`, copied to
+  `previews/pr-N/index.html` (`:92`). So placing the probe in `public/`
+  would put it in `dist/` and still leave it **unreachable** from the
+  preview URL — while shipping probe clutter into the game bundle. Not
+  done.
+- **`raw.githubusercontent.com` serves `text/plain`**, so the browser
+  shows source instead of running the page. It confirms the file is live
+  (HTTP 200, which is also how the repo's public visibility was verified)
+  but cannot host the probe.
 
 **Effort:** ~50 min of the 1 h cap (research, probe, container control,
 this write-up). Within cap.
