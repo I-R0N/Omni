@@ -113,6 +113,63 @@ WebGPU in this container requires explicit flags and a software adapter —
 which bounds what any future CI-side WebGPU work could ever be (functional
 smoke tests: yes; performance gating: never).
 
+### Second control: Safari 18.5 on macOS — **not the target device**
+
+The first real-browser reading came back from a desktop Mac rather than
+the iPhone, over the Netlify deploy preview (`https:`, secure context
+satisfied). **It is not a KG1 result** and is recorded as a control.
+
+| Field | Value |
+|---|---|
+| User agent | `Macintosh; Intel Mac OS X 10_15_7 … Version/18.5 Safari/605.1.15` |
+| Platform / dpr / touch points | `MacIntel` / `1` / `0` |
+| Screen | 1920×1080 css |
+| `navigator.gpu` | **absent** |
+| WebGL2 | available — **`Apple GPU`**, `MAX_TEXTURE_SIZE` **16384** |
+
+**Why this is the expected result and not a kill.** WebGPU shipped in
+**Safari 26**; this is **Safari 18.5**, several major versions earlier. A
+missing `navigator.gpu` here confirms the version boundary rather than
+contradicting it. The target remains a 390×844 iPhone (`devicePixelRatio`
+3, `maxTouchPoints` 5) — none of which this reading shows.
+
+**The design lesson, which is the reason this section exists.** The probe
+reports a full environment block alongside the gate booleans. Without
+`userAgent` / `platform` / `devicePixelRatio` / `maxTouchPoints`, this
+JSON would have read as a clean *"KG1 FAIL — navigator.gpu is absent,
+secure context confirmed, so this is a real device answer"* and **ended
+the spike on the wrong device and the wrong browser version.** Design
+note 2 guards against the wrong *protocol*; this is the same failure mode
+one layer up — the wrong *machine* — and the environment block is what
+catches it. **Any future probe must report enough about its host to prove
+which host it ran on.** A verdict is only as good as its provenance.
+
+**The probe was hardened in response.** It now derives a *device class*
+and a *Safari version*, and refuses to report `KG1 FAIL` from a host that
+is not the target class — reporting `INCONCLUSIVE` instead, the same shape
+as the insecure-context guard. A `PASS` from a non-target host is likewise
+downgraded (`gate.VALID = false`): a pass on the wrong machine is no more
+a gate result than a fail is.
+
+Two details in that heuristic are worth keeping, both found by testing it
+against emulated iPhone / desktop-site / Mac hosts rather than by reading
+it:
+
+- **Touch points, not the UA string, identify an iOS device.** iOS Safari
+  in "Request Desktop Website" mode reports a *Mac* UA and `MacIntel`
+  platform — but still reports `maxTouchPoints > 0`, where a real Mac
+  reports `0`.
+- **`/Version\/(\d+) Safari/` does not match any iPhone.** iOS inserts
+  `Mobile/15E148` between the two tokens, so a regex requiring them
+  adjacent parses every *desktop* Safari and *no* iOS device — silently
+  returning `null` on precisely the device the gate is about. The pattern
+  must not anchor on the trailing `Safari` token.
+
+**A useful by-product.** WebGL2 on this Mac reports a real `Apple GPU`
+with `MAX_TEXTURE_SIZE` 16384 — so on Apple hardware a WebGL2 fallback
+path clears both the device-support hazard and the 3072 static-tile-cache
+limit comfortably. Still a different project; still the operator's call.
+
 ### Adapter limits (software adapter — indicative of the API floor only)
 
 | Limit | Value | Why it matters downstream |
@@ -231,7 +288,7 @@ are in the brief and are deliberately not repeated here.
 
 | Hazard | Actual outcome so far |
 |---|---|
-| **H1 — Safari/iOS support** | API confirmed shipped on iOS 26+ (~88% of iOS devices). **Target-device reading outstanding** — this is the open kill gate |
+| **H1 — Safari/iOS support** | API confirmed shipped on iOS 26+ (~88% of iOS devices). Two controls read: container Chromium (no adapter without flags) and **Safari 18.5 on macOS (no `navigator.gpu`, as expected below Safari 26)**. **Target-iPhone reading still outstanding** — this is the open kill gate |
 | **H2 — Path rendering (375 sites)** | Confirmed unchanged: WebGPU has no path, fill, stroke, arc or gradient primitive. Untested — Stage 2 |
 | **H3 — Draw-call explosion** | Untested — Stage 2/5 |
 | **H4 — Composite modes** | Untested — Stage 4/5 |

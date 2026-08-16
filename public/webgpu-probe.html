@@ -147,11 +147,47 @@ function readEnv() {
   e.deviceMemoryGB      = navigator.deviceMemory ?? "(not exposed)";
   e.maxTouchPoints      = navigator.maxTouchPoints;
 
+  /* DEVICE IDENTITY. The kill gate is a statement about ONE device — the
+     target iPhone. A "no WebGPU" answer from some OTHER machine looks
+     identical in the gate booleans and would kill the spike for the wrong
+     reason. (This happened: the first real-browser run came back from a
+     desktop Mac on Safari 18.5, which predates WebGPU entirely.) So the
+     probe works out what it is running on and refuses to call a FAIL when
+     the host is not the target class.
+
+     Touch points are the reliable signal, not the UA string: iOS Safari in
+     "Request Desktop Website" mode reports a Mac UA and MacIntel platform,
+     but still reports maxTouchPoints > 0, whereas a real Mac reports 0. */
+  const ua = e.userAgent;
+  const platform = navigator.platform || "";
+  e.appleTouchDevice = /iPhone|iPad|iPod/.test(ua)
+                    /* Desktop-site mode hides the iOS UA behind a Mac one, but a
+                       real Mac reports 0 touch points and an iOS device does not.
+                       Matched against UA *and* platform because emulators spoof
+                       only one of the two. */
+                    || (navigator.maxTouchPoints > 0 && /Mac/.test(ua + " " + platform));
+  e.isTargetClass = e.appleTouchDevice;
+  /* NOT /Version\/x Safari/ — iOS puts "Mobile/15E148" between the two, so
+     requiring them adjacent parses every desktop Safari and no iPhone. */
+  const safari = ua.match(/Version\/(\d+(?:\.\d+)?)/);
+  e.safariVersion = safari ? safari[1] : null;
+  /* WebGPU shipped in Safari 26. Anything below that is EXPECTED to lack it
+     and says nothing about the device's capability under a current OS. */
+  e.safariBelowWebGPUFloor = e.safariVersion ? parseFloat(e.safariVersion) < 26 : null;
+
   rows("t-env", [
     ["secure context", ...(e.isSecureContext ? ["yes", "y"] : ["NO — WebGPU IS HIDDEN", "n"])],
     ["protocol", e.protocol],
+    ["device class", e.isTargetClass ? "Apple touch device (target class)"
+                                     : "NOT the target device — desktop/other",
+                     e.isTargetClass ? "y" : "q"],
+    ["Safari version", e.safariVersion
+        ? e.safariVersion + (e.safariBelowWebGPUFloor ? "  (< 26 — predates WebGPU)" : "  (≥ 26 ✓)")
+        : "(not Safari)",
+      e.safariVersion ? (e.safariBelowWebGPUFloor ? "q" : "y") : ""],
     ["user agent", e.userAgent],
     ["devicePixelRatio", e.devicePixelRatio],
+    ["maxTouchPoints", e.maxTouchPoints],
     ["viewport (css)", e.viewport],
     ["Omni backing store", e.omniBackingStore, "key"],
     ["hardwareConcurrency", e.hardwareConcurrency],
@@ -365,21 +401,46 @@ function finish() {
       + "Re-open over https:// (or localhost) before reading any verdict.</span>";
     R.gate.VALID = false;
   } else if (g.PASS) {
-    v.className = "verdict pass";
-    v.innerHTML = "KG1 PASS — WebGPU is usable on this device<br>"
-      + "<span style='font-weight:400;font-size:12px'>Adapter, device, canvas context and a live render loop all succeeded.</span>";
-    R.gate.VALID = true;
+    v.className = e.isTargetClass ? "verdict pass" : "verdict warn";
+    v.innerHTML = (e.isTargetClass ? "KG1 PASS — WebGPU is usable on this device"
+                                   : "PASS, but NOT on the target device")
+      + "<br><span style='font-weight:400;font-size:12px'>"
+      + "Adapter, device, canvas context and a live render loop all succeeded."
+      + (e.isTargetClass ? ""
+          : " This is a desktop/other host, so it does not clear the kill gate for the target iPhone.")
+      + "</span>";
+    /* A pass on the wrong machine is no more a gate result than a fail is. */
+    R.gate.VALID = !!e.isTargetClass;
   } else {
-    v.className = "verdict fail";
     const firstFail = !g.navigatorGpuPresent ? "navigator.gpu is absent"
       : !g.adapterObtained ? "requestAdapter() returned null"
       : !g.deviceObtained ? "requestDevice() failed"
       : !g.canvasContextObtained ? "getContext('webgpu') returned null"
       : "the render test did not draw";
-    v.innerHTML = "KG1 FAIL — " + esc(firstFail) + "<br>"
-      + "<span style='font-weight:400;font-size:12px'>Secure context confirmed, so this is a real device answer. "
-      + "The spike stops here; record OS and browser version.</span>";
-    R.gate.VALID = true;
+
+    if (!e.isTargetClass) {
+      /* A failure on the WRONG MACHINE is not a kill gate result. Same shape
+         as the insecure-context guard: report INCONCLUSIVE, never FAIL. */
+      v.className = "verdict warn";
+      v.innerHTML = "INCONCLUSIVE — NOT THE TARGET DEVICE<br>"
+        + "<span style='font-weight:400;font-size:12px'>" + esc(firstFail)
+        + ", but this is a desktop/other host, not the target iPhone"
+        + (e.safariBelowWebGPUFloor
+            ? " — and Safari " + esc(e.safariVersion) + " predates WebGPU, which shipped in Safari 26"
+            : "")
+        + ". The kill gate is a statement about the TARGET device; re-run there.</span>";
+      R.gate.VALID = false;
+    } else {
+      v.className = "verdict fail";
+      v.innerHTML = "KG1 FAIL — " + esc(firstFail) + "<br>"
+        + "<span style='font-weight:400;font-size:12px'>Secure context and target device both confirmed"
+        + (e.safariBelowWebGPUFloor
+            ? ", but note Safari " + esc(e.safariVersion) + " predates WebGPU (shipped in Safari 26) — "
+              + "this is an OS-VERSION result, not a hardware one; re-ask after updating"
+            : ", so this is a real device answer")
+        + ". Record OS and browser version.</span>";
+      R.gate.VALID = true;
+    }
   }
 
   $("raw").textContent = JSON.stringify(R, null, 2);
