@@ -1510,6 +1510,56 @@ export class PhysicsSystem {
       }
   }
 
+  /** Visit every active static tile whose centre is within `r` (toroidal) of
+   *  (x,y) — the RADIUS-CORRECT sibling of `forEachStaticNear`.
+   *
+   *  The difference is the cell span.  `forEachStaticNear` and the two
+   *  boolean probes beside it all walk a FIXED 3x3 neighbourhood, which
+   *  covers a radius of at most `SPATIAL_GRID_SIZE` (120).  Every one of
+   *  their callers happens to pass less than that, so the limitation is
+   *  latent there — but the unified lighting pass queries at 300-500, where
+   *  a 3x3 walk silently under-reports and shadows would simply be missing
+   *  from occluders one cell further out.  So the span is derived from the
+   *  radius instead: `ceil(r / SPATIAL_GRID_SIZE)`.
+   *
+   *  The span is CLAMPED to half the grid's extent.  Past that the wrapped
+   *  cell indices start repeating, and a cell visited twice would emit its
+   *  tiles to the callback twice — on a small map (Pocket is 4000 wide = 34
+   *  columns) a large enough radius would otherwise double-count.  At the
+   *  clamp the walk already covers the whole torus, so nothing is lost.
+   *
+   *  The probe coordinates are WRAPPED first, matching `hasStaticTileNear`
+   *  rather than `forEachStaticNear`.  That is load-bearing, not tidiness:
+   *  `wrapDeltaX` applies a SINGLE correction step, so it is only correct
+   *  when its inputs are already inside the canonical box.  Wrapping here
+   *  makes the query correct for any caller instead of only for callers who
+   *  happen to pass a canonical position.
+   *
+   *  The callback MUST NOT mutate the static grid (collect, then act). */
+  public forEachStaticInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
+      const wx = wrapX(x);
+      const wy = wrapY(y);
+      const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
+      const span = Math.ceil(r / SPATIAL_GRID_SIZE);
+      const spanX = Math.min(span, (SPATIAL_COLS - 1) >> 1);
+      const spanY = Math.min(span, (SPATIAL_ROWS - 1) >> 1);
+      const rSq = r * r;
+      for (let dx = -spanX; dx <= spanX; dx++) {
+          for (let dy = -spanY; dy <= spanY; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  const tdx = wrapDeltaX(t.position.x, wx);
+                  const tdy = wrapDeltaY(t.position.y, wy);
+                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
+              }
+          }
+      }
+  }
+
   public isPositionClear(x: number, y: number, r: number): boolean {
       const cx = Math.floor(x / SPATIAL_GRID_SIZE);
       const cy = Math.floor(y / SPATIAL_GRID_SIZE);

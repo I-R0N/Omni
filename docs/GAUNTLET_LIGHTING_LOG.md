@@ -22,7 +22,7 @@ recorded rather than quietly dropped.
 ## Checklist
 
 - [x] **A0** — Instrumentation, baseline, legacy credit
-- [ ] **A1** — Occluder extraction into a single queryable source
+- [x] **A1** — Occluder extraction into a single queryable source
 - [ ] **A2** — Light-layer scaffolding + debug visualization
 - [ ] **A3** — Occluder churn
 - [ ] **A4** — One point light, shadow-cast
@@ -239,3 +239,102 @@ with the frame-delta half of each gate deferred to a device capture the
 operator runs. That is a strictly weaker protocol than the ladder
 specifies and it should be adopted deliberately, not by default —
 hence: reported, awaiting direction.
+
+---
+
+## A1 — Occluder extraction into a single queryable source
+
+### What shipped (2 files, as scoped)
+
+- **`PhysicsSystem.forEachStaticInRadius(x, y, r, cb)`** — the
+  radius-correct static walk. Cell span is derived as
+  `ceil(r / SPATIAL_GRID_SIZE)` instead of hardcoded to ±1.
+  `forEachStaticNear` is deliberately **untouched**; other callers depend
+  on its exact behaviour and Part B owns the consolidation.
+- **`engine/systems/render/lighting.ts`** — `collectOccluders(physics,
+  lx, ly, radius, out)` plus the `Occluder` record. Filters to
+  `STRUCTURE && mass === Infinity && !passThrough`, resolves each hit
+  into the light's wrap zone via `shiftX`/`shiftY`, index-fills with the
+  refill idiom. No Canvas2D types — this is the portable half.
+
+Both are **dead code at this stage**: nothing calls either until A2/A4.
+That is what makes A1's cost gate trivially satisfiable — the added cost
+is zero by construction, not by measurement — and it is why the stage is
+verified on correctness instead.
+
+### Two decisions worth recording
+
+**The span is clamped to half the grid extent.** Past that, wrapped cell
+indices repeat and a cell visited twice emits its tiles to the callback
+twice. Pocket is 4000 wide = 34 columns, so a large enough radius would
+double-count on the small maps. At the clamp the walk already covers the
+whole torus, so nothing is lost.
+
+**The probe coordinates are wrapped, matching `hasStaticTileNear` rather
+than `forEachStaticNear`.** This settles half of B1's question 1 in
+advance, and it is load-bearing rather than tidiness: `wrapDeltaX`
+applies a SINGLE correction step (`if d > HALF: d -= MAP`), so it is
+correct only when its inputs are already inside the canonical box. An
+unwrapped probe more than half a map out of the box yields a wrong delta.
+Wrapping makes the query correct for any caller, not just for callers who
+happen to pass a canonical position.
+
+### Verification
+
+Run against the live engine on UNIVERSE and GLASS_FIELD through a
+temporary `window.__omniLighting` handle, **reverted before commit** (the
+permanent handle belongs to A3, whose gate requires it). Verifying here
+rather than at A4 is deliberate: wrong wrap or tangent geometry has no
+symptom until it draws a bar of darkness across the arena, which is the
+`__omniHid` rationale applied to lighting.
+
+| check | UNIVERSE | GLASS_FIELD |
+|---|---|---|
+| r=100 — agrees with the 3×3 walk exactly | 15 = 15 | 15 = 15 |
+| r=300 — finds MORE than the 3×3 walk | 40 → **51** (+28 %) | 38 → **55** (+45 %) |
+| r=300 — is a superset of the 3×3 walk | 0 missed | 0 missed |
+| no duplicate visits (span clamp) | 0 | 0 |
+| matches brute-force toroidal ground truth | 51 = 51 | 55 = 55 |
+| `collectOccluders` filters passThrough + mobile shards | 0 of 51 | 55 of 55 |
+| wrap-resolved inside half a map | max Δ 0 | max Δ 248 / 231 |
+| seam probe stays local | ok | ok |
+| 2000 repeat collections, engine paused | 28.3 B/call | 30.6 B/call |
+
+> **The radius-correctness claim is not theoretical.** At a lighting
+> radius of 300 the fixed 3×3 walk under-reports by **28 % on UNIVERSE
+> and 45 % on GLASS_FIELD**. Had A4 been built on `forEachStaticNear`,
+> roughly a third of the occluders in every light would simply have been
+> missing, and the symptom — shadows absent from tiles one cell out —
+> would have read as a tuning problem rather than a query bug.
+
+**On allocation.** The residual is ~29 B/call and it is *identical on
+both maps* — the same figure whether the call collects 0 occluders
+(UNIVERSE, whose densest cluster is entirely nebula) or 55
+(GLASS_FIELD). An allocation that does not scale with the work done is
+not the collector's; it is the paused engine's rAF and React still
+ticking under the measurement. The first attempt at this check ran with
+the engine LIVE and read 424 KB / −1486 KB on the two maps — noise
+swamping signal, the same contamination `perf/probe.mjs` warns about.
+Recorded because the first number was wrong and the reason is reusable.
+
+**An unplanned finding, relevant to A4's look assessment.** On UNIVERSE
+the densest static-tile cluster is **51 of 51 `nebula-tile`** — all
+passThrough, so `collectOccluders` correctly returns **zero**. Combined
+with A0's population count (1496 of 2227 static tiles on that map are
+nebula), this means a light in the busiest part of the game's main map
+may have almost nothing to cast a shadow from. The unified model's
+headline feature could be close to invisible exactly where the game is
+played. This is not a defect in A1 — the filter is behaving as specified,
+and nebula must not cast shadow — but it is a material question for A4's
+"does this look better than what it replaces" decision, and it is better
+known now than discovered then.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| Byte-identical rendering | PASS — no call sites; nothing in the render path changed |
+| No `PerfSnapshot` field but `lightingMs` changes | PASS — `lightingMs` still 0 |
+| 111 tests pass | PASS |
+| Added cost ≤ 0.15 ms p95 | PASS by construction (dead code), **not measured on device** |
+| Scope ≤ 2 files | PASS (`PhysicsSystem.ts`, new `lighting.ts`) |
