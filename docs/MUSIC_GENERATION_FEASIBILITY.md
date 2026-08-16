@@ -491,13 +491,37 @@ variants for the handful of cues where the **timbre** genuinely must differ
 rather than the pitch: shatter, gnat pop, hull hit.  That is ~10 extra
 files, not 150.
 
-This is also why the cue inventory should precede the generation.  **The
-`docs/SFX_INVENTORY.md` that `AUDIO_PLAN.md` and decision #43 call the Pair
-B deliverable does not exist yet** — and its per-effect parameters
-(character, duration, envelope, variation, throttle, mix, positional) are
-exactly the fields a text-to-audio prompt needs.  Written well, that
-inventory *is* the prompt list; written after the fact, it is a second pass
-over the same 90 decisions.
+This is also why the cue inventory precedes the generation — and on
+`origin/claude/gauntlet-pair-b-sfx-7oxdrc` **it already does**.
+`docs/SFX_INVENTORY.md` and the registry-generated
+`docs/SFX_FILE_MANIFEST.md` carry, per cue, an id, a target filename, a
+**tier**, a **polyphony cap**, a **length in ms**, a **positional flag**,
+and a paragraph of acoustic description.  That is a text-to-audio prompt
+list with the hard parameters already attached: **the manifest is the
+generator's input file**, not something to be re-derived.
+
+Two pieces of that branch also delete most of what a generator would
+otherwise have to build:
+
+- **`scripts/prep-sfx.mjs`** already does the entire conditioning pass —
+  head-trim to the first audible sample (keeping 1 ms of run-up),
+  envelope-based tail trim, a hard `--max-ms` ceiling with an 8 ms fade so
+  the truncation does not click, peak normalise, mono downmix, 16-bit
+  out — in dependency-free Node.  A generator should emit a raw take and
+  hand it to `prep-sfx --max-ms <the row's ms>`.  It must not re-implement
+  any of that.
+- **The `-a`/`-b`/`-c` round-robin file convention** means §9b's
+  "randomise instead of generating variants" is already solved *in the
+  other direction*: the engine cycles however many takes exist per id, so
+  extra takes are idiomatic here rather than wasteful.  Scale them off the
+  **Tier** column — 3 takes for tier 1, 2 for tier 2, 1 for tier 3 — which
+  spends the asset budget where the repetition is actually audible.
+
+The one thing `prep-sfx` is wrong for is **loop cues** (`ms: L`, e.g.
+`weapon.charge.loop`): its tail trim and end-fade are exactly what a
+seamless loop must not have.  Loops need their own path — generate long,
+select a stable window, equal-power crossfade the wrap, skip `prep-sfx` or
+teach it a `--loop` mode.
 
 ### 9c. Consequence for the model choice overall
 
