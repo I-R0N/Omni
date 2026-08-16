@@ -1,11 +1,19 @@
-# MiniMax-Music3 for Omni's adaptive score — feasibility
+# Generative audio for Omni — feasibility
 
-Assessment of <https://huggingface.co/MiniMaxAI/MiniMax-Music3> as the
-**offline generator of the audio files** for the active layered background
-music described in `docs/AUDIO_PLAN.md` §3 (music director) and §5 (music
-beds).  The question is asset authoring, not runtime: the model runs on a
-rented box while the soundtrack is being made, the game ships the `.opus`
-files it produced, and nothing model-shaped is ever in the bundle.
+Can generative models author Omni's audio assets offline?  Two questions
+with two different answers and two different models:
+
+- **§1–§8 — music beds.**  <https://huggingface.co/MiniMaxAI/MiniMax-Music3>
+  as the generator for the layered background music in `docs/AUDIO_PLAN.md`
+  §3 (music director) and §5 (music beds).  **Yes, via
+  generate-then-separate.**
+- **§9 — sound effects.**  The same model for the ~90 cues in
+  `AUDIO_PLAN.md` §4.  **No — wrong tool.  Use Stable Audio 3 Small-SFX**,
+  which is 25× smaller, runs on a CPU, and has a clearer licence.
+
+Throughout, the question is asset authoring, not runtime: models run on a
+box while the audio is being made, the game ships the `.opus` files they
+produced, and nothing model-shaped is ever in the bundle.
 
 **Nothing here is implemented.**  The game still has ZERO audio — no
 `AudioContext`, no audio assets, no `AudioSystem`, no trigger hooks
@@ -359,13 +367,16 @@ than the platform terms, or (b) offline/reproducible generation matters.
 Not a recommendation to switch — a note that Music3's weakness here
 (mixdown-only) is precisely what some newer models target:
 
-- **Stable Audio (3.x, open-weight family)** advertises *track extraction*
-  (generative stem separation), *layering* (adding instruments to existing
-  audio), *repainting* of time windows, and explicit game-audio use cases —
-  i.e. the §3 requirements as first-class operations rather than as a
-  post-process.  Caveat: **self-hosting for commercial use requires a
-  separate agreement with Stability AI**, so its licensing question is at
-  least as live as MiniMax's.
+- **Stable Audio 3 Medium** (1.4B, open weights, 380 s max, ~6.5 GB VRAM,
+  a 120 s render in 0.78 s on an H200) does music *and* SFX from one stack,
+  supports audio-to-audio editing and inpainting/continuation, and is
+  LoRA-fine-tunable.  Its licence position is also *known* rather than
+  unread — see §9, which specs the family properly because it is the
+  recommendation for sound effects.  **If §2b comes back non-commercial,
+  this is the replacement for Music3 as well**, and then the whole
+  soundtrack — beds and cues — comes off one model on one box.  Music3
+  probably keeps a quality edge on long-form musical coherence; that edge
+  is worth less on a 60-second loop than on a five-minute song.
 - **ACE-Step (3.5B, Apache-2.0)** is the licence-clean option — 8 GB VRAM,
   fast iteration, LoRA-fine-tunable so a house style is reachable.  Lower
   ceiling than Music3 on full-song coherence, which matters much less for a
@@ -373,8 +384,13 @@ Not a recommendation to switch — a note that Music3's weakness here
 - **Demucs (MIT)** is needed in all three worlds and has no licence
   question.
 
-If the licence in §2b comes back non-commercial, ACE-Step + Demucs is the
-fallback that requires no other change to the pipeline in §4.
+- **ACE-Step (3.5B, Apache-2.0)** is the licence-*cleanest* option — 8 GB
+  VRAM, fast iteration, LoRA-fine-tunable.  Lower ceiling than Music3 on
+  full-song coherence; same caveat as above about how little that matters
+  for a loop.
+
+Either fallback drops into §4's pipeline unchanged — the generator is one
+box in that diagram and the sidecar is the interface.
 
 ---
 
@@ -397,3 +413,99 @@ fallback that requires no other change to the pipeline in §4.
    emotional win, but SFX is what the game is missing at the moment-to-
    moment level, and both need the same bus structure, iOS unlock and
    volume-settings home from `AUDIO_PLAN.md` §3/§6.
+
+---
+
+## 9. Sound effects — a different model
+
+**Music3 is the wrong tool for the ~90 cues in `AUDIO_PLAN.md` §4, on five
+independent axes.**  Not "worse": wrong.
+
+1. **It is a song model.**  Its conditioning is lyrics plus a *music*
+   caption and its prior is musical structure.  Ask it for a glass shatter
+   and it will try to write a piece about one.
+2. **Length.**  Built for takes up to five minutes at ~30 frames/sec; SFX
+   cues are 80 ms – 2 s.  Every cue would mean generating far too much
+   audio and trimming a transient out of it.
+3. **32 kHz means a 16 kHz ceiling.**  A music bed does not miss the top
+   octave.  SFX largely *are* the top octave — glass shatter, metal clang,
+   laser zap, gnat pop all carry their identity at 8–16 kHz.  Dull,
+   blanketed transients is the exact failure mode, and it is unfixable in
+   post.
+4. **Throughput.**  ~90 cues × several takes each is hundreds of
+   generations on an 11.1B two-GPU non-streaming model.
+5. **No audio-conditioned variation.**  The `[var]` round-robins in §4 need
+   "the same impact, performed slightly differently".  Music3 has no
+   audio input at all, so every variant would be an unrelated roll.
+
+### 9a. The right tool: Stable Audio 3 Small-SFX
+
+From the [Stability-AI/stable-audio-3 README](https://github.com/Stability-AI/stable-audio-3)
+(read 2026-08-16) — a purpose-built SFX variant, and the numbers are not
+close to Music3's:
+
+| | MiniMax-Music3 | SA3 **Small-SFX** | SA3 Medium |
+|---|---|---|---|
+| Params | 11.1B | **433M** | 1.4B |
+| Hardware | **2 × CUDA GPU** | **CPU — no GPU required** | 1 CUDA GPU (+FlashAttn2) |
+| Peak VRAM | ~22 GB+ of weights | 1.7–2.4 GB *if* on GPU | 5.1–6.5 GB |
+| Sample rate | 32 kHz | **44.1 kHz stereo** | 44.1 kHz stereo |
+| Max length | ~5 min | 120 s | 380 s |
+| 5 s render | undisclosed | **0.41 s** (H200) / 0.70 s (Mac CPU) / 0.23 s (CoreML) / 0.017 s (TensorRT) | 0.60 s (H200) |
+| Purpose | songs | **sound effects** | music + SFX |
+
+Three properties beyond raw speed decide it:
+
+- **Audio-to-audio editing** is the `[var]` problem solved properly: feed
+  cue v1, get v2 — recognisably the same event, differently performed.
+  Also **inpainting/continuation** for repairing or extending a take.
+- **LoRA fine-tuning**, stackable and runtime-adjustable (trainable on
+  Apple Silicon via the bundled MLX path, no PyTorch).  A house sound for
+  the material families — glass / plastic / metal / rock / nebula, which
+  `SHARD_VARIANTS` already treats as a table — from a handful of
+  references.  That is how ~90 disparate cues end up sounding like one
+  game rather than one hundred stock downloads, and it is the single
+  biggest lever on §1's "AAA" quality target.
+- **The licence is knowable.**  Stability AI Community License, models
+  trained on fully licensed data, commercial use of outputs permitted
+  below a **$1M annual-revenue** threshold (enterprise licence above it).
+  Read it to confirm — but "a threshold Omni will not cross" is a very
+  different risk posture from §2b's unread file.
+
+CPU-capable also means the SFX loop is *iterative*: tweak a prompt, hear
+the result in under a second, on the laptop, with no box to rent.  For 90
+cues that workflow difference is worth more than any quality delta.
+
+### 9b. Generate fewer files than you think
+
+`AUDIO_PLAN.md` §4 marks ~30 cues `[var]` (3–5 round-robin variants).
+Generating 5 files each is ~150 extra assets against a standalone build
+that is already the sore point in §6.
+
+**Do what shipped games do instead: randomise per voice at trigger time.**
+Playback rate ±3–6 %, gain ±1.5 dB, and a light filter-cutoff jitter, rolled
+when the voice is allocated, kills machine-gun repetition for **zero
+bytes** — and it composes with the voice pool, per-cue cooldowns and
+same-step coalescing that §2c already requires.  Reserve *generated*
+variants for the handful of cues where the **timbre** genuinely must differ
+rather than the pitch: shatter, gnat pop, hull hit.  That is ~10 extra
+files, not 150.
+
+This is also why the cue inventory should precede the generation.  **The
+`docs/SFX_INVENTORY.md` that `AUDIO_PLAN.md` and decision #43 call the Pair
+B deliverable does not exist yet** — and its per-effect parameters
+(character, duration, envelope, variation, throttle, mix, positional) are
+exactly the fields a text-to-audio prompt needs.  Written well, that
+inventory *is* the prompt list; written after the fact, it is a second pass
+over the same 90 decisions.
+
+### 9c. Consequence for the model choice overall
+
+Sound effects and music can come off **one stack**: SA3 Small-SFX for cues,
+SA3 Medium for beds, both under one licence, one repo, one set of tooling —
+versus Music3 for beds (2 GPUs, unread licence) plus SA3 for cues.  Music3
+likely wins on musical quality; the consolidation is worth weighing against
+that, especially since §4's pipeline is generator-agnostic by construction.
+
+Demucs stays in the picture either way — the stem split in §4 is
+independent of who generated the take.

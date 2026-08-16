@@ -241,7 +241,12 @@ feel comes from — see the area-composition entry in PARKING_LOT.
 > that closes the gap.  Short version: the generator is an authoring-time
 > asset source, the music director in §3 is unaffected, and the per-bed
 > `{bpm, loopStart, layers[]}` sidecar described there is the interface
-> between them.
+> between them.  **§9 of that doc covers the §4 cues** — a song model is
+> the wrong tool for them (32 kHz caps the transients that carry a
+> shatter, and there is no audio-conditioned variation for the `[var]`
+> round-robins); a purpose-built SFX model is right, and most `[var]`
+> variation should be per-voice pitch/gain/filter jitter rather than extra
+> files.
 
 ---
 
