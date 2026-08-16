@@ -1,0 +1,406 @@
+<!doctype html>
+<!--
+  OMNI — WebGPU FEASIBILITY PROBE  (Stage 0 / KILL GATE 1)
+  =========================================================
+  THIS IS A PROBE, NOT GAME CODE. It is standalone, imports nothing, and is
+  never loaded by the app. Delete it freely once the spike concludes.
+
+  PURPOSE: answer one question — does the TARGET iPhone support WebGPU at all?
+  Everything else in docs/GAUNTLET_WEBGPU_LOG.md depends on this answer.
+
+  ── HOW TO RUN IT (read this, it is the part that goes wrong) ──────────────
+  WebGPU is only exposed in a SECURE CONTEXT. Opening this page over plain
+  http:// from a LAN address (http://192.168.x.x:3000/...) will report
+  "navigator.gpu: ABSENT" on a phone that supports WebGPU perfectly well.
+  That is a FALSE NEGATIVE and it would fail the kill gate for the wrong
+  reason. The probe detects this and refuses to render a verdict.
+
+  Valid ways to open it on the phone:
+    * any https:// URL   (Netlify deploy preview, GitHub Pages, a gist, etc.)
+    * http://localhost   (desktop control only — localhost is privileged)
+    * file:// on iOS does NOT work for this; use https.
+
+  Tap "COPY REPORT" and paste the JSON back — the phone has no devtools,
+  which is the same constraint PerfRecorder was built around.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Omni — WebGPU Probe (Stage 0)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 14px 14px 40px;
+    background: #0b1120; color: #e2e8f0;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .04em; }
+  .sub { color: #64748b; font-size: 11px; margin-bottom: 14px; }
+  .verdict {
+    padding: 14px; border-radius: 10px; margin: 0 0 14px;
+    font-size: 15px; font-weight: 700; letter-spacing: .02em;
+    border: 1px solid; line-height: 1.35;
+  }
+  .pass { background: #052e1a; border-color: #10b981; color: #6ee7b7; }
+  .fail { background: #3f1020; border-color: #f43f5e; color: #fda4af; }
+  .warn { background: #3b2506; border-color: #f59e0b; color: #fcd34d; }
+  .pend { background: #172033; border-color: #334155; color: #94a3b8; }
+  section { border: 1px solid #1e293b; border-radius: 8px; margin-bottom: 10px; }
+  section > h2 {
+    margin: 0; padding: 8px 10px; font-size: 11px; letter-spacing: .09em;
+    text-transform: uppercase; color: #94a3b8; background: #111a2e;
+    border-bottom: 1px solid #1e293b; border-radius: 8px 8px 0 0;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 10px; vertical-align: top; border-top: 1px solid #16202f; }
+  td:first-child { color: #7c8da5; width: 44%; word-break: break-word; }
+  td:last-child { word-break: break-word; }
+  tr:first-child td { border-top: 0; }
+  .y { color: #6ee7b7; } .n { color: #fda4af; } .q { color: #fcd34d; }
+  .key { color: #93c5fd; }
+  button {
+    width: 100%; padding: 13px; margin-bottom: 10px; font: inherit;
+    font-weight: 700; letter-spacing: .05em; color: #0b1120; background: #38bdf8;
+    border: 0; border-radius: 8px; -webkit-appearance: none;
+  }
+  button:active { background: #0ea5e9; }
+  canvas {
+    width: 100%; max-width: 260px; aspect-ratio: 1; display: block;
+    margin: 10px auto; background: #000; border: 1px solid #1e293b;
+    border-radius: 6px;
+  }
+  pre {
+    margin: 0; padding: 10px; font-size: 10px; line-height: 1.45;
+    white-space: pre-wrap; word-break: break-all; color: #7c8da5; max-height: 320px;
+    overflow: auto;
+  }
+  .note { padding: 8px 10px; font-size: 11px; color: #94a3b8; }
+</style>
+</head>
+<body>
+
+<h1>OMNI — WebGPU PROBE</h1>
+<div class="sub">Stage 0 / Kill Gate 1 &middot; standalone, touches no game code</div>
+
+<div id="verdict" class="verdict pend">Probing&hellip;</div>
+<button id="copy">COPY REPORT</button>
+
+<section><h2>Verdict detail</h2><table id="t-gate"></table></section>
+<section><h2>Environment</h2><table id="t-env"></table></section>
+<section><h2>Adapter</h2><table id="t-adapter"></table></section>
+<section><h2>Limits that matter downstream</h2><table id="t-limits"></table>
+  <div class="note">Omni's static-tile cache is up to 3072&times;3072 (one texture).
+  <code>maxTextureDimension2D</code> below 3072 means it must be split into tiles &mdash;
+  a real, loggable cost.</div>
+</section>
+<section><h2>End-to-end render test</h2>
+  <canvas id="cv" width="512" height="512"></canvas>
+  <table id="t-render"></table>
+</section>
+<section><h2>Fallback (informational only)</h2><table id="t-fallback"></table></section>
+<section><h2>Raw report (paste this back)</h2><pre id="raw">…</pre></section>
+
+<script>
+"use strict";
+
+/* The report object IS the deliverable of this stage. Everything the probe
+   learns is written here, and the COPY button serialises it verbatim. */
+const R = {
+  probeVersion: "stage0.1",
+  when: new Date().toISOString(),
+  env: {}, gate: {}, adapter: {}, limits: {}, render: {}, fallback: {}, errors: []
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function rows(el, pairs) {
+  $(el).innerHTML = pairs.map(([k, v, cls]) =>
+    `<tr><td>${esc(k)}</td><td class="${cls || ""}">${esc(v)}</td></tr>`).join("");
+}
+const yn = (b) => (b ? ["yes", "y"] : ["NO", "n"]);
+
+/* ── ENVIRONMENT ──────────────────────────────────────────────────────────
+   Captured BEFORE any WebGPU call, because if the context is insecure the
+   WebGPU answer is meaningless and we must say so rather than report a
+   false negative. */
+function readEnv() {
+  const e = R.env;
+  e.href            = location.href;
+  e.protocol        = location.protocol;
+  e.isSecureContext = window.isSecureContext === true;
+  e.userAgent       = navigator.userAgent;
+  e.platform        = navigator.platform || "(n/a)";
+  e.devicePixelRatio = window.devicePixelRatio;
+  e.screen          = `${screen.width}x${screen.height} css`;
+  e.viewport        = `${innerWidth}x${innerHeight} css`;
+  /* The backing store Omni would actually drive: effectiveDpr() caps dpr at 2
+     (RENDER_SCALE_CYCLE[0]) — see constants.ts. Reproduced here so the probe
+     reports the REAL pixel count the renderer must fill on this device. */
+  const cappedDpr = Math.min(window.devicePixelRatio || 1, 2);
+  e.omniBackingStore = `${Math.round(innerWidth * cappedDpr)}x${Math.round(innerHeight * cappedDpr)} px `
+                     + `(${((innerWidth * cappedDpr * innerHeight * cappedDpr) / 1e6).toFixed(2)} Mpx) @ dpr cap 2`;
+  e.hardwareConcurrency = navigator.hardwareConcurrency ?? "(n/a)";
+  e.deviceMemoryGB      = navigator.deviceMemory ?? "(not exposed)";
+  e.maxTouchPoints      = navigator.maxTouchPoints;
+
+  rows("t-env", [
+    ["secure context", ...(e.isSecureContext ? ["yes", "y"] : ["NO — WebGPU IS HIDDEN", "n"])],
+    ["protocol", e.protocol],
+    ["user agent", e.userAgent],
+    ["devicePixelRatio", e.devicePixelRatio],
+    ["viewport (css)", e.viewport],
+    ["Omni backing store", e.omniBackingStore, "key"],
+    ["hardwareConcurrency", e.hardwareConcurrency],
+    ["deviceMemory", e.deviceMemoryGB],
+  ]);
+}
+
+/* ── FALLBACK ─────────────────────────────────────────────────────────────
+   One line, captured while we are here: the brief asks whether WebGL2 exists
+   as an alternative path. It is a different project and the operator's call;
+   this only records the fact. */
+function readFallback() {
+  const f = R.fallback;
+  try {
+    const c = document.createElement("canvas");
+    const gl = c.getContext("webgl2");
+    f.webgl2 = !!gl;
+    if (gl) {
+      const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      f.webgl2Renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "(masked)";
+      f.webgl2Vendor   = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : "(masked)";
+      f.webgl2MaxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      const lose = gl.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext();
+    }
+  } catch (err) { f.webgl2 = false; f.error = String(err); }
+  rows("t-fallback", [
+    ["WebGL2 available", ...yn(f.webgl2)],
+    ["WebGL2 renderer", f.webgl2Renderer ?? "—"],
+    ["WebGL2 MAX_TEXTURE_SIZE", f.webgl2MaxTexture ?? "—"],
+  ]);
+}
+
+/* ── THE GATE ─────────────────────────────────────────────────────────────
+   Five checks, in the order the brief specifies. Each records its own
+   outcome so a partial failure is legible rather than a bare "failed". */
+async function probe() {
+  const g = R.gate;
+
+  g.navigatorGpuPresent = typeof navigator !== "undefined" && !!navigator.gpu;
+  if (!g.navigatorGpuPresent) { finish(); return; }
+
+  R.adapter.preferredCanvasFormat = (() => {
+    try { return navigator.gpu.getPreferredCanvasFormat(); }
+    catch (e) { R.errors.push("getPreferredCanvasFormat: " + e); return null; }
+  })();
+
+  /* Ask for high-performance explicitly: on a phone the default is
+     low-power, and a renderer port would want to know both exist. */
+  let adapter = null;
+  try {
+    adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!adapter) adapter = await navigator.gpu.requestAdapter();
+  } catch (e) { R.errors.push("requestAdapter: " + e); }
+  g.adapterObtained = !!adapter;
+  if (!adapter) { finish(); return; }
+
+  /* adapter.info is the current spec surface; requestAdapterInfo() was the
+     older async form. Handle both — this is exactly the kind of detail that
+     goes stale between spec revisions. */
+  let info = null;
+  try {
+    info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : null);
+  } catch (e) { R.errors.push("adapterInfo: " + e); }
+  R.adapter.info = info ? {
+    vendor: info.vendor, architecture: info.architecture,
+    device: info.device, description: info.description,
+  } : "(not exposed)";
+  R.adapter.isFallbackAdapter = adapter.isFallbackAdapter ?? "(n/a)";
+  R.adapter.features = [...(adapter.features || [])].sort();
+
+  const L = adapter.limits || {};
+  for (const k in L) { const v = L[k]; if (typeof v === "number") R.limits[k] = v; }
+
+  let device = null;
+  try { device = await adapter.requestDevice(); }
+  catch (e) { R.errors.push("requestDevice: " + e); }
+  g.deviceObtained = !!device;
+  if (device) {
+    device.lost.then((i) => R.errors.push("DEVICE LOST: " + i.reason + " " + i.message));
+    device.onuncapturederror = (ev) => R.errors.push("uncaptured: " + ev.error.message);
+  }
+
+  const cv = $("cv");
+  let ctx = null;
+  try { ctx = cv.getContext("webgpu"); } catch (e) { R.errors.push("getContext: " + e); }
+  g.canvasContextObtained = !!ctx;
+
+  if (device && ctx) await renderTest(device, ctx);
+
+  finish();
+}
+
+/* Proving a context exists is weaker than proving the pipeline runs, and the
+   extra cost is one shader. A triangle that actually reaches the screen rules
+   out a whole class of "supported but broken" outcomes. */
+async function renderTest(device, ctx) {
+  const r = R.render;
+  try {
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    ctx.configure({ device, format, alphaMode: "opaque" });
+    r.configured = true; r.format = format;
+
+    const shader = device.createShaderModule({ code: `
+      @vertex fn vs(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {
+        var p = array<vec2f,3>(vec2f(0.0, 0.72), vec2f(-0.72, -0.62), vec2f(0.72, -0.62));
+        return vec4f(p[i], 0.0, 1.0);
+      }
+      @fragment fn fs(@builtin(position) c : vec4f) -> @location(0) vec4f {
+        return vec4f(0.22 + c.x / 1024.0, 0.74, 0.95, 1.0);
+      }` });
+
+    const ci = await shader.getCompilationInfo();
+    r.shaderMessages = ci.messages.map((m) => `${m.type}: ${m.message}`);
+
+    const pipeline = device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module: shader, entryPoint: "vs" },
+      fragment: { module: shader, entryPoint: "fs", targets: [{ format }] },
+      primitive: { topology: "triangle-list" },
+    });
+    r.pipelineCreated = true;
+
+    const drawOnce = () => {
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginRenderPass({ colorAttachments: [{
+        view: ctx.getCurrentTexture().createView(),
+        clearValue: { r: 0.043, g: 0.067, b: 0.125, a: 1 },
+        loadOp: "clear", storeOp: "store" }] });
+      pass.setPipeline(pipeline); pass.draw(3); pass.end();
+      device.queue.submit([enc.finish()]);
+    };
+
+    /* A short rAF sample. Not a benchmark — Stage 1 owns that — but it costs
+       nothing here and distinguishes "renders once" from "sustains a loop". */
+    const deltas = []; let last = performance.now(); let n = 0;
+    await new Promise((resolve) => {
+      const tick = (t) => {
+        drawOnce(); deltas.push(t - last); last = t;
+        if (++n >= 120) resolve(); else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await device.queue.onSubmittedWorkDone();
+
+    const s = deltas.slice(5).sort((a, b) => a - b);
+    const pct = (p) => s.length ? +s[Math.min(s.length - 1, Math.floor(s.length * p))].toFixed(2) : null;
+    r.frames = n; r.frameMs = { p50: pct(0.5), p95: pct(0.95), max: +Math.max(...s).toFixed(2) };
+    r.drew = true;
+  } catch (e) {
+    r.drew = false; r.error = String(e); R.errors.push("renderTest: " + e);
+  }
+
+  rows("t-render", [
+    ["context configured", ...yn(r.configured)],
+    ["canvas format", r.format ?? "—"],
+    ["pipeline created", ...yn(r.pipelineCreated)],
+    ["triangle drawn (120 frames)", ...yn(r.drew)],
+    ["frame ms p50 / p95 / max", r.frameMs ? `${r.frameMs.p50} / ${r.frameMs.p95} / ${r.frameMs.max}` : "—"],
+    ["shader diagnostics", (r.shaderMessages && r.shaderMessages.length) ? r.shaderMessages.join(" | ") : "none"],
+    ["error", r.error ?? "—"],
+  ]);
+}
+
+function finish() {
+  const g = R.gate, e = R.env;
+
+  /* THE GATE IS ALL FIVE, AND-ed. Recorded as a single boolean so the log
+     cannot later soften it. */
+  g.PASS = !!(g.navigatorGpuPresent && g.adapterObtained && g.deviceObtained
+              && g.canvasContextObtained && R.render.drew);
+
+  rows("t-gate", [
+    ["navigator.gpu present", ...yn(g.navigatorGpuPresent)],
+    ["requestAdapter()", ...yn(g.adapterObtained)],
+    ["requestDevice()", ...yn(g.deviceObtained)],
+    ["getContext('webgpu')", ...yn(g.canvasContextObtained)],
+    ["triangle reached the screen", ...yn(!!R.render.drew)],
+    ["preferred canvas format", R.adapter.preferredCanvasFormat ?? "—"],
+  ]);
+
+  const inf = R.adapter.info;
+  rows("t-adapter", [
+    ["vendor", inf && inf.vendor ? inf.vendor : "(not exposed)"],
+    ["architecture", inf && inf.architecture ? inf.architecture : "(not exposed)"],
+    ["device", inf && inf.device ? inf.device : "(not exposed)"],
+    ["description", inf && inf.description ? inf.description : "(not exposed)"],
+    ["fallback (software) adapter", String(R.adapter.isFallbackAdapter)],
+    ["features", (R.adapter.features || []).join(", ") || "(none)"],
+  ]);
+
+  const L = R.limits, lim = (k) => (k in L ? L[k].toLocaleString() : "—");
+  const texOk = (L.maxTextureDimension2D ?? 0) >= 3072;
+  rows("t-limits", [
+    ["maxTextureDimension2D", lim("maxTextureDimension2D") + (texOk ? "  (≥3072 ✓)" : "  (<3072 — cache must tile)"),
+      texOk ? "y" : "q"],
+    ["maxBufferSize", lim("maxBufferSize")],
+    ["maxVertexBuffers", lim("maxVertexBuffers")],
+    ["maxVertexAttributes", lim("maxVertexAttributes")],
+    ["maxBindGroups", lim("maxBindGroups")],
+    ["maxStorageBufferBindingSize", lim("maxStorageBufferBindingSize")],
+    ["maxColorAttachments", lim("maxColorAttachments")],
+  ]);
+
+  const v = $("verdict");
+  if (!e.isSecureContext) {
+    /* The one outcome that must NEVER be read as a kill-gate result. */
+    v.className = "verdict warn";
+    v.innerHTML = "INVALID — NOT A SECURE CONTEXT<br>"
+      + "<span style='font-weight:400;font-size:12px'>navigator.gpu is hidden on "
+      + esc(e.protocol) + "// regardless of device support. This result proves NOTHING. "
+      + "Re-open over https:// (or localhost) before reading any verdict.</span>";
+    R.gate.VALID = false;
+  } else if (g.PASS) {
+    v.className = "verdict pass";
+    v.innerHTML = "KG1 PASS — WebGPU is usable on this device<br>"
+      + "<span style='font-weight:400;font-size:12px'>Adapter, device, canvas context and a live render loop all succeeded.</span>";
+    R.gate.VALID = true;
+  } else {
+    v.className = "verdict fail";
+    const firstFail = !g.navigatorGpuPresent ? "navigator.gpu is absent"
+      : !g.adapterObtained ? "requestAdapter() returned null"
+      : !g.deviceObtained ? "requestDevice() failed"
+      : !g.canvasContextObtained ? "getContext('webgpu') returned null"
+      : "the render test did not draw";
+    v.innerHTML = "KG1 FAIL — " + esc(firstFail) + "<br>"
+      + "<span style='font-weight:400;font-size:12px'>Secure context confirmed, so this is a real device answer. "
+      + "The spike stops here; record OS and browser version.</span>";
+    R.gate.VALID = true;
+  }
+
+  $("raw").textContent = JSON.stringify(R, null, 2);
+}
+
+$("copy").addEventListener("click", async () => {
+  const txt = JSON.stringify(R, null, 2);
+  try { await navigator.clipboard.writeText(txt); $("copy").textContent = "COPIED ✓"; }
+  catch {
+    /* iOS Safari blocks clipboard writes outside some gestures; selecting the
+       text is the reliable fallback on the device this probe targets. */
+    const r = document.createRange(); r.selectNodeContents($("raw"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    $("copy").textContent = "SELECTED — copy manually";
+  }
+  setTimeout(() => ($("copy").textContent = "COPY REPORT"), 2200);
+});
+
+readEnv();
+readFallback();
+probe().catch((e) => { R.errors.push("probe: " + e); finish(); });
+</script>
+</body>
+</html>
