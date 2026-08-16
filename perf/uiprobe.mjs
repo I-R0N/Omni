@@ -162,6 +162,32 @@ async function startRun(page) {
         console.log(`  n=${String(n).padStart(5)}  ui ${r2(s.uiMed).padStart(7)}ms  ` +
           `per-1k-nodes ${n ? r2((s.uiMed - b0.uiMed) / (n / 1000)) : '   —'}`);
       }
+    } else if (mode === 'ablate') {
+      // ── Independent cross-check: cut React out of the frame entirely ───
+      // This does not use the Profiler at all, so it cannot inherit any of
+      // the Profiler's assumptions.  If reconciliation were the ~32ms the
+      // 2026-08-09 capture attributed to it, deleting it outright would be
+      // impossible to miss in frame time.
+      console.log(`\n=== REACT ABLATION A/B (${REPEATS}x ${SAMPLE_MS}ms, container) ===\n`);
+      for (const [name, setup] of [
+        ['in-play (hub)', async (p) => { await startRun(p); }],
+        ['pause menu', async (p) => { await startRun(p); await p.evaluate(() => window.__omniEngine.pauseGame()); await p.waitForTimeout(500); }],
+      ]) {
+        for (const cut of [false, true]) {
+          const runs = [];
+          for (let r = 0; r < REPEATS; r++) {
+            await boot(page);
+            await setup(page);
+            if (cut) await page.evaluate(() => { window.__omniEngine.onStatsUpdate = () => {}; });
+            await page.waitForTimeout(300);
+            runs.push(summarize(await page.evaluate(COLLECT, SAMPLE_MS)));
+          }
+          const s = medianOfRuns(runs);
+          console.log(`${(name + (cut ? ' — REACT CUT' : ' — normal')).padEnd(30)}` +
+            `frame med ${r2(s.frameMed).padStart(6)} p95 ${r2(s.frameP95).padStart(6)} ms  (ui med ${r2(s.uiMed)})`);
+        }
+        console.log('');
+      }
     } else {
       // ── PHASE 2 ATTRIBUTION ───────────────────────────────────────────
       console.log(`\n=== PHASE 2 ATTRIBUTION (${REPEATS}x ${SAMPLE_MS}ms, container) ===\n`);
@@ -169,45 +195,65 @@ async function startRun(page) {
 
       const STATES = [
         ['in-play (hub)', async (p) => { await startRun(p); }],
-        ['in-play (boss wave)', async (p) => {
+        ['in-play (boss)', async (p) => {
           await startRun(p);
-          await p.evaluate(() => {
-            const e = window.__omniEngine;
-            e.dbg?.spawnBoss?.() ?? e.debugSpawnBoss?.();
-          }).catch(() => {});
-          await p.waitForTimeout(800);
+          await p.evaluate(() => window.__omniEngine.debugSpawnBoss(''));
+          await p.waitForTimeout(1200);
         }],
-        ['pause menu', async (p) => { await startRun(p); await p.evaluate(() => window.__omniEngine.pauseGame()); await p.waitForTimeout(400); }],
-        ['docked (station)', async (p) => {
+        ['pause menu', async (p) => {
           await startRun(p);
+          await p.evaluate(() => window.__omniEngine.pauseGame());
+          await p.waitForTimeout(500);
+        }],
+        ['docked (trade hub)', async (p) => {
+          await startRun(p);
+          // Park on the Trade Hub — the station with BOTH shops, i.e. the
+          // heaviest station panel there is (F2's worst case).
           await p.evaluate(() => {
             const e = window.__omniEngine;
-            const st = e.stations?.[e.stations.length - 1];
-            if (st) { e.player.position.x = st.position.x; e.player.position.y = st.position.y + 10; }
+            const st = (e.stations || []).find(s => s.stationKind === 'tradehub') || e.stations?.[0];
+            if (st) { e.player.position.x = st.position.x; e.player.position.y = st.position.y; }
+            e.player.velocity.x = 0; e.player.velocity.y = 0;
           });
+          await p.waitForTimeout(600);
+          const ok = await p.evaluate(() => window.__omniEngine.dockAtStation());
+          if (!ok) console.log('   (warn: dock failed)');
           await p.waitForTimeout(500);
-          await p.evaluate(() => { const e = window.__omniEngine; if (!e.dockedAtStation && e.nearestStation) e.dock?.(e.nearestStation); });
-          await p.waitForTimeout(500);
+        }],
+        ['death screen', async (p) => {
+          await startRun(p);
+          await p.evaluate(() => { const e = window.__omniEngine; e.player.health = 0; e.handleEntityDeath?.(e.player); });
+          await p.waitForTimeout(3500);   // explosion + DEATH_SCREEN_DELAY beat
         }],
       ];
 
       for (const [name, setup] of STATES) {
         for (const hz of [60, 30, 15]) {
           const runs = [];
+          let stateOk = true;
           for (let r = 0; r < REPEATS; r++) {
             await boot(page);
+            // cycleHudRate walks [60,30,15]; step until we land on target.
             await page.evaluate((target) => {
-              // cycleHudRate walks [60,30,15]; step until we land on target.
               const e = window.__omniEngine;
-              for (let i = 0; i < 3; i++) {
-                if ((window.__omniStats?.hudRate ?? 60) === target) break;
-                e.dbg?.cycleHudRate?.();
+              for (let i = 0; i < 4; i++) {
+                if ((window.__omniStats?.hudRateName ?? '60Hz') === target + 'Hz') break;
+                e.dbg.cycleHudRate();
               }
-            }, hz).catch(() => {});
+            }, hz);
             await setup(page);
-            runs.push(summarize(await page.evaluate(COLLECT, SAMPLE_MS)));
+            const s = summarize(await page.evaluate(COLLECT, SAMPLE_MS));
+            if (r === 0) {
+              const st = await page.evaluate(() => {
+                const e = window.__omniEngine;
+                return { paused: e.gameState, docked: !!e.dockedAtStation, dead: !!e.deathPending,
+                         rate: window.__omniStats?.hudRateName, prof: !!window.__omniStats?.perf?.uiProfiled };
+              });
+              if (!st.prof) { console.log('  !! PROFILER NOT ACTIVE — rebuild with OMNI_PROFILE_REACT=1'); stateOk = false; }
+            }
+            runs.push(s);
           }
-          console.log(row(`${name} @${hz}Hz`, medianOfRuns(runs)));
+          if (stateOk) console.log(row(`${name} @${hz}Hz`, medianOfRuns(runs)));
         }
         console.log('');
       }
