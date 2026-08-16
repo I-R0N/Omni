@@ -50,6 +50,24 @@ asserts this for the synth drafts.
 **Vary the takes.** Three slightly different recordings beat one perfect
 one for anything that fires in bulk.
 
+## Prepare a file after exporting
+
+```bash
+node scripts/prep-sfx.mjs --dry-run public/assets/sfx/*.wav   # report only
+node scripts/prep-sfx.mjs public/assets/sfx/*.wav             # rewrite in place
+```
+
+Pure Node, no dependencies and no audio application: it trims leading
+silence, trims the inaudible tail, caps length (`--max-ms`, default 250),
+normalises (`--peak`, default -6 dBFS), downmixes to mono and writes back
+16-bit PCM. Originals are recoverable from git.
+
+The length cap is not cosmetic. A voice holds its polyphony slot for the
+whole length of its buffer, and contact sounds cap at `poly: 3`, so a
+two-second take means that after three hits the id is saturated for two
+seconds and every further hit is **dropped** — a dense rubble field gets
+quieter the busier it gets.
+
 ## Check a file before trusting it
 
 ```bash

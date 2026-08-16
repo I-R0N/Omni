@@ -38,7 +38,7 @@ prints one line per assertion.
 | `b4.mjs` | 28 | Explosion variety: each entity class compared *against the others* on debris count/speed/size/lifetime/hue and ring shape, the particle budget, `MAX_PARTICLES` under 60 simultaneous deaths, and audio+visual firing together. |
 | `b5.mjs` | 27 | Validation: a muted-vs-unmuted frame-time A/B on an identical heavy scene, a `play()` microbenchmark, a 390 px phone-scale check of the settings row, and a full gameplay loop with audio asserted throughout. |
 | `ios.mjs` | 12 | iOS recovery: both audio-session paths (modern `navigator.audioSession` and the forced pre-16.4 fallback), that the silent-WAV shim decodes, and that a *later* gesture recovers a suspended context. |
-| `assets.mjs` | per file | Validates whatever real `.wav` files are sitting in `public/assets/sfx/`, through the BROWSER's decoder rather than a hand-rolled parser: level, how much of the file is digital silence, content length, mono, and the sub-2 kHz rule. `tone.mjs` protects the synth drafts and a recorded file walks straight past it, so this is the equivalent guard for assets. No files present → nothing to check, exit 0. |
+| `assets.mjs` | per file (21 for the three shard takes) | Validates whatever real `.wav` files are sitting in `public/assets/sfx/`, through the BROWSER's decoder rather than a hand-rolled parser: level, how much of the file is digital silence, content length, mono, and the sub-2 kHz rule. `tone.mjs` protects the synth drafts and a recorded file walks straight past it, so this is the equivalent guard for assets. No files present → nothing to check, exit 0. |
 | `sample.mjs` | 20 | The recorded-sample path: decode-at-unlock (never on first trigger), round-robin variants, that every budget still applies to a recording, the per-voice and frame-time cost against the synth drafts, and the 404 fallback — which is the state of the repo until wav files are dropped in. Generates its own wavs, so it needs no committed assets. |
 | `tone.mjs` | 21 | Tonal regression guard: renders every material voice and every loop through an `OfflineAudioContext` and asserts nothing bulk-fired sits in the fatiguing band, that the material brightness ordering survives, and that the portal and station beds are distinguishable by character. |
 
@@ -50,6 +50,14 @@ noise. The load-insensitive evidence is the `play()` microbenchmark in the
 same suite (~0.1–0.3 µs/call); if that holds, audio is not a per-frame
 cost regardless of what the frame-time delta says. Re-run before treating
 a single failure as real.
+
+**Brightness is judged on the SUSTAIN, not the attack.** `assets.mjs`
+reports both. An impact legitimately has a bright transient — that is what
+makes it read as hard rather than soft — and the rule it enforces
+(CLAUDE.md §8) is about *ringing*, which is a sustain property. An early
+cut of this suite averaged brightness over the whole file and passed a
+2 kHz-plus transient as ~30 Hz, because a long quiet tail dominated the
+zero-crossing count. Measure over the region that holds the energy.
 
 **`tone.mjs` measures a proxy, not a spectrum.** Zero-crossing rate over
 the rendered buffer over-reads on noisy sources. It is monotonic in

@@ -766,3 +766,51 @@ test that fires at the wrong coordinates does not error, it passes
 quietly while measuring silence — the same shape as the vacuous B3
 assertion in decision #34, and the second time this pass has been caught
 by it.
+
+---
+
+## The first recorded assets, and two bugs in the guard that checked them
+
+Three takes for `crash.player.shard` arrived in two rounds.
+
+**Round one was empty.** 96–98% of each file was exact digital silence,
+peaking at −31 to −35 dBFS with ~8ms of content, at 8-bit depth spanning
+about five distinct amplitude values. Not salvageable by normalising — 30dB
+of gain on two bits of content is a grainy click. This exposed a genuine
+gap: the sample path fell back to the synth draft when a file was MISSING
+or UNDECODABLE, but a file that decoded to silence took neither path. It
+won over a working draft and the sound disappeared, which is the worse
+failure because it looks like working audio. Decoded buffers are now
+checked for signal at load (`AUDIO_CONSTANTS.SAMPLE_MIN_PEAK`).
+
+**Round two was real audio, and the guard passed it wrongly — twice.**
+
+1. *Brightness was averaged over the whole file.* The takes are a bright
+   ~3.1kHz transient followed by a 1–2 second low-level tail. Counting zero
+   crossings across all of it returned ~26–76 Hz and PASSED the sub-2kHz
+   check that exists precisely to catch bright bulk-fired sounds. Fixed to
+   measure over the window holding 90% of the energy.
+2. *Then it failed them for the wrong reason.* With the fix, a 7ms click
+   read ~3.5kHz and the check went red — but CLAUDE.md §8 is explicit that
+   the rule is about RINGING ("Q matters as much as pitch"), and an impact
+   is supposed to have a bright attack. Judging the attack would reject
+   every good impact recording. Now split: **sustain** (after the first
+   20ms) is judged against the 2kHz rule, **attack** is reported with a
+   note that it needs a listen test.
+
+**Length turned out to be a correctness issue, not a polish one.** A voice
+holds its polyphony slot for the whole length of its buffer, and contact
+ids cap at `poly: 3`. The 1–2 second takes therefore did not merely smear:
+after three hits the id would be saturated for two seconds and every
+further hit dropped, so a dense rubble field would get QUIETER the busier
+it got. `assets.mjs` treats length as a failure rather than a warning for
+that reason, and `scripts/prep-sfx.mjs` (pure Node, no dependencies) trims
+to it — 1161/1022/2043ms became 113/179/178ms at −6 dBFS, keeping the
+second bounce at 90–160ms that gives the takes their character.
+
+*Recorded because* both guard bugs are the same shape as decision #34 and
+the sample-suite position bug: **a measurement aimed at the wrong window
+does not error, it passes quietly.** Three times now in this pass. The
+countermeasure that has actually worked each time is asserting that the
+thing being measured was really there — voices played, energy present —
+before believing the number derived from it.

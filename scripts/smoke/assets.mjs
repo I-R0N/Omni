@@ -48,17 +48,37 @@ for (const name of files) {
     // Fraction of the file that is EXACT digital silence — the signature of
     // an export that captured nothing.
     let zero = 0; for (let i = 0; i < d.length; i++) if (d[i] === 0) zero++;
-    // Dominant frequency, by the same zero-crossing proxy tone.mjs uses over
-    // the sounding region only (trailing silence would drag it to 0).
-    let cross = 0;
-    for (let i = lead + 1; i <= tail; i++) if ((d[i - 1] < 0) !== (d[i] < 0)) cross++;
-    const span = Math.max(1, (tail - lead)) / buf.sampleRate;
+    // Dominant frequency, by the zero-crossing proxy tone.mjs uses — but
+    // measured over the region that HOLDS THE ENERGY, not the whole file.
+    // This guard's first cut counted crossings across everything after the
+    // onset, and a bright 10ms transient followed by a 2s low-level tail
+    // then read as ~30Hz: a false PASS on exactly the check the rule exists
+    // for.  Take the window containing 90% of the energy instead.
+    let total = 0; for (let i = 0; i < d.length; i++) total += d[i] * d[i];
+    let acc = 0, energyEnd = lead;
+    for (let i = lead; i <= tail; i++) { acc += d[i] * d[i]; if (acc >= total * 0.9) { energyEnd = i; break; } }
+    energyEnd = Math.max(energyEnd, lead + Math.floor(buf.sampleRate * 0.005));  // at least 5ms
+    const brightness = (from, to) => {
+      let c = 0;
+      for (let i = Math.max(1, from) + 1; i <= to && i < d.length; i++) if ((d[i - 1] < 0) !== (d[i] < 0)) c++;
+      return c / 2 / Math.max(1 / buf.sampleRate, (to - from) / buf.sampleRate);
+    };
+    const energyMs = (energyEnd - lead) / buf.sampleRate * 1000;
+    // TWO brightness figures, because the rule they serve is about RINGING.
+    // An impact legitimately has a bright transient — that is what makes it
+    // read as hard rather than soft — and CLAUDE.md §8 is explicit that Q
+    // matters as much as pitch: a high-Q filter RINGS and ringing is what
+    // fatigues.  So the transient is reported and the SUSTAIN is judged.
+    const transientEnd = lead + Math.floor(buf.sampleRate * 0.020);
+    const attackHz  = brightness(lead, transientEnd);
+    const sustainHz = tail > transientEnd ? brightness(transientEnd, tail) : 0;
+    const cross = 0, span = 1;
     return {
       channels: buf.numberOfChannels, rate: buf.sampleRate, duration: buf.duration,
       peak, rms, zeroFrac: zero / d.length,
       leadMs: lead / buf.sampleRate * 1000,
       contentMs: (tail - lead) / buf.sampleRate * 1000,
-      domHz: cross / 2 / span,
+      attackHz, sustainHz, energyMs,
     };
   }, [bytes]);
 
@@ -67,7 +87,9 @@ for (const name of files) {
   const dbfs = v => (20 * Math.log10(Math.max(v, 1e-9))).toFixed(1);
   console.log(`  ..   ${r.channels}ch ${r.rate}Hz  ${(r.duration * 1000).toFixed(0)}ms  `
             + `peak ${dbfs(r.peak)} dBFS  rms ${dbfs(r.rms)} dBFS  `
-            + `silence ${(r.zeroFrac * 100).toFixed(1)}%  content ${r.contentMs.toFixed(1)}ms  ~${r.domHz.toFixed(0)}Hz`);
+            + `silence ${(r.zeroFrac * 100).toFixed(1)}%  content ${r.contentMs.toFixed(1)}ms  `
+            + `90%-energy in ${r.energyMs.toFixed(0)}ms  `
+            + `attack ~${r.attackHz.toFixed(0)}Hz  sustain ~${r.sustainHz.toFixed(0)}Hz`);
 
   ok(true, 'decodes in the browser');
   // LEVEL.  The engine applies its own mix gain (0.34 for shard contact) and
@@ -78,12 +100,27 @@ for (const name of files) {
   ok(r.zeroFrac < 0.9, `contains actual audio (${(r.zeroFrac * 100).toFixed(1)}% of it is digital silence)`);
   ok(r.contentMs > 15, `has more than a click of content (${r.contentMs.toFixed(1)}ms)`);
   ok(r.channels === 1, `is mono (${r.channels}ch) — the engine pans positionally`);
-  // THE WHINE RULE (CLAUDE.md §8).  Bulk-fired material sounds live under
-  // ~2kHz; this is the check a recorded file otherwise escapes entirely.
-  ok(r.domHz < 2000, `sits below the fatiguing band (~${r.domHz.toFixed(0)}Hz)`);
+  // THE WHINE RULE (CLAUDE.md §8), applied to what the rule is actually
+  // about.  A bright ATTACK is what makes an impact read as hard; a bright
+  // SUSTAIN is the ringing that a hundred repeats turn into a whine.
+  ok(r.sustainHz < 2000,
+     `does not RING in the fatiguing band (sustain ~${r.sustainHz.toFixed(0)}Hz)`);
+  if (r.attackHz > 2500) {
+    note(`bright attack (~${r.attackHz.toFixed(0)}Hz) — fine for a hard impact, but this is the `
+       + `one property headless cannot judge: listen to it in a dense rubble field`);
+  }
 
   if (r.leadMs > 15) note(`${r.leadMs.toFixed(1)}ms of leading silence — reads as input latency on an impact sound`);
-  if (r.duration * 1000 > 250) note(`${(r.duration * 1000).toFixed(0)}ms long — poly is 3, so long takes overlap into a smear`);
+  // A voice holds its polyphony slot for its whole buffer, and contact ids
+  // cap at poly 3 — so an over-long take does not just smear, it SATURATES
+  // the id and later hits are dropped.  That makes length a failure, not a
+  // note.  scripts/prep-sfx.mjs trims to this.
+  ok(r.duration * 1000 <= 300,
+     `is short enough not to starve its own polyphony (${(r.duration * 1000).toFixed(0)}ms; want <=300)`);
+  if (r.energyMs > 0 && r.duration * 1000 > r.energyMs * 4) {
+    note(`${(r.duration * 1000).toFixed(0)}ms long but 90% of the energy is in the first `
+       + `${r.energyMs.toFixed(0)}ms — the rest is an inaudible tail holding a voice slot`);
+  }
 }
 
 await browser.close();
