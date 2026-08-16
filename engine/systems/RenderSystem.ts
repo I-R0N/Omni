@@ -137,6 +137,15 @@ export class RenderSystem {
   // Count of tiles that actually drew a bloom this frame.  Context for
   // interpreting lastTileLightingMs.
   public lastTileLightingCount: number = 0;
+  // Wall time (ms) of the unified-lighting pass this frame — occluder
+  // collection, wedge-path construction, the per-light composite and the
+  // blit.  Reset at the start of render() beside lastTileLightingMs, and
+  // stays 0 while LIGHTING_CYCLE is at 'legacy'.  Read NET of
+  // lastTileLightingMs: the unified system absorbs the legacy models, so
+  // the gross figure overstates the cost of the change.
+  public lastLightingMs: number = 0;
+  // Lights composited this frame, after viewport culling and the tier cap.
+  public lastLightingLights: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
@@ -784,6 +793,10 @@ export class RenderSystem {
     // indestructible path, asteroid/shard branch's rock-tile path).
     this.lastTileLightingMs = 0;
     this.lastTileLightingCount = 0;
+    // Unified-lighting accumulator — populated by the lighting pass when
+    // LIGHTING_CYCLE is off 'legacy'; stays 0 otherwise.
+    this.lastLightingMs = 0;
+    this.lastLightingLights = 0;
     this.lastLodShardCount = 0;
 
     // Sort indicators once for the frame — NEAREST FIRST, so the per-type
@@ -1186,8 +1199,9 @@ export class RenderSystem {
             || entity.shardVariant === 'indestructible-tile');
       // Skip the fast path while the player is inside this tile's
       // variant glow range so the slow path's layer 2b can paint.
-      // Glass-tile reads `repelImpulse` (any nearby repellable body
-      // ramps the glow); indestructible-tile keeps player-distance
+      // Glass-tile reads `repelImpulse` (the PLAYER or an ENEMY ramps
+      // the glow — mobile shards deliberately do not; see the gate in
+      // PhysicsSystem); indestructible-tile keeps player-distance
       // because it has no repel field.
       let inGlowRange = false;
       if (isGlassFamilyStaticTile && entity.shardVariant !== undefined) {

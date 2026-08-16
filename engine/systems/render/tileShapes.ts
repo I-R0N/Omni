@@ -541,11 +541,16 @@ export function drawTileShape(
 
         // Layer 2b — glass-tile proximity glow.  Intensity is
         // driven by the per-substep `repelImpulse` accumulator
-        // PhysicsSystem writes into the tile, so the glow
-        // ramps up for ANY repellable body (player, enemy,
-        // mobile shards), not only the player.  Fill + thick
-        // stroke so the halo reads as a clear "lit edge" —
-        // fill alone washes the hex out but doesn't beacon.
+        // PhysicsSystem writes into the tile, so the glow ramps
+        // up for the PLAYER and for ENEMIES — but NOT for mobile
+        // shards.  See PhysicsSystem.ts (the `b.repelImpulse`
+        // write is gated on `a.type === PLAYER || a.type ===
+        // ENEMY`): ambient shard contact would otherwise keep the
+        // glow permanently lit.  Note the SAME field name means
+        // something different on the scanner `a`, where it does
+        // accumulate from shards; only the TILE side is gated.
+        // Fill + thick stroke so the halo reads as a clear "lit
+        // edge" — fill alone washes the hex out but doesn't beacon.
         // Indestructible-tile keeps the warm-white radial
         // bloom drawn after the cracks below.
         if (!isFlash && entity.shardVariant === 'glass-tile') {

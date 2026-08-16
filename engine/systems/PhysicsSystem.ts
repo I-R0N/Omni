@@ -990,13 +990,25 @@ export class PhysicsSystem {
                                 a.velocity.x += dx * inv * accel;
                                 a.velocity.y += dy * inv * accel;
                             }
-                            // Scanner reads its own accumulator for fade fx.
+                            // ── `repelImpulse` CARRIES TWO MEANINGS ──────────
+                            // One field name, two different accumulators, and
+                            // the difference is the gate below.  Read both
+                            // before changing either.
+                            //
+                            // (1) On the SCANNER `a` — the body moving through
+                            // the field.  Accumulates from ANY repellable body,
+                            // mobile shards included, and drives that body's OWN
+                            // fade effects.  Ungated.
                             a.repelImpulse = (a.repelImpulse ?? 0) + accel;
-                            // The tile's glow tracks ONLY the player / enemies,
-                            // not the many mobile shards drifting through its
-                            // field — otherwise ambient shard contact keeps the
-                            // glow lit constantly.  Lighting up to the player's
-                            // repel field is the primary intent.
+                            // (2) On the TILE `b` — the emitter of the field,
+                            // whose glow this drives (the "Model B" repel glow
+                            // on glass + metal).  Accumulates ONLY from the
+                            // player and enemies, NOT from the many mobile
+                            // shards drifting through — ambient shard contact
+                            // would keep the glow lit constantly.  Lighting up
+                            // to the player's repel field is the primary intent;
+                            // enemy emission is deliberate and shipped, so any
+                            // refactor that loses it is a regression.
                             if (a.type === EntityType.PLAYER || a.type === EntityType.ENEMY) {
                                 b.repelImpulse = (b.repelImpulse ?? 0) + accel;
                             }

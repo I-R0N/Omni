@@ -1328,6 +1328,28 @@ export interface PerfSnapshot {
   // past the range / no-glow early-returns).  Latest frame, not
   // averaged — context for interpreting tileLightingMs.
   tileLightingCount: number;
+  // ── Unified lighting (the shadow-cast light layer) ───────────────────
+  //
+  // Wall time (ms) of the whole unified-lighting pass this frame:
+  // occluder collection, wedge-path construction, the per-light
+  // composite onto the light canvas, and the single blit.  Ring-
+  // averaged like the timers above.
+  //
+  // Read this ALONGSIDE `tileLightingMs`, never instead of it.  The
+  // unified system is absorbing the three legacy hand-rolled models
+  // (proximity bloom, repel glow, glass edge tint), so its cost is only
+  // meaningful NET of theirs — as each legacy receiver migrates,
+  // `tileLightingMs` falls and this rises.  A gross reading of this
+  // field alone will overstate the cost of the change.
+  //
+  // Zero while LIGHTING_CYCLE is at 'legacy' (the default), which is
+  // how the toggle proves it costs nothing when off.
+  lightingMs: number;
+  // Number of lights composited this frame, after viewport culling and
+  // the per-tier cap.  Latest frame, not averaged — context for
+  // interpreting lightingMs, exactly as tileLightingCount is for
+  // tileLightingMs.
+  lightingLights: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the

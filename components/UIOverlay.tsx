@@ -1709,6 +1709,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statRow(' ·neb fast/slow', `${perf.nebulaFast}/${perf.nebulaSlow}`)}
                   {statRow(' ·tLit', fmtMs(perf.tileLightingMs))}
                   {statRow(' ·tLit-N', perf.tileLightingCount)}
+                  {statRow(' ·lit', fmtMs(perf.lightingMs))}
+                  {statRow(' ·lit-N', perf.lightingLights)}
                 </>)}
               </>)}
     </div>

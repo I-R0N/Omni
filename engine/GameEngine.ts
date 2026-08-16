@@ -634,6 +634,7 @@ export class GameEngine {
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfTileLighting  = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLighting      = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -5065,6 +5066,7 @@ export class GameEngine {
       this.perfRender[this.perfRenderIdx]        = this.renderer.lastRenderMs;
       this.perfNebula[this.perfRenderIdx]        = this.renderer.lastNebulaMs;
       this.perfTileLighting[this.perfRenderIdx] = this.renderer.lastTileLightingMs;
+      this.perfLighting[this.perfRenderIdx]     = this.renderer.lastLightingMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
@@ -5128,6 +5130,8 @@ export class GameEngine {
           nebulaSlow:     this.renderer.lastNebulaSlowCount,
           tileLightingMs:    GameEngine.ringAvg(this.perfTileLighting, this.perfRenderFilled),
           tileLightingCount: this.renderer.lastTileLightingCount,
+          lightingMs:        GameEngine.ringAvg(this.perfLighting,     this.perfRenderFilled),
+          lightingLights:    this.renderer.lastLightingLights,
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),
