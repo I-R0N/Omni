@@ -362,27 +362,44 @@ the residual is outside React and none of these six do anything about it.
 
 ---
 
-## What the 32 ms probably was
+## What the 32 ms was — and it is already answered in this repo
 
-Not established — this needs a device and is a re-scope, not a conclusion.
-The reasoning that makes it worth looking:
+**This turned out not to need a new investigation. Gauntlet 5c had already
+found it, on device, and the finding is sitting in `constants.ts` under
+`RENDER_SCALE_CYCLE` (`constants.ts:1330–1356`).**
 
-The 2026-08-09 capture recorded a 35 ms frame with 1 ms render + 2 ms sim. But
-`renderMs` times the **CPU-side canvas call issuing**, not the rasterization
-those calls queue. On an iPhone at 390×844 with dpr 3 the backing store is
-~1170×2532 ≈ 3.0 Mpx, and Omni composites nebula sprites, gradients and bloom
-over large areas of it. GPU/compositor time, vsync waiting, and Safari's own
-frame overhead all land in the rAF delta and in **none** of the engine's
-timers — which is exactly the shape of the observed residual, and the same
-shape React had, which is presumably why React was the suspect.
+The reasoning is the same one that exonerates React. `renderMs` times the
+**CPU-side canvas call issuing**, not the rasterization those calls queue —
+which happens in the browser compositor *after* the rAF callback returns. That
+cost lands in the rAF delta and in **none** of the engine's timers. At dpr 3 a
+phone viewport rasterizes ~3.0 Mpx per frame, much of it `'lighter'`-composited
+gradients and bloom. This is exactly the shape of the residual, and the same
+shape React had — which is presumably why React was the suspect.
 
-Recommended next step, if the operator wants the residual chased: capture on
-device with the new `ui` column live, and read the PerfRecorder worst-frame
-table's **`other`** column (frame − render − sim − ui). That column now has an
-honest `ui` subtracted from it for the first time. If `other` is still ~30 ms
-with `ui` at ~0.3 ms, the answer is outside JS entirely and the next
-instrument is a rasterization/fill-rate experiment (render-scale and
-zoom ablations), not a React one.
+The existing comment records the device A/B: capping dpr at 2 (~3.0 M → 1.3 M
+pixels) took worst frame **81 ms → 27 ms**, p99 36 → 23 ms, 1 %-low 28 → 43 fps,
+
+> "and the unattributed `other` term — the one that had resisted every other
+> fix this session — fell from 47–78 ms to 20–25 ms. That is the single
+> largest smoothness result of the gauntlet, and **it confirms `other` was
+> compositing**."
+
+So the residual was identified, attributed and largely fixed by the render-scale
+cap (now defaulted to 2) — **before** this investigation started. The React
+attribution was a parallel, and wrong, explanation of the same symptom, written
+into `HUD_RATE_CYCLE`'s comment at around the same time and never reconciled
+against the render-scale finding.
+
+That is the real lesson here, and it is not about React: **two comments in the
+same file offered two different explanations of one residual, and the wrong one
+was the one that got a knob, a DBG row and a tooltip.** The corrected comments
+now cross-reference each other.
+
+If anyone still wants to chase what remains: capture on device and read the
+PerfRecorder worst-frame **`other`** column (frame − render − sim − ui), which
+now has an honest `ui` subtracted from it for the first time. If `other` is
+still large with `ui` at ~0.3 ms, it is compositing again, and the instrument
+is a fill-rate experiment (render-scale and zoom ablations), not a React one.
 
 ---
 

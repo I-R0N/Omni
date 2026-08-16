@@ -1379,16 +1379,31 @@ export function cycleRenderScale(): number {
 // ─── DBG: HUD (React) update rate ────────────────────────────────────────────
 //
 // `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.
-// The reconciliation it triggers walks the whole (unmemoized, ~2100-line)
-// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer ever
-// saw it.  A hardware capture (2026-08-09, Ring World, iPhone) showed 35 ms
-// frames carrying only 1 ms render + 2 ms sim — ~32 ms unaccounted — which is
-// what made this worth a knob.
+// The reconciliation it triggers walks the whole (unmemoized, ~2500-line)
+// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer saw
+// it — until one was built for it.
+//
+// THE ORIGINAL JUSTIFICATION FOR THIS KNOB WAS WRONG.  It read: a hardware
+// capture (2026-08-09, Ring World, iPhone) showed 35 ms frames carrying only
+// 1 ms render + 2 ms sim, ~32 ms unaccounted, and that residual was
+// attributed here.  It is not this.  Measured with a React `<Profiler>`,
+// reconciliation costs **0.1 ms median / 0.2 ms p95 in play** and 0.3 / 0.5 ms
+// with the heaviest overlay up — three orders of magnitude off the number
+// that motivated the knob.  Cutting React out of the frame entirely moves
+// frame time ~2 %.  The 32 ms residual is real but lives somewhere else;
+// `renderMs` times CPU-side canvas call issuing, not the rasterization those
+// calls queue.  See docs/GAUNTLET_REACT_LOG.md.
+//
+// So this knob is a LEFTOVER, kept because it is harmless and occasionally
+// handy for A/B work — NOT a tuning lever, and not evidence that the HUD is
+// expensive.  Its ceiling is ~0.05 ms in play.  Do not cite it, or the
+// capture above, as a reason to go optimizing the React layer; that case was
+// investigated in full and declined on evidence.
 //
 // The HUD is text chips and bars; it does not need 60 Hz.  Everything that
 // must stay frame-perfect is canvas-drawn (minimap, loadout strip, wave
 // banners, damage text) and is unaffected by this.  60 is index 0 and stays
-// the default, so the shipping path is unchanged until someone chooses.
+// the default — now on the measurement above rather than on caution.
 export const HUD_RATE_CYCLE: ReadonlyArray<number> = [60, 30, 15] as const;
 let activeHudRateIndex = 0;
 export function getActiveHudRate(): number { return HUD_RATE_CYCLE[activeHudRateIndex]; }
