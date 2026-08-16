@@ -814,3 +814,36 @@ does not error, it passes quietly.** Three times now in this pass. The
 countermeasure that has actually worked each time is asserting that the
 thing being measured was really there — voices played, energy present —
 before believing the number derived from it.
+
+---
+
+## AUDIO_PLAN §2a — the standalone-build fork, answered
+
+Carried as the top open question through this whole pass. It is now settled,
+and it was settled by the fallback design rather than by a build change.
+
+**The answer: recorded audio is WEB-BUILD ONLY, and the standalone plays the
+procedural drafts.**
+
+`scripts/inline-build.mjs` matches `png|jpg|jpeg|webp|svg|gif` and always has;
+it was never modified by this branch. (The `vite.config.ts` change was the
+SFX discovery plugin — unrelated to the standalone.) So a `.wav` is never
+inlined, the standalone fetches nothing, every id falls back to its synth
+draft, and the file does not grow as the recorded library does.
+
+Measured on the current tree: **5.55 MB, 27 assets inlined, zero audio.** The
+single `data:audio/wav` in it is the 592-byte SILENT_WAV iOS session shim,
+which is a source literal and not a sound. Verified at RUNTIME too — loading
+`omniverse-standalone.html` over `file://` gives `sampleCount: 0`,
+`hasSample('crash.player.shard') === false`, and both a shard contact and a
+blaster shot still sound.
+
+This is AUDIO_PLAN §2a's option (a) — "audio external, standalone silent" —
+except the standalone is not silent, because every id has a draft underneath
+it. The plan could not see that option because it assumed sampled audio would
+be the only implementation; the drafts were built for a different reason
+(no asset pipeline yet) and paid for themselves here.
+
+*Recorded because* the failure mode is a one-line regex edit by someone
+trying to help. The policy is now written at that exact line in
+`inline-build.mjs`, not only here.

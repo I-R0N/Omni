@@ -85,3 +85,14 @@ cannot use. Run it after every export; a bad export is not audible as
 A file that decodes but carries no signal is **rejected at load**
 (`AUDIO_CONSTANTS.SAMPLE_MIN_PEAK`) and its id falls back to the synth
 draft, so a broken export cannot silence a working sound.
+
+## These files never reach the standalone build
+
+`scripts/inline-build.mjs` inlines images only. The single-file
+`omniverse-standalone.html` therefore carries **no audio**, fetches none, and
+falls back to the procedural synth draft for every id — so it is fully
+audible, and it does not grow as this folder does.
+
+That is the settled answer to `docs/AUDIO_PLAN.md` §2a: recorded audio is
+web-build only. Record as many takes as you like without watching the
+standalone's size.

@@ -30,6 +30,21 @@ const mimeFor = (ext) => {
   }
 };
 
+// IMAGES ONLY — AUDIO IS DELIBERATELY EXCLUDED, and this is the answer to
+// docs/AUDIO_PLAN.md §2a (the standalone-build fork).
+//
+// Every sound id carries a procedural synth draft, and a recorded .wav only
+// REPLACES that draft where one is installed.  So the standalone build needs
+// no audio at all: it fetches nothing, falls back to the drafts, and is fully
+// audible.  The recorded library can therefore grow without bound — a
+// hundred takes or a thousand — and this file does not grow by a byte.
+//
+// Do NOT add wav/mp3/ogg to this pattern to "fix" the standalone's sound.
+// It already has sound.  Adding audio here trades a working 5.5MB single
+// file for a broken 50MB one, and base64 inflates it by a further third.
+// If sampled audio in the standalone is ever genuinely wanted, that is a
+// deliberate product decision to take with the repo owner (and probably
+// wants a curated subset, not the whole folder), not a regex edit.
 const assetPattern = /\/assets\/([A-Za-z0-9_.-]+\.(?:png|jpg|jpeg|webp|svg|gif))/g;
 const referenced = new Set();
 for (const m of jsSource.matchAll(assetPattern)) referenced.add(m[1]);
