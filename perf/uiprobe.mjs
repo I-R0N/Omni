@@ -1,8 +1,19 @@
-/** Phase 1 self-validation + Phase 2 attribution probe for the React cost.
+/** The React reconciliation-cost probe (gauntlet: react-reconciliation-cost).
  *
- *  TEMPORARY SCAFFOLDING (gauntlet: react-reconciliation-cost).  Not part of
- *  `npm test`, not a merge gate.  Delete with the rest of the Phase 2
- *  scaffolding.
+ *  KEPT, not scaffolding.  It is the only validated instrument for "what does
+ *  reconciliation actually cost", and the question has already been answered
+ *  wrong once from a timer that could not see it (see
+ *  docs/GAUNTLET_REACT_LOG.md, F3).  Not part of `npm test` and not a merge
+ *  gate — same standing as capture.mjs, and for the same reason: runs take
+ *  minutes and are noise-prone.
+ *
+ *  REQUIRES A MEASUREMENT BUILD.  React's shipping react-dom compiles the
+ *  profiler timers out, so every figure below reads exactly 0.00 against a
+ *  normal build — which is indistinguishable from "reconciliation is free".
+ *  Build first, and check `uiProfiled` in the output:
+ *
+ *      OMNI_PROFILE_REACT=1 npx vite build
+ *      npx vite build                      # restore the shipping bundle after
  *
  *  Same caveat as capture.mjs and for the same reason: this container
  *  rasterizes canvas in SOFTWARE, so frame-time LEVELS here are not the
@@ -14,8 +25,19 @@
  *  on-device Perf REC captures settle the levels.
  *
  *  Usage:
- *    node perf/uiprobe.mjs --mode validate    # Phase 1 gate (ballast sweep)
- *    node perf/uiprobe.mjs --mode attribute   # Phase 2 states x HUD rates
+ *    node perf/uiprobe.mjs --mode attribute   # states x HUD rates (the matrix)
+ *    node perf/uiprobe.mjs --mode ablate      # frame time with React cut out
+ *    node perf/uiprobe.mjs --mode validate    # re-validate the instrument
+ *    node perf/uiprobe.mjs --mode attribute --repeat 5 --ms 10000
+ *
+ *  `--mode validate` needs the ballast component temporarily re-mounted inside
+ *  the `<Profiler>` in App.tsx (it was removed after Phase 1 — see the log's
+ *  gate table for what it measured).  Re-add it before trusting a fresh set of
+ *  numbers from a changed UI layer: an instrument reading zero and a cost that
+ *  is genuinely gone look identical, which is what started this whole exercise.
+ *
+ *  `--mode ablate` is the cross-check that shares NONE of the profiler's
+ *  assumptions: it nulls onStatsUpdate and reads frame time.
  */
 
 import { chromium } from '@playwright/test';

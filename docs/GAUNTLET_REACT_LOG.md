@@ -27,8 +27,8 @@ Working rules for this branch:
 
 - [x] **Phase 1** — Build an instrument that can see the cost (gate passed)
 - [x] **Phase 2** — Attribute the cost (container only; device captures outstanding)
-- [ ] **Phase 3** — **NOT STARTED — stop condition 2 reached.** The ~32 ms
-      does not reproduce. Awaiting operator.
+- [x] **Phase 3** — **DECLINED ON EVIDENCE.** Not deferred, not blocked, not a
+      TODO. See "Phase 3 — declined" below before reopening any of F1–F5.
 
 ---
 
@@ -186,12 +186,15 @@ alone would be completely inert.** Every handler prop is a fresh arrow
 function per render, and `stats` is a new object every frame, so props never
 compare equal. Prop stabilization is a prerequisite, not an optimization.
 
-### F5 — Unconditional per-frame allocation. **CONFIRMED, not yet fixed**
+### F5 — Unconditional per-frame allocation. **CONFIRMED — see Phase 3e**
 
 `buildPerfSnapshot()` is called at `GameEngine.ts:1492`, outside the
 `if (pushStats)` guard, building a ~25-field object (plus a fresh
-`perfTasks` array) every frame regardless of consumption. Deliberately left
-in place — it is Phase 3e, and Phase 1 applies no fixes.
+`perfTasks` array) every frame regardless of consumption. Left in place: it is
+the one item in Phase 3 still worth doing, but it stands on CLAUDE.md §8's
+no-allocation-in-per-frame-paths rule rather than on anything measured here —
+the allocation matrix puts the stats push nowhere near the top allocators.
+See the Phase 3 table.
 
 ---
 
@@ -319,13 +322,47 @@ legitimate and valuable outcome: it means the cost was misattributed or has
 since been fixed incidentally. Report it and stop — do not go looking for
 something to optimize."*
 
-**Phase 3 is therefore not started.** F1–F5 are, individually, all true as
-stated — the throttle is inert, the overlays bypass it, the timer was
-meaningless, nothing is memoized, and the snapshot allocates unguarded. What
-is false is the premise underneath them: that these add up to 32 ms. They add
-up to a fraction of one.
+---
 
-### What the 32 ms probably was
+## Phase 3 — DECLINED ON EVIDENCE
+
+**Read this before acting on F1–F5. They are not an unworked TODO list.**
+
+Every one of F1–F5 is individually TRUE as stated: the throttle is inert at
+the default, the overlays bypass it, the timer was meaningless, nothing is
+memoized, and the snapshot allocates unguarded. Each reads like a defect, and
+a reasonable engineer finding them listed would go and fix them.
+
+What is false is the premise underneath them — that they add up to 32 ms.
+**They add up to a fraction of one.**
+
+**The ceiling on the entire memoization programme (3a + 3b + 3c together) is
+the measured `ui` column itself: 0.1 ms in play, 0.3 ms with the heaviest
+overlay up.** That is not the expected win, it is the arithmetic maximum — you
+cannot save more reconciliation time than reconciliation costs. `baseDuration
+- actualDuration` is 0.00 ms at every state, so no memoization exists to be
+improved on; the whole programme's payoff is bounded by a number that rounds
+to zero against a 16.7 ms budget.
+
+Per sub-stage, with what each was expected to buy and what it can actually buy:
+
+| | Proposal | Disposition |
+| --- | --- | --- |
+| **3a** | `useCallback` every handler in `App.tsx` | **Declined.** ~60 handlers wrapped with hand-maintained dependency arrays, across a file with no memoization for them to enable. Prerequisite to a 3b that buys ≤0.3 ms. Pure risk surface — a wrong dep array is a stale-closure bug in a live control. |
+| **3b** | `React.memo(UIOverlay)` | **Declined.** Inert without 3a, and near-inert with it: `stats` is a new object every frame, so the memo comparison fails on the first prop regardless of handler identity. Would buy the ≤0.3 ms only in combination with 3c. |
+| **3c** | Split `EngineStats` by change frequency | **Declined, and this is the one worth being explicit about.** It is the structurally correct fix and it was correctly identified as the largest change. It is also the largest change *for a ≤0.3 ms ceiling* — restructuring the single engine→UI contract that ~60 props and five overlay screens read, to win a third of a millisecond. The payload shape is a legitimate design question; it is not a performance question, and it should not be reopened as one. |
+| **3d** | Throttle the F2 overlay bypass | **Declined.** The bypass costs 0.3 ms median / 0.5 ms p95 on the heaviest screen, and those screens are sim-frozen, so it steals nothing from the sim. The current behaviour — a screen the player just asked for renders immediately — is worth more than 0.3 ms. |
+| **3e** | Move `buildPerfSnapshot()` inside the `pushStats` guard | **The one live item.** Trivially correct, called for by CLAUDE.md §8's no-allocation-in-per-frame-paths rule, and justified on housekeeping grounds alone. NOT done here: Phase 3 was gated on a Phase 2 that reached a stop condition, and a one-line allocation tidy-up does not need this investigation's authority. Worth a standalone commit; do not attach a perf claim to it — the allocation matrix puts the stats push nowhere near the top allocators (`handleEntityCollisions` 39 MB/frame, `prepareFrameEntities` 30 MB, `update` 28 MB, `rebuild` 22 MB). |
+| **3f** | Reconsider the default HUD rate | **Declined on data, as the brief asked.** The brief framed this as a data question, and the data says the knob's ceiling is ~0.05 ms in play. There is no case for changing a shipping default — or for keeping the reasoning that motivated the knob. `HUD_RATE_CYCLE`'s comment in `constants.ts:1380–1391` still cites the 32 ms attribution as its justification; that citation is now known to be wrong, and the knob is a harmless leftover rather than a tuning lever. |
+
+**If you want to reopen any of this, the thing to change first is not the code
+— it is the measurement.** Take the device captures (below). If they contradict
+Phase 2, this table is void and 3c is back on the table. If they agree with it,
+the residual is outside React and none of these six do anything about it.
+
+---
+
+## What the 32 ms probably was
 
 Not established — this needs a device and is a re-scope, not a conclusion.
 The reasoning that makes it worth looking:
@@ -363,3 +400,18 @@ purpose; taking those captures needs the operator.
 
 The conclusion is stated at 300× margin, which is why it is stated at all. If
 device captures contradict it, they win.
+
+### Taking them
+
+`perf/uiprobe.mjs` is kept in the tree for this. It is the only validated
+instrument for the question, and the question has already been answered wrong
+once from a timer that could not see it.
+
+    OMNI_PROFILE_REACT=1 npx vite build     # or the profiler reads 0.00
+    node perf/uiprobe.mjs --mode attribute  # states x HUD rates
+    node perf/uiprobe.mjs --mode ablate     # the no-profiler cross-check
+    npx vite build                          # restore the shipping bundle
+
+On device, use the in-game path instead: pause ▸ Debug Menu ▸ Perf REC, whose
+`ui` column now carries `uiActualMs`. Check `uiProfiled` before quoting any
+figure from either — a stripped profiler reads 0.00 and looks like good news.
