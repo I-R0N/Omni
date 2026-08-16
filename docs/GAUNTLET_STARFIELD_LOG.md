@@ -1004,6 +1004,12 @@ behaviour, and both fixes make the test MORE precise:
 Neither was weakened to accommodate the change: (1) tightened a literal into a
 composition, (2) removed an ambient assumption. Full suite: **127 passing**.
 
+**CI on the merged head is green.** `typecheck · build · test` passed on
+`af03391` (run 31917880625, 4m32s), as did `preview`. That run is the one that
+matters: it is the first time the two branches' suites — #84's input/polish
+tests and this gauntlet's star-field tests — have been executed against each
+other on a clean clone, rather than each against its own base.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than
