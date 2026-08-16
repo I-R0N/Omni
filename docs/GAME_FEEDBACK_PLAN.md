@@ -1759,6 +1759,30 @@ k. After N waves, spawn a portal to a new map.
     stay untouched. Tier 6 of the parking-lot harness entry is
     thereby consumed; tiers 3–5 remain parked.
 
+52. **Step 5 SHIPPED (PR #84) + two side items; sweep review
+    (2026-08-14).** Step 5 (Pair C + polish + CI) is DONE —
+    ledger `docs/GAUNTLET_PAIRC_POLISH_LOG.md`. Highlights
+    verified: `pr-checks.yml` runs the three gates on every PR
+    (decision #51 consumed); gamepad + onscreen joystick landed
+    with the controller INTERACT wired into the ship-select
+    `selected` flag (the #44 hole closed); menu help; the
+    MINIMAP FLOW VERDICT — streamlines SHIPPED as the default
+    over shard dots (three-way DBG cycle Flow/Dots/Off kept as
+    the honest control), nebula removed per #43; portal
+    indicators resolved; palette defaults + MAP_POPULATION
+    authority landed. Side items in the same sweep:
+    a. **PR #86** — a react-reconciliation-cost investigation
+       that DECLINED to act after measurement (the suspected
+       32 ms React cost did not reproduce; stop-condition
+       honoured). The right outcome, logged as precedent:
+       measure-first also means stopping.
+    b. **User WAV takes are landing directly** (e.g. 35e5e7f,
+       shard-hit a/b/c on the integration branch): sound
+       CONTENT and sound CODE are already flowing on separate
+       tracks — the SFX branch built the pipeline for exactly
+       this (filename-discovered .wav takes replacing synth
+       drafts per cue, asset guard, audition mode).
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
