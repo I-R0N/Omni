@@ -82,6 +82,7 @@ interface UIOverlayProps {
   // this pass adds — Pair A owns the overlay's structural work.
   onSetVolume?: (v: number) => void;
   onToggleMute?: () => void;
+  onToggleDrafts?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
   onToggleJoystickDebug?: () => void;
@@ -252,6 +253,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleScreenShake,
   onSetVolume,
   onToggleMute,
+  onToggleDrafts,
   onToggleTileOutlines,
   onToggleChevronMode,
   onToggleJoystickDebug,
@@ -2487,6 +2489,45 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {stats.audio?.muted ? '—' : `${Math.round((stats.audio?.volume ?? 0.7) * 100)}%`}
               </span>
             </div>
+
+            {/* Recorded-take audition.  Turning the synth DRAFTS off is the
+                only way to judge real assets honestly: with a draft under
+                every id, a sound that is still synthetic is indistinguishable
+                from one that landed, and the coverage count says how much of
+                the game goes quiet when they are off. */}
+            <div className="mx-auto w-full max-w-xs flex items-center gap-3 px-3 py-2
+                            bg-slate-900/70 border border-slate-700/60 rounded-lg">
+              <button
+                onClick={onToggleDrafts}
+                aria-label={stats.audio?.drafts ? 'Turn synth drafts off' : 'Turn synth drafts on'}
+                className={`pointer-events-auto cursor-pointer shrink-0 px-2 h-9 rounded-md text-[11px]
+                            font-semibold border ${stats.audio?.drafts
+                              ? 'bg-slate-800/80 border-slate-600/60 text-slate-200'
+                              : 'bg-emerald-900/60 border-emerald-500/50 text-emerald-200'}`}
+              >
+                {stats.audio?.drafts ? 'Drafts ON' : 'WAV only'}
+              </button>
+              <span className="flex-1 text-[11px] leading-tight text-slate-400">
+                {stats.audio?.drafts
+                  ? 'Synth drafts fill every sound with no .wav yet.'
+                  : 'Only recorded .wav files sound. Everything else is silent.'}
+              </span>
+              <span className="shrink-0 text-right text-slate-300 text-[11px] tabular-nums">
+                {stats.audio?.sampled ?? 0}/{stats.audio?.total ?? 0}
+              </span>
+            </div>
+
+            {/* A filename that matches no sound id is invisible otherwise —
+                it looks exactly like an id nobody has recorded yet. */}
+            {stats.audio && stats.audio.unmatched.length > 0 && (
+              <div className="mx-auto w-full max-w-xs px-3 py-2 rounded-lg
+                              bg-amber-950/40 border border-amber-500/40
+                              text-[11px] leading-relaxed text-amber-200/90">
+                {stats.audio.unmatched.length} file(s) in /assets/sfx/ match no sound id:{' '}
+                <span className="font-mono">{stats.audio.unmatched.slice(0, 4).join(', ')}</span>
+                {stats.audio.unmatched.length > 4 ? ' …' : ''}
+              </div>
+            )}
 
             {/* Audio diagnostics.  Only shown when audio is NOT audible, so
                 it costs nothing in the normal case — but on a phone there is

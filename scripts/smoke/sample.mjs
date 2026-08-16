@@ -43,7 +43,9 @@ const run = async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 
   // Serve the generated takes at the exact path AudioSystem fetches.
-  const takes = ['shard-hit-a.wav', 'shard-hit-b.wav', 'shard-hit-c.wav'];
+  // Named by the CONVENTION (id with dots as dashes), because that is now how
+  // a file finds its id — nothing declares these in the registry.
+  const takes = ['crash-player-shard-a.wav', 'crash-player-shard-b.wav', 'crash-player-shard-c.wav'];
   let served = 0;
   await page.route('**/assets/sfx/*.wav', route => {
     const name = route.request().url().split('/').pop();
@@ -212,6 +214,44 @@ const run = async () => {
   ok(silent.loaded === 0, 'and is not counted as loaded');
   ok(silent.has === false, 'so the id does not resolve to a recording');
   ok(silent.played === 1, 'and the draft still makes the sound');
+
+  // ── Auto-discovery by filename, and the drafts toggle ────────────────────
+  const page4 = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page4.goto(URL, { waitUntil: 'networkidle' });
+  await page4.mouse.click(195, 700);
+  await page4.waitForFunction(() => window.__omniEngine?.audio?.audible === true, { timeout: 15000 });
+  await page4.evaluate(() => window.__omniEngine.startGame());
+  await page4.waitForFunction(() => window.__omniEngine.audio.sampleCount > 0, { timeout: 15000 })
+    .catch(() => {});
+  const disc = await page4.evaluate(() => {
+    const a = window.__omniEngine.audio;
+    return { sampled: a.sampledIds, unmatched: a.unmatchedFiles, total: a.allIds.length };
+  });
+  // The committed takes are named crash-player-shard-*.wav and nothing in the
+  // registry declares them: matching them to the id is the convention working.
+  ok(disc.sampled.includes('crash.player.shard'),
+     `a file named after an id is discovered without being declared (${disc.sampled.join(', ') || 'none'})`);
+  ok(disc.unmatched.length === 0, `no file matches an unknown id (${disc.unmatched.join(', ') || 'none'})`);
+  ok(disc.total > 100, `every registered id is reported for coverage (${disc.total})`);
+
+  const drafts = await page4.evaluate(() => {
+    const e = window.__omniEngine, a = e.audio, p = e.player.position;
+    const run = () => {
+      a.resetCounters();
+      const st1 = a.ids?.get('crash.player.shard'); if (st1) st1.lastAt = -999;
+      a.play('crash.player.shard', { x: p.x, y: p.y });          // HAS a recording
+      const st2 = a.ids?.get('crash.player.tile'); if (st2) st2.lastAt = -999;
+      a.play('crash.player.tile', { x: p.x, y: p.y });           // draft only
+      return { rec: a.playsOf('crash.player.shard'), draft: a.playsOf('crash.player.tile') };
+    };
+    a.draftsEnabled = true;  const on  = run();
+    a.draftsEnabled = false; const off = run();
+    a.draftsEnabled = true;
+    return { on, off };
+  });
+  ok(drafts.on.rec === 1 && drafts.on.draft === 1, 'with drafts ON both a recorded and an unrecorded id sound');
+  ok(drafts.off.rec === 1, 'with drafts OFF a recorded id still sounds');
+  ok(drafts.off.draft === 0, 'with drafts OFF an unrecorded id is SILENT — the audition mode');
 
   await browser.close();
   console.log(`\nsample: ${pass} passed, ${fail} failed`);

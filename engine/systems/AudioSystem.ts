@@ -1,3 +1,4 @@
+import SFX_MANIFEST from 'virtual:sfx-manifest';
 import { AUDIO_CONSTANTS } from '../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
@@ -189,6 +190,14 @@ export class AudioSystem {
   private samplesRequested = false;
   private samplesLoaded = 0;
   private samplesRejected = 0;
+  /** Files in the folder that match no registered id — a typo in a filename,
+   *  which would otherwise be indistinguishable from "not wired yet". */
+  private unmatchedSamples: string[] = [];
+  /** When false, an id with no usable recording makes NO SOUND rather than
+   *  falling back to its synth draft.  Exists so recorded assets can be
+   *  auditioned alone: with the drafts under them, a sound that is quietly
+   *  still synthetic is impossible to tell from one that landed. */
+  private _draftsEnabled = true;
   private gestureBound = false;
   /** iOS session-category shim — see claimPlaybackSession(). */
   private silentEl: HTMLAudioElement | null = null;
@@ -374,10 +383,16 @@ export class AudioSystem {
   private async preloadSamples(): Promise<void> {
     if (!this.ctx || this.samplesRequested) return;
     this.samplesRequested = true;
+    const discovered = this.discoverSamples();
     const jobs: Promise<void>[] = [];
     for (const [id, def] of this.defs) {
-      if (!def.sample) continue;
-      const names = Array.isArray(def.sample) ? def.sample : [def.sample];
+      const found = discovered.get(id);
+      // An explicit `sample` on the def WINS, so a one-off can always be
+      // pinned by name; otherwise the folder decides.  With neither, the id
+      // is on its draft and there is nothing to fetch.
+      const declared = def.sample ? (Array.isArray(def.sample) ? def.sample : [def.sample]) : null;
+      const names = declared ?? found;
+      if (!names || names.length === 0) continue;
       const slots: (AudioBuffer | null)[] = names.map(() => null);
       this.samples.set(id, { bufs: slots, next: 0 });
       names.forEach((name, i) => {
@@ -406,6 +421,32 @@ export class AudioSystem {
       });
     }
     await Promise.all(jobs);
+  }
+
+  /**
+   * Group the files in `public/assets/sfx/` by the id each belongs to.
+   *
+   * The convention is the id with dots as dashes, plus any suffix — so
+   * `crash.player.shard` collects `crash-player-shard.wav`,
+   * `crash-player-shard-a.wav`, `crash-player-shard-rice-02.wav`.  Matching
+   * is LONGEST-PREFIX against the ids the registry actually declares, which
+   * is what keeps `destroy.enemy` from swallowing `destroy.enemy.heavy`'s
+   * files: both are real ids, and the longer one wins its own takes.
+   */
+  private discoverSamples(): Map<string, string[]> {
+    const byId = new Map<string, string[]>();
+    // Longest id first, so a prefix id cannot claim a longer id's files.
+    const ids = [...this.defs.keys()].sort((a, b) => b.length - a.length);
+    const dashed = ids.map(id => [id, id.replace(/\./g, '-')] as const);
+    for (const file of SFX_MANIFEST) {
+      const stem = file.replace(/\.wav$/i, '').toLowerCase();
+      const hit = dashed.find(([, d]) => stem === d || stem.startsWith(d + '-'));
+      if (!hit) { this.unmatchedSamples.push(file); continue; }
+      const list = byId.get(hit[0]);
+      if (list) list.push(file); else byId.set(hit[0], [file]);
+    }
+    for (const list of byId.values()) list.sort();
+    return byId;
   }
 
   /** Next decoded take for an id, or null while none has landed.  Cycles
@@ -582,8 +623,15 @@ export class AudioSystem {
       src.connect(voiceGain);
       src.start(now);
       dur = buf.duration / Math.max(0.01, s.pitch);
-    } else {
+    } else if (this._draftsEnabled) {
       dur = Math.max(0.01, def.render(s));
+    } else {
+      // Drafts off and no recording for this id: play nothing, and count it
+      // as a drop so the DBG readout can say how much of the game is still
+      // silent rather than leaving it to the ear.
+      voiceGain.disconnect();
+      this.counts.dropped++;
+      return;
     }
     dur = Math.max(0.01, dur);
 
@@ -701,6 +749,20 @@ export class AudioSystem {
    *  means every id is on its synth draft — the normal state until files
    *  are dropped in, and the state the standalone build stays in. */
   public get sampleCount(): number { return this.samplesLoaded; }
+  /** Synth drafts on/off.  With them off, only recorded takes sound — the
+   *  audition mode for judging assets without mistaking a draft for one. */
+  public get draftsEnabled(): boolean { return this._draftsEnabled; }
+  public set draftsEnabled(v: boolean) { this._draftsEnabled = v; }
+  /** Ids that have at least one decoded recording. */
+  public get sampledIds(): string[] {
+    return [...this.samples.keys()].filter(id => this.takeSample(id) !== null).sort();
+  }
+  /** Every registered id — one-shots AND loops.  Coverage is over every
+   *  sound the game can make, so a readout that counted only one-shots would
+   *  quietly overstate how done the asset pass is. */
+  public get allIds(): string[] { return [...this.defs.keys(), ...this.loopDefs.keys()]; }
+  /** Filenames present in the folder that match no id — i.e. typos. */
+  public get unmatchedFiles(): string[] { return this.unmatchedSamples.slice(); }
   /** Files that decoded but were rejected as silent.  Non-zero means an
    *  asset is broken and its id fell back to the draft — the one state that
    *  otherwise looks identical to "no files installed". */

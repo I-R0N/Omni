@@ -27,6 +27,16 @@ const SHARD_RANGE = {
  * sound is produced.  Inventory §9 ranks which drafts are worth
  * replacing first.
  */
+// RECORDED TAKES ARE NOT DECLARED HERE.  Any .wav dropped into
+// `public/assets/sfx/` named after an id — dots as dashes, plus any suffix —
+// is discovered at build time and replaces that id's draft:
+//
+//     crash.player.shard  ->  crash-player-shard-a.wav, -b.wav, -rice02.wav
+//
+// So adding sound is adding files, not editing this file.  `SfxDef.sample`
+// still exists to PIN a specific filename when one id needs an exception.
+// The drafts below stay as the fallback for every id with no take, and are
+// what the standalone build plays.
 export function registerSfx(a: AudioSystem) {
   registerWeapons(a);
   registerEnemyWeapons(a);
@@ -367,12 +377,6 @@ function registerImpacts(a: AudioSystem) {
   a.register('crash.player.shard', {
     tier: 1, gain: 0.34, poly: 3, minInterval: ms(70), collapse: true,
     jitter: 0.12, positional: true,
-    // First id wired for recorded takes.  These filenames are OPTIONAL:
-    // until the files exist under public/assets/sfx/ the draft below plays,
-    // which is also what the standalone build does permanently.  Pitch
-    // (shard size) and gain (impact speed) still come from the call site,
-    // so record neutral — see public/assets/sfx/README.md.
-    sample: ['shard-hit-a.wav', 'shard-hit-b.wav', 'shard-hit-c.wav'],
     render: s => Math.max(
       tone(s, { type: 'triangle', f0: 280, f1: 170, attack: ms(1), decay: ms(120), gain: 0.5 }),
       noise(s, { f0: 900, f1: 380, type: 'lowpass', attack: ms(1), decay: ms(90), gain: 0.3 }),

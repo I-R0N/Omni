@@ -267,6 +267,14 @@ const App: React.FC = () => {
       e.audio.toggleMute();
   };
 
+  // Synth drafts on/off — the audition switch for recorded takes.
+  const handleToggleDrafts = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.draftsEnabled = !e.audio.draftsEnabled;
+  };
+
   const handleToggleTileOutlines = () => {
       if (engineRef.current) engineRef.current.dbg.toggleTileOutlines();
   };
@@ -596,6 +604,7 @@ const App: React.FC = () => {
         onToggleScreenShake={handleToggleScreenShake}
         onSetVolume={handleSetVolume}
         onToggleMute={handleToggleMute}
+            onToggleDrafts={handleToggleDrafts}
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
         onToggleJoystickDebug={handleToggleJoystickDebug}

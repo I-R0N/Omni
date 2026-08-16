@@ -1704,6 +1704,9 @@ export class GameEngine {
       audio: {
         volume: this.audio.volume, muted: this.audio.muted,
         state: this.audio.contextState, audible: this.audio.audible,
+        drafts: this.audio.draftsEnabled,
+        sampled: this.audio.sampledIds.length, total: this.audio.allIds.length,
+        unmatched: this.audio.unmatchedFiles,
       },
     });
     // Cost of handing the frame to React.  This is the ONE per-frame cost the
