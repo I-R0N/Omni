@@ -19,7 +19,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ok  ' + m); } else { fail
 /** Minimal mono 16-bit PCM wav.  A short noise burst through a one-pole
  *  lowpass — deliberately in the same family as the shard-contact draft so
  *  the cost comparison is like-for-like. */
-function makeWav(seconds, rate, seed) {
+function makeWav(seconds, rate, seed, amp = 0.8) {
   const n = Math.floor(seconds * rate);
   const bytes = Buffer.alloc(44 + n * 2);
   bytes.write('RIFF', 0); bytes.writeUInt32LE(36 + n * 2, 4); bytes.write('WAVE', 8);
@@ -33,7 +33,7 @@ function makeWav(seconds, rate, seed) {
     const white = (s / 0xffffffff) * 2 - 1;
     lp += (white - lp) * 0.18;                     // dull it, per the <2kHz rule
     const env = Math.exp(-i / (rate * 0.02));      // ~20ms decay
-    bytes.writeInt16LE(Math.max(-32767, Math.min(32767, lp * env * 26000)), 44 + i * 2);
+    bytes.writeInt16LE(Math.max(-32767, Math.min(32767, lp * env * 32767 * amp)), 44 + i * 2);
   }
   return bytes;
 }
@@ -187,6 +187,31 @@ const run = async () => {
   ok(fell.count === 0, 'a 404 decodes nothing');
   ok(fell.has === false, 'and the id reports no recording');
   ok(fell.played === 1, 'but the sound still plays — the draft covers it');
+
+  // ── A file that decodes but carries no signal ────────────────────────────
+  // The failure that actually happened: an export captured ~4ms of near-
+  // silence.  It is worse than a missing file, because it WINS over a
+  // working draft, so the fallback has to cover content and not just fetch.
+  const page3 = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page3.route('**/assets/sfx/*.wav', route =>
+    route.fulfill({ status: 200, contentType: 'audio/wav', body: makeWav(0.2, 22050, 3, 0.0004) }));
+  await page3.goto(URL, { waitUntil: 'networkidle' });
+  await page3.mouse.click(195, 700);
+  await page3.waitForFunction(() => window.__omniEngine?.audio?.audible === true, { timeout: 15000 });
+  await page3.evaluate(() => window.__omniEngine.startGame());
+  await page3.waitForFunction(() => window.__omniEngine.audio.rejectedSampleCount >= 3, { timeout: 15000 })
+    .catch(() => {});
+  const silent = await page3.evaluate(() => {
+    const e = window.__omniEngine, a = e.audio, p = e.player.position;
+    a.resetCounters();
+    a.play('crash.player.shard', { x: p.x, y: p.y });
+    return { rejected: a.rejectedSampleCount, loaded: a.sampleCount,
+             has: a.hasSample('crash.player.shard'), played: a.playsOf('crash.player.shard') };
+  });
+  ok(silent.rejected === 3, `a silent take is rejected at decode (${silent.rejected}/3)`);
+  ok(silent.loaded === 0, 'and is not counted as loaded');
+  ok(silent.has === false, 'so the id does not resolve to a recording');
+  ok(silent.played === 1, 'and the draft still makes the sound');
 
   await browser.close();
   console.log(`\nsample: ${pass} passed, ${fail} failed`);

@@ -164,6 +164,17 @@ interface LiveLoop {
   param: number;
 }
 
+/** Absolute peak of a decoded buffer, across every channel.  Runs once per
+ *  file at load, never in a frame. */
+function peakOf(buf: AudioBuffer): number {
+  let peak = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
+  }
+  return peak;
+}
+
 export class AudioSystem {
   // ── Registry ──
   private defs = new Map<string, SfxDef>();
@@ -177,6 +188,7 @@ export class AudioSystem {
   private samples = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
   private samplesRequested = false;
   private samplesLoaded = 0;
+  private samplesRejected = 0;
   private gestureBound = false;
   /** iOS session-category shim — see claimPlaybackSession(). */
   private silentEl: HTMLAudioElement | null = null;
@@ -374,7 +386,18 @@ export class AudioSystem {
             const res = await fetch(`${SFX_ASSET_DIR}${name}`);
             if (!res.ok) return;                       // missing → synth draft
             const bytes = await res.arrayBuffer();
-            slots[i] = await this.ctx!.decodeAudioData(bytes);
+            const buf = await this.ctx!.decodeAudioData(bytes);
+            // A file that DECODES but carries no signal is the same failure
+            // as a missing one — a bad export, a captured silence — and it is
+            // the worse of the two, because it wins over a working draft and
+            // the sound just disappears.  So the "degrade to a sound, never
+            // to silence" rule is enforced on the CONTENT, not merely on the
+            // fetch.  The bar is deliberately low and about audibility, not
+            // taste: play() multiplies by the def's mix gain and then by
+            // distance attenuation, so a peak this quiet cannot be heard in
+            // play whatever the file was meant to be.
+            if (peakOf(buf) < AUDIO_CONSTANTS.SAMPLE_MIN_PEAK) { this.samplesRejected++; return; }
+            slots[i] = buf;
             this.samplesLoaded++;
           } catch {
             /* undecodable → synth draft.  Deliberately silent. */
@@ -678,6 +701,10 @@ export class AudioSystem {
    *  means every id is on its synth draft — the normal state until files
    *  are dropped in, and the state the standalone build stays in. */
   public get sampleCount(): number { return this.samplesLoaded; }
+  /** Files that decoded but were rejected as silent.  Non-zero means an
+   *  asset is broken and its id fell back to the draft — the one state that
+   *  otherwise looks identical to "no files installed". */
+  public get rejectedSampleCount(): number { return this.samplesRejected; }
   /** True once a decoded take exists for this id, i.e. `play` will use the
    *  recording rather than the draft. */
   public hasSample(id: string): boolean { return this.takeSample(id) !== null; }

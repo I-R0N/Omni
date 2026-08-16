@@ -49,3 +49,21 @@ asserts this for the synth drafts.
 
 **Vary the takes.** Three slightly different recordings beat one perfect
 one for anything that fires in bulk.
+
+## Check a file before trusting it
+
+```bash
+npm run build
+npx vite preview --port 4173 --host 127.0.0.1 &
+node scripts/smoke/assets.mjs
+```
+
+It decodes every wav in this folder with the browser's own decoder and
+reports level, how much of the file is digital silence, content length,
+channel count and dominant frequency — then fails on anything the engine
+cannot use. Run it after every export; a bad export is not audible as
+"quiet", it is audible as nothing at all.
+
+A file that decodes but carries no signal is **rejected at load**
+(`AUDIO_CONSTANTS.SAMPLE_MIN_PEAK`) and its id falls back to the synth
+draft, so a broken export cannot silence a working sound.

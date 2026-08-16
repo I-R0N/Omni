@@ -3541,6 +3541,13 @@ export const TIMED_WAVE_CONFIG = {
 // PROVISIONAL: every number here was reasoned about, not measured on the
 // user's hardware (gauntlet log, FOR-USER-REVIEW).
 export const AUDIO_CONSTANTS = {
+    /** A decoded sample peaking below this is treated as a BROKEN export and
+     *  discarded in favour of the synth draft.  `play()` multiplies by the
+     *  def's mix gain (~0.3) and then by distance attenuation, so anything
+     *  under this cannot be heard in play whatever it was meant to be — the
+     *  file has not made the sound quieter, it has removed it.  ~-26 dBFS. */
+    SAMPLE_MIN_PEAK: 0.05,
+
   DEFAULT_VOLUME: 0.7,     // master gain at boot; in-memory only (no persistence)
   MAX_VOICES: 24,          // hard ceiling across all tiers
   MAX_VOICES_TIER2: 20,    // tier-2 triggers stop being admitted here
