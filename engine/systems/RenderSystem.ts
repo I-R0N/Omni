@@ -1,7 +1,7 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME} from '../../constants';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -21,7 +21,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
-         renderMinimap, renderWaveAnnouncements, fitFontPx,
+         renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
 
 /**
@@ -153,6 +153,13 @@ export class RenderSystem {
   // gracefully no-op without a flow field.
   private flowField: import('./FlowFieldGrid').FlowFieldGrid | null = null;
   public setFlowField(f: import('./FlowFieldGrid').FlowFieldGrid) { this.flowField = f; }
+  /** Read access for the minimap's streamline layer (G5), which lives in
+   *  `render/hud.ts` and cannot reach a private field. */
+  public flowFieldForMinimap() { return this.flowField; }
+  /** Cached streamline geometry in WORLD space, rebuilt only when the seed
+   *  lattice moves (camera crosses a cell) or the zoom changes — see
+   *  `renderMinimapFlow`.  Nulled on map load, since the field is rebaked. */
+  _minimapFlowCache: { data: Float64Array; cellX: number; cellY: number; spacing: number } | null = null;
 
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
@@ -611,6 +618,8 @@ export class RenderSystem {
     player?: GameEntity,
     waveAnnouncements?: WaveAnnouncement[],
     flowOverlay?: FlowOverlayState,
+    joystick?: JoystickHUDState | null,
+    fireButton?: FireButtonHUDState | null,
   ) {
     const t0 = performance.now();
     this.lastTintMs = 0;
@@ -626,6 +635,10 @@ export class RenderSystem {
 
     // Guard against 0 dimensions
     if (width === 0 || height === 0) return;
+
+    // Whether the minimap wants per-shard dots this frame (G5).  Hoisted out
+    // of the loop: it is one lookup for the whole pass, not one per entity.
+    const minimapDots = getActiveMinimapMaterial() === 'dots';
 
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
@@ -725,8 +738,13 @@ export class RenderSystem {
 
         // Structures use the pre-rendered static minimap layer — skip them
         // here to avoid ~22k per-frame object allocations + fillRect calls.
+        // MOBILE shards still reach this buffer, but only in the DBG 'dots'
+        // material mode (G5): the shipped default traces the flow field
+        // instead, and a few thousand pushes per frame for dots nobody is
+        // drawing is the kind of cost that hides in a profile.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
                 && entity.shardVariant !== 'nebula-tile' && entity.shardVariant !== 'nebula-shard'
+                && !(entity.type === EntityType.STRUCTURE && minimapDots === false)
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -901,6 +919,16 @@ export class RenderSystem {
     // 9. Render 2-slot loadout HUD (Screen Space)
     if (player) {
         renderLoadoutHUD(ctx, player, width, height);
+    }
+
+    // 10. The touch scheme's two widgets (Screen Space, LAST) — they live
+    // under actual thumbs, so nothing may draw over them.  Both are null
+    // unless the active control scheme has them.
+    if (joystick) {
+        renderJoystick(ctx, joystick);
+    }
+    if (fireButton) {
+        renderFireButton(ctx, fireButton);
     }
 
     this.lastRenderMs = performance.now() - t0;

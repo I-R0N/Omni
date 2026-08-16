@@ -953,6 +953,57 @@ the source. The explicit steps are overrides for comparing two settings on one
 map. A density override deliberately does NOT drag parallax with it: the rows
 stay independent so either can be isolated.
 
+## Merge with `claude/plan-completion` (PR #84 landed)
+
+PR #84 (Pair C — input/polish) merged into the base while this branch was open,
+so the base moved from `dab0394` to `28b8851`. Merged it in rather than
+rebasing: 13 commits with CI history behind them, and a merge keeps the record
+of what was tested when.
+
+**Four conflicts, all mechanical:**
+
+| file | conflict | resolution |
+|---|---|---|
+| `engine/GameEngine.ts` | both sides added imports to the same two lines | union — their `ControlScheme`/`RumbleKind`/trigger imports plus my star getters |
+| `engine/maps/MapClasses.ts` | both added to one import line | union — their `randomRockShade` plus my `HUB_TEST_PORTAL_SITES` |
+| `CLAUDE.md` | two NEW §8 bullets written against the same anchor | kept both, and restored the shared bullet header the conflict had swallowed |
+| `tests/README.md` | see below | merged into one rule |
+
+**The `tests/README.md` conflict is worth its own note.** Both branches
+independently hit the *same* harness gotcha — that `waitForEngine` /
+`waitForStats` stringify their predicate, so a closure over test-side state
+throws `ReferenceError` in the page and surfaces as an unexplained timeout — and
+each wrote its own numbered rule for it. Two sessions, two rediscoveries, four
+debugging cycles between them. Merged into a single rule carrying both remedies
+(`new Function` inlining and the `engine()` `arg` channel) and noting that it
+was rediscovered rather than read, which is the argument for the file existing.
+
+### Two of #84's tests changed, and why
+
+Both broke on the hub TEST RACK (S12), both were assumptions rather than
+behaviour, and both fixes make the test MORE precise:
+
+1. **`maps.spec.ts` — "the Overworld hub still builds its terrain, stations and
+   rifts"** asserted `portals === 4`. The hub now carries 4 arena rifts plus the
+   6-portal rack, so 10. Rewritten to assert the PARTS (`arenaRifts === 4`,
+   `rackRifts === 6`, and that they sum to the total) rather than a bare
+   literal — it now says which rifts are expected instead of restating a number
+   that changes whenever one is added.
+
+2. **`minimap.spec.ts` — "the arrow is bracketed"** used
+   `_indicatorBuffer.find(i => i.entity.isPortal)`, i.e. ANY portal. Its
+   far-side standoff parks the player at (2400, 2400), and a rack portal sits
+   **1345 units** from there — inside `INDICATOR_RANGE` (1500). So the helper
+   returned a different rift and reported an arrow where the test expected
+   none. The behaviour under test — the range gate and the on-screen flag — is
+   unchanged and still passes; the helper's implicit "only one portal can ever
+   be in range" is what my change invalidated. Now scoped to the specific
+   portal by `portalTargetId`, which also makes it immune to the next portal
+   anyone adds.
+
+Neither was weakened to accommodate the change: (1) tightened a literal into a
+composition, (2) removed an ambient assumption. Full suite: **127 passing**.
+
 ## DECISIONS TAKEN
 
 **D1 — Measure with a purpose-built probe (`perf/starfield.mjs`) rather than

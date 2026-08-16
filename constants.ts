@@ -1,12 +1,16 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig, ControlScheme } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
   PerMapVariantSpawn,
 } from './engine/systems/ShardSystem.types';
 import { ASSETS } from './assets';
+// The trigger-effect vocabulary is the HID protocol's own — wire values, not
+// game config — so it lives with the transport.  Safe direction: DualSenseHID
+// imports nothing, so this cannot cycle.
+import { TriggerProfile } from './engine/systems/DualSenseHID';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -37,6 +41,62 @@ export const COLORS = {
   STRUCTURE_METAL: '#5b8499',             // blue-cyan gunmetal body (slate shifted toward blue/cyan)
   STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
+
+// ── Rock palettes (material-palette-residual, decision #30) ─────────
+// Rock was ONE flat slate (`COLORS.ASTEROID`), so a rock field read as grey
+// gravel — the most common material in the game and the least characterful.
+// Decision #30 asked for a "rock red+blue palette": per-instance shades
+// spanning a warm oxidised red and a cold mineral blue, so a rock cluster
+// has internal variation and different regions can eventually be built from
+// different families ("maps become known for characteristics").
+//
+// Same mechanism as the plastic palettes and for the same reason: the shade
+// is picked ONCE at spawn (`randomRockShade`) and stored on the entity, so
+// it survives the tile→shard→tile cycle and costs nothing per frame.  The
+// density-tint system multiplies this base, so every shade darkens toward
+// the shared ROCK_AGGREGATION_TINT_FLOOR exactly as the old flat colour did.
+export const ROCK_SLATE_SHADES = [
+  '#94a3b8', '#8b98ac', '#a1adc0', '#7f8b9e', '#9aa7ba',
+] as const;
+// Oxidised — iron reds and rust browns, desaturated enough to sit against a
+// near-black starfield without reading as lava.
+export const ROCK_RUST_SHADES = [
+  '#a1746a', '#8f6259', '#b08277', '#7d564f', '#96695f',
+] as const;
+// Mineral — cold blues with a slate backbone.
+export const ROCK_MINERAL_SHADES = [
+  '#7c93b8', '#6b83a8', '#8ba2c4', '#5f7699', '#7488ab',
+] as const;
+// Mixed — the shipped default: mostly slate with rust and mineral running
+// through it, so a field reads as ROCK with variation rather than as three
+// different materials.  The pure families stay selectable for regional
+// identity work and for judging them side by side.
+export const ROCK_MIXED_SHADES = [
+  ...ROCK_SLATE_SHADES, ...ROCK_SLATE_SHADES,
+  ...ROCK_RUST_SHADES, ...ROCK_MINERAL_SHADES,
+] as const;
+
+export const ROCK_PALETTES: ReadonlyArray<{ name: string; shades: readonly string[] }> = [
+  { name: 'mixed',   shades: ROCK_MIXED_SHADES   },
+  { name: 'slate',   shades: ROCK_SLATE_SHADES   },
+  { name: 'rust',    shades: ROCK_RUST_SHADES    },
+  { name: 'mineral', shades: ROCK_MINERAL_SHADES },
+] as const;
+
+let activeRockPaletteIndex = 0; // 'mixed'
+export function getActiveRockPaletteName(): string {
+  return ROCK_PALETTES[activeRockPaletteIndex].name;
+}
+export function cycleRockPalette(): number {
+  activeRockPaletteIndex = (activeRockPaletteIndex + 1) % ROCK_PALETTES.length;
+  return activeRockPaletteIndex;
+}
+/** One shade from the active rock palette.  Called at every rock-tile and
+ *  free rock-shard spawn site; shards otherwise inherit their parent's. */
+export function randomRockShade(): string {
+  const shades = ROCK_PALETTES[activeRockPaletteIndex].shades;
+  return shades[(Math.random() * shades.length) | 0];
+}
 
 // ── Plastic palettes ───────────────────────────────────────────────
 // Per-instance random shade picked by randomPlasticShade() at every
@@ -292,11 +352,18 @@ export function cycleGlassGlowColor(): number {
 // ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
 // Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
 // the palette so the two tile glows can be A/B'd against a shared
-// vocabulary.  Default index 4 = 'magenta' (#e879f9), the closest
-// match to the legacy fuchsia `#d946ef` baked into SHARD_VARIANTS
-// ['metal-tile'].glow.color.  RenderSystem reads the live hex via
+// vocabulary.  RenderSystem reads the live hex via
 // getActiveMetalGlowColor() in the metal-tile glow branch.
-let activeMetalGlowIndex = 4; // 'magenta' — matches legacy fuchsia
+//
+// DEFAULT CHANGED index 4 'magenta' → 0 'cyan' (material-palette-residual,
+// decision #30 → gauntlet step 5 G7).  Magenta was never chosen: it was the
+// nearest match to a legacy fuchsia baked into SHARD_VARIANTS, and it left
+// the game's coldest material — now an explicitly blue steel that brightens
+// toward METAL_BRIGHT_TARGET — wearing a hot pink halo whenever the player
+// got close.  Cyan is the same cold family as the body, and it is NOT the
+// glass glow's 'sky' (index 8), so the two tile glows still read apart:
+// glass glows a soft sky, metal an icy cyan.
+let activeMetalGlowIndex = 0; // 'cyan' — the cold family the metal body lives in
 
 export function getActiveMetalGlowColor(): string {
   return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
@@ -913,6 +980,49 @@ export const MINIMAP_CONSTANTS = {
     CLAMPED_ALPHA_MULT: 0.8,
     SPIN_HZ: 0.15,        // slow rotation of the diamond
   },
+  // Stations are the only BUILT contact on the map — fixed, safe, and not
+  // alive.  A square says all of that before the colour does, and it is the
+  // only rectilinear mark among dots and diamonds.
+  STATION_BLIP: {
+    HALF: 3,
+    OUTLINE_ALPHA: 0.55,
+    OUTLINE_WIDTH: 0.9,
+  },
+  // ── Material flow layer (decision #43, G5) ────────────────────────────
+  // Short streamlines traced through the asteroid flow field, replacing the
+  // per-shard dot spray.  A dot per shard answers "where is every rock",
+  // which at a few thousand shards is a grey wash; the field answers "which
+  // way is the material going", which is the only thing the map can usefully
+  // say about material it cannot draw individually.
+  //
+  // Seeds sit on a WORLD-space lattice whose spacing scales with the shown
+  // range, so the same count is drawn zoomed in and zoomed out (49 lines), and
+  // they are world-ANCHORED: the pattern slides under the moving window rather
+  // than being painted onto the glass.
+  FLOW: {
+    /** Lattice seeds each side of centre → (2n+1)² lines in view. */
+    SEEDS_PER_HALF: 4,
+    /** Integration steps per streamline (segments = STEPS). */
+    STEPS: 6,
+    /** Step length as a fraction of the lattice spacing.  The product
+     *  (STEPS × STEP_FRAC ≈ 0.84 of one cell) is the number that matters: a
+     *  line must be SHORTER than the gap between seeds, or the strokes run
+     *  into each other and the layer reads as long chords crossing the map
+     *  rather than as a field of local currents.  The first version used
+     *  2.2 cells and looked exactly that wrong when the map was expanded. */
+    STEP_FRAC: 0.14,
+    COLOR: '#64748b',
+    ALPHA: 0.34,
+    WIDTH: 1,
+    /** A brighter pulse travels each line downstream — the part that says
+     *  which WAY, and the reason this beats a static hatch. */
+    PULSE_ALPHA: 0.85,
+    PULSE_WIDTH: 1.8,
+    PULSE_HZ: 0.28,
+    /** Lines shorter than this (px, end to end) are dropped: in a dead-calm
+     *  cell the streamline collapses to a smudge that reads as noise. */
+    MIN_PX: 3,
+  },
 };
 
 export const INPUT_CONSTANTS = {
@@ -930,6 +1040,199 @@ export const INPUT_CONSTANTS = {
   CHARGE_FULL: 1.0,        // seconds: hold time required for a charged shot AND for the ring to read "full"
   TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
+
+  // ── Gamepad rumble ─────────────────────────────────────────────────────
+  // Force feedback rides the SCREEN SHAKE.  Every impact in the game already
+  // funnels through `GameEngine.handleScreenShake(amount)` — crashes,
+  // explosions, cannon recoil, boss deaths — with magnitudes long since tuned
+  // against each other.  Rumble is the haptic twin of that shake, so it hangs
+  // off the same call rather than growing a second list of "things that should
+  // buzz" to keep in sync with the first.
+  //
+  // `dual-rumble` is the only effect the Gamepad API exposes: two magnitudes,
+  // a strong low-frequency motor and a weak high-frequency one.  The
+  // DualSense's real party tricks — adaptive trigger resistance, the
+  // voice-coil haptics, the light bar — need raw HID reports (WebHID), which
+  // is a desktop-Chromium-only path and deliberately not what this drives.
+  RUMBLE: {
+    /** Shake amounts below this do not buzz.  Set to MICRO (1) — the
+     *  smallest thing the game emits — on user direction: shard pings,
+     *  blaster shots and tier-1 kills should all TICK.  The first version
+     *  cut them off at 4 on the theory that a pad rattling on every plink is
+     *  a pad you switch off; the answer turned out to be a magnitude FLOOR
+     *  and a weak-motor bias instead, so the small stuff is felt as a tick
+     *  rather than skipped or thumped. */
+    MIN_SHAKE: 1,
+    /** Shake amount that maps to full strength.  HEAVY (20) is a high-speed
+     *  crash, and should be the loudest thing the hand feels. */
+    FULL_SHAKE: 20,
+    /** Overall magnitude at MIN_SHAKE.  A FLOOR, not zero: the curve used to
+     *  start at 0, which meant the smallest qualifying event played a
+     *  correctly-timed effect at zero strength — silence, dressed up as a
+     *  feature.  Anything worth playing is worth feeling. */
+    MIN_MAGNITUDE: 0.14,
+    /** Effect length in ms at MIN_SHAKE and at FULL_SHAKE.  Short at the
+     *  bottom: a tick, not a buzz. */
+    MIN_MS: 45,
+    MAX_MS: 260,
+    /** The two motors are different instruments — strong is a low-frequency
+     *  THUMP, weak a high-frequency BUZZ — so the balance crossfades with
+     *  magnitude instead of being fixed.  A blaster shot is nearly all buzz
+     *  (STRONG_AT_MIN of the heavy motor); a crash is nearly all thump, with
+     *  WEAK_AT_MAX of high-frequency edge left on top so it still has a
+     *  transient. */
+    STRONG_AT_MIN: 0.25,
+    WEAK_AT_MAX: 0.55,
+    /** Trigger-motor force, as a multiplier on the effect's overall
+     *  magnitude.  A trigger has a far shorter throw than a handle motor, so
+     *  the same number reads weaker there.  Clamped to 1 at the top. */
+    TRIGGER_FORCE_MULT: 1.6,
+    /** Haptic-only tick for a weapon whose recoil deliberately shakes NO
+     *  camera — the plain Blaster.  Screen shake on every shot of the
+     *  fastest gun in the game would be unplayable; a tick in the hand is
+     *  exactly what the shake funnel cannot express. */
+    WEAPON_TICK: 2,
+    /** Floor on the gap between effects (ms).  playEffect restarts the motors,
+     *  so firing one per frame produces a flat drone instead of hits; a new
+     *  effect interrupts early ONLY if it is meaningfully stronger. */
+    MIN_INTERVAL_MS: 70,
+    /** How much stronger a new event must be to interrupt one already
+     *  playing (0.15 = 15 percentage points of magnitude). */
+    INTERRUPT_DELTA: 0.15,
+  },
+
+  // ── Fire button (joystick scheme) ──────────────────────────────────────
+  // The joystick scheme's shooting control.  Tap-to-shoot is the STANDARD
+  // touch scheme's gesture; a scheme whose left thumb is pinned to a stick
+  // needs a thing to press with the right one, and a tap that both aims and
+  // fires cannot coexist with a thumb that is dragging to aim.
+  //
+  // Parked above the loadout strip on the right, mirroring the joystick's
+  // side.  Its own rect is excluded from the aim gesture, so pressing it
+  // never yanks the aim to the corner.
+  FIRE_BUTTON: {
+    RADIUS: 38,
+    /** px in from the button's OWN edge to its centre — the right edge in the
+     *  left-handed layout, the left edge in the mirrored one. */
+    MARGIN_X: 58,
+    /** px from the bottom edge to the button's CENTRE.  Clears the loadout
+     *  strip (SLOT_H + BOTTOM_MARGIN = 62) with a comfortable gap. */
+    MARGIN_Y: 110,
+    /** ...but on the LEFT the minimap is already there (MARGIN 20 + SIZE 75
+     *  up from the bottom), so the mirrored layout sits the button higher
+     *  rather than on top of it. */
+    MARGIN_Y_MIRRORED: 150,
+    IDLE_ALPHA: 0.20,
+    PRESSED_ALPHA: 0.42,
+    COLOR: '#f87171',
+  },
+
+  // ── Onscreen joystick (Pair C, c2 second half) ─────────────────────────
+  // A FLOATING left-thumb stick: it has no fixed home, it appears wherever
+  // the thumb lands inside the zone below.  Floating rather than parked
+  // because the bottom-left corner is already the minimap's, and a fixed
+  // stick would either fight it or sit somewhere a thumb cannot reach.
+  //
+  // The zone is what keeps the stick from stealing the gestures that were
+  // already there: it excludes the top strip (HUD chips), the bottom strip
+  // (minimap + loadout slots, both tap targets), the RIGHT half entirely
+  // (aim and fire), and a disc around the ship (the dock / portal tap).
+  JOYSTICK: {
+    /** Left fraction of the viewport in which a touch can become the stick. */
+    ZONE_W_FRAC: 0.45,
+    /** Top of the zone, as a fraction of height — above it are the HUD chips. */
+    ZONE_TOP_FRAC: 0.30,
+    /** Bottom of the zone, px up from the bottom edge.  Covers the collapsed
+     *  minimap (MARGIN + SIZE) and the loadout strip; the EXPANDED minimap is
+     *  handled dynamically instead, since its rect changes at runtime. */
+    ZONE_BOTTOM_PX: 100,
+    /** Deflection (px) from the touch origin that means full throttle. */
+    RADIUS: 56,
+    /** Below this the stick reads as centred — kills thumb tremor without
+     *  eating a real nudge. */
+    DEAD_PX: 6,
+    KNOB_RADIUS: 22,
+    RING_ALPHA: 0.22,
+    KNOB_ALPHA: 0.40,
+    /** Seconds the widget takes to fade after the thumb lifts.  It exists
+     *  only while a touch session is live — there is no ghost stick sitting
+     *  under a mouse or a pad. */
+    FADE_SEC: 0.22,
+    COLOR: '#7dd3fc',
+  },
+
+  // ── Gamepad (Pair C, c2) ───────────────────────────────────────────────
+  // The pad is a THIRD input device beside keyboard/mouse and touch, not a
+  // replacement for either: it feeds the SAME movement vector, the same
+  // synthetic pointer the mouse writes, and the same fire/charge queues, so
+  // nothing downstream of InputSystem knows a pad exists.
+  //
+  // BUTTON INDICES are the W3C "standard gamepad" mapping, which is what a
+  // DualSense reports over both USB and Bluetooth (and what an Xbox pad
+  // reports too — the labels below are the PS5 names for the same indices).
+  // Every action lists ALL the buttons bound to it: a face button and a
+  // shoulder/trigger where the choice is a matter of taste, so neither
+  // convention is wrong on this pad.
+  GAMEPAD: {
+    /** Radial stick deadzone, applied to the MAGNITUDE and then rescaled so
+     *  the live range is still a full 0→1 (a raw clamp would make the first
+     *  usable deflection jump to 0.18). Sticks rest noisily; drift under this
+     *  is not input. Provisional — feel number, wants a real pad. */
+    STICK_DEADZONE: 0.18,
+    /** Analogue triggers report 0→1 on their button `value`; over this counts
+     *  as pressed. High enough that a resting finger is not a shot. */
+    TRIGGER_THRESHOLD: 0.35,
+    /** Band the trigger's FIRE POINT is clamped into.  The fire point tracks
+     *  the adaptive-trigger profile's break — that is what makes the clutch
+     *  giving way and the gun going off the same event — but the SAME number
+     *  has to feel right on a pad with no WebHID and therefore no physical
+     *  cue, so no profile may push the shot into the last sliver of travel
+     *  (unreachable-feeling) or the first (fires as the trigger leaves rest,
+     *  which is the bug this band exists to prevent recurring). */
+    FIRE_POINT_MIN: 0.25,
+    FIRE_POINT_MAX: 0.75,
+    /** Distance (CSS px) from screen centre at which the pad parks its
+     *  synthetic pointer. Matches THROTTLE_DISTANCE so the aim reticle sits
+     *  where a mouse at full throttle would, and — load-bearing — is well
+     *  outside SHIP_SELECT_RADIUS, so a pad shot can never be mistaken for a
+     *  tap on the ship and swallowed by `claimTapNear`. */
+    AIM_RADIUS: 150,
+    /** Seconds the connect/disconnect HUD hint stays up. */
+    HINT_LIFETIME: 3.0,
+    AXES: { LX: 0, LY: 1, RX: 2, RY: 3 },
+    BUTTONS: {
+      FIRE:         [7, 0],   // R2, Cross — tap = shot, hold ≥ CHARGE_FULL = charged
+      /** FIRE under the trigger-thrust scheme.  R2 drops out because BOTH
+       *  triggers are the throttle there — a minimal pad may only have one,
+       *  and which one it is cannot be detected, so neither can be the gun.
+       *  The face button covers it, which is what a one-stick pad has. */
+      FIRE_FACE:    [0],
+      INTERACT:     [2],      // Square — dock / enter portal / undock (the `selected` flag)
+      CYCLE_WEAPON: [5, 3],   // R1, Triangle
+      PAUSE:        [9],      // Options
+      DPAD:         [12, 13, 14, 15], // up, down, left, right — digital thrust
+      /** THROTTLE under `gamepad-thrust`: EITHER trigger, whichever is
+       *  pulled further.  A pad with only a left trigger and a pad with only
+       *  a right one both work, and there is no device sniffing involved —
+       *  the trigger that is not there simply reads zero forever. */
+      THROTTLE:     [6, 7],   // L2, R2
+      // MENU navigation.  These reuse buttons that are already bound in
+      // flight, which is safe because they are only ever SPENT while a
+      // full-screen overlay is up and the world is frozen: Cross cannot fire
+      // (the FIRE queue is gated on the world) and the D-pad cannot thrust.
+      CONFIRM:      [0],      // Cross — activate the focused control
+      BACK:         [1],      // Circle — dismiss / resume / undock
+    },
+    /** Menu D-pad auto-repeat: the first step is immediate, then a held
+     *  direction waits DELAY before repeating every INTERVAL.  Without the
+     *  delay a single press walks several items; without the repeat, a long
+     *  list is a lot of presses. */
+    MENU_REPEAT_DELAY_MS: 420,
+    MENU_REPEAT_INTERVAL_MS: 110,
+    /** Below this the throttle reads as released, so a trigger that rests a
+     *  hair off zero does not creep the ship forward. */
+    THROTTLE_DEADZONE: 0.06,
+  },
 };
 
 export const PHYSICS_CONSTANTS = {
@@ -1559,6 +1862,15 @@ export const METAL_ASSEMBLY = {
 export const METAL_HEX_CELLS = 6;                 // shards per hexagon layer (= 1 tier)
 export const METAL_MAX_DENSITY_TIER = 6;          // tier cap (rare — 36 shards)
 export const METAL_AGGREGATION_BRIGHT_CEIL = 1.5; // brightness at the top tier
+// De-white target (material-palette-residual, decision #30 → gauntlet step 5
+// G7).  Density brightening used to SCALE every channel by the same factor,
+// which drives a mid steel-blue toward its own ceiling on all three channels
+// at once — the colour desaturates as it climbs and dense metal ends up
+// reading as pale near-white hex.  Brightening toward an explicit SHINY
+// STEEL-BLUE instead keeps the material blue at every density, and gives the
+// "shiny metal" direction a colour to aim at rather than a brightness knob.
+// (Interpolation lives in the renderer; this is the endpoint.)
+export const METAL_BRIGHT_TARGET = '#a5d8f0';
 // Shards released when a metal tile breaks = densityTier × this.  Below the
 // 6/tier it took to BUILD the tile, so ~half the metal is "destroyed" in the
 // break — keeps dense clusters from flooding the field with debris.
@@ -2881,6 +3193,104 @@ export const WEAPON_LIST = [
 // (WEAPON_SLOT_LABELS deleted with the 8-cell ammo strip — the 2-slot
 // loadout HUD is wide enough to render full weapon names.)
 
+// ── Adaptive-trigger profiles (DualSense, WebHID) ─────────────────────────
+// What the RIGHT trigger feels like per equipped weapon.  This is the one
+// piece of hardware feedback the Gamepad API cannot express at all — rumble
+// says "something happened", a trigger clutch says "this is what you are
+// holding" — so the table is written to make the guns distinguishable BY
+// FEEL rather than to make each one maximally dramatic.
+//
+// Units are NORMALISED, not wire values: `start`/`end` are fractions of the
+// trigger's travel and `strength` is 0..1.  The two competing wire encodings
+// disagree about ranges (raw 0–255 bytes vs ten 0–9 travel zones with a 0–8
+// force), and the design intent — "the Cannon is the deepest pull in the
+// game" — is true in both.  engine/systems/DualSenseHID.ts converts.
+//
+// Six shapes are available (see TriggerKind); these seven use five of them.
+// The rule followed here: a gun's trigger should say what the gun IS before
+// it says anything else, so cadence picks the shape and the numbers only
+// separate guns that already share one.
+export const WEAPON_TRIGGERS: Record<WeaponType, TriggerProfile> = {
+  // 7 shots/s.  A CLICK 7x/s is not feedback, it is fatigue — and it is also
+  // a lie, because the gun is not asking you to commit to each shot.  A
+  // low-frequency RATTLE is what an automatic weapon feels like.
+  [WeaponType.BLASTER]: {
+    kind: 'vibration', start: 0.30, end: 0, strength: 0.45, frequency: 0.30,
+  },
+  // Three-round burst: a click, but a TEXTURED one — three notches on the
+  // way down, so the trigger says how many rounds are coming.
+  [WeaponType.BURST]: {
+    kind: 'texture', start: 0.30, end: 0.70, strength: 0.6,
+    zones: [0, 0, 0.7, 0, 0.7, 0, 0.7],
+  },
+  // 1.5 shots/s slug.  Commits per shot, and the trigger should say so: a
+  // firm break with nothing before it, so the whole pull is the commitment.
+  [WeaponType.SHOTGUN]: {
+    kind: 'weapon', start: 0.42, end: 0.62, strength: 0.80,
+  },
+  // Held beam — a smooth wall.  No break, because there is no per-shot
+  // moment to mark; you are leaning on it.
+  [WeaponType.BOUNCER]: {
+    kind: 'resistance', start: 0.30, end: 0, strength: 0.45,
+  },
+  // Held chain.  A fast, fine BUZZ over the wall — electricity, not recoil.
+  [WeaponType.LIGHTNING]: {
+    kind: 'vibration', start: 0.35, end: 0, strength: 0.60, frequency: 0.85,
+  },
+  // Lock-and-release.  The pull gets HARDER as it goes (the lock winding up)
+  // and then the shot leaves at the top.
+  [WeaponType.HOMING]: {
+    kind: 'slope', start: 0.30, end: 0.65, strength: 0.25, endStrength: 0.85,
+  },
+  // Artillery.  The deepest, heaviest pull in the game, ramping the whole
+  // way — the one gun where reaching the shot is work.
+  [WeaponType.CANNON]: {
+    kind: 'slope', start: 0.25, end: 0.75, strength: 0.35, endStrength: 1.0,
+  },
+};
+
+// LEFT trigger under the trigger-thrust scheme.  A SLOPE that stiffens with
+// the ship's speed: free at rest, and a real push once you are near the cap,
+// so "already flat out" is something the hand knows.  Quantised by the caller
+// for the same reason the charge ramp is — each step is an HID write.
+export const THRUST_TRIGGER_STEPS = 5;
+export function THRUST_TRIGGER(speedFraction: number): TriggerProfile {
+  const q = Math.round(Math.max(0, Math.min(1, speedFraction)) * THRUST_TRIGGER_STEPS) / THRUST_TRIGGER_STEPS;
+  return {
+    kind: 'slope',
+    start: 0.10,
+    end: 0.90,
+    // A light detent at the bottom always, so the throttle has a bite point.
+    strength: 0.15 + 0.25 * q,
+    endStrength: 0.25 + 0.55 * q,
+  };
+}
+
+// Held CHARGE (Overcharge).  Overrides the weapon profile while a charged
+// shot winds up — and unlike every profile above, it is not static: the
+// trigger STIFFENS as the ring fills, so the charge is something the hand
+// feels building rather than a wall that simply appeared.  This is the one
+// thing an adaptive trigger can say that no other output in the game can,
+// which is why it gets the only state-driven profile.
+//
+// `chargeTrigger(t)` is called with the charge fraction and QUANTISED by the
+// caller: each distinct profile is an HID write, and the pad's endpoint is
+// not a frame buffer.
+export const CHARGE_TRIGGER_MAX_STRENGTH = 0.95;
+export const CHARGE_TRIGGER_STEPS = 5;
+export function chargeTrigger(t: number): TriggerProfile {
+  const q = Math.round(Math.max(0, Math.min(1, t)) * CHARGE_TRIGGER_STEPS) / CHARGE_TRIGGER_STEPS;
+  return {
+    kind: 'slope',
+    start: 0.12,
+    end: 0.85,
+    // Already firm at the bottom so the wall is there the moment the hold
+    // starts; the RAMP is what grows.
+    strength: 0.30 + 0.30 * q,
+    endStrength: 0.45 + (CHARGE_TRIGGER_MAX_STRENGTH - 0.45) * q,
+  };
+}
+
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
 // Simple enemy blaster (separate so we can tune independently of player weapons)
@@ -3341,6 +3751,113 @@ export function cycleSnitchSpeed(): number {
   return activeSnitchSpeedIndex;
 }
 
+// ── Control schemes (user directive, step 5 G9) ──────────────────────────────
+// Picked at game start (main menu) and changeable from the pause menu.  Like
+// DIFFICULTY, the choice is a PREFERENCE: it survives restarts and is not
+// part of run state.
+//
+// The axis that matters is the TOUCH MODEL.  The two touch schemes are
+// mutually exclusive ways to drive the same ship — blending them (which is
+// what shipped first) has the floating stick and the drag-to-fly gesture
+// fighting over the same finger.  Keyboard and controller do NOT switch touch
+// off; they select the standard touch model AND stop the MOUSE from dragging
+// the ship, because on those schemes steering is the keys' or the stick's job
+// and a click should only shoot.
+//
+//   scheme            stick+button   mouse drags   touch drags   tap fires
+//   touch             no             yes           yes           yes
+//   joystick-left     YES (L/R)      no            no (stick)    no (button)
+//   joystick-right    YES (R/L)      no            no (stick)    no (button)
+//   keyboard          no             NO            yes           yes
+//   gamepad           no             NO            yes           yes
+//
+// The two joystick schemes are the same scheme MIRRORED — stick left + fire
+// right, or stick right + fire left — because which thumb wants the stick is
+// handedness, not preference about the game.  In both, the ship AIMS WHERE IT
+// FLIES: the stick writes the synthetic pointer, so there is no separate aim
+// gesture to compete with it.
+//
+// `keyboard` and `gamepad` are deliberately identical in TOUCH behaviour —
+// the honest reading of "the controller and keyboard options should also
+// allow simultaneous touch control".  What differs between them is which
+// device the help panel leads with.
+export const CONTROL_SCHEMES: ReadonlyArray<{
+  id: ControlScheme;
+  label: string;
+  /** One line for the menu button's caption. */
+  blurb: string;
+}> = [
+  { id: 'touch',          label: 'Touch',            blurb: 'Drag to fly and aim · tap to shoot' },
+  { id: 'joystick-left',  label: 'Joystick (right-handed)', blurb: 'Stick left · fire button right' },
+  { id: 'joystick-right', label: 'Joystick (left-handed)',  blurb: 'Stick right · fire button left' },
+  { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
+  { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
+  { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'Either trigger throttles · either stick steers + aims' },
+] as const;
+
+export function controlSchemeDef(id: ControlScheme) {
+  return CONTROL_SCHEMES.find(c => c.id === id) ?? CONTROL_SCHEMES[0];
+}
+
+/** Per-scheme behaviour flags.  One table, read by InputSystem and by the
+ *  engine's tap-to-fire gate — so "what does this scheme do" is answerable in
+ *  one place rather than by grepping for the scheme name. */
+export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
+  joystick: boolean;
+  fireButton: boolean;
+  mouseDragMoves: boolean;
+  touchDragMoves: boolean;
+  tapFires: boolean;
+  /** Does a POINTER drag set the aim?  False under the joystick schemes,
+   *  where the ship AIMS WHERE IT FLIES (user directive): the stick writes
+   *  the synthetic pointer, so a second aim channel would only fight it. */
+  pointerAims: boolean;
+  /** Which side of the screen the stick lives on; the fire button takes the
+   *  other.  Undefined for schemes with neither. */
+  stickSide?: 'left' | 'right';
+  /** Does the LEFT TRIGGER act as an analogue throttle, with the left stick
+   *  reduced to steering only?  A separate scheme rather than a toggle
+   *  because it changes what a stick deflection MEANS — under `gamepad` the
+   *  stick's magnitude is thrust, here it is discarded — and two answers to
+   *  that cannot be live at once. */
+  triggerThrust?: boolean;
+}> = {
+  touch:            { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true,  pointerAims: true },
+  'joystick-left':  { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'left'  },
+  'joystick-right': { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'right' },
+  keyboard:         { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
+  gamepad:          { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
+  // Same as `gamepad` in every touch respect — the trigger changes what the
+  // LEFT STICK means, not what a finger means, so touch stays exactly alive.
+  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true },
+};
+
+// ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────
+// What the minimap says about MATERIAL, as a three-way DBG cycle so the three
+// candidates can be judged against each other in motion rather than argued
+// about:
+//   'flow'  — streamlines sampled from the asteroid flow field: where material
+//             MOVES, instead of ten thousand dots saying where it is.  DEFAULT.
+//   'dots'  — the status quo ante: one dot per mobile shard.
+//   'off'   — neither.  The control, and the honest answer if the streamlines
+//             fail to read at 75px.
+// Static TILES are unaffected — they come from the pre-rendered static layer,
+// which is the minimap's actual terrain reading.
+export const MINIMAP_MATERIAL_MODES = ['flow', 'dots', 'off'] as const;
+export type MinimapMaterialMode = typeof MINIMAP_MATERIAL_MODES[number];
+let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('flow');
+export function getActiveMinimapMaterial(): MinimapMaterialMode {
+  return MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
+}
+export function getActiveMinimapMaterialName(): string {
+  const m = MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
+  return m === 'flow' ? 'Flow' : m === 'dots' ? 'Dots' : 'Off';
+}
+export function cycleMinimapMaterial(): number {
+  activeMinimapMaterialIndex = (activeMinimapMaterialIndex + 1) % MINIMAP_MATERIAL_MODES.length;
+  return activeMinimapMaterialIndex;
+}
+
 // DBG: gnat (Swarm) movement mode — cycle to feel each behavior side-by-side.
 // 'weave' (serpentine dive) is the default; the others are the picked
 // alternatives kept for live DBG comparison.  See AISystem.updateSwarm.
@@ -3554,9 +4071,17 @@ export const PORTAL_CONSTANTS = {
   // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
   // for a rift on the far side of the map is noise, not navigation — the
   // arrow only appears once the player is close enough for that rift to be
-  // a real option.  Inside this range the arrow is PERSISTENT: unlike other
-  // POIs it is not suppressed when the portal itself is on screen, so the
-  // labelled cue stays put while the player lines up the approach.
+  // a real option.
+  //
+  // Inside that range the arrow now behaves like every other contact
+  // (decision #46b, gauntlet step 5 G6): it is SUPPRESSED once the rift is
+  // on screen, because the rift itself and its own world-space destination
+  // tag are already there and a third naming of the same place is the arrow
+  // at its least useful.  So the two rules bracket exactly the case the
+  // arrow is good for — close enough to matter, not yet visible.  Finding a
+  // rift from further out is the MINIMAP's job (its anomaly blip clamps to
+  // the border rather than being culled, and G5 cleared the shard-dot wash
+  // that used to hide it).
   INDICATOR_RANGE: 1500,
 };
 
@@ -5687,8 +6212,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   // Overworld (wave-free home map, 12k) — standard mixed terrain, read
-  // directly from this table by OverworldMap.init() (the authoritative
-  // pattern; the older natural maps still hardcode their ratios).
+  // directly from this table by OverworldMap.init().  Since G7 every
+  // natural map reads its tile-variant mix from here; the table is the
+  // authority rather than a parallel description of one.
   [MapType.OVERWORLD]: {
     'rock-shard': { freeSpawn: { count: 120, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
     'glass-tile':   { tileCluster: { clusterCount: 10, minClusterSize: 10, maxClusterSize: 30 } },
@@ -5696,34 +6222,55 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'metal-tile':   { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
     'nebula-tile':  { tileCluster: { clusterCount: 42, minClusterSize: 12, maxClusterSize: 36 } },
   },
+  // Deep Space (16k arena).  These counts are what UniverseMap.init HAS
+  // been generating; before G7 the class hardcoded them and this entry
+  // said something else entirely (glass 14 / nebula 65+120), so the table
+  // documented a map that had not existed for a long time.  The numbers
+  // moved here unchanged — G7 was a data move, not a rebalance.
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 6000 } },
-    'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
-    'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
-    'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    // The old 42-cluster budget split 64 / 23 / 13 glass / plastic / metal.
+    // Written out as counts, because a percentage split of a budget is a
+    // second thing to keep in sync and the counts are what get generated.
+    'glass-tile':          { tileCluster: { clusterCount: 27, minClusterSize: 10, maxClusterSize: 34 } },
+    'plastic-tile':        { tileCluster: { clusterCount: 10, minClusterSize:  8, maxClusterSize: 22 } },
+    'metal-tile':          { tileCluster: { clusterCount:  5, minClusterSize:  6, maxClusterSize: 14 } },
     // indestructible-tile intentionally absent — per decision #6,
     // reserved for deliberate border/structure placement, not random
     // clusters in the natural maps.  INDESTRUCTIBLE_FIELD showcase
     // still spawns it for stress testing.
+    //
+    // The inner/outer split is gone rather than moved: UniverseMap stopped
+    // applying it long ago (its own comment records why — on smaller maps
+    // it visibly concentrated clusters in the centre) and merely AVERAGED
+    // the two size ranges into one pass.  Carrying a field no code reads is
+    // how the entry above came to be wrong in the first place.
     'nebula-tile': {
-      tileCluster: {
-        clusterCount:    65,    // halved for 7.5k map (was 130)
-        minClusterSize:  14,
-        maxClusterSize:  42,
-        outer: {
-          clusterCount:   120,  // halved for 7.5k map (was 240)
-          minClusterSize: 7,
-          maxClusterSize: 26,
-        },
-      },
+      tileCluster: { clusterCount: 75, minClusterSize: 11, maxClusterSize: 34 },
     },
   },
   [MapType.RING]: {
     'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
   },
+  // Seven Rings (12k arena).  A ring map's tile-variant "ratio" is WHICH
+  // RING is made of what, so it is expressed as ring indices rather than
+  // cluster counts — inner rings soft, outer wall indestructible, which is
+  // the map's whole readable-difficulty idea.  The ring GEOMETRY (count,
+  // radii, thinning) stays in SevenRingsMap: that is the map's shape.
+  // indestructible-tile appears here and nowhere else in the natural maps,
+  // which is exactly what decision #6 reserves it for — deliberate border
+  // placement, never a random cluster.
   [MapType.SEVEN_RINGS]: {
     'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
+    'glass-tile':          { tileRings: [0, 1] },
+    'plastic-tile':        { tileRings: [2, 3] },
+    'metal-tile':          { tileRings: [4, 5] },
+    'indestructible-tile': { tileRings: [6] },
   },
+  // Pocket sandbox (4k).  The cluster COUNTS here already matched what
+  // PocketMap.init hardcoded; only the nebula SIZE range disagreed (the
+  // class generates 6–12, this said 6–20), so the table is corrected to
+  // the map that exists.
   [MapType.POCKET]: {
     'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 1600 } },
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
@@ -5732,7 +6279,7 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     // indestructible-tile intentionally absent — see UNIVERSE entry
     // above for the decision-#6 rationale.
     'nebula-tile': {
-      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
+      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 12 },
     },
   },
   [MapType.ASTEROID_FIELD]: {

@@ -81,8 +81,12 @@ Two things worth knowing:
 | `attribution.spec.ts` | 7 | **The refold** — the load-bearing suite. Parses the rendered contributor strings back into numbers, folds them the way `applyModuleEffects` folds, and requires equality with the sim, across four outfits. Includes the two DERIVED rows (the fire-rate inverse, the ship-weight drag factor) that sum wrongly if folded additively with the module rows. |
 | `traits.spec.ts` | 10 | The counterplay layer: armor, front-shield, regen, evasive, and the arc shield — every damage number measured through the real projectile path. Asserts the deliberate ORDERING (armor and the plate reduce damage before the regen bucket sees it) and that the regen bucket is FIXED rather than sliding. |
 | `screens.spec.ts` | 9 | Freeze semantics: death is the one full-screen overlay that leaves the world running, stage-clear freezes it, and both directions are asserted. Plus the summary snapshot, the inert wreck, all three exit paths, the 40px tap-target floor, the halted ladder, the descent rift and the depth stride. |
+| `input.spec.ts` | 58 | The gamepad mapping layer and the touch joystick (step 5, Pair C). The Gamepad API cannot be synthesised headless, so the layer is split at exactly that line: `pollGamepad()` finds and reads a pad, `applyPadSnapshot()` takes a plain object a test can write. The joystick half drives **real `TouchEvent`s** dispatched at the canvas, because the whole point of it is a second finger being down at the same time and `page.touchscreen` only does single taps. Also the five CONTROL SCHEMES (including both handednesses): the same touch in the same place flies the ship under one and becomes the stick under another; keyboard/controller keep touch alive while stopping the mouse from dragging; switching mid-run releases whatever the old scheme held; the ship aims where it flies under the stick; the mirrored layout puts the button clear of the minimap. Plus RUMBLE: the shake→effect curve, the throttle and interrupt rules, and — with a stand-in actuator, the one thing headless cannot supply — that an impact reaches the device and an unsupported browser is asked exactly once. Plus the DualSense ADAPTIVE TRIGGERS (WebHID, G12), which stop at the page boundary on purpose: no browser in CI has a pad, so what is pinned is the half that can be wrong with no symptom — a pad discards a report with a bad CRC or layout in silence, so the suite checks CRC-32 against its published vector (`0xCBF43926`) and the report SHAPE (which bytes move, and that no others do) via `window.__omniHid`. It also pins the sync (gun / charge / released-when-EMP'd) and that an unsupported browser offers no control at all. The offset test earns its keep: it pins the trigger blocks at data offsets 10/21 rather than the 11/22 most published samples quote, which are indices into a buffer that includes the report ID. Plus the FIRE POINT (an analogue read against the profile's own break, per shape, clamped so no profile strands the shot), the TRIGGER-THRUST scheme (stick steers, trigger throttles), and GAMEPAD MENU NAVIGATION — driven through the real DOM, because the driver's premise is that focus is the browser's focus and movement is geometric over whatever the panels render, so stubbing either would test something else. |
+| `help.spec.ts` | 5 | The Controls & Basics panel: reachable from both menus, identical rows in each, the active scheme marked, and it fits 390px — asserted against the document's scroll width AND every row's rect, since a fixed-basis label column beside wrapping prose is the shape that overflows sideways. |
+| `minimap.spec.ts` | 6 | The minimap's material layer and the portal arrow (step 5). Nebula gone from BOTH halves (the terrain layer is proved blank on the nebula-only showcase); the material mode decides whether shards are even collected; drops excluded in every mode; the streamline cache reused across pans and rebuilt across cells. Plus the portal indicator's two brackets — range-gated far, suppressed once on screen. |
+| `maps.spec.ts` | 4 | Map composition after `MAP_POPULATION` became the authority: per-variant population bands measured before and after the move, plus Seven Rings asserted exactly (its geometry is deterministic) and its ring ORDER by median radius. |
 
-**38 tests.** All run at **390×844** — the phone this game is played on, and
+**111 tests.** All run at **390×844** — the phone this game is played on, and
 the size every layout assertion is written against. Every test asserts a
 clean console.
 
@@ -121,14 +125,25 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    `CREDITS_PER_DROP` rather than importing it. A test that imports the value
    it checks is asserting that a constant equals itself; hard-coding means a
    tuning change has to touch this file, which is the alarm working.
-8. **A polled predicate must be SELF-CONTAINED.** `waitForEngine` /
-   `waitForStats` serialise the callback with `toString()` and re-create it
-   inside the page, so an arrow closing over a test-side variable references a
-   name that does not exist there and can never resolve — it fails as a
-   *timeout*, which reads like a product bug. Inline the expected value with
-   `new Function('e', \`return … \${expected}\`)`. This cost two debugging
-   cycles in the star-field gauntlet before it was written down.
-9. **Respect the phase machine.** A boss's traits are a function of its
+8. **Feed and read in ONE evaluation for anything queue-shaped.** The
+   engine's loop drains the fire queues and the interact latch every frame,
+   so injecting input in one `page.evaluate` and reading the queue in the
+   next reads an empty queue — a real frame ran in between. `input.spec.ts`'s
+   `feedThen` does both in one turn of the event loop. Better still, assert a
+   DURABLE consequence (a spawned projectile) rather than the transient.
+9. **Predicates are STRINGIFIED, so they cannot close over test state.**
+   `waitForEngine` / `waitForStats` serialise the callback with `toString()`
+   and re-create it inside the page, so `waitForStats(page, s => s.currentWeapon
+   !== first, …)` does not fail an assertion — it throws `ReferenceError` in the
+   page and surfaces as an *unexplained timeout*, which reads like a product
+   bug. Spell the expected value out (`new Function('e', \`return … \${expected}\`)`),
+   or pass it as an `arg` to `engine()`.
+
+   **Two independent sessions hit this and each wrote its own rule** — step 5
+   and the star-field gauntlet — costing two debugging cycles apiece before it
+   was written down here. That it was rediscovered rather than read is the
+   argument for this file.
+10. **Respect the phase machine.** A boss's traits are a function of its
    health, and `updateBosses` stamps a phase one frame after the transition.
    Poll for `bossPhase` instead of reading traits in the same breath as
    setting health.
@@ -141,9 +156,14 @@ reasoning; the headlines:
 
 - **Only 390×844.** No desktop, no landscape, no mid-session resize.
   Parked as the viewport-coverage item, promoted into roadmap 5d.
-- **Nothing measured by pixel-sampling the canvas** — the off-screen
-  indicator legend, the size ramp, the aggro blink, the wave-banner fit.
-  These existed in the prior session's suites and were not re-derived.
+- **Almost nothing measured by pixel-sampling the canvas** — the off-screen
+  indicator legend, the size ramp, the aggro blink, the wave-banner fit, and
+  every colour choice in the step-5 minimap faithfulness pass. Those were
+  judged from captures, with the verdicts in
+  `docs/GAUNTLET_PAIRC_POLISH_LOG.md`. The one exception is
+  `minimap.spec.ts`'s nebula test, which reads the pre-rendered terrain
+  canvas back: a blank canvas is the only way to prove ABSENCE from a
+  pre-rendered layer.
 - **Drag-and-drop outfitting.** Suites call `moveModule()` directly.
 - **Balance, by construction.** These suites prove the panel agrees with
   the sim and the mechanisms behave as designed. They cannot say whether the

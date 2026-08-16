@@ -49,11 +49,15 @@ npm run build && node scripts/inline-build.mjs
 - `tests/README.md` — the smoke suites: how to run them, what each
   covers, and the harness rules that keep them from flaking.
 
+[![PR checks](https://github.com/I-R0N/Omni/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/I-R0N/Omni/actions/workflows/pr-checks.yml)
+
 Validation is three commands — `npm run build`, `npm run typecheck`,
 `npm test` — and all three are expected green before a commit. The
 Playwright suites drive the real engine in a real browser through the
-`window.__omniEngine` debug handle; nothing is stubbed. There is no
-linter and no CI gating.
+`window.__omniEngine` debug handle; nothing is stubbed. The same three
+run in CI on every pull request and on pushes to the long-lived
+branches (`.github/workflows/pr-checks.yml`), which is the gate before a
+merge. There is still no linter.
 
 ## Deploying
 

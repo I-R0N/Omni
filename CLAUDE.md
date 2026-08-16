@@ -50,11 +50,18 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
-                          plus helpers.ts (the shared harness over the
-                          debug handles) and README.md (suite map +
-                          the anti-flake rules).  38 tests
+                          plus input / help / minimap / maps (step 5),
+                          helpers.ts (the shared harness over the debug
+                          handles) and README.md (suite map + the
+                          anti-flake rules).  111 tests
 
 components/
+  menuNav.ts              GAMEPAD MENU NAVIGATION (G15) — the D-pad
+                          focus driver.  Drives DOM focus, not React
+                          state, and moves GEOMETRICALLY over whatever
+                          the live `[data-overlay]` panel renders, so a
+                          new screen is navigable the day it is added
+                          and no focus order is authored anywhere
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
                           UI, dock affordance, death/run-summary screen;
                           debug panel lives inside the pause menu)
@@ -125,10 +132,24 @@ engine/
                           does NOT replace it
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
-    InputSystem.ts        Keyboard/mouse/touch state.  Pointer gestures
-                          engage game input ONLY when they start on the
-                          CANVAS — overlay-targeted events are skipped
-                          entirely so menus keep native touch scrolling
+    InputSystem.ts        Keyboard / mouse / touch / GAMEPAD state, plus
+                          the onscreen touch joystick (Pair C, c2).
+                          Pointer gestures engage game input ONLY when
+                          they start on the CANVAS — overlay-targeted
+                          events are skipped entirely so menus keep
+                          native touch scrolling.  The pad and the stick
+                          both feed the SAME movement vector / synthetic
+                          pointer / fire queues the mouse feeds, so
+                          nothing downstream knows which device is
+                          driving (see §8)
+    DualSenseHID.ts       DualSense ADAPTIVE TRIGGERS over WebHID (G12) —
+                          the CRC-32, the output-report builders and the
+                          device wrapper.  Output-only, opt-in behind a
+                          user gesture, inert where WebHID is absent
+                          (every mobile browser, and Safari), and imports
+                          nothing, so `constants.ts` can take the
+                          trigger-mode vocabulary from it without a
+                          cycle.  See §8
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
     RenderSystem.ts       Canvas2D draw pass (~1580 lines).  After the 5f
@@ -173,9 +194,10 @@ engine/
                           (station, portal, snitch).  Like enemyShapes,
                           takes no engine and no renderer
       hud.ts              The SCREEN-SPACE layer: minimap + its static
-                          layer, off-screen indicators, loadout strip,
-                          player messages, wave banners, damage text,
-                          fitFontPx
+                          layer + its flow-streamline layer, off-screen
+                          indicators, loadout strip, player messages,
+                          wave banners, damage text, the touch
+                          joystick, fitFontPx
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
       staticTileCache.ts  The pre-rendered immovable-terrain layer —
@@ -598,8 +620,49 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `CHUNK_SIZE`, `SPATIAL_GRID_SIZE`
 - `COLORS`, `CAMERA_CONSTANTS`, `SPRITE_CONSTANTS`
 - `AI_CONFIG`, `COLLISION_CONFIG`
-- `UI_CONSTANTS`, `LOADOUT_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`,
-  `INPUT_CONSTANTS`
+- `UI_CONSTANTS`, `LOADOUT_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`
+  (including `FLOW` — the minimap's streamline layer — and
+  `STATION_BLIP`; see §8), `INPUT_CONSTANTS`.  The latter grew two
+  nested blocks in step 5 (Pair C):
+  - `INPUT_CONSTANTS.GAMEPAD` — W3C standard-gamepad axis/button
+    indices per action, radial `STICK_DEADZONE` (rescaled, not just
+    clamped), `TRIGGER_THRESHOLD`, and `AIM_RADIUS`, the distance from
+    screen centre at which the pad parks its synthetic pointer.
+    `INPUT_CONSTANTS.RUMBLE` sits beside it — force feedback rides the
+    SCREEN SHAKE (see §8).
+    `AIM_RADIUS` must stay well ABOVE `SHIP_SELECT_RADIUS` — the ship
+    renders at screen centre and `claimTapNear` claims taps within that
+    radius, so a shot synthesised at the centre is silently eaten as a
+    dock tap.
+  - `INPUT_CONSTANTS.JOYSTICK` — the floating touch stick's zone
+    (left fraction, top fraction, bottom px), ring/knob geometry,
+    deadzone and fade.  The zone is defined by what it REFUSES; see §8.
+- `CONTROL_SCHEMES` / `CONTROL_SCHEME_RULES` / `controlSchemeDef()` — the
+  control-scheme picker (user directive, step 5 G9).  FIVE schemes chosen at
+  game start (and changeable from the pause menu, via a DROPDOWN there):
+  `touch` (drag to fly and aim, tap to shoot — the default),
+  `joystick-left` / `joystick-right` (floating stick + an onscreen FIRE
+  button, MIRRORED for handedness — stick left + fire right, or the reverse;
+  in both the ship AIMS WHERE IT FLIES, because the stick writes the
+  synthetic pointer and there is no second aim gesture to fight it),
+  `keyboard`, `gamepad`.  The axis that matters is the TOUCH
+  MODEL: the two touch schemes are mutually exclusive ways to drive the same
+  ship, because a floating stick and the drag-to-fly gesture otherwise fight
+  over the same finger.  `keyboard` and `gamepad` do NOT switch touch off —
+  they select the standard touch model AND stop the MOUSE from dragging the
+  ship, since on those schemes steering belongs to the keys or the stick and
+  a click should only shoot.  `CONTROL_SCHEME_RULES` is the one table every
+  read goes through (`joystick` / `fireButton` / `mouseDragMoves` /
+  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide`), so a scheme's
+  behaviour is a lookup rather than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
+  it survives `restartGame()` and every map load.
+  `INPUT_CONSTANTS.FIRE_BUTTON` carries the button's geometry.
+- `ROCK_PALETTES` / `randomRockShade()` — per-instance rock body shades
+  (slate / rust / mineral, shipped `mixed`), rolled once at spawn like
+  the plastic palettes and inherited by shards.  `METAL_BRIGHT_TARGET`
+  — the steel-blue that metal's density brightening interpolates
+  TOWARD, replacing a per-channel scale that desaturated dense metal
+  toward white.
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
@@ -623,13 +686,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/SHARD_SYSTEM.md` for the design rationale.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
-  count table.  Source of truth for rock-shard free-spawn counts
-  (read via `getRockShardFreeSpawn()`); per-map tile-cluster
-  entries are read by `MapClasses.populate()` for the nebula-cluster
-  sizing and the single-variant showcase maps.  Some natural maps
-  (UniverseMap, PocketMap, SevenRingsMap) still hardcode their own
-  tile-variant ratios; treat MAP_POPULATION as authoritative for
-  documentation but verify the relevant `MapClasses` subclass too.
+  count table, and since step 5 (G7) the ACTUAL authority rather than a
+  parallel description: every map's rock free-spawn
+  (`getRockShardFreeSpawn()`) and tile-variant mix comes from here.
+  The three natural maps that used to hardcode their own ratios read it
+  through two shared `BaseMapLayer` helpers — `populateTileClusters` and
+  `populateNebulaClusters` — and SevenRingsMap takes its per-ring
+  material from the optional `tileRings` field via `ringVariants()`.
+  Ring GEOMETRY (count, radii, thinning) deliberately stays on the map
+  class: that is the map's shape, not its population.  `tests/maps.spec.ts`
+  pins the resulting populations, so a change here is a visible rebalance
+  rather than a silent one.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
@@ -1114,12 +1181,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   clear.  `USE_RANGE` sits just under the station's `DOCK_RANGE` so the
   shared-E nearest-wins arbitration has a clear winner at the boundary.
   `INDICATOR_RANGE` gates the off-screen indicator: a portal is a FIXED
-  landmark, so its arrow only appears once the player is within range,
-  and inside that range it is PERSISTENT (exempt from the
-  offscreen-only suppression) and labelled with the
-  destination name.  The ARROW is green (the type legend, §8); the rift's
-  own violet/sky colours still drive the world-space + minimap art.  Because the chevron is range-gated, the MINIMAP is
-  how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
+  landmark, so its arrow only appears once the player is within range.
+  Inside that range it now behaves like EVERY OTHER CONTACT (decision
+  #46b, step 5 G6): suppressed once the rift is on screen, and labelled
+  with the destination NAME but no distance readout.  The two rules
+  bracket the case the arrow is actually good for — close enough to
+  matter, not yet visible; approaching a rift used to give you the rift,
+  its own world-space tag AND an edge arrow naming the same place a
+  third time.  The ARROW is green (the type legend, §8); the rift's
+  own violet/sky colours still drive the world-space + minimap art.  Since the arrow is both range-gated and
+  suppressed on screen, the MINIMAP is how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
   ANOMALY — a spinning colour-filled diamond with an expanding radar
   ping — and, like an enemy blip, it CLAMPS to the minimap border when
   out of range instead of being culled the way other POI dots are.  The
@@ -1227,9 +1298,9 @@ of `BaseMapLayer`:
 - Per-map gameplay knobs live in `PLAYER_MOVEMENT_CONFIG` (movement
   feel) and `MAP_POPULATION` (entity counts) in `constants.ts` —
   both are `Record<MapType, …>`, so adding a new MapType requires
-  entries in both.  Showcase maps (single-variant fields) read
-  cluster sizing directly from `MAP_POPULATION`; natural mixed maps
-  hardcode their per-variant ratios in their `MapClasses` subclass.
+  entries in both.  EVERY map — showcase and natural alike — now reads
+  its cluster sizing and variant mix from `MAP_POPULATION` (step 5 G7);
+  no `MapClasses` subclass hardcodes a ratio any more.
 
 Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add a row to `MAP_DESCRIPTORS` in `MapDescriptors.ts`, add
@@ -1271,8 +1342,12 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     once. See `tests/README.md` for the suite map and the harness rules.
 - **The same three gates run in CI on EVERY pull request, and they are the
   LAST STEP BEFORE A MERGE** — `.github/workflows/pr-checks.yml`, job
-  `validate`, in this order: typecheck → build → `npx playwright install
-  --with-deps chromium` → test.  Running them locally is still expected
+  `validate`, in this order: typecheck → build → install the Playwright
+  browser → test.  The browser download is CACHED, keyed on the resolved
+  `@playwright/test` version plus the runner OS; on a cache hit the
+  workflow installs only the apt system libraries (`install-deps`),
+  because a restored browser with no libraries cannot launch.  A green
+  run is ~2.5 minutes.  Running them locally is still expected
   (a red CI run is a slow way to learn something `npm run typecheck`
   would have told you in five seconds); CI is the backstop that makes
   green non-optional rather than remembered.  Rules that go with it:
@@ -1282,8 +1357,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
     on fork PRs.  Keep it that way — a merge gate that silently skips for
     outside contributors is not a gate.
-  - It also runs on pushes to `main`, so a bad merge is visible
-    immediately instead of at the next PR.
+  - It also runs on pushes to `main` AND to `claude/plan-completion`, so a
+    bad merge into either long-lived branch is visible immediately instead
+    of at the next PR opened against it.
   - On failure the Playwright HTML report uploads as a run artifact
     (`playwright-report-<run id>`, 7-day retention) — read that before
     re-running, since the suites are timing-sensitive and the report
@@ -1611,10 +1687,24 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
   feeds them.  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
   with its full phase table, each click stacking another (the Dragon-menu
-  pattern).
-- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
-  `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so the headless
+  pattern).  Step 5 added four rows: Player ▸ **Gamepad** + **↳ axes** (a
+  live READOUT — the pad has nothing to switch, and what a hardware check
+  needs to see is whether the axes reach the sim), and Visual ▸
+  **Joystick** (Touch / Forced — the widget is touch-only by design, so
+  this is the only way to check its layout on a desktop), **Minimap mat**
+  (Flow / Dots / Off) and **Rock palette** (mixed / slate / rust /
+  mineral).
+- **The menus carry a CONTROLS & BASICS panel** (`renderHelpPanel`, Pair C
+  c1) — one function, hosted by both the main menu and the pause menu with
+  separate collapse keys, describing touch, keyboard/mouse, gamepad and the
+  run's basics.  It is a collapsible SECTION rather than a sixth
+  full-screen overlay on purpose.  Keep it accurate to what is BOUND: where
+  the game has no binding (there is no keyboard weapon-cycle or pause key),
+  the panel says nothing rather than inventing one.
+- **`window.__omniEngine` / `window.__omniStats` / `window.__omniHid` are
+  debug handles.**
+  `App.tsx` assigns the live engine, the latest `EngineStats` payload, and the
+  pure DualSense output-report builders to `window`.  NOTHING in the game reads them — they exist so the headless
   Playwright suites in `tests/` can drive the real engine in a real browser
   (§7; the "without a test runner being added" rationale is superseded —
   roadmap 5b adopted one, and these handles are what it drives).  Two
@@ -1623,7 +1713,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   engine internals (`runTimeSec`, `waves.waveOffset`) and call private
   methods (`physics.resolveCollision`) straight off the handle.  That is
   intended, and is what lets a test measure damage arithmetic in situ
-  instead of reimplementing it.
+  instead of reimplementing it.  `__omniHid` is the same idea with a sharper
+  motive: those builders are the one place in the input layer that can be
+  wrong with NO symptom to read (a pad discards a malformed report in
+  silence), and they are pure with a published CRC test vector, so they are
+  pinnable without hardware.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk
@@ -1640,6 +1734,193 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   join it rather than add a second path: when buying was discounted and
   sell-back was not, buy-then-sell netted `discount - (1 - SELL_FRACTION)`
   of cost per cycle — an infinite money pump above a 10% discount.
+- **THREE input devices, ONE set of inputs.**  Keyboard/mouse, touch and
+  gamepad all write the same three things — the movement vector, the
+  synthetic POINTER, and the fire/charge queues — so nothing downstream of
+  `InputSystem` branches on device.  Aiming and shooting on a pad work
+  because rotation is derived from the pointer and a shot's target IS a
+  pointer position; there is deliberately no second aim channel (step 5
+  G2).  Four rules go with it:
+  - **RUMBLE rides the screen shake.**  `GameEngine.handleScreenShake(amount)`
+    is the funnel every impact in the game already goes through with
+    magnitudes tuned against each other, so `InputSystem.rumble(amount)` hangs
+    off it rather than growing a second list of things that should buzz.  It
+    is called ABOVE the screen-shake toggle (camera lurch and hand buzz are
+    different preferences) and has its own DBG row.  `rumbleParamsFor` is pure
+    and takes `nowMs`, so the threshold, curve, throttle and interrupt rule are
+    all testable; only the actuator itself is stood in for.  The curve runs
+    TICK → THUMP: every event the game emits now buzzes (down to a shard
+    ping), riding a magnitude FLOOR so the smallest is felt, with the two
+    motors crossfading — small events lead with the high-frequency motor, a
+    crash with the low.  One event is haptic-ONLY (`GameEngine.handleRumble`,
+    no camera shake): the plain Blaster, because shaking the camera on the
+    fastest gun in the game would be unplayable.  Player weapon fire asks for
+    the `'trigger'` `RumbleKind`, which plays `trigger-rumble` — whose
+    parameters are a superset of `dual-rumble`'s, so ONE effect drives the
+    handles and the trigger — but ONLY when the actuator's `effects` list
+    offers it; everywhere else it falls back to the handle thump.  Adaptive
+    trigger RESISTANCE is a different thing again and is not reachable from
+    the Gamepad API at all — it is the WebHID path below.  Note `dual-rumble`
+    is the ONLY effect the Gamepad API exposes; the DualSense's voice-coil
+    haptics and light bar need raw HID reports (WebHID:
+    desktop Chromium/Edge only, never Safari or mobile), which this
+    deliberately does not do.  `playEffect` REJECTS on a browser that knows
+    the method but not the effect, so the rejection is swallowed and the pad
+    is asked exactly once — an unhandled rejection would fail every suite's
+    clean-console assertion.
+  - **ADAPTIVE TRIGGERS are a SECOND, OPTIONAL transport to the same pad**
+    (`engine/systems/DualSenseHID.ts`, G12) — and the only platform-specific
+    thing in the input layer, deliberately quarantined behind four rules so it
+    cannot become one.  It is **output-only** (input is always the Gamepad
+    API, which also sidesteps the hazard that opening a DualSense over
+    Bluetooth can flip its input-report mode), **opt-in behind a user gesture**
+    (`navigator.hid.requestDevice` requires a click and shows a device
+    picker), **inert where unsupported** (`isSupported()` is false on every
+    mobile browser and on Safari, and every method no-ops with no device
+    open), and **nothing in the sim may branch on it** — the pad plays
+    identically without it, which is why it is not a control scheme and why
+    the UI control renders only where `EngineStats.adaptiveTriggersSupported`
+    is true — in BOTH the main menu and the pause menu, because one copy at
+    the bottom of the pause menu's scroll reads as a missing feature.  `WEAPON_TRIGGERS` (per gun) and `CHARGE_TRIGGER` (while a
+    charged shot winds up) are the profile table; the sync sits beside the
+    charge-ring update in `updateGameLogic`, because what the trigger should
+    feel like is a function of what the player is holding RIGHT NOW and
+    "charging" fires no weapon-change event.  Precedence: no gun or EMP'd →
+    released (the disable made physical), charging → a hard wall, otherwise
+    the gun's own profile.  Profiles are authored in NORMALISED units (0..1 of
+    travel, 0..1 of strength) and converted at the wire, because the two
+    candidate ENCODINGS disagree about ranges while the design intent does
+    not.  The report FRAME matches the Linux kernel's
+    `dualsense_output_report_common` field for field — note the trigger blocks
+    are at data offsets **10 and 21**, not the 11 and 22 most samples quote:
+    those index a buffer whose byte 0 is the REPORT ID, which WebHID's
+    `sendReport(reportId, data)` does not carry, so a literal transcription
+    lands every field one byte late.  The Bluetooth report also pads 24
+    reserved bytes before the CRC; a short report is DROPPED, not truncated.
+    What is still open is the trigger EFFECT encoding: `'zones'` (modes
+    0x21/0x25, parameters packed into ten travel zones) and `'simple'` (modes
+    0x01/0x02, raw byte parameters) are both reported working on different
+    firmware, and a pad silently DISCARDS the one it does not understand — so
+    `'zones'` is CONFIRMED WORKING on hardware and is the default; `'simple'`
+    stays selectable at DBG ▸ "trig enc" because a pad silently discards an
+    effect it does not understand, so a firmware that disagrees would
+    otherwise present as a dead feature.  Only `'zones'` can express the three
+    richer SHAPES — `vibration` (a buzz at a frequency), `slope` (resistance
+    ramping between two strengths) and `texture` (a hand-authored force per
+    travel zone) — because all three are per-zone by nature; under `'simple'`
+    they degrade to their nearest constant wall rather than vanishing.  Two
+    profiles are STATE-DRIVEN rather than static, which is the thing an
+    adaptive trigger can say that no other output in the game can:
+    `chargeTrigger(t)` stiffens as the charge ring fills, and
+    `THRUST_TRIGGER(speed)` stiffens as the ship nears its cap.  Both are
+    QUANTISED by the caller — each distinct profile is an HID write, and the
+    pad's endpoint is not a frame buffer.  DBG ▸ "HID buzz" pulses the
+    pad's MOTORS through the same framing and CRC to bisect transport from
+    encoding.  `window.__omniHid` exposes the pure builders so
+    `tests/input.spec.ts` can pin CRC-32 against its published vector
+    (`0xCBF43926`), the corrected offsets, and both encodings' bytes.
+  - **MENU NAVIGATION is a D-pad and two buttons over DOM FOCUS** (G15,
+    `components/menuNav.ts`).  Five overlays and several hundred controls,
+    most of them generated (hex flowers, inventory honeycomb, debug rows), so
+    a hand-authored focus order per screen would be wrong within a week.
+    Three rules instead: focus IS DOM focus (the browser's job already —
+    survives re-renders, brings the focus ring and screen-reader behaviour,
+    and opens a `<select>` with the OS picker); movement is GEOMETRIC over the
+    live candidate set, since one rule then serves the 2-up grids, the chip
+    rows and the row columns that share a screen; and the driver scopes itself
+    by `[data-overlay]` CONTAINER, never by game state, so a new overlay is
+    navigable the day it is tagged.  It is installed from `App.tsx`, not
+    UIOverlay — it must not be rebuilt on every stats push.  CONFIRM clicks
+    whatever has focus and so needs no game knowledge; BACK is the one action
+    that differs per screen and lives on `GameEngine.menuBack()`, which
+    deliberately does NOTHING on the death and stage-clear screens (those are
+    decisions, and a button that quietly picks one is worse than no button).
+  - **The pad is POLLED once per rendered frame**, from
+    `GameEngine.pollGamepad` at the top of `loop` — above every freeze
+    short-circuit, so the pause button works from inside the paused state.
+    `navigator.getGamepads()` allocates per call, so never poll it inside
+    the sim substep loop.  Adoption is by polling too, not by trusting
+    `gamepadconnected`: the spec lets a browser withhold a pad until its
+    first button press, and Safari does.
+  - **The trigger's FIRE POINT is the adaptive profile's own break** (G14).
+    Reading the browser's `pressed` flag fires the gun as the trigger leaves
+    rest — Chrome sets it at a hair's deflection — so the snapshot carries
+    ANALOG button values and the fire test is `value >= padFirePoint()`.  That
+    point is derived from the live `TriggerProfile`, and which end of the
+    effect it takes depends on the shape: `weapon` and `slope` fire at the far
+    end (a click is felt when it GIVES WAY; a ramp's payoff is the top of the
+    pull), `texture` past its LAST notch, `resistance` and `vibration` at the
+    near end (neither has a break).  Clamped to
+    `GAMEPAD.FIRE_POINT_MIN/MAX`, because the SAME number has to feel right on
+    a pad with no WebHID and therefore no physical cue — branching on whether
+    the HID link is open would put an optional desktop-only transport
+    underneath the sim.
+  - **A DEDICATED fire control fires on PRESS; a POINTER gesture fires on
+    release** (G13).  The split is about the control, not the device: a tap
+    fires on release because it MUST — until the finger lifts, a tap and a
+    drag are the same gesture — while a pad trigger has no such ambiguity and
+    any delay between the pull and the shot reads as lag.  So the pad queues
+    its shot on the press, and a hold past `CHARGE_FULL` adds the CHARGED shot
+    on release (the release no longer owes an ordinary one, or every held shot
+    would double).  This is also what makes an adaptive `weapon` profile mean
+    something — its break point IS the shot now, where before the gun went off
+    after the clutch had already given way.  The onscreen FIRE button
+    deliberately still fires on release, pending a feel call: it is a thumb on
+    a small target, where a press that commits before the thumb has settled is
+    a different trade than a trigger.
+  - **FIRE is gated on the world; everything else is drained.**  A trigger
+    held through a station visit must not bank a shot that lands on
+    undock, and INTERACT / CYCLE are consumed every frame whether or not
+    they can be spent, so no press fires later out of context.
+  - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
+    which must exceed `SHIP_SELECT_RADIUS` — see §5.
+  - **`gamepad-thrust` is the MINIMAL-PAD scheme** (G15/G16): a TRIGGER
+    supplies thrust magnitude and a STICK supplies direction.  Which trigger
+    and which stick is deliberately not specified — EITHER stick steers (and
+    aims: the ship aims where it flies, the joystick schemes' rule, because a
+    one-stick pad has no second stick to aim with) and EITHER trigger
+    throttles, larger deflection winning in both cases.  That is what lets a
+    cheap clip-on pad with one stick and one trigger play, WITHOUT any device
+    sniffing — a control the pad does not have simply reads zero forever.
+    It follows that the gun moves to the FACE button
+    (`GAMEPAD.BUTTONS.FIRE_FACE`): if either trigger may be the throttle, then
+    neither can be the trigger, or a one-trigger pad would shoot every time it
+    accelerated.  Its own scheme rather than a toggle because it changes what
+    a stick deflection MEANS — under `gamepad` the deflection IS the throttle
+    — and two answers to that cannot be live at once.  BOTH triggers carry the
+    speed-ramped `THRUST_TRIGGER` resistance here, so "already flat out" is
+    something the hand knows; every other scheme leaves the left trigger
+    RELEASED, since a clutch on a control that does nothing is just a stiff
+    trigger.
+  - **The CONTROL SCHEME decides which touch model is live** (G9).  The
+    joystick and the standard drag-to-fly gesture are mutually exclusive —
+    they compete for the same finger — so they are separate schemes rather
+    than layers, and `CONTROL_SCHEME_RULES` is where "what does this scheme
+    do" is answered.  Two consequences worth knowing before touching input:
+    a TAP only fires under a scheme with `tapFires` (it still reaches the
+    minimap toggle, the loadout slots and `claimTapNear`, which are not
+    weapons); a POINTER drag only aims under a scheme with `pointerAims`,
+    which the joystick schemes turn OFF because their stick already writes
+    the pointer; and DEVICE shots — the fire button and the pad trigger — go
+    into a SEPARATE queue (`getDeviceFireEvents`) that bypasses the tap
+    handler entirely, because a synthesised shot aimed at the world must not
+    be eaten by a HUD widget the aim happened to point at.
+  - **The touch joystick is a FLOATING left-thumb stick** whose zone is
+    defined by what it REFUSES: the ship-select disc at screen centre
+    (or docking by tap silently breaks), the LIVE minimap rect (pushed in
+    per frame by `GameEngine.tickJoystick`, because the map is 75px
+    collapsed and 280px expanded), the top and bottom HUD strips, and the
+    whole right half.  It exists only while a touch session is live —
+    `getJoystickState()` returns null otherwise, which is why checking its
+    layout on a desktop needs the DBG toggle.  When NO stick is down the
+    single-touch model is unchanged.  The stick's SIDE is the scheme's
+    (`stickSide`), and the fire button takes the other — on the left it also
+    sits higher, because the minimap already owns that corner.  Its scheme
+    also gets the FIRE BUTTON,
+    which — unlike the stick — is drawn from the first frame and accepts a
+    mouse press: a control that only appears once pressed cannot be found,
+    and in that scheme it is the only way to shoot.
+
 - **The STAR FIELD is drawn at whole DEVICE pixels, and its count comes
   from AREA.**  Two invariants, both measured into place by the star-field
   gauntlet (`docs/GAUNTLET_STARFIELD_LOG.md`), and both easy to undo by
@@ -1689,7 +1970,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   so a prefix is a spatially unbiased sample), which is why it costs one
   sample per frame rather than a test per star.  `perf/starfield-regions.mjs`
   prints the field as ASCII — use it, not a screenshot, to judge the shape.
-  `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
+
+- **Off-screen indicators are EDGE-anchored, size-coded and typed.**  `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
   INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
   edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE
   (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
@@ -1698,7 +1980,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   it.  POIs keep the far-only readout; portals and bosses keep their
   self-labels (an unlabelled arrow is ambiguous the moment a second one is
   on the edge), and label LINES stack vertically — stacking them radially
-  puts line 2 on top of line 1 at a near-horizontal bearing.
+  puts line 2 on top of line 1 at a near-horizontal bearing.  PORTALS no
+  longer print a distance either, and no longer survive the on-screen
+  suppression (step 5 G6): they were the wordiest contact on the screen,
+  and both halves of that were redundant with the rift the arrow points
+  at.  There are now NO exemptions from the offscreen-only rule.
   COLOUR IS BY TYPE, never `entity.color` (`INDICATORS.COLORS`): red enemy
   / indigo station / green portal / yellow rival / purple bubble, plus
   slate for any other POI.  A rival or a bubble is only CONDITIONALLY
@@ -1713,6 +1999,35 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   indicated now (they used to be excluded as clutter) — the small separate
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
+
+- **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
+  object.**  Three rules, all decided in step 5 G5 (user directive,
+  decision #43):
+  1. **Nebula is off it entirely.**  Nebula tiles are skipped by
+     `buildMinimapStaticLayer` and nebula shards never enter the
+     per-frame buffer.  The map was drawing the softest thing in the
+     world as its hardest-edged marks.
+  2. **Material is a FLOW LAYER, not dots.**  `renderMinimapFlow` traces
+     short streamlines through the asteroid flow field
+     (`MINIMAP_CONSTANTS.FLOW`); the old per-shard dots are still
+     available behind the DBG cycle Visual ▸ "Minimap mat"
+     (Flow / Dots / Off), and in any mode but `dots` mobile shards are
+     not even collected into `_minimapBuffer`.  Two things to know
+     before touching it: the streamline geometry is cached in WORLD
+     space and keyed on the seed CELL (panning must not retrace), and
+     the polyline needs a SEAM BREAK — per-point torus math is not
+     enough, because consecutive points either side of the wrap seam
+     draw a chord across the whole map.  Total line length must also
+     stay UNDER one lattice cell or the strokes stop reading as local
+     currents.
+  3. **Contacts wear the INDICATOR LEGEND's colours**, not
+     `entity.color` — red enemy, purple bubble, yellow rival, boss in
+     the shared red with its RING doing the distinguishing, indigo
+     SQUARE for a station (the only built, fixed, not-alive contact and
+     so the only rectilinear mark), the snitch in its own gold, portals
+     as the anomaly diamond.  A contact that is red on the screen edge
+     and teal on the map is two contacts as far as the player is
+     concerned.  Drops stay excluded entirely.
 
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
@@ -1762,7 +2077,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - Default branch: `main`.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
 - Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
-  build + Playwright on every PR and on pushes to `main`),
+  build + Playwright on every PR and on pushes to `main` and
+  `claude/plan-completion`),
   `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
