@@ -10,8 +10,9 @@ normal outcome and must leave `main` untouched.
 
 Working rules for this branch:
 
-- **Hardest-first.** Stages 0–2 touch no repo code. The first stage that
-  modifies the repo is Stage 3, and it is the only stage whose value
+- **Hardest-first.** Stages 0–2 touch no *game* code — they add only
+  standalone probe/harness pages and this log. The first stage that
+  modifies the renderer is Stage 3, and it is the only stage whose value
   survives abandonment.
 - **Three kill gates.** Reaching one is *success*, not failure. A spike
   that returns "no, and here is precisely why" in two days has done its
@@ -41,12 +42,14 @@ Working rules for this branch:
 
 ## Stage 0 — Does the target device support WebGPU at all?
 
-**KILL GATE 1. Cap: 1 hour. Touches no repo code.** Status: **instrument
-built and validated; the decisive device reading is outstanding.**
+**KILL GATE 1. Cap: 1 hour. Touches no game code** — it adds one
+standalone page under `public/` (so a preview can serve it) and this log.
+Status: **instrument built and validated; the decisive device reading is
+outstanding.**
 
 ### The instrument
 
-`docs/webgpu-probe.html` — a single standalone file, zero dependencies,
+`public/webgpu-probe.html` — a single standalone file, zero dependencies,
 never loaded by the app, safe to delete when the spike concludes. It
 reports, in the order the brief specifies: `navigator.gpu` presence,
 `requestAdapter()`, adapter info/features/limits, `requestDevice()`,
@@ -180,30 +183,35 @@ To run it, the probe must be opened **over `https://`** — see the
 secure-context note above; a LAN `http://` URL will report a false
 negative.
 
-**Delivery: `raw.githack.com`, no PR or build step required.** The probe
-is a standalone file already committed to a public repo, and githack
-re-serves any such file over HTTPS with correct content types:
+**Delivery: two independent HTTPS paths.** The probe lives at
+`public/webgpu-probe.html` — in `public/` specifically so the build copies
+it to `dist/`, which is what Netlify publishes.
 
-```
-https://raw.githack.com/i-r0n/Omni/claude/webgpu-feasibility-spike-kfwx1b/docs/webgpu-probe.html
-```
+1. **Netlify deploy preview** (first-party, per-PR):
+   `https://deploy-preview-<PR>--omnispace.netlify.app/webgpu-probe.html`
+2. **`raw.githack.com`** (no build or PR needed — serves the committed
+   file directly, and is the *same mechanism the repo's own previews use
+   to get builds onto the iPhone*, `pr-preview.yml:21`):
+   `https://raw.githack.com/i-r0n/Omni/<branch>/public/webgpu-probe.html`
 
-This is the *same mechanism the repo's own PR previews already use to get
-builds onto the iPhone* (`pr-preview.yml:21`), so it is proven for this
-device.
+Notes recorded so they are not rediscovered:
 
-Two dead ends were checked first and are recorded so they are not retried:
-
-- **`pr-preview.yml` does not publish `dist/`.** It publishes only the
-  single inlined `omniverse-standalone.html`, copied to
-  `previews/pr-N/index.html` (`:92`). So placing the probe in `public/`
-  would put it in `dist/` and still leave it **unreachable** from the
-  preview URL — while shipping probe clutter into the game bundle. Not
-  done.
+- **`pr-preview.yml` does not publish `dist/`** — only the single inlined
+  `omniverse-standalone.html`, copied to `previews/pr-N/index.html`
+  (`:92`). The probe is therefore *not* reachable from that particular
+  preview URL. It **is** reachable from the Netlify one, which publishes
+  `dist/` (`netlify.toml`) — these are two separate preview systems on the
+  same PR, and conflating them is an easy mistake to make.
+- **`scripts/inline-build.mjs` ignores it.** It reads only
+  `dist/index.html` and the assets that file references (`:9,15,16,46`),
+  so a standalone page in `dist/` adds nothing to the standalone bundle.
 - **`raw.githubusercontent.com` serves `text/plain`**, so the browser
   shows source instead of running the page. It confirms the file is live
-  (HTTP 200, which is also how the repo's public visibility was verified)
-  but cannot host the probe.
+  (HTTP 200 — also how the repo's public visibility was verified) but
+  cannot host the probe.
+- **Clean-up obligation:** the probe ships in `dist/` on this branch. If
+  the spike is abandoned, delete `public/webgpu-probe.html` rather than
+  letting it reach `main`.
 
 **Effort:** ~50 min of the 1 h cap (research, probe, container control,
 this write-up). Within cap.
