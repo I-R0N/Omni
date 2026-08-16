@@ -338,3 +338,146 @@ known now than discovered then.
 | 111 tests pass | PASS |
 | Added cost ≤ 0.15 ms p95 | PASS by construction (dead code), **not measured on device** |
 | Scope ≤ 2 files | PASS (`PhysicsSystem.ts`, new `lighting.ts`) |
+
+---
+
+## B1 — Prove the static-query duplication
+
+Measurement only. One temporary instrument in `PhysicsSystem` (per-site
+call count, max observed radius, wall time, out-of-box probe count, and a
+wrapped-vs-unwrapped answer cross-check), driven over all 8 perf scenes
+plus a dragon-heavy DBG session, then **reverted**. No production code
+changed by this stage.
+
+### Q0 (unasked) — there are FOUR existing walks, not three
+
+The ladder's table lists `forEachStaticNear`, `isPositionClear` and
+`hasStaticTileNear`. There is a fourth: **`forEachStaticTileNear`**
+(`PhysicsSystem.ts`, called from `ShardSystem`'s plastic-shard ↔ tile
+bond pass). It is the same 3×3 walk again, it wraps its probe like
+`hasStaticTileNear` does, and it has **no radius filter at all** — it
+visits every active tile in the 3×3 neighbourhood unconditionally. With
+A1's `forEachStaticInRadius` that makes **five** near-duplicate walks in
+one class. B2's consolidation should absorb it too.
+
+### Q1 — are the walks equivalent modulo predicate?
+
+Structurally yes: identical cell derivation, identical 3×3 span,
+identical `active` check, identical toroidal squared-distance test. They
+differ in predicate (`ignoreId`), in return shape (visitor vs
+early-exiting boolean), and in **one** substantive way — the probe
+coordinates.
+
+| walk | wraps the probe? |
+|---|---|
+| `forEachStaticNear` | no |
+| `isPositionClear` | no |
+| `hasStaticTileNear` | **yes** (`wrapX`/`wrapY`) |
+| `forEachStaticTileNear` | **yes** |
+
+This matters because `wrapDeltaX` applies a **single** correction step,
+so it is only correct when its inputs are already inside the canonical
+box. An un-wrapped probe is therefore not obviously safe.
+
+**And it is actively exercised: 45–50 of ~63–102 `isPositionClear` calls
+arrive with an out-of-box probe** — 79 % of them in the shard-heavy
+scenes — from `ShardSystem`'s and `NebulaSystem`'s `hexCoordToPixel`
+output, which is not wrapped.
+
+So it was cross-checked directly rather than reasoned about: every
+out-of-box call recomputed its answer with a wrapped probe and the two
+were compared.
+
+```
+out-of-box probes cross-checked: 45
+answers that DISAGREED:           0
+```
+
+**The divergence is COSMETIC.** Unification can preserve behaviour and
+B1's stop condition (#9) is *not* triggered. The analytical reason the
+margin holds: tile positions are always canonical (|from| ≤ HALF), so a
+single correction covers any |d| ≤ 1.5 × MAP, and it would only fail for
+a probe more than a **full map width** out of the box — which
+`hexCoordToPixel` cannot produce. The safety margin is one map width,
+which is comfortable but is not infinite, and it is undocumented at
+every one of those call sites today.
+
+**Recommendation for B2: wrap, i.e. adopt `hasStaticTileNear`'s
+behaviour.** It is provably identical on every input the engine
+currently produces (0/45 disagreements), it is correct on inputs the
+engine does not currently produce, and it costs one `wrapX` per query.
+A1's `forEachStaticInRadius` already does this.
+
+### Q2 — does any live call site exceed r = 120?
+
+**No. Not one.**
+
+| site | caller | max observed r | calls with r > 120 |
+|---|---|---|---|
+| `forEachStaticNear` | `dragons.ts:97` | **78.4** | **0** |
+| `isPositionClear` | Wave / Nebula / Shard | 44.0 | 0 |
+| `hasStaticTileNear` | RenderSystem outlines | 11.0 | 0 |
+| `forEachStaticTileNear` | `ShardSystem:1778` | n/a (no radius) | n/a |
+
+The ladder flagged the dragon as the genuinely unknown case — *"Whether
+this already exceeds 120 depends on the dragon's live size — B1 measures
+it. Do not assume either way."* Measured across a 6-dragon session:
+`headR + 40` tops out at **78.4**, comfortably under the 120 the fixed
+3×3 span covers.
+
+> **So Part B is correctness insurance and consolidation, NOT a bug fix.**
+> **B3 is unreachable and must be skipped** — its precondition ("only run
+> this stage if B1(2) found a call site exceeding r = 120") is unmet, and
+> the ladder is explicit that the work should not be manufactured. Doing
+> it anyway would hand the dragon more terrain per pass and change body
+> growth, severing and pacing, for no correctness reason.
+
+### Q3 — what does the walk cost today?
+
+`collisionsMs` covers the SAT broadphase, not these queries; they were
+untimed. First-run figures (before the cross-check was added, so
+uncontaminated by it):
+
+| site | calls / 8 scenes | µs per call | calls per frame | ms per frame |
+|---|---|---|---|---|
+| `forEachStaticNear` | 8356 | 1.19 | 20–30 (roamer / dragon only) | **0.024–0.036** |
+| `isPositionClear` | 63 | 9.60 | ≤ 0.4 | ~0.0005 |
+| `hasStaticTileNear` | 1692 | 1.21 | 8.9 (stage-descent only) | 0.011 |
+| `forEachStaticTileNear` | 0–1 | — | ~0 | ~0 |
+
+Two notes on reading this. `isPositionClear`'s high per-call cost is a
+*small-N artefact* — 63 calls across eight scenes, at the timer's own
+resolution; its per-frame contribution is negligible either way.
+`hasStaticTileNear` is strongly scene-dependent (1692 calls in one run,
+0 in the next): it only fires on the material-tile slow path, so it
+tracks how much metal/plastic is on screen.
+
+**Whole-class worst case ≈ 0.036 ms per frame.**
+
+> **This pre-answers B4.** B4's own precondition says the sharing is not
+> worth its coupling if the combined cost is under 0.3 ms. The static-query
+> half is **0.036 ms — an order of magnitude under that threshold** —
+> before lighting's half is even counted. B4 should be **declined on
+> evidence**, which the ladder names as the expected outcome. The coupling
+> it would introduce spans the 120 Hz sim / render-rate boundary, which is
+> a real correctness hazard, in exchange for at most a few tens of
+> microseconds.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| All three questions answered with numbers | PASS |
+| No production code changed | PASS (instrument reverted; `git status` clean) |
+| Scope ≤ 2 files | PASS (1 file, temporarily) |
+
+### What B1 changes about the rest of Part B
+
+- **B2 is still worth doing** — five near-duplicate walks is real
+  duplication, and the span arithmetic is wrong in four of them even
+  though no caller currently reaches the wrong region. It is a
+  correctness-insurance refactor with a byte-identical gate.
+- **B2 should absorb `forEachStaticTileNear` too**, which the plan did
+  not list.
+- **B3 is skipped**, precondition unmet.
+- **B4 is declined on evidence**, precondition already failed at 0.036 ms.
