@@ -29,8 +29,7 @@ Working rules for this branch:
 
 ## Checklist
 
-- [x] **Stage 0** — Device support (KG1) — *instrument validated; **device
-      result outstanding** (see "The blocking dependency")*
+- [x] **Stage 0** — Device support (**KG1 PASSED** on iPhone / iOS 26.6)
 - [ ] **Stage 1** — Throwaway harness
 - [ ] **Stage 2** — Hardest primitive (KG2)
 - [ ] **Stage 3** — Renderer seam
@@ -44,8 +43,8 @@ Working rules for this branch:
 
 **KILL GATE 1. Cap: 1 hour. Touches no game code** — it adds one
 standalone page under `public/` (so a preview can serve it) and this log.
-Status: **instrument built and validated; the decisive device reading is
-outstanding.**
+Status: **PASSED.** WebGPU is present and usable on the target iPhone
+(iOS 26.6), backed by a real Apple GPU.
 
 ### The instrument
 
@@ -112,6 +111,61 @@ end-to-end before the phone sees it, and it establishes that headless
 WebGPU in this container requires explicit flags and a software adapter —
 which bounds what any future CI-side WebGPU work could ever be (functional
 smoke tests: yes; performance gating: never).
+
+### ✅ KG1 — **PASS** on the target device
+
+Read 2026-08-16 over the Netlify deploy preview (`https:`, secure context
+confirmed, device class confirmed *Apple touch device*).
+
+| | |
+|---|---|
+| Device | **iPhone**, `platform: iPhone`, dpr **3**, `maxTouchPoints` 5 |
+| OS | **iOS 26.6.0** |
+| Browser | **Edge iOS 151** (`Version/26.0 Mobile/15E148`) — WebKit, so this *is* the Safari 26 engine |
+| Screen / viewport | 440×956 css / 440×756 css |
+| Omni backing store | **880×1512 = 1.33 Mpx** @ dpr cap 2 |
+| `navigator.gpu` → adapter → device → context → 120-frame present | **all ✓** |
+| Adapter | `vendor: apple, architecture: apple`, **`isFallbackAdapter: false`** — a real GPU |
+| Preferred canvas format | `bgra8unorm` |
+| Triangle frame ms | p50 **17.0** / p95 **17.0** / max **59.0** |
+
+**Every hazard-relevant limit clears with room to spare**, and several are
+far above the software adapter's:
+
+| Limit | iPhone | Container (SwiftShader) | Consequence |
+|---|---|---|---|
+| `maxTextureDimension2D` | **16384** | 8192 | Static-tile cache (3072) fits in **one** texture — the tiling cost is **not** incurred |
+| `maxVertexAttributes` | **30** | 16 | Ample for per-instance transform + wrap offset + tint |
+| `maxVertexBuffers` | **12** | 8 | Ample |
+| `maxBindGroups` | **11** | 4 | Far more headroom than the batching design needs |
+| `maxBufferSize` | 1 GiB | 1 GiB | Ample |
+
+**Three findings worth more than the pass itself.**
+
+1. **`timestamp-query` is available.** This is the single most useful item
+   in the feature list. The repo's existing `renderMs` times *CPU-side call
+   issuing, not rasterization* — a known measurement hazard that cuts both
+   ways in a GPU port, since a GPU renderer moves work *out* of that timer.
+   `timestamp-query` permits **GPU-side** timing, so Stage 2's cost
+   comparison can measure the thing it claims to measure instead of
+   inferring it. Also present: `shader-f16`, `float32-filterable`, and the
+   BC/ETC2/ASTC compression families.
+2. **The real device is 440×956, not the 390×844 the brief assumes.** That
+   figure is the *Playwright viewport* (`playwright.config.ts:35,47`), not
+   this phone. The pixel counts happen to land within 1% (1.33 vs 1.32 Mpx)
+   because browser chrome eats the difference, so no downstream number
+   moves — but the test viewport is **not** the target device, and any
+   future "it fits on the phone" reasoning should use 440×956.
+3. **The 59 ms worst frame is not yet a finding.** One frame in 120 on a
+   *single triangle*, against a 17.0 ms p50/p95 (a clean 60 Hz vsync). It
+   is almost certainly first-frame pipeline compilation or the browser
+   settling. It is recorded rather than dismissed because worst-frame is
+   this repo's metric (gauntlet 5c), and if the same spike reappears in
+   Stage 1's textured-quad loop it becomes a real one.
+
+**Interpretation.** H1 is cleared **for this device**. It is *not* cleared
+for the ~12% of iOS players below iOS 26, which is why Canvas2D remains the
+default and both renderers must coexist. Proceeding to Stage 1.
 
 ### Second control: Safari 18.5 on macOS — **not the target device**
 
@@ -221,22 +275,11 @@ players — which is precisely why Canvas2D must remain the default path and
 both renderers must coexist, exactly as the brief's Stage 4 requires. This
 figure is an ecosystem-wide estimate and should be re-checked at Stage 6.
 
-### The blocking dependency
+### Delivery (how the device reading was obtained)
 
-**Stage 0's gate is a statement about one specific iPhone, and I cannot
-reach it from this container.** The probe is built and proven; what is
-missing is a reading from the device.
-
-This is a genuine blocker rather than something to assume past, because
-the two outcomes are opposite and both are plausible:
-
-- iPhone on **iOS 26+** → WebGPU present, KG1 passes, spike proceeds to
-  Stage 1.
-- iPhone on **iOS 18 or earlier** → **no WebGPU at all**, flagged or
-  otherwise. KG1 fails, and the correct action is to stop and write the
-  verdict, re-asking the question when the device updates.
-
-To run it, the probe must be opened **over `https://`** — see the
+The gate could not be read from the container — it is a statement about
+one specific iPhone — so the probe had to reach the phone. It must be
+opened **over `https://`** — see the
 secure-context note above; a LAN `http://` URL will report a false
 negative.
 
@@ -275,9 +318,9 @@ this write-up). Within cap.
 
 ---
 
-## Stages 1–6
+## Stage 1 — Throwaway harness
 
-Not started. Blocked on Stage 0's device reading.
+**Cap: 2 hours. Touches no game code.** In progress.
 
 ---
 
@@ -288,7 +331,7 @@ are in the brief and are deliberately not repeated here.
 
 | Hazard | Actual outcome so far |
 |---|---|
-| **H1 — Safari/iOS support** | API confirmed shipped on iOS 26+ (~88% of iOS devices). Two controls read: container Chromium (no adapter without flags) and **Safari 18.5 on macOS (no `navigator.gpu`, as expected below Safari 26)**. **Target-iPhone reading still outstanding** — this is the open kill gate |
+| **H1 — Safari/iOS support** | **CLEARED for the target device.** iPhone on iOS 26.6: real Apple GPU, all five gate checks pass, every downstream limit exceeded (`maxTextureDimension2D` 16384 vs the 3072 needed). Not cleared for the ~12% of iOS players below iOS 26 — hence both renderers coexist. Controls: container Chromium (no adapter without flags), macOS Safari 18.5 (no `navigator.gpu`, as expected below Safari 26) |
 | **H2 — Path rendering (375 sites)** | Confirmed unchanged: WebGPU has no path, fill, stroke, arc or gradient primitive. Untested — Stage 2 |
 | **H3 — Draw-call explosion** | Untested — Stage 2/5 |
 | **H4 — Composite modes** | Untested — Stage 4/5 |
