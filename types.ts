@@ -1268,6 +1268,45 @@ export interface PerfSnapshot {
   explosionRingsMs: number;
   weaponsMs: number;
   renderMs: number;
+  // ── React reconciliation (the UI cost) ────────────────────────────────
+  //
+  // These three are RAW PER-FRAME values, not the 60-frame rolling averages
+  // the timers above carry — there is nothing to smooth, because a frame
+  // either committed the React tree or it didn't.
+  //
+  // Measured by React's own `<Profiler>` around `<UIOverlay>` (App.tsx).
+  // That is the only instrument that can see this cost: `onStatsUpdate` is a
+  // setState called from a rAF callback, so React BATCHES it and defers
+  // reconciliation past the end of that callback.  Any timer bracketing the
+  // `onStatsUpdate` CALL therefore measures scheduling and reads ~0 no matter
+  // how expensive the tree is — see `uiScheduleMs` below, which is exactly
+  // that number, kept as the control.
+  //
+  // ALIGNMENT: the profiler commits after the frame that pushed them, so the
+  // engine consumes them at the TOP of the following frame.  They are one
+  // frame late against the render/sim timers beside them.  That is fine for
+  // the distributions this is read as (median / p95) and wrong for
+  // "which single frame did this belong to" — don't read them that way.
+  /** Profiler `actualDuration` — time spent rendering the committed tree.
+   *  Summed if a frame committed more than once; 0 on frames that didn't
+   *  commit (a throttled HUD push, or nothing changed). */
+  uiActualMs: number;
+  /** Profiler `baseDuration` — the cost of rendering the whole tree with NO
+   *  memoization. `uiBaseMs - uiActualMs` is what memoization is currently
+   *  buying; it is ~0 while nothing in the UI layer is memoized. */
+  uiBaseMs: number;
+  /** React commits folded into the two figures above for this frame. */
+  uiCommits: number;
+  /** Wall time of the `onStatsUpdate` CALL itself — i.e. the cost of
+   *  SCHEDULING the update, not of rendering it.  Retained deliberately as
+   *  the control for the claim above: it stays near zero while `uiActualMs`
+   *  moves.  Do not read it as the React cost. */
+  uiScheduleMs: number;
+  /** Whether the profiler is actually reporting.  FALSE in a normal shipping
+   *  build, where React strips the profiler timers and the three figures
+   *  above are all 0 — which reads identically to "the UI is free".  Never
+   *  quote a ui number without checking this. */
+  uiProfiled: boolean;
   // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
   // debug overlay alongside renderMs so the contribution of the nebula
   // pass can be A/B'd against the twinkle / background-puff ablation

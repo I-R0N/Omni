@@ -74,6 +74,18 @@ export default defineConfig(() => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+          // MEASUREMENT BUILD ONLY.  React's production `react-dom` strips the
+          // `<Profiler>` instrumentation, so `onRender` never fires and the UI
+          // cost reads exactly 0 — indistinguishable from "there is no cost".
+          // `react-dom/profiling` is the production build WITH the timers kept.
+          // Opt-in via the env var so the SHIPPING bundle is untouched: same
+          // pattern as `vite build --minify false` for allocation attribution.
+          //
+          //   OMNI_PROFILE_REACT=1 npx vite build
+          //
+          ...(process.env.OMNI_PROFILE_REACT
+            ? { 'react-dom/client': 'react-dom/profiling' }
+            : {}),
         }
       }
     };
