@@ -123,6 +123,7 @@ export function updateBubbles(g: GameEngine, dt: number) {
                     e.attachedToId = target.id;
                     e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
                     e.bubbleLatchTimer = B.LATCH_DURATION;
+                    g.audio.play('bubble.latch', { x: target.position.x, y: target.position.y });
                     if (target.id === 'player') g.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
                     g.spawnParticles(target.position, 10, e.color || '#67e8f9', {
                         speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
@@ -177,6 +178,7 @@ export function resolveAggroTarget(g: GameEngine, id: string): GameEntity | null
 /** Break a bubble's latch: it falls off, goes SICK (sluggish + can't eat),
  *  and loses aggro — it does NOT die (shoot it while sick for the kill). */
 export function detachLatch(g: GameEngine, e: GameEntity) {
+g.audio.play('bubble.detach', { x: e.position.x, y: e.position.y });
     e.attachedToId = undefined;
     e.attachOffset = undefined;
     e.bubbleLatchTimer = 0;

@@ -63,8 +63,9 @@ components/
                           new screen is navigable the day it is added
                           and no focus order is authored anywhere
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
-                          UI, dock affordance, death/run-summary screen;
-                          debug panel lives inside the pause menu)
+                          UI, dock affordance, death/run-summary screen,
+                          audio settings row; debug panel lives inside
+                          the pause menu)
 
 engine/
   GameEngine.ts           Orchestrator (~4900 lines).  Owns the player
@@ -240,6 +241,12 @@ engine/
                           flat array indexed by DENSE cell index, with
                           recycled bucket arrays.  Backs the two
                           per-substep broadphase grids (gauntlet 5c)
+    AudioSystem.ts        SFX manager — gesture-unlocked WebAudio,
+                          per-id polyphony caps + retrigger collapse,
+                          tier-thinned global voice ceiling, torus-
+                          wrapped pan/attenuation, synthesis primitives
+    SfxRegistry.ts        The procedural draft of every sound in
+                          docs/SFX_INVENTORY.md, keyed by its stable id
     PerfRecorder.ts       DBG in-game FPS/perf capture harness — records
                           the per-frame timing + PerfSnapshot stream over a
                           window and exports a copy-paste report (DBG panel
@@ -256,6 +263,8 @@ perf/                     Headless capture harness (gauntlet 5c) —
                           any number out of it
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
+                          EXCEPT docs/SFX_INVENTORY.md, which IS current
+                          and IS the source of truth for sound (see §8)
 .github/workflows/        pr-checks (the merge gate: typecheck + build +
                           Playwright on every PR), pr-preview,
                           publish-standalone
@@ -1693,6 +1702,141 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   debug handles.**
   `App.tsx` assigns the live engine, the latest `EngineStats` payload, and the
   pure DualSense output-report builders to `window`.  NOTHING in the game reads them — they exist so the headless
+  pattern).
+- **Sound goes through one id, and the id is the contract.**  Every
+  trigger site calls `audio.play('<inventory id>')` (or
+  `audio.loop(id, on, …)` for sustained sounds) and nothing else.
+  `docs/SFX_INVENTORY.md` is the source of truth for WHAT plays and with
+  what parameters — trigger site, mix tier, duration, sonic character,
+  frequency + envelope, variation, polyphony + throttle, mix level,
+  positional vs UI-flat.  `SfxRegistry` holds the procedural draft for
+  each id; replacing a draft with a recorded asset is a registry change
+  and NEVER a call-site change — any `.wav` dropped into
+  `public/assets/sfx/` and NAMED AFTER AN ID — dots as dashes, plus any
+  suffix (`crash.player.shard` ← `crash-player-shard-a.wav`) — is
+  discovered at build time by `sfxManifestPlugin` (the same virtual-module
+  trick the nebula images use) and matched to its id by longest-prefix, so
+  adding sound is adding FILES and never editing the registry.  Several
+  files for one id are variants, cycled round-robin; `SfxDef.sample` still
+  pins a filename for the exceptional case.  The draft stays as the
+  FALLBACK, so a missing or
+  undecodable file degrades to a different sound rather than to silence,
+  and the standalone build — whose inliner carries images, not audio —
+  stays fully audible on the drafts.  Files are fetched and DECODED ONCE
+  at unlock, never on first trigger: a `decodeAudioData` inside the frame
+  a collision lands in is the one way this path could cost frames.  Pitch
+  rides `playbackRate`, so the call site's existing `{gain, pitch}`
+  (shard size, impact speed) still spans one take from pebble-tap to
+  boulder-slam.  The synth drafts can be switched OFF wholesale
+  (`AudioSystem.draftsEnabled`, the pause menu's WAV-only button): an id
+  with no recording then makes NO sound — LOOPS INCLUDED, and switching it
+  off STOPS the ones already running, because `move.thrust` idles
+  continuously while the player is alive and would otherwise never be
+  re-asked; the always-on beds are precisely the sounds most likely to be
+  mistaken for a recording, which is the only honest way to
+  audition real assets — with a draft under every id, a sound that is
+  still synthetic is indistinguishable from one that landed.  A headless smoke parses the document
+  and asserts registry↔document parity in BOTH directions, so adding a
+  sound means adding its row first.  Systems that need to make a sound
+  expose ONE generic sink (`PhysicsSystem.sfx`, `ShardSystem.sfx`,
+  `DropSystem.sfx`, `WeaponSystem.onEnemyFire`) assigned once in the
+  GameEngine constructor — the same settable-field style as
+  `setPhysics` / `traitsEnabled` — so no system imports audio state and
+  adding a sound is a call rather than a signature change.  The engine
+  modules extracted in gauntlet 5f (`engine/roamers/*`, `engine/bosses.ts`,
+  `engine/explosions.ts`) need no sink at all: they are free functions
+  taking `g: GameEngine`, so a voice there is `g.audio.play(id, …)` — the
+  roamer/boss/AoE cues live beside the behaviour that causes them rather
+  than being routed back through the orchestrator.
+- **Audio is EVENT-DRIVEN; nothing audio-related runs per frame** except
+  `audio.setListener(camera)` and `audio.setActive(...)`, two number
+  writes and a boolean.  Voice lifetimes come from the duration each
+  synth returns and are pruned lazily inside `play()` — no timers, no
+  `onended` handlers.  Measured: `play()` costs ~0.3 µs, and a heavy
+  mass-death scene shows no frame-time difference between muted and
+  unmuted.  Three mechanisms keep a 400-death frame sane: per-id
+  polyphony caps, a per-id retrigger window that COLLAPSES simultaneous
+  triggers while bumping the survivor's gain (so bulk reads as HEAVIER,
+  not thinner or louder), and a global ceiling that thins tier 3 then
+  tier 2 — tier 1 always plays.  Positional pan and attenuation use
+  `wrapDeltaX`/`wrapDeltaY` (listener-first: `wrapDeltaX(from, to)`
+  returns `to - from`, so source-first inverts the stereo image).
+  A FROZEN SIM (paused / docked / menu) silences the WORLD — loops and
+  positional one-shots — but deliberately NOT flat/UI sounds, because
+  the station and pause screens are exactly where docking cues,
+  purchases and menu clicks have to be heard.  The AudioContext is
+  created on the FIRST USER GESTURE (AudioSystem arms its own
+  capture-phase window listeners rather than hooking InputSystem, which
+  only sees canvas-targeted events and so misses the menu tap that is
+  usually a phone session's first gesture).  Master volume + mute are
+  IN-MEMORY only, consistent with the project keeping no state across
+  reloads.
+- **Material chatter lives BELOW ~2 kHz, and Q matters as much as pitch.**
+  Sounds that fire in BULK (tile chips, shard breaks, tile snaps, merges)
+  are judged by what a hundred of them sound like, not one — up in the
+  fatiguing band a hundred is a whine however quiet each is.  A HIGH-Q
+  bandpass on noise rings, and ringing is what reads as whining, so
+  lowering Q turns the same filter into a knock.  Materials keep their
+  relative ORDER (glass brightest → metal → rock dullest) so they stay
+  tellable apart.  A headless smoke renders every material voice through
+  an OfflineAudioContext and asserts a dominant-frequency proxy stays
+  under the band AND that the ordering survives — so this is a guarded
+  invariant, not a one-off tuning.
+- **Sustained loops are judged far more harshly than one-shots, and the
+  POI beds are voiced APART.**  Every "whine" reported in playtest was a
+  LOOP or a bulk-fired chip, never a single event.  So every loop is low:
+  `portal.idle` is a TONAL 55 Hz beat, `poi.station.idle` a BROADBAND
+  ~300 Hz noise bed, `move.thrust` a 36 Hz rumble.  Portal and station are
+  deliberately opposite in CHARACTER (tonal vs broadband) rather than just
+  different in pitch, so the two POIs are tellable apart without looking;
+  a headless smoke measures both the dominant frequency and the
+  zero-crossing regularity to hold that.  Both are driven by the NEAREST
+  POI of their kind at ANY distance so volume swells on approach, and
+  `AudioSystem.loop` treats an out-of-earshot positional loop as OFF so a
+  far POI holds no oscillators.
+- **Player contact is split by WHAT was hit, at two different speeds.**
+  `crash.player.tile` (static wall) fires above
+  `STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD`; `crash.player.shard`
+  (mobile shard) fires above the much lower `SHARD_CONTACT_SPEED`,
+  because a loose rock knocking off the hull is audible long before it is
+  destructive — sharing one voice at the break threshold made ordinary
+  shard bumping SILENT and hard shard hits sound like masonry.  The shard
+  voice is pitched by the shard's SIZE and gained by impact speed at the
+  call site (`PhysicsSystem.sfx` takes `{gain, pitch}`), so one id spans
+  pebble-tap to boulder-slam.
+- **Ambient shard chatter is NEAR-FIELD; the player's own shards are not.**
+  A dense field collides/merges/snaps constantly, so `destroy.shard.*`,
+  `move.tilesnap`, `move.merge` and `crash.shard.tile` carry only to
+  `AUDIO_CONSTANTS.SHARD_FAR_RADIUS` instead of the normal `FAR_RADIUS`.
+  The exception is the point: a shard destroyed BY the player is played at
+  the NORMAL radius, keyed off the `killedByPlayer` stamp that already
+  exists for scoring (set by the projectile / crash / lightning / AoE
+  paths) — so a shard you shot from range is still yours to hear.  Direct
+  player↔shard contact is covered by `crash.player.tile` at full range,
+  because mobile shards are `STRUCTURE`s.  Radii resolve caller → def →
+  global default (`SfxDef.near`/`.far`, `play(id, {near, far})`).
+- **The engine loop IDLES; it does not switch on and off.**
+  `move.thrust` runs continuously while the player is alive and THROTTLE
+  MODULATES it (gain and filter cutoff together, both heavily smoothed) —
+  gating the loop on `throttle > 0` snapped the whole bed on and off with
+  the input and read as jarring.  It stops only on death, pause and dock.
+- **iOS needs three things desktop does not.**  (1) The ring/silent switch
+  silences WebAudio, because Safari puts it in the "ambient" session by
+  default — the game claims the `playback` session instead, via
+  `navigator.audioSession` on 16.4+ and, on older iOS, by playing a
+  detached-proof silent WAV data URI from an in-document
+  `<audio playsinline>` element (a data URI, so the standalone build is
+  still asset-free; it MUST be appended to the document or iOS ignores it).
+  (2) iOS uses a non-standard `'interrupted'` AudioContext state after a
+  call / Siri / app switch, so `unlock()` resumes on anything that is not
+  `'running'`, never on `'suspended'` alone.  (3) The gesture listeners are
+  NOT `once` — an interruption after the first gesture would otherwise
+  leave the game permanently silent — and `visibilitychange` re-unlocks on
+  tab return.  `audio.audible` (context exists AND running) is the honest
+  "can this be heard" check; `unlocked` alone is not.
+- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
+  `App.tsx` assigns the live engine and the latest `EngineStats` payload to
+  `window`.  NOTHING in the game reads them — they exist so the headless
   Playwright suites in `tests/` can drive the real engine in a real browser
   (§7; the "without a test runner being added" rationale is superseded —
   roadmap 5b adopted one, and these handles are what it drives).  Two

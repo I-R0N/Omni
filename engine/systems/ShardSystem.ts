@@ -380,6 +380,11 @@ export class ShardSystem {
   private _polyRadius: number[] = [];
   private _polyIdx: number[] = [];
 
+  /** SFX sink (SFX_INVENTORY §6 material chatter).  Set once by
+   *  GameEngine; null in any context without audio.  Same generic shape
+   *  as PhysicsSystem.sfx — this system stays free of audio state. */
+  public sfx: ((id: string, x: number, y: number) => void) | null = null;
+
   constructor(private particles: ParticleSystem) {}
 
   public setPerfController(pc: PerfController): void {
@@ -658,6 +663,7 @@ export class ShardSystem {
     const popBurst = variant.regen.popBurst;
     if (popBurst) {
       entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
+      this.sfx?.('move.regenpop', entity.position.x, entity.position.y);
       this.particles.spawn(entities, entity.position, popBurst.chipCount, entity.color || '#6366f1', {
         speedMin: popBurst.chipSpeedMin,
         speedMax: popBurst.chipSpeedMax,
@@ -2195,6 +2201,10 @@ export class ShardSystem {
     variant: 'plastic-shard' | 'glass-shard',
     entities: GameEntity[],
   ): void {
+    // Crystallisation — fragments locking into a solid.  Fired here
+    // because every snap path releases debris, so this is the one site
+    // all of them pass through.
+    this.sfx?.('move.tilesnap', pos.x, pos.y);
     const variantDef = SHARD_VARIANTS[variant];
     const childSpawn = variantDef.spawn;
     const size = TILE_SNAP.DEBRIS_DIAMETER;
