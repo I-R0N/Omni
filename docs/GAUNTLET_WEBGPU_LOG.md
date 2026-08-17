@@ -31,8 +31,8 @@ Working rules for this branch:
 
 - [x] **Stage 0** — Device support (**KG1 PASSED** on iPhone / iOS 26.6)
 - [x] **Stage 1** — Throwaway harness (**PASSED** on device)
-- [~] **Stage 2** — Hardest primitive (KG2) — *quality MET; cost outstanding*
-- [ ] **Stage 3** — Renderer seam
+- [x] **Stage 2** — Hardest primitive (**KG2 PASSED** — parity at 5× throughput)
+- [~] **Stage 3** — Renderer seam
 - [ ] **Stage 4** — Sprites, static tiles, HUD overlay
 - [ ] **Stage 5** — Procedural shapes
 - [ ] **Stage 6** — Verdict (KG3)
@@ -321,8 +321,9 @@ this write-up). Within cap.
 ## Stage 2 — The hardest primitive (KILL GATE 2)
 
 **Cap: 1 day. Touches no game code** — adds one standalone page under
-`public/`. Status: **built, quality condition met in-container; the COST
-condition needs the device.**
+`public/`. Status: **PASSED on the target device.** Quality parity at
+0.37/255, and **5× the sustained tile count at 60 fps** against a required
+2×.
 
 `public/webgpu-stage2.html` reproduces a **dented rock tile** in WebGPU and
 in Canvas2D, in the same page, drawing the same scene from the same
@@ -410,7 +411,67 @@ has taken the frame by then. Copying the texture directly
 swizzle) gave 1.49. **A quality gate that screen-scrapes a GPU canvas will
 fail for reasons that have nothing to do with rendering.**
 
-### Cost condition — **outstanding, and it needs the device**
+### ✅ KG2 — **PASS** on the target device
+
+iPhone / iOS 26.6, 880×1512 (1.33 Mpx), MSAA 4×, entity-ordered, 10% dent
+churn per frame.
+
+**Quality — three consecutive runs, and they agree:**
+
+| run | mean abs diff (/255) | pixels >8 | max channel |
+|---|---|---|---|
+| 1 | 0.366 | 1.050% | 33 |
+| 2 | 0.365 | 1.034% | 32 |
+| 3 | 0.367 | 1.051% | 31 |
+
+**0.37/255 (0.14%), ~1% of pixels differing, max channel 33** — and within
+0.02 of the container's 0.383, so the in-container measurement transferred
+to hardware essentially unchanged. Condition **met**.
+
+**Cost — THE RAMP (tiles sustained at 60 fps):**
+
+| Renderer | max tiles @60fps | broke at | frame p95 there |
+|---|---|---|---|
+| **Canvas2D** | **500** | 750 | 27 ms |
+| **WebGPU** | **2500** | 2750 | 20 ms |
+| *(split — both renderers per frame)* | *500* | *750* | *25 ms* |
+
+# WebGPU sustains 5× the tiles at 60 fps.
+
+The brief's condition is "≤ 50% of Canvas2D's cost", i.e. **2×**. The
+measured margin is **5×** — not marginal, and it holds against the same
+scene, on the same device, in the same page. *(The `split` row is both
+renderers running each frame and is therefore bounded by Canvas2D; it
+matches the Canvas2D row exactly, which is a useful consistency check
+rather than a third result.)*
+
+**The 2750-tile scene, and why the 5× is a FLOOR rather than a ceiling:**
+
+| Metric | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| frame ms | 17 | 18 | 20 | 30 |
+| **cpu ms** | **5** | 5 | 6 | 8 |
+| **gpu ms** | **4.18** | 7.45 | 8.95 | 9.46 |
+| re-triangulate ms | 1 | 2 | 2 | 5 |
+
+At 5.5× the reference scene the WebGPU path is **CPU-bound, not GPU-bound**
+— 5 ms of CPU against 4.18 ms of GPU, with the GPU using only a quarter of
+the frame budget. And the harness is deliberately naive about that CPU
+work: **it re-uploads the entire geometry buffer every frame**
+(2750 × 102 verts × 16 B ≈ **4.5 MB/frame, ~270 MB/s**) rather than writing
+only the ~10% of slots that dented. The fixed-slot layout was built to make
+dirty-range uploads possible and the harness simply does not use it.
+
+So the ceiling is higher than 5×, and the next optimisation for a real port
+is **not** shader work — it is CPU-side data marshalling. Re-triangulation,
+the thing the brief flagged as the dynamic-geometry hazard, costs **1 ms
+p50** for 275 tiles per frame and is not the problem.
+
+**H2's verdict: the hardest primitive is reproducible at parity and at 5×
+the throughput.** Fills, miter-joined strokes and the analytic bloom all
+land. Proceeding to Stage 3.
+
+### Cost condition — how it was measured
 
 Container numbers here are worthless in both directions: WebGPU runs on
 SwiftShader (a CPU rasterizer through software Vulkan), while Canvas2D runs
@@ -553,7 +614,7 @@ are in the brief and are deliberately not repeated here.
 | Hazard | Actual outcome so far |
 |---|---|
 | **H1 — Safari/iOS support** | **CLEARED for the target device.** iPhone on iOS 26.6: real Apple GPU, all five gate checks pass, every downstream limit exceeded (`maxTextureDimension2D` 16384 vs the 3072 needed). Not cleared for the ~12% of iOS players below iOS 26 — hence both renderers coexist. Controls: container Chromium (no adapter without flags), macOS Safari 18.5 (no `navigator.gpu`, as expected below Safari 26) |
-| **H2 — Path rendering (375 sites)** | **Reproducible.** Ear-clipped fills, miter-joined stroke expansion and an analytic radial bloom match Canvas2D to 0.38/255 mean (<1% of pixels differing) with MSAA 4×. MSAA is REQUIRED for edge parity. Cost on device outstanding |
+| **H2 — Path rendering (375 sites)** | **CLEARED on device.** Ear-clipped fills, miter-joined stroke expansion and an analytic radial bloom match Canvas2D to **0.37/255** (~1% of pixels differing) at **5× the throughput**. MSAA 4× is REQUIRED for edge parity and is included in that result |
 | **H3 — Draw-call explosion** | **Mitigation works, but the brief's rule is WRONG.** 2000 instances cost 0 ms p50 CPU in 1 draw call (Stage 1, device). However batching "one draw per SHAPE FAMILY" breaks painter's order and renders overlapping entities incorrectly — batch by DRAW ORDER with a per-vertex kind flag instead, which is both correct and fewer draw calls |
 | **H4 — Composite modes** | Untested — Stage 4/5 |
 | **H5 — Text (20 sites)** | Confirmed no text primitive; the Canvas2D-overlay mitigation stands. Untested — Stage 4 |
