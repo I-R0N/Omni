@@ -33,7 +33,7 @@ Working rules for this branch:
 - [x] **Stage 1** — Throwaway harness (**PASSED** on device)
 - [x] **Stage 2** — Hardest primitive (**KG2 PASSED** — parity at 5× throughput)
 - [x] **Stage 3** — Renderer seam (**COMPLETE** — byte-identical, 111/111)
-- [ ] **Stage 4** — Sprites, static tiles, HUD overlay
+- [~] **Stage 4** — *partial*: H4/H5 hazard probes done; `GPURenderSystem` NOT built
 - [ ] **Stage 5** — Procedural shapes
 - [ ] **Stage 6** — Verdict (KG3)
 
@@ -315,6 +315,83 @@ Notes recorded so they are not rediscovered:
 
 **Effort:** ~50 min of the 1 h cap (research, probe, container control,
 this write-up). Within cap.
+
+---
+
+## Stage 4 (PARTIAL) — hazard probes for H4 and H5
+
+**Scope note, so this is not overclaimed: the full Stage 4 — a
+`GPURenderSystem` behind the seam, URL-selectable, covering the easy 53
+draw sites — was NOT built.** What was built is a targeted probe closing the
+two hazards the ladder had left with *no* measured outcome. Stage 6 requires
+every hazard to report an actual result rather than a predicted one, and both
+of these could be settled **without touching repo code**, so they were settled
+regardless of whether the port continues.
+
+`public/webgpu-stage4.html`. Touches no game code.
+
+### 🔴 H4 — all four composite modes ARE blend states, **but only in
+premultiplied alpha**
+
+The brief predicts `source-atop` and `destination-out` "are **not** blend
+states in the general case; they need render-target ping-ponging or stencil
+work." **They are both single blend states.** But the condition attached is
+the real finding, because getting it wrong fails quietly:
+
+| Canvas2D mode | uses | WebGPU blend (premultiplied source) |
+|---|---|---|
+| `source-over` | ×6 | src `one`, dst `one-minus-src-alpha` |
+| `lighter` | ×9 | src `one`, dst `one` |
+| `destination-out` | ×1 **load-bearing** | src `zero`, dst `one-minus-src-alpha` |
+| `source-atop` | ×2 | src `dst-alpha`, dst `one-minus-src-alpha` |
+
+**A shader emitting STRAIGHT alpha cannot express `source-atop` at all.** The
+correct result needs `Cs·αs·αd`; a blend factor supplies exactly *one*
+multiplier, so `dst-alpha` yields `Cs·αd` and silently drops the `αs`. WebGPU
+has no combined src-alpha×dst-alpha factor, so **no choice of factors fixes
+it** — the fragment shader must emit premultiplied colour (`rgb *= a`), which
+folds `αs` in. Measured, against Canvas2D performing the identical sequence
+into an offscreen surface with a real alpha channel:
+
+| Source alpha | mean abs diff (premul) | pixels >8 |
+|---|---|---|
+| Straight | 2.85 / 255 | 6.20% |
+| **Premultiplied** | **0.109 / 255** | **0.27%** |
+
+The residual 0.27% is edge antialiasing — this probe deliberately runs
+without MSAA, unlike Stage 2. `destination-out`, the load-bearing one
+(`staticTileCache.ts:159`, the per-tile erase), reproduces exactly.
+
+**Why the test had to render to a texture rather than to the canvas:** both
+modes depend on **destination alpha**, and a canvas configured
+`alphaMode: "opaque"` pins `αd` at 1 — which silently degrades `source-atop`
+into `source-over` and would have "passed" for the wrong reason. The repo's
+`destination-out` runs on an offscreen canvas that *does* have alpha, so the
+faithful reproduction is render-to-texture with a real alpha channel.
+
+**H4 CLEARED, and it is cheaper than predicted:** no ping-ponging, no
+stencil, no extra passes. One rule: **emit premultiplied alpha everywhere.**
+
+### H5 — the Canvas2D text overlay works, and costs ~0.1 ms
+
+A `<canvas>` layered above the WebGPU canvas, redrawing all 14 of `hud.ts`'s
+text sites plus a minimap rect every frame.
+
+| Overlay | frame ms p50 | overlay ms p50 / p95 / max |
+|---|---|---|
+| ON | 16.7 | 0.1 / 0.2 / 2.8 |
+| OFF | 16.7 | 0 / 0.1 / 1.2 |
+
+**No measurable frame-time difference; ~0.1 ms of CPU for the whole HUD text
+layer.** The mitigation is sound and cheap, and it removes H5 from the
+critical path as the brief predicted.
+
+**Caveat, and it is the reason this is not marked fully cleared:** the
+brief's specific worry is *iOS compositing artifacts from stacked canvases* —
+tearing, blur, or a compositor promotion penalty. Those are device-specific
+and this measurement is from the container. **The device check is a
+one-minute look**, and until it is done H5 is "works, cost measured, iOS
+compositing unverified".
 
 ---
 
@@ -696,8 +773,8 @@ are in the brief and are deliberately not repeated here.
 | **H1 — Safari/iOS support** | **CLEARED for the target device.** iPhone on iOS 26.6: real Apple GPU, all five gate checks pass, every downstream limit exceeded (`maxTextureDimension2D` 16384 vs the 3072 needed). Not cleared for the ~12% of iOS players below iOS 26 — hence both renderers coexist. Controls: container Chromium (no adapter without flags), macOS Safari 18.5 (no `navigator.gpu`, as expected below Safari 26) |
 | **H2 — Path rendering (375 sites)** | **CLEARED on device.** Ear-clipped fills, miter-joined stroke expansion and an analytic radial bloom match Canvas2D to **0.37/255** (~1% of pixels differing) at **5× the throughput**. MSAA 4× is REQUIRED for edge parity and is included in that result |
 | **H3 — Draw-call explosion** | **Mitigation works, but the brief's rule is WRONG.** 2000 instances cost 0 ms p50 CPU in 1 draw call (Stage 1, device). However batching "one draw per SHAPE FAMILY" breaks painter's order and renders overlapping entities incorrectly — batch by DRAW ORDER with a per-vertex kind flag instead, which is both correct and fewer draw calls |
-| **H4 — Composite modes** | Untested — Stage 4/5 |
-| **H5 — Text (20 sites)** | Confirmed no text primitive; the Canvas2D-overlay mitigation stands. Untested — Stage 4 |
+| **H4 — Composite modes** | **CLEARED, and cheaper than predicted.** All four modes the repo uses are SINGLE blend states — no ping-pong, no stencil — *provided the shader emits premultiplied alpha*. Straight alpha cannot express `source-atop` at all (a blend factor gives one multiplier; the result needs `Cs·αs·αd`). Premultiplied: 0.109/255 mean vs Canvas2D. iOS-device confirmation not yet run |
+| **H5 — Text (20 sites)** | **Mitigation works and is cheap.** A Canvas2D overlay above the WebGPU canvas draws all 14 `hud.ts` text sites for **~0.1 ms p50** with no measurable frame-time cost. Remaining unknown is iOS-specific stacked-canvas compositing (tearing/blur/promotion), which needs the device |
 
 ---
 
