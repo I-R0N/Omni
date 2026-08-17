@@ -1428,6 +1428,32 @@ export function toggleShardShadows(): boolean {
   return shardShadowsEnabled;
 }
 
+/** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
+ *
+ *  A point light casts a perfectly hard shadow, which is what made the first
+ *  version read as a drawn line rather than as lighting.  Softness here is
+ *  an ANGLE (see PENUMBRA_DEG_PER_K in render/lighting.ts), so the soft band
+ *  widens with distance from the caster the way a real area light's does —
+ *  tight against the tile, spreading further out.  Cycling rather than a
+ *  toggle because this is a look call that wants to be made on the device,
+ *  against real terrain, not chosen from a number here.
+ *
+ *  'off' restores the hard shadow exactly, which is also the A5 penumbra
+ *  stage's control case. */
+export const SHADOW_SOFTNESS_CYCLE: ReadonlyArray<{ name: string; k: number }> = [
+  { name: 'soft',   k: 2.5 },
+  { name: 'softer', k: 4.5 },
+  { name: 'off',    k: 0   },
+  { name: 'subtle', k: 1.2 },
+] as const;
+let activeSoftnessIndex = 0;
+export function getShadowSoftness(): number { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].k; }
+export function getShadowSoftnessName(): string { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name; }
+export function cycleShadowSoftness(): string {
+  activeSoftnessIndex = (activeSoftnessIndex + 1) % SHADOW_SOFTNESS_CYCLE.length;
+  return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name;
+}
+
 /** Per-tier lighting budget.
  *
  *  `divisor` is how many CSS pixels of screen one light-layer pixel covers.

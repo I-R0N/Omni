@@ -27,8 +27,8 @@ recorded rather than quietly dropped.
 - [x] **A3** — Occluder churn
 - [x] **A4** — One point light, shadow-cast (**awaiting the look decision**)
 - [x] **A4s** — Shard occluders (user request)
+- [x] **A5** — Soft shadow penumbra (brought forward by user request)
 - [ ] **A4b** — Migrate the legacy receivers
-- [ ] **A5** — Soft shadow penumbra
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
 - [x] **B1** — Prove the static-query duplication
@@ -1036,3 +1036,84 @@ threshold, because a first version asserting "share < 60 %" failed at
 100 % — correctly. A sustained shatter eventually leaves *no* terrain in
 range, and shards taking the whole pool then is right. The invariant is
 conditional: the cap binds while there is terrain to reserve for.
+
+---
+
+## A5 — Soft shadow penumbra (brought forward by user request)
+
+> *"The lighting lines on tiles are harsh — can we soften these and perhaps
+> add some curvature to the line?"*
+
+A5 was specced to be a no-op on the phone (`penumbraK: 0` at Low) and to
+be gated on Medium/High only. The request is for it ON the phone, so it
+is brought forward and Low gets a real softness.
+
+### TWO different defects made the edge read as a drawn line
+
+They needed different fixes, and only one of them was the penumbra.
+
+**(a) The terminator was a straight CHORD.** The wedge closed from one
+tangent point straight back to the other. That chord cuts across the
+occluder and leaves its far bulge OUTSIDE the shadow path — so the body's
+own dark side stayed lit, with a hard straight cut across the tile face
+exactly where the shadow began. That straight cut across a hex is, I
+believe, most of what "harsh line on tiles" was describing, and no amount
+of softening would have removed it. Closing around the circle's FAR ARC
+instead puts the terminator where it belongs and curves it around the
+body — which is also the "curvature" half of the request.
+
+**(b) The edges were perfectly hard**, because a point light has no
+penumbra at all. Fixed by widening the wedge by a CONSTANT ANGLE per
+pass, which fakes an area light of that angular size. Constant angular
+widening is what makes the soft band grow with distance from the caster —
+tight against the tile, spreading further out — which is the physical
+behaviour rather than a uniform blur. Three graded passes, with erase
+fractions chosen so the surviving light steps linearly across the band
+(`f_i = 1 − R_{i+1}/R_i`; for N=3 that is ⅓, ½, 1).
+
+### Cost, and the cut that paid for it
+
+Softening every occluder triples the wedge work:
+
+| | hard p95 | soft p95 | delta |
+|---|---|---|---|
+| METAL_FIELD | 0.425 | 0.990 | +0.565 |
+| ASTEROID_FIELD | 0.565 | 1.215 | +0.650 |
+| GLASS_FIELD (churn) | 0.720 | 1.340 | +0.620 |
+
+**+0.46 to +0.66 ms** — most of the entire lighting budget spent on an
+edge treatment, against A5's 0.10 ms slice. So the ladder's own documented
+fail action was taken: **penumbra on the nearest 8 occluders only, the
+rest hard**. The near casters are the ones whose shadow edges are large
+on screen and actually being looked at; a distant one's penumbra is a
+couple of pixels wide and indistinguishable from a hard edge. Every
+occluder still ends fully dark in its umbra — the far ones just reach it
+in one pass instead of three.
+
+| | hard p95 | soft p95 | delta |
+|---|---|---|---|
+| METAL_FIELD | 0.435 | 0.670 | +0.235 |
+| METAL_FIELD (churn) | 0.660 | 0.855 | +0.195 |
+| ASTEROID_FIELD | 0.500 | 0.890 | +0.390 |
+| GLASS_FIELD | 0.545 | 0.795 | +0.250 |
+| GLASS_FIELD (churn) | 0.760 | 0.950 | +0.190 |
+
+**Roughly halved: +0.19 to +0.39 ms, worst total 0.96 ms p95** against
+the 2.0 ms overall budget.
+
+### The knob
+
+`Shadow soft` under Visual — **soft** (default) / **softer** / **off** /
+**subtle**. Cycling rather than a fixed constant because this is a look
+call that wants making on the device against real terrain, and `off`
+restores the hard-edged original exactly, which is also A5's control
+case.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| Softness present at Low | PASS — brought forward deliberately; Low was specced at k=0 |
+| Hard output at `off` byte-identical to pre-A5 | PASS by construction — `steps` collapses to 1 and the erase fraction to 1, i.e. the original single pass |
+| Cost | PASS — +0.19 to +0.39 ms; worst total 0.96 ms of 2.0 ms |
+| 118 tests pass | PASS |

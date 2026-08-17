@@ -1668,6 +1668,8 @@ export interface EngineStats {
   /** DBG: whether MOBILE SHARDS cast shadows too.  Only meaningful while
    *  the lighting mode is 'unified'. */
   shardShadowsEnabled?: boolean;
+  /** DBG label for the shadow-edge softness cycle. */
+  shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */

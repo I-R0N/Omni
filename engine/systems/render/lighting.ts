@@ -34,7 +34,7 @@ import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
-    getShardShadowsEnabled,
+    getShardShadowsEnabled, getShadowSoftness,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -292,6 +292,31 @@ const PLAYER_LIGHT = {
  *  a handful of entries. */
 const _gradCache = new Map<number, CanvasGradient>();
 
+/** Graded passes used to fake a penumbra.  Three is the point where the
+ *  banding stops reading as banding at this layer's resolution; more passes
+ *  cost another compound path each for a difference nobody can see. */
+const SOFT_STEPS = 3;
+/** Degrees of angular widening per unit of the tier's `penumbraK`.  The
+ *  softness is an ANGLE, which is why the resulting soft band widens with
+ *  distance from the caster instead of being a uniform blur. */
+const PENUMBRA_DEG_PER_K = 1.6;
+/** How many of the (nearest-first) occluders get soft edges.  Softening
+ *  everything triples the wedge work — measured +0.46 to +0.66 ms p95, which
+ *  is most of the whole lighting budget spent on an edge treatment.  The
+ *  nearest casters are the ones whose shadow edges are large on screen and
+ *  actually being looked at; a distant one's penumbra is a couple of pixels
+ *  wide and indistinguishable from the hard edge.  So the near ones get the
+ *  graded passes and the rest stay hard, which is where the cost went. */
+const PENUMBRA_NEAREST = 8;
+const DEG2RAD = Math.PI / 180;
+
+/** Positive remainder in [0, 2pi).  `%` is a remainder, not a modulo, so it
+ *  returns negatives for negative input and would flip the arc sweep. */
+function norm2pi(a: number): number {
+    const m = a % (Math.PI * 2);
+    return m < 0 ? m + Math.PI * 2 : m;
+}
+
 function lightGradient(lctx: CanvasRenderingContext2D, rPx: number): CanvasGradient {
     const key = Math.round(rPx);
     let g = _gradCache.get(key);
@@ -328,6 +353,7 @@ function compositeLight(
     cx: number, cy: number, rPx: number,
     occ: Occluder[], count: number,
     lx: number, ly: number, worldToPx: number,
+    penumbraK: number,
 ): void {
     // 1. Falloff.  Created at the origin and MOVED by the transform, so the
     //    cache key stays the radius alone.  setTransform rather than
@@ -346,60 +372,122 @@ function compositeLight(
     // the cost bounded by the occluder cap rather than by silhouette
     // complexity, and it is also the only shape that survives rock tiles
     // deforming their polygon on every hit.
-    lctx.beginPath();
+    // 2. The shadow wedges, in SOFT_STEPS graded passes.
+    //
+    // TWO THINGS MADE THE OLD EDGE READ AS A DRAWN LINE, and they are
+    // different problems with different fixes.
+    //
+    // (a) THE TERMINATOR WAS A STRAIGHT CHORD.  The wedge used to close from
+    //     one tangent point straight back to the other, which cuts the
+    //     chord across the occluder and leaves its far bulge OUTSIDE the
+    //     shadow — so the body's own dark side stayed lit, with a hard
+    //     straight cut across the tile face where the shadow began.  Closing
+    //     around the circle's FAR arc instead puts the terminator where it
+    //     belongs and curves it around the body.
+    //
+    // (b) THE EDGES WERE PERFECTLY HARD.  A point light has no penumbra at
+    //     all, which is why this looked mechanical.  Widening the wedge by a
+    //     CONSTANT ANGLE per pass fakes an area light of that angular size,
+    //     and constant angular widening is exactly what makes the soft band
+    //     grow with distance from the caster — the physical behaviour, not a
+    //     blur.  Near the tile the transition is tight; far away it spreads.
+    //
+    // The erase fractions are chosen so the remaining light steps LINEARLY
+    // across the band: after pass i the survivor is 1 - (i+1)/N, so
+    // f_i = 1 - R_(i+1)/R_i.  For N = 3 that is 1/3, 1/2, 1 — and the last
+    // pass is 1 so the umbra is fully dark rather than nearly so.
+    const kRad = penumbraK * PENUMBRA_DEG_PER_K * DEG2RAD;
+    const steps = kRad > 0 ? SOFT_STEPS : 1;
     let wedges = 0;
-    for (let i = 0; i < count; i++) {
-        const o = occ[i];
-        const dx = (o.x - lx) * worldToPx;
-        const dy = (o.y - ly) * worldToPx;
-        const rad = o.r * worldToPx;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        // Light inside the occluder — there is no tangent, and asin() would
-        // return NaN and poison the whole compound path.
-        if (d <= rad) continue;
-        // Entirely past the light's reach: nothing of it is lit, so nothing
-        // of it can shadow.
-        if (d - rad > rPx) continue;
+    for (let step = 0; step < steps; step++) {
+        // Widest first, umbra last.
+        const widen = steps > 1 ? kRad * (steps - 1 - step) / (steps - 1) : 0;
+        const remainBefore = 1 - step / steps;
+        const remainAfter = 1 - (step + 1) / steps;
+        // For the near occluders the fractions compose to full darkness
+        // across the passes; for the far ones only this last pass runs, and
+        // it erases outright.  Both land at a fully dark umbra.
+        const erase = step === steps - 1
+            ? 1
+            : (remainBefore > 0 ? 1 - remainAfter / remainBefore : 1);
 
-        const theta = Math.atan2(dy, dx);
-        const alpha = Math.asin(rad / d);
-        const tan = Math.sqrt(d * d - rad * rad);   // light -> tangent point
-        const a1 = theta - alpha, a2 = theta + alpha;
-        // Far edge at 1.6x the light radius: comfortably past the falloff so
-        // no lit rim survives behind an occluder, and comfortably inside the
-        // `lightRadius * 3` torus-seam assertion, which must stay able to
-        // catch a genuine wrap failure (those land half a map away).
-        const far = rPx * 1.6;
-        const c1 = Math.cos(a1), s1 = Math.sin(a1);
-        const c2 = Math.cos(a2), s2 = Math.sin(a2);
+        lctx.beginPath();
+        let drew = 0;
+        // The widening passes cover only the nearest few; the final (umbra)
+        // pass covers everything, so a distant occluder still ends fully
+        // dark — it just gets a hard edge instead of a graded one.
+        const isUmbraPass = step === steps - 1;
+        const upTo = isUmbraPass ? count : Math.min(count, PENUMBRA_NEAREST);
+        for (let i = 0; i < upTo; i++) {
+            const o = occ[i];
+            const dx = (o.x - lx) * worldToPx;
+            const dy = (o.y - ly) * worldToPx;
+            const rad = o.r * worldToPx;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            // Light inside the occluder — there is no tangent, and asin()
+            // would return NaN and poison the whole compound path.
+            if (d <= rad) continue;
+            // Entirely past the light's reach: nothing of it is lit, so
+            // nothing of it can shadow.
+            if (d - rad > rPx) continue;
 
-        lctx.moveTo(cx + c1 * tan, cy + s1 * tan);
-        lctx.lineTo(cx + c1 * far, cy + s1 * far);
-        lctx.arc(cx, cy, far, a1, a2);
-        lctx.lineTo(cx + c2 * tan, cy + s2 * tan);
-        lctx.closePath();
-        wedges++;
+            const theta = Math.atan2(dy, dx);
+            const alpha = Math.asin(rad / d) + widen;
+            const tan = Math.sqrt(d * d - rad * rad);   // light -> tangent point
+            const a1 = theta - alpha, a2 = theta + alpha;
+            // Far edge at 1.6x the light radius: comfortably past the falloff
+            // so no lit rim survives behind an occluder, and comfortably
+            // inside the `lightRadius * 3` torus-seam assertion, which must
+            // stay able to catch a genuine wrap failure (those land half a
+            // map away).
+            const far = rPx * 1.6;
+            const c1 = Math.cos(a1), s1 = Math.sin(a1);
+            const c2 = Math.cos(a2), s2 = Math.sin(a2);
+            const t1x = cx + c1 * tan, t1y = cy + s1 * tan;
+            const t2x = cx + c2 * tan, t2y = cy + s2 * tan;
+
+            lctx.moveTo(t1x, t1y);
+            lctx.lineTo(cx + c1 * far, cy + s1 * far);
+            lctx.arc(cx, cy, far, a1, a2);
+            lctx.lineTo(t2x, t2y);
+            // Close around the occluder's FAR side (see (a) above).  The
+            // sweep is chosen by which way round passes `theta`, the bearing
+            // from the occluder centre directly away from the light — safer
+            // than deriving the tangent angles' signs by hand.
+            const ocx = cx + dx, ocy = cy + dy;
+            const g2 = Math.atan2(t2y - ocy, t2x - ocx);
+            const g1 = Math.atan2(t1y - ocy, t1x - ocx);
+            const ccwSpan = norm2pi(g1 - g2);
+            const ccwToTheta = norm2pi(theta - g2);
+            lctx.arc(ocx, ocy, rad, g2, g1, ccwToTheta > ccwSpan);
+            lctx.closePath();
+            drew++;
+        }
+        if (drew === 0) continue;
+        wedges += drew;
+
+        // 3. Withhold this band.  Shadows SUBTRACT added light; they never
+        //    darken the world below what it already was, which keeps the
+        //    system additive-only until A7 deliberately is not.
+        //
+        // THE FILL STYLE MUST BE OPAQUE.  Under `destination-out` only the
+        // SOURCE ALPHA matters, and on the first pass `fillStyle` is still
+        // the falloff gradient from step 1 — created in user space at the
+        // origin and now used under the IDENTITY transform, so it sits on
+        // the canvas corner and reads alpha 0 near the wedges.  Filling with
+        // it erases exactly nothing, and the failure is silent: the shadows
+        // simply do not appear, with no error and no wrong-looking geometry
+        // to trace back from.  (Measured before the fix: light gain was a
+        // uniform 12.5 luminance at every bearing, including directly behind
+        // the occluder.)
+        lctx.fillStyle = '#000';
+        lctx.globalAlpha = erase;
+        lctx.globalCompositeOperation = 'destination-out';
+        lctx.fill();
+        lctx.globalCompositeOperation = 'source-over';
+        lctx.globalAlpha = 1;
     }
     if (wedges === 0) return;
-
-    // 3. Withhold them all at once.  Shadows SUBTRACT added light; they never
-    //    darken the world below what it already was, which is what keeps the
-    //    whole system additive-only until A7 deliberately is not.
-    //
-    // THE FILL STYLE MUST BE RESET TO SOMETHING OPAQUE FIRST.  Under
-    // `destination-out` only the SOURCE ALPHA matters, and at this point
-    // `fillStyle` is still the falloff gradient from step 1 — which was
-    // created in user space at the origin and is now being used under the
-    // IDENTITY transform, so it is centred on the canvas corner and reads
-    // alpha 0 everywhere near the wedges.  Filling with it erases exactly
-    // nothing, and the failure is silent: the shadows simply do not appear,
-    // with no error and no wrong-looking geometry to trace back from.
-    // (Measured before the fix: light gain was a uniform 12.5 luminance at
-    // every bearing, including directly behind the occluder.)
-    lctx.fillStyle = '#000';
-    lctx.globalCompositeOperation = 'destination-out';
-    lctx.fill();
-    lctx.globalCompositeOperation = 'source-over';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -523,7 +611,8 @@ export function renderLightLayer(
                         - camera.position.y + shake.y) * camera.zoom) * k;
             compositeLight(lctx, cx, cy, tier.maxRadius * worldToPx,
                            r._lightOccluders, r._lightOccluderCount,
-                           playerPos.x, playerPos.y, worldToPx);
+                           playerPos.x, playerPos.y, worldToPx,
+                           getShadowSoftness());
         }
     } else {
         r._lightOccluderCount = 0;

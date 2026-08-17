@@ -34,7 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
-    toggleShardShadows,
+    toggleShardShadows, cycleShadowSoftness,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -355,6 +355,13 @@ export class DebugControls {
    *  broke off is not.  Off is the cost comparison. */
   toggleShardShadows() {
     toggleShardShadows();
+  }
+
+  /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.
+   *  Softness is an ANGLE, so the band widens with distance from the caster
+   *  rather than being a uniform blur.  'off' is the hard-shadow control. */
+  cycleShadowSoftness() {
+    cycleShadowSoftness();
   }
 
   /** DBG (Visual): gamepad force feedback on/off.  Separate from the
