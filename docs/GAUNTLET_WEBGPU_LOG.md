@@ -60,8 +60,9 @@ that *produced* the result being reported.
 - [x] **Stage 3** — Renderer seam (**COMPLETE** — byte-identical, 111/111)
 - [~] **Stage 4** — *partial*: H4/H5 hazard probes done; `GPURenderSystem` NOT built
 - [ ] **Stage 5** — Procedural shapes (**not started** — see the verdict)
-- [x] **Stage 6** — **VERDICT WRITTEN (KG3)** — *complete the port, conditional
-      on one prerequisite measurement; merge the seam regardless*
+- [x] **Stage 6** — **VERDICT RESOLVED (KG3)** — *the prerequisite capture was
+      run: Omni is **sim-bound, not render-bound** (worst frames 88% sim, render
+      <7 ms). **Keep the seam; do not build the WebGPU renderer.** See §5a*
 
 ---
 
@@ -346,10 +347,11 @@ this write-up). Within cap.
 
 ## Stage 6 — THE VERDICT (KILL GATE 3)
 
-> **RECOMMENDATION: complete the port — but only after one cheap
-> prerequisite measurement, because this spike proved WebGPU is *faster*
-> and did NOT prove Omni is *render-bound*.** Merge the Stage 3 seam now
-> either way.
+> **RECOMMENDATION (RESOLVED): KEEP THE STAGE 3 SEAM, DO NOT BUILD THE
+> WEBGPU RENDERER.** The spike proved WebGPU is *faster* (5× on the hardest
+> primitive). The prerequisite device capture then showed Omni is **not
+> render-bound** — its worst frames are **88% simulation**, with render
+> under 7 ms. See §5a. The port would optimise the wrong 6 ms.
 
 ### 1. Device support
 
@@ -469,6 +471,69 @@ reproduced.
 as a performance failure but as a *correctness* one, from following the
 brief's own batching rule.
 
+### 5a. ⚠️ THE PREREQUISITE WAS RUN — and it says **DO NOT PORT**
+
+The verdict below was made conditional on one measurement: *is Omni actually
+render-bound?* **That measurement has now been taken on the device, and the
+answer is no.** The conditional therefore resolves to **keep the seam, do
+not build the WebGPU renderer.**
+
+Device capture, `PerfRecorder`, iPhone, tile-dense scene, difficulty 3,
+77.4 s / 3923 frames, 440×756 @ rscale 2x, zoom 0.65, ~5,200 entities:
+
+```
+FPS   avg 51 · median 59 · 5%-low 20 · 1%-low 17 · min 12 · ≥55: 80%
+frame avg 19.7ms · median 17.0ms · p95 49.0ms · p99 60.0ms
+cost  render avg 2.36ms · sim avg 1.95ms · collisions avg 0.61ms · ui 0.00ms
+```
+
+**The tail is sim, not render, and it is not close:**
+
+| worst frame | total | **sim** | render | other | steps |
+|---|---|---|---|---|---|
+| 1 | 81.0 | **71.0** | 6.0 | 4.0 | 5 |
+| 2 | 73.0 | **56.0** | 7.0 | 10.0 | 5 |
+| 3 | 68.0 | **59.0** | 6.0 | 3.0 | 5 |
+| 4 | 68.0 | **46.0** | 6.0 | 16.0 | 5 |
+| 5 | 67.0 | **55.0** | 7.0 | 5.0 | 5 |
+
+**Sim is 88% of the worst frame. Render never exceeds 7 ms on any of them.**
+
+The median (17.0 ms / 59 fps) is healthy; the whole problem is the tail
+(p95 49 ms, 1%-low 17 fps), and the tail is simulation.
+
+**Why `renderMs` under-reporting does not rescue the port.** `renderMs`
+times CPU-side call issuing, not rasterization, so the honest read has to
+allow for hidden GPU cost — which would surface in `other`. `other` is
+**3–16 ms**. Even trebling render to ~18 ms for unmeasured rasterization
+leaves sim's 71 ms dominant. A GPU renderer would attack the 6 ms and leave
+the 71 ms untouched.
+
+**The scene choice strengthens the conclusion rather than weakening it.**
+This was a *tile-dense* scene at ~5,200 entities — the case most favourable
+to a render bottleneck. If rendering were going to be the constraint
+anywhere, it would be there, and it was not.
+
+**Two observations that redirect the work:**
+
+1. **Every worst frame reports `steps 5`** — the substep cap
+   (`MAX_SUBSTEPS`). That is accumulator bunching: a long frame drains more
+   substeps, which lengthens the frame. `Sim rate` and `Substep cap` are
+   already DBG rows, so how much of the 71 ms is bunching versus raw
+   per-step cost is one more capture away.
+2. **`sim avg 1.95 ms` against `peak sim 71 ms`** — a 36× spread. This is a
+   spike, not steady load, which usually means it is fixable rather than
+   fundamental.
+
+**One render-side win that survives this finding**, and it needs no WebGPU:
+`tint peak 13.00 ms · 1916 total misses` against a **256-entry** cache is
+evicted-before-reuse thrashing, and it is the plausible source of the
+otherwise-unexplained `peak render 40.00 ms`.
+
+*(Single scene, single session. The margin is an order of magnitude, so the
+conclusion is robust — but a second capture on a different map would cost
+minutes and remove the last doubt.)*
+
 ### 5. The recommendation
 
 **Complete the port — conditional on one cheap prerequisite.**
@@ -487,11 +552,12 @@ that miss 60 fps are missing them in *render*. The brief names fill-rate as
 the leading hypothesis for the unattributed device residual — **that
 hypothesis is still unconfirmed**, and it is the whole business case.
 
-- **If render is the bottleneck** → complete the port. The margin is real
-  and large.
-- **If it is not** → keep the seam, keep this log, and spend the 8–15 days
-  on whatever the capture *does* implicate. Re-open this branch when the
-  answer changes; nothing here expires except the iOS adoption figure.
+- ~~**If render is the bottleneck** → complete the port.~~
+- **✅ THIS IS WHAT HAPPENED — render is NOT the bottleneck** (§5a). Keep
+  the seam, keep this log, and spend the 8–15 days on the sim tail the
+  capture actually implicates. Re-open this branch if the answer changes —
+  nothing here expires except the iOS adoption figure, and the 5× margin
+  will still be there if rendering ever becomes the constraint.
 
 **Merge policy:** merge **the Stage 3 seam only**. It is byte-identical
 (proven), 111/111 green, and valuable regardless — it is the extraction any
