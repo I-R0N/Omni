@@ -575,10 +575,12 @@ export class DebugControls {
 
   /** DBG: cycle the HUD (React) update rate — 60Hz default / 30 / 15.
    *
-   *  Diagnostic first, knob second: the per-frame React hand-off is the one
-   *  cost the engine's own timers never saw, and the hardware capture that
-   *  motivated this showed 32ms of a 35ms frame outside render+sim.  Lowering
-   *  it is the A/B that says whether that gap is React.  Overlay screens
+   *  This was added as a diagnostic — the A/B that would say whether the
+   *  32ms-of-a-35ms-frame gap in the 2026-08-09 capture was React.  THAT A/B
+   *  HAS SINCE BEEN RUN, with a real instrument, and the answer is no:
+   *  reconciliation is 0.1ms median in play, and this knob's ceiling is
+   *  ~0.05ms (see docs/GAUNTLET_REACT_LOG.md).  It survives as a harmless
+   *  A/B convenience, not as a lever worth reaching for.  Overlay screens
    *  always push immediately regardless of this setting. */
   cycleHudRate() {
     cycleHudRate();

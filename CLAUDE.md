@@ -1846,6 +1846,40 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   wrong with NO symptom to read (a pad discards a malformed report in
   silence), and they are pure with a published CRC test vector, so they are
   pinnable without hardware.
+- **The `ui` column in any PerfRecorder capture taken before
+  2026-08-16 is INVALID — it measured scheduling, not rendering.**  It was
+  fed `GameEngine.lastStatsPushMs`, a bracket around the `onStatsUpdate`
+  call.  But `onStatsUpdate` is a setState called from a rAF callback:
+  React 18/19 BATCHES it and does the reconciliation AFTER that callback
+  returns, so the bracket closed before the work it was captioned as
+  measuring had begun.  It was structurally incapable of containing the
+  cost, and read ~0 no matter how expensive the tree was.  Measured, it
+  understated by ~45×.  **Read every historical export's `ui avg` and
+  worst-frame `ui` column as ~0 and disregard them** — and note the
+  `other` residual beside them is correspondingly overstated, since
+  `other` is `frame − render − sim − ui`.
+  Live captures are fine: the column is now fed `PerfSnapshot.uiActualMs`,
+  measured by a React `<Profiler>` wrapped around `<UIOverlay>` in
+  `App.tsx`, which reports in through `GameEngine.noteUiRender()` as PLAIN
+  FIELD WRITES (never a setState — an instrument that re-renders the tree
+  it measures is its own load).  Two things go with it:
+  (1) **React's shipping `react-dom` compiles the profiler timers out**, so
+  in a normal build `onRender` never fires and the ui figures read exactly
+  0.00 — indistinguishable from "reconciliation is free".  A measurement
+  build keeps them: `OMNI_PROFILE_REACT=1 npx vite build` (an opt-in alias
+  to `react-dom/profiling` in `vite.config.ts`; the shipping bundle is
+  untouched).  `PerfSnapshot.uiProfiled` says which build you are reading,
+  and no ui number should be quoted without it.
+  (2) The figures are RAW PER-FRAME, not ring-averaged like the timers
+  beside them, and they lag those timers by ONE FRAME (React commits after
+  the rAF callback that scheduled the work).  Fine for medians and p95s,
+  wrong for "which single frame owned this".
+  `lastStatsPushMs` survives as `lastStatsScheduleMs` /
+  `PerfSnapshot.uiScheduleMs` — it does measure something real (the
+  `EngineStats` literal is built as the ARGUMENT to `onStatsUpdate`, so
+  payload construction plus scheduling both sit inside it, together ≤0.1 ms)
+  and it is the control that demonstrates the batching claim.  It is not
+  the React cost.  See `docs/GAUNTLET_REACT_LOG.md`.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk

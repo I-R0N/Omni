@@ -587,8 +587,53 @@ export class GameEngine {
    *  substeps in".  Pairing the two separates the sim's own cost from the
    *  substep-bunching a slow frame causes — the frame-PACING signal. */
   private lastFrameSteps: number = 0;
-  /** Wall time of the per-frame `onStatsUpdate` hand-off to React. */
-  private lastStatsPushMs: number = 0;
+  /** Wall time of the `onStatsUpdate` CALL — i.e. how long it takes to
+   *  SCHEDULE a React update, NOT how long React then spends rendering one.
+   *  `onStatsUpdate` is a setState called from a rAF callback: React 18/19
+   *  batches it and defers reconciliation past the end of this callback, so
+   *  this bracket closes before any of the work it was once captioned as
+   *  measuring has happened.  It is kept, under an honest name, as the
+   *  CONTROL for that claim — it should stay near zero while `uiActualMs`
+   *  moves.  The real cost is measured by `<Profiler>` (see noteUiRender). */
+  private lastStatsScheduleMs: number = 0;
+  // ── React reconciliation cost, reported IN by the UI layer ────────────
+  //
+  // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
+  // App.tsx.  Plain field writes, never a setState — an instrument that
+  // re-renders the tree it is measuring is its own load.
+  //
+  // Accumulated across commits and CONSUMED once per frame (see `loop`), so
+  // a frame that committed nothing records 0 rather than repeating the last
+  // commit's cost.  React commits after the rAF callback that scheduled
+  // them, so what a frame consumes belongs to the PREVIOUS frame's push.
+  private uiActualAccum: number = 0;
+  private uiBaseAccum: number = 0;
+  private uiCommitAccum: number = 0;
+  private lastUiActualMs: number = 0;
+  private lastUiBaseMs: number = 0;
+  private lastUiCommits: number = 0;
+
+  /** True once the `<Profiler>` has reported even one commit.
+   *
+   *  This exists because of the single most dangerous failure mode in this
+   *  measurement: React's SHIPPING `react-dom` build strips the profiler
+   *  timers, so `onRender` never fires and the UI cost reads exactly 0.00 —
+   *  which is indistinguishable from "reconciliation is free".  A measurement
+   *  build (`OMNI_PROFILE_REACT=1 npx vite build`, see vite.config.ts) keeps
+   *  them.  Anything reporting the ui figures must report this flag beside
+   *  them, so a zero is readable as EITHER "measured, and cheap" or "not
+   *  measured at all". */
+  public uiProfilerSeen: boolean = false;
+
+  /** Fold one React commit of the UI tree into this frame's totals.
+   *  `actualDuration` is what the commit cost; `baseDuration` is what it
+   *  would have cost with no memoization anywhere. */
+  public noteUiRender(actualDuration: number, baseDuration: number): void {
+    this.uiProfilerSeen = true;
+    this.uiActualAccum += actualDuration;
+    this.uiBaseAccum += baseDuration;
+    this.uiCommitAccum++;
+  }
   /** Seconds accrued toward the next HUD (React) push — see HUD_RATE_CYCLE. */
   statsPushAccum: number = 0;
   // Last-seen values for the Perf REC event timeline (see markPerfEvents).
@@ -1540,6 +1585,17 @@ export class GameEngine {
         || this.dockedAtStation || this.deathPending || this.stageClearPending;
     const pushStats = overlayUp || this.statsPushAccum >= hudPeriod;
     if (pushStats) this.statsPushAccum = 0;
+    // Consume whatever React committed since the last frame.  Done BEFORE the
+    // snapshot so the snapshot, the recorder sample and the HUD all report the
+    // same figures for this frame.  Zero here means "no commit landed", which
+    // is the honest answer for a throttled frame — hence consume-and-reset
+    // rather than a sticky last-value.
+    this.lastUiActualMs = this.uiActualAccum;
+    this.lastUiBaseMs   = this.uiBaseAccum;
+    this.lastUiCommits  = this.uiCommitAccum;
+    this.uiActualAccum = 0;
+    this.uiBaseAccum = 0;
+    this.uiCommitAccum = 0;
     const perf = this.buildPerfSnapshot();
     // Menu-grade snapshots (loadout / shop / stats) are built while the
     // pause menu OR the docked station UI is up — both are sim-frozen
@@ -1559,7 +1615,12 @@ export class GameEngine {
         this.renderer.lastRenderMs,
         this.lastFrameSimMs,
         this.lastFrameSteps,
-        this.lastStatsPushMs,
+        // The recorder's `ui` column.  This used to be fed the setState
+        // SCHEDULING time, which is near-zero by construction — so every
+        // capture in the repo's history reported a ui cost of ~0 and an
+        // unexplained `other` residual of the same size as the real cost.
+        // It is now the profiler's measured reconciliation time.
+        this.lastUiActualMs,
         this.renderer.lastStampMs,
         this.renderer.lastStampCount,
         this.renderer.lastTintMs,
@@ -1709,13 +1770,13 @@ export class GameEngine {
         unmatched: this.audio.unmatchedFiles,
       },
     });
-    // Cost of handing the frame to React.  This is the ONE per-frame cost the
-    // engine's own timers never saw: `onStatsUpdate` is a setState, and the
-    // reconciliation it triggers is neither `draw()` nor the sim.  A hardware
-    // capture (2026-08-09) showed 35ms frames carrying only 1ms render + 2ms
-    // sim, i.e. ~32ms outside everything measured — so the unmeasured work is
-    // the whole story and had to be given a number.
-    this.lastStatsPushMs = pushStats ? performance.now() - tStats0 : 0;
+    // Cost of SCHEDULING the React update — not of performing it.  The
+    // reconciliation this setState triggers is deferred past the end of this
+    // rAF callback, so it is not inside this bracket and never was: the
+    // number this line produces is ~0 whatever the tree costs.  The measured
+    // cost is `lastUiActualMs`, reported in by the `<Profiler>` in App.tsx.
+    // Kept as the control that demonstrates the point.
+    this.lastStatsScheduleMs = pushStats ? performance.now() - tStats0 : 0;
 
     // Audio follows the camera, and goes quiet whenever the sim does.  Two
     // number writes and a boolean per frame — the manager is otherwise
@@ -5408,6 +5469,12 @@ export class GameEngine {
           weaponsMs:      GameEngine.ringAvg(this.perfWeapons,      simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
+          // Raw per-frame, not ring-averaged — see the PerfSnapshot comment.
+          uiActualMs:     this.lastUiActualMs,
+          uiBaseMs:       this.lastUiBaseMs,
+          uiCommits:      this.lastUiCommits,
+          uiScheduleMs:   this.lastStatsScheduleMs,
+          uiProfiled:     this.uiProfilerSeen,
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),
           nebulaVisible:  this.renderer.lastNebulaVisible,
           nebulaFast:     this.renderer.lastNebulaFastCount,
