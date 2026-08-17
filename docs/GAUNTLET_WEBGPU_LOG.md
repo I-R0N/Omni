@@ -30,8 +30,8 @@ Working rules for this branch:
 ## Checklist
 
 - [x] **Stage 0** — Device support (**KG1 PASSED** on iPhone / iOS 26.6)
-- [ ] **Stage 1** — Throwaway harness
-- [ ] **Stage 2** — Hardest primitive (KG2)
+- [x] **Stage 1** — Throwaway harness (**PASSED** on device)
+- [~] **Stage 2** — Hardest primitive (KG2) — *quality MET; cost outstanding*
 - [ ] **Stage 3** — Renderer seam
 - [ ] **Stage 4** — Sprites, static tiles, HUD overlay
 - [ ] **Stage 5** — Procedural shapes
@@ -318,6 +318,122 @@ this write-up). Within cap.
 
 ---
 
+## Stage 2 — The hardest primitive (KILL GATE 2)
+
+**Cap: 1 day. Touches no game code** — adds one standalone page under
+`public/`. Status: **built, quality condition met in-container; the COST
+condition needs the device.**
+
+`public/webgpu-stage2.html` reproduces a **dented rock tile** in WebGPU and
+in Canvas2D, in the same page, drawing the same scene from the same
+polygon data, so the comparison is of *renderers* rather than of two
+different scenes. All five of the brief's requirements are present:
+runtime-mutable polygon triangulated on a dirty flag, stroked outline with
+real joins, radial-gradient bloom confined to the polygon, 500 instances,
+10% re-triangulating per frame.
+
+**Fidelity was taken from the renderer, not invented** (`tileShapes.ts`):
+the bloom is *not* `ctx.clip()` — it fills the polygon path with a radial
+gradient as `fillStyle` (`:194–213`), and its centre is the **closest point
+on the polygon outline to the player** (`:167–191`), sliding along the
+perimeter as the player orbits. Centring the bloom would have made the
+WebGPU side cheaper than the thing it claims to reproduce.
+
+Two deliberate choices to avoid flattering the result: **real ear-clipping**
+triangulation rather than a centroid fan (a fan is valid for these radial
+polygons and nearly free — which is exactly why timing one would understate
+the cost being measured), and **miter-joined stroke expansion**, the half of
+H2 the brief flags as underestimated.
+
+### 🔴 THE FINDING: batching by shape family produces the WRONG IMAGE
+
+**This is the most consequential result of the spike so far, and it
+contradicts the brief's own instruction.**
+
+The brief mandates, for H3: *"one instanced draw per **shape family**, not
+per entity."* Implemented literally — all fills in one draw, then all
+strokes in another — **the output is visibly wrong**: an earlier entity's
+*stroke* paints over a later entity's *fill*, so tiles show through each
+other. Canvas2D, drawing fill-then-stroke per entity, occludes correctly.
+
+It was found by looking at three deliberately overlapping tiles rather than
+by trusting the aggregate diff, and it is not subtle once isolated. In Omni
+tiles, shards and enemies overlap constantly, so this would have shipped as
+a pervasive rendering artifact.
+
+**Why a depth buffer does not rescue it:** Omni's rendering is heavily
+alpha-blended (blooms, glows, translucent overlays), and blending is
+order-dependent by nature. Depth testing fixes opaque overlap only.
+
+**The fix, which is the actual architectural lesson:** sort the vertex
+buffer by **entity order**, not by shape family — `[fill₀, stroke₀, fill₁,
+stroke₁, …]` — and carry a per-vertex `kind` flag that the fragment shader
+branches on. Painter's order is preserved *and* the whole scene collapses to
+**one draw call instead of two**. So the correct rule is:
+
+> **Batch by DRAW ORDER and branch in the shader — never by shape family.**
+
+Any future attempt should start from that sentence. Getting it wrong is
+cheap to fix in a harness and expensive to discover at Stage 5.
+
+### Quality condition — **MET** (objectively, not by eye)
+
+KG2's quality bar ("visually indistinguishable at 1× zoom") is otherwise a
+subjective judgement made on a phone. The harness instead renders the same
+frame through both renderers, reads back the **actual GPU texture**, and
+compares pixels — so the answer is a number that a future reader can
+re-check.
+
+| Configuration | mean abs diff (/255) | pixels differing >8 | max channel |
+|---|---|---|---|
+| Family-batched, no MSAA | 1.42 | 5.67% | 87 |
+| Family-batched, MSAA 4× | 1.26 | 4.10% | 94 |
+| Entity-ordered, no MSAA | 1.10 | 4.91% | 83 |
+| **Entity-ordered + MSAA 4×** | **0.38** | **0.88%** | **44** |
+
+**0.38/255 mean (0.15%), with under 1% of pixels differing perceptibly.**
+The residual is edge antialiasing, which differs by nature. Both fixes are
+required and they are independent: ordering fixes overlap, MSAA fixes edges.
+
+**MSAA 4× is not optional for parity** — without it, 4.9% of pixels differ.
+Canvas2D antialiases every path edge for free; a `sampleCount: 1` WebGPU
+pass does not. Its cost on a mobile GPU must be measured on the device, and
+the toggle exists for exactly that. (Apple's TBDR resolves MSAA in tile
+memory, so the cost may be modest — but "may be" is not a measurement.)
+
+**A measurement bug worth recording**, because it produced a confident wrong
+answer first: the diff initially read **47/255 with 100% of pixels
+differing**, which looks like catastrophic failure. The cause was
+`drawImage()` from the WebGPU canvas returning **blank** — the compositor
+has taken the frame by then. Copying the texture directly
+(`copyTextureToBuffer`, `COPY_SRC` usage, 256-byte row alignment, BGRA→RGBA
+swizzle) gave 1.49. **A quality gate that screen-scrapes a GPU canvas will
+fail for reasons that have nothing to do with rendering.**
+
+### Cost condition — **outstanding, and it needs the device**
+
+Container numbers here are worthless in both directions: WebGPU runs on
+SwiftShader (a CPU rasterizer through software Vulkan), while Canvas2D runs
+on Skia's heavily optimised software path. That comparison measures two
+CPU rasterizers, not a GPU.
+
+**Stage 1 also established that frame time cannot answer this question** —
+it is vsync-locked at 17 ms, so any renderer fitting the budget reads as
+exactly 17. Two vsync-immune instruments are therefore built in:
+
+1. **GPU work time** per frame via `timestamp-query` (validated on device in
+   Stage 1). Canvas2D has no equivalent — its JS issuing cost *under-reports*,
+   which the UI states rather than hides.
+2. **THE RAMP** — raise the tile count until 60 fps breaks and report where.
+   Immune to vsync and to both timers' dishonesty, and it is the number that
+   actually answers "which is faster". **This is the primary evidence for
+   KG2's cost condition.**
+
+Verified working in-container (ramp terminates and reports; 1 draw call at
+all counts; zero console errors). Awaiting the device run.
+
+---
+
 ## Stage 1 — Throwaway harness
 
 **Cap: 2 hours. Touches no game code** — adds one standalone page under
@@ -379,12 +495,53 @@ than by the error it would have caused: `queue.writeBuffer`'s first
 argument is the destination **GPUBuffer**, and it had been passed the
 source `ArrayBuffer`. It would have thrown on the first frame.
 
-### Outstanding
+### ✅ Stage 1 — **PASS** on the target device
 
-Stage 1's gate is a device statement, like Stage 0's: *a quad renders on
-the target device at a stable frame rate, with frame-time percentiles
-readable on-device.* Awaiting the phone reading via the same Netlify
-preview URL.
+iPhone / iOS 26.6, 880×1512 (1.33 Mpx), **2000 instances in 1 draw call**,
+885 frames over 14.8 s.
+
+| Metric | p50 | p95 | p99 | max | min |
+|---|---|---|---|---|---|
+| **frame** ms (rAF delta) | 17.0 | 17.0 | 17.0 | 32.0 | 9.0 |
+| **cpu** ms (JS issuing) | 0 | 1 | 1 | 1 | 0 |
+| **gpu** ms (`timestamp-query`) | **4.48** | 4.53 | 4.58 | 5.83 | 4.44 |
+
+**2000 textured, rotated, alpha-blended, per-instance-tinted sprites cost
+4.5 ms of GPU time** at the real backing store, holding a locked 60 fps —
+about **27% of a 16.7 ms budget**, with the CPU side at effectively zero.
+
+**Four results, in descending order of consequence.**
+
+1. **`timestamp-query` returns real values on WebKit/iOS.** p50 4.48
+   against a min of 4.44 and a p99 of 4.58 — a distribution far too tight
+   and too finely resolved to be a privacy-quantised stub. **Stage 2's
+   cost gate is therefore measurable.** This was the open risk flagged
+   before the run.
+2. **Frame time is VSYNC-LOCKED and cannot answer Stage 2's question.**
+   17.0 at p50, p95 *and* p99 is the display's 60 Hz cadence, not the
+   renderer's cost — the GPU is doing 4.5 ms of work inside a 16.7 ms
+   slot and then waiting. **Any renderer whose work fits in budget reads
+   as exactly 17 ms**, so a Canvas2D-vs-WebGPU comparison on frame time
+   would report "17 vs 17" and conclude nothing. The brief's "≤ 50% of
+   Canvas2D's frame time" gate has to be honoured *in intent* by
+   measuring work, not cadence. **This changes Stage 2's design** — see
+   the measurement plan there.
+3. **The Stage 0 59 ms spike did NOT recur.** One 32 ms frame in 885,
+   against a 17 ms p99. The pipeline-compilation hypothesis is confirmed
+   and the observation is closed rather than left hanging.
+4. **H3's mitigation is real on hardware.** 2000 instances cost **0 ms**
+   p50 of CPU time in one draw call. Whatever kills this port, it will
+   not be per-entity CPU dispatch — *provided* the port is written
+   instanced, which is the condition, not a given.
+
+**Toolchain cost: low.** No Safari-specific quirks, zero WGSL
+diagnostics, no compositing issues, and the container's software adapter
+proved a faithful enough functional stand-in that the device run
+reproduced it first time. The brief's fail-action ("if the toolchain
+fights you for more than the cap, that is signal about the port's total
+cost") did not trigger — the toolchain was not the problem.
+
+**Effort:** ~1 h of the 2 h cap.
 
 ---
 
@@ -396,8 +553,8 @@ are in the brief and are deliberately not repeated here.
 | Hazard | Actual outcome so far |
 |---|---|
 | **H1 — Safari/iOS support** | **CLEARED for the target device.** iPhone on iOS 26.6: real Apple GPU, all five gate checks pass, every downstream limit exceeded (`maxTextureDimension2D` 16384 vs the 3072 needed). Not cleared for the ~12% of iOS players below iOS 26 — hence both renderers coexist. Controls: container Chromium (no adapter without flags), macOS Safari 18.5 (no `navigator.gpu`, as expected below Safari 26) |
-| **H2 — Path rendering (375 sites)** | Confirmed unchanged: WebGPU has no path, fill, stroke, arc or gradient primitive. Untested — Stage 2 |
-| **H3 — Draw-call explosion** | Untested — Stage 2/5 |
+| **H2 — Path rendering (375 sites)** | **Reproducible.** Ear-clipped fills, miter-joined stroke expansion and an analytic radial bloom match Canvas2D to 0.38/255 mean (<1% of pixels differing) with MSAA 4×. MSAA is REQUIRED for edge parity. Cost on device outstanding |
+| **H3 — Draw-call explosion** | **Mitigation works, but the brief's rule is WRONG.** 2000 instances cost 0 ms p50 CPU in 1 draw call (Stage 1, device). However batching "one draw per SHAPE FAMILY" breaks painter's order and renders overlapping entities incorrectly — batch by DRAW ORDER with a per-vertex kind flag instead, which is both correct and fewer draw calls |
 | **H4 — Composite modes** | Untested — Stage 4/5 |
 | **H5 — Text (20 sites)** | Confirmed no text primitive; the Canvas2D-overlay mitigation stands. Untested — Stage 4 |
 
