@@ -1,0 +1,242 @@
+/** Unified tile lighting — the occluder layer (gauntlet A1-A3).
+ *
+ *  See `docs/GAUNTLET_LIGHTING_LOG.md`.  What is pinned here is the part of
+ *  the lighting system that can be WRONG WITH NO SYMPTOM until it is very
+ *  wrong indeed — the same motive as `__omniHid` in the input suite:
+ *
+ *   - The occluder FILTER.  `nebula-tile` is `passThrough` and must never
+ *     cast shadow; it is also the most numerous static tile on the natural
+ *     maps (1496 of Universe's 2227), so getting this wrong would darken
+ *     most of the game and read as an art problem, not a filter bug.
+ *   - CHURN.  A tile that died this frame must leave the set immediately.  A
+ *     stale shadow under a tile the player just shot is the single most
+ *     visible failure this system can have, and `FlowFieldGrid` already
+ *     concedes it cannot patch creation incrementally — shadows must not
+ *     inherit that.
+ *   - The RADIUS-CORRECT walk.  `forEachStaticNear` scans a fixed 3x3 cell
+ *     block, which covers at most SPATIAL_GRID_SIZE (120).  Lighting queries
+ *     at 300+, where that under-reports by 28-45%.  The symptom would be
+ *     "shadows are missing from some tiles", which looks like tuning.
+ *   - The TOROIDAL SEAM.  A wedge built across a wrap seam draws a bar of
+ *     darkness through the whole arena.  Occluders are resolved into the
+ *     light's zone at collection; this asserts they stay there.
+ *
+ *  The lighting MODE is driven through `engine.renderer.setLighting(...)`.
+ *  Occluders are read off `renderer._lightOccluders` / `_lightOccluderCount`
+ *  — index-filled buffers, so the COUNT is authoritative, never `.length`.
+ */
+
+import { test, expect } from '@playwright/test';
+import { boot, engine, startRun, waitForEngine } from './helpers';
+
+/** Park the player in the densest static-tile cluster on the current map and
+ *  hold it there, so a light actually has occluders around it.  Returns the
+ *  collected occluder count for one frame at that spot. */
+async function parkInCluster(page: import('@playwright/test').Page) {
+  return engine(page, (e) => {
+    const tiles = e.currentMap.entities.filter(
+      (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity && t.active,
+    );
+    let best = null, bestN = -1;
+    for (let i = 0; i < tiles.length; i += 5) {
+      const a = tiles[i];
+      let n = 0;
+      for (let j = 0; j < tiles.length; j += 3) {
+        const dx = a.position.x - tiles[j].position.x;
+        const dy = a.position.y - tiles[j].position.y;
+        if (dx * dx + dy * dy < 300 * 300) n++;
+      }
+      if (n > bestN) { bestN = n; best = a; }
+    }
+    if (best) {
+      e.player.position.x = best.position.x;
+      e.player.position.y = best.position.y;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+    }
+    return { tiles: tiles.length, cluster: bestN };
+  });
+}
+
+test.describe('occluder collection', () => {
+  test('is inert at the legacy default — no canvas, no cost, no set', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    const r = await engine(page, e => ({
+      mode: e.renderer.getLighting(),
+      hasCanvas: !!e.renderer._lightCanvas,
+      count: e.renderer._lightOccluderCount,
+      ms: e.renderer.lastLightingMs,
+    }));
+
+    // 'legacy' is the shipped default and it must cost literally nothing —
+    // that is what makes the toggle a restore rather than a second route to
+    // the same picture.
+    expect(r.mode).toBe('legacy');
+    expect(r.hasCanvas).toBe(false);
+    expect(r.count).toBe(0);
+    expect(r.ms).toBe(0);
+    watch.assertClean();
+  });
+
+  test('collects solid tiles and NEVER passThrough nebula', async ({ page }) => {
+    const watch = await boot(page);
+    // Universe is the case that matters: two thirds of its static tiles are
+    // nebula, so a filter that leaked passThrough would be obvious here and
+    // nowhere else.
+    await startRun(page, 'UNIVERSE');
+    await engine(page, e => e.renderer.setLighting('unified'));
+    await parkInCluster(page);
+    await waitForEngine(page, e => e.renderer._lightOccluderCount >= 0, 'a lighting frame');
+
+    const r = await engine(page, (e) => {
+      const n = e.renderer._lightOccluderCount;
+      const occ = e.renderer._lightOccluders.slice(0, n);
+      // Match each collected occluder back to a live entity by position, and
+      // report what variants came through.
+      const variants: Record<string, number> = {};
+      let nebula = 0, mobile = 0, inactive = 0;
+      for (const o of occ) {
+        const hit = e.currentMap.entities.find(
+          (t: any) => Math.abs(t.position.x - o.x) < 0.01 && Math.abs(t.position.y - o.y) < 0.01,
+        );
+        if (!hit) continue;                       // wrap-shifted copy; fine
+        variants[hit.shardVariant] = (variants[hit.shardVariant] ?? 0) + 1;
+        if (hit.shardVariant === 'nebula-tile') nebula++;
+        if (hit.mass !== Infinity) mobile++;
+        if (!hit.active) inactive++;
+      }
+      return { n, variants, nebula, mobile, inactive };
+    });
+
+    expect(r.nebula).toBe(0);     // passThrough must never cast shadow
+    expect(r.mobile).toBe(0);     // static/dynamic is by MASS, not EntityType
+    expect(r.inactive).toBe(0);
+    watch.assertClean();
+  });
+
+  test('drops a tile from the set the frame it dies — no stale shadows', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await engine(page, e => e.renderer.setLighting('unified'));
+    await parkInCluster(page);
+    await waitForEngine(page, e => e.renderer._lightOccluderCount > 0, 'occluders around the player');
+
+    const before = await engine(page, e => e.renderer._lightOccluderCount);
+    expect(before).toBeGreaterThan(0);
+
+    // Kill the tiles nearest the player through the FULL death path — what a
+    // cannon into a cluster does.
+    const killed = await engine(page, (e) => {
+      const px = e.player.position.x, py = e.player.position.y;
+      const cands = e.currentMap.entities
+        .filter((t: any) => t.active && t.type === 'STRUCTURE' && t.mass === Infinity
+                            && t.shardVariant !== 'indestructible-tile')
+        .map((t: any) => ({ t, d: (t.position.x - px) ** 2 + (t.position.y - py) ** 2 }))
+        .sort((a: any, b: any) => a.d - b.d)
+        .slice(0, 12);
+      for (const { t } of cands) {
+        t.killedByPlayer = true;
+        t.health = 0;
+        e.handleEntityDeath(t);
+        t.active = false;
+      }
+      return cands.map((c: any) => c.t.id);
+    });
+    expect(killed.length).toBeGreaterThan(0);
+
+    // The set is rebuilt per frame from the live static grid, so the dead
+    // tiles must be gone immediately — not on some later invalidation.
+    await waitForEngine(
+      page,
+      e => e.renderer._lightOccluderCount >= 0,
+      'a lighting frame after the kill',
+    );
+    const after = await engine(page, (e) => {
+      const n = e.renderer._lightOccluderCount;
+      const occ = e.renderer._lightOccluders.slice(0, n);
+      let stale = 0;
+      for (const o of occ) {
+        const hit = e.currentMap.entities.find(
+          (t: any) => Math.abs(t.position.x - o.x) < 0.01 && Math.abs(t.position.y - o.y) < 0.01,
+        );
+        if (hit && !hit.active) stale++;
+      }
+      return { n, stale };
+    });
+
+    expect(after.stale).toBe(0);
+    watch.assertClean();
+  });
+
+  test('survives the wrap seam — occluders stay in the light\'s zone', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'UNIVERSE');
+    await engine(page, e => e.renderer.setLighting('unified'));
+
+    // Walk the player along the seam.  A wedge whose apex and base straddle
+    // the wrap draws a bar of darkness across the arena, and the failure is
+    // silent until it happens — so the invariant is asserted, not eyeballed.
+    const worst = await engine(page, async (e) => {
+      const W = e.currentMap.width, H = e.currentMap.height;
+      let maxDx = 0, maxDy = 0, frames = 0;
+      const spots = [
+        [W / 2 - 1, H / 2 - 1], [-W / 2 + 1, -H / 2 + 1],
+        [W / 2 - 1, -H / 2 + 1], [-W / 2 + 1, H / 2 - 1],
+        [W / 2 - 150, H / 2 - 150], [0, H / 2 - 5],
+      ];
+      for (const [x, y] of spots) {
+        e.player.position.x = x; e.player.position.y = y;
+        e.player.velocity.x = 0; e.player.velocity.y = 0;
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const n = e.renderer._lightOccluderCount;
+        frames++;
+        for (let i = 0; i < n; i++) {
+          const o = e.renderer._lightOccluders[i];
+          maxDx = Math.max(maxDx, Math.abs(o.x - e.player.position.x));
+          maxDy = Math.max(maxDy, Math.abs(o.y - e.player.position.y));
+        }
+      }
+      return { maxDx, maxDy, frames };
+    });
+
+    // The torus-seam detector from the ladder: no occluder may sit further
+    // from the light than 3x the light radius.  A seam failure puts one half
+    // a map away, so this catches it by orders of magnitude, not by a hair.
+    expect(worst.frames).toBeGreaterThan(0);
+    expect(worst.maxDx).toBeLessThan(300 * 3);
+    expect(worst.maxDy).toBeLessThan(300 * 3);
+    watch.assertClean();
+  });
+
+  test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await parkInCluster(page);
+
+    const r = await engine(page, (e) => {
+      const p = e.player.position;
+      const count = (fn: string, rad: number) => {
+        let n = 0;
+        (e.physics as any)[fn](p.x, p.y, rad, () => { n++; });
+        return n;
+      };
+      return {
+        near100: count('forEachStaticNear', 100),
+        rad100: count('forEachStaticInRadius', 100),
+        near300: count('forEachStaticNear', 300),
+        rad300: count('forEachStaticInRadius', 300),
+      };
+    });
+
+    // Under one cell (120) the two walks cover the same ground, so they must
+    // agree exactly — that is what makes keeping the fixed span for the
+    // legacy callers behaviour-preserving.
+    expect(r.rad100).toBe(r.near100);
+    // At a lighting radius the fixed span under-reports.  This is the bug
+    // that would have shipped had A4 been built on forEachStaticNear.
+    expect(r.rad300).toBeGreaterThan(r.near300);
+    watch.assertClean();
+  });
+});

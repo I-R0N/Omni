@@ -23,7 +23,7 @@ import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
-import { renderLightLayer } from './render/lighting';
+import { renderLightLayer, type Occluder } from './render/lighting';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -163,6 +163,13 @@ export class RenderSystem {
   _lightW: number = 0;
   _lightH: number = 0;
   _lightScale: number = 1;   // light-layer px per CSS px (= 1 / divisor)
+  // This frame's occluder set for the player light, nearest-first.  Held on
+  // the renderer (not module scope) so a test can read it off
+  // `window.__omniEngine.renderer` without a second debug handle.  Read
+  // `_lightOccluderCount`, not `.length`: the buffer is index-filled and the
+  // tier cap may be below the collected count.
+  _lightOccluders: Occluder[] = [];
+  _lightOccluderCount: number = 0;
 
   /** DBG passthroughs for the lighting mode.  The state itself is module
    *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
@@ -917,7 +924,7 @@ export class RenderSystem {
     // it never tints the HUD, and AFTER ctx.restore() because the layer is
     // screen-space and must not inherit the camera translation.  No-op at
     // LIGHTING_CYCLE 'legacy' (the default).
-    renderLightLayer(this, ctx, width, height);
+    renderLightLayer(this, ctx, width, height, playerPos);
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

@@ -24,7 +24,7 @@ recorded rather than quietly dropped.
 - [x] **A0** — Instrumentation, baseline, legacy credit
 - [x] **A1** — Occluder extraction into a single queryable source
 - [x] **A2** — Light-layer scaffolding + debug visualization
-- [ ] **A3** — Occluder churn
+- [x] **A3** — Occluder churn
 - [ ] **A4** — One point light, shadow-cast
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A5** — Soft shadow penumbra
@@ -698,3 +698,101 @@ broken change.
 | 111 tests pass | PASS |
 
 Cost against the ladder's budget: **0.085 ms** of the 0.20 ms slice.
+
+---
+
+## A3 — Occluder churn
+
+Two files (`render/lighting.ts`, `RenderSystem.ts`) plus a new permanent
+suite, `tests/lighting.spec.ts`.
+
+### What shipped
+
+At `'unified'` the frame now COLLECTS the player light's occluder set —
+nearest-first, capped at the tier's 24 — and holds it on
+`RenderSystem._lightOccluders` / `_lightOccluderCount`. Nothing is drawn
+yet; A4 owns the falloff and the wedges. That split is deliberate: it
+makes `lightingMs` at this stage the collection cost *with nothing else
+in it*.
+
+**There is nothing to invalidate, by construction.** Lights move every
+frame, so each light's set is recomputed from the live static grid
+regardless, and `forEachStaticCells` skips `!active` entities — a tile
+that died this frame cannot appear in the set at all. A3 exists to *show*
+that this is affordable under maximum churn, not to add machinery.
+`FlowFieldGrid` concedes it cannot patch tile CREATION incrementally and
+falls back to a dirty flag; shadows deliberately do not inherit that,
+because a shadow still cast by a tile the player just shot is far more
+visible than a stale flow vector.
+
+**A landmine documented before it can bite.** The occluder pool is shared
+across lights, so every `out` array holds references INTO it. With one
+light that cannot matter. From A6 each light's set must be *consumed*
+before the next is collected — collecting all lights up front and then
+drawing would give every light the last light's occluders, and the
+symptom (wrong-place shadows, only when two lights are near each other)
+would be very hard to read backwards.
+
+### Cost — the collection, isolated
+
+`'debug'` does clear + fill + blit; `'unified'` does clear + blit +
+collect. The difference is the collection with nothing else in it.
+
+The stock perf scenes could not measure this: with `tile-shatter-storm`
+the player is parked away from terrain AND the storm clears whatever is
+left, so collection ran against **0 occluders** and `lightingMs` (0.095
+p95) was measuring the blit. So the player is PINNED in the densest
+static-tile cluster, with the churn cadence driven on top.
+
+| map | churn | debug p95 | unified p95 | **collect p95** | occluders p50/p95/max |
+|---|---|---|---|---|---|
+| GLASS_FIELD | no | 0.090 | 0.120 | **0.030** | 24 / 24 / 24 |
+| GLASS_FIELD | yes | 0.100 | 0.120 | **0.020** | 0 / 0 / 6 |
+| UNIVERSE | no | 0.090 | 0.115 | **0.025** | 0 / 0 / 0 |
+| UNIVERSE | yes | 0.105 | 0.110 | **0.005** | 0 / 0 / 6 |
+| METAL_FIELD | no | 0.085 | 0.105 | **0.020** | 24 / 24 / 24 |
+| METAL_FIELD | yes | 0.100 | 0.120 | **0.020** | 0 / 0 / 24 |
+
+**0.005–0.030 ms p95 against a 0.15 ms gate — a 5× margin**, and the
+worst case is at the FULL 24-occluder cap, so it does not get worse with
+denser terrain (the cap is what bounds it).
+
+Two things in that table are findings rather than noise. Under churn the
+occluder count collapses to ~0 because the storm destroys the
+neighbourhood faster than regen refills it — which is the churn case
+working, not a measurement failure. And **UNIVERSE reads 0 occluders even
+without churn**, for the third time in this log: its densest static
+cluster is entirely `nebula-tile`, which is `passThrough`.
+
+### Correctness — `tests/lighting.spec.ts`, 5 tests, now permanent
+
+The suite pins the things that can be wrong with no symptom until they
+are very wrong — the `__omniHid` motive applied to lighting:
+
+1. **Inert at `'legacy'`** — no canvas, no set, `lightingMs` exactly 0.
+2. **Never collects `passThrough` nebula, never collects mobile shards,
+   never collects inactive entities** — run on UNIVERSE specifically,
+   because a leak there would darken most of the game.
+3. **A tile leaves the set the frame it dies** — 12 tiles killed through
+   the full death path; 0 stale occluders after. This is the ladder's
+   stated A3 correctness gate.
+4. **The torus seam** — the player walked onto all four wrap corners and
+   both seams; no occluder further than `lightRadius × 3` from the light.
+5. **The radius-correct walk out-reports the 3×3 walk at light radii**,
+   and agrees with it exactly under one cell.
+
+Suite total: **111 → 116**.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| ≤ 0.15 ms p95 beyond A2, under churn | PASS — **0.005–0.030 ms**, 5× margin, worst case at the full occluder cap |
+| Shoot a tile, its shadow is gone within one frame | PASS — asserted in the suite; 0 inactive occluders after 12 full-path kills |
+| No `active === false` occluder in the collected set | PASS — guaranteed structurally by `forEachStaticCells`, asserted empirically |
+| 116 tests pass | PASS |
+| Scope ≤ 2 files | PASS (2 production files + the new suite) |
+
+Running total against the ladder's budget: A2 blit **0.085** + A3
+collection **0.030** = **0.115 ms p95**, against a cumulative 0.50 ms
+allowance at this point.

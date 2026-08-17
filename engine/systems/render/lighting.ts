@@ -56,9 +56,18 @@ export interface Occluder {
 
 /** Reusable occluder records.  Grows to the high-water mark of the largest
  *  query ever made and is then stable, so a steady-state frame allocates
- *  nothing.  Entries are owned by this module and are overwritten by the
- *  next `collectOccluders` call — consumers must read them within the frame
- *  and never retain one. */
+ *  nothing.
+ *
+ *  THE POOL IS SHARED ACROSS LIGHTS, AND THAT IS A CONSTRAINT ON CALLERS,
+ *  not an implementation detail.  Every `out` array handed to
+ *  `collectOccluders` is filled with references INTO this pool, so a second
+ *  collection overwrites the records the first one's array still points at.
+ *  With one light (A3/A4) that cannot bite.  From A6, where several lights
+ *  are composited per frame, each light's set MUST be consumed — drawn —
+ *  before the next light is collected.  Collecting all lights up front and
+ *  then drawing them would silently give every light the last light's
+ *  occluders, and the symptom (shadows in the wrong place, only when two
+ *  lights are near each other) would be very hard to read backwards. */
 const _pool: Occluder[] = [];
 
 function poolAt(i: number): Occluder {
@@ -150,6 +159,10 @@ export function collectOccluders(
 
 const _EMPTY: Occluder[] = [];
 
+/** Nearest-first comparator, hoisted — a comparator literal passed to
+ *  `sort` inside a per-frame path is rebuilt every frame. */
+function byDistSq(a: Occluder, b: Occluder): number { return a.distSq - b.distSq; }
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  THE LIGHT LAYER — the compositing half.
 //
@@ -216,6 +229,7 @@ export function ensureLightCanvas(r: RenderSystem, ctx: CanvasRenderingContext2D
  */
 export function renderLightLayer(
     r: RenderSystem, ctx: CanvasRenderingContext2D, width: number, height: number,
+    playerPos?: { x: number; y: number },
 ): void {
     const mode = getActiveLightingMode();
     if (mode === 'legacy') return;
@@ -229,6 +243,35 @@ export function renderLightLayer(
     lctx.clearRect(0, 0, lw, lh);
 
     let lights = 0;
+    if (mode === 'unified' && playerPos && r.physics) {
+        // OCCLUDER CHURN.  Collected FRESH every frame, deliberately.
+        //
+        // Occluders churn constantly in Omni: tiles shatter, the dragon eats
+        // static tiles into its body, merged shards snap back onto the hex
+        // grid.  `FlowFieldGrid` concedes it cannot patch tile CREATION
+        // incrementally and falls back to a dirty flag — shadows must not
+        // inherit that, because a shadow still being cast by a tile the
+        // player just destroyed is far more visible than a stale flow vector.
+        //
+        // There is nothing to invalidate here BY CONSTRUCTION: lights move
+        // every frame, so each light's set is recomputed from the live static
+        // grid regardless. `forEachStaticCells` skips `!active` entities, so a
+        // tile that died this frame cannot appear in the set at all.  A3
+        // exists to show that this costs an acceptable amount under maximum
+        // churn rather than to add machinery.
+        const tier = getActiveLightingTier();
+        const n = collectOccluders(r.physics, playerPos.x, playerPos.y, tier.maxRadius, r._lightOccluders);
+        // Nearest-first, then cap: the nearest occluders subtend the largest
+        // shadow angle, so truncation degrades gracefully instead of dropping
+        // whichever ones the grid happened to return last.
+        r._lightOccluders.sort(byDistSq);
+        r._lightOccluderCount = n < tier.maxOccluders ? n : tier.maxOccluders;
+        lights = 1;
+        // A4 draws the falloff and the wedges.  A3 collects only, so the
+        // number it reports is the collection cost with nothing else in it.
+    } else {
+        r._lightOccluderCount = 0;
+    }
     if (mode === 'debug') {
         // A flat 50% grey.  This stage is proving the PLUMBING — canvas,
         // sizing, the single blit, and the smoothing restore below — so it
