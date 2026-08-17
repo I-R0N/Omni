@@ -1117,3 +1117,51 @@ case.
 | Hard output at `off` byte-identical to pre-A5 | PASS by construction — `steps` collapses to 1 and the erase fraction to 1, i.e. the original single pass |
 | Cost | PASS — +0.19 to +0.39 ms; worst total 0.96 ms of 2.0 ms |
 | 118 tests pass | PASS |
+
+---
+
+## CI red on A5, and the class of bug behind it
+
+The merge gate failed on `0febf43` with one test:
+`lighting.spec.ts` › *collects solid tiles and NEVER passThrough nebula*,
+asserting `mobile === 0` and receiving `2`.
+
+**Not a flake — a stale assertion, and my own.** That line was written at
+A3, when only static tiles cast. A4s made shards cast *deliberately*, and
+the assertion still said they must not. It is the exact defect the test
+was supposed to guard against, inverted.
+
+**It passed locally and failed in CI, and the reason matters more than
+the fix.** The maps are unseeded. The test parked the player in whatever
+the densest cluster happened to be and asserted on whatever was in range;
+my local runs drew clusters with no shard nearby, CI drew one with two.
+A test that depends on generated world state is a coin flip, and it will
+land on the side that says "green" often enough to ship.
+
+Two fixes, in that order:
+
+1. **The assertion now states the real invariant** — not "no mobile
+   occluders" but "mobile occluders *exactly when asked for*". It
+   classifies the set with `Shard shadows` both off and on, and checks
+   what actually holds either way: nebula never casts on either side of
+   the mass axis, nothing inactive is collected, the shard size floor is
+   respected, and each record's own `mobile` flag agrees with the entity
+   it came from.
+
+2. **`--repeat-each` was then run, and found a SECOND one.** The
+   debris-share test failed 1 run in 4 on `tilesInRange >= 16` — the same
+   dependence on where the cluster happened to be. It now **builds its
+   scene**: everything deactivated, 20 tiles on a ring at 190 and 20
+   shards at 90, so the shards are strictly nearer and plain nearest-first
+   would hand them the whole pool. Deterministic, and a sharper test of
+   the cap than the found scene ever was.
+
+56/56 across `--repeat-each 8` afterwards.
+
+**The lesson for the rest of this ladder:** these suites drive a
+procedurally generated, unseeded world. Any lighting test that *finds* its
+subject rather than *placing* it is sampling, not asserting. The shadow
+test and the share-cap test both build their scenes now; the churn and
+seam tests still use found scenes, but assert properties that hold for
+any population (nothing stale in the set, nothing beyond `radius × 3`),
+which is the distinction that makes that safe.

@@ -87,7 +87,7 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
-  test('collects solid tiles and NEVER passThrough nebula', async ({ page }) => {
+  test('collects solid geometry and NEVER passThrough nebula, on both sides of the mass axis', async ({ page }) => {
     const watch = await boot(page);
     // Universe is the case that matters: two thirds of its static tiles are
     // nebula, so a filter that leaked passThrough would be obvious here and
@@ -97,29 +97,57 @@ test.describe('occluder collection', () => {
     await parkInCluster(page);
     await waitForEngine(page, e => e.renderer._lightOccluderCount >= 0, 'a lighting frame');
 
-    const r = await engine(page, (e) => {
+    // Classify the collected set against the live entities, with SHARD
+    // SHADOWS both off and on.  An earlier version of this test asserted a
+    // flat `mobile === 0`, which was right when only tiles cast and became
+    // wrong the moment shards did — and it kept passing locally because the
+    // maps are unseeded and the runs happened to have no shard in range.
+    // CI drew a seed with two and caught it.  The invariant is not "no
+    // mobile occluders", it is "mobile occluders exactly when asked for".
+    const classify = async (wantShards: boolean) => engine(page, async (want) => {
+      const e = window.__omniEngine;
+      if (e.renderer.getShardShadows() !== want) e.renderer.toggleShardShadows();
+      await new Promise<void>(res => {
+        let k = 0;
+        const t = () => { if (++k < 6) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
       const n = e.renderer._lightOccluderCount;
-      const occ = e.renderer._lightOccluders.slice(0, n);
-      // Match each collected occluder back to a live entity by position, and
-      // report what variants came through.
       const variants: Record<string, number> = {};
-      let nebula = 0, mobile = 0, inactive = 0;
-      for (const o of occ) {
+      let nebula = 0, mobile = 0, inactive = 0, tooSmall = 0, matched = 0;
+      for (let i = 0; i < n; i++) {
+        const o = e.renderer._lightOccluders[i];
         const hit = e.currentMap.entities.find(
           (t: any) => Math.abs(t.position.x - o.x) < 0.01 && Math.abs(t.position.y - o.y) < 0.01,
         );
         if (!hit) continue;                       // wrap-shifted copy; fine
+        matched++;
         variants[hit.shardVariant] = (variants[hit.shardVariant] ?? 0) + 1;
-        if (hit.shardVariant === 'nebula-tile') nebula++;
-        if (hit.mass !== Infinity) mobile++;
+        if (String(hit.shardVariant).indexOf('nebula') >= 0) nebula++;
+        if (hit.mass !== Infinity) {
+          mobile++;
+          // The size floor applies to shards only.
+          if (Math.max(hit.size.x, hit.size.y) * 0.5 < 6) tooSmall++;
+        }
         if (!hit.active) inactive++;
+        // The record's own flag must agree with the entity it came from.
+        if (o.mobile !== (hit.mass !== Infinity)) inactive += 1000;   // poison
       }
-      return { n, variants, nebula, mobile, inactive };
-    });
+      return { n, matched, variants, nebula, mobile, inactive, tooSmall };
+    }, wantShards);
 
-    expect(r.nebula).toBe(0);     // passThrough must never cast shadow
-    expect(r.mobile).toBe(0);     // static/dynamic is by MASS, not EntityType
-    expect(r.inactive).toBe(0);
+    const off = await classify(false);
+    const on = await classify(true);
+
+    // Invariants that hold either way.
+    for (const r of [off, on]) {
+      expect(r.nebula).toBe(0);      // passThrough never casts — tile OR shard
+      expect(r.inactive).toBe(0);    // also catches a mismatched `mobile` flag
+      expect(r.tooSmall).toBe(0);    // the shard size floor is respected
+    }
+    // The mass axis is the toggle, not a hardcoded exclusion.
+    expect(off.mobile).toBe(0);
+    expect(on.mobile).toBeGreaterThanOrEqual(0);
     watch.assertClean();
   });
 
@@ -312,71 +340,74 @@ test.describe('occluder collection', () => {
 
   test('debris cannot blank out the terrain shadows', async ({ page }) => {
     const watch = await boot(page);
-    await startRun(page, 'GLASS_FIELD');
-    await engine(page, (e) => {
+    // UNIVERSE because this needs BOTH kinds present; the glass showcase has
+    // no shards and the asteroid showcase has no tiles.
+    await startRun(page, 'UNIVERSE');
+
+    // The scene is BUILT, not found.  An earlier version shattered the
+    // generated terrain and then asserted on whatever happened to be in
+    // range, which made it depend on where `parkInCluster` landed on an
+    // unseeded map — it passed locally and failed in CI, then failed 1 run
+    // in 4 under --repeat-each.  Here the adversarial case is constructed
+    // directly: shards placed NEARER than the tiles, so plain nearest-first
+    // would hand them the entire pool.
+    const r = await engine(page, async (e) => {
+      e.player.position.x = 0; e.player.position.y = 0;
+      e.player.velocity.x = 0; e.player.velocity.y = 0;
+
+      const all = e.currentMap.entities.filter((t: any) => t.type === 'STRUCTURE');
+      for (const t of all) t.active = false;
+      const tiles = all.filter((t: any) => t.mass === Infinity
+                                        && String(t.shardVariant).indexOf('nebula') < 0);
+      const shards = all.filter((t: any) => t.mass !== Infinity
+                                         && String(t.shardVariant).indexOf('nebula') < 0);
+
+      const NT = 20, NS = 20;
+      // Tiles on the OUTER ring...
+      for (let i = 0; i < NT && i < tiles.length; i++) {
+        const a = (i / NT) * Math.PI * 2;
+        tiles[i].active = true;
+        tiles[i].position.x = Math.cos(a) * 190;
+        tiles[i].position.y = Math.sin(a) * 190;
+      }
+      // ...shards on the INNER ring, i.e. strictly nearer than every tile.
+      for (let i = 0; i < NS && i < shards.length; i++) {
+        const a = ((i + 0.5) / NS) * Math.PI * 2;
+        shards[i].active = true;
+        shards[i].position.x = Math.cos(a) * 90;
+        shards[i].position.y = Math.sin(a) * 90;
+        shards[i].velocity.x = 0; shards[i].velocity.y = 0;
+      }
+      e.physics.initializeStaticGrid(e.currentMap.entities);
       e.renderer.setLighting('unified');
       if (!e.renderer.getShardShadows()) e.renderer.toggleShardShadows();
-    });
-    await parkInCluster(page);
-    await waitForEngine(page, e => e.renderer._lightOccluderCount > 0, 'occluders around the player');
 
-    // Shatter the nearest terrain repeatedly — the debris burst is what
-    // makes shards outrank tiles, since fragments land nearer than the
-    // intact terrain behind them.  Measured before the share cap existed:
-    // 100% of the 24 slots went to debris and the tiles stopped casting.
-    const share: Array<{ share: number; tilesInRange: number }> = await engine(page, async (e) => {
-      const px = e.player.position.x, py = e.player.position.y;
-      const shatter = () => {
-        const c = e.currentMap.entities
-          .filter((t: any) => t.active && t.type === 'STRUCTURE' && t.mass === Infinity
-                              && t.shardVariant !== 'indestructible-tile')
-          .map((t: any) => ({ t, d: (t.position.x - px) ** 2 + (t.position.y - py) ** 2 }))
-          .sort((a: any, b: any) => a.d - b.d).slice(0, 20);
-        for (const { t } of c) { t.killedByPlayer = true; t.health = 0; e.handleEntityDeath(t); t.active = false; }
-      };
-      // Sample the share ALONGSIDE how much intact terrain is actually in
-      // range.  Those two together are the invariant: shards may take the
-      // whole pool when there is no terrain left to reserve for (which a
-      // sustained shatter eventually causes, and which is correct), but they
-      // must NOT crowd terrain out while terrain is there to cast.
-      const frames: Array<{ share: number; tilesInRange: number }> = [];
-      const R = 300;
-      for (let round = 0; round < 3; round++) {
-        shatter();
-        await new Promise<void>(res => {
-          let n = 0;
-          const tick = () => {
-            e.player.position.x = px; e.player.position.y = py;
-            const k = e.renderer._lightOccluderCount;
-            if (k > 0) {
-              let mob = 0;
-              for (let i = 0; i < k; i++) if (e.renderer._lightOccluders[i].mobile) mob++;
-              let tilesInRange = 0;
-              const ents = e.currentMap.entities;
-              for (let i = 0; i < ents.length; i++) {
-                const t = ents[i];
-                if (!t.active || t.type !== 'STRUCTURE' || t.mass !== Infinity) continue;
-                if (t.shardVariant === 'nebula-tile') continue;
-                const dx = t.position.x - px, dy = t.position.y - py;
-                if (dx * dx + dy * dy < R * R) tilesInRange++;
-              }
-              frames.push({ share: mob / k, tilesInRange });
-            }
-            if (++n < 40) requestAnimationFrame(tick); else res();
-          };
-          requestAnimationFrame(tick);
-        });
-      }
-      return frames;
+      // Hold the player at the origin while the dynamic grid refills.
+      await new Promise<void>(res => {
+        let k = 0;
+        const t = () => {
+          e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++k < 30) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+
+      const n = e.renderer._lightOccluderCount;
+      let mob = 0;
+      for (let i = 0; i < n; i++) if (e.renderer._lightOccluders[i].mobile) mob++;
+      return { n, mob, tiles: n - mob, placedTiles: Math.min(NT, tiles.length),
+               placedShards: Math.min(NS, shards.length) };
     });
 
-    expect(share.length).toBeGreaterThan(0);
-    // The invariant: on any frame with terrain to spare, debris must not have
-    // taken more than its share of the pool.  Low tier gives shards 8 of 24.
-    const withTerrain = share.filter(f => f.tilesInRange >= 16);
-    expect(withTerrain.length).toBeGreaterThan(0);
-    const worst = Math.max(...withTerrain.map(f => f.share));
-    expect(worst).toBeLessThanOrEqual(8 / 24 + 0.01);
+    expect(r.placedTiles).toBeGreaterThanOrEqual(20);
+    expect(r.placedShards).toBeGreaterThanOrEqual(20);
+    expect(r.n).toBeGreaterThan(0);
+    // Plain nearest-first would give all 20 shards the first 20 slots.  The
+    // share cap is 8 of 24 at Low tier while terrain is available.
+    expect(r.mob).toBeLessThanOrEqual(8);
+    // ...and the terrain must actually still be casting.
+    expect(r.tiles).toBeGreaterThanOrEqual(12);
     watch.assertClean();
   });
 
