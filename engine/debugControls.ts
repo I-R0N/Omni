@@ -33,7 +33,7 @@ import {
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette,
+    cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -326,6 +326,25 @@ export class DebugControls {
    *  on newly generated rock; reload the map to repaint a whole field. */
   cycleRockPalette() {
     cycleRockPalette();
+  }
+
+  /** DBG (Visual): cycle the unified tile lighting — legacy / debug /
+   *  unified.  Index 0 is 'legacy' and it is named for what it IS rather
+   *  than "off": Omni ships THREE hand-rolled lighting models (the
+   *  proximity bloom, the repel glow, the glass edge tint) and legacy is
+   *  those three, unchanged.  The unified system has to be judged against
+   *  them, which is what this control is for.  'debug' paints a flat grey
+   *  layer — no lighting maths — so the canvas, the blit and the
+   *  smoothing restore can be checked without the light in the way. */
+  cycleLighting() {
+    cycleLightingMode();
+  }
+
+  /** DBG (Visual): cycle the lighting TIER — low / medium / high.  Low is
+   *  pinned as the default because it is the 390x844 phone's budget: a
+   *  divisor-3 layer, 4 lights, 24 occluders, radius 300, hard shadows. */
+  cycleLightingTier() {
+    cycleLightingTier();
   }
 
   /** DBG (Visual): gamepad force feedback on/off.  Separate from the

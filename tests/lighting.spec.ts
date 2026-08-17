@@ -1,4 +1,4 @@
-/** Unified tile lighting — the occluder layer (gauntlet A1-A3).
+/** Unified tile lighting — occluders and the shadow-cast light (gauntlet A1-A4).
  *
  *  See `docs/GAUNTLET_LIGHTING_LOG.md`.  What is pinned here is the part of
  *  the lighting system that can be WRONG WITH NO SYMPTOM until it is very
@@ -20,6 +20,13 @@
  *   - The TOROIDAL SEAM.  A wedge built across a wrap seam draws a bar of
  *     darkness through the whole arena.  Occluders are resolved into the
  *     light's zone at collection; this asserts they stay there.
+ *   - THE SHADOW ITSELF.  A4 shipped with the wedges silently erasing
+ *     nothing (the destination-out fill inherited the falloff gradient as
+ *     its fillStyle, which reads alpha 0 away from its centre).  Nothing
+ *     threw; the geometry was correct; the output was empty.  The shadow
+ *     test measures a ring of bearings around the light's OWN centre,
+ *     because a two-point probe taken from screen centre reported that as
+ *     "the shadow is a bit weak" rather than "there is no shadow".
  *
  *  The lighting MODE is driven through `engine.renderer.setLighting(...)`.
  *  Occluders are read off `renderer._lightOccluders` / `_lightOccluderCount`

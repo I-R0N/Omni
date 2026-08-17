@@ -1658,6 +1658,13 @@ export interface EngineStats {
    *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
    *  nothing. */
   minimapMaterialName?: string;
+  /** DBG label for LIGHTING_CYCLE — 'legacy' (the three shipped hand-rolled
+   *  models, and the default), 'debug' (flat grey layer, proves the blit) or
+   *  'unified' (the shadow-cast light). */
+  lightingModeName?: string;
+  /** DBG label for the active lighting tier — low (pinned for the phone) /
+   *  medium / high. */
+  lightingTierName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */

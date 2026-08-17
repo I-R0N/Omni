@@ -270,6 +270,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
   };
 
+  const handleCycleLighting = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLighting();
+  };
+
+  const handleCycleLightingTier = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightingTier();
+  };
+
   const handleToggleRumble = () => {
       if (engineRef.current) engineRef.current.dbg.toggleRumble();
   };
@@ -612,6 +620,8 @@ const App: React.FC = () => {
         onToggleChevronMode={handleToggleChevronMode}
         onToggleJoystickDebug={handleToggleJoystickDebug}
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
+        onCycleLighting={handleCycleLighting}
+        onCycleLightingTier={handleCycleLightingTier}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}

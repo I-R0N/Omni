@@ -30,7 +30,7 @@ recorded rather than quietly dropped.
 - [ ] **A5** — Soft shadow penumbra
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
-- [ ] **B1** — Prove the static-query duplication
+- [x] **B1** — Prove the static-query duplication
 - [x] **B2** — Unify onto one primitive
 - [x] **B3** — SKIPPED: precondition unmet (no call site exceeds r=120)
 - [x] **B4** — DECLINED on evidence (0.036 ms vs a 0.3 ms threshold)
@@ -916,3 +916,21 @@ same decision.
 deleting them) is deliberately NOT started**, because it is the
 irreversible half and its precondition is the operator confirming the
 unified look is at least as good.
+
+### The DBG rows, landed here rather than at A2
+
+A2 deferred the pause-menu control because a DBG row spans six files and
+that stage's cap was three. It lands now, because A4 is the first stage
+with something to look at — and without it the only way to reach the
+feature is `renderer.setLighting()` from a console, which is not a thing
+that can be done on the phone this is built for.
+
+Two rows under Visual, following the `Minimap mat` pattern exactly:
+**Lighting** (legacy / debug / unified) and **Light tier** (low / medium
+/ high), surfaced through `EngineStats.lightingModeName` /
+`.lightingTierName`.
+
+Verified end to end through the real UI: the row renders (nested five
+collapsibles deep in the pause menu), the cycle runs
+legacy → debug → unified → legacy, the tier steps low → medium, and the
+console stays clean.

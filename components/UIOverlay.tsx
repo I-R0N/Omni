@@ -82,6 +82,8 @@ interface UIOverlayProps {
   onToggleChevronMode?: () => void;
   onToggleJoystickDebug?: () => void;
   onCycleMinimapMaterial?: () => void;
+  onCycleLighting?: () => void;
+  onCycleLightingTier?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -250,6 +252,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleChevronMode,
   onToggleJoystickDebug,
   onCycleMinimapMaterial,
+  onCycleLighting,
+  onCycleLightingTier,
   onCycleRockPalette,
   onToggleRumble,
   onSetControlScheme,
@@ -1479,6 +1483,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Minimap mat', onCycleMinimapMaterial,
                   stats.minimapMaterialName ?? 'Flow',
                   'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.')}
+                {ctrlRow('Lighting', onCycleLighting,
+                  stats.lightingModeName ?? 'legacy',
+                  'Unified tile lighting. LEGACY (default) is not "off" — it is the THREE hand-rolled models Omni ships: the player-distance proximity bloom on rock/plastic/indestructible, the repel-impulse glow on glass and metal, and the glass edge tint on its own 120 range. UNIFIED replaces all three with one shadow-casting point light at the ship: a radial falloff with a shadow wedge withheld behind every solid tile in range. Nebula is passThrough and deliberately casts NOTHING, which is why the effect reads strongly on the material showcase maps and faintly on Universe (two thirds of its static tiles are nebula). DEBUG paints a flat grey layer instead of a light — no lighting maths — so the canvas, the single blit and the smoothing restore can be checked on their own.')}
+                {ctrlRow('Light tier', onCycleLightingTier,
+                  stats.lightingTierName ?? 'low',
+                  'Lighting budget. LOW (default) is the 390x844 phone: the light layer renders at a third of screen resolution, 4 lights, 24 occluders each, radius 300, hard shadows. Medium/High halve the divisor and raise every cap. The occluder cap is load-bearing rather than defensive — a radius-300 light can cover ~225 hexes in solid terrain, and the cap takes the NEAREST, which subtend the largest shadow angle, so truncation degrades gracefully.')}
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}
