@@ -1477,6 +1477,7 @@ export class PhysicsSystem {
       // static-tile world-canvas stamp (which baked the old polygon
       // outline).  Both caches re-populate lazily on next use.
       tile._satCacheAxes = undefined;
+      tile._occluderR = undefined;   // the shadow radius is derived from the polygon
       if (tile._staticCached === true) tile._staticCached = false;
 
       // Damage cracks are no longer appended here.  Rock / metal tiles

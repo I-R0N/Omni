@@ -128,8 +128,62 @@ function visitShard(t: GameEntity): void {
     const v = t.shardVariant;
     if (v === undefined) return;
     if (SHARD_VARIANTS[v].passThrough === true) return;
-    if (Math.max(t.size.x, t.size.y) * 0.5 < MIN_SHARD_OCCLUDER_R) return;
+    if (occluderRadius(t) < MIN_SHARD_OCCLUDER_R) return;
     record(t, true);
+}
+
+/**
+ * The radius the shadow is cast from: the largest circle centred on the
+ * centroid that fits INSIDE the polygon — its INRADIUS.
+ *
+ * The obvious choice is the circumradius (`max(size) * 0.5`), and it is
+ * wrong in a way that is very visible on shards.  A shard's `size` is its
+ * bounding box, which for an irregular polygon can be far larger than the
+ * body; the shadow then springs from a circle noticeably wider than the
+ * thing you can see, leaving a bright ring of lit space around every shard
+ * before its own shadow starts.  Tiles hide this because a hex fills its
+ * cell, so its circumradius is close to its real extent.
+ *
+ * The inradius errs the other way — corners poke very slightly out of their
+ * own shadow — and that is the error you want, because it is bounded by the
+ * difference between the two radii and it reads as the shadow hugging the
+ * body rather than floating off it.
+ *
+ * Cached on the entity and invalidated wherever `polygonPoints` is mutated
+ * (beside `_satCacheAxes`), because rock tiles deform theirs on every hit
+ * and this walk is O(edges) on a path that runs for every candidate in
+ * range, not just the ones that survive the cap.
+ */
+function occluderRadius(t: GameEntity): number {
+    const cached = t._occluderR;
+    if (cached !== undefined) return cached;
+    const pts = t.polygonPoints;
+    let r: number;
+    if (pts === undefined || pts.length < 3) {
+        // No polygon (sprite-only or degenerate) — fall back to the bounding
+        // half-extent, which is all there is to go on.
+        r = Math.max(t.size.x, t.size.y) * 0.5;
+    } else {
+        // Distance from the centroid to the nearest EDGE, not the nearest
+        // vertex: the nearest vertex overshoots on any polygon that is not
+        // regular, which is exactly the case here.  Points are entity-local
+        // with the centroid at the origin, and the inradius is rotationally
+        // invariant, so no de-rotation is needed.
+        let minD2 = Infinity;
+        for (let i = 0; i < pts.length; i++) {
+            const a = pts[i], b = pts[(i + 1) % pts.length];
+            const abx = b.x - a.x, aby = b.y - a.y;
+            const segLen2 = abx * abx + aby * aby;
+            let u = segLen2 > 0 ? -(a.x * abx + a.y * aby) / segLen2 : 0;
+            if (u < 0) u = 0; else if (u > 1) u = 1;
+            const qx = a.x + abx * u, qy = a.y + aby * u;
+            const d2 = qx * qx + qy * qy;
+            if (d2 < minD2) minD2 = d2;
+        }
+        r = Math.sqrt(minD2);
+    }
+    t._occluderR = r;
+    return r;
 }
 
 /** Write one occluder record.  Shared by both filters so the wrap
@@ -159,7 +213,7 @@ function record(t: GameEntity, mobile: boolean): void {
     const o = poolAt(_n);
     o.x = ox;
     o.y = oy;
-    o.r = Math.max(t.size.x, t.size.y) * 0.5;
+    o.r = occluderRadius(t);
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
     _outBuf[_n++] = o;

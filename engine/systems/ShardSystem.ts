@@ -2176,6 +2176,7 @@ export class ShardSystem {
       }
       if (mutated) {
         e._satCacheAxes = undefined;
+        e._occluderR = undefined;   // the shadow radius is derived from the polygon
         if (e._staticCached === true) e._staticCached = false;
       }
     }

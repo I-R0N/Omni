@@ -958,6 +958,11 @@ export interface GameEntity {
   // are "deformed", and their adjacent edges always draw regardless
   // of neighbour presence.
   originalCircumradiusSq?: number;
+  /** Cached SHADOW-CASTING radius — the largest circle centred on the
+   *  centroid that fits INSIDE `polygonPoints` (the inradius), not the
+   *  circumradius.  See render/lighting.ts for why.  Invalidated wherever
+   *  the polygon is mutated, alongside `_satCacheAxes`. */
+  _occluderR?: number;
 
 
   // Composite asteroid — tracks every drop (including power-ups) stored

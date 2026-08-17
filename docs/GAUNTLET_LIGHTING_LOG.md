@@ -1165,3 +1165,49 @@ test and the share-cap test both build their scenes now; the churn and
 seam tests still use found scenes, but assert properties that hold for
 any population (nothing stale in the set, nothing beyond `radius × 3`),
 which is the distinction that makes that safe.
+
+---
+
+## A5b — the occluder radius was the bounding box, not the body
+
+> *"The shards cast shadows well but they each have a small circle of light
+> around them where the shadow starts from. This circle matches the largest
+> dimension of the polygonal shards."*
+
+Exactly right, and the discrepancy is larger than it looks. The occluder
+radius was `max(size) * 0.5` — half the BOUNDING BOX. For an irregular
+polygon that is nowhere near the body:
+
+| map | kind | n | bounding half-extent (p50) | polygon inradius (p50) | ratio p50 | ratio min |
+|---|---|---|---|---|---|---|
+| ASTEROID_FIELD | shard | 1204 | 44.2 | 21.6 | **0.50** | 0.32 |
+| UNIVERSE | shard | 145 | 45.9 | 22.3 | **0.50** | 0.35 |
+| GLASS_FIELD | tile | 1170 | 20.9 | 19.1 | 0.91 | 0.91 |
+| UNIVERSE | tile | 791 | 20.9 | 19.1 | 0.91 | 0.91 |
+
+**Shards were casting from a circle twice their real size.** The shadow
+therefore sprang from a boundary well outside the visible body, leaving a
+lit ring around every shard before its own shadow began — which is
+precisely what was reported. Tiles hid it because a hex fills its cell, so
+its bounding box is close to its true extent (0.91).
+
+Now the **INRADIUS**: the largest circle centred on the centroid that fits
+inside `polygonPoints`, computed as the distance to the nearest EDGE (the
+nearest *vertex* overshoots on anything not regular, which is exactly this
+case). The error now runs the other way — corners poke very slightly out
+of their own shadow — and that is the better error, bounded by the gap
+between the two radii and reading as the shadow hugging the body rather
+than floating off it.
+
+Cached on `GameEntity._occluderR` and invalidated wherever
+`polygonPoints` is mutated, beside `_satCacheAxes`. That matters because
+rock tiles deform theirs on every hit, and the walk is O(edges) on a path
+that runs for every candidate in range, not only the ones that survive the
+cap.
+
+The shard size floor now measures the same radius the shadow uses, so it
+stays honest — at a median inradius of 21.6 a floor of 6 still excludes
+only genuine dust.
+
+Tiles shift by 9 %, so the tile look this ladder was gated on is
+essentially unchanged.
