@@ -43,17 +43,23 @@ vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
                           (no lint script)
-playwright.config.ts      Test harness: one 390×844 project, a webServer
+playwright.config.ts      Test harness: one 390×844 project (the DESIGN
+                          TARGET; viewports.spec.ts overrides it per
+                          describe block), a webServer
                           that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
-                          plus input / help / minimap / maps (step 5),
+                          plus input / help / minimap / maps (step 5) and
+                          viewports / healthbars (5d),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  111 tests
+                          anti-flake rules).  161 tests.  All run at
+                          390×844 EXCEPT viewports.spec.ts, which sets
+                          its own and covers six sizes plus a
+                          mid-session resize
 
 components/
   menuNav.ts              GAMEPAD MENU NAVIGATION (G15) — the D-pad
@@ -1568,6 +1574,25 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).
+- **A world-space health bar is a HIT REACTION, not a label** (gauntlet 5d,
+  U5).  `renderHealthBar` draws an enemy's bar only while
+  `GameEntity.healthBarTimer > 0`, fading over the last
+  `UI_CONSTANTS.HEALTH_BAR.FADE_DURATION` — so the bars on screen are exactly
+  the fights in progress rather than a label on every entity.  The timer is
+  stamped by `markDamaged(entity, flash)` (health) and `markShieldDamaged`
+  (a hit the SHIELD ate — without which the strip could only appear once the
+  shield had already failed) at every damage path, and ticked beside
+  `hitFlash` in PhysicsSystem.  It is a SEPARATE field from `hitFlash` on
+  purpose: that is a ~0.1–0.3s whiten-and-punch, and a bar living that long
+  would strobe rather than inform.  Three consequences worth knowing:
+  the PLAYER has no world-space bar at all — `EngineStats.vitals` carries
+  hull + shield EVERY frame (unlike `playerStats`, which is menu-only) and
+  the HUD's top-left chip is the canonical readout; the shield strip draws
+  for ANY shielded entity, not just the player; and
+  `GameEntity.alwaysShowHealthBar` opts a priority target back into a
+  permanent bar (the dragon takes it, capstone bosses deliberately do NOT —
+  they have the dedicated HUD bar).  DBG ▸ Visual ▸ "HP bars" restores the
+  always-on behaviour as the A/B.
 - **Shield absorption is generalized.** The PhysicsSystem projectile-
   damage path (and the GameEngine shockwave-AoE path) absorb into
   `shield` for ANY entity with `shield`/`maxShield` > 0 — not just the
@@ -1834,9 +1859,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   leave the game permanently silent — and `visibilitychange` re-unlocks on
   tab return.  `audio.audible` (context exists AND running) is the honest
   "can this be heard" check; `unlocked` alone is not.
-- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
+- **`window.__omniEngine` / `window.__omniStats` / `window.__omniHud` are
+  debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so the headless
+  `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's three PURE
+  layout functions — `fitFontPx`, `computeMinimapRect`,
+  `computeLoadoutHUDLayout` — on exactly the `__omniHid` rationale: they are
+  pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
+  320px, a minimap rect disagreeing with the tap handler that catches its
+  expand tap, a loadout strip off the viewport: none throw, none log, and
+  none are visible at the one viewport the suites used to run at.  The
+  alternative was sampling pixels off a starfield.  NOTHING in the game reads them — they exist so the headless
   Playwright suites in `tests/` can drive the real engine in a real browser
   (§7; the "without a test runner being added" rationale is superseded —
   roadmap 5b adopted one, and these handles are what it drives).  Two
@@ -2087,6 +2120,32 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     mouse press: a control that only appears once pressed cannot be found,
     and in that scheme it is the only way to shoot.
 
+- **TWO canvas palettes, and they are different KINDS of thing** (gauntlet
+  5d, U3).  `UI_CONSTANTS.INDICATORS.COLORS` is the **TYPE LEGEND** — what a
+  contact IS, wherever it is drawn (edge arrow, minimap blip): red enemy /
+  indigo station / green portal / yellow rival / purple bubble / slate other,
+  with a boss in the shared enemy red and its SIZE and ring doing the
+  distinguishing.  `UI_CONSTANTS.HUD` is the **CHROME palette** — the four
+  named type sizes (MICRO 9 / BODY 11 / ROW 12 / LOUD 14, mirroring the DOM's
+  scale), the greys (`TEXT_COLOR` / `MUTED_COLOR` / `DIM_COLOR` /
+  `RULE_COLOR` / `PANEL_FILL`), the one text outline every canvas string
+  wears, and the accents (`ACCENT_COLOR` for banner subtext, the
+  `CHARGE_FULL` / `CHARGE_PART` pair the ship's ring and the fire button must
+  share).  Chrome carries no type meaning, so it must never read the legend
+  and the legend must never be used for text — nothing in the canvas layer
+  may introduce a third palette.  TWO DOCUMENTED EXEMPTIONS from the legend,
+  both deliberate: a PORTAL blip carries the rift's own violet/sky (so an
+  outbound rift and a return rift are tellable apart) while its ARROW is the
+  legend's green, and the SNITCH has its own gold.  Canvas HUD text stays
+  MONOSPACE against the DOM's sans — a world-vs-chrome distinction, not drift.
+- **ONE screen corner, one rect.**  `computeMinimapRect(height, expanded)`
+  (beside `computeLoadoutHUDLayout` in `constants.ts`) is the single
+  definition of the minimap's bottom-left rect, read by the renderer, the
+  fire-event handler that catches the expand tap, the joystick exclusion
+  zone, and the wave banner that has to clear it.  The banner is why this
+  exists: it reserved `MINIMAP_CONSTANTS.SIZE` (the COLLAPSED 75px)
+  unconditionally, so with the map open it drew inside the 280px expanded
+  one.  `minimapExpanded` is a banner PARAMETER now, never an assumption.
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
   INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
@@ -2156,6 +2215,30 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   font size, so it's ONE `measureText`, not a binary search in a draw path.
   Any new canvas string built from authored/variable content should go
   through it rather than hardcoding a px size.
+- **The DOM overlay has ONE NAMED CLASS VOCABULARY** (gauntlet 5d, U2), at
+  module scope in `components/UIOverlay.tsx` alongside `OVERLAY_SCRIM` and
+  `PANEL_OPAQUE`, which set the pattern: when more than one surface has to
+  look like the same thing, the class string becomes a constant so the
+  surfaces cannot drift apart.  Type scale `T_MICRO`/`T_NOTE`/`T_BODY`/
+  `T_ROW` — named for what each step is FOR rather than how big it is,
+  because "10px or 11px?" is the question that produced the drift.  Then
+  `PANEL` / `PANEL_ROW` / `panelAccent()` (an accent panel keeps the neutral
+  body and swaps only the BORDER), `HEADING` / `SCREEN_TITLE` /
+  `OUTCOME_TITLE`, `BTN_PRIMARY` / `BTN_SECONDARY` / `BTN_COMPACT`,
+  `CHIP_BASE` / `CHIP_OFF`, `HUD_CHIP`, `SECTION_TOGGLE`, and `TAP` (the
+  40px tap floor).  A constant is the DEFAULT and a call site that departs
+  from it says why in a comment; there are three such departures today
+  (START is the indigo `rounded-full` HERO rather than the shared emerald
+  PRIMARY, and the debug menu takes a smaller 22–24px floor because a
+  developer surface of ~90 diagnostic rows trades reach for density).
+- **The top HUD bar is a COLUMN, and `justify-between` evicts its LAST
+  item.**  The boss capstone bar and the readout chip stack live in one flex
+  column so the layout engine owns the band they share — as an `absolute`
+  block beside a separate stack, the boss health bar landed exactly on top
+  of the Salvage chip.  Within the row under it (vitals chip · readout stack
+  · pause button), the readout column must keep `min-w-0` and the pause
+  button `shrink-0`: an unshrinkable middle pushes the last item off the
+  screen, which is how the pause button left the viewport at 320px.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
   `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
   `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,

@@ -35,8 +35,8 @@ Branch `claude/gauntlet-5d-ui-coherence-idqcdk`, off the
 | U2 | DOM coherence fixes (`components/UIOverlay.tsx`) | **done** |
 | U3 | Canvas HUD coherence (`engine/systems/render/hud.ts`) | **done** |
 | U4 | Viewport coverage matrix + mid-session resize | **done** |
-| U5 | OPTIONAL — damage-triggered health/shield bars | pending |
-| U-final | Validation + handoff | pending |
+| U5 | OPTIONAL — damage-triggered health/shield bars | **done** |
+| U-final | Validation + handoff | **done** |
 
 Three gates green before every commit: `npm run build`,
 `npm run typecheck`, `npm test`. CI green on the branch before the PR.
@@ -375,6 +375,77 @@ Deliberately NOT done: re-running the 111 behavioural tests at six sizes
 merge gate and no information), and screenshotting (visual regression is
 parked at tiers 3–5, and a capture with no assertion is not a test).
 
+### U5 — Damage-triggered health bars (the optional milestone)
+
+Taken rather than cut: U1–U4 did not run long. The parked item's design was
+followed closely; three things changed on screen.
+
+1. **The bar is a hit reaction.** `healthBarTimer` is stamped by
+   `markDamaged()` at every damage path and ticked beside `hitFlash` in
+   PhysicsSystem. A separate field on purpose, per the parking lot's own
+   note: `hitFlash` is a ~0.1–0.3 s whiten-and-punch, and a bar living that
+   long would strobe rather than inform. Each site keeps its own flash
+   duration; only the bar window is shared.
+2. **The player has no floating bar.** It was the number the pause menu
+   already showed, drawn under the thing the player is looking at.
+   `EngineStats.vitals` now carries hull + shield EVERY frame (`playerStats`
+   is menu-only) and the HUD renders it in the top-left — which was empty,
+   and is where status conventionally lives.
+3. **The shield strip is no longer player-only**, since shield absorption
+   has been entity-agnostic since the Bulwark.
+
+`alwaysShowHealthBar` opts a priority target back into a permanent bar. The
+dragon takes it; capstone bosses deliberately do NOT, because they have the
+dedicated HUD bar and a second readout under the hull is the same redundancy
+point 2 removed. DBG ▸ Visual ▸ "HP bars" restores the pre-5d always-on
+behaviour, because a visible change should ship with its own A/B.
+
+**The suite earned its keep immediately.** `healthbars.spec.ts` caught that
+a hit fully ABSORBED BY A SHIELD never armed the bar — so the shield strip
+could only appear once the shield had already failed, which is precisely
+backwards for a readout whose job is to be watched draining. Fixed in the
+engine (`markShieldDamaged()` at every shield-drain site), not by weakening
+the assertion.
+
+**And it produced one regression, caught by U4's matrix.** Adding the vitals
+chip to the top bar squeezed it: `justify-between` with an unshrinkable
+middle SHOVES THE LAST ITEM OUT, and at 320 px the pause button left the
+screen. Fixed by letting the readout column shrink and pinning the pause
+button, and the viewport test now asserts both ends of that row at every
+size — so the matrix built in U4 caught a defect introduced in U5, which is
+the whole point of building it first.
+
+---
+
+## Validation
+
+Three gates green at every milestone commit, and on the final tree:
+
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run build` | clean |
+| `npm test` | **161 passed** |
+
+The suite grew 111 → 161: `viewports.spec.ts` (+44) and
+`healthbars.spec.ts` (+6), plus one assertion added to an existing
+viewport test. **No existing test was modified.** Nothing in U1–U4 changed
+any test's meaning — the layout fixes made previously-unasserted things
+true rather than changing what was asserted — and U5's behaviour change is
+covered by its own new file. (Harness rule: no test edited without a ledger
+note explaining why its meaning legitimately changed. None needed one.)
+
+Re-captured the full 13-surface inventory after every milestone. Final
+state at 390×844: **0 sub-40px tap targets on every player-facing surface**
+(down from 3 / 21 / 17 / 32 / 31), 0 elements past either viewport edge, 0
+console errors, and the four A/B defects measured closed.
+
+Render-path cost: U5 is a net REDUCTION in draw calls — most entities draw
+no bar on most frames — against one timer decrement per entity, which rides
+the `hitFlash` loop that already existed. Nothing else in this pass touched
+a per-frame path; the class-vocabulary work is all module-scope string
+constants evaluated once.
+
 ---
 
 ## Decisions taken
@@ -458,3 +529,94 @@ moving the strip when the map opens makes it jump, and the map auto-collapses
 after five seconds. The loadout draws on top, so nothing is unreadable; what
 is occluded is the middle-bottom of a transient overlay. Left as-is because
 every fix I can see is a bigger aesthetic change than the problem.
+
+**R4 — The player's hull readout is new, and where it goes is a taste call.**
+U5 removed the player's floating world-space bar, so the readout had to land
+somewhere; it went to the top-left, which was empty and is where status
+conventionally lives. The hull number changes colour with urgency
+(emerald → amber → rose), which is the one place in this HUD where a colour
+change is the information rather than decoration. If it reads as too loud, or
+belongs bottom-left near the minimap instead, that is a one-line move.
+
+**R5 — At 320px, the longest station title ellipsizes.** Measured: every
+station title fits EXACTLY at 390×844, the design target
+(`⬡ HOME STATION` needs 283px and has 283px). At 320 with a six-figure
+salvage balance beside it, `⬡ HOME STATION` needs 283px and has 254px, so
+`truncate` does its job and shows an ellipsis. That is graceful, bounded
+degradation on a viewport the brief says must be *functional*, not designed
+for — and the station's name is also on the dock prompt in the world and in
+the pause menu's Location row. Every alternative I tried trades a guarantee
+for it: dropping `min-w-0` so the header wraps instead would let a future
+longer name overflow the viewport outright. Recorded so it reads as a
+decision rather than an oversight.
+
+---
+
+## Completion summary
+
+**5d is done.** Six milestones, six commits, no milestone skipped and no
+stop-condition hit.
+
+**What the pass actually was.** The game's UI surface was complete but had
+been built across a dozen sessions, so it had drifted the way a surface does
+when each addition is locally right: the primary action button was three
+colours across five overlays, three panel recipes meant one thing, eleven
+type sizes did four jobs, and one collapsible-section control had four
+treatments. Underneath that were four things that were simply broken at the
+design viewport — the boss bar landing on the Salvage chip, the hex flowers
+overlapping their drop targets, two screen titles wrapping, and the death
+and stage-clear panels wearing each other's `data-overlay` identity.
+
+**The method that made it tractable** was measuring rather than looking. U1
+photographed 13 surfaces and then measured the DOM it had just photographed
+— every interactive rect, a font-size histogram, the class-string recipe of
+every panel and heading. That turned "these menus feel inconsistent" into a
+ranked list with numbers attached, and it is why every fix below can be
+stated as a before → after rather than as an opinion.
+
+**Headline numbers:**
+
+| | before | after |
+|---|---|---|
+| sub-40px tap targets (player-facing) | 3 / 21 / 17 / 32 / 31 per surface | **0** |
+| boss bar vs Salvage chip | overlapping | clear |
+| hex-flower overlap | 20px (off-viewport at 320) | **0** |
+| screen titles wrapping | 2 | **0** |
+| neutral panel recipes | 3 | **1** |
+| primary-button colours | 3 | **1** (+ one commented hero) |
+| viewports covered by tests | 1 | **6 + a resize** |
+| tests | 111 | **161** |
+
+**Three findings the work produced that the audit could not have:**
+
+1. **A test of mine was wrong before the code was.** The banner test
+   asserted that a fitted line always fits the window; `fitFontPx` promises
+   no such thing — it floors at a readability minimum and lets text clip
+   below it, deliberately. Rewritten to pin the ENVELOPE (every string the
+   game can actually produce fits without reaching the floor) and the
+   INVARIANT (fits, or floors, never in between).
+2. **U5's own suite caught a real gap in U5.** A hit fully absorbed by a
+   shield never armed the health bar, so the shield strip could only appear
+   once the shield had already failed — backwards for a readout whose job is
+   to be watched draining. Fixed in the engine, not the test.
+3. **U4's matrix caught a regression introduced in U5.** Adding the vitals
+   chip to the top bar pushed the pause button off screen at 320px, because
+   `justify-between` evicts its last item when the middle cannot shrink.
+   Building the matrix before the optional milestone is what caught it.
+
+**Scope held.** No game-logic, physics, economy or audio change. The engine
+edits are the `healthBarTimer` / `markDamaged` visual stamp (nothing in the
+sim reads either field), the shared `computeMinimapRect`, the canvas HUD
+vocabulary, and two new `EngineStats` fields — which the brief explicitly
+allows for surfacing data. `docs/GAME_FEEDBACK_PLAN.md` and
+`docs/PARKING_LOT.md` were not modified.
+
+**Five aesthetic calls are in FOR-USER-REVIEW above**, led by the one with
+the widest blast radius (R1, the stage-clear button colour). Two of them
+(R2, R3) are pre-existing inconsistencies this pass deliberately did NOT
+resolve, because reversing a documented decision silently is worse than
+either option.
+
+**Follow-on for step 6:** nothing here is balance, so nothing here should be
+re-litigated in the tuning pass — but the tuning pass is now judging feel on
+final presentation, which is what decision #47b sequenced 5d before it for.
