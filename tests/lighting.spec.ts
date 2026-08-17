@@ -66,23 +66,30 @@ async function parkInCluster(page: import('@playwright/test').Page) {
 }
 
 test.describe('occluder collection', () => {
-  test('is inert at the legacy default — no canvas, no cost, no set', async ({ page }) => {
+  test('ships on unified, and legacy is still a true restore', async ({ page }) => {
     const watch = await boot(page);
+
+    // The shipped default, read BEFORE the run starts so nothing in the boot
+    // path can have cycled it.
+    const dflt = await engine(page, e => e.renderer.getLighting());
+    expect(dflt).toBe('unified');
+
     await startRun(page, 'GLASS_FIELD');
 
+    // `legacy` must still cost literally nothing — that is what makes the
+    // toggle a restore rather than a second route to the same picture.  It is
+    // asserted on a FRESH page so no earlier frame can have left a canvas or
+    // a stale accumulator behind.
+    await engine(page, (e) => { e.renderer.setLighting('legacy'); e.renderer.lastLightingMs = 0; });
+    await page.waitForTimeout(200);
     const r = await engine(page, e => ({
       mode: e.renderer.getLighting(),
-      hasCanvas: !!e.renderer._lightCanvas,
-      count: e.renderer._lightOccluderCount,
       ms: e.renderer.lastLightingMs,
     }));
-
-    // 'legacy' is the shipped default and it must cost literally nothing —
-    // that is what makes the toggle a restore rather than a second route to
-    // the same picture.
     expect(r.mode).toBe('legacy');
-    expect(r.hasCanvas).toBe(false);
-    expect(r.count).toBe(0);
+    // Frames have gone by since the accumulator was zeroed, and it is only
+    // ever written after the layer has been built — so a 0 here is the whole
+    // claim: no canvas work, no collection, no blit.
     expect(r.ms).toBe(0);
     watch.assertClean();
   });
@@ -408,6 +415,103 @@ test.describe('occluder collection', () => {
     expect(r.mob).toBeLessThanOrEqual(8);
     // ...and the terrain must actually still be casting.
     expect(r.tiles).toBeGreaterThanOrEqual(12);
+    watch.assertClean();
+  });
+
+  test('casts from the BODY: a sliver clears the size floor, and every occluder carries its polygon', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'UNIVERSE');
+
+    // Two shards, BUILT rather than found, at the same distance:
+    //
+    //   SLIVER — bounding half-extent 10 (over the 6-unit floor), inradius 2
+    //            (under it).  A5b switched the shadow radius to the inradius
+    //            and the floor silently came with it, so bodies up to 18
+    //            units across stopped casting.  This is that case.
+    //   FAT    — a regular hexagon, over the floor either way.  The control:
+    //            if the scene itself failed to build, both vanish together.
+    const r = await engine(page, async (e) => {
+      const all = e.currentMap.entities.filter((t: any) => t.type === 'STRUCTURE');
+      for (const t of all) t.active = false;
+      const shards = all.filter((t: any) => t.mass !== Infinity
+                                         && String(t.shardVariant).indexOf('nebula') < 0);
+      if (shards.length < 2) return { built: false } as any;
+
+      const poly = (n: number, rx: number, ry: number) => {
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          out.push({ x: Math.cos(a) * rx, y: Math.sin(a) * ry });
+        }
+        return out;
+      };
+      const place = (t: any, x: number, y: number, pts: any[], half: number) => {
+        t.active = true;
+        t.position.x = x; t.position.y = y;
+        t.velocity.x = 0; t.velocity.y = 0;
+        t.rotation = 0;
+        t.polygonPoints = pts;
+        t.size.x = half * 2; t.size.y = half * 2;
+        t._occluderR = undefined;         // the inradius cache must re-derive
+      };
+      // Positions stay CANONICAL (inside the map, never negative): the wrap
+      // resolution in `record` picks the copy nearest the light, and a
+      // negative input is not a position this engine ever produces.
+      const px = e.player.position.x, py = e.player.position.y;
+      // A 4-gon 20 long and 4 wide: bounding half-extent 10, inradius 2.
+      place(shards[0], px + 90, py, poly(4, 10, 2), 10);
+      // A hexagon of radius 10: inradius 8.66.
+      place(shards[1], px, py + 90, poly(6, 10, 10), 10);
+
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      e.renderer.setLighting('unified');
+      if (!e.renderer.getShardShadows()) e.renderer.toggleShardShadows();
+
+      // Both shards are MOBILE, so the flow field and gravity walk them off
+      // their marks over the settle window — which made an earlier version of
+      // this test pass alone and fail in a full run, purely on how many frames
+      // went by.  Re-pin them, and the player, every frame.
+      await new Promise<void>(res => {
+        let k = 0;
+        const t = () => {
+          e.player.position.x = px; e.player.position.y = py;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          place(shards[0], px + 90, py, shards[0].polygonPoints, 10);
+          place(shards[1], px, py + 90, shards[1].polygonPoints, 10);
+          if (++k < 30) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+
+      const n = e.renderer._lightOccluderCount;
+      const occ = [];
+      for (let i = 0; i < n; i++) {
+        const o = e.renderer._lightOccluders[i];
+        occ.push({ dx: +(o.x - px).toFixed(1), dy: +(o.y - py).toFixed(1),
+                   r: +o.r.toFixed(2), br: +o.br.toFixed(2),
+                   verts: o.pts ? o.pts.length : 0 });
+      }
+      return { built: true, n, occ };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.n).toBe(2);
+    const sliver = r.occ.find((o: any) => Math.abs(o.dx - 90) < 2 && Math.abs(o.dy) < 2);
+    const fat = r.occ.find((o: any) => Math.abs(o.dy - 90) < 2 && Math.abs(o.dx) < 2);
+    expect(fat).toBeTruthy();
+    // The regression: this one was dropped outright.
+    expect(sliver).toBeTruthy();
+    expect(sliver.r).toBeLessThan(6);       // its inradius really is under the floor
+    expect(sliver.br).toBeGreaterThanOrEqual(6);
+
+    // And every occluder must carry the polygon the shadow is extruded from,
+    // with the bounding extent never under the inradius — the two radii are
+    // used for different jobs (reach cull vs fallback circle) and swapping
+    // them would be silent.
+    for (const o of r.occ) {
+      expect(o.verts).toBeGreaterThanOrEqual(3);
+      expect(o.br).toBeGreaterThanOrEqual(o.r - 1e-6);
+    }
     watch.assertClean();
   });
 

@@ -39,21 +39,40 @@ import {
 import { shiftX, shiftY } from './drawUtils';
 
 /** One shadow-casting body, already resolved into the querying light's wrap
- *  zone, approximated as a circle.
+ *  zone.
  *
- *  A CIRCLE, not the tile's hexagon, on purpose: one wedge per occluder
- *  (two tangents + a far arc) instead of six per hexagon is what keeps the
- *  per-light cost bounded by the occluder cap rather than by silhouette
- *  complexity.  Rock tiles also physically deform their `polygonPoints` as
- *  they take damage, so a per-edge silhouette would additionally have to be
- *  rebuilt per hit per tile. */
+ *  IT CARRIES BOTH SILHOUETTES, and which one is used is decided at draw
+ *  time.  The POLYGON (`pts` + `rot`) is the real one and is what every
+ *  shard-family body has; the CIRCLE (`r`, the inradius) is the fallback for
+ *  a sprite-only or degenerate body, and is also what the `d <= r` guards
+ *  read.  A circle alone was the A4/A5 design — one wedge per occluder
+ *  instead of one quad per back-facing edge — and it was wrong for a reason
+ *  no amount of choosing a better radius could fix: the bodies are visibly
+ *  polygonal, so ANY circle prints its own arc across the face as the
+ *  terminator.  Too big and there is a lit ring around the body before its
+ *  shadow starts; too small and there is a bright crescent of body outside
+ *  its own shadow.  Both were reported from the device, at both radii.
+ *  See `emitSilhouetteShadow`. */
 export interface Occluder {
     /** World X, WRAP-RESOLVED into the light's local zone (see below). */
     x: number;
     /** World Y, wrap-resolved likewise. */
     y: number;
-    /** Circumcircle radius for the tangent construction. */
+    /** Inradius — the fallback circle silhouette, and the scale reference the
+     *  penumbra dilation is expressed against. */
     r: number;
+    /** Bounding half-extent: the widest the body can possibly be.  Used for
+     *  the reach cull and the size floor, both of which want the body's
+     *  APPARENT size rather than its inscribed circle. */
+    br: number;
+    /** The body outline, ENTITY-LOCAL with the centroid at the origin and
+     *  pre-rotation — a live reference to `GameEntity.polygonPoints`, not a
+     *  copy, because rock tiles deform theirs on every hit and a copy would
+     *  need invalidating.  `undefined` for a body that has no polygon. */
+    pts: Vector2[] | undefined;
+    /** The body's rotation, needed to bring `pts` into world orientation.
+     *  Static tiles are 0; shards spin. */
+    rot: number;
     /** Squared distance to the light — the nearest-first selection key. */
     distSq: number;
     /** True for a mobile shard, false for a static tile.  Selection needs to
@@ -61,13 +80,20 @@ export interface Occluder {
     mobile: boolean;
 }
 
-/** Below this world radius a shard is not worth a wedge.  At 150 units a
- *  6-unit body subtends 2*asin(6/150) = 4.6 degrees, which on a light layer
- *  rendered at a third of screen resolution is a couple of pixels wide — it
- *  costs a full wedge to draw something no one can see, and in a debris
- *  burst there are a lot of them.  Measured shard radii run 43.6 median /
- *  72.2 p90 on the asteroid showcase, so this excludes genuine dust and
- *  nothing else. */
+/** Below this world radius a shard is not worth casting from.  At 150 units
+ *  a 6-unit body subtends 2*asin(6/150) = 4.6 degrees, which on a light
+ *  layer rendered at a third of screen resolution is a couple of pixels wide
+ *  — it costs path work to draw something no one can see, and in a debris
+ *  burst there are a lot of them.
+ *
+ *  MEASURED AGAINST THE BOUNDING HALF-EXTENT, which is what the paragraph
+ *  above reasons about ("a 6-unit body").  A5b silently changed the meaning
+ *  of this number by switching the shadow radius to the inradius: on real
+ *  shards the inradius is about half the bounding extent (0.50 median, 0.32
+ *  worst), so the floor started rejecting bodies up to 18 units across —
+ *  which is why small shards stopped casting anything visible.  It is also
+ *  the cheaper test: `size` is already there, where the inradius costs a
+ *  walk over the edges of a body that may be about to be rejected. */
 const MIN_SHARD_OCCLUDER_R = 6;
 
 /** Reusable occluder records.  Grows to the high-water mark of the largest
@@ -89,7 +115,7 @@ const _pool: Occluder[] = [];
 function poolAt(i: number): Occluder {
     let o = _pool[i];
     if (o === undefined) {
-        o = { x: 0, y: 0, r: 0, distSq: 0, mobile: false };
+        o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, distSq: 0, mobile: false };
         _pool[i] = o;
     }
     return o;
@@ -128,7 +154,7 @@ function visitShard(t: GameEntity): void {
     const v = t.shardVariant;
     if (v === undefined) return;
     if (SHARD_VARIANTS[v].passThrough === true) return;
-    if (occluderRadius(t) < MIN_SHARD_OCCLUDER_R) return;
+    if (Math.max(t.size.x, t.size.y) * 0.5 < MIN_SHARD_OCCLUDER_R) return;
     record(t, true);
 }
 
@@ -214,6 +240,12 @@ function record(t: GameEntity, mobile: boolean): void {
     o.x = ox;
     o.y = oy;
     o.r = occluderRadius(t);
+    o.br = Math.max(t.size.x, t.size.y) * 0.5;
+    // A LIVE REFERENCE, deliberately: rock tiles rewrite their polygon on
+    // every hit, so a copy would be one more thing to invalidate.  Nothing
+    // downstream mutates it.
+    o.pts = t.polygonPoints;
+    o.rot = t.rotation;
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
     _outBuf[_n++] = o;
@@ -371,6 +403,164 @@ function norm2pi(a: number): number {
     return m < 0 ? m + Math.PI * 2 : m;
 }
 
+/** Vertex-count bound on the silhouette scratch below.  Nothing in the shard
+ *  family comes near it — a hex tile has 6 and the chunkiest shard polygon is
+ *  well under 16 — so this is a buffer bound, not a policy: a body wider than
+ *  this falls back to the circle rather than being dropped. */
+const MAX_SIL_VERTS = 32;
+const _svx = new Float64Array(MAX_SIL_VERTS);
+const _svy = new Float64Array(MAX_SIL_VERTS);
+/** Each vertex's EXTRUDED twin, computed once per vertex in the transform
+ *  pass.  Every vertex is shared by two edges, so extruding per edge would
+ *  take two square roots where this takes one — and the two edges MUST agree
+ *  on the extruded point to the bit, or the quads separate and leave a bright
+ *  sliver down the middle of the umbra. */
+const _sfx = new Float64Array(MAX_SIL_VERTS);
+const _sfy = new Float64Array(MAX_SIL_VERTS);
+/** Per-edge back-facing classification.  Only filled on the slow path — see
+ *  the note on the light-inside bail. */
+const _sback = new Uint8Array(MAX_SIL_VERTS);
+/** How far the penumbra passes may dilate a body.  The dilation is derived
+ *  from the widening ANGLE and the distance, so for a small shard far away it
+ *  is legitimately large — but past 2x the body it stops reading as a soft
+ *  edge and starts reading as a second, bigger shadow. */
+const DILATE_MAX = 2;
+
+/**
+ * Emit ONE occluder's shadow volume into the already-open path, extruded from
+ * the body's OWN POLYGON rather than from a circle around it.
+ *
+ * WHY NOT A CIRCLE.  The bodies are visibly polygonal, and a circular
+ * silhouette prints its own arc across the face as the terminator: at the
+ * circumradius there is a lit ring around the body before its shadow begins,
+ * and at the inradius there is a bright crescent of body standing outside its
+ * own shadow.  Both were reported from the device, at both radii, because
+ * they are the same defect seen from either side — the shadow's outline and
+ * the body's outline are different shapes.  Extruding the real outline is the
+ * only version with no mismatch to see, and it doubles the apparent width of
+ * a small shard's shadow into the bargain (the inradius was casting from half
+ * the body).
+ *
+ * ONE QUAD PER BACK-FACING EDGE, which is the textbook 2D shadow volume:
+ * their union IS the umbra, adjacent quads share their inner edge exactly so
+ * there is no sliver between them, and the near half of the body is left
+ * uncovered — so a body still lights up on the side facing the light, which a
+ * whole-body erase would have thrown away (mobile shards have no legacy glow
+ * of their own to fall back on).
+ *
+ * Returns false when nothing was emitted, which includes the degenerate case
+ * of the light being INSIDE the body — there every edge faces away, and
+ * emitting them would erase the light's whole neighbourhood.
+ */
+function emitSilhouetteShadow(
+    lctx: CanvasRenderingContext2D,
+    cx: number, cy: number,
+    ocx: number, ocy: number,
+    far: number,
+    pts: Vector2[],
+    rot: number,
+    scale: number,
+    lightOutside: boolean,
+): boolean {
+    const n = pts.length;
+    const cosR = Math.cos(rot), sinR = Math.sin(rot);
+    for (let i = 0; i < n; i++) {
+        const p = pts[i];
+        const x = ocx + (p.x * cosR - p.y * sinR) * scale;
+        const y = ocy + (p.x * sinR + p.y * cosR) * scale;
+        _svx[i] = x;
+        _svy[i] = y;
+        const rx = x - cx, ry = y - cy;
+        const len = Math.sqrt(rx * rx + ry * ry);
+        const k = len > 0 ? far / len : 0;
+        _sfx[i] = cx + rx * k;
+        _sfy[i] = cy + ry * k;
+    }
+
+    // TWO SHAPES OF THIS LOOP, and which one runs is decided by whether the
+    // light can possibly be inside the body.
+    //
+    // If it can, classification has to finish BEFORE anything is written:
+    // "every edge faces away" is how the inside case is recognised, and by
+    // then a fused loop would already have emitted half the quads — which
+    // would erase the light's entire neighbourhood.
+    //
+    // If it cannot (`lightOutside`, i.e. the light is beyond the body's
+    // bounding circle), that check can never fire, so the classify and emit
+    // steps fuse into one pass over the edges.  That is the case essentially
+    // always, and it is worth the branch: the loop runs per occluder per
+    // graded pass.
+    if (!lightOutside) {
+        let backs = 0;
+        for (let i = 0; i < n; i++) {
+            const j = i + 1 === n ? 0 : i + 1;
+            const ax = _svx[i], ay = _svy[i];
+            const ex = _svx[j] - ax, ey = _svy[j] - ay;
+            const sL = ex * (cy - ay) - ey * (cx - ax);
+            const sC = ex * (ocy - ay) - ey * (ocx - ax);
+            const back = (sL >= 0) === (sC >= 0) ? 1 : 0;
+            _sback[i] = back;
+            backs += back;
+        }
+        // Every edge facing away means the light is inside the body (for a
+        // convex body exactly; for a dented one, near enough).  Nothing
+        // occludes a light it contains.
+        if (backs === 0 || backs === n) return false;
+        for (let i = 0; i < n; i++) {
+            if (_sback[i] === 1) emitQuad(lctx, cx, cy, i, i + 1 === n ? 0 : i + 1);
+        }
+        return true;
+    }
+
+    let drew = false;
+    for (let i = 0; i < n; i++) {
+        const j = i + 1 === n ? 0 : i + 1;
+        const ax = _svx[i], ay = _svy[i];
+        const ex = _svx[j] - ax, ey = _svy[j] - ay;
+        // BACK-FACING, WITHOUT KNOWING THE WINDING: an edge faces away from
+        // the light exactly when the light and the body's own centre lie on
+        // the SAME side of the edge's line.  The shard family's polygons come
+        // from several generators and their vertex order is not guaranteed,
+        // so a normal-direction test would have to establish it first.
+        const sL = ex * (cy - ay) - ey * (cx - ax);
+        const sC = ex * (ocy - ay) - ey * (ocx - ax);
+        if ((sL >= 0) !== (sC >= 0)) continue;
+        emitQuad(lctx, cx, cy, i, j);
+        drew = true;
+    }
+    return drew;
+}
+
+/** One back-facing edge's extrusion, from the vertex scratch. */
+function emitQuad(
+    lctx: CanvasRenderingContext2D, cx: number, cy: number, i: number, j: number,
+): void {
+    let ax = _svx[i], ay = _svy[i], bx = _svx[j], by = _svy[j];
+    let fax = _sfx[i], fay = _sfy[i], fbx = _sfx[j], fby = _sfy[j];
+    // CANONICAL ORIENTATION.  Every subpath in the compound path must wind
+    // the same way: under nonzero winding two overlapping subpaths of
+    // OPPOSITE orientation cancel, which would punch a bright hole wherever
+    // two shadows crossed.  Ordering each pair so that b is counter-clockwise
+    // of a about the light fixes the sign by construction — no signed-area
+    // pass, and correct per-quad even across occluders whose polygons wind
+    // opposite ways.
+    if ((ax - cx) * (by - cy) - (ay - cy) * (bx - cx) < 0) {
+        let t = ax; ax = bx; bx = t;
+        t = ay; ay = by; by = t;
+        t = fax; fax = fbx; fbx = t;
+        t = fay; fay = fby; fby = t;
+    }
+    // near-a -> far-a -> far-b -> near-b.  That order (rather than the more
+    // natural near-a -> near-b -> far-b -> far-a) is what makes the quad wind
+    // the SAME way as the circle fallback's wedge, which matters because the
+    // two can overlap: opposite windings would cancel to a bright hole.
+    lctx.moveTo(ax, ay);
+    lctx.lineTo(fax, fay);
+    lctx.lineTo(fbx, fby);
+    lctx.lineTo(bx, by);
+    lctx.closePath();
+}
+
 function lightGradient(lctx: CanvasRenderingContext2D, rPx: number): CanvasGradient {
     const key = Math.round(rPx);
     let g = _gradCache.get(key);
@@ -472,18 +662,57 @@ function compositeLight(
         // dark — it just gets a hard edge instead of a graded one.
         const isUmbraPass = step === steps - 1;
         const upTo = isUmbraPass ? count : Math.min(count, PENUMBRA_NEAREST);
+        // Rotating a ray by the widening angle is the RIGHT construction for a
+        // circle and the wrong one for a polygon: adjacent quads would then
+        // extrude their shared vertex in two different directions and leave a
+        // bright sliver between them.  So the polygon path widens by DILATING
+        // the body instead — a penumbra is the shadow of a slightly larger
+        // caster — which keeps every shared vertex shared and costs one
+        // multiply on the transform scale.
         for (let i = 0; i < upTo; i++) {
             const o = occ[i];
             const dx = (o.x - lx) * worldToPx;
             const dy = (o.y - ly) * worldToPx;
             const rad = o.r * worldToPx;
+            const brPx = o.br * worldToPx;
             const d = Math.sqrt(dx * dx + dy * dy);
-            // Light inside the occluder — there is no tangent, and asin()
+            // Entirely past the light's reach: nothing of it is lit, so
+            // nothing of it can shadow.  Measured against the BOUNDING extent
+            // so a body whose near edge is in range is not culled on its
+            // centre.
+            if (d - brPx > rPx) continue;
+            const ocx = cx + dx, ocy = cy + dy;
+
+            const pts = o.pts;
+            if (pts !== undefined && pts.length >= 3 && pts.length <= MAX_SIL_VERTS) {
+                const far = rPx * 1.6;
+                let k = 1;
+                if (widen > 0 && rad > 0) {
+                    // Angular widening `widen` at distance `d` is a body that
+                    // is `widen * d` px wider, i.e. this scale factor against
+                    // the inradius.
+                    k = 1 + widen * d / rad;
+                    if (k > DILATE_MAX) k = DILATE_MAX;
+                    // Never let the dilated body swallow the light: it would
+                    // turn every edge back-facing and erase the light's whole
+                    // neighbourhood.  `emitSilhouetteShadow` would catch that
+                    // and bail, losing the soft pass; clamping keeps it.
+                    const kMax = brPx > 0 ? 0.9 * d / brPx : 1;
+                    if (k > kMax) k = kMax;
+                    if (k < 1) k = 1;
+                }
+                // `d > brPx * k` proves the light is outside the (dilated)
+                // body, which lets the emitter fuse its two passes.
+                if (emitSilhouetteShadow(lctx, cx, cy, ocx, ocy, far, pts, o.rot,
+                                         worldToPx * k, d > brPx * k)) drew++;
+                continue;
+            }
+
+            // NO POLYGON (sprite-only or degenerate) — the circle silhouette
+            // is all there is to go on.
+            // Light inside the occluder: there is no tangent, and asin()
             // would return NaN and poison the whole compound path.
             if (d <= rad) continue;
-            // Entirely past the light's reach: nothing of it is lit, so
-            // nothing of it can shadow.
-            if (d - rad > rPx) continue;
 
             const theta = Math.atan2(dy, dx);
             const alpha = Math.asin(rad / d) + widen;
@@ -508,7 +737,6 @@ function compositeLight(
             // sweep is chosen by which way round passes `theta`, the bearing
             // from the occluder centre directly away from the light — safer
             // than deriving the tangent angles' signs by hand.
-            const ocx = cx + dx, ocy = cy + dy;
             const g2 = Math.atan2(t2y - ocy, t2x - ocx);
             const g1 = Math.atan2(t1y - ocy, t1x - ocx);
             const ccwSpan = norm2pi(g1 - g2);

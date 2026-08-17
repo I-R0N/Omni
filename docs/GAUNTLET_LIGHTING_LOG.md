@@ -25,9 +25,11 @@ recorded rather than quietly dropped.
 - [x] **A1** — Occluder extraction into a single queryable source
 - [x] **A2** — Light-layer scaffolding + debug visualization
 - [x] **A3** — Occluder churn
-- [x] **A4** — One point light, shadow-cast (**awaiting the look decision**)
+- [x] **A4** — One point light, shadow-cast (look confirmed on device at A5)
 - [x] **A4s** — Shard occluders (user request)
 - [x] **A5** — Soft shadow penumbra (brought forward by user request)
+- [x] **A5b** — Cast from the polygon inradius, not the bounding box
+- [x] **A5c** — Cast from the BODY (per-edge shadow volume); ship on unified
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
@@ -1211,3 +1213,133 @@ only genuine dust.
 
 Tiles shift by 9 %, so the tile look this ladder was gated on is
 essentially unchanged.
+
+---
+
+## A5c — cast from the BODY, and ship on unified
+
+Three things, from one round of device testing:
+
+> *"Let's default to the unified lighting system for one. Then the shadows
+> look great on polygonal asteroids but I still see a circle lighting effect
+> show up on these. Additionally, the shadow effects are not working on the
+> small shards."*
+
+### The default
+
+`activeLightingIndex` now starts at `unified`. Nothing else about the
+toggle changes — `legacy` still allocates no canvas, draws nothing, and
+leaves `lightingMs` at exactly 0, and the first test in the suite is
+rewritten to assert both halves separately: that the shipped default IS
+`unified`, and that switching to `legacy` still costs nothing.
+
+### The circle, and the small shards, are the SAME defect
+
+They read as two bugs and are one. A5 approximated every occluder as a
+**circle**, and the bodies are visibly polygonal, so whichever radius that
+circle takes, its outline is printed across the scene as the terminator:
+
+| circle radius | what you see |
+|---|---|
+| bounding half-extent (A4s) | a lit ring around the body before its shadow starts — reported |
+| inradius (A5b) | a bright crescent of body standing OUTSIDE its own shadow, bounded by a circular arc — reported |
+
+Both reports are the same mismatch seen from either side. And because
+the inradius runs about **half** the bounding extent on real shards (0.50
+median, 0.32 worst — the A5b table), casting from it also halved every
+small shard's shadow width, which at a light layer rendered at a third of
+screen resolution is the difference between a visible shadow and none.
+That is the third complaint, and it needed no separate fix.
+
+Measured on the hub, mobile shards inside the light radius had inradii of
+5.3 / 6.6 / 7.1 / 7.9 / 9.9 / 12.9 … against a `MIN_SHARD_OCCLUDER_R` of
+6 — so the floor was cutting real bodies too, because A5b moved the
+radius the floor measures without moving the number. The floor now reads
+the **bounding half-extent**, which is what its own comment always
+reasoned about ("a 6-unit body"), and is the cheaper test besides: `size`
+is already there, where the inradius costs a walk over the edges of a body
+that may be about to be rejected.
+
+### What shipped — one quad per back-facing edge
+
+The textbook 2D shadow volume, replacing the tangents-and-far-arc wedge:
+
+- Each occluder now carries a **live reference** to its `polygonPoints`
+  plus its `rotation`, and the bounding half-extent alongside the inradius.
+  A reference, not a copy, because rock tiles rewrite their polygon on
+  every hit and a copy would be one more thing to invalidate.
+- An edge is **back-facing** when the light and the body's own centre lie
+  on the SAME side of the edge's line. That test needs no knowledge of the
+  vertex order, which matters: the shard family's polygons come from
+  several generators and their winding is not guaranteed.
+- Each back-facing edge is extruded to a quad. Their union IS the umbra;
+  adjacent quads share their extruded vertices **to the bit** (extrusion is
+  computed once per vertex, never once per edge) so no sliver opens down
+  the middle of a shadow. The near half of the body is left uncovered, so a
+  body still lights up on the side facing the light — which a whole-body
+  erase would have thrown away, since mobile shards have no legacy glow of
+  their own to fall back on.
+- **Winding is canonical per quad.** Under nonzero winding two overlapping
+  subpaths of opposite orientation cancel, which would punch a bright hole
+  wherever two shadows crossed. Ordering each edge's pair so `b` is
+  counter-clockwise of `a` about the light fixes the sign by construction —
+  no signed-area pass, and correct even between two occluders whose
+  polygons wind opposite ways. The circle fallback's wedge was re-ordered
+  to match, because the two can overlap.
+- The **penumbra widens by dilating the body**, not by rotating the
+  extrusion rays. Rotating rays is right for a circle and wrong for a
+  polygon: adjacent quads would push their shared vertex in two different
+  directions and leave a bright sliver between them. A penumbra is the
+  shadow of a slightly larger caster, so dilation is both the correct model
+  and free — one multiply on the transform scale. Clamped at 2x, and
+  clamped again so a dilated body can never swallow the light.
+- The circle path survives as the fallback for a body with no polygon.
+
+### Cost
+
+Same harness as A5 (`softcost.mjs`), same maps, ship parked in the densest
+cluster. `soft p95` is the total `lightingMs` per frame with the graded
+penumbra on — the number to compare.
+
+| | A5 soft p95 | A5c soft p95 | delta |
+|---|---|---|---|
+| METAL_FIELD | 0.670 | 0.870 | +0.200 |
+| METAL_FIELD (churn) | 0.855 | 1.020 | +0.165 |
+| ASTEROID_FIELD | 0.890 | 1.230 | +0.340 |
+| GLASS_FIELD | 0.795 | 0.925 | +0.130 |
+| GLASS_FIELD (churn) | 0.950 | 1.055 | +0.105 |
+
+and on the maps the game is actually played on:
+
+| | hard p95 | soft p95 | occluders |
+|---|---|---|---|
+| UNIVERSE | 0.360 | 0.270 | 0 |
+| OVERWORLD | 0.260 | 0.340 | 5 |
+| OVERWORLD (churn) | 0.710 | 1.145 | 24 |
+
+So: **~0.3 ms in normal play, 1.2 ms p95 in the worst synthetic scene**
+against a 2.0 ms budget. The first cut of this was 1.61 ms on
+ASTEROID_FIELD; two changes took it to 1.23 without touching the output —
+extruding once per vertex instead of twice per edge, and fusing the
+classify and emit passes whenever the light provably cannot be inside the
+body (`d > bounding radius`, i.e. essentially always). The safe two-pass
+form is kept for the case where it can, because "every edge faces away" is
+how the light-inside case is recognised and a fused loop would have
+emitted half the quads before finding out.
+
+### Gate
+
+- `npm run typecheck`, `npm run build`, `npm test` — 119 passed
+  (118 + one new).
+- **New test**: *casts from the BODY*. Two shards BUILT rather than found —
+  a sliver whose bounding half-extent clears the size floor but whose
+  inradius does not, and a fat hexagon as the control — asserting the
+  sliver is collected, and that every occluder carries a polygon with
+  `br >= r`. That is exactly the A5b regression, pinned.
+- The new test flaked once in a full run and passed alone: both shards are
+  MOBILE, so the flow field walked them off their marks over the settle
+  window. They are re-pinned every frame now. Same lesson as the CI-red
+  entry above — a lighting test that lets its subject move is sampling.
+- Look confirmed by screenshot on OVERWORLD and ASTEROID_FIELD: the
+  terminator now follows each body's own outline, there is no arc printed
+  on any face, and small shards cast shadows the width of the shard.

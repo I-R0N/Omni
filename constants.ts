@@ -1396,7 +1396,14 @@ export function cycleRenderScale(): number {
 //   unified — the real shadow-cast lighting.
 export const LIGHTING_CYCLE = ['legacy', 'debug', 'unified'] as const;
 export type LightingMode = typeof LIGHTING_CYCLE[number];
-let activeLightingIndex = 0;
+/** SHIPPED DEFAULT: `unified` (user call, after device confirmation).
+ *
+ *  `legacy` was the default while the layer was being built, because a stage
+ *  that cannot be switched back off is not a stage.  That property has not
+ *  gone anywhere — `legacy` still allocates no canvas, draws nothing and
+ *  leaves `lightingMs` at 0, and `tests/lighting.spec.ts` pins exactly that.
+ *  It is simply no longer the thing you get without asking. */
+let activeLightingIndex = LIGHTING_CYCLE.indexOf('unified');
 export function getActiveLightingMode(): LightingMode { return LIGHTING_CYCLE[activeLightingIndex]; }
 export function cycleLightingMode(): LightingMode {
   activeLightingIndex = (activeLightingIndex + 1) % LIGHTING_CYCLE.length;
