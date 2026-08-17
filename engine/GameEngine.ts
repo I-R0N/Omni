@@ -3,6 +3,7 @@
 import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
+import type { Renderer } from './systems/Renderer';
 import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
@@ -74,7 +75,10 @@ export class GameEngine {
    *  way; this just stops the compiler disagreeing with the debug menu). */
   input: InputSystem;
   physics: PhysicsSystem;
-  renderer: RenderSystem;
+  /* Typed by the SEAM, not the class (gauntlet WebGPU stage 3): the engine
+     depends on what a renderer must provide, and `new RenderSystem()` below
+     is the concrete choice. Canvas2D remains the only implementation. */
+  renderer: Renderer;
   private ai: AISystem;
   private particles: ParticleSystem;
   trails: TrailSystem;

@@ -32,7 +32,7 @@ Working rules for this branch:
 - [x] **Stage 0** — Device support (**KG1 PASSED** on iPhone / iOS 26.6)
 - [x] **Stage 1** — Throwaway harness (**PASSED** on device)
 - [x] **Stage 2** — Hardest primitive (**KG2 PASSED** — parity at 5× throughput)
-- [~] **Stage 3** — Renderer seam
+- [x] **Stage 3** — Renderer seam (**COMPLETE** — byte-identical, 111/111)
 - [ ] **Stage 4** — Sprites, static tiles, HUD overlay
 - [ ] **Stage 5** — Procedural shapes
 - [ ] **Stage 6** — Verdict (KG3)
@@ -315,6 +315,86 @@ Notes recorded so they are not rediscovered:
 
 **Effort:** ~50 min of the 1 h cap (research, probe, container control,
 this write-up). Within cap.
+
+---
+
+## Stage 3 — The renderer seam
+
+**Cap: 4 hours. Scope: ≤3 files. Status: ✅ COMPLETE — 3 files, +1 new.**
+**This is the first stage that touches repo code, and the only one whose
+value survives abandonment.**
+
+`engine/systems/Renderer.ts` — a **behaviour-free interface** describing
+exactly what `GameEngine` needs from a renderer. `RenderSystem` implements
+it unchanged; `GameEngine.renderer` is typed by it. Canvas2D remains the
+only implementation and the default.
+
+| File | Change |
+|---|---|
+| `engine/systems/Renderer.ts` | **new** — the interface |
+| `engine/systems/RenderSystem.ts` | `implements Renderer` + one type import |
+| `engine/GameEngine.ts` | field typed `Renderer` + one type import |
+
+### The coupling, written down
+
+The extraction is **28 members in three groups**, and the grouping is the
+finding — this is the real cost estimate for *any* future renderer swap,
+WebGPU or otherwise:
+
+1. **Lifecycle + frame (7)** — `setContext`, `setMapType`,
+   `setNebulaClusterCenters`, `buildStaticTileLayer`,
+   `buildMinimapStaticLayer`, `render`, `worldToScreen`. The genuine
+   renderer API, and the part a second implementation would expect to write.
+2. **Wiring back into the sim (2)** — `setPhysics`, `setFlowField`. The
+   renderer holds live references to two *simulation* systems so debug
+   overlays can draw them. A real back-coupling; a second renderer must
+   accept both even if it ignores them.
+3. **Debug flags + perf counters (19)** — 5 mutable debug booleans written
+   by `DebugControls`, plus **13 perf counters** read directly by
+   `GameEngine.buildPerfSnapshot()` and the DBG panel, plus `setDebugMode` /
+   `setTrailShape`.
+
+**Group 3 is the awkward two-thirds**, and naming it is the point of doing
+this stage carefully. Those are *fields*, not methods, so the interface must
+expose them as mutable properties, and a second renderer has to carry all
+thirteen even where they are meaningless to it — a GPU renderer has no "tint
+cache miss", and `lastRenderMs` measures CPU-side call issuing, which is
+precisely the measure a GPU renderer moves work *out* of (Stage 1). The
+obvious next refactor is a `RendererStats` object the engine asks for once
+per frame. **It is deliberately not done here**: stage 3's gate is a
+byte-identical game, and reshaping the perf plumbing would fail it.
+
+One member was deliberately **excluded**: `debugMode` is set through
+`setDebugMode` and never read from outside, so putting the field in the seam
+would describe a coupling that does not exist.
+
+### Byte-identical — proven, not asserted
+
+`implements` and type-only imports are erased at compile time, so the
+emitted JavaScript should be unchanged. That is an argument, not evidence,
+so it was checked by building with and without the seam and comparing.
+
+**A control run first saved this from a false conclusion.** The naive
+comparison reported "JS DIFFERS" — but two builds of *identical source* also
+differ, so the comparison was meaningless. The cause is a **build timestamp
+embedded in the bundle** (`build <sha> · <ISO timestamp>` in the UI): exactly
+**4 bytes**, the seconds of the build clock. Normalising that timestamp:
+
+```
+with seam:    743720 bytes  md5 befed201cccf0dceb4f2792fd80efa2c
+without seam: 743720 bytes  md5 befed201cccf0dceb4f2792fd80efa2c
+```
+
+**The emitted JavaScript is byte-identical.** Anything reading "this build
+differs" in this repo should check the timestamp first — the bundle is not
+reproducible byte-for-byte by design.
+
+**Gates:** `npm run typecheck`, `npm run build`, `npm test` — **111/111**.
+The interface typechecked against the real class on the first attempt, which
+is itself evidence that it describes the existing coupling rather than an
+idealised version of it.
+
+**Effort:** ~1 h of the 4 h cap.
 
 ---
 
