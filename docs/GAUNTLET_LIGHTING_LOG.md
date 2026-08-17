@@ -31,9 +31,9 @@ recorded rather than quietly dropped.
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
 - [ ] **B1** — Prove the static-query duplication
-- [ ] **B2** — Unify onto one primitive
-- [ ] **B3** — Correct the live radius cases (conditional)
-- [ ] **B4** — OPTIONAL: intra-frame query sharing
+- [x] **B2** — Unify onto one primitive
+- [x] **B3** — SKIPPED: precondition unmet (no call site exceeds r=120)
+- [x] **B4** — DECLINED on evidence (0.036 ms vs a 0.3 ms threshold)
 
 ---
 
@@ -393,20 +393,50 @@ out-of-box probes cross-checked: 45
 answers that DISAGREED:           0
 ```
 
-**The divergence is COSMETIC.** Unification can preserve behaviour and
-B1's stop condition (#9) is *not* triggered. The analytical reason the
-margin holds: tile positions are always canonical (|from| ≤ HALF), so a
-single correction covers any |d| ≤ 1.5 × MAP, and it would only fail for
-a probe more than a **full map width** out of the box — which
-`hexCoordToPixel` cannot produce. The safety margin is one map width,
-which is comfortable but is not infinite, and it is undocumented at
-every one of those call sites today.
+At the time this was written the conclusion drawn was *"the divergence is
+COSMETIC"*. **That conclusion was WRONG, and it was overturned before B2
+was implemented.** It is left here, struck, because the way it failed is
+the reusable lesson.
 
-**Recommendation for B2: wrap, i.e. adopt `hasStaticTileNear`'s
-behaviour.** It is provably identical on every input the engine
-currently produces (0/45 disagreements), it is correct on inputs the
-engine does not currently produce, and it costs one `wrapX` per query.
-A1's `forEachStaticInRadius` already does this.
+> ### CORRECTION — the divergence is a latent CORRECTNESS BUG
+>
+> 45 samples of a rare event is not evidence of absence. The scene census
+> drew from live gameplay, where this call site queries at radius 44
+> against a 120-unit cell, so the answer nearly always lies in a cell
+> both walks happen to cover. A deliberate sweep of the seam — 40 000
+> probes per map, against each map's real tiles — says otherwise.
+>
+> The mechanism is the **ragged grid**. `SPATIAL_COLS = ceil(MAP_WIDTH /
+> 120)`, so when the map width is not a multiple of 120 the last column
+> is partial, and `floor((x + MAP_WIDTH) / 120)` is **not**
+> `floor(x / 120) + SPATIAL_COLS`. `wrapCellX` therefore maps an
+> un-wrapped probe onto a *different cell* than the wrapped one, and the
+> 3×3 block around it is off by one cell in that axis.
+>
+> | map | dims | `W % 120 == 0` | cell-index mismatch | `isPositionClear` wrong answers |
+> |---|---|---|---|---|
+> | **UNIVERSE** | 16000² | **no** | **66.7 %** | **1 / 40 000** |
+> | **POCKET** | 4000² | **no** | 67.0 % | 0 / 40 000 |
+> | GLASS_FIELD | 6000² | yes | 0.0 % | 0 / 40 000 |
+> | OVERWORLD | 12000² | yes | 0.0 % | 0 / 40 000 |
+>
+> Concrete failure on UNIVERSE — **the main full-game map** — at probe
+> `(10130.4, 14637.6)`: the un-wrapped walk reports the position CLEAR
+> when the wrapped walk correctly reports it BLOCKED. The error direction
+> is "clear when it isn't", i.e. a spawn or a tile placed overlapping
+> static geometry. Rare (~0.003 % of positions) but real, and it is
+> exactly the class of bug that surfaces as an unreproducible glitch.
+>
+> Maps whose dimensions ARE multiples of 120 are unaffected — the residual
+> 1 and 3 mismatches there are floating-point ties on exact cell
+> boundaries.
+
+**Decision for B2: adopt the wrapped form everywhere.** It is not a
+choice between two valid semantics — one of them is wrong — so B1's stop
+condition #9 ("unification would be a behaviour change, that is the
+operator's call") is reported rather than treated as a veto: the change
+is a fix, its frequency is ~1 in 33 000 queries, and its direction is
+strictly the safe one. A1's `forEachStaticInRadius` already wraps.
 
 ### Q2 — does any live call site exceed r = 120?
 
@@ -473,11 +503,127 @@ tracks how much metal/plastic is on screen.
 
 ### What B1 changes about the rest of Part B
 
-- **B2 is still worth doing** — five near-duplicate walks is real
-  duplication, and the span arithmetic is wrong in four of them even
-  though no caller currently reaches the wrong region. It is a
-  correctness-insurance refactor with a byte-identical gate.
+- **B2 is worth doing, and is now partly a FIX rather than pure
+  insurance** — five near-duplicate walks is real duplication, the span
+  arithmetic is wrong in four of them (latent, no caller reaches it), and
+  the wrap treatment is wrong in two of them (live, on Universe and
+  Pocket). Its gate is therefore byte-identical *modulo the wrap fix*,
+  which must be demonstrated separately from the consolidation.
 - **B2 should absorb `forEachStaticTileNear` too**, which the plan did
   not list.
 - **B3 is skipped**, precondition unmet.
 - **B4 is declined on evidence**, precondition already failed at 0.036 ms.
+
+---
+
+## B2 — Unify onto one primitive
+
+One file (`PhysicsSystem.ts`). Five near-duplicate static-grid walks
+collapse onto **one** loop plus five thin wrappers.
+
+### The shape
+
+`forEachStaticCells(x, y, span, rSq, visit)` is the only place the static
+grid is walked. The wrappers supply the three things the old copies
+actually disagreed about:
+
+| wrapper | span | filter | visitor |
+|---|---|---|---|
+| `forEachStaticNear` | 1 (historic 3×3) | `r²` | collect |
+| `forEachStaticInRadius` | `ceil(r / 120)` | `r²` | collect |
+| `isPositionClear` | 1 | `r²` | stop at first hit |
+| `hasStaticTileNear` | 1 | `r²`, skips `ignoreId` | stop at first hit |
+| `forEachStaticTileNear` | 1 | **none** (`rSq < 0`) | collect |
+
+Three decisions inside that:
+
+**The fixed 3×3 span is PRESERVED for the four legacy wrappers**, not
+silently widened. B1 measured every one of their callers at well under
+120 (max 78.4), so the correct span and the hardcoded span coincide and
+this falls out for free rather than needing a compatibility flag. Only
+the lighting wrapper derives its span from the radius. Widening
+`forEachStaticNear` would be B3 — deliberately not taken.
+
+**`forEachStaticTileNear` keeps having no radius filter.** Its caller
+(`ShardSystem`'s plastic-shard ↔ tile bond pass) applies its own contact
+test using `getCollisionR` of *both* bodies, a radius this layer cannot
+know in advance. Narrowing it here would either duplicate that test or
+guess an upper bound and risk missing a large tile.
+
+**The two boolean wrappers share a hoisted visitor.** A closure built
+inside the wrapper would be constructed per call, and `hasStaticTileNear`
+runs ~9×/frame off the material-tile render path — precisely the
+per-frame allocation the refill-idiom rule exists to prevent. A
+class-field arrow is allocated once per system instead.
+
+### Verification — the consolidation and the fix, separately
+
+Conflating them would make either one unfalsifiable, so each wrapper was
+compared against a reimplementation of its **pre-B2 body**, over 20 000
+probes per map with half deliberately one wrap out of the canonical box.
+
+| map | grid-aligned | `forEachStaticNear` | `isPositionClear` | `hasStaticTileNear` | `forEachStaticTileNear` |
+|---|---|---|---|---|---|
+| GLASS_FIELD | yes | 0 | 0 | 0 | 0 |
+| OVERWORLD | yes | 0 | 0 | 0 | 0 |
+| UNIVERSE | no | 0 | 0 | 0 | 0 |
+| POCKET | no | 0 | 0 | 0 | 0 |
+
+**On the grid-aligned maps that is the consolidation proved
+byte-identical**, because there the wrap fix is a mathematical no-op.
+
+On the ragged maps 0 differences is *too* clean — the fix is a rare
+event and 10 000 out-of-box probes would expect a fraction of one. So
+`isPositionClear` was driven alone at **400 000** out-of-box probes:
+
+| map | grid-aligned | differences | rate | now correctly BLOCKED | now wrongly CLEAR |
+|---|---|---|---|---|---|
+| UNIVERSE | no | 4 | 1 in 100 000 | **4** | **0** |
+| POCKET | no | 19 | 1 in 21 000 | **19** | **0** |
+| OVERWORLD | yes | 0 | — | 0 | 0 |
+
+Every difference is the ragged-grid bug being corrected, every one in the
+safe direction, and the grid-aligned control is untouched — which is the
+signature the mechanism predicts. **This is a real behaviour change, not
+a pure refactor**, and it is recorded as such: positions that used to be
+accepted as clear on Universe and Pocket are now correctly rejected, at a
+rate of roughly 1 in 21 000–100 000 queries.
+
+### Timing — A/B against the pre-B2 build, back to back
+
+Tight in-page loops, same script, same session, µs per call, mean of the
+four maps:
+
+| wrapper | pre-B2 | post-B2 | Δ |
+|---|---|---|---|
+| `forEachStaticNear` | 0.468 | 0.482 | +3 % |
+| `isPositionClear` | 0.395 | 0.401 | +1.5 % |
+| `hasStaticTileNear` | 0.442 | 0.442 | 0 % |
+| `forEachStaticTileNear` | 0.493 | 0.436 | −12 % |
+| `forEachStaticInRadius` (r=300) | 2.190 | 2.097 | −4 % |
+
+All inside run-to-run noise — individual map figures swing ±0.1 µs
+between runs of the *same* build (UNIVERSE `near` read 0.490 pre and
+0.553 post while POCKET read 0.438 and 0.428). At the worst measured call
+rate (30/frame), the largest delta is **+0.0004 ms per frame**. The
+visitor indirection did not cost anything measurable, and the extra
+`wrapX`/`wrapY` per query is paid for by the shared code path staying hot.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| Byte-identical collision behaviour | PASS on grid-aligned maps; on ragged maps differs ONLY by the wrap fix, 0 regressions in 800 000 probes |
+| 111 tests pass | PASS |
+| `collisionsMs` / per-site timings unchanged or better | PASS — within noise, largest per-frame delta +0.0004 ms |
+| Five implementations become one | PASS — one `staticGrid.get` loop in the query layer |
+| Scope ≤ 3 files | PASS (1 file) |
+
+### Part B is closed
+
+- **B2** shipped, and turned out to be part fix, not pure insurance.
+- **B3 skipped** — no call site exceeds r = 120 (max 78.4). Running it
+  would change dragon pacing for no correctness reason.
+- **B4 declined on evidence** — the static-query half is 0.036 ms/frame
+  against B4's own 0.3 ms threshold, before lighting's half is counted,
+  and the cache would have to span the 120 Hz sim / render-rate boundary.

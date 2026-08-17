@@ -1486,65 +1486,70 @@ export class PhysicsSystem {
       // HP drops rather than spawning fresh random segments per hit.
   }
 
-  // Returns true if world-space point (x, y) with radius r is clear of all
-  // static tiles — used for safe spawn-point validation.
-  /** Visit every active static tile whose centre is within `r` (toroidal) of
-   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
-   *  Used by the dragon to devour tiles in its path (Stage 6). */
-  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
-      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
-      const rSq = r * r;
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  const tdx = wrapDeltaX(t.position.x, x);
-                  const tdy = wrapDeltaY(t.position.y, y);
-                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
-              }
-          }
-      }
-  }
+  // ── THE STATIC-GEOMETRY QUERY LAYER ─────────────────────────────────
+  //
+  // Five callers used to walk the static grid with five near-identical
+  // copies of the same loop.  They differed in three ways and agreed on
+  // everything else, so gauntlet B2 collapsed them onto ONE walk plus five
+  // thin wrappers that supply the differences:
+  //
+  //   - SPAN     how many cells out to look.  Four of the five hardcoded a
+  //              3x3 neighbourhood, which covers a radius of at most
+  //              SPATIAL_GRID_SIZE (120).  Every one of those callers
+  //              queries well under 120 (measured max: 78.4, the dragon's
+  //              head reach), so the fixed span is preserved for them and
+  //              costs nothing.  The lighting pass queries at 300-500,
+  //              where a 3x3 walk silently under-reports by 28-45%, and it
+  //              passes a span derived from the radius instead.
+  //   - FILTER   a toroidal radius test, or none at all (the shard-to-tile
+  //              bond pass wants every tile in the block and applies its
+  //              own contact test).  `rSq < 0` means "no filter".
+  //   - VISITOR  collect-everything, or stop at the first hit.  Returning
+  //              `false` from the visitor stops the walk.
+  //
+  // The probe is WRAPPED, which was the one substantive disagreement
+  // between the old copies and is a FIX rather than a tidy-up.  See
+  // `forEachStaticCells` for why.
 
-  /** Visit every active static tile whose centre is within `r` (toroidal) of
-   *  (x,y) — the RADIUS-CORRECT sibling of `forEachStaticNear`.
+  /** The one static-grid walk.  See the block comment above for what the
+   *  parameters mean; `rSq < 0` disables the distance filter, and a visitor
+   *  returning `false` stops the walk.
    *
-   *  The difference is the cell span.  `forEachStaticNear` and the two
-   *  boolean probes beside it all walk a FIXED 3x3 neighbourhood, which
-   *  covers a radius of at most `SPATIAL_GRID_SIZE` (120).  Every one of
-   *  their callers happens to pass less than that, so the limitation is
-   *  latent there — but the unified lighting pass queries at 300-500, where
-   *  a 3x3 walk silently under-reports and shadows would simply be missing
-   *  from occluders one cell further out.  So the span is derived from the
-   *  radius instead: `ceil(r / SPATIAL_GRID_SIZE)`.
+   *  WHY THE PROBE IS WRAPPED.  Two of the five old copies wrapped their
+   *  probe coordinates and two did not, and the difference was not
+   *  cosmetic — it was a latent correctness bug that fires on any map whose
+   *  dimensions are not a multiple of SPATIAL_GRID_SIZE.
    *
-   *  The span is CLAMPED to half the grid's extent.  Past that the wrapped
-   *  cell indices start repeating, and a cell visited twice would emit its
-   *  tiles to the callback twice — on a small map (Pocket is 4000 wide = 34
-   *  columns) a large enough radius would otherwise double-count.  At the
-   *  clamp the walk already covers the whole torus, so nothing is lost.
+   *  `SPATIAL_COLS = ceil(MAP_WIDTH / 120)`, so such a map has a RAGGED
+   *  last column and `floor((x + MAP_WIDTH) / 120)` is NOT
+   *  `floor(x / 120) + SPATIAL_COLS`.  `wrapCellX` therefore lands an
+   *  un-wrapped probe on a DIFFERENT cell than the wrapped one, and the
+   *  block around it is off by one cell.  Measured: on Universe (16000,
+   *  i.e. 133.33 cells) the two disagree on the cell index for 66.7% of
+   *  positions, and a seam sweep found `isPositionClear` reporting a
+   *  position CLEAR that is actually BLOCKED.  Rare (~1 in 33 000 queries)
+   *  because the callers' radii are small against a 120 cell, but real, and
+   *  in the unsafe direction.  Universe and Pocket are affected; the maps
+   *  sized at a multiple of 120 never were.
    *
-   *  The probe coordinates are WRAPPED first, matching `hasStaticTileNear`
-   *  rather than `forEachStaticNear`.  That is load-bearing, not tidiness:
-   *  `wrapDeltaX` applies a SINGLE correction step, so it is only correct
-   *  when its inputs are already inside the canonical box.  Wrapping here
-   *  makes the query correct for any caller instead of only for callers who
-   *  happen to pass a canonical position.
-   *
-   *  The callback MUST NOT mutate the static grid (collect, then act). */
-  public forEachStaticInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
+   *  This matters because `wrapDeltaX` applies a SINGLE correction step, so
+   *  it too is only correct for inputs already inside the canonical box.
+   *  Wrapping once, here, makes the whole layer correct for any caller. */
+  private forEachStaticCells(
+      x: number, y: number, span: number, rSq: number,
+      visit: (t: GameEntity) => boolean | void,
+  ): void {
       const wx = wrapX(x);
       const wy = wrapY(y);
       const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
       const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
-      const span = Math.ceil(r / SPATIAL_GRID_SIZE);
+      // Clamp to half the grid extent: past that the wrapped cell indices
+      // repeat and a cell would emit its tiles to the visitor twice.  At the
+      // clamp the walk already covers the whole torus, so nothing is lost.
+      // No shipped map is small enough for this to bite a span of 1.
       const spanX = Math.min(span, (SPATIAL_COLS - 1) >> 1);
       const spanY = Math.min(span, (SPATIAL_ROWS - 1) >> 1);
-      const rSq = r * r;
+      const filter = rSq >= 0;
       for (let dx = -spanX; dx <= spanX; dx++) {
           for (let dy = -spanY; dy <= spanY; dy++) {
               const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
@@ -1552,90 +1557,81 @@ export class PhysicsSystem {
               for (let i = 0; i < cell.length; i++) {
                   const t = cell[i];
                   if (!t.active) continue;
-                  const tdx = wrapDeltaX(t.position.x, wx);
-                  const tdy = wrapDeltaY(t.position.y, wy);
-                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
+                  if (filter) {
+                      const tdx = wrapDeltaX(t.position.x, wx);
+                      const tdy = wrapDeltaY(t.position.y, wy);
+                      if (tdx * tdx + tdy * tdy >= rSq) continue;
+                  }
+                  if (visit(t) === false) return;
               }
           }
       }
   }
 
+  // Hoisted probe state + visitor for the two BOOLEAN wrappers.  A closure
+  // built inside the wrapper would be constructed on every call, and
+  // `hasStaticTileNear` runs ~9x per frame off the material-tile render
+  // path — a per-frame allocation is exactly what the refill-idiom rule
+  // exists to prevent.  A class-field arrow is allocated once per system.
+  private _probeIgnoreId: string | undefined = undefined;
+  private _probeHit = false;
+  private readonly _probeVisit = (t: GameEntity): boolean => {
+      if (this._probeIgnoreId !== undefined && t.id === this._probeIgnoreId) return true;
+      this._probeHit = true;
+      return false;   // stop the walk — these probes only need existence
+  };
+
+  /** Visit every active static tile whose centre is within `r` (toroidal) of
+   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
+   *  Used by the dragon to devour tiles in its path (Stage 6).
+   *
+   *  Keeps the historic 3x3 span.  Its only caller queries at most 78.4,
+   *  which a 3x3 block fully covers, so this is behaviour-preserving —
+   *  widening it would hand the dragon more terrain per pass and change
+   *  pacing (gauntlet B3, deliberately not taken). */
+  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
+      this.forEachStaticCells(x, y, 1, r * r, cb);
+  }
+
+  /** Visit every active static tile within `r` — the RADIUS-CORRECT walk,
+   *  whose cell span is derived from the radius rather than fixed at 3x3.
+   *  This is the one the lighting pass uses, where radii of 300-500 make
+   *  the fixed span under-report by 28-45%. */
+  public forEachStaticInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
+      this.forEachStaticCells(x, y, Math.ceil(r / SPATIAL_GRID_SIZE), r * r, cb);
+  }
+
+  /** True if world-space point (x, y) with radius `r` is clear of all static
+   *  tiles — safe spawn-point validation. */
   public isPositionClear(x: number, y: number, r: number): boolean {
-      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
-      const rSq = r * r;
-
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const key = cellKeyFromCell(cx + dx, cy + dy);
-              const cell = this.staticGrid.get(key);
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  // Toroidal distance — a candidate tile near the seam can
-                  // still be within `r` of the test point on the short way.
-                  const tdx = wrapDeltaX(t.position.x, x);
-                  const tdy = wrapDeltaY(t.position.y, y);
-                  if (tdx * tdx + tdy * tdy < rSq) return false;
-              }
-          }
-      }
-      return true;
+      this._probeIgnoreId = undefined;
+      this._probeHit = false;
+      this.forEachStaticCells(x, y, 1, r * r, this._probeVisit);
+      return !this._probeHit;
   }
 
-  // Returns true if an active static tile's centre lies within `radius` of
-  // world-space point (x, y), ignoring the tile whose id matches `ignoreId`
-  // (so a tile can probe for its own neighbours without finding itself).
-  // Used by RenderSystem to suppress outline strokes on edges that are
-  // cleanly butted against a neighbour tile.  Wraps the probe coordinates
-  // so callers probing across the toroidal seam still find neighbours on
-  // the opposite side.
+  /** True if an active static tile's centre lies within `radius` of (x, y),
+   *  ignoring the tile whose id matches `ignoreId` (so a tile can probe for
+   *  its own neighbours without finding itself).  Used by RenderSystem to
+   *  suppress outline strokes on edges cleanly butted against a neighbour. */
   public hasStaticTileNear(x: number, y: number, radius: number, ignoreId?: string): boolean {
-      const wx = wrapX(x);
-      const wy = wrapY(y);
-      const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
-      const rSq = radius * radius;
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  if (ignoreId !== undefined && t.id === ignoreId) continue;
-                  const tdx = wrapDeltaX(t.position.x, wx);
-                  const tdy = wrapDeltaY(t.position.y, wy);
-                  if (tdx * tdx + tdy * tdy < rSq) return true;
-              }
-          }
-      }
-      return false;
+      this._probeIgnoreId = ignoreId;
+      this._probeHit = false;
+      this.forEachStaticCells(x, y, 1, radius * radius, this._probeVisit);
+      this._probeIgnoreId = undefined;
+      return this._probeHit;
   }
 
   /**
    * Iterate every active static tile in the 3x3 spatial cells around
-   * (x, y) and invoke `cb` for each.  Used by ShardSystem's plastic-
-   * shard ↔ tile bond formation pass to find candidate tile partners
-   * — the merge broadphase only walks the dynamic candidates set, so
-   * static tiles need this side-channel.  Callbacks return early if
-   * they want to break out of the inner loop.
+   * (x, y) — NO radius filter.  Used by ShardSystem's plastic-shard to
+   * tile bond formation, which applies its own contact test inside the
+   * callback, so narrowing this to a radius here would duplicate that
+   * test with a radius this layer cannot know.  Callbacks return early
+   * (undefined) to skip a tile; they never stop the walk.
    */
   public forEachStaticTileNear(x: number, y: number, cb: (tile: GameEntity) => void): void {
-      const cx = Math.floor(wrapX(x) / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(wrapY(y) / SPATIAL_GRID_SIZE);
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  cb(t);
-              }
-          }
-      }
+      this.forEachStaticCells(x, y, 1, -1, cb);
   }
 
   /**
