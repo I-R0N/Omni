@@ -85,6 +85,7 @@ interface UIOverlayProps {
   onToggleDrafts?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
+  onToggleDamageBars?: () => void;
   onToggleJoystickDebug?: () => void;
   onCycleMinimapMaterial?: () => void;
   onCycleRockPalette?: () => void;
@@ -349,6 +350,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleDrafts,
   onToggleTileOutlines,
   onToggleChevronMode,
+  onToggleDamageBars,
   onToggleJoystickDebug,
   onCycleMinimapMaterial,
   onCycleRockPalette,
@@ -1627,6 +1629,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Chevrons', onToggleChevronMode,
                   stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
                   'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
+                {ctrlRow('HP bars', onToggleDamageBars,
+                  stats.damageTriggeredBars === false ? 'Always' : 'On damage',
+                  'Enemy world-space health bars. On damage (default): a bar appears when the enemy is hit and fades out after, so the bars on screen are the fights in progress rather than a label on every entity. Always: the pre-5d behaviour, every enemy carrying a bar every frame. The PLAYER has no world-space bar either way - the HUD hull/shield readout is the canonical one.')}
                 {ctrlRow('Rumble', onToggleRumble,
                   stats.rumbleEnabled === false ? 'Off' : 'On',
                   'Gamepad force feedback. Rides the SCREEN SHAKE — every impact already funnels through one call with magnitudes tuned against each other, so the hand feels what the camera feels. Separate from the Screen shake toggle: the camera lurching and the pad buzzing are different preferences. Only dual-rumble is reachable from a browser; the DualSense adaptive triggers need WebHID (desktop Chromium only).')}
@@ -1953,16 +1958,63 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       )}
 
       <div className="flex justify-between items-start">
-        {/* Top-left intentionally empty — the debug menu now lives in the
-            pause Player Menu (Debug Menu section). */}
-        <div />
+        {/* ── Player vitals (gauntlet 5d, U5) ──────────────────────────
+            The top-left used to be empty (the debug menu moved into the
+            pause Player Menu), and the player's hull was a floating bar
+            drawn UNDER the ship — on top of the thing the player is
+            actually looking at, and duplicated by the pause menu.  U5
+            removed that bar, so this is now the canonical readout for the
+            player's own condition, in the corner status conventionally
+            lives in.  A BAR plus the number, because a bar answers "how
+            close am I" at a glance and the number answers "how much have
+            I got" when it matters.  Shield strip only when a Shield core
+            is installed (maxShield is 0 on the lean start). */}
+        {stats.gameState === GameState.PLAYING && stats.vitals && (() => {
+          const v = stats.vitals!;
+          const hp = v.maxHealth > 0 ? Math.max(0, Math.min(1, v.health / v.maxHealth)) : 0;
+          const sh = v.maxShield > 0 ? Math.max(0, Math.min(1, v.shield / v.maxShield)) : 0;
+          // The hull colour carries urgency — the one place in the HUD where
+          // a number changing colour is the point rather than decoration.
+          const hull = hp > 0.5 ? 'bg-emerald-400' : hp > 0.25 ? 'bg-amber-400' : 'bg-rose-500';
+          const hullText = hp > 0.5 ? 'text-emerald-300' : hp > 0.25 ? 'text-amber-300' : 'text-rose-300';
+          return (
+            <div
+              data-testid="player-vitals"
+              className={`pointer-events-none ${HUD_CHIP} border-slate-600/50 text-left w-[104px] shrink-0 px-2.5`}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className={`text-slate-400 ${T_MICRO} font-bold uppercase tracking-widest`}>Hull</span>
+                <span className={`${hullText} ${T_ROW} font-bold tabular-nums`}>
+                  {v.health}<span className="text-slate-500">/{v.maxHealth}</span>
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-slate-800/90 overflow-hidden">
+                <div className={`h-full ${hull} transition-[width] duration-150`} style={{ width: `${hp * 100}%` }} />
+              </div>
+              {v.maxShield > 0 && (
+                <>
+                  <div className="flex items-baseline justify-between gap-2 mt-1">
+                    <span className={`text-slate-400 ${T_MICRO} font-bold uppercase tracking-widest`}>Shield</span>
+                    <span className={`text-cyan-300 ${T_MICRO} font-bold tabular-nums`}>
+                      {v.shield}<span className="text-slate-500">/{v.maxShield}</span>
+                    </span>
+                  </div>
+                  <div className="mt-0.5 h-1 rounded-full bg-slate-800/90 overflow-hidden">
+                    <div className="h-full bg-cyan-300/90 transition-[width] duration-150" style={{ width: `${sh * 100}%` }} />
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
+        {!(stats.gameState === GameState.PLAYING && stats.vitals) && <div />}
 
         {/* Top-right: wave HUD + pause button */}
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 min-w-0">
 
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
-            <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-col items-end gap-1 min-w-0">
               {/* Run score */}
               <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/50`}>
                 <span className={`text-amber-300 ${T_ROW} font-bold tracking-widest tabular-nums`}>
@@ -2023,7 +2075,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     : 'pointer-events-none border-slate-600/50'
                 }`}
               >
-                <span className={`text-slate-300 ${T_ROW} font-bold uppercase tracking-widest`}>
+                <span className={`text-slate-300 ${T_ROW} font-bold uppercase tracking-wide`}>
                   Wave {stats.waveNumber ?? 1}
                   {stats.enemiesRemaining !== undefined && (
                     <span className="text-rose-300"> · {stats.enemiesRemaining} left</span>
@@ -2048,7 +2100,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && (
             <button
               onClick={onPause}
-              className={`pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border border-slate-600/60 transition-all active:scale-95`}
+              className={`pointer-events-auto shrink-0 bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border border-slate-600/60 transition-all active:scale-95`}
               aria-label="Pause"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">

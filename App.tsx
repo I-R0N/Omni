@@ -62,7 +62,7 @@ const App: React.FC = () => {
     // game reads this.
     (window as any).__omniHid = { crc32, buildTriggerData, buildRumbleData, buildOutputReport };
 
-    // Debug handle #4 (gauntlet 5d, U4) — the canvas HUD's LAYOUT functions,
+    // Debug handle #5 (gauntlet 5d, U4) — the canvas HUD's LAYOUT functions,
     // exposed for the same reason as __omniHid and on the same terms: they are
     // pure, and they are wrong in a way nothing reports.  A banner that clips
     // off both edges at 320px, a minimap rect that disagrees with the tap
@@ -294,6 +294,10 @@ const App: React.FC = () => {
 
   const handleToggleChevronMode = () => {
       if (engineRef.current) engineRef.current.dbg.toggleChevronMode();
+  };
+
+  const handleToggleDamageBars = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleDamageTriggeredBars();
   };
 
   const handleToggleJoystickDebug = () => {
@@ -651,6 +655,7 @@ const App: React.FC = () => {
             onToggleDrafts={handleToggleDrafts}
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
+        onToggleDamageBars={handleToggleDamageBars}
         onToggleJoystickDebug={handleToggleJoystickDebug}
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
         onCycleRockPalette={handleCycleRockPalette}

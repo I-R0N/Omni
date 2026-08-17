@@ -26,8 +26,7 @@ import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, Vector2, WeaponType } from '../types';
 import {
     EXPLOSION_CONSTANTS, PHYSICS_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS,
-    noteTraitDamage, hitReactStrength, WEAPONS,
-} from '../constants';
+    noteTraitDamage, hitReactStrength, WEAPONS, markDamaged, markShieldDamaged} from '../constants';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
 import { nextId } from './systems/IdAllocator';
 
@@ -179,6 +178,7 @@ export function updateExplosionRings(g: GameEngine) {
                 if (e.id === 'player' && (e.shield ?? 0) > 0 && !e.systemsDisabled) {
                     const absorbed = Math.min(e.shield!, applied);
                     e.shield! -= absorbed;
+                    markShieldDamaged(e);
                     applied -= absorbed;
                     e.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                     e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
@@ -193,7 +193,7 @@ export function updateExplosionRings(g: GameEngine) {
                 // Third-party retaliation (Stage 5): an AoE that catches a
                 // bubble makes it target the blast's owner.
                 if (e.thirdParty && ring.ownerId) e.aggroTargetId = ring.ownerId;
-                e.hitFlash = 0.12;
+                markDamaged(e, 0.12);
                 e.hitReact = hitReactStrength(applied, e.maxHealth ?? e.health);
                 g.spawnDamageText(e.position, applied, e);
                 if (e.health <= 0 && !e.isExploding) {
@@ -298,6 +298,7 @@ export function applyBlastToPlayer(g: GameEngine, pos: Vector2, radius: number, 
     if ((p.shield ?? 0) > 0) {
         const absorbed = Math.min(p.shield!, dmg);
         p.shield! -= absorbed;
+        markShieldDamaged(p);
         dmg -= absorbed;
         p.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
         p.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
@@ -306,7 +307,7 @@ export function applyBlastToPlayer(g: GameEngine, pos: Vector2, radius: number, 
         p.health -= dmg;
         g.spawnDamageText(p.position, dmg, p);
     }
-    p.hitFlash = 0.2;
+    markDamaged(p, 0.2);
 
     // Launch: shove along the blast→player vector (away from it) and raise
     // the overshoot allowance so the cap doesn't clamp the impulse.

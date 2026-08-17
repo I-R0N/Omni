@@ -856,7 +856,20 @@ export const UI_CONSTANTS = {
     PLAYER_WIDTH: 44, PLAYER_HEIGHT: 5,
     ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,
     OFFSET_MODIFIER: 0.85, // Multiplier of entity size
-    OFFSET_BASE: 10 // Pixel padding
+    OFFSET_BASE: 10, // Pixel padding
+    /** DAMAGE-TRIGGERED VISIBILITY (gauntlet 5d, U5 — parking-lot item).
+     *
+     *  A bar is a HIT REACTION, not a permanent label.  Every enemy used to
+     *  carry one every frame, at full health and on one-shot trash alike,
+     *  which read as "tracked HUD" for entities the player has no reason to
+     *  track.  Now a bar appears when the entity takes damage and fades out
+     *  again, so the bars on screen are exactly the fights in progress.
+     *
+     *  SHOW_DURATION is long enough to read a bar after a hit lands and
+     *  still be there for the follow-up shot; FADE_DURATION is the tail of
+     *  it, so the bar dissolves rather than blinking out. */
+    SHOW_DURATION: 2.2,
+    FADE_DURATION: 0.7,
   },
   // Off-screen indicators.  Arrows ride the SCREEN EDGE (an inset viewport
   // rect) rather than a fixed centre ring, and their SIZE carries distance:
@@ -4275,6 +4288,45 @@ export function enemyDamageMult(waveIndex: number): number {
 export function hitReactStrength(damage: number, maxHealth: number): number {
   if (!(damage > 0) || !(maxHealth > 0)) return 0;
   return Math.min(1, damage / maxHealth);
+}
+
+/**
+ * Stamp the two VISUAL hit timers together (gauntlet 5d, U5).
+ *
+ * `hitFlash` is the ~0.1–0.3s whiten-and-scale-punch each damage site already
+ * set for itself; `healthBarTimer` is the much longer window the world-space
+ * health bar is visible for.  They are separate fields — a bar that lived as
+ * long as a flash would strobe rather than inform — but they are stamped by
+ * the same event, so folding them into one call is what stops the two from
+ * drifting apart as damage paths are added.  Each site keeps its OWN flash
+ * duration, because those were tuned per impact type.
+ *
+ * Purely presentational: nothing in the sim reads either field, so this is
+ * safe to call from any damage path without touching behaviour.  Takes a
+ * loosely-typed entity so `constants.ts` stays free of a `types.ts` import.
+ */
+export function markDamaged(
+  entity: { hitFlash?: number; healthBarTimer?: number },
+  flash: number,
+) {
+  entity.hitFlash = flash;
+  entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
+}
+
+/**
+ * Arm the bar window for a hit the SHIELD ate (gauntlet 5d, U5).
+ *
+ * A shot fully absorbed by a shield costs no health, so it never reached
+ * `markDamaged` — and the bar is where the shield STRIP lives, so without
+ * this a player could never watch a shield drain: the readout would only
+ * appear once the shield had already failed and the hull was taking hits.
+ * That is precisely backwards, and it is what the U5 suite caught.
+ *
+ * No `hitFlash`: the hull did not take the hit, and the shield has its own
+ * `shieldHitFlash`. Only the bar's visibility window is armed.
+ */
+export function markShieldDamaged(entity: { healthBarTimer?: number }) {
+  entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
 }
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────

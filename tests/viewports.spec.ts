@@ -250,6 +250,21 @@ for (const vp of VIEWPORTS) {
       expect(bb.x).toBeGreaterThanOrEqual(0);
       expect(bb.x + bb.width).toBeLessThanOrEqual(vp.w + 0.5);
 
+      // The top bar is `justify-between` with three items — vitals chip,
+      // readout stack, pause button — and an unshrinkable middle SHOVES THE
+      // LAST ONE OUT. That is a real regression this caught at 320px while
+      // U5 was being written: the pause button left the screen. So both
+      // ends of the row are pinned, not just the bar between them.
+      for (const id of ['player-vitals', 'Pause']) {
+        const el = id === 'Pause'
+          ? page.getByRole('button', { name: 'Pause' })
+          : page.getByTestId(id);
+        const box = (await el.boundingBox())!;
+        expect(box, `${id} laid out`).not.toBeNull();
+        expect(box.x, `${id} left edge`).toBeGreaterThanOrEqual(-0.5);
+        expect(box.x + box.width, `${id} right edge`).toBeLessThanOrEqual(vp.w + 0.5);
+      }
+
       watch.assertClean();
     });
 

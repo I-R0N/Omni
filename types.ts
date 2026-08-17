@@ -384,6 +384,19 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
+  /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
+   *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
+   *  while it is positive and fades over the last `FADE_DURATION`.  A
+   *  SEPARATE timer from `hitFlash` on purpose: `hitFlash` is a ~0.1–0.3s
+   *  whiten-and-punch, and a bar that lived that long would strobe rather
+   *  than inform.  Purely presentational — nothing reads it but the
+   *  renderer. */
+  healthBarTimer?: number;
+  /** Opt OUT of the damage trigger and keep a persistent bar.  For priority
+   *  targets a player is meant to be tracking rather than reacting to (the
+   *  dragon mini-boss).  Capstone bosses do not need it — they have the
+   *  dedicated HUD bar. */
+  alwaysShowHealthBar?: boolean;
   shield?: number;
   maxShield?: number;
   shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
@@ -1421,6 +1434,15 @@ export interface EngineStats {
    *  flash window + remaining-window fraction for fade. */
   salvageFlash?: { amount: number; fraction: number };
   /** Effective player stats for the player menu (pause screen). */
+  /** The player's live hull + shield pools, pushed EVERY frame (gauntlet 5d,
+   *  U5).  `playerStats` beside it is richer but is built only while a menu
+   *  is open, and the in-game HUD needs these four numbers during play: the
+   *  player's floating world-space bar was removed in U5, so this is now the
+   *  canonical readout for the player's own condition. */
+  vitals?: {
+    health: number; maxHealth: number;
+    shield: number; maxShield: number;
+  };
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
@@ -1632,6 +1654,10 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  /** DBG: enemy health bars appear on damage and fade (true, default) vs
+   *  always drawn (false, the pre-5d behaviour).  See RenderSystem
+   *  `damageTriggeredBars`. */
+  damageTriggeredBars?: boolean;
   /** DBG minimap MATERIAL mode name (decision #43, G5): 'Flow' / 'Dots' /
    *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
    *  nothing. */

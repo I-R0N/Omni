@@ -68,6 +68,11 @@ export class RenderSystem {
   // entities.  Wired through GameEngine.toggleChevronMode, surfaced in the DBG
   // Visual section ("Chevrons": Offscreen / All).  Default = offscreen-only.
   public chevronsOffscreenOnly: boolean = true;
+  /** DBG toggle (Visual ▸ "HP bars") — when true (default), an enemy's
+   *  world-space health bar appears only while recently damaged and fades
+   *  out; when false, every enemy carries one every frame, which is the
+   *  pre-5d behaviour and the A/B for judging the change (gauntlet 5d, U5). */
+  public damageTriggeredBars: boolean = true;
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -1503,19 +1508,58 @@ export class RenderSystem {
     });
   }
 
+  /**
+   * The world-space health bar — a HIT REACTION, not a permanent label
+   * (gauntlet 5d, U5; the parked "damage-triggered health / shield bars"
+   * item).
+   *
+   * Three rules, and each of them removes something that used to be on screen
+   * all the time:
+   *
+   *  1. **A bar appears when the entity takes damage and fades out again.**
+   *     Every enemy used to carry one every frame, at full health and on
+   *     one-shot trash alike, which read as "tracked HUD" for entities the
+   *     player has no reason to track.  `healthBarTimer` is stamped by
+   *     `markDamaged` at every damage path and ticked by PhysicsSystem, so
+   *     the bars on screen are exactly the fights in progress.
+   *  2. **The PLAYER has no floating bar at all.**  `EngineStats.playerStats`
+   *     already feeds a persistent hull/shield readout to the HUD, which is
+   *     the canonical place for it — a second copy under the ship was the
+   *     same number twice, and it was under the thing the player is looking
+   *     at.  Hit feedback for the player is the hit-flash, the shield flash
+   *     and the screen shake, all of which stayed.
+   *  3. **The SHIELD bar is no longer player-only.**  Shields are
+   *     entity-agnostic now (the Bulwark, boss phases), so any shielded
+   *     entity gets the strip on a shield hit.
+   *
+   * `alwaysShowHealthBar` opts a priority target back into a persistent bar.
+   * Capstone bosses deliberately do NOT set it: they have the dedicated HUD
+   * bar, and a second readout under the hull is the redundancy rule 2 removes.
+   *
+   * Net effect on cost is a REDUCTION — most entities draw no bar on most
+   * frames — against one timer decrement per entity.
+   */
   private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
-      // Only render for Player and Enemies
-      if ((entity.type !== EntityType.PLAYER && entity.type !== EntityType.ENEMY) || entity.maxHealth <= 0) return;
+      // ENEMIES only.  The player's readout is the HUD's (rule 2).
+      if (entity.type !== EntityType.ENEMY || entity.maxHealth <= 0) return;
       // Bubbles (ambient fauna) carry no health bar — keep them reading as
       // neutral blobs, not tracked combatants.
       if (entity.enemyShape === 'bubble') return;
 
-      const { PLAYER_WIDTH, PLAYER_HEIGHT, ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
+      // Damage-triggered visibility.  `alwaysShowHealthBar` and the DBG
+      // toggle are the two ways back to a permanent bar.
+      let alpha = 1;
+      if (!entity.alwaysShowHealthBar && this.damageTriggeredBars) {
+          const t = entity.healthBarTimer ?? 0;
+          if (t <= 0) return;
+          const { FADE_DURATION } = UI_CONSTANTS.HEALTH_BAR;
+          if (t < FADE_DURATION) alpha = t / FADE_DURATION;
+      }
 
-      const isPlayer = entity.type === EntityType.PLAYER;
+      const { ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
 
-      const width = isPlayer ? PLAYER_WIDTH : ENEMY_WIDTH;
-      const height = isPlayer ? PLAYER_HEIGHT : ENEMY_HEIGHT;
+      const width = ENEMY_WIDTH;
+      const height = ENEMY_HEIGHT;
 
       // Calculate offset based on visual size approx
       const visualRadius = Math.max(entity.size.x, entity.size.y) * OFFSET_MODIFIER;
@@ -1523,22 +1567,27 @@ export class RenderSystem {
 
       const x = rx - width / 2;
       const y = ry + yOffset;
-      
+
       const healthPct = Math.max(0, Math.min(1, entity.health / entity.maxHealth));
+
+      const prevAlpha = ctx.globalAlpha;
+      if (alpha < 1) ctx.globalAlpha = prevAlpha * alpha;
 
       // Background
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, width, height);
 
-      // Fill Color — player + normal enemy bars are red; rival bars take the
+      // Fill Color — normal enemy bars are red; rival bars take the
       // disposition team colour (red hostile / green ally / amber neutral) so the
       // bar doubles as the at-a-glance intent cue (replacing the removed ring).
       ctx.fillStyle = entity.isRival ? (entity.color || '#ef4444') : '#ef4444';
 
       ctx.fillRect(x, y, width * healthPct, height);
 
-      // Shield bar — thin blue bar below health bar (player only)
-      if (isPlayer && entity.maxShield && entity.maxShield > 0) {
+      // Shield strip — for ANY shielded entity now, not just the player
+      // (rule 3): shields are entity-agnostic, so the Bulwark's arc and a
+      // boss phase's bubble both read here.
+      if (entity.maxShield && entity.maxShield > 0) {
           const shieldY = y + height + 1;
           const shieldHeight = height - 1;
           const shieldPct = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
@@ -1547,6 +1596,8 @@ export class RenderSystem {
           ctx.fillStyle = SHIELD_COLOR;
           ctx.fillRect(x, shieldY, width * shieldPct, shieldHeight);
       }
+
+      ctx.globalAlpha = prevAlpha;
   }
 
 

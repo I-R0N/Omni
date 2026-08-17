@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -452,9 +452,13 @@ export class PhysicsSystem {
         }
       }
 
-      // Visuals: Tick down flash timer
+      // Visuals: Tick down flash timer, and the longer health-bar window
+      // that rides the same events (5d U5).
       if (entity.hitFlash && entity.hitFlash > 0) {
           entity.hitFlash -= dt;
+      }
+      if (entity.healthBarTimer !== undefined && entity.healthBarTimer > 0) {
+          entity.healthBarTimer -= dt;
       }
       // Nebula shatter cooldown — strikers (PLAYER/ENEMY) that just broke
       // a nebula can't break another until this expires.
@@ -1261,6 +1265,7 @@ export class PhysicsSystem {
       proj.position.y = shielded.position.y + ny * (reach + 1);
 
       shielded.shield! -= projDmg;
+      markShieldDamaged(shielded);
       shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
       shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
       // A ricochet, not a landing: the deflect voice RISES in pitch, which
@@ -2884,6 +2889,7 @@ export class PhysicsSystem {
               && PhysicsSystem.shieldCoversHit(target, proj)) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
+              markShieldDamaged(target);
               projDmg -= absorbed;
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
@@ -2989,7 +2995,7 @@ export class PhysicsSystem {
                   target.velocity.x += (proj.velocity.x / vmag) * kick;
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
                   if (!poise || projDmg >= poise.stunDamage) target.hitStun = HIT_FEEDBACK.STUN_SEC;
-                  target.hitFlash = 0.18; // bigger flash + scale-punch on impact
+                  markDamaged(target, 0.18); // bigger flash + scale-punch on impact
                   // Scale-punch magnitude ∝ damage / maxHealth, so a chip on a
                   // tanky beast barely flinches and a heavy hit on a frail enemy snaps.
                   target.hitReact = hitReactStrength(projDmg, target.maxHealth ?? target.health);
@@ -3018,7 +3024,7 @@ export class PhysicsSystem {
                       const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
                       target.velocity.x += (proj.velocity.x / vmag) * kick;
                       target.velocity.y += (proj.velocity.y / vmag) * kick;
-                      target.hitFlash = Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012));
+                      markDamaged(target, Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012)));
                   }
               } else {
                   onShake(COLLISION_CONFIG.SHAKE.MICRO);
@@ -3101,11 +3107,12 @@ export class PhysicsSystem {
                       if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                           const absorbed = Math.min(target.shield!, bite);
                           target.shield! -= absorbed;
+                          markShieldDamaged(target);
                           bite -= absorbed;
                           target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                           target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                       }
-                      if (bite > 0) { target.health -= bite; target.hitFlash = 0.2; }
+                      if (bite > 0) { target.health -= bite; markDamaged(target, 0.2); }
                       if (onShake) onShake(COLLISION_CONFIG.SHAKE.MICRO);
                       if (target.health <= 0 && onDeath) onDeath(target);
                   }
@@ -3120,6 +3127,7 @@ export class PhysicsSystem {
                   if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
+                      markShieldDamaged(target);
                       ramDmg -= absorbed;
                       target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                       target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
@@ -3127,7 +3135,7 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(target.position, ramBase, target);
                   if (ramDmg > 0) {
                       target.health -= ramDmg;
-                      target.hitFlash = 0.2;
+                      markDamaged(target, 0.2);
                   }
                   if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
                   if (target.health <= 0 && onDeath) {
@@ -3316,13 +3324,14 @@ export class PhysicsSystem {
               if ((player.shield ?? 0) > 0) {
                   const absorbed = Math.min(player.shield!, envDmg);
                   player.shield! -= absorbed;
+                  markShieldDamaged(player);
                   envDmg -= absorbed;
                   player.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                   player.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
               }
               if (envDmg > 0) {
                   player.health -= envDmg;
-                  player.hitFlash = 0.1;
+                  markDamaged(player, 0.1);
               }
           }
       }
@@ -3433,7 +3442,7 @@ export class PhysicsSystem {
           if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
               player.health -= envDmg;
-              player.hitFlash = 0.1;
+              markDamaged(player, 0.1);
           }
       }
       
