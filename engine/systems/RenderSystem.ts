@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -23,6 +23,7 @@ import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
+import { renderLightLayer } from './render/lighting';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -146,6 +147,33 @@ export class RenderSystem {
   public lastLightingMs: number = 0;
   // Lights composited this frame, after viewport culling and the tier cap.
   public lastLightingLights: number = 0;
+
+  // ── The unified-lighting layer ──────────────────────────────────────
+  // Offscreen canvas the per-light passes composite into, blitted to the
+  // main canvas in ONE drawImage.  Mirrors the _staticTileCanvas fields
+  // above rather than inventing a second offscreen-canvas pattern; the
+  // code that drives it lives in render/lighting.ts as free functions
+  // over `r: RenderSystem`, same as staticTileCache.ts.
+  //
+  // Sized in CSS pixels over the active tier's divisor — never 1, because
+  // a light layer is low-frequency by nature.  At the Low tier's 3 a
+  // 390x844 phone gets 130x282 = 0.15 MB.
+  _lightCanvas: HTMLCanvasElement | null = null;
+  _lightCtx: CanvasRenderingContext2D | null = null;
+  _lightW: number = 0;
+  _lightH: number = 0;
+  _lightScale: number = 1;   // light-layer px per CSS px (= 1 / divisor)
+
+  /** DBG passthroughs for the lighting mode.  The state itself is module
+   *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
+   *  the harness and the tests can reach it off `engine.renderer` without
+   *  the mode having to be plumbed through EngineStats first.  The pause-menu
+   *  DBG row lands with A4, when there is something to look at. */
+  public cycleLighting(): string { return cycleLightingMode(); }
+  public setLighting(m: LightingMode): void { setActiveLightingMode(m); }
+  public getLighting(): LightingMode { return getActiveLightingMode(); }
+  public cycleLightTier(): string { return cycleLightingTier().name; }
+  public getLightTier(): string { return getActiveLightingTier().name; }
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
@@ -882,6 +910,14 @@ export class RenderSystem {
     }
 
     ctx.restore();
+
+    // 5b'. THE LIGHT LAYER (Screen Space).
+    //
+    // After the entity pass so it lights what was drawn, before the HUD so
+    // it never tints the HUD, and AFTER ctx.restore() because the layer is
+    // screen-space and must not inherit the camera translation.  No-op at
+    // LIGHTING_CYCLE 'legacy' (the default).
+    renderLightLayer(this, ctx, width, height);
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

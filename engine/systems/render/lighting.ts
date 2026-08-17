@@ -27,8 +27,11 @@
  *  idiom (CLAUDE.md §8), never `length = 0` + `push`.
  */
 import type { PhysicsSystem } from '../PhysicsSystem';
+import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType } from '../../../types';
-import { SHARD_VARIANTS } from '../../../constants';
+import {
+    SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
+} from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
 /** One shadow-casting body, already resolved into the querying light's wrap
@@ -146,3 +149,112 @@ export function collectOccluders(
 }
 
 const _EMPTY: Occluder[] = [];
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  THE LIGHT LAYER — the compositing half.
+//
+//  Everything above this line is portable geometry.  Everything below it is
+//  Canvas2D, and is the half a renderer swap would throw away.  The split is
+//  deliberate: a WebGL port is parked rather than dead, and when it happens
+//  the occluder collection and (from A4) the tangent maths should survive it
+//  untouched.
+//
+//  The layer follows `staticTileCache.ts` rather than inventing a second
+//  offscreen-canvas pattern: free functions over `r: RenderSystem`, with the
+//  canvas / ctx / dimensions living as fields there because they persist
+//  between frames, and `RenderSystem` imported as a TYPE so there is no
+//  runtime cycle.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Ensure the light canvas exists and matches the current viewport and tier.
+ *
+ * Sized in CSS pixels divided by the tier's divisor, NOT in backing-store
+ * pixels — the layer is low-frequency, and tying it to the device pixel
+ * ratio would make a dpr-3 phone pay 2.25x for a blur it cannot see.  CSS
+ * dimensions come from the backing store over `effectiveDpr()`, never from
+ * `window.devicePixelRatio`: the cap means those two disagree, and mixing
+ * them computes a logical viewport that does not match the canvas.
+ *
+ * Rebuilds only when the size actually changes (resize, tier change).  A
+ * canvas reallocation per frame would dwarf everything this stage is
+ * measuring.
+ */
+export function ensureLightCanvas(r: RenderSystem, ctx: CanvasRenderingContext2D): boolean {
+    const dpr = effectiveDpr();
+    const cssW = ctx.canvas.width / dpr;
+    const cssH = ctx.canvas.height / dpr;
+    const divisor = getActiveLightingTier().divisor;
+    const w = Math.max(1, Math.ceil(cssW / divisor));
+    const h = Math.max(1, Math.ceil(cssH / divisor));
+
+    if (r._lightCanvas !== null && r._lightW === w && r._lightH === h) return true;
+
+    if (r._lightCanvas === null) {
+        if (typeof document === 'undefined') return false;
+        r._lightCanvas = document.createElement('canvas');
+        r._lightCtx = r._lightCanvas.getContext('2d');
+        if (r._lightCtx === null) { r._lightCanvas = null; return false; }
+    }
+    r._lightCanvas.width = w;
+    r._lightCanvas.height = h;
+    r._lightW = w;
+    r._lightH = h;
+    // World units per light-layer pixel, for the per-light passes in A4.
+    r._lightScale = 1 / divisor;
+    return true;
+}
+
+/**
+ * Build and blit the light layer.  Called once per frame from `render()`,
+ * after the entity pass and before the HUD, OUTSIDE the camera transform —
+ * the layer is screen-space, so it must not inherit the world translation.
+ *
+ * No-op at `'legacy'`, which is what makes the toggle a true restore rather
+ * than a re-render of the same thing by another route: nothing is allocated,
+ * nothing is drawn, and `lastLightingMs` stays 0.
+ */
+export function renderLightLayer(
+    r: RenderSystem, ctx: CanvasRenderingContext2D, width: number, height: number,
+): void {
+    const mode = getActiveLightingMode();
+    if (mode === 'legacy') return;
+
+    const t0 = performance.now();
+    if (!ensureLightCanvas(r, ctx)) return;
+    const lctx = r._lightCtx!;
+    const lw = r._lightW, lh = r._lightH;
+
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.clearRect(0, 0, lw, lh);
+
+    let lights = 0;
+    if (mode === 'debug') {
+        // A flat 50% grey.  This stage is proving the PLUMBING — canvas,
+        // sizing, the single blit, and the smoothing restore below — so it
+        // deliberately draws something with no lighting maths in it, and
+        // therefore nothing that could hide a cost or a seam.
+        lctx.globalAlpha = 1;
+        lctx.fillStyle = '#808080';
+        lctx.fillRect(0, 0, lw, lh);
+        lights = 1;
+    }
+    // 'unified' draws nothing yet — A4 owns the per-light passes.
+
+    // ONE drawImage reaches the main canvas, per the batching constraint.
+    //
+    // `imageSmoothingEnabled` is set false globally at the top of render(),
+    // which is right for sprites and wrong here: the layer is a third of
+    // screen resolution, so nearest-neighbour upscaling makes it visibly
+    // blocky.  Turn it on for exactly this draw and put it back immediately
+    // — leaving it true would silently soften every sprite drawn afterwards.
+    const prevSmoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(r._lightCanvas!, 0, 0, lw, lh, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.imageSmoothingEnabled = prevSmoothing;
+
+    r.lastLightingMs += performance.now() - t0;
+    r.lastLightingLights = lights;
+}

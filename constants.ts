@@ -1376,6 +1376,84 @@ export function cycleRenderScale(): number {
   return RENDER_SCALE_CYCLE[activeRenderScaleIndex];
 }
 
+// ─── DBG: unified tile lighting ──────────────────────────────────────────────
+//
+// The mode toggle for the lighting gauntlet (docs/GAUNTLET_LIGHTING_LOG.md).
+//
+// Index 0 is `'legacy'`, and it is named for what it IS rather than "off":
+// Omni is not a game without lighting.  It ships THREE hand-rolled lighting
+// approximations that have drifted apart — the player-distance proximity
+// bloom on rock / plastic / indestructible tiles, the repel-impulse glow on
+// glass and metal, and the glass edge tint on its own hardcoded 120 range.
+// `'legacy'` is those three, unchanged, and it is the default: the unified
+// system has to earn its place against them, not be assumed to replace them.
+//
+//   legacy  — the three shipped models, untouched.  lightingMs reads 0.
+//   debug   — the light layer is built and blitted, but paints a flat grey.
+//             Proves the canvas, its sizing, the blit and the
+//             imageSmoothingEnabled restore, with no lighting maths in the
+//             way of reading the cost.
+//   unified — the real shadow-cast lighting.
+export const LIGHTING_CYCLE = ['legacy', 'debug', 'unified'] as const;
+export type LightingMode = typeof LIGHTING_CYCLE[number];
+let activeLightingIndex = 0;
+export function getActiveLightingMode(): LightingMode { return LIGHTING_CYCLE[activeLightingIndex]; }
+export function cycleLightingMode(): LightingMode {
+  activeLightingIndex = (activeLightingIndex + 1) % LIGHTING_CYCLE.length;
+  return LIGHTING_CYCLE[activeLightingIndex];
+}
+/** Jump straight to a mode.  Exists for the harness and the tests, which
+ *  need to A/B two specific modes rather than walk the cycle. */
+export function setActiveLightingMode(m: LightingMode): void {
+  const i = LIGHTING_CYCLE.indexOf(m);
+  if (i >= 0) activeLightingIndex = i;
+}
+
+/** Per-tier lighting budget.
+ *
+ *  `divisor` is how many CSS pixels of screen one light-layer pixel covers.
+ *  It is never 1: a light layer is low-frequency by nature, so rendering it
+ *  at full resolution buys nothing but fill rate.  At the Low tier's 3, a
+ *  390x844 phone gets a 130x282 layer — 0.15 MB.
+ *
+ *  `maxOccluders` is load-bearing rather than defensive.  A 300-radius light
+ *  covers pi*300^2 = 283k square units; at HEX_AREA = 1257 that is up to ~225
+ *  hexes if the field were solid.  The cap takes the N NEAREST, because the
+ *  nearest occluders subtend the largest shadow angle — so truncation loses
+ *  the shadows least likely to be noticed, and the cost stays bounded by the
+ *  cap rather than by how dense the terrain happens to be.
+ *
+ *  `maxRadius` of 300 at Low is anchored on the legacy models' own
+ *  `glow.range` of 250, so a unified light reads at a scale players already
+ *  know rather than announcing itself as a new system.
+ *
+ *  `ambientPerStage` is multiplied by min(stageIndex, 4) — ambient darkness
+ *  is scoped to DEPTH, so the hub and the surface look exactly as they do
+ *  today and darkness becomes a property of descending.  Zero at Low. */
+export interface LightingTier {
+  readonly name: string;
+  readonly divisor: number;
+  readonly maxLights: number;
+  readonly maxOccluders: number;
+  readonly maxRadius: number;
+  /** Penumbra softness. 0 = hard shadows (Low pins this, so the penumbra
+   *  stage is a no-op on the worst target by construction). */
+  readonly penumbraK: number;
+  readonly ambientPerStage: number;
+}
+export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
+  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxRadius: 300, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
+  { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
+] as const;
+// Index 0 = Low, PINNED for the 390x844 phone the game is played on.
+let activeLightingTierIndex = 0;
+export function getActiveLightingTier(): LightingTier { return LIGHTING_TIERS[activeLightingTierIndex]; }
+export function cycleLightingTier(): LightingTier {
+  activeLightingTierIndex = (activeLightingTierIndex + 1) % LIGHTING_TIERS.length;
+  return LIGHTING_TIERS[activeLightingTierIndex];
+}
+
 // ─── DBG: HUD (React) update rate ────────────────────────────────────────────
 //
 // `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.

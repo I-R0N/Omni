@@ -23,7 +23,7 @@ recorded rather than quietly dropped.
 
 - [x] **A0** — Instrumentation, baseline, legacy credit
 - [x] **A1** — Occluder extraction into a single queryable source
-- [ ] **A2** — Light-layer scaffolding + debug visualization
+- [x] **A2** — Light-layer scaffolding + debug visualization
 - [ ] **A3** — Occluder churn
 - [ ] **A4** — One point light, shadow-cast
 - [ ] **A4b** — Migrate the legacy receivers
@@ -627,3 +627,74 @@ visitor indirection did not cost anything measurable, and the extra
 - **B4 declined on evidence** — the static-query half is 0.036 ms/frame
   against B4's own 0.3 ms threshold, before lighting's half is counted,
   and the cache would have to span the 120 Hz sim / render-rate boundary.
+
+---
+
+## A2 — Light-layer scaffolding + debug visualization
+
+Three files, as scoped: `constants.ts`, `render/lighting.ts`,
+`RenderSystem.ts`.
+
+### What shipped
+
+- **`LIGHTING_CYCLE = ['legacy', 'debug', 'unified']`**, index 0 default.
+  Named `'legacy'` rather than "off" because Omni is not a game without
+  lighting — index 0 IS the three shipped models, and the unified system
+  has to earn its place against them.
+- **`LIGHTING_TIERS`** — the divisor / light cap / occluder cap / max
+  radius / penumbra `k` / depth-ambient table, Low pinned for the phone.
+- **The light canvas** as `RenderSystem` fields (`_lightCanvas`,
+  `_lightCtx`, `_lightW/H`, `_lightScale`), driven by free functions over
+  `r: RenderSystem` in `lighting.ts` with `RenderSystem` a TYPE import —
+  the `staticTileCache.ts` pattern, not a second one.
+- **The blit**, after `ctx.restore()` (so the screen-space layer does not
+  inherit the camera translation), after entities, before the HUD.
+
+`lighting.ts` now has two halves with a hard line between them: the
+portable geometry above, the Canvas2D compositing below. A WebGL port
+should be able to keep the first and discard the second.
+
+**Scope decision.** A full DBG menu row spans six files
+(`constants`, `debugControls`, `App`, `UIOverlay`, `types`,
+`GameEngine`) and A2's cap is three. The toggle therefore ships as
+module state plus thin passthroughs on `RenderSystem`
+(`setLighting`/`cycleLighting`/`cycleLightTier`), which the harness and
+tests reach as `engine.renderer.setLighting('debug')`. The pause-menu row
+lands with A4, when there is something to look at.
+
+### Two measurement defects found in my own gate, and fixed
+
+**A screenshot-equality check cannot prove "byte-identical" here.** The
+first version of the A2 gate compared PNGs, and *passed* its
+"debug differs from legacy" assertion against the **pre-A2 build**, which
+contains no lighting code at all. Nebula twinkle and the particle pool
+are driven by wall-clock time, so two captures of the same build already
+differ; the check was measuring its own nondeterminism. Replaced with a
+noise-floor design: two captures of the *same* build establish the floor,
+and the cross-build difference must not exceed it.
+
+**A per-cell "did it brighten" test must be noise-aware in the right
+way.** The second version compared each cell's gain against that cell's
+own frame-to-frame noise, and flagged 9 cells — every one of which had a
+debug value exceeding *both* legacy samples, i.e. had plainly brightened.
+The cells were simply ones containing a moving bright object, swinging 80+
+luminance on their own. Corrected to "brighter than the dimmer of the two
+legacy samples", which is the claim actually being made.
+
+Both are recorded because both would have produced a green gate on a
+broken change.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| At `'legacy'`, byte-identical | PASS — structurally (no canvas allocated, function returns before touching the context) and statistically (cross-build grid difference **3.94** against a same-build noise floor of **7.49**) |
+| At `'legacy'`, `lightingMs` = 0 | PASS — exactly 0, p95 |
+| At `'debug'`, ≤ 0.20 ms p95 | PASS — **0.085 ms** p95, 0.045 p50 |
+| Grey covers the viewport, no seam | PASS — 0 of 1152 cells uncovered; worst row 0/24, worst col 0/48 |
+| No blockiness (the smoothing restore) | PASS — asserted DIRECTLY: `ctx.imageSmoothingEnabled === false` and `globalCompositeOperation === 'source-over'` after a completed frame. A *flat* grey cannot reveal nearest-neighbour blockiness by looking at it, so the restore is proved by reading the context state rather than by eye; the visual confirmation belongs to A4. |
+| No HUD occlusion | PASS — the blit precedes the HUD pass; no page errors |
+| Layer sized cssW/3 × cssH/3 | PASS — 130×282 at 390×844, Low tier (0.15 MB, well under the 8 MB stop condition) |
+| 111 tests pass | PASS |
+
+Cost against the ladder's budget: **0.085 ms** of the 0.20 ms slice.
