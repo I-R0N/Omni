@@ -224,6 +224,99 @@ const PANEL_OPAQUE = 'bg-slate-950/95 backdrop-blur-md';
 const OVERLAY_FADE_IN = { animation: 'omniFadeIn 420ms ease-out both' } as const;
 const OVERLAY_KEYFRAMES = '@keyframes omniFadeIn{from{opacity:0}to{opacity:1}}';
 
+/* ── The shared class vocabulary (gauntlet 5d, U2) ──────────────────────
+ *
+ * `OVERLAY_SCRIM` and `PANEL_OPAQUE` above already set the pattern: when
+ * more than one surface needs to look like the same thing, the class string
+ * becomes a named constant so the surfaces cannot drift apart.  The 5d audit
+ * (docs/GAUNTLET_5D_LOG.md, U1) counted what happens without that discipline
+ * — three neutral-panel recipes meaning one thing, the primary action button
+ * in three colours across five overlays, four treatments of one collapsible
+ * toggle — so the rest of the vocabulary is named here.
+ *
+ * The rule for reading these: a constant is the DEFAULT, and a call site that
+ * departs from it should say why in a comment.  There are three such
+ * departures today and each is labelled at its call site.
+ */
+
+/** TYPE SCALE.  Five steps, and the names say what each is FOR rather than
+ *  how big it is, because "10px vs 11px" is the question that produced the
+ *  drift.  `MICRO` is the readability floor on glass — the audit found 7px
+ *  badges, which is below anything legible on a phone held at arm's length. */
+const T_MICRO = 'text-[9px]';   // badges, pips, slot numbers
+const T_NOTE  = 'text-[10px]';  // secondary captions hanging off a value
+const T_BODY  = 'text-[11px]';  // section headings, help rows, prose
+const T_ROW   = 'text-xs';      // 12px — data rows, button labels
+
+/** The neutral information PANEL.  Sixteen of the nineteen panels in the
+ *  overlay already wanted exactly this; the other three said the same thing
+ *  in slightly different slate. */
+const PANEL = 'bg-slate-800/60 border border-slate-600/40 rounded-lg p-3';
+/** Same panel, tighter — for a single-row strip rather than a stack. */
+const PANEL_ROW = 'bg-slate-800/60 border border-slate-600/40 rounded-lg px-3 py-2';
+/** An ACCENT panel keeps the neutral body and swaps only the border, so the
+ *  accent reads as a label on a familiar shape rather than a different
+ *  component.  Today: amber (commerce), rose (repair), sky (outfitting),
+ *  emerald (reward). */
+const panelAccent = (border: string) =>
+  `bg-slate-800/60 border ${border} rounded-lg p-3`;
+
+/** SECTION HEADING — the 11px uppercase rule the overlay already follows in
+ *  every panel; named so the colour is the only thing a call site varies. */
+const HEADING = `${T_BODY} font-bold uppercase tracking-widest`;
+
+/** SCREEN TITLE (pause, station).  Steps down at phone width: the audit
+ *  measured `text-3xl` + `tracking-[0.2em]` wrapping "PLAYER MENU" onto two
+ *  lines at 390px, which is the viewport this game is designed for. */
+const SCREEN_TITLE = 'text-2xl sm:text-3xl font-bold tracking-[0.15em] truncate min-w-0';
+/** OUTCOME TITLE (death, stage-clear) — the two screens that interrupt play
+ *  and get to shout.  Heavier than a screen title on purpose. */
+const OUTCOME_TITLE = 'text-3xl sm:text-4xl font-black tracking-[0.2em]';
+
+/** The TAP-TARGET FLOOR.  40px is what `screens.spec.ts` already asserts on
+ *  the death screen; U1 found it held nowhere else (a 16.5px front-door
+ *  toggle, 24.5px shop rows).  Applied as a min-height rather than by
+ *  re-padding every control, so a dense row keeps its visual density and
+ *  gains only its hit area. */
+const TAP = 'min-h-[40px]';
+
+/** PRIMARY ACTION — "carry on playing".  Station UNDOCK, pause CONTINUE,
+ *  death RESPAWN and stage-clear CONTINUE all mean this, and emerald is what
+ *  three of the four already were. */
+const BTN_PRIMARY =
+  `bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg ` +
+  `transition-all active:scale-95 tracking-widest uppercase ${TAP}`;
+/** SECONDARY ACTION — a real choice, but not the one the screen is steering
+ *  you toward. */
+const BTN_SECONDARY =
+  `bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg ` +
+  `${T_ROW} tracking-widest uppercase transition-all active:scale-95 ${TAP}`;
+/** A COMPACT action inside a panel (repair, sell, scrap, unmount). */
+const BTN_COMPACT =
+  `px-3 py-1.5 rounded ${T_BODY} font-bold transition-all active:scale-95 ${TAP} ` +
+  `disabled:opacity-40 disabled:cursor-not-allowed`;
+/** A SELECTABLE chip in a grid (difficulty, maps, enemy test, dragon…).
+ *  `on` is the selected accent; `off` is the shared resting state, so an
+ *  unselected chip looks the same everywhere and only the hover accent
+ *  differs by group. */
+const CHIP_BASE =
+  `px-3 py-2 rounded-lg ${T_ROW} font-bold border transition-all active:scale-95 ${TAP}`;
+const CHIP_OFF = 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white';
+
+/** A HUD CHIP — the top-right readout stack.  One padding for the whole
+ *  column; the audit found the status badges at `px-3 py-1` against
+ *  `px-4 py-1.5` everywhere else, which is what made the stack's left edge
+ *  ragged. */
+const HUD_CHIP =
+  'bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right';
+
+/** A COLLAPSIBLE SECTION toggle.  Colour is the semantic (amber = debug,
+ *  sky = help, slate = neutral) and is passed in; everything else — size,
+ *  padding, tap area, the ▸/▾ affordance — is shared. */
+const SECTION_TOGGLE =
+  `pointer-events-auto cursor-pointer ${T_BODY} uppercase tracking-widest ` +
+  `select-none py-2 px-3 ${TAP} transition-colors`;
+
 const UIOverlay: React.FC<UIOverlayProps> = ({
   stats,
   onCycleWeapon,
@@ -445,9 +538,50 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // Installed hexes are drydock-only; the inventory is the player's cargo
   // hold — reorderable (and scrappable) from anywhere on the map.
   const canEditInstalled = dockedSvc?.drydock === true;
-  const HEXW = 76, HEXH = 66;
-  const INVW = 66, INVH = 57; // small flat-top hexes, H ≈ 0.866 W
+  /* HEX SIZING IS RESPONSIVE (5d, U2 — audit finding A2).
+   *
+   * The flowers used to be a fixed 200px-wide box in a `grid-cols-2` column
+   * that is ~163px at 390px and ~128px at 320px, so the two flowers OVERLAPPED
+   * by 20px on the design viewport and left the screen on both sides at 320.
+   * That is not only cosmetic: the hexes are pointer drop targets resolved
+   * through `document.elementFromPoint`, which returns the TOPMOST
+   * `[data-tile]` — so an overlapping band could take a drop meant for its
+   * neighbour.
+   *
+   * So the hex size is derived from the width actually available rather than
+   * assumed.  The arithmetic mirrors the layout exactly: the panel sits in a
+   * `max-w-2xl` (672) column with the overlay's `p-4` and the panel's own
+   * `p-3`, and the two flowers split what is left with a `gap-2` between
+   * them.  Capped at the original 76px so nothing about the tablet and
+   * desktop cases changes, floored so a very narrow window degrades rather
+   * than inverts.
+   *
+   * `vw` is state, not a per-frame read: it changes on RESIZE, which is a
+   * user action a few times a session, not game data.  (The EngineStats-only
+   * rule is about per-frame sim data — see CLAUDE.md §8.) */
+  const [vw, setVw] = useState<number>(() =>
+    typeof window === 'undefined' ? 390 : window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    onResize();
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  // Content width inside the overlay padding + the panel padding, capped by
+  // the `max-w-2xl` wrapper the station and pause panels both use.
+  const panelContentW = Math.min(vw, 672) - 32 /* overlay p-4 */ - 24 /* panel p-3 */;
+  // Two flowers, `gap-2` between them; a flower's box is HEXW * 2.5 + 10.
+  const HEXW = Math.max(40, Math.min(76, ((panelContentW - 8) / 2 - 10) / 2.5));
+  const HEXH = HEXW * (66 / 76); // flat-top hex: H ≈ 0.868 W (the shipped ratio)
+  // The inventory honeycomb is one row of INV_COLS across the same content
+  // width: cw = 0.75 * INVW * (COLS - 1) + INVW = INVW * 4.75 at six columns.
   const INV_COLS = 6;
+  const INVW = Math.max(36, Math.min(66, panelContentW / (0.75 * (INV_COLS - 1) + 1)));
+  const INVH = INVW * (57 / 66);
   const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
   const HEX_OFF = [
     { x: 0, y: 0 },
@@ -494,11 +628,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
     return (
       <div className="flex flex-col items-center gap-1.5">
-        <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>
-          {title}
+        {/* Title and the gun-count chip STACK rather than sharing a line
+            (5d U2, audit finding B3): inline, the chip wrapped the weapon
+            heading onto a second line at 390px, which pushed the weapon
+            flower down out of alignment with the ship flower.  The fixed
+            min-height keeps both headings the same height whether or not
+            they carry a chip. */}
+        <h3 className={`flex flex-col items-center justify-start gap-1 min-h-[38px] text-center ${HEADING} ${accentText}`}>
+          <span>{title}</span>
           {g === 'weapon' && (
             <span
-              className={`ml-2 px-1.5 py-0.5 rounded text-[9px] tabular-nums ${gunCount >= maxGuns ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700/70 text-slate-300'}`}
+              className={`px-1.5 py-0.5 rounded ${T_MICRO} tabular-nums ${gunCount >= maxGuns ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700/70 text-slate-300'}`}
               title={`Mounted guns — limited to ${maxGuns} at a time (any hex; more slots is a future ship upgrade). Weaponless is allowed: guns weigh the ship down, flying light boosts acceleration.`}
             >
               Guns {gunCount}/{maxGuns}
@@ -541,11 +681,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   className="absolute flex flex-col items-center justify-center text-center"
                   style={{ inset: 2.5, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
                 >
-                  {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{(gunOrder.get(i) ?? 0) + 1}</span>}
+                  {/* 9px is the readability floor on glass; these two were
+                      7px before 5d U2 (audit finding C4). */}
+                  {isGun && <span className={`${T_MICRO} font-bold text-amber-400/90 tracking-widest leading-none mb-0.5`}>W{(gunOrder.get(i) ?? 0) + 1}</span>}
                   {m ? (
                     <>
-                      <span className={`text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
-                      {offline && <span className="text-[7px] text-rose-400/90 font-bold leading-none mt-0.5">OFFLINE</span>}
+                      <span className={`${T_MICRO} font-bold uppercase tracking-tight leading-tight px-1 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
+                      {offline && <span className={`${T_MICRO} text-rose-400/90 font-bold leading-none mt-0.5`}>OFFLINE</span>}
                     </>
                   ) : (
                     <span className="text-slate-500 text-base font-bold leading-none">+</span>
@@ -567,7 +709,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     const ch = INVH * rows + INVH / 2 + 4;
     return (
       <div className="flex flex-col items-center gap-1.5">
-        <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest">Inventory</h3>
+        <h3 className={`text-amber-300 ${HEADING}`}>Inventory</h3>
         <div className="relative" style={{ width: cw, height: ch }}>
           {(out?.inventory ?? []).map((m, i) => {
             const col = i % INV_COLS, row = Math.floor(i / INV_COLS);
@@ -598,9 +740,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   style={{ inset: 2, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
                 >
                   {m ? (
-                    <span className="text-[8px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{m.label}</span>
+                    <span className={`${T_MICRO} font-bold uppercase tracking-tight leading-tight px-1 text-slate-100`}>{m.label}</span>
                   ) : (
-                    <span className="text-slate-600 text-xs font-bold leading-none">·</span>
+                    <span className={`text-slate-600 ${T_ROW} font-bold leading-none`}>·</span>
                   )}
                 </span>
               </button>
@@ -628,10 +770,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     const feeds = (c: { area?: string; idx?: number }) =>
       selHex !== null && c.area === selHex.area && c.idx === selHex.idx;
     return (
-      <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-        <div className="flex items-baseline justify-between mb-2">
-          <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Ship Status</h3>
-          <span className="text-slate-500 text-[10px]">
+      <div className={PANEL}>
+        <div className="flex items-baseline justify-between gap-2 mb-2">
+          <h3 className={`text-sky-300 ${HEADING}`}>Ship Status</h3>
+          <span className={`text-slate-500 ${T_NOTE} text-right`}>
             {selHex ? 'highlighted: fed by the selected hex' : 'tap a stat for its modules'}
           </span>
         </div>
@@ -648,25 +790,25 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <button
                   data-testid={`stat-${l.id}`}
                   onClick={() => setOpenStat(open ? null : l.id)}
-                  className="w-full flex items-baseline justify-between gap-2 px-1.5 py-1.5 text-left hover:bg-slate-700/30 rounded transition-colors"
+                  className={`w-full flex items-center justify-between gap-2 px-1.5 py-1.5 text-left hover:bg-slate-700/30 rounded transition-colors ${TAP}`}
                 >
-                  <span className="text-slate-400 text-xs flex items-baseline gap-1.5">
+                  <span className={`text-slate-400 ${T_ROW} flex items-baseline gap-1.5`}>
                     {l.label}
-                    <span className="text-slate-600 text-[9px]">{open ? '▾' : '▸'}</span>
+                    <span className={`text-slate-600 ${T_MICRO}`}>{open ? '▾' : '▸'}</span>
                   </span>
                   <span className="flex items-baseline gap-1.5">
                     {counted > 0 && (
-                      <span className={`text-[9px] font-bold tabular-nums ${lit ? 'text-amber-300' : 'text-slate-600'}`}>
+                      <span className={`${T_MICRO} font-bold tabular-nums ${lit ? 'text-amber-300' : 'text-slate-600'}`}>
                         {counted} mod{counted > 1 ? 's' : ''}
                       </span>
                     )}
-                    <span className="text-white font-bold tabular-nums text-xs">{l.display}</span>
+                    <span className={`text-white font-bold tabular-nums ${T_ROW}`}>{l.display}</span>
                   </span>
                 </button>
                 {open && (
                   <div
                     data-testid={`stat-detail-${l.id}`}
-                    className="px-1.5 pb-2 pt-0.5 flex flex-col gap-0.5 text-[11px]"
+                    className={`px-1.5 pb-2 pt-0.5 flex flex-col gap-0.5 ${T_BODY}`}
                   >
                     <div className="flex justify-between gap-2 text-slate-500">
                       <span>Base</span>
@@ -680,7 +822,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                         <span className="truncate">
                           {c.label}
                           {!c.active && c.requires && (
-                            <span className="text-rose-400/80 ml-1.5 text-[9px] uppercase tracking-wide">
+                            <span className={`text-rose-400/80 ml-1.5 ${T_MICRO} uppercase tracking-wide`}>
                               offline · needs {c.requires}
                             </span>
                           )}
@@ -691,7 +833,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {l.contributors.length === 0 && (
                       <span className="text-slate-600">No modules feed this stat.</span>
                     )}
-                    {l.note && <span className="text-slate-500 text-[10px] mt-0.5">{l.note}</span>}
+                    {l.note && <span className={`text-slate-500 ${T_NOTE} mt-0.5`}>{l.note}</span>}
                   </div>
                 )}
               </div>
@@ -705,9 +847,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    *  read-only info (pause) for hex selections; SELL / SCRAP actions for
    *  inventory selections (sell needs a station, scrap works anywhere). */
   const renderModuleDetail = (ctx: 'station' | 'pause') => (
-    <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 min-h-[52px] flex items-center justify-between gap-3 flex-wrap">
+    <div className={`${PANEL_ROW} min-h-[52px] flex items-center justify-between gap-3 flex-wrap`}>
       {!selSlot ? (
-        <span className="text-slate-500 text-[11px]">
+        <span className={`text-slate-500 ${T_BODY}`}>
           {ctx === 'station'
             ? (canEditInstalled ? 'Drag modules between tiles, or tap a hex slot to inspect / install.' : 'Tap a hex slot to inspect the outfit.')
             : 'Tap a tile to inspect. Cargo can be rearranged or scrapped here; outfitting needs a station drydock.'}
@@ -715,9 +857,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       ) : selSlot.g === 'inventory' ? (
         selInvMod ? (
           <>
-            <div className="text-xs">
+            <div className={T_ROW}>
               <span className="text-white font-bold uppercase tracking-wide">{selInvMod.label}</span>
-              <span className="text-slate-500 ml-2 text-[10px] uppercase">{selInvMod.kind.replace('-', ' ')}</span>
+              <span className={`text-slate-500 ml-2 ${T_NOTE} uppercase`}>{selInvMod.kind.replace('-', ' ')}</span>
             </div>
             <div className="flex gap-1.5">
               <button
@@ -726,30 +868,30 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 title={!stats.dock?.docked
                   ? 'Sell-back needs a station — dock anywhere to sell for 90% of cost'
                   : selInvMod.sellValue <= 0 ? 'Worthless — scrap it instead' : 'Sell back for 90% of cost'}
-                className="px-3 py-1 rounded text-[11px] font-bold bg-emerald-800/60 hover:bg-emerald-700/70 text-emerald-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                className={`${BTN_COMPACT} bg-emerald-800/60 hover:bg-emerald-700/70 text-emerald-200`}
               >
                 Sell ◈{selInvMod.sellValue.toLocaleString()}
               </button>
               <button
                 onClick={() => onScrapModule?.(selSlot.i)}
                 title="Break up for scrap — 9% of cost, works anywhere"
-                className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95"
+                className={`${BTN_COMPACT} bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200`}
               >
                 Scrap ◈{selInvMod.scrapValue.toLocaleString()}
               </button>
             </div>
           </>
         ) : (
-          <span className="text-slate-500 text-[11px]">Empty inventory tile — purchases land here.</span>
+          <span className={`text-slate-500 ${T_BODY}`}>Empty inventory tile — purchases land here.</span>
         )
       ) : selHexMod ? (
         <>
-          <div className="text-xs">
+          <div className={T_ROW}>
             <span className="text-white font-bold uppercase tracking-wide">{selHexMod.label}</span>
-            <span className="text-slate-500 ml-2 text-[10px] uppercase">{selHexMod.kind.replace('-', ' ')}</span>
+            <span className={`text-slate-500 ml-2 ${T_NOTE} uppercase`}>{selHexMod.kind.replace('-', ' ')}</span>
             {selHexMod.active
-              ? <span className="text-emerald-300 ml-2 font-bold text-[10px] uppercase">Online</span>
-              : <span className="text-rose-400 ml-2 font-bold text-[10px] uppercase">Offline — must touch {selHexMod.requires}</span>}
+              ? <span className={`text-emerald-300 ml-2 font-bold ${T_NOTE} uppercase`}>Online</span>
+              : <span className={`text-rose-400 ml-2 font-bold ${T_NOTE} uppercase`}>Offline — must touch {selHexMod.requires}</span>}
             {/* Exact effect (A2): every stat this hex feeds, with the amount
                 it contributes.  An OFFLINE module lists the same stats with
                 a zero contribution, so "what am I losing" reads directly. */}
@@ -759,10 +901,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   .filter(c => c.area === selSlot.g && c.idx === selSlot.i)
                   .map(c => ({ stat: l.label, display: c.display, active: c.active })));
               if (eff.length === 0) {
-                return <div className="text-slate-500 text-[10px] mt-0.5">Contributes no ship stats.</div>;
+                return <div className={`text-slate-500 ${T_NOTE} mt-0.5`}>Contributes no ship stats.</div>;
               }
               return (
-                <div data-testid="detail-effects" className="text-[10px] mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5">
+                <div data-testid="detail-effects" className={`${T_NOTE} mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5`}>
                   {eff.map((e, i) => (
                     <span key={i} className={e.active ? 'text-amber-200' : 'text-slate-600'}>
                       {e.stat} <span className={`tabular-nums font-bold ${e.active ? '' : 'line-through'}`}>{e.display}</span>
@@ -779,27 +921,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               title={firstFreeInv === -1 ? 'Inventory full'
                 : selHexMod.kind === 'weapon' ? 'Unmount (weaponless flight is allowed — flying light boosts acceleration)'
                 : 'Move to inventory'}
-              className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              className={`${BTN_COMPACT} bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200`}
             >
               ✕ To inventory
             </button>
           )}
           {ctx === 'pause' && (
-            <span className="text-slate-500 text-[10px]">Installed — reconfigure at a station drydock.</span>
+            <span className={`text-slate-500 ${T_NOTE}`}>Installed — reconfigure at a station drydock.</span>
           )}
         </>
       ) : (
         <>
-          <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider shrink-0">
+          <span className={`text-slate-400 ${T_BODY} font-bold uppercase tracking-wider shrink-0`}>
             Install · {selSlot.g} module
           </span>
           <div className="flex gap-1.5 flex-wrap">
             {ctx === 'pause' || !canEditInstalled ? (
-              <span className="text-slate-500 text-[11px]">
+              <span className={`text-slate-500 ${T_BODY}`}>
                 {ctx === 'pause' ? 'Empty slot — outfit at a station drydock.' : 'Outfitting locked — no drydock at this station.'}
               </span>
             ) : candidates.length === 0 ? (
-              <span className="text-slate-500 text-[11px]">No matching modules in the inventory — buy some at a shop station.</span>
+              <span className={`text-slate-500 ${T_BODY}`}>No matching modules in the inventory — buy some at a shop station.</span>
             ) : candidates.map(c => {
               const gunBlocked = c.m!.kind === 'weapon' && gunCount >= maxGuns;
               return (
@@ -808,7 +950,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   disabled={gunBlocked}
                   onClick={() => onMoveModule?.({ area: 'inventory', idx: c.idx }, { area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i })}
                   title={gunBlocked ? `Gun limit reached (${gunCount}/${maxGuns}) — unmount a gun first` : undefined}
-                  className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`${BTN_COMPACT} uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100`}
                 >
                   {c.m!.label}{gunBlocked ? ' ⛔' : ''}
                 </button>
@@ -844,7 +986,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             className="absolute flex items-center justify-center text-center"
             style={{ inset: 2.5, clipPath: HEX_CLIP, background: '#0f172a' }}
           >
-            <span className="text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{dragging.label}</span>
+            <span className={`${T_MICRO} font-bold uppercase tracking-tight leading-tight px-1 text-slate-100`}>{dragging.label}</span>
           </span>
         </div>
       </div>
@@ -856,16 +998,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // backdrop swap on the menu, a live switch-and-play mid-game.
   const renderMapGroup = (heading: string, maps: { type: MapType; label: string }[]) => (
     <div className="flex flex-col items-center gap-2">
-      {heading && <span className="text-slate-400 text-[11px] uppercase tracking-wider">{heading}</span>}
+      {heading && <span className={`text-slate-400 ${T_BODY} uppercase tracking-wider`}>{heading}</span>}
       <div className="flex flex-wrap justify-center gap-2 max-w-xl">
         {maps.map(opt => (
           <button
             key={opt.type}
             onClick={() => onSetMapType && onSetMapType(opt.type)}
-            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+            className={`${CHIP_BASE} ${
               mapType === opt.type
                 ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
+                : `${CHIP_OFF} hover:border-indigo-400`
             }`}
           >
             {opt.label}
@@ -878,7 +1020,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // the main menu and the pause player-menu so test-switching is one place.
   const renderEnemyTestGroup = () => (
     <div className="flex flex-col items-center gap-2">
-      <span className="text-rose-300 text-[11px] uppercase tracking-wider">Enemy Test — force one type</span>
+      <span className={`text-rose-300 ${T_BODY} uppercase tracking-wider`}>Enemy Test — force one type</span>
       <div className="flex flex-wrap justify-center gap-2 max-w-xl">
         {ENEMY_TEST.map(opt => {
           const active = (stats.forcedEnemy ?? null) === (opt.type ?? null);
@@ -886,10 +1028,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <button
               key={opt.label}
               onClick={() => onSetForcedEnemy && onSetForcedEnemy(opt.type)}
-              className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+              className={`${CHIP_BASE} ${
                 active
                   ? 'bg-rose-600 border-rose-400 text-white shadow-lg'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-rose-400 hover:text-white'
+                  : `${CHIP_OFF} hover:border-rose-400`
               }`}
             >
               {opt.label}
@@ -906,7 +1048,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       <div className="text-center">
         <button
           onClick={() => toggleSection('fieldmaps')}
-          className="pointer-events-auto cursor-pointer text-slate-500 text-[10px] uppercase tracking-widest select-none hover:text-slate-300"
+          className={`${SECTION_TOGGLE} text-slate-500 hover:text-slate-300`}
         >
           Material Field Maps {collapsed.fieldmaps ? '▸' : '▾'}
         </button>
@@ -933,18 +1075,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             key={scheme.id}
             data-testid={`scheme-${scheme.id}`}
             onClick={() => onSetControlScheme && onSetControlScheme(scheme.id)}
-            className={`px-2 py-2 rounded-lg border text-left transition-all ${
-              // Five options into a 2-up grid: the odd one out spans the row
-              // rather than leaving a hole.
+            className={`px-2 py-2 rounded-lg border text-left transition-all active:scale-95 ${TAP} ${
+              // An ODD number of options into a 2-up grid: the last one spans
+              // the row rather than leaving a hole.  (Six today, so this is
+              // inert — kept because the roster has changed twice.)
               i === CONTROL_SCHEMES.length - 1 && CONTROL_SCHEMES.length % 2 === 1 ? 'col-span-2 ' : ''
             }${
               active === scheme.id
                 ? 'bg-sky-600 border-sky-400 text-white shadow-lg'
-                : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-sky-400 hover:text-white'
+                : `${CHIP_OFF} hover:border-sky-400`
             }`}
           >
-            <div className="text-xs font-bold">{scheme.label}</div>
-            <div className={`text-[9px] leading-tight mt-0.5 ${active === scheme.id ? 'text-sky-100' : 'text-slate-500'}`}>
+            <div className={`${T_ROW} font-bold`}>{scheme.label}</div>
+            <div className={`${T_MICRO} leading-tight mt-0.5 ${active === scheme.id ? 'text-sky-100' : 'text-slate-500'}`}>
               {scheme.blurb}
             </div>
           </button>
@@ -970,13 +1113,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           data-testid="scheme-select"
           value={active}
           onChange={ev => onSetControlScheme && onSetControlScheme(ev.target.value as ControlScheme)}
-          className="w-full bg-slate-900 border border-slate-600 text-white text-xs rounded-lg px-2 py-2 focus:border-sky-400 focus:outline-none"
+          className={`w-full bg-slate-900 border border-slate-600 text-white ${T_ROW} rounded-lg px-2 py-2 ${TAP} focus:border-sky-400 focus:outline-none`}
         >
           {CONTROL_SCHEMES.map(scheme => (
             <option key={scheme.id} value={scheme.id}>{scheme.label}</option>
           ))}
         </select>
-        <span className="text-slate-500 text-[10px] leading-tight">
+        <span className={`text-slate-500 ${T_NOTE} leading-tight`}>
           {controlSchemeDef(active).blurb}
         </span>
       </div>
@@ -1012,15 +1155,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         <button
           data-testid="adaptive-triggers-toggle"
           onClick={() => onToggleAdaptiveTriggers && onToggleAdaptiveTriggers()}
-          className={`pointer-events-auto cursor-pointer w-full px-2 py-2 rounded-lg border text-xs font-bold transition-all ${
+          className={`pointer-events-auto w-full ${CHIP_BASE} ${
             on
               ? 'bg-amber-600 border-amber-400 text-white'
-              : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-400 hover:text-white'
+              : `${CHIP_OFF} hover:border-amber-400`
           }`}
         >
           {on ? 'Adaptive Triggers — ON' : 'Connect DualSense Triggers'}
         </button>
-        <span className="text-slate-500 text-[10px] leading-tight">
+        <span className={`text-slate-500 ${T_NOTE} leading-tight`}>
           {on
             ? 'The right trigger takes on each weapon’s own resistance.'
             : 'Optional, desktop only. Adds per-weapon trigger resistance on a PS5 pad; everything else works without it.'}
@@ -1056,16 +1199,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       live?: React.ReactNode, activeFor?: ControlScheme[],
     ) => (
       <div className={`w-full ${activeFor && !activeFor.includes(scheme) ? 'opacity-45' : ''}`}>
-        <h4 className={`${accent} text-[11px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-2`}>
+        <h4 className={`${accent} ${HEADING} mb-1.5 flex items-center gap-2 flex-wrap`}>
           {title}
           {activeFor && activeFor.includes(scheme) && (
-            <span className="text-[9px] normal-case tracking-normal bg-white/10 px-1.5 py-0.5 rounded">active</span>
+            <span className={`${T_MICRO} normal-case tracking-normal bg-white/10 px-1.5 py-0.5 rounded`}>active</span>
           )}
           {live}
         </h4>
         <div className="flex flex-col gap-1">
           {rows.map(([control, what]) => (
-            <div key={control} className="flex gap-2 text-[11px] leading-snug">
+            <div key={control} className={`flex gap-2 ${T_BODY} leading-snug`}>
               {/* Fixed-basis control column so the descriptions line up, but
                   `min-w-0` + wrapping on both halves so a 390px screen never
                   pushes the row sideways. */}
@@ -1114,7 +1257,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['In menus', 'D-pad moves, bottom face button selects, right face button goes back.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], padOn ? (
-          <span className="text-violet-200/80 font-mono text-[9px] normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded">
+          <span className={`text-violet-200/80 font-mono ${T_MICRO} normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded`}>
             connected
           </span>
         ) : null, ['gamepad', 'gamepad-thrust'])}
@@ -1149,7 +1292,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const renderSectionHeader = (name: string, label: string) => (
     <button
       onClick={() => toggleSection(name)}
-      className="pointer-events-auto mt-1 w-full flex items-center justify-between text-slate-400/80 hover:text-amber-300 uppercase tracking-wider text-[8px] transition-colors"
+      /* DELIBERATE EXCEPTION to the 40px TAP floor (5d U2).  The debug menu
+         is a developer surface behind two collapsed dropdowns, and it trades
+         reach for density on purpose — a 40px floor on ~90 rows would make it
+         several screens longer, which is the opposite of what a diagnostic
+         panel wants.  It still gets a floor, just a smaller one. */
+      className="pointer-events-auto mt-1 w-full min-h-[24px] flex items-center justify-between text-slate-400/80 hover:text-amber-300 uppercase tracking-wider text-[8px] transition-colors"
       title={`Toggle ${label} section`}
     >
       <span>{label}</span>
@@ -1179,7 +1327,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{label}</span>
       <button
         onClick={onClick}
-        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+        /* Same deliberate density exception as renderSectionHeader above. */
+        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-1 min-h-[22px] text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
         title={title}
       >
         {value}
@@ -1351,7 +1500,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     <button
                       key={t}
                       onClick={() => onSpawnDragon && onSpawnDragon(t)}
-                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white"
+                      className={`${CHIP_BASE} capitalize ${CHIP_OFF} hover:border-emerald-400`}
                     >
                       {t}
                     </button>
@@ -1372,7 +1521,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     <button
                       key={k}
                       onClick={() => onSpawnRival && onSpawnRival(k)}
-                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:text-white ${c}`}
+                      className={`${CHIP_BASE} capitalize ${CHIP_OFF} ${c}`}
                     >
                       {k}
                     </button>
@@ -1390,7 +1539,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       key={k}
                       onClick={() => onSpawnBoss && onSpawnBoss(k)}
                       title="Warp this boss in with its full phase table (DBG). Each click stacks another."
-                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all bg-slate-800 border-slate-700 text-slate-300 hover:border-rose-400 hover:text-white"
+                      className={`${CHIP_BASE} ${CHIP_OFF} hover:border-rose-400`}
                     >
                       {label}
                     </button>
@@ -1405,10 +1554,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => onPerfRecToggle && onPerfRecToggle()}
-                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all ${
+                      className={`${CHIP_BASE} ${
                         stats.perfRecording
                           ? 'bg-red-600/80 border-red-400 text-white animate-pulse'
-                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-red-400 hover:text-white'
+                          : `${CHIP_OFF} hover:border-red-400`
                       }`}
                       title="Start / stop an FPS + perf capture"
                     >
@@ -1416,7 +1565,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     </button>
                     <button
                       onClick={() => onPerfRecCycleScene && onPerfRecCycleScene()}
-                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-400 hover:text-white"
+                      className={`${CHIP_BASE} capitalize ${CHIP_OFF} hover:border-amber-400`}
                       title="Cycle the scene label recorded with the capture"
                     >
                       {stats.perfRecScene ?? 'baseline'}
@@ -1424,7 +1573,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     <button
                       onClick={handlePerfCopy}
                       disabled={(stats.perfRecSamples ?? 0) === 0}
-                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white disabled:opacity-40"
+                      className={`${CHIP_BASE} ${CHIP_OFF} hover:border-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed`}
                       title="Export the capture as a copy-paste report"
                     >
                       {perfCopied ? 'Copied ✓' : 'Copy'}
@@ -1740,127 +1889,24 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {!overlayUp && (<>
 
-      {/* ── Top Bar ── */}
-      <div className="flex justify-between items-start">
-        {/* Top-left intentionally empty — the debug menu now lives in the
-            pause Player Menu (Debug Menu section). */}
-        <div />
+      {/* ── Top Bar ──
+          A COLUMN, not a row (5d U2, audit finding A1).  The boss bar used to
+          be an `absolute top-14` block and the chip stack a separate
+          right-aligned column, so the two had no shared idea of the band they
+          share: with a capstone alive the health bar landed exactly on top of
+          the Salvage chip (measured overlap: 100% vertically, 104px
+          horizontally at 390x844).  Putting both in one flex column hands the
+          problem to the layout engine — the bar takes the width it needs, the
+          chips start below whatever is left, and it holds at every viewport
+          without a magic offset to keep in sync. */}
+      <div className="flex flex-col gap-2">
 
-        {/* Top-right: wave HUD + pause button */}
-        <div className="flex items-start gap-3">
-
-          {/* Wave info — only while playing */}
-          {stats.gameState === GameState.PLAYING && (
-            <div className="flex flex-col items-end gap-1">
-              {/* Run score */}
-              <div className="pointer-events-none bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
-                <span className="text-amber-300 text-xs font-bold tracking-widest tabular-nums">
-                  {(stats.score ?? 0).toLocaleString()} PTS
-                </span>
-              </div>
-              {/* Salvage (money) — silver to match the field drop, distinct
-                  from the gold score chip.  Flashes +N on pickup. */}
-              <div className="pointer-events-none bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
-                <span className="text-slate-200 text-xs font-bold tracking-widest tabular-nums">
-                  ◈ {(stats.credits ?? 0).toLocaleString()}
-                </span>
-                {stats.salvageFlash && (
-                  <span
-                    className="text-slate-50 text-xs font-extrabold tabular-nums ml-1.5"
-                    style={{ opacity: Math.max(0.25, stats.salvageFlash.fraction) }}
-                  >
-                    +{stats.salvageFlash.amount.toLocaleString()}
-                  </span>
-                )}
-              </div>
-              {/* Kill-combo multiplier — fades out as the window lapses */}
-              {(stats.comboMultiplier ?? 1) > 1 && (
-                <div
-                  className="pointer-events-none text-right -mt-0.5"
-                  style={{ opacity: Math.max(0.3, stats.comboFraction ?? 1) }}
-                >
-                  <span className="text-orange-400 text-sm font-extrabold tracking-wider tabular-nums drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-                    ×{stats.comboMultiplier} combo
-                  </span>
-                  {(stats.comboCount ?? 0) > 0 && (
-                    <span className="text-orange-300/70 text-[10px] font-bold ml-1">
-                      {stats.comboCount} kills
-                    </span>
-                  )}
-                </div>
-              )}
-              {/* Active status effects — e.g. CORROSION ×N / DISABLE, fading as it lapses */}
-              {(stats.statusEffects ?? []).map(e => {
-                const amber = e.kind === 'disable';
-                return (
-                <div
-                  key={e.kind}
-                  className={`pointer-events-none bg-slate-900/75 border rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right ${amber ? 'border-amber-500/50' : 'border-lime-500/50'}`}
-                  style={{ opacity: Math.max(0.45, e.fraction) }}
-                >
-                  <span className={`text-[11px] font-extrabold uppercase tracking-widest tabular-nums ${amber ? 'text-amber-300' : 'text-lime-300'}`}>
-                    {e.kind === 'disable' ? 'DISABLED' : `${e.kind} ×${e.stacks}`}
-                  </span>
-                </div>
-              );})}
-              {stats.wavesEnabled !== false && (
-              <div
-                onClick={isGrace ? onSkipWave : undefined}
-                className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${
-                  isGrace
-                    ? 'pointer-events-auto border-emerald-500/60 cursor-pointer hover:bg-emerald-900/40 active:scale-95'
-                    : 'pointer-events-none border-slate-600/50'
-                }`}
-              >
-                <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
-                  Wave {stats.waveNumber ?? 1}
-                  {stats.enemiesRemaining !== undefined && (
-                    <span className="text-rose-300"> · {stats.enemiesRemaining} left</span>
-                  )}
-                  {stats.waveElapsedSec !== undefined && (
-                    <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
-                  )}
-                </span>
-                {isGrace && (
-                  <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
-                    Next in {stats.waveGraceTimer}s · tap to skip
-                  </p>
-                )}
-              </div>
-              )}
-            </div>
-          )}
-
-          {/* Pause button — hidden while docked or dead (the station UI and
-              the run-summary screen already freeze the sim and own the
-              screen) */}
-          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && (
-            <button
-              onClick={onPause}
-              className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 shadow-lg border border-slate-600/60 transition-all active:scale-95"
-              aria-label="Pause"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Boss bar ((h)) ──────────────────────────────────────────
-          Present only while a capstone boss is alive.  Sized for PHONE
-          scale: the name and the percent readout are the two things
-          that have to survive a 390px-wide screen, so they anchor the
-          two ends of the row and the pips sit under them rather than
-          competing for the same line.  Pure EngineStats — no per-frame
-          React state. */}
+      {/* Boss capstone bar — full width, above the readout stack. */}
       {stats.gameState === GameState.PLAYING && stats.boss && (
-        <div className="absolute top-14 sm:top-16 left-1/2 -translate-x-1/2 pointer-events-none w-[min(560px,92vw)] px-1">
+        <div className="pointer-events-none w-full max-w-[560px] mx-auto px-1" data-testid="boss-bar">
           <div className="flex items-center justify-between gap-2 mb-1">
             <span
-              className="text-[12px] sm:text-[13px] font-extrabold uppercase tracking-[0.2em] drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] truncate"
+              className={`${T_ROW} sm:text-[13px] font-extrabold uppercase tracking-[0.2em] drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] truncate min-w-0`}
               style={{ color: stats.boss.color }}
             >
               {stats.boss.name}
@@ -1880,7 +1926,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 ))}
               </span>
               <span
-                className="text-[12px] sm:text-[13px] font-extrabold tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]"
+                className={`${T_ROW} sm:text-[13px] font-extrabold tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]`}
                 style={{ color: stats.boss.color }}
               >
                 {Math.ceil(stats.boss.healthFrac * 100)}%
@@ -1906,6 +1952,116 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
+      <div className="flex justify-between items-start">
+        {/* Top-left intentionally empty — the debug menu now lives in the
+            pause Player Menu (Debug Menu section). */}
+        <div />
+
+        {/* Top-right: wave HUD + pause button */}
+        <div className="flex items-start gap-3">
+
+          {/* Wave info — only while playing */}
+          {stats.gameState === GameState.PLAYING && (
+            <div className="flex flex-col items-end gap-1">
+              {/* Run score */}
+              <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/50`}>
+                <span className={`text-amber-300 ${T_ROW} font-bold tracking-widest tabular-nums`}>
+                  {(stats.score ?? 0).toLocaleString()} PTS
+                </span>
+              </div>
+              {/* Salvage (money) — silver to match the field drop, distinct
+                  from the gold score chip.  Flashes +N on pickup. */}
+              <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/50`}>
+                <span className={`text-slate-200 ${T_ROW} font-bold tracking-widest tabular-nums`}>
+                  ◈ {(stats.credits ?? 0).toLocaleString()}
+                </span>
+                {stats.salvageFlash && (
+                  <span
+                    className={`text-slate-50 ${T_ROW} font-extrabold tabular-nums ml-1.5`}
+                    style={{ opacity: Math.max(0.25, stats.salvageFlash.fraction) }}
+                  >
+                    +{stats.salvageFlash.amount.toLocaleString()}
+                  </span>
+                )}
+              </div>
+              {/* Kill-combo multiplier — fades out as the window lapses */}
+              {(stats.comboMultiplier ?? 1) > 1 && (
+                <div
+                  className="pointer-events-none text-right -mt-0.5"
+                  style={{ opacity: Math.max(0.3, stats.comboFraction ?? 1) }}
+                >
+                  <span className="text-orange-400 text-sm font-extrabold tracking-wider tabular-nums drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    ×{stats.comboMultiplier} combo
+                  </span>
+                  {(stats.comboCount ?? 0) > 0 && (
+                    <span className={`text-orange-300/70 ${T_NOTE} font-bold ml-1`}>
+                      {stats.comboCount} kills
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Active status effects — e.g. CORROSION ×N / DISABLE, fading as it lapses */}
+              {(stats.statusEffects ?? []).map(e => {
+                const amber = e.kind === 'disable';
+                return (
+                <div
+                  key={e.kind}
+                  className={`pointer-events-none ${HUD_CHIP} ${amber ? 'border-amber-500/50' : 'border-lime-500/50'}`}
+                  style={{ opacity: Math.max(0.45, e.fraction) }}
+                >
+                  <span className={`${T_BODY} font-extrabold uppercase tracking-widest tabular-nums ${amber ? 'text-amber-300' : 'text-lime-300'}`}>
+                    {e.kind === 'disable' ? 'DISABLED' : `${e.kind} ×${e.stacks}`}
+                  </span>
+                </div>
+              );})}
+              {stats.wavesEnabled !== false && (
+              <div
+                onClick={isGrace ? onSkipWave : undefined}
+                className={`${HUD_CHIP} transition-all ${
+                  isGrace
+                    ? 'pointer-events-auto border-emerald-500/60 cursor-pointer hover:bg-emerald-900/40 active:scale-95'
+                    : 'pointer-events-none border-slate-600/50'
+                }`}
+              >
+                <span className={`text-slate-300 ${T_ROW} font-bold uppercase tracking-widest`}>
+                  Wave {stats.waveNumber ?? 1}
+                  {stats.enemiesRemaining !== undefined && (
+                    <span className="text-rose-300"> · {stats.enemiesRemaining} left</span>
+                  )}
+                  {stats.waveElapsedSec !== undefined && (
+                    <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
+                  )}
+                </span>
+                {isGrace && (
+                  <p className={`text-emerald-400 ${T_NOTE} font-bold mt-0.5 animate-pulse`}>
+                    Next in {stats.waveGraceTimer}s · tap to skip
+                  </p>
+                )}
+              </div>
+              )}
+            </div>
+          )}
+
+          {/* Pause button — hidden while docked or dead (the station UI and
+              the run-summary screen already freeze the sim and own the
+              screen) */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && (
+            <button
+              onClick={onPause}
+              className={`pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border border-slate-600/60 transition-all active:scale-95`}
+              aria-label="Pause"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      </div>
+
       {/* No dock / portal BUTTON.  The interaction is selecting your own
           ship (tap / click, or E), and the prompt naming that control is
           drawn AT the ship by RenderSystem — one affordance, in the place the
@@ -1930,34 +2086,38 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="station">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
-            <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-bold text-sky-300 tracking-[0.2em]">⬡ {stats.dock?.name ?? 'STATION'}</h2>
-              <span className="text-amber-300 text-sm font-bold tabular-nums">◈ {(stats.credits ?? 0).toLocaleString()} Salvage</span>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className={`${SCREEN_TITLE} text-sky-300`}>⬡ {stats.dock?.name ?? 'STATION'}</h2>
+              {/* The `Salvage` word came off this chip in 5d U2: the ◈ glyph
+                  is the money mark on every other surface (the in-game HUD
+                  chip is exactly `◈ N`), and spelled out it pushed the
+                  header past 390px and wrapped BOTH halves onto two lines. */}
+              <span className={`text-amber-300 ${T_ROW} font-bold tabular-nums shrink-0`}>◈ {(stats.credits ?? 0).toLocaleString()}</span>
             </div>
 
             <button
               onClick={onUndock}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+              className={`${BTN_PRIMARY} flex items-center justify-center gap-2`}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-              UNDOCK <span className="text-emerald-200 text-[10px] font-mono">[E]</span>
+              UNDOCK <span className={`text-emerald-200 ${T_NOTE} font-mono`}>[E]</span>
             </button>
 
             {/* Hull repair — pay-per-HP, pro-rated (repair-service stations) */}
             {svc?.repair && (
-            <div className="bg-slate-800/60 border border-rose-600/30 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-xs">
-                <h3 className="text-rose-300 text-[11px] font-bold uppercase tracking-widest mb-1">Hull Repair</h3>
+            <div className={`${panelAccent('border-rose-600/30')} flex items-center justify-between gap-3 flex-wrap`}>
+              <div className={T_ROW}>
+                <h3 className={`text-rose-300 ${HEADING} mb-1`}>Hull Repair</h3>
                 <span className="text-slate-400">Hull </span>
                 <span className="text-white font-bold tabular-nums">{ps?.health ?? 0} / {ps?.maxHealth ?? 100}</span>
-                <span className="text-slate-500 ml-2 text-[10px]">◈{stats.station?.repairCostPerHp ?? 0}/HP · partial repair if short</span>
+                <span className={`text-slate-500 ml-2 ${T_NOTE}`}>◈{stats.station?.repairCostPerHp ?? 0}/HP · partial repair if short</span>
               </div>
               <button
                 disabled={!stats.station?.canRepair}
                 onClick={onRepairHull}
-                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                className={`${BTN_COMPACT} ${
                   stats.station?.canRepair
-                    ? 'bg-rose-700/60 hover:bg-rose-600/70 text-rose-100 active:scale-95'
+                    ? 'bg-rose-700/60 hover:bg-rose-600/70 text-rose-100'
                     : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
                 }`}
               >
@@ -1979,9 +2139,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {renderShipStatus()}
 
             {out && (
-              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3 flex flex-col gap-2">
+              <div className={`${panelAccent('border-sky-600/30')} flex flex-col gap-2`}>
                 {!canEdit && (
-                  <p className="text-slate-500 text-[10px] text-center -mb-1">
+                  <p className={`text-slate-500 ${T_NOTE} text-center -mb-1`}>
                     No drydock here — outfitting is locked. Swap modules at the <span className="text-sky-400 font-bold">Home Station</span>.
                   </p>
                 )}
@@ -2003,10 +2163,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* Module shops — items are fixed Mk varieties (no upgrades);
                 a purchase lands in the inventory. */}
             {out && (svc?.shipShop || svc?.weaponShop) && (
-              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
+              <div className={`${panelAccent('border-amber-600/30')} flex flex-col gap-3`}>
                 {(['ship', 'weapon'] as const).filter(g => (g === 'ship' ? svc?.shipShop : svc?.weaponShop)).map(g => (
                   <div key={g}>
-                    <h3 className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
+                    <h3 className={`${HEADING} mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
                       Shop · {g === 'ship' ? 'Ship Modules' : 'Weapon Modules'}
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
@@ -2016,9 +2176,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                           disabled={!c.affordable}
                           onClick={() => onPurchaseModule?.(c.id)}
                           title={`${c.desc} — bought into the inventory`}
-                          className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                          className={`${BTN_COMPACT} flex items-center justify-between gap-2 ${
                             c.affordable
-                              ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                              ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100'
                               : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
                           }`}
                         >
@@ -2051,25 +2211,25 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         const sc = stats.stageClear;
         const row = (label: string, value: React.ReactNode, note?: string) => (
           <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
-            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className={`text-slate-400 ${T_BODY} uppercase tracking-widest`}>{label}</span>
             <span className="text-right">
-              <span className="text-white font-bold tabular-nums text-sm">{value}</span>
-              {note && <span className="text-slate-500 text-[10px] ml-1.5">{note}</span>}
+              <span className={`text-white font-bold tabular-nums ${T_ROW}`}>{value}</span>
+              {note && <span className={`text-slate-500 ${T_NOTE} ml-1.5`}>{note}</span>}
             </span>
           </div>
         );
         return (
           <div
             style={OVERLAY_FADE_IN}
-            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="death"
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="stage-clear"
           >
             <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
 
               <div className="text-center">
-                <h2 className="text-4xl font-black text-amber-300 tracking-[0.2em]">STAGE {sc.stage}</h2>
-                <p className="text-emerald-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">Cleared</p>
-                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">
+                <h2 className={`${OUTCOME_TITLE} text-amber-300`}>STAGE {sc.stage}</h2>
+                <p className={`text-emerald-300 ${T_ROW} font-bold uppercase tracking-[0.2em] mt-1`}>Cleared</p>
+                <p className={`text-slate-500 ${T_BODY} uppercase tracking-widest mt-1`}>
                   {sc.bossName} destroyed · {sc.mapName}
                 </p>
               </div>
@@ -2077,7 +2237,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* Salvage leads — it is the money, and it is what the shop
                   speaks.  Score is a separate performance metric that buys
                   nothing, so it is labelled as such and sits below. */}
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
+              <div className={`${PANEL} flex flex-col`}>
                 {row('Salvage', `◈${sc.salvageCredits.toLocaleString()}`, 'sprayed on the wreck')}
                 {row('Score', `+${sc.scoreAwarded.toLocaleString()}`)}
               </div>
@@ -2085,19 +2245,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* Capstone reward: a module you carry away. */}
               {(sc.rewardLabel || sc.rewardCredits) && (
                 <div className="bg-emerald-950/40 border border-emerald-600/40 rounded-lg p-3">
-                  <p className="text-emerald-300 font-bold uppercase tracking-widest text-[10px] mb-1">
+                  <p className={`text-emerald-300 ${HEADING} mb-1`}>
                     Salvaged from the wreck
                   </p>
                   {sc.rewardLabel ? (
                     <>
-                      <p className="text-white font-bold text-sm">{sc.rewardLabel}</p>
-                      {sc.rewardDesc && <p className="text-slate-400 text-[11px] mt-0.5">{sc.rewardDesc}</p>}
-                      <p className="text-slate-500 text-[10px] mt-1">In your cargo — install it at a drydock.</p>
+                      <p className={`text-white font-bold ${T_ROW}`}>{sc.rewardLabel}</p>
+                      {sc.rewardDesc && <p className={`text-slate-400 ${T_BODY} mt-0.5`}>{sc.rewardDesc}</p>}
+                      <p className={`text-slate-500 ${T_NOTE} mt-1`}>In your cargo — install it at a drydock.</p>
                     </>
                   ) : (
                     <>
-                      <p className="text-white font-bold text-sm">◈{(sc.rewardCredits ?? 0).toLocaleString()}</p>
-                      <p className="text-slate-400 text-[11px] mt-0.5">Cargo was full — the module was scrapped for its value.</p>
+                      <p className={`text-white font-bold ${T_ROW}`}>◈{(sc.rewardCredits ?? 0).toLocaleString()}</p>
+                      <p className={`text-slate-400 ${T_BODY} mt-0.5`}>Cargo was full — the module was scrapped for its value.</p>
                     </>
                   )}
                 </div>
@@ -2106,8 +2266,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* The choice is IN THE WORLD, not on this screen — so the screen
                   explains where the two rifts are rather than offering buttons
                   that would bypass flying to them. */}
-              <div className="bg-slate-800/40 border border-amber-600/30 rounded-lg p-3 text-[11px] leading-relaxed text-slate-300">
-                <p className="text-amber-300 font-bold uppercase tracking-widest text-[10px] mb-1.5">A rift has opened</p>
+              <div className={`${panelAccent('border-amber-600/30')} ${T_BODY} leading-relaxed text-slate-300`}>
+                <p className={`text-amber-300 ${HEADING} mb-1.5`}>A rift has opened</p>
                 <p>
                   <span className="text-amber-300 font-bold">Descend</span> through the new amber rift to
                   {' '}<span className="text-white font-bold">Stage {sc.nextStage}</span> — five more waves and a tougher capstone.
@@ -2122,7 +2282,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <button
                 onClick={onDismissStageClear}
                 data-testid="stage-continue"
-                className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest uppercase"
+                className={BTN_PRIMARY}
               >
                 Continue
               </button>
@@ -2143,40 +2303,40 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         const ss = rs.timeSec % 60;
         const row = (label: string, value: React.ReactNode, note?: string) => (
           <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
-            <span className="text-slate-400 text-[11px] uppercase tracking-widest">{label}</span>
+            <span className={`text-slate-400 ${T_BODY} uppercase tracking-widest`}>{label}</span>
             <span className="text-right">
-              <span className="text-white font-bold tabular-nums text-sm">{value}</span>
-              {note && <span className="text-slate-500 text-[10px] ml-1.5">{note}</span>}
+              <span className={`text-white font-bold tabular-nums ${T_ROW}`}>{value}</span>
+              {note && <span className={`text-slate-500 ${T_NOTE} ml-1.5`}>{note}</span>}
             </span>
           </div>
         );
         return (
           <div
             style={OVERLAY_FADE_IN}
-            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="stage-clear"
+            className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="death"
           >
             <style>{OVERLAY_KEYFRAMES}</style>
             <div className="w-full max-w-sm flex flex-col gap-4 my-auto">
 
               <div className="text-center">
-                <h2 className="text-4xl font-black text-rose-400 tracking-[0.2em]">DESTROYED</h2>
-                <p className="text-slate-500 text-[11px] uppercase tracking-widest mt-1">{rs.mapName}</p>
+                <h2 className={`${OUTCOME_TITLE} text-rose-400`}>DESTROYED</h2>
+                <p className={`text-slate-500 ${T_BODY} uppercase tracking-widest mt-1`}>{rs.mapName}</p>
               </div>
 
               {/* Headline — the run's performance metric, big. */}
-              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 text-center">
-                <div className="text-amber-300 text-[10px] font-bold uppercase tracking-widest">Score</div>
+              <div className={`${panelAccent('border-amber-600/30')} text-center`}>
+                <div className={`text-amber-300 ${HEADING}`}>Score</div>
                 <div className="text-amber-200 text-4xl font-black tabular-nums leading-tight">
                   {rs.score.toLocaleString()}
                 </div>
                 {rs.bestCombo > 1 && (
-                  <div className="text-slate-400 text-[11px] mt-0.5">
+                  <div className={`text-slate-400 ${T_BODY} mt-0.5`}>
                     best combo <span className="text-amber-300 font-bold tabular-nums">×{rs.bestCombo}</span>
                   </div>
                 )}
               </div>
 
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col">
+              <div className={`${PANEL} flex flex-col`}>
                 {rs.wavesEnabled && row('Waves cleared', rs.wavesCleared, `high ${rs.highestWave}`)}
                 {row('Enemies destroyed', rs.kills.toLocaleString(), rs.bosses > 0 ? `${rs.bosses} boss${rs.bosses > 1 ? 'es' : ''}` : undefined)}
                 {/* Salvage reads as a ledger for THIS life: what the sortie
@@ -2188,11 +2348,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                      'since last death')}
                 {rs.creditsLost > 0 && (
                   <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
-                    <span className="text-rose-400/90 text-[11px] uppercase tracking-widest">Salvage lost</span>
+                    <span className={`text-rose-400/90 ${T_BODY} uppercase tracking-widest`}>Salvage lost</span>
                     <span className="text-right">
-                      <span className="text-rose-300 font-bold tabular-nums text-sm">−◈{rs.creditsLost.toLocaleString()}</span>
+                      <span className={`text-rose-300 font-bold tabular-nums ${T_ROW}`}>−◈{rs.creditsLost.toLocaleString()}</span>
                       {rs.creditsLostRun > rs.creditsLost && (
-                        <span className="text-slate-500 text-[10px] ml-1.5">◈{rs.creditsLostRun.toLocaleString()} this run</span>
+                        <span className={`text-slate-500 ${T_NOTE} ml-1.5`}>◈{rs.creditsLostRun.toLocaleString()} this run</span>
                       )}
                     </span>
                   </div>
@@ -2205,11 +2365,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <button
                   onClick={onRespawn}
                   data-testid="death-respawn"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 tracking-widest uppercase"
+                  className={BTN_PRIMARY}
                 >
                   Respawn
                 </button>
-                <p className="text-slate-500 text-[10px] text-center -mt-1">
+                <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
                   Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept
                   {rs.creditsLost > 0
                     ? `; the wreck cost you ◈${rs.creditsLost.toLocaleString()} of your unspent Salvage${rs.credits === 0 ? ' — all of it' : ''}.`
@@ -2219,14 +2379,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <button
                     onClick={onRestartRun}
                     data-testid="death-restart"
-                    className="bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg text-xs tracking-widest uppercase transition-all active:scale-95"
+                    className={BTN_SECONDARY}
                   >
                     Restart Run
                   </button>
                   <button
                     onClick={onQuitToMenu}
                     data-testid="death-menu"
-                    className="bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold py-3 rounded-lg text-xs tracking-widest uppercase transition-all active:scale-95"
+                    className={BTN_SECONDARY}
                   >
                     Main Menu
                   </button>
@@ -2279,10 +2439,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <button
                     key={level}
                     onClick={() => onSetDifficulty && onSetDifficulty(level)}
-                    className={`py-3 rounded-lg text-xs font-bold border transition-all ${
+                    className={`${CHIP_BASE} ${
                       difficulty === level
                         ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
+                        : `${CHIP_OFF} hover:border-indigo-400`
                     }`}
                   >
                     {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
@@ -2307,7 +2467,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <button
               data-testid="menu-start"
               onClick={onStart}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"
+              /* DELIBERATE DEPARTURE from BTN_PRIMARY (5d U2).  Every other
+                 primary button means "carry on playing" inside a run and wears
+                 the shared emerald; START is the one HERO control in the game
+                 — the front door, sitting under an indigo title and an indigo
+                 difficulty row — and hero is a different job from primary.
+                 Kept indigo and rounded-full; the tap floor is shared. */
+              className={`w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 rounded-full ${TAP} shadow-2xl transition-all transform hover:scale-105 active:scale-95`}
             >
               START
             </button>
@@ -2319,7 +2485,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <button
                 data-testid="menu-help-toggle"
                 onClick={() => toggleSection('menuhelp')}
-                className="pointer-events-auto cursor-pointer text-sky-300/80 text-[11px] uppercase tracking-widest select-none hover:text-sky-200 py-2 px-3"
+                className={`${SECTION_TOGGLE} text-sky-300/80 hover:text-sky-200`}
               >
                 Controls &amp; Basics {collapsed.menuhelp ? '▸' : '▾'}
               </button>
@@ -2338,7 +2504,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <button
                 data-testid="menu-debug-toggle"
                 onClick={() => toggleSection('menudebug')}
-                className="pointer-events-auto cursor-pointer text-amber-400/80 text-[11px] uppercase tracking-widest select-none hover:text-amber-300"
+                className={`${SECTION_TOGGLE} text-amber-400/80 hover:text-amber-300`}
               >
                 Debug Menu {collapsed.menudebug ? '▸' : '▾'}
               </button>
@@ -2370,22 +2536,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="pause">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
-            <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-bold text-white tracking-[0.2em]">PLAYER MENU</h2>
-              <span className="text-amber-300 text-sm font-bold tabular-nums">◈ {(stats.credits ?? 0).toLocaleString()} Salvage</span>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className={`${SCREEN_TITLE} text-white`}>PLAYER MENU</h2>
+              <span className={`text-amber-300 ${T_ROW} font-bold tabular-nums shrink-0`}>◈ {(stats.credits ?? 0).toLocaleString()}</span>
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={onResume}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                className={`flex-1 ${BTN_PRIMARY} flex items-center justify-center gap-2`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                 CONTINUE
               </button>
               <button
                 onClick={onRestart}
-                className="flex-1 bg-slate-700 hover:bg-red-600 text-slate-200 hover:text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                className={`flex-1 ${BTN_SECONDARY} hover:bg-red-600 hover:text-white flex items-center justify-center gap-2`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12" /><path d="M3 3v9h9" /></svg>
                 RESTART
@@ -2395,16 +2561,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* Live pools (the two stats that MOVE in flight) — the derived
                 per-module breakdown lives in the shared Ship Status widget
                 right below. */}
-            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Condition</h3>
-              <div className="flex flex-col gap-1 text-xs">
+            <div className={PANEL}>
+              <h3 className={`text-sky-300 ${HEADING} mb-2`}>Condition</h3>
+              <div className={`flex flex-col gap-1 ${T_ROW}`}>
                 {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
                 {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
                 {statLine('Weight', `${(ps?.shipWeight ?? 0).toFixed(1)}`)}
                 {statLine('Location', (
                   <>
                     {stats.currentMapName}
-                    <span className="text-slate-500 font-normal ml-1.5 text-[10px]">
+                    <span className={`text-slate-500 font-normal ml-1.5 ${T_NOTE}`}>
                       {ps ? `${ps.position.x}, ${ps.position.y}` : ''}
                     </span>
                   </>
@@ -2422,7 +2588,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 fully live: drag to rearrange, tap a tile to SCRAP it for
                 9% anywhere (sell-back at 90% needs a station). */}
             {stats.outfitting && (
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
+              <div className={`${PANEL} flex flex-col gap-2`}>
                 <div className="grid grid-cols-2 gap-2 justify-items-center">
                   {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', false)}
                   {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', false)}
@@ -2434,14 +2600,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
             {/* Commerce lives at the stations (economy-pivot 1e): shops
                 sell to the inventory; outfitting needs a docked drydock. */}
-            <p className="text-slate-500 text-[11px] text-center">
+            <p className={`text-slate-500 ${T_BODY} text-center`}>
               Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
             </p>
 
             {/* Controls — changeable mid-run, so picking wrong at the front
                 door costs a tap rather than a restart. */}
-            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
-              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Controls</h3>
+            <div className={`${PANEL} flex flex-col gap-2`}>
+              <h3 className={`text-sky-300 ${HEADING}`}>Controls</h3>
               {renderSchemeDropdown()}
               {renderAdaptiveTriggers()}
             </div>
@@ -2452,7 +2618,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <button
                 data-testid="pause-help-toggle"
                 onClick={() => toggleSection('pausehelp')}
-                className="pointer-events-auto cursor-pointer text-sky-300/80 text-[11px] uppercase tracking-widest select-none hover:text-sky-200 py-2 px-3"
+                className={`${SECTION_TOGGLE} text-sky-300/80 hover:text-sky-200`}
               >
                 Controls &amp; Basics {collapsed.pausehelp ? '▸' : '▾'}
               </button>
@@ -2465,14 +2631,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* Audio — master volume + mute.  One row by design: Pair A is
                 developing the overlay's structural UI in parallel, so this
                 pass keeps its footprint to a single settings strip. */}
-            <div className="mx-auto w-full max-w-xs flex items-center gap-3 px-3 py-2
-                            bg-slate-900/70 border border-slate-700/60 rounded-lg">
+            <div className={`mx-auto w-full max-w-xs flex items-center gap-3 ${PANEL_ROW}`}>
               <button
                 onClick={onToggleMute}
                 aria-label={stats.audio?.muted ? 'Unmute' : 'Mute'}
-                className="pointer-events-auto cursor-pointer shrink-0 w-9 h-9 rounded-md
+                className={`pointer-events-auto cursor-pointer shrink-0 w-10 ${TAP} rounded-md
                            bg-slate-800/80 border border-slate-600/60 text-base
-                           hover:bg-slate-700/80 active:bg-slate-600/80"
+                           hover:bg-slate-700/80 active:bg-slate-600/80`}
               >
                 {stats.audio?.muted ? '🔇' : '🔊'}
               </button>
@@ -2481,11 +2646,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 value={Math.round((stats.audio?.volume ?? 0.7) * 100)}
                 onChange={e => onSetVolume?.(Number(e.target.value) / 100)}
                 aria-label="Master volume"
-                className="pointer-events-auto cursor-pointer flex-1 accent-sky-400
-                           disabled:opacity-40"
+                className={`pointer-events-auto cursor-pointer flex-1 accent-sky-400 ${TAP}
+                           disabled:opacity-40`}
                 disabled={stats.audio?.muted === true}
               />
-              <span className="shrink-0 w-10 text-right text-slate-400 text-[11px] tabular-nums">
+              <span className={`shrink-0 w-10 text-right text-slate-400 ${T_BODY} tabular-nums`}>
                 {stats.audio?.muted ? '—' : `${Math.round((stats.audio?.volume ?? 0.7) * 100)}%`}
               </span>
             </div>
@@ -2495,24 +2660,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 every id, a sound that is still synthetic is indistinguishable
                 from one that landed, and the coverage count says how much of
                 the game goes quiet when they are off. */}
-            <div className="mx-auto w-full max-w-xs flex items-center gap-3 px-3 py-2
-                            bg-slate-900/70 border border-slate-700/60 rounded-lg">
+            <div className={`mx-auto w-full max-w-xs flex items-center gap-3 ${PANEL_ROW}`}>
               <button
                 onClick={onToggleDrafts}
                 aria-label={stats.audio?.drafts ? 'Turn synth drafts off' : 'Turn synth drafts on'}
-                className={`pointer-events-auto cursor-pointer shrink-0 px-2 h-9 rounded-md text-[11px]
+                className={`pointer-events-auto cursor-pointer shrink-0 px-2 ${TAP} rounded-md ${T_BODY}
                             font-semibold border ${stats.audio?.drafts
                               ? 'bg-slate-800/80 border-slate-600/60 text-slate-200'
                               : 'bg-emerald-900/60 border-emerald-500/50 text-emerald-200'}`}
               >
                 {stats.audio?.drafts ? 'Drafts ON' : 'WAV only'}
               </button>
-              <span className="flex-1 text-[11px] leading-tight text-slate-400">
+              <span className={`flex-1 ${T_BODY} leading-tight text-slate-400`}>
                 {stats.audio?.drafts
                   ? 'Synth drafts fill every sound with no .wav yet.'
                   : 'Only recorded .wav files sound. Everything else is silent.'}
               </span>
-              <span className="shrink-0 text-right text-slate-300 text-[11px] tabular-nums">
+              <span className={`shrink-0 text-right text-slate-300 ${T_BODY} tabular-nums`}>
                 {stats.audio?.sampled ?? 0}/{stats.audio?.total ?? 0}
               </span>
             </div>
@@ -2570,7 +2734,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="text-center">
               <button
                 onClick={() => toggleSection('switchmap')}
-                className="pointer-events-auto cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest select-none hover:text-slate-200"
+                className={`${SECTION_TOGGLE} text-slate-400 hover:text-slate-200`}
               >
                 Switch Map / Test {collapsed.switchmap ? '▸' : '▾'}
               </button>
@@ -2586,7 +2750,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="text-center">
               <button
                 onClick={() => toggleSection('debug')}
-                className="pointer-events-auto cursor-pointer text-amber-400/80 text-[11px] uppercase tracking-widest select-none hover:text-amber-300"
+                className={`${SECTION_TOGGLE} text-amber-400/80 hover:text-amber-300`}
               >
                 Debug Menu {collapsed.debug ? '▸' : '▾'}
               </button>

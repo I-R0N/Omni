@@ -32,7 +32,7 @@ Branch `claude/gauntlet-5d-ui-coherence-idqcdk`, off the
 | # | Milestone | State |
 |---|---|---|
 | U1 | Audit every surface, no fixes | **done** |
-| U2 | DOM coherence fixes (`components/UIOverlay.tsx`) | pending |
+| U2 | DOM coherence fixes (`components/UIOverlay.tsx`) | **done** |
 | U3 | Canvas HUD coherence (`engine/systems/render/hud.ts`) | pending |
 | U4 | Viewport coverage matrix + mid-session resize | pending |
 | U5 | OPTIONAL — damage-triggered health/shield bars | pending |
@@ -232,6 +232,54 @@ Worth recording, so the absence is not mistaken for a gap in the audit:
   dense-panel backing (`PANEL_OPAQUE`); that part of the vocabulary
   works and should be the model for the rest.
 
+### U2 — DOM coherence
+
+One named class vocabulary at module scope in `UIOverlay.tsx`, following the
+pattern `OVERLAY_SCRIM` and `PANEL_OPAQUE` already set: when more than one
+surface needs to look like the same thing, the class string becomes a
+constant so the surfaces cannot drift apart. Everything else in this
+milestone is either routing a call site through that vocabulary or fixing
+one of U1's A/B defects.
+
+**The vocabulary.** Type scale (`T_MICRO` 9 / `T_NOTE` 10 / `T_BODY` 11 /
+`T_ROW` 12), named for what each is FOR rather than how big it is, because
+"10px or 11px?" is the question that produced the drift. `PANEL` /
+`PANEL_ROW` / `panelAccent()`. `HEADING`, `SCREEN_TITLE`, `OUTCOME_TITLE`.
+`BTN_PRIMARY` / `BTN_SECONDARY` / `BTN_COMPACT`, `CHIP_BASE` / `CHIP_OFF`,
+`HUD_CHIP`, `SECTION_TOGGLE`, and `TAP` (the 40px floor).
+
+**The defects, and what the numbers say afterwards** — same probes, same
+viewport, before → after:
+
+| Defect | Before | After |
+|---|---|---|
+| A1 boss bar vs Salvage chip | overlap `[216,58,320,96]` inside `[15,56,374,100]` | no overlapping element |
+| A2 hex flowers | 20 px overlap; off-viewport at 320 | 0 px overlap; `ship [33,186]` / `weapon [203,356]` |
+| A3 `data-overlay` | swapped | `stage-clear` on STAGE, `death` on DESTROYED |
+| B1 pause title | 72 px tall / 36 px line-height (2 lines) | 32 / 32 (1 line) |
+| B2 salvage chip | 40 / 20 (2 lines) | 16 / 16 (1 line) |
+| B3 `Guns n/2` chip | wrapped the weapon heading out of alignment | both headings share a 38 px block |
+| D tap targets < 40 px | 3 / 21 / 17 / 32 / 31 per surface | **0** on every player-facing surface |
+
+Console still clean; document scroll width still never exceeds the viewport;
+all 111 existing tests pass **unmodified** — no test's meaning changed, so
+no test was touched.
+
+**A1 is the one structural change.** The boss bar was an `absolute top-14`
+block and the chip stack a separate right-aligned column, so neither knew
+about the band they share. Both now live in one flex COLUMN in the top bar,
+which hands the problem to the layout engine: the bar takes the width it
+needs, the chips start below whatever is left, and it holds at every
+viewport with no magic offset to keep in sync.
+
+**A2 made the hex sizing responsive.** `HEXW` / `INVW` are now derived from
+the width actually available (`Math.min(vw, 672) - 32 - 24`, mirroring the
+`max-w-2xl` + `p-4` + `p-3` the layout really uses), capped at the shipped
+76 px so nothing changes at tablet and desktop. `vw` is `useState` fed by a
+`resize` / `orientationchange` listener — that is a per-RESIZE read, not a
+per-frame one, so the EngineStats-only rule (which is about per-frame sim
+data) is untouched.
+
 ---
 
 ## Decisions taken
@@ -249,6 +297,38 @@ explicitly parked (tiers 3–5).
 **D2 — Screenshots live in the scratchpad, never the repo.** Per the
 brief. Before/after pairs go in the PR body and this ledger by
 description + measurement, not by committed binary.
+
+**D3 — The primary action button unifies on EMERALD; START stays the
+indigo hero.** Three of the five were already emerald and all four in-run
+ones mean the same thing ("carry on playing"), so emerald wins on both
+count and meaning. The stage-clear CONTINUE moved off amber, and that one
+is more than taste: amber on that screen is the DESCENT RIFT colour — the
+panel above the button says "A rift has opened", "**Descend**", "**Stage
+2**" all in amber — so an amber button reads as "descend", which is exactly
+what it does not do (it dismisses the screen; the choice is made by flying
+to a rift). START keeps indigo and `rounded-full`: it is the one HERO
+control in the game, sitting under an indigo title and an indigo difficulty
+row, and hero is a different job from primary. Both departures are
+commented at their call sites. **Flagged for review** — a colour token
+change is exactly the "taste could reasonably differ" case.
+
+**D4 — The debug menu keeps its density and gets a smaller floor.** The
+40px tap floor is a player-facing legibility rule; the debug menu is a
+developer surface behind two collapsed dropdowns with ~90 rows, and a 40px
+floor there would add several screens of scroll to a diagnostic panel. Its
+rows get 22–24px instead, and the exception is commented where it is taken.
+The discrete button GROUPS inside it (dragon / rivals / bosses / perf-rec)
+are ordinary chips and do take the full floor. Alternative considered:
+apply the floor everywhere — rejected on the above; the residual 15
+sub-40px controls in the after-metrics are all this exception.
+
+**D5 — The type scale is NAMED, not fully normalised.** U1 counted eleven
+sizes. The four-step vocabulary is applied at every call site this
+milestone touched, and 7px (below any readability floor on glass) is gone.
+The remaining `text-sm` / `text-base` / display sizes on outcome headlines
+were left alone: converting every last one is a large mechanical diff with
+real regression surface and little reader benefit, and the vocabulary now
+exists for the next person either way. Recorded rather than done quietly.
 
 ---
 
