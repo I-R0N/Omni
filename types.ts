@@ -1838,6 +1838,9 @@ export interface EngineStats {
     /** Files in public/assets/sfx/ matching no id — i.e. a filename typo,
      *  which otherwise looks exactly like "that one isn't wired yet". */
     unmatched: string[];
+    /** Files named after a LOOP id — matched, but loops cannot take a
+     *  recording yet, so they are refused rather than silently ignored. */
+    loopFiles: string[];
   };
 }
 

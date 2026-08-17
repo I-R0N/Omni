@@ -193,6 +193,10 @@ export class AudioSystem {
   /** Files in the folder that match no registered id — a typo in a filename,
    *  which would otherwise be indistinguishable from "not wired yet". */
   private unmatchedSamples: string[] = [];
+  /** Files named after a LOOP id.  Matched, but unusable — see
+   *  discoverSamples().  Kept apart from `unmatchedSamples` because the two
+   *  need different advice: one is a typo, this one is an unbuilt feature. */
+  private loopSampleFiles: string[] = [];
   /** When false, an id with no usable recording makes NO SOUND rather than
    *  falling back to its synth draft.  Exists so recorded assets can be
    *  auditioned alone: with the drafts under them, a sound that is quietly
@@ -442,6 +446,14 @@ export class AudioSystem {
       const stem = file.replace(/\.wav$/i, '').toLowerCase();
       const hit = dashed.find(([, d]) => stem === d || stem.startsWith(d + '-'));
       if (!hit) { this.unmatchedSamples.push(file); continue; }
+      // A LOOP cannot take a recording yet — the sample path builds a
+      // one-shot BufferSource, and a sustained sound needs seamless looping
+      // plus a mapping from its tracked parameter (throttle, charge) onto
+      // the buffer.  Until that exists, refusing the file LOUDLY beats
+      // accepting it: registering it would mark the id as covered while
+      // `loop()` went on calling the synth, so the draft would play and
+      // look like the recording was working.
+      if (this.loopDefs.has(hit[0])) { this.loopSampleFiles.push(file); continue; }
       const list = byId.get(hit[0]);
       if (list) list.push(file); else byId.set(hit[0], [file]);
     }
@@ -785,6 +797,10 @@ export class AudioSystem {
   public get allIds(): string[] { return [...this.defs.keys(), ...this.loopDefs.keys()]; }
   /** Filenames present in the folder that match no id — i.e. typos. */
   public get unmatchedFiles(): string[] { return this.unmatchedSamples.slice(); }
+  /** Filenames naming a LOOP id, which cannot use a recording yet. */
+  public get loopSampleFilenames(): string[] { return this.loopSampleFiles.slice(); }
+  /** Ids that are loops, so callers can explain why they take no file. */
+  public get loopIds(): string[] { return [...this.loopDefs.keys()]; }
   /** Files that decoded but were rejected as silent.  Non-zero means an
    *  asset is broken and its id fell back to the draft — the one state that
    *  otherwise looks identical to "no files installed". */

@@ -1768,6 +1768,7 @@ export class GameEngine {
         drafts: this.audio.draftsEnabled,
         sampled: this.audio.sampledIds.length, total: this.audio.allIds.length,
         unmatched: this.audio.unmatchedFiles,
+        loopFiles: this.audio.loopSampleFilenames,
       },
     });
     // Cost of SCHEDULING the React update — not of performing it.  The

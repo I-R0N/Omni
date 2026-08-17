@@ -86,6 +86,26 @@ A file that decodes but carries no signal is **rejected at load**
 (`AUDIO_CONSTANTS.SAMPLE_MIN_PEAK`) and its id falls back to the synth
 draft, so a broken export cannot silence a working sound.
 
+## Sustained sounds cannot use .wav yet
+
+Seven ids are **loops**, not one-shots — they run continuously and respond to
+a live parameter:
+
+| Loop | What drives it |
+|---|---|
+| `move.thrust` | throttle → gain *and* filter cutoff |
+| `weapon.charge.loop` | charge progress → pitch |
+| `portal.idle` | distance only |
+| `poi.station.idle` | distance only |
+| `snitch.near` | distance only |
+| `status.disable.loop` | on/off |
+| `bubble.drain` | on/off |
+
+The sample path builds a one-shot buffer, so these stay procedural. A file
+named after a loop id is **refused and reported** in the pause menu rather
+than accepted — accepting it would mark the id as covered while the synth
+kept playing, which looks exactly like a working recording.
+
 ## These files never reach the standalone build
 
 `scripts/inline-build.mjs` inlines images only. The single-file

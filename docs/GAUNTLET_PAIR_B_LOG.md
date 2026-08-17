@@ -884,3 +884,35 @@ three stray `shard-hit-*.wav` uploads from it, via the rename recorded in
 the earlier merge. Confirmed with a name-status diff — `D` on all three — so
 the integration branch is cleaned up by the PR merge itself, with no push to
 it from this session.
+
+---
+
+## Loops refuse recordings, loudly
+
+Follow-on from the audition-switch fix, found while answering "why can't
+loops use .wav?".
+
+The answer is that the sample path builds a ONE-SHOT `BufferSource`, and a
+sustained sound needs two things it does not have: seamless looping (a file
+that is not loop-prepared ticks once per cycle) and a mapping from its
+tracked parameter onto the buffer. Two of the seven are genuinely
+parameter-driven — `move.thrust` maps throttle onto gain AND filter cutoff
+together, `weapon.charge.loop` maps charge onto pitch — and a filter over a
+fixed recording can only subtract, where a synth changes its source. The
+other five are on/off or distance-only and would port easily.
+
+**The trap this exposed** is what made it worth fixing before the merge.
+Dropping `move-thrust-a.wav` into the folder was ACCEPTED by discovery: the
+id then reported `hasSample: true`, counted toward the coverage readout, and
+`draftOnly` went false — so under WAV-only the SYNTH played while the UI
+said the id was covered. Indistinguishable from a working recording.
+Verified in the browser before fixing.
+
+Loop ids now refuse samples at discovery and the files are surfaced in the
+pause menu under their own message, kept apart from the typo list because
+the advice differs: one is a misspelling, the other is an unbuilt feature.
+
+*Recorded because* it is the third instance in this pass of the same shape —
+**a state that LOOKS like success is worse than an error.** Silent files
+that decoded, a guard that averaged brightness into a false pass, and now a
+sample that registers against an id nothing will ever play it for.

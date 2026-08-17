@@ -2529,6 +2529,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             )}
 
+            {/* A file named after a LOOP id is matched but unusable — loops
+                have no sampled path yet.  Silence here would read as "my
+                recording isn't working" with no way to find out why. */}
+            {stats.audio && stats.audio.loopFiles.length > 0 && (
+              <div className="mx-auto w-full max-w-xs px-3 py-2 rounded-lg
+                              bg-amber-950/40 border border-amber-500/40
+                              text-[11px] leading-relaxed text-amber-200/90">
+                Sustained sounds can't use .wav yet, so these are ignored:{' '}
+                <span className="font-mono">{stats.audio.loopFiles.slice(0, 3).join(', ')}</span>
+                {stats.audio.loopFiles.length > 3 ? ' …' : ''}
+              </div>
+            )}
+
             {/* Audio diagnostics.  Only shown when audio is NOT audible, so
                 it costs nothing in the normal case — but on a phone there is
                 no console, and "no sound" has four very different causes that
