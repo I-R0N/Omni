@@ -334,6 +334,18 @@ export interface ShardVariantDef {
    *  contact; the variant still takes damage and may shatter.  Only
    *  the nebula-tile variant uses this. */
   passThrough?: boolean;
+  /** Fraction of the unified light layer's contribution that passes
+   *  THROUGH this variant instead of being withheld behind it, 0..1.
+   *  Absent or 0 means opaque — the body casts a full shadow, which is
+   *  every variant's default and the whole of the pre-existing
+   *  behaviour.  Glass is the case this exists for: it is drawn as a
+   *  translucent panel, so a solid black umbra behind it contradicts
+   *  the art.
+   *
+   *  Distinct from `passThrough`, which is about COLLISION and is
+   *  binary: a nebula tile lets a striker pass and casts no shadow at
+   *  all, where glass stops a striker dead and casts a faint one. */
+  transmit?: number;
   /** Render fast-path opt-in.  Today only nebula-tile populates the
    *  per-entity tinted-canvas cache (`nebulaCachedTinted`); the
    *  RenderSystem fast-path gating flips from EntityType-keyed to

@@ -252,7 +252,7 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
-  test('casts a real shadow behind an occluder, and none behind passThrough', async ({ page }) => {
+  test('opaque casts a full shadow, glass a partial one, passThrough none', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
 
@@ -260,15 +260,23 @@ test.describe('occluder collection', () => {
     // scene is hand-built: every static tile deactivated, exactly one revived
     // due east of the player.  The bearings are then unambiguous.
     const r = await engine(page, async (e) => {
-      const place = async (variant: string | null) => {
+      // The showcase map is single-variant, so the OCCLUDER'S VARIANT is
+      // stamped on rather than searched for.  That is safe because the ring
+      // is sampled at 220 units and the tile sits at 120 — the probe never
+      // touches the tile's own pixels, only the light behind it — and it is
+      // the only way to get an opaque tile, a translucent one and a
+      // passThrough one into the same hand-built scene.
+      const place = async (variant: string) => {
         e.player.position.x = 0; e.player.position.y = 0;
         e.player.velocity.x = 0; e.player.velocity.y = 0;
         const tiles = e.currentMap.entities.filter(
           (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
         for (const t of tiles) t.active = false;
-        const pick = variant ? tiles.find((t: any) => t.shardVariant === variant) : tiles[0];
+        const pick = tiles[0];
         if (!pick) return false;
         pick.active = true;
+        pick.shardVariant = variant;
+        pick._occluderR = undefined;
         pick.position.x = 120; pick.position.y = 0;
         e.physics.initializeStaticGrid(e.currentMap.entities);
         return true;
@@ -312,13 +320,16 @@ test.describe('occluder collection', () => {
         return on.map((v, i) => v - off[i]);
       };
 
-      await place(null);
+      await place('rock-tile');            // opaque
       const solid = await profile();
       const solidOcc = e.renderer._lightOccluderCount;
-      const nebulaOk = await place('nebula-tile');
-      const nebula = nebulaOk ? await profile() : null;
+      await place('glass-tile');           // translucent (transmit 0.55)
+      const glass = await profile();
+      const glassOcc = e.renderer._lightOccluderCount;
+      await place('nebula-tile');          // passThrough — casts nothing
+      const nebula = await profile();
       const nebulaOcc = e.renderer._lightOccluderCount;
-      return { solid, solidOcc, nebula, nebulaOcc };
+      return { solid, solidOcc, glass, glassOcc, nebula, nebulaOcc };
     });
 
     // asin(22/120) = 10.6 deg, so at 5 deg per sample the shadow covers
@@ -334,14 +345,25 @@ test.describe('occluder collection', () => {
     // generous bar for a HARD shadow; measured it is ~2.9 vs ~12.7.
     expect(mean(inShadow)).toBeLessThan(mean(outside) * 0.5);
 
+    // GLASS TRANSMITS.  It is drawn as a translucent panel, so it withholds
+    // only 1 - transmit of the light instead of all of it.  The band that
+    // matters is BETWEEN the two failure modes: a glass shadow as dark as
+    // rock's means the transmission never reached the fill, and one as bright
+    // as open space means glass stopped casting at all.  Both are silent.
+    expect(r.glassOcc).toBe(1);
+    const gIn = mean([70, 71, 0, 1, 2].map(i => r.glass[i]));
+    const gOut = mean(r.glass.filter((_: number, i: number) => i > 5 && i < 67));
+    expect(gIn).toBeGreaterThan(gOut * 0.30);
+    expect(gIn).toBeLessThan(gOut * 0.80);
+    // ...and strictly lighter than the opaque case, on the same geometry.
+    expect(gIn).toBeGreaterThan(mean(inShadow));
+
     // passThrough casts NOTHING: nebula collects as zero occluders, so the
     // ring is uniformly lit.
-    if (r.nebula) {
-      expect(r.nebulaOcc).toBe(0);
-      const nIn = mean([70, 71, 0, 1, 2].map(i => r.nebula![i]));
-      const nOut = mean(r.nebula!.filter((_: number, i: number) => i > 5 && i < 67));
-      expect(nIn).toBeGreaterThan(nOut * 0.7);
-    }
+    expect(r.nebulaOcc).toBe(0);
+    const nIn = mean([70, 71, 0, 1, 2].map(i => r.nebula[i]));
+    const nOut = mean(r.nebula.filter((_: number, i: number) => i > 5 && i < 67));
+    expect(nIn).toBeGreaterThan(nOut * 0.7);
     watch.assertClean();
   });
 

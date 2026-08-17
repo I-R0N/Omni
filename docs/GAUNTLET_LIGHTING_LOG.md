@@ -30,6 +30,7 @@ recorded rather than quietly dropped.
 - [x] **A5** — Soft shadow penumbra (brought forward by user request)
 - [x] **A5b** — Cast from the polygon inradius, not the bounding box
 - [x] **A5c** — Cast from the BODY (per-edge shadow volume); ship on unified
+- [x] **A5d** — Penumbra as a cone, not an offset; glass transmits light
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
@@ -1343,3 +1344,122 @@ emitted half the quads before finding out.
 - Look confirmed by screenshot on OVERWORLD and ASTEROID_FIELD: the
   terminator now follows each body's own outline, there is no arc printed
   on any face, and small shards cast shadows the width of the shard.
+
+---
+
+## A5d — the penumbra was fattening the body; and glass transmits
+
+Two from device testing:
+
+> *"For some of the smallest shards, the light still appears to be blocked by
+> a larger shape than the actual polygon of the shard."*
+>
+> *"Is it possible to add a reduced light that passes through the glass
+> tiles / shards / asteroids to simulate light passing through these objects
+> since they technically represent something transparent?"*
+
+### 1. A penumbra is a CONE, not an offset
+
+A5c widened the soft passes by DILATING the whole body — "a penumbra is the
+shadow of a slightly larger caster". That is a true sentence and the wrong
+construction, and the way it is wrong is exactly what was reported: a real
+penumbra is **zero wide at the caster's own surface** and opens out with
+distance from it, where a uniform dilation is equally wide everywhere —
+including right at the body, where it reads as the shadow being thrown by
+something bigger than the thing you can see.
+
+It is worst on the smallest bodies, because the widening is an ANGLE and a
+small body's own angle is small. `k = 1 + widen·d/rad`, so k goes up as the
+body goes down. Measured on a live frame at the shipped defaults:
+
+| body radius | inradius | distance | dilation k | raw (pre-clamp) |
+|---|---|---|---|---|
+| 15.6 | 7.7 | 302 | **2.00** | 3.72 |
+| 20.9 | 19.1 | 291 | **2.00** | 2.07 |
+| 28.9 | 11.4 | 197 | **2.00** | 2.21 |
+| 41.0 | 21.9 | 104 | 1.33 | 1.33 |
+| 74.5 | 42.4 | 48 | 1.00 | 1.08 |
+
+Anything small or far pinned the `DILATE_MAX` clamp — a 15-unit shard was
+casting its widest pass from a silhouette **twice its size**, and that pass
+erases a third of the light.
+
+**The fix is one line of placement, not a new model.** The dilation now
+applies to the EXTRUDED FAR POINTS only: the near boundary of each quad
+stays on the true outline, and the far point's BEARING is taken from the
+dilated vertex. The extra bearing works out to `(k-1)·r/d`, which is the
+intended widening angle by construction — so the band opens from zero at the
+body to `widen·D` at distance D, which is the cone. Every vertex still has
+exactly ONE far point, so the quads still share their edges and no sliver
+opens down the umbra.
+
+### 2. Glass transmits
+
+New optional variant field, `SHARD_VARIANTS[v].transmit` (0..1), set to
+**0.55** on `glass-tile` and `glass-shard` and absent everywhere else.
+Deliberately distinct from `passThrough`, which is about COLLISION and is
+binary: a nebula tile lets a striker pass and casts no shadow at all, where
+glass stops a striker dead and casts a faint one.
+
+Shadows are withheld with `destination-out`, whose strength is the fill's
+ALPHA — one number for the whole fill — so bodies that transmit different
+fractions cannot share a compound path. Each distinct value gets its own
+path and its own fill at `erase × (1 - transmit)`. With every variant opaque
+the group count is 1 and the output is byte-identical to before. A fifth
+distinct value would be SNAPPED onto the nearest existing group rather than
+dropped, because a body that fell out of every group would cast no shadow at
+all — a much worse failure than a slightly wrong translucency.
+
+Not done, and worth knowing it was considered: the transmitted light is not
+TINTED by the glass. That needs an additive pass in the variant's colour
+behind the body, which is a second light-layer draw per translucent occluder
+rather than a change to the erase alpha.
+
+### Cost
+
+`PENUMBRA_NEAREST` cut from 8 to 5. The polygon silhouette costs one quad
+per back-facing edge where the circle cost one wedge full stop, so a graded
+pass buys roughly three times the path work it did at A5, and eight of them
+is no longer affordable. Before the cut, ASTEROID_FIELD measured 1.92–1.97
+ms p95.
+
+Same harness, ship parked in the densest cluster. **Occluder count is the
+dominant term and the harness picks a random cluster per run**, so rows are
+only comparable at equal counts — that is why the count is in the table:
+
+| map | churn | hard p95 | soft p95 | occluders |
+|---|---|---|---|---|
+| ASTEROID_FIELD | no | 1.055 | 1.175 | 15 |
+| ASTEROID_FIELD | yes | 1.115 | **1.725** | 24 |
+| GLASS_FIELD | no | 0.760 | 1.070 | 24 |
+| GLASS_FIELD | yes | 0.995 | 1.400 | 24 |
+| METAL_FIELD | yes | 0.865 | 1.140 | 24 |
+| UNIVERSE | no | 0.585 | 1.115 | 24 |
+| OVERWORLD | no | 0.490 | 0.565 | 2 |
+
+The A5c baseline re-measured on the same container read 1.645 at 24
+occluders on ASTEROID_FIELD, so this is **parity with A5c once the occluder
+count is matched** — and the 1.230 quoted in the A5c entry was a
+low-occluder sample that flattered it. The honest figure for both is
+**~1.7 ms p95 at the 24-occluder cap in the worst synthetic scene**, and
+0.35–0.6 ms in normal play.
+
+That is close enough to the 2.0 ms budget to say plainly: **the budget has
+still never been re-derived, and it now matters.** The next lever if a
+device capture says it is too tight is the tier's `maxOccluders` (24 at
+Low), which scales the umbra pass directly.
+
+### Gate
+
+- `npm run typecheck`, `npm run build`, `npm test` — 119 passed.
+- The shadow test is rewritten to cover all three cases on one hand-built
+  scene, stamping the variant onto the placed tile rather than searching for
+  one (the showcase maps are single-variant). Opaque erases nearly
+  everything, glass lands strictly between the two failure modes — as dark
+  as rock means the transmission never reached the fill, as bright as open
+  space means glass stopped casting — and passThrough still collects zero
+  occluders.
+- That test previously placed a GLASS tile and asserted a full umbra, so it
+  would have failed on this change. Worth noting as a small win for the
+  suite: the assertion that had to move was the one that was accidentally
+  wrong about which material it was measuring.

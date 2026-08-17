@@ -73,6 +73,10 @@ export interface Occluder {
     /** The body's rotation, needed to bring `pts` into world orientation.
      *  Static tiles are 0; shards spin. */
     rot: number;
+    /** `SHARD_VARIANTS[v].transmit` — the fraction of light that passes
+     *  THROUGH rather than being withheld.  0 for everything opaque, which
+     *  is everything but glass. */
+    transmit: number;
     /** Squared distance to the light — the nearest-first selection key. */
     distSq: number;
     /** True for a mobile shard, false for a static tile.  Selection needs to
@@ -115,7 +119,8 @@ const _pool: Occluder[] = [];
 function poolAt(i: number): Occluder {
     let o = _pool[i];
     if (o === undefined) {
-        o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, distSq: 0, mobile: false };
+        o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, transmit: 0,
+              distSq: 0, mobile: false };
         _pool[i] = o;
     }
     return o;
@@ -246,6 +251,8 @@ function record(t: GameEntity, mobile: boolean): void {
     // downstream mutates it.
     o.pts = t.polygonPoints;
     o.rot = t.rotation;
+    const v = t.shardVariant;
+    o.transmit = v !== undefined ? SHARD_VARIANTS[v].transmit ?? 0 : 0;
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
     _outBuf[_n++] = o;
@@ -392,8 +399,14 @@ const PENUMBRA_DEG_PER_K = 1.6;
  *  nearest casters are the ones whose shadow edges are large on screen and
  *  actually being looked at; a distant one's penumbra is a couple of pixels
  *  wide and indistinguishable from the hard edge.  So the near ones get the
- *  graded passes and the rest stay hard, which is where the cost went. */
-const PENUMBRA_NEAREST = 8;
+ *  graded passes and the rest stay hard, which is where the cost went.
+ *
+ *  Cut from 8 to 5 at A5d.  The polygon silhouette costs one quad per
+ *  back-facing edge where the circle cost one wedge full stop, so a graded
+ *  pass buys roughly three times the path work it used to and the number
+ *  that was affordable at A5 no longer is.  Five still covers everything
+ *  close enough for its soft edge to be more than a couple of pixels. */
+const PENUMBRA_NEAREST = 5;
 const DEG2RAD = Math.PI / 180;
 
 /** Positive remainder in [0, 2pi).  `%` is a remainder, not a modulo, so it
@@ -460,17 +473,41 @@ function emitSilhouetteShadow(
     pts: Vector2[],
     rot: number,
     scale: number,
+    dilate: number,
     lightOutside: boolean,
 ): boolean {
     const n = pts.length;
     const cosR = Math.cos(rot), sinR = Math.sin(rot);
     for (let i = 0; i < n; i++) {
         const p = pts[i];
-        const x = ocx + (p.x * cosR - p.y * sinR) * scale;
-        const y = ocy + (p.x * sinR + p.y * cosR) * scale;
+        const lx = p.x * cosR - p.y * sinR;
+        const ly = p.x * sinR + p.y * cosR;
+        const x = ocx + lx * scale;
+        const y = ocy + ly * scale;
         _svx[i] = x;
         _svy[i] = y;
-        const rx = x - cx, ry = y - cy;
+        // THE PENUMBRA DILATION APPLIES TO THE FAR POINT ONLY.
+        //
+        // Dilating the whole body was the obvious reading of "a penumbra is
+        // the shadow of a slightly larger caster", and it is wrong at the one
+        // place you look: a real penumbra is ZERO WIDE at the caster's own
+        // surface and opens out with distance from it, where a uniform
+        // dilation is equally wide everywhere — including right at the body,
+        // where it reads as the shadow being thrown by something bigger than
+        // the thing you can see.  It was worst on the smallest bodies,
+        // because the widening is an ANGLE and a small body's own angle is
+        // small: measured on a live frame, a 15-unit shard was casting from
+        // a silhouette 2x its size (the clamp; the raw factor was 3.7), and
+        // even 28-unit shards pinned the clamp.  Reported from the device as
+        // exactly that.
+        //
+        // Taking the far point's BEARING from the dilated vertex and the near
+        // point from the true one gives the cone instead: the extra bearing
+        // works out to (k-1)*r/d, which is the intended widening angle by
+        // construction, while the near boundary stays exactly on the body.
+        const fx = ocx + lx * scale * dilate;
+        const fy = ocy + ly * scale * dilate;
+        const rx = fx - cx, ry = fy - cy;
         const len = Math.sqrt(rx * rx + ry * ry);
         const k = len > 0 ? far / len : 0;
         _sfx[i] = cx + rx * k;
@@ -529,6 +566,39 @@ function emitSilhouetteShadow(
         drew = true;
     }
     return drew;
+}
+
+/** Distinct `transmit` values present in the selected occluder set.
+ *
+ *  Shadows are withheld with `destination-out`, whose strength is the fill's
+ *  ALPHA — one number for the whole fill.  So bodies that let different
+ *  fractions through cannot share a fill, and each distinct value needs its
+ *  own compound path.  In practice there are one or two (opaque, and glass),
+ *  so this is a two-element array and one extra `fill` per graded pass; the
+ *  all-opaque case draws exactly what it drew before. */
+const _transmits = new Float64Array(4);
+
+/** Fill `_transmits` and return how many are in use.  Anything past the
+ *  fourth distinct value is SNAPPED onto the nearest one already listed
+ *  rather than dropped — a body that fell out of every group would cast no
+ *  shadow at all, which is a much worse failure than a slightly wrong
+ *  translucency.  Nothing in the shipped variant table gets near four. */
+function collectTransmitGroups(occ: Occluder[], count: number): number {
+    let n = 0;
+    for (let i = 0; i < count; i++) {
+        const t = occ[i].transmit;
+        let found = false;
+        for (let g = 0; g < n; g++) if (_transmits[g] === t) { found = true; break; }
+        if (found) continue;
+        if (n < _transmits.length) { _transmits[n++] = t; continue; }
+        let best = 0, bestD = Infinity;
+        for (let g = 0; g < n; g++) {
+            const d = Math.abs(_transmits[g] - t);
+            if (d < bestD) { bestD = d; best = g; }
+        }
+        occ[i].transmit = _transmits[best];
+    }
+    return n;
 }
 
 /** One back-facing edge's extrusion, from the vertex scratch. */
@@ -609,14 +679,7 @@ function compositeLight(
 
     if (count === 0) return;
 
-    // 2. One compound path of every shadow wedge.
-    //
-    // Occluders are approximated as CIRCLES: one wedge each — two tangents
-    // and a far arc — instead of six quads per hexagon.  That is what keeps
-    // the cost bounded by the occluder cap rather than by silhouette
-    // complexity, and it is also the only shape that survives rock tiles
-    // deforming their polygon on every hit.
-    // 2. The shadow wedges, in SOFT_STEPS graded passes.
+    // 2. The shadow volumes, in SOFT_STEPS graded passes.
     //
     // TWO THINGS MADE THE OLD EDGE READ AS A DRAWN LINE, and they are
     // different problems with different fixes.
@@ -630,11 +693,13 @@ function compositeLight(
     //     belongs and curves it around the body.
     //
     // (b) THE EDGES WERE PERFECTLY HARD.  A point light has no penumbra at
-    //     all, which is why this looked mechanical.  Widening the wedge by a
-    //     CONSTANT ANGLE per pass fakes an area light of that angular size,
-    //     and constant angular widening is exactly what makes the soft band
+    //     all, which is why this looked mechanical.  Widening the silhouette
+    //     by a CONSTANT ANGLE per pass fakes an area light of that angular
+    //     size, and constant angular widening is what makes the soft band
     //     grow with distance from the caster — the physical behaviour, not a
-    //     blur.  Near the tile the transition is tight; far away it spreads.
+    //     blur.  Near the body the transition is tight; far away it spreads.
+    //     The widening reaches the geometry as `dilate`, and applies to the
+    //     EXTRUDED far points only — see `emitSilhouetteShadow`.
     //
     // The erase fractions are chosen so the remaining light steps LINEARLY
     // across the band: after pass i the survivor is 1 - (i+1)/N, so
@@ -642,6 +707,7 @@ function compositeLight(
     // pass is 1 so the umbra is fully dark rather than nearly so.
     const kRad = penumbraK * PENUMBRA_DEG_PER_K * DEG2RAD;
     const steps = kRad > 0 ? SOFT_STEPS : 1;
+    const groups = collectTransmitGroups(occ, count);
     let wedges = 0;
     for (let step = 0; step < steps; step++) {
         // Widest first, umbra last.
@@ -655,22 +721,27 @@ function compositeLight(
             ? 1
             : (remainBefore > 0 ? 1 - remainAfter / remainBefore : 1);
 
-        lctx.beginPath();
-        let drew = 0;
         // The widening passes cover only the nearest few; the final (umbra)
         // pass covers everything, so a distant occluder still ends fully
         // dark — it just gets a hard edge instead of a graded one.
         const isUmbraPass = step === steps - 1;
         const upTo = isUmbraPass ? count : Math.min(count, PENUMBRA_NEAREST);
-        // Rotating a ray by the widening angle is the RIGHT construction for a
-        // circle and the wrong one for a polygon: adjacent quads would then
-        // extrude their shared vertex in two different directions and leave a
-        // bright sliver between them.  So the polygon path widens by DILATING
-        // the body instead — a penumbra is the shadow of a slightly larger
-        // caster — which keeps every shared vertex shared and costs one
-        // multiply on the transform scale.
+
+        // ONE COMPOUND PATH PER TRANSMISSION GROUP.  `destination-out` takes
+        // its strength from the fill's alpha, one number for the whole fill,
+        // so bodies that let different fractions of light through cannot
+        // share one.  With every variant opaque (`groups === 1`) this is the
+        // single path it always was.
+        for (let g = 0; g < groups; g++) {
+        const transmit = _transmits[g];
+        const eraseAlpha = erase * (1 - transmit);
+        if (eraseAlpha <= 0) continue;      // fully transparent: casts nothing
+
+        lctx.beginPath();
+        let drew = 0;
         for (let i = 0; i < upTo; i++) {
             const o = occ[i];
+            if (o.transmit !== transmit) continue;
             const dx = (o.x - lx) * worldToPx;
             const dy = (o.y - ly) * worldToPx;
             const rad = o.r * worldToPx;
@@ -688,23 +759,26 @@ function compositeLight(
                 const far = rPx * 1.6;
                 let k = 1;
                 if (widen > 0 && rad > 0) {
-                    // Angular widening `widen` at distance `d` is a body that
-                    // is `widen * d` px wider, i.e. this scale factor against
-                    // the inradius.
+                    // Angular widening `widen` at distance `d` is a body
+                    // `widen * d` px wider, i.e. this factor against the
+                    // inradius.  It scales the FAR points only, so it opens
+                    // the shadow out with distance instead of fattening the
+                    // body — see `emitSilhouetteShadow`.
                     k = 1 + widen * d / rad;
                     if (k > DILATE_MAX) k = DILATE_MAX;
-                    // Never let the dilated body swallow the light: it would
-                    // turn every edge back-facing and erase the light's whole
-                    // neighbourhood.  `emitSilhouetteShadow` would catch that
-                    // and bail, losing the soft pass; clamping keeps it.
+                    // Never let the dilated vertices reach the light: one
+                    // landing on it has no bearing at all, and the quad
+                    // collapses onto the light's own centre and erases a
+                    // sliver out of the middle of it.
                     const kMax = brPx > 0 ? 0.9 * d / brPx : 1;
                     if (k > kMax) k = kMax;
                     if (k < 1) k = 1;
                 }
-                // `d > brPx * k` proves the light is outside the (dilated)
-                // body, which lets the emitter fuse its two passes.
+                // `d > brPx` proves the light is outside the body — the
+                // NEAR vertices are undilated now, so this is the true
+                // outline — which lets the emitter fuse its two passes.
                 if (emitSilhouetteShadow(lctx, cx, cy, ocx, ocy, far, pts, o.rot,
-                                         worldToPx * k, d > brPx * k)) drew++;
+                                         worldToPx, k, d > brPx)) drew++;
                 continue;
             }
 
@@ -763,11 +837,12 @@ function compositeLight(
         // uniform 12.5 luminance at every bearing, including directly behind
         // the occluder.)
         lctx.fillStyle = '#000';
-        lctx.globalAlpha = erase;
+        lctx.globalAlpha = eraseAlpha;
         lctx.globalCompositeOperation = 'destination-out';
         lctx.fill();
         lctx.globalCompositeOperation = 'source-over';
         lctx.globalAlpha = 1;
+        }
     }
     if (wedges === 0) return;
 }

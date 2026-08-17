@@ -5447,6 +5447,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Glass is drawn as a translucent panel, so a solid umbra behind it
+    // contradicts the art.  Roughly half the unified light layer's
+    // contribution passes through instead of being withheld — enough that
+    // a glass wall reads as glass rather than as rock, and not so much
+    // that its shadow stops registering as one.
+    transmit: 0.55,
     // Neighbour-count OPACITY automata (DBG "Tile shade"), BIPOLAR
     // around the neutral default: a half-surrounded tile (~3 of 6
     // neighbours) renders at the normal opacity — the MIDDLE of the
@@ -5738,6 +5744,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-shard': {
     id: 'glass-shard',
     carrier: EntityType.STRUCTURE,
+    // Same translucency as the tile it broke off — see 'glass-tile'.
+    transmit: 0.55,
     spawn: GLASS_SHARD_SPAWN_SHAPE,
     regen: { kind: 'none' },
     merge: {
