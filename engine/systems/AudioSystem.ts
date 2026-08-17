@@ -679,7 +679,14 @@ export class AudioSystem {
         this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far) <= 0;
     }
 
-    if (!on || outOfEarshot || this._muted || !this._active) {
+    // Drafts off and no recording for this id → the loop must NOT sound.
+    // Every loop is a synth draft today (the sample path is one-shot only),
+    // so WAV-only silences all of them — which is the point: the engine bed
+    // and the POI hums are exactly the sounds most likely to be mistaken for
+    // a recording, because they are always there.
+    const draftOnly = this.takeSample(id) === null;
+    if (!on || outOfEarshot || this._muted || !this._active
+        || (draftOnly && !this._draftsEnabled)) {
       if (live && this.ctx) {
         live.voice.stop(this.ctx.currentTime);
         try { live.gain.disconnect(); } catch { /* already gone */ }
@@ -752,7 +759,22 @@ export class AudioSystem {
   /** Synth drafts on/off.  With them off, only recorded takes sound — the
    *  audition mode for judging assets without mistaking a draft for one. */
   public get draftsEnabled(): boolean { return this._draftsEnabled; }
-  public set draftsEnabled(v: boolean) { this._draftsEnabled = v; }
+  public set draftsEnabled(v: boolean) {
+    if (this._draftsEnabled === v) return;
+    this._draftsEnabled = v;
+    // Stop any live draft loop immediately.  Without this the engine bed
+    // keeps running until something asks for it again — and `move.thrust`
+    // idles continuously while the player is alive, so nothing ever would.
+    if (!v && this.ctx) {
+      const now = this.ctx.currentTime;
+      for (const [id, live] of this.loops) {
+        if (this.takeSample(id) !== null) continue;   // a recorded loop may stay
+        live.voice.stop(now);
+        try { live.gain.disconnect(); } catch { /* already gone */ }
+        this.loops.delete(id);
+      }
+    }
+  }
   /** Ids that have at least one decoded recording. */
   public get sampledIds(): string[] {
     return [...this.samples.keys()].filter(id => this.takeSample(id) !== null).sort();

@@ -253,6 +253,47 @@ const run = async () => {
   ok(drafts.off.rec === 1, 'with drafts OFF a recorded id still sounds');
   ok(drafts.off.draft === 0, 'with drafts OFF an unrecorded id is SILENT — the audition mode');
 
+  // LOOPS TOO.  The first cut of the audition switch gated `play()` only, so
+  // the engine bed and the station hum kept running under WAV-only — the two
+  // sounds most likely to be mistaken for a recording, because they are
+  // always there.  Measured at the master rather than counted: a loop that
+  // has been forgotten by the bookkeeping still makes noise.
+  const bed = await page4.evaluate(async () => {
+    const e = window.__omniEngine, a = e.audio;
+    const level = async () => {
+      const an = a.ctx.createAnalyser(); an.fftSize = 2048;
+      a.master.connect(an);
+      const buf = new Float32Array(an.fftSize);
+      let sum = 0, n = 0;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 700) {
+        an.getFloatTimeDomainData(buf);
+        for (let i = 0; i < buf.length; i++) { sum += buf[i] * buf[i]; n++; }
+        await new Promise(r => setTimeout(r, 20));
+      }
+      a.master.disconnect(an);
+      return Math.sqrt(sum / n);
+    };
+    a.draftsEnabled = true;
+    a.loop('move.thrust', true, { param: 1 });          // the engine bed
+    await new Promise(r => setTimeout(r, 400));
+    const on = { rms: await level(), loops: [...a.loops.keys()].length };
+    a.draftsEnabled = false;
+    await new Promise(r => setTimeout(r, 300));
+    const off = { rms: await level(), loops: [...a.loops.keys()].length };
+    a.draftsEnabled = true;
+    a.loop('move.thrust', true, { param: 1 });
+    await new Promise(r => setTimeout(r, 400));
+    const back = { loops: [...a.loops.keys()].length };
+    a.loop('move.thrust', false);
+    return { on, off, back };
+  });
+  ok(bed.on.loops > 0, `the engine bed runs with drafts ON (${bed.on.loops} loop(s))`);
+  ok(bed.off.loops === 0, `no draft loop survives WAV-only (${bed.off.loops} left)`);
+  ok(bed.off.rms < Math.max(bed.on.rms * 0.1, 1e-6),
+     `and the bed is genuinely silent, not merely untracked (rms ${bed.off.rms.toExponential(1)} vs ${bed.on.rms.toExponential(1)})`);
+  ok(bed.back.loops > 0, 'loops come back when drafts are re-enabled');
+
   await browser.close();
   console.log(`\nsample: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

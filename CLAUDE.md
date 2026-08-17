@@ -1729,7 +1729,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (shard size, impact speed) still spans one take from pebble-tap to
   boulder-slam.  The synth drafts can be switched OFF wholesale
   (`AudioSystem.draftsEnabled`, the pause menu's WAV-only button): an id
-  with no recording then makes NO sound, which is the only honest way to
+  with no recording then makes NO sound — LOOPS INCLUDED, and switching it
+  off STOPS the ones already running, because `move.thrust` idles
+  continuously while the player is alive and would otherwise never be
+  re-asked; the always-on beds are precisely the sounds most likely to be
+  mistaken for a recording, which is the only honest way to
   audition real assets — with a draft under every id, a sound that is
   still synthetic is indistinguishable from one that landed.  A headless smoke parses the document
   and asserts registry↔document parity in BOTH directions, so adding a

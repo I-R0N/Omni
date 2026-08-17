@@ -847,3 +847,40 @@ be the only implementation; the drafts were built for a different reason
 *Recorded because* the failure mode is a one-line regex edit by someone
 trying to help. The policy is now written at that exact line in
 `inline-build.mjs`, not only here.
+
+---
+
+## The audition switch missed the loops
+
+Reported from play: under WAV-only the engine hum and the acceleration
+noise were both still there.
+
+The gate was in `play()` only. Loops go through `loop()`, which never
+consulted the flag — so all seven kept running, and since NO loop can carry
+a recording today (the sample path is one-shot only), every one of them was
+a draft that should have been silent. Worse, the always-on beds are exactly
+the sounds most likely to be mistaken for a recording, because they are
+always there; the switch was failing hardest on the case it exists for.
+
+Two halves to the fix, and the second is the one that is easy to miss:
+`loop()` now treats "draft-only and drafts off" like "off", AND the
+`draftsEnabled` setter stops what is already running. Without the second,
+`move.thrust` would keep sounding indefinitely — it idles continuously
+while the player is alive, so nothing ever asks for it again.
+
+Measured at the master through an analyser rather than counted, because a
+loop the bookkeeping has forgotten still makes noise: RMS **0.0182 → exactly
+0.00000**, back to 0.0189 when re-enabled. `poi.station.idle` was running
+too, so a station hum was in it as well.
+
+*Recorded because* it is the same lesson as the three measurement bugs
+earlier in this pass, from the other side: **a feature that gates one code
+path is not a feature that gates the behaviour.** The one-shot gate had a
+passing assertion, and the assertion was true — it just was not the claim
+the feature makes. The new assertions measure the OUTPUT.
+
+Also folded in here: merging the latest `claude/plan-completion` deletes the
+three stray `shard-hit-*.wav` uploads from it, via the rename recorded in
+the earlier merge. Confirmed with a name-status diff — `D` on all three — so
+the integration branch is cleaned up by the PR merge itself, with no push to
+it from this session.
