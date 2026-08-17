@@ -28,7 +28,7 @@
  */
 import type { PhysicsSystem } from '../PhysicsSystem';
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType } from '../../../types';
+import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
 } from '../../../constants';
@@ -158,10 +158,155 @@ export function collectOccluders(
 }
 
 const _EMPTY: Occluder[] = [];
+const ZERO: Vector2 = { x: 0, y: 0 };
 
 /** Nearest-first comparator, hoisted — a comparator literal passed to
  *  `sort` inside a per-frame path is rebuilt every frame. */
 function byDistSq(a: Occluder, b: Occluder): number { return a.distSq - b.distSq; }
+
+/** The player light.
+ *
+ *  Colour is the ship's own engine glow (`PLAYER_TRAIL_CONSTANTS.COLOR`),
+ *  so the light reads as coming FROM the ship rather than as a new system
+ *  announcing itself.
+ *
+ *  PEAK is the alpha at the light's centre.  It is deliberately well under
+ *  the legacy models' peakAlpha (0.33-0.85): those tinted ONE tile face,
+ *  where this adds over the entire lit area, so the same number would wash
+ *  the scene out.
+ *
+ *  Lives here rather than in `constants.ts` only because A4's scope cap is
+ *  two files.  It is config-as-code and belongs in `constants.ts` beside the
+ *  tier table; move it there when the DBG row lands. */
+const PLAYER_LIGHT = {
+    RGB: '125, 211, 252',
+    PEAK: 0.34,
+    /** Where the falloff reaches zero, as a fraction of the light radius.
+     *  1.0 exactly would put a hard rim at the radius; the gradient's own
+     *  mid stop does the softening. */
+    MID: 0.55,
+    MID_ALPHA: 0.11,
+};
+
+/** Cached radial gradients, keyed on integer light-canvas radius.
+ *
+ *  Building one parses a CSS colour string PER STOP, which is why the engine
+ *  already caches `enemyBodyGrad` / `bubbleFillGrad` on the entity.  The key
+ *  is the RADIUS ONLY, never the position — the gradient is created at the
+ *  origin and moved by the transform, so a moving light reuses one object.
+ *  Camera zoom is the only thing that changes the radius, so the map stays
+ *  a handful of entries. */
+const _gradCache = new Map<number, CanvasGradient>();
+
+function lightGradient(lctx: CanvasRenderingContext2D, rPx: number): CanvasGradient {
+    const key = Math.round(rPx);
+    let g = _gradCache.get(key);
+    if (g === undefined) {
+        g = lctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(1, key));
+        g.addColorStop(0, `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.PEAK})`);
+        g.addColorStop(PLAYER_LIGHT.MID, `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.MID_ALPHA})`);
+        g.addColorStop(1, `rgba(${PLAYER_LIGHT.RGB}, 0)`);
+        _gradCache.set(key, g);
+    }
+    return g;
+}
+
+/**
+ * Composite ONE light: falloff, then every shadow wedge withheld from it.
+ *
+ * Four draw operations regardless of occluder count — a gradient fill, one
+ * `beginPath`, one `fill`, and the composite-mode flip between them.  The
+ * cost is PATH CONSTRUCTION, which the tier's occluder cap bounds.
+ *
+ * The wedges go into ONE compound path and are withheld in a single
+ * `destination-out` fill.  Overlapping wedges union correctly under nonzero
+ * winding, so no per-wedge state change is needed.  The ctx path API is used
+ * rather than `Path2D` because it allocates nothing — a `Path2D` cannot be
+ * cleared and would mean a new object per light per frame.
+ *
+ * No clip is set.  The falloff is alpha 0 beyond its radius and
+ * `destination-out` against alpha 0 is a no-op, so wedges running past the
+ * light's edge cost nothing and harm nothing.  That is what removes the
+ * per-light `save`/`restore` a scissor rect would have needed.
+ */
+function compositeLight(
+    lctx: CanvasRenderingContext2D,
+    cx: number, cy: number, rPx: number,
+    occ: Occluder[], count: number,
+    lx: number, ly: number, worldToPx: number,
+): void {
+    // 1. Falloff.  Created at the origin and MOVED by the transform, so the
+    //    cache key stays the radius alone.  setTransform rather than
+    //    save/translate/restore: same effect, no state stack.
+    lctx.setTransform(1, 0, 0, 1, cx, cy);
+    lctx.fillStyle = lightGradient(lctx, rPx);
+    lctx.fillRect(-rPx, -rPx, rPx * 2, rPx * 2);
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    if (count === 0) return;
+
+    // 2. One compound path of every shadow wedge.
+    //
+    // Occluders are approximated as CIRCLES: one wedge each — two tangents
+    // and a far arc — instead of six quads per hexagon.  That is what keeps
+    // the cost bounded by the occluder cap rather than by silhouette
+    // complexity, and it is also the only shape that survives rock tiles
+    // deforming their polygon on every hit.
+    lctx.beginPath();
+    let wedges = 0;
+    for (let i = 0; i < count; i++) {
+        const o = occ[i];
+        const dx = (o.x - lx) * worldToPx;
+        const dy = (o.y - ly) * worldToPx;
+        const rad = o.r * worldToPx;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        // Light inside the occluder — there is no tangent, and asin() would
+        // return NaN and poison the whole compound path.
+        if (d <= rad) continue;
+        // Entirely past the light's reach: nothing of it is lit, so nothing
+        // of it can shadow.
+        if (d - rad > rPx) continue;
+
+        const theta = Math.atan2(dy, dx);
+        const alpha = Math.asin(rad / d);
+        const tan = Math.sqrt(d * d - rad * rad);   // light -> tangent point
+        const a1 = theta - alpha, a2 = theta + alpha;
+        // Far edge at 1.6x the light radius: comfortably past the falloff so
+        // no lit rim survives behind an occluder, and comfortably inside the
+        // `lightRadius * 3` torus-seam assertion, which must stay able to
+        // catch a genuine wrap failure (those land half a map away).
+        const far = rPx * 1.6;
+        const c1 = Math.cos(a1), s1 = Math.sin(a1);
+        const c2 = Math.cos(a2), s2 = Math.sin(a2);
+
+        lctx.moveTo(cx + c1 * tan, cy + s1 * tan);
+        lctx.lineTo(cx + c1 * far, cy + s1 * far);
+        lctx.arc(cx, cy, far, a1, a2);
+        lctx.lineTo(cx + c2 * tan, cy + s2 * tan);
+        lctx.closePath();
+        wedges++;
+    }
+    if (wedges === 0) return;
+
+    // 3. Withhold them all at once.  Shadows SUBTRACT added light; they never
+    //    darken the world below what it already was, which is what keeps the
+    //    whole system additive-only until A7 deliberately is not.
+    //
+    // THE FILL STYLE MUST BE RESET TO SOMETHING OPAQUE FIRST.  Under
+    // `destination-out` only the SOURCE ALPHA matters, and at this point
+    // `fillStyle` is still the falloff gradient from step 1 — which was
+    // created in user space at the origin and is now being used under the
+    // IDENTITY transform, so it is centred on the canvas corner and reads
+    // alpha 0 everywhere near the wedges.  Filling with it erases exactly
+    // nothing, and the failure is silent: the shadows simply do not appear,
+    // with no error and no wrong-looking geometry to trace back from.
+    // (Measured before the fix: light gain was a uniform 12.5 luminance at
+    // every bearing, including directly behind the occluder.)
+    lctx.fillStyle = '#000';
+    lctx.globalCompositeOperation = 'destination-out';
+    lctx.fill();
+    lctx.globalCompositeOperation = 'source-over';
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  THE LIGHT LAYER — the compositing half.
@@ -229,7 +374,7 @@ export function ensureLightCanvas(r: RenderSystem, ctx: CanvasRenderingContext2D
  */
 export function renderLightLayer(
     r: RenderSystem, ctx: CanvasRenderingContext2D, width: number, height: number,
-    playerPos?: { x: number; y: number },
+    playerPos?: Vector2, camera?: CameraState,
 ): void {
     const mode = getActiveLightingMode();
     if (mode === 'legacy') return;
@@ -267,8 +412,24 @@ export function renderLightLayer(
         r._lightOccluders.sort(byDistSq);
         r._lightOccluderCount = n < tier.maxOccluders ? n : tier.maxOccluders;
         lights = 1;
-        // A4 draws the falloff and the wedges.  A3 collects only, so the
-        // number it reports is the collection cost with nothing else in it.
+
+        if (camera) {
+            // World -> light-canvas pixels.  The light canvas is screen space
+            // at 1/divisor, so this is the camera zoom times that scale.  CSS
+            // dimensions, never backing-store: `effectiveDpr` caps the device
+            // ratio, so the two disagree and mixing them puts the light
+            // somewhere other than the ship.
+            const k = r._lightScale;
+            const worldToPx = camera.zoom * k;
+            const shake = camera.shakeOffset ?? ZERO;
+            const cx = (width / 2 + (shiftX(camera.position.x, playerPos.x)
+                        - camera.position.x + shake.x) * camera.zoom) * k;
+            const cy = (height / 2 + (shiftY(camera.position.y, playerPos.y)
+                        - camera.position.y + shake.y) * camera.zoom) * k;
+            compositeLight(lctx, cx, cy, tier.maxRadius * worldToPx,
+                           r._lightOccluders, r._lightOccluderCount,
+                           playerPos.x, playerPos.y, worldToPx);
+        }
     } else {
         r._lightOccluderCount = 0;
     }

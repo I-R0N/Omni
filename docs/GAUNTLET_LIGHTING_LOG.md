@@ -25,7 +25,7 @@ recorded rather than quietly dropped.
 - [x] **A1** — Occluder extraction into a single queryable source
 - [x] **A2** — Light-layer scaffolding + debug visualization
 - [x] **A3** — Occluder churn
-- [ ] **A4** — One point light, shadow-cast
+- [x] **A4** — One point light, shadow-cast (**awaiting the look decision**)
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A5** — Soft shadow penumbra
 - [ ] **A6** — N lights with culling
@@ -796,3 +796,123 @@ Suite total: **111 → 116**.
 Running total against the ladder's budget: A2 blit **0.085** + A3
 collection **0.030** = **0.115 ms p95**, against a cumulative 0.50 ms
 allowance at this point.
+
+---
+
+## A4 — One point light, shadow-cast
+
+Two files (`render/lighting.ts`, `RenderSystem.ts`), plus one more test in
+the suite.
+
+### What shipped
+
+One light at the player, radius 300 (Low tier), coloured with the ship's
+own engine glow (`PLAYER_TRAIL_CONSTANTS.COLOR`) so it reads as coming
+FROM the ship. Per light, per frame, exactly the Core Technique:
+
+1. A cached radial falloff, created at the origin and moved by the
+   transform so the cache key is the RADIUS alone — a moving light reuses
+   one gradient object. Camera zoom is the only thing that changes the
+   radius, so the map holds a handful of entries.
+2. **One** compound path of every shadow wedge — two tangents from the
+   light to the occluder's circumcircle, extruded to 1.6× the light
+   radius, closed with a far arc — filled **once** under
+   `destination-out`. Overlapping wedges union under nonzero winding, so
+   no per-wedge state change.
+3. Blitted with `'lighter'`.
+
+**Four draw operations per light regardless of occluder count.** The cost
+is path construction, bounded by the tier's occluder cap.
+
+Two simplifications worth recording. **No clip is set**: the falloff is
+alpha 0 beyond its radius and `destination-out` against alpha 0 is a
+no-op, so wedges running past the light's edge cost and harm nothing —
+which removes the per-light `save`/`restore` a scissor rect would have
+needed. And `setTransform` is used instead of `save`/`translate`/
+`restore`: same effect, no state stack.
+
+### The bug that would have shipped as "shadows don't work"
+
+The first implementation drew no shadows at all — and threw no error,
+produced no wrong-looking geometry, and passed every structural check.
+Measured, the light gain was a uniform **12.5 luminance at every bearing,
+including directly behind the occluder**.
+
+The cause: at the `destination-out` fill, `fillStyle` was still the
+falloff **gradient** from step 1. Under `destination-out` only the source
+ALPHA matters, and that gradient — created in user space at the origin,
+then used under the identity transform — sits centred on the canvas
+corner and reads alpha 0 everywhere near the wedges. It erased exactly
+nothing. Setting `fillStyle = '#000'` before the fill is the whole fix.
+
+It is recorded because the failure mode is the dangerous one: the
+geometry was correct, the path was correct, the composite mode was
+correct, and the output was silently empty.
+
+**It was only caught by changing the measurement, not the code.** The
+first probe compared two points assuming the player sits at exact screen
+centre; that gave "behind 14.2 vs clear 14.8" — a 0.6 difference readable
+as "the shadow is too weak, tune it". Sweeping 72 bearings around the
+light's *actual* computed centre instead produced a flat 12.5 everywhere,
+which is not a tuning problem at all.
+
+### Shadow profile, measured
+
+One tile due east at 120 u, probes on a ring at 220 u, gain = lit − unlit:
+
+| bearing | 0° | 5° | 10° | 15° | 90° | 180° | 270° | 345° | 350° | 355° |
+|---|---|---|---|---|---|---|---|---|---|---|
+| gain | **0.0** | **0.0** | 10.3 | 12.7 | 12.3 | 12.8 | 12.9 | 12.8 | **4.1** | **0.0** |
+
+Mean gain inside the predicted shadow **2.88**, outside **12.70**.
+Predicted half-angle `asin(22/120)` = **10.6°**; the observed transition
+sits between 5° and 10–15° on one side and 345°–355° on the other. The
+geometry is doing what the arithmetic says.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| ≤ 0.70 ms p95 beyond A3 | PASS — **0.28–0.31 ms** (GLASS 0.290, METAL 0.280, UNIVERSE 0.305), at the full 24-occluder cap |
+| No wedge vertex beyond `lightRadius × 3` | PASS — far edge is 1.6×; asserted in the suite across all four wrap corners |
+| An occluder leaves the point behind it strictly darker | PASS — behind **0.0** vs clear **12.8** at equal radius |
+| Additive-only: never darker than the unlit world | PASS — behind-lit 0.0 vs unlit 0.0 |
+| `passThrough` variants cast nothing | PASS — nebula collects 0 occluders; ring uniformly lit |
+| 117 tests pass | PASS (suite 116 → 117) |
+
+Running total: A2 blit **0.085** + A3 collect **0.030** + A4 light
+**0.310** = **0.425 ms p95** against a 1.20 ms cumulative allowance.
+
+### THE LOOK DECISION — operator's call, evidence attached
+
+Screenshots captured per map at `'legacy'` and `'unified'` from the same
+camera. What they show:
+
+- **On the showcase maps (metal / glass / plastic) the effect is strong
+  and correct.** Clear umbra cones radiate away from the ship behind each
+  tile cluster; the near faces of the clusters are lit and the far sides
+  fall off. It reads as a real light source rather than a tint.
+- **On UNIVERSE — the map a run actually plays — it is muted.** The
+  nebula that makes up two thirds of that map's static tiles is already
+  bright, is `passThrough`, and therefore both swamps the additive light
+  and casts no shadow. The glass tiles that *would* cast are typically
+  outside the strong part of the falloff.
+
+This is the third independent confirmation of the same structural fact
+(A0's population count, A1's all-nebula densest cluster, A3's zero-
+occluder reading): **the unified model's headline feature is strongest
+exactly where the game is not played.**
+
+On Model A parity: the ladder required the unified light reproduce the
+proximity bloom's read — the highlight sliding along a tile's perimeter
+as the player orbits. It does so *by construction* rather than by
+imitation, since a true point light lights the near face and that IS the
+same phenomenon. But it is not identical: Model A tinted one tile face
+and nothing else, where this brightens the tile AND the space around it.
+That difference is a matter of taste, not correctness, and belongs to the
+same decision.
+
+**A4 is complete and gated. A4b (migrating the legacy receivers, and
+deleting them) is deliberately NOT started**, because it is the
+irreversible half and its precondition is the operator confirming the
+unified look is at least as good.

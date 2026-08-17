@@ -924,7 +924,7 @@ export class RenderSystem {
     // it never tints the HUD, and AFTER ctx.restore() because the layer is
     // screen-space and must not inherit the camera translation.  No-op at
     // LIGHTING_CYCLE 'legacy' (the default).
-    renderLightLayer(this, ctx, width, height, playerPos);
+    renderLightLayer(this, ctx, width, height, playerPos, camera);
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

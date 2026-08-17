@@ -210,6 +210,99 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('casts a real shadow behind an occluder, and none behind passThrough', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    // A generated map gives no control over WHERE the occluders are, so the
+    // scene is hand-built: every static tile deactivated, exactly one revived
+    // due east of the player.  The bearings are then unambiguous.
+    const r = await engine(page, async (e) => {
+      const place = async (variant: string | null) => {
+        e.player.position.x = 0; e.player.position.y = 0;
+        e.player.velocity.x = 0; e.player.velocity.y = 0;
+        const tiles = e.currentMap.entities.filter(
+          (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+        for (const t of tiles) t.active = false;
+        const pick = variant ? tiles.find((t: any) => t.shardVariant === variant) : tiles[0];
+        if (!pick) return false;
+        pick.active = true;
+        pick.position.x = 120; pick.position.y = 0;
+        e.physics.initializeStaticGrid(e.currentMap.entities);
+        return true;
+      };
+      const settle = () => new Promise<void>(res => {
+        let n = 0;
+        const t = () => { e.player.position.x = 0; e.player.position.y = 0;
+          if (++n < 30) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      // Luminance on a ring around the LIGHT's own centre — computed the way
+      // the renderer computes it, not assumed to be screen centre, because
+      // the camera follows with lag and a bearing taken from the wrong origin
+      // silently probes the wrong place.
+      const ring = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const lcx = (W / 2 + (0 - cam.position.x + shake.x) * cam.zoom) * dpr;
+        const lcy = (H / 2 + (0 - cam.position.y + shake.y) * cam.zoom) * dpr;
+        const rpx = 220 * cam.zoom * dpr;
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        const lum = (px: number, py: number) => {
+          const x = Math.round(px), y = Math.round(py);
+          const i = (y * cv.width + x) * 4;
+          return (img[i] + img[i + 1] + img[i + 2]) / 3;
+        };
+        const out: number[] = [];
+        for (let k = 0; k < 72; k++) {
+          const a = (k / 72) * Math.PI * 2;
+          out.push(lum(lcx + Math.cos(a) * rpx, lcy + Math.sin(a) * rpx));
+        }
+        return out;
+      };
+      const profile = async () => {
+        e.renderer.setLighting('unified'); await settle();
+        const on = ring();
+        e.renderer.setLighting('legacy'); await settle();
+        const off = ring();
+        return on.map((v, i) => v - off[i]);
+      };
+
+      await place(null);
+      const solid = await profile();
+      const solidOcc = e.renderer._lightOccluderCount;
+      const nebulaOk = await place('nebula-tile');
+      const nebula = nebulaOk ? await profile() : null;
+      const nebulaOcc = e.renderer._lightOccluderCount;
+      return { solid, solidOcc, nebula, nebulaOcc };
+    });
+
+    // asin(22/120) = 10.6 deg, so at 5 deg per sample the shadow covers
+    // samples 70,71,0,1,2 — bearing 0 plus a sample either side.
+    const inShadow = [70, 71, 0, 1, 2].map(i => r.solid[i]);
+    const outside = r.solid.filter((_: number, i: number) => i > 5 && i < 67);
+    const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
+
+    expect(r.solidOcc).toBe(1);
+    // The light must actually add light somewhere...
+    expect(mean(outside)).toBeGreaterThan(5);
+    // ...and must not, behind the occluder.  Half the outside gain is a
+    // generous bar for a HARD shadow; measured it is ~2.9 vs ~12.7.
+    expect(mean(inShadow)).toBeLessThan(mean(outside) * 0.5);
+
+    // passThrough casts NOTHING: nebula collects as zero occluders, so the
+    // ring is uniformly lit.
+    if (r.nebula) {
+      expect(r.nebulaOcc).toBe(0);
+      const nIn = mean([70, 71, 0, 1, 2].map(i => r.nebula![i]));
+      const nOut = mean(r.nebula!.filter((_: number, i: number) => i > 5 && i < 67));
+      expect(nIn).toBeGreaterThan(nOut * 0.7);
+    }
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
