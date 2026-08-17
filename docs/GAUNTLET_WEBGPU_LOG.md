@@ -34,8 +34,9 @@ Working rules for this branch:
 - [x] **Stage 2** — Hardest primitive (**KG2 PASSED** — parity at 5× throughput)
 - [x] **Stage 3** — Renderer seam (**COMPLETE** — byte-identical, 111/111)
 - [~] **Stage 4** — *partial*: H4/H5 hazard probes done; `GPURenderSystem` NOT built
-- [ ] **Stage 5** — Procedural shapes
-- [ ] **Stage 6** — Verdict (KG3)
+- [ ] **Stage 5** — Procedural shapes (**not started** — see the verdict)
+- [x] **Stage 6** — **VERDICT WRITTEN (KG3)** — *complete the port, conditional
+      on one prerequisite measurement; merge the seam regardless*
 
 ---
 
@@ -315,6 +316,163 @@ Notes recorded so they are not rediscovered:
 
 **Effort:** ~50 min of the 1 h cap (research, probe, container control,
 this write-up). Within cap.
+
+---
+
+## Stage 6 — THE VERDICT (KILL GATE 3)
+
+> **RECOMMENDATION: complete the port — but only after one cheap
+> prerequisite measurement, because this spike proved WebGPU is *faster*
+> and did NOT prove Omni is *render-bound*.** Merge the Stage 3 seam now
+> either way.
+
+### 1. Device support
+
+| | |
+|---|---|
+| Target | iPhone, **iOS 26.6.0**, Edge iOS 151 — WebKit, i.e. the Safari 26 engine |
+| Adapter | `vendor: apple, architecture: apple`, `isFallbackAdapter: false` — a real GPU |
+| Backing store | 880×1512 = 1.33 Mpx @ dpr cap 2 |
+| Canvas format | `bgra8unorm` |
+| `maxTextureDimension2D` | **16384** (needs 3072 → one texture, no tiling) |
+| `maxVertexAttributes` / `maxVertexBuffers` / `maxBindGroups` | 30 / 12 / 11 — all ample |
+| `timestamp-query` | **available**, and returns real values |
+
+**Player exclusion: ~12% of iOS devices.** WebGPU requires iOS 26+, which is
+~85% of iOS devices (plus ~3% on iOS 27). So a WebGPU-only renderer would
+drop roughly **1 in 8** iOS players. **This is the single most consequential
+number in the verdict**, because it means Canvas2D can never be deleted:
+both renderers must be maintained in parallel, indefinitely, for the game's
+most polished subsystem. Controls tested: macOS Safari 18.5 (no
+`navigator.gpu`, as expected below Safari 26) and container Chromium
+(SwiftShader only, behind flags).
+
+### 2. Measured speedup — on hardware
+
+The scene is the brief's dented rock tile: mutable polygon, ear-clipped fill,
+miter-joined stroke, radial bloom, 10% re-triangulating per frame.
+
+| Renderer | tiles sustained @60 fps | broke at | frame p95 there |
+|---|---|---|---|
+| Canvas2D | **500** | 750 | 27 ms |
+| WebGPU | **2500** | 2750 | 20 ms |
+
+# 5× the sustained throughput, against a required 2×.
+
+At the 2750-tile scene: frame p50/p95 **17/18 ms**, **gpu 4.18/7.45 ms**,
+cpu 5 ms, re-triangulation 1 ms p50.
+
+**Two caveats, in opposite directions, and both matter:**
+
+- **The 5× is a floor.** At 2750 tiles the WebGPU path is **CPU-bound, not
+  GPU-bound** (5 ms cpu vs 4.18 ms gpu, GPU at a quarter of budget), and the
+  harness re-uploads the *entire* geometry buffer every frame (~4.5 MB,
+  ~270 MB/s) instead of the ~10% that changed. Dirty-range uploads would
+  raise the ceiling.
+- **Frame time could not be used as the metric.** It is vsync-locked at
+  17 ms, so any renderer fitting the budget reads as exactly 17 and the
+  brief's literal "≤50% of Canvas2D's frame time" gate is unfalsifiable.
+  The ramp measures the same *intent* in a form vsync cannot flatten. **No
+  Canvas2D-vs-WebGPU frame-time comparison in this repo should be believed
+  without checking whether both sides fit in budget.**
+
+### 3. Coverage — stated honestly
+
+**Of the repo's 375 path sites: 0 are ported. 0%.** No `GPURenderSystem`
+exists; the Canvas2D renderer is untouched and remains the only
+implementation. What exists in the repo is the **seam** (3 files) and four
+standalone probe pages that are not loaded by the app.
+
+What was *demonstrated*, in harnesses, is the full technique set the port
+needs:
+
+| Demonstrated | Status |
+|---|---|
+| Textured quads, instanced | ✅ 2000 in 1 draw call, 4.5 ms GPU |
+| Arbitrary mutable filled polygon (ear-clipped, dirty-flag) | ✅ |
+| Stroked outline, miter joins, real lineWidth | ✅ |
+| Radial-gradient bloom confined to a polygon | ✅ analytic, one pass |
+| All 4 composite modes | ✅ single blend states |
+| HUD text | ✅ Canvas2D overlay, ~0.1 ms |
+| MSAA edge parity | ✅ 4×, required |
+
+**Estimate for the remainder: 8–15 working days.** Derived from the modules,
+not guessed:
+
+| Work | Estimate |
+|---|---|
+| Stage 4 proper — sprites, static-tile texture, background, overlay wiring | 1–2 d |
+| Stage 5 — the six shape modules (~3,500 lines: `enemyShapes` 915, `tileShapes` 1113, `dropShapes` 384, `projectileShapes` 186, `nebulaTiles` 405, `effects` 460), batched by draw order | 4–7 d |
+| Integration — `RendererStats` refactor, DBG toggles, MSAA tuning, dirty-range uploads, test fixes | 2–4 d |
+| Device validation across the 8 `perf/scenes.mjs` scenes + polish | 1–2 d |
+
+Two things *reduce* the estimate and are worth knowing: **`hud.ts` (1,080
+lines) is screen-space Canvas2D and is REUSED essentially verbatim on the
+overlay** rather than ported, and `drawUtils`'s colour maths is
+renderer-agnostic. The risk in the remainder is **volume, not novelty** —
+every remaining technique is a variation on what Stage 2 already
+reproduced.
+
+**Two integration hazards found while estimating, both previously unknown:**
+
+- **`tests/minimap.spec.ts` asserts on renderer INTERNALS** —
+  `e.renderer._minimapBuffer` and `e.renderer._indicatorBuffer` (`:29`,
+  `:68`). These are *not* in the Stage 3 seam, so a second renderer must
+  either reproduce those buffers or the tests must be rewritten against the
+  interface.
+- **The HUD overlay collides with the input layer's canvas rule.**
+  `tests/input.spec.ts` dispatches events via
+  `document.querySelector('canvas')` (`:121`, `:1063`), which returns the
+  *first* canvas in DOM order — and CLAUDE.md §8's rule is that pointer
+  gestures engage game input *only when they start on the canvas*. Adding an
+  overlay canvas above the game canvas changes both. `pointer-events: none`
+  (used in the probe) handles event delivery, but the selector and the rule
+  both need revisiting. **This is a real cost of the H5 mitigation that the
+  brief's "removes H5 from the critical path" framing does not capture.**
+
+### 4. What broke — every hazard's ACTUAL outcome
+
+| | Predicted | **Actual** |
+|---|---|---|
+| **H1** Safari/iOS | *decisive risk* | **Cleared** on iOS 26.6, real GPU, all limits ample. But ~12% of iOS players excluded → dual renderers forever |
+| **H2** Path rendering | *"strokes are harder than fills"* | **Cleared.** Fills, miter strokes and the bloom all reproduce at **0.37/255** mean diff. MSAA 4× **required** for edge parity |
+| **H3** Draw-call explosion | *"batch one instanced draw per shape family"* | **Cleared, but the brief's rule is WRONG.** Family batching renders overlapping entities incorrectly — an earlier entity's stroke paints over a later entity's fill. **Batch by DRAW ORDER with a per-vertex kind flag**: correct *and* fewer draw calls. A depth buffer does not rescue it, because the rendering is alpha-blended and blending is order-dependent |
+| **H4** Composite modes | *"not blend states; need ping-pong or stencil"* | **Cleared, and cheaper than predicted.** All four are single blend states — **provided the shader emits premultiplied alpha.** Straight alpha cannot express `source-atop` at all (a blend factor gives one multiplier; the result needs `Cs·αs·αd`) |
+| **H5** Text | *"mitigation removes it from the critical path"* | **Works, ~0.1 ms** for all 14 sites. But it is not free: it collides with the input layer's canvas rule (above), and iOS stacked-canvas compositing is still unverified on device |
+
+**The hazard that actually bit was H3, and not in the way predicted** — not
+as a performance failure but as a *correctness* one, from following the
+brief's own batching rule.
+
+### 5. The recommendation
+
+**Complete the port — conditional on one cheap prerequisite.**
+
+The engineering question is settled: WebGPU reproduces Omni's hardest
+drawing at parity and 5× the throughput, every hazard is cleared, and the
+remaining work is volume rather than discovery. **But this spike measured a
+synthetic tile scene, not Omni.** It proves WebGPU is faster; it does not
+prove Omni is *render-bound*. Those are different claims, and 8–15 days
+plus permanent dual-renderer maintenance should not be spent on the second
+without evidence.
+
+**The prerequisite, and it is hours not days:** a `PerfRecorder` capture on
+the device across the `perf/scenes.mjs` matrix, establishing whether frames
+that miss 60 fps are missing them in *render*. The brief names fill-rate as
+the leading hypothesis for the unattributed device residual — **that
+hypothesis is still unconfirmed**, and it is the whole business case.
+
+- **If render is the bottleneck** → complete the port. The margin is real
+  and large.
+- **If it is not** → keep the seam, keep this log, and spend the 8–15 days
+  on whatever the capture *does* implicate. Re-open this branch when the
+  answer changes; nothing here expires except the iOS adoption figure.
+
+**Merge policy:** merge **the Stage 3 seam only**. It is byte-identical
+(proven), 111/111 green, and valuable regardless — it is the extraction any
+renderer swap needs, and the coupling list in it is the real cost estimate.
+The four probe pages under `public/` should be **deleted** if the port is
+not pursued; they ship in `dist/` and are dead weight there.
 
 ---
 
