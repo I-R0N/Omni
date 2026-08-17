@@ -1783,6 +1783,35 @@ k. After N waves, spawn a portal to a new map.
        this (filename-discovered .wav takes replacing synth
        drafts per cue, asset guard, audition mode).
 
+53. **Pair B SFX system SHIPPED (PR #79, 2026-08-16) —
+    Phase 3 is COMPLETE.** The collaborator-finished SFX
+    system merged: WebAudio engine with a per-cue synth draft
+    for every id in the ~130-cue `docs/SFX_INVENTORY.md`,
+    recorded `.wav` takes auto-discovered from
+    `public/assets/sfx/` (an SFX manifest mirroring the
+    nebula-manifest pattern), asset guards (silent/broken
+    files can never beat a working draft), a WAV-only
+    audition mode, and explosion variety. Ledger:
+    `docs/GAUNTLET_PAIR_B_LOG.md`.
+    a. **The AUDIO_PLAN §2a standalone-build fork is
+       RESOLVED**: audio is deliberately excluded from
+       single-file inlining — the standalone falls back to
+       synth drafts (still has sound, stays ~5.5 MB), with an
+       in-code warning against "fixing" it.
+    b. **Honest-state discipline**: loop-driven cues
+       (thrust, charge) REFUSE recorded samples at discovery
+       and surface them in the pause menu — a sample
+       registered against an id nothing plays is the third
+       documented instance of "looks like success" being
+       worse than an error.
+    c. **Content state: 4 of ~130 cues recorded.** Sound
+       production continues as asset-only PRs (binary adds,
+       guard-validated, CI-checked) in parallel with 5d and
+       step 6; the COMPLETE soundscape must land before the
+       step-7 final playtest. The merge itself cleaned up the
+       stray takes previously uploaded to the integration
+       branch.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
