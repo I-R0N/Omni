@@ -1665,6 +1665,9 @@ export interface EngineStats {
   /** DBG label for the active lighting tier — low (pinned for the phone) /
    *  medium / high. */
   lightingTierName?: string;
+  /** DBG: whether MOBILE SHARDS cast shadows too.  Only meaningful while
+   *  the lighting mode is 'unified'. */
+  shardShadowsEnabled?: boolean;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */

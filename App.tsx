@@ -278,6 +278,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleLightingTier();
   };
 
+  const handleToggleShardShadows = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardShadows();
+  };
+
   const handleToggleRumble = () => {
       if (engineRef.current) engineRef.current.dbg.toggleRumble();
   };
@@ -622,6 +626,7 @@ const App: React.FC = () => {
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
         onCycleLighting={handleCycleLighting}
         onCycleLightingTier={handleCycleLightingTier}
+        onToggleShardShadows={handleToggleShardShadows}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}

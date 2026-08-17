@@ -6,20 +6,23 @@
  *  throwaway half and lives elsewhere; a future renderer swap should be able
  *  to keep this file as-is.
  *
- *  WHAT AN OCCLUDER IS.  Exactly one thing casts shadow in Omni:
+ *  WHAT AN OCCLUDER IS.  The shard family, solid, on either side of the
+ *  mass axis:
  *
- *      EntityType.STRUCTURE  &&  mass === Infinity  &&  !passThrough
+ *      EntityType.STRUCTURE && !passThrough, and either
+ *        mass === Infinity                  -> a TILE   (static grid)
+ *        mass finite && r >= MIN_SHARD_...  -> a SHARD  (dynamic grid)
  *
  *  Each clause earns its place.  STRUCTURE is the unified shard-family
- *  carrier, so it covers every tile and shard variant at once.  `mass ===
- *  Infinity` is the static/dynamic axis — CLAUDE.md is explicit that this
- *  dispatch is by MASS and never by EntityType, so mobile shards (finite
- *  mass) are excluded here by the same rule the physics broadphase uses.
- *  And `passThrough` excludes `nebula-tile`: nebula is a soft cloud a ship
- *  flies through, and a soft cloud casting a hard shadow would read as a
- *  bug.  That exclusion is mandatory, not a tuning choice — and it matters
- *  more than it looks, because nebula is the single most numerous static
- *  tile on the natural maps (1496 of UNIVERSE's 2227).
+ *  carrier, so it covers every tile and shard variant at once.  The MASS
+ *  split is not a filter but a routing decision — CLAUDE.md is explicit
+ *  that static-vs-dynamic dispatch is by mass and never by EntityType, and
+ *  the two live in different grids, so each needs its own query.  And
+ *  `passThrough` excludes nebula on BOTH sides: a nebula shard is the same
+ *  soft cloud as a nebula tile and neither may cast.  That exclusion is
+ *  mandatory rather than a tuning choice, and it matters more than it looks
+ *  — nebula is the single most numerous static tile on the natural maps
+ *  (1496 of UNIVERSE's 2227).
  *
  *  ALLOCATION.  Steady-state allocation in a per-frame path buys GC pauses,
  *  and a GC pause is a dip — so collection is zero-allocation after warm-up:
@@ -31,6 +34,7 @@ import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
+    getShardShadowsEnabled,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -52,7 +56,19 @@ export interface Occluder {
     r: number;
     /** Squared distance to the light — the nearest-first selection key. */
     distSq: number;
+    /** True for a mobile shard, false for a static tile.  Selection needs to
+     *  tell them apart: see the shard share cap in `selectOccluders`. */
+    mobile: boolean;
 }
+
+/** Below this world radius a shard is not worth a wedge.  At 150 units a
+ *  6-unit body subtends 2*asin(6/150) = 4.6 degrees, which on a light layer
+ *  rendered at a third of screen resolution is a couple of pixels wide — it
+ *  costs a full wedge to draw something no one can see, and in a debris
+ *  burst there are a lot of them.  Measured shard radii run 43.6 median /
+ *  72.2 p90 on the asteroid showcase, so this excludes genuine dust and
+ *  nothing else. */
+const MIN_SHARD_OCCLUDER_R = 6;
 
 /** Reusable occluder records.  Grows to the high-water mark of the largest
  *  query ever made and is then stable, so a steady-state frame allocates
@@ -73,7 +89,7 @@ const _pool: Occluder[] = [];
 function poolAt(i: number): Occluder {
     let o = _pool[i];
     if (o === undefined) {
-        o = { x: 0, y: 0, r: 0, distSq: 0 };
+        o = { x: 0, y: 0, r: 0, distSq: 0, mobile: false };
         _pool[i] = o;
     }
     return o;
@@ -95,6 +111,30 @@ function visit(t: GameEntity): void {
     const v = t.shardVariant;
     if (v === undefined) return;
     if (SHARD_VARIANTS[v].passThrough === true) return;
+    record(t, false);
+}
+
+/** The MOBILE half.  Same shard family, opposite side of the mass axis.
+ *
+ *  `passThrough` still excludes nebula — a nebula SHARD is the same soft
+ *  cloud as a nebula tile and must not cast either.  The size floor is the
+ *  only rule that is not shared with the static filter, and it exists
+ *  because debris comes in bursts: a shatter can put dozens of fragments
+ *  around the light at once, and the small ones would each cost a wedge to
+ *  draw a sliver too thin to see. */
+function visitShard(t: GameEntity): void {
+    if (t.type !== EntityType.STRUCTURE) return;
+    if (t.mass === Infinity) return;
+    const v = t.shardVariant;
+    if (v === undefined) return;
+    if (SHARD_VARIANTS[v].passThrough === true) return;
+    if (Math.max(t.size.x, t.size.y) * 0.5 < MIN_SHARD_OCCLUDER_R) return;
+    record(t, true);
+}
+
+/** Write one occluder record.  Shared by both filters so the wrap
+ *  resolution and the refill idiom exist in exactly one place. */
+function record(t: GameEntity, mobile: boolean): void {
 
     // WRAP RESOLUTION, and why it happens HERE rather than at the tangent.
     //
@@ -121,12 +161,19 @@ function visit(t: GameEntity): void {
     o.y = oy;
     o.r = Math.max(t.size.x, t.size.y) * 0.5;
     o.distSq = dx * dx + dy * dy;
+    o.mobile = mobile;
     _outBuf[_n++] = o;
 }
 
 /**
- * Collect the shadow-casting static geometry within `radius` of a light at
+ * Collect the shadow-casting geometry within `radius` of a light at
  * (lx, ly), wrap-resolved into that light's zone, into `out`.
+ *
+ * Tiles always; mobile shards too when `shards` is set.  The two come from
+ * different grids and so are two walks, but they land in ONE set — selection
+ * is nearest-first across both, because a shard between you and a tile
+ * occludes exactly as a nearer tile would and the pool has no reason to
+ * know which kind of body it holds.
  *
  * Returns the count.  `out` is index-filled and truncated only when the
  * count actually shrank, so repeated calls at a steady occluder population
@@ -143,12 +190,14 @@ export function collectOccluders(
     ly: number,
     radius: number,
     out: Occluder[],
+    shards: boolean = false,
 ): number {
     _outBuf = out;
     _n = 0;
     _lx = lx;
     _ly = ly;
     physics.forEachStaticInRadius(lx, ly, radius, visit);
+    if (shards) physics.forEachDynamicInRadius(lx, ly, radius, visitShard);
     const n = _n;
     if (out.length !== n) out.length = n;
     // Drop the reference so a stale `out` can't be written by a later stray
@@ -163,6 +212,51 @@ const ZERO: Vector2 = { x: 0, y: 0 };
 /** Nearest-first comparator, hoisted — a comparator literal passed to
  *  `sort` inside a per-frame path is rebuilt every frame. */
 function byDistSq(a: Occluder, b: Occluder): number { return a.distSq - b.distSq; }
+
+/**
+ * Choose which of the collected occluders actually cast, in place.
+ *
+ * Nearest-first alone is not good enough once shards are in the pool, and
+ * the failure is specific rather than theoretical: MEASURED on the glass
+ * showcase under a shatter cadence, **100 % of the 24 slots went to debris**,
+ * so the intact tiles around the player stopped casting entirely — at
+ * exactly the moment the player is looking at the explosion.  Debris is
+ * nearer than terrain almost by definition, so plain nearest-first hands the
+ * whole budget to whatever just broke.
+ *
+ * So shards get a SHARE, not the run of the pool: at most `maxShardOccluders`
+ * while there is terrain to fill the rest, and the whole pool when there is
+ * not (the asteroid showcase has no static tiles at all, and reserving slots
+ * for tiles that do not exist would just throw shadows away).  Within each
+ * kind the choice is still nearest-first, which is what makes truncation
+ * degrade gracefully — the nearest bodies subtend the largest angle.
+ *
+ * `occ` must already be sorted nearest-first.  Returns the count to draw;
+ * the chosen entries are compacted to the front, so nothing is allocated.
+ */
+export function selectOccluders(
+    occ: Occluder[], n: number, maxOccluders: number, maxShardOccluders: number,
+): number {
+    let tiles = 0;
+    for (let i = 0; i < n; i++) if (!occ[i].mobile) tiles++;
+    const shards = n - tiles;
+    // Shards may take their share, or whatever terrain leaves unused —
+    // whichever is larger.
+    const shardSlots = Math.min(shards, Math.max(maxShardOccluders, maxOccluders - tiles));
+    const tileSlots = Math.min(tiles, maxOccluders - shardSlots);
+
+    let outN = 0, tookT = 0, tookS = 0;
+    for (let i = 0; i < n && outN < maxOccluders; i++) {
+        const o = occ[i];
+        if (o.mobile) { if (tookS >= shardSlots) continue; tookS++; }
+        else          { if (tookT >= tileSlots)  continue; tookT++; }
+        // Compact forward.  i >= outN always, so this never clobbers an
+        // entry it has not already read.
+        if (outN !== i) occ[outN] = o;
+        outN++;
+    }
+    return outN;
+}
 
 /** The player light.
  *
@@ -405,12 +499,13 @@ export function renderLightLayer(
         // exists to show that this costs an acceptable amount under maximum
         // churn rather than to add machinery.
         const tier = getActiveLightingTier();
-        const n = collectOccluders(r.physics, playerPos.x, playerPos.y, tier.maxRadius, r._lightOccluders);
-        // Nearest-first, then cap: the nearest occluders subtend the largest
-        // shadow angle, so truncation degrades gracefully instead of dropping
-        // whichever ones the grid happened to return last.
+        const n = collectOccluders(r.physics, playerPos.x, playerPos.y, tier.maxRadius,
+                                   r._lightOccluders, getShardShadowsEnabled());
+        // Nearest-first, then SELECT — see selectOccluders for why a plain
+        // cap is wrong once debris is in the pool.
         r._lightOccluders.sort(byDistSq);
-        r._lightOccluderCount = n < tier.maxOccluders ? n : tier.maxOccluders;
+        r._lightOccluderCount = selectOccluders(
+            r._lightOccluders, n, tier.maxOccluders, tier.maxShardOccluders);
         lights = 1;
 
         if (camera) {

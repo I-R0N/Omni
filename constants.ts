@@ -1409,6 +1409,25 @@ export function setActiveLightingMode(m: LightingMode): void {
   if (i >= 0) activeLightingIndex = i;
 }
 
+/** DBG: do MOBILE SHARDS cast shadows, as well as static tiles?
+ *
+ *  Its own switch rather than part of LIGHTING_CYCLE, because the question
+ *  it answers is independent of "is the unified model better than the three
+ *  legacy ones" and wants to be A/B'd on its own.  Only has any effect while
+ *  the mode is 'unified'.
+ *
+ *  ON by default: shards are the same shard family as tiles and roughly the
+ *  same size (measured radii 43.6 median against a tile's 22), so excluding
+ *  them makes debris read as transparent to a light that the rock it broke
+ *  off is not.  The reason to turn it off is cost, and the reason to keep
+ *  the switch is that cost is exactly what it is for. */
+let shardShadowsEnabled = true;
+export function getShardShadowsEnabled(): boolean { return shardShadowsEnabled; }
+export function toggleShardShadows(): boolean {
+  shardShadowsEnabled = !shardShadowsEnabled;
+  return shardShadowsEnabled;
+}
+
 /** Per-tier lighting budget.
  *
  *  `divisor` is how many CSS pixels of screen one light-layer pixel covers.
@@ -1435,6 +1454,13 @@ export interface LightingTier {
   readonly divisor: number;
   readonly maxLights: number;
   readonly maxOccluders: number;
+  /** How many of `maxOccluders` mobile SHARDS may take while there is still
+   *  terrain to fill the rest.  Debris is nearer than terrain almost by
+   *  definition, so without a share cap a shatter hands the entire budget to
+   *  the fragments and the intact tiles stop casting.  Measured at 100 % of
+   *  the pool on the glass showcase under a shatter cadence before this
+   *  existed.  Shards still get the WHOLE pool on a map with no tiles. */
+  readonly maxShardOccluders: number;
   readonly maxRadius: number;
   /** Penumbra softness. 0 = hard shadows (Low pins this, so the penumbra
    *  stage is a no-op on the worst target by construction). */
@@ -1442,9 +1468,9 @@ export interface LightingTier {
   readonly ambientPerStage: number;
 }
 export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
-  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxRadius: 300, penumbraK: 0,   ambientPerStage: 0    },
-  { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
-  { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
+  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxShardOccluders: 16, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
+  { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxShardOccluders: 32, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
 ] as const;
 // Index 0 = Low, PINNED for the 390x844 phone the game is played on.
 let activeLightingTierIndex = 0;

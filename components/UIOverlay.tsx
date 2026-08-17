@@ -84,6 +84,7 @@ interface UIOverlayProps {
   onCycleMinimapMaterial?: () => void;
   onCycleLighting?: () => void;
   onCycleLightingTier?: () => void;
+  onToggleShardShadows?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -254,6 +255,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleMinimapMaterial,
   onCycleLighting,
   onCycleLightingTier,
+  onToggleShardShadows,
   onCycleRockPalette,
   onToggleRumble,
   onSetControlScheme,
@@ -1489,6 +1491,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Light tier', onCycleLightingTier,
                   stats.lightingTierName ?? 'low',
                   'Lighting budget. LOW (default) is the 390x844 phone: the light layer renders at a third of screen resolution, 4 lights, 24 occluders each, radius 300, hard shadows. Medium/High halve the divisor and raise every cap. The occluder cap is load-bearing rather than defensive — a radius-300 light can cover ~225 hexes in solid terrain, and the cap takes the NEAREST, which subtend the largest shadow angle, so truncation degrades gracefully.')}
+                {ctrlRow('Shard shadows', onToggleShardShadows,
+                  stats.shardShadowsEnabled === false ? 'Off' : 'On',
+                  'Do MOBILE SHARDS cast shadows too, or only static tiles? Only has an effect while Lighting is unified. On by default: a shard is the same shard family as the tile it broke off and about twice its radius (measured 43.6 median against a tile\'s 22), so leaving them out makes debris read as transparent to a light that solid rock is not. Nebula shards are excluded either way — same soft cloud as a nebula tile. Shards are drawn from the DYNAMIC grid, so this is a second spatial query per light; turn it off to see what that costs.')}
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}

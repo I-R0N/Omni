@@ -26,6 +26,7 @@ recorded rather than quietly dropped.
 - [x] **A2** — Light-layer scaffolding + debug visualization
 - [x] **A3** — Occluder churn
 - [x] **A4** — One point light, shadow-cast (**awaiting the look decision**)
+- [x] **A4s** — Shard occluders (user request)
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A5** — Soft shadow penumbra
 - [ ] **A6** — N lights with culling
@@ -934,3 +935,104 @@ Verified end to end through the real UI: the row renders (nested five
 collapsibles deep in the pause menu), the cycle runs
 legacy → debug → unified → legacy, the tier steps low → medium, and the
 console stays clean.
+
+---
+
+## A4s — Shard occluders (user request)
+
+> *"This works well for tiles but can we also apply this shadow effect to
+> the shards? There can be large amounts of these on screen at one time."*
+
+### What the data said before anything was written
+
+Three things had to be sized first, and one of them inverted the
+assumption behind the request.
+
+**Shards are BIG, not small.** Measured radii: **43.6 median / 72.2 p90**
+on the asteroid showcase, **47.1 median** on Universe — against a tile's
+22. A median shard at 150 units subtends a **33.8°** shadow. So the
+feared "hundreds of tiny slivers = visual noise" is not the shape of this
+problem; shards cast *larger* shadows than tiles do.
+
+**Density inside a light radius is modest.** Only **25 shards within
+r=300** on the asteroid showcase (1202 shards over a 6000² map), and
+**1** on Universe. The volume concern is real for the *query*, not for
+the wedge count — the occluder cap already bounds the drawing.
+
+**The budget was the actual risk.** The pool is 24, selected
+nearest-first, and debris lands nearer than the terrain behind it almost
+by definition.
+
+### What shipped
+
+- **`PhysicsSystem.forEachDynamicInRadius`** — the same walk B2 built,
+  pointed at the other grid. The two grids are keyed on the same dense
+  cell index and expose the same `get(idx)`, so this is one added
+  parameter rather than a sixth near-duplicate. The dynamic grid is
+  rebuilt every collision substep and the render pass runs after the sim
+  drains, so at draw time it holds exactly the state being drawn.
+- **`visitShard`** beside `visit`, sharing a `record()` so the wrap
+  resolution and refill idiom exist once. `passThrough` still excludes
+  nebula on both sides — a nebula shard is the same soft cloud as a
+  nebula tile.
+- **`MIN_SHARD_OCCLUDER_R = 6`** — a size floor, since debris arrives in
+  bursts and a 6-unit body subtends 4.6° at 150 units, a couple of pixels
+  on a third-resolution layer. Given the measured median of 43.6 this
+  excludes genuine dust and nothing else.
+- **A `Shard shadows` DBG row**, On by default, its own switch rather
+  than part of `LIGHTING_CYCLE` because "should debris occlude" is
+  independent of "is unified better than legacy" and wants its own A/B.
+
+### The failure this found, and the fix
+
+Plain nearest-first was implemented first and measured. On the glass
+showcase under a shatter cadence:
+
+> **100 % of the 24 occluder slots went to debris**, at both p50 and max.
+> The intact tiles around the player stopped casting entirely — at exactly
+> the moment the player is looking at an explosion.
+
+So shards get a **share**, not the run of the pool (`selectOccluders`):
+at most `maxShardOccluders` (8 of 24 at Low) *while there is terrain to
+fill the rest*, and the whole pool when there is not — the asteroid
+showcase has no static tiles at all, and reserving slots for tiles that
+do not exist would just throw shadows away. Within each kind the choice
+is still nearest-first, so truncation still degrades gracefully. The
+compaction is in place; nothing is allocated.
+
+After the fix, glass showcase with terrain standing: **exactly 33 %**
+(8/24), the cap binding precisely.
+
+### Cost
+
+`lightingMs` p95, player held beside the densest cluster, shards off vs on:
+
+| map | churn | tiles only | + shards | delta |
+|---|---|---|---|---|
+| ASTEROID_FIELD | no | 0.175 | 0.430 | +0.255 |
+| ASTEROID_FIELD | yes | 0.180 | 0.430 | +0.250 |
+| UNIVERSE | no | 0.285 | 0.210 | −0.075 (noise; 0–1 shards in range) |
+| UNIVERSE | yes | 0.205 | 0.250 | +0.045 |
+| GLASS_FIELD | no | 0.345 | 0.450 | +0.105 |
+| GLASS_FIELD | yes | 0.205 | 0.605 | **+0.400** |
+
+**Worst total 0.605 ms p95**, against A4's cumulative 1.20 ms allowance.
+The expensive case is a sustained shatter storm, where the second
+spatial query runs against a field of fresh debris — which is also the
+case the `Shard shadows` toggle exists to let you price.
+
+### Gate
+
+| requirement | result |
+|---|---|
+| Total lighting cost within the A4 allowance | PASS — 0.605 ms p95 worst case vs 1.20 ms |
+| Debris cannot blank out terrain shadows | PASS — asserted per frame: on any frame with ≥16 tiles in range, the mobile share never exceeds 8/24 |
+| Nebula shards cast nothing | PASS — `passThrough` filter is shared by both sides |
+| Off by toggle, no cost when off | PASS — the dynamic query is skipped entirely |
+| 118 tests pass | PASS (suite 117 → 118) |
+
+The test is written around the real invariant rather than a flat
+threshold, because a first version asserting "share < 60 %" failed at
+100 % — correctly. A sustained shatter eventually leaves *no* terrain in
+range, and shards taking the whole pool then is right. The invariant is
+conditional: the cap binds while there is terrain to reserve for.

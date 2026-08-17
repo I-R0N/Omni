@@ -1538,6 +1538,7 @@ export class PhysicsSystem {
   private forEachStaticCells(
       x: number, y: number, span: number, rSq: number,
       visit: (t: GameEntity) => boolean | void,
+      dynamic: boolean = false,
   ): void {
       const wx = wrapX(x);
       const wy = wrapY(y);
@@ -1552,7 +1553,12 @@ export class PhysicsSystem {
       const filter = rSq >= 0;
       for (let dx = -spanX; dx <= spanX; dx++) {
           for (let dy = -spanY; dy <= spanY; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              const key = cellKeyFromCell(cx + dx, cy + dy);
+              // ONE walk, two grids.  They are keyed on the same dense cell
+              // index and expose the same `get(idx)`, so the only difference
+              // is which one is asked — see the note on forEachDynamicInRadius
+              // for why the dynamic grid is safe to read from the render pass.
+              const cell = dynamic ? this.dynamicGrid.get(key) : this.staticGrid.get(key);
               if (!cell) continue;
               for (let i = 0; i < cell.length; i++) {
                   const t = cell[i];
@@ -1599,6 +1605,25 @@ export class PhysicsSystem {
    *  the fixed span under-report by 28-45%. */
   public forEachStaticInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
       this.forEachStaticCells(x, y, Math.ceil(r / SPATIAL_GRID_SIZE), r * r, cb);
+  }
+
+  /** Visit every active DYNAMIC entity within `r` (toroidal) of (x,y).
+   *
+   *  Same walk as `forEachStaticInRadius`, over the other grid.  Used by the
+   *  lighting pass so mobile shards cast shadows like tiles do.
+   *
+   *  WHY THE DYNAMIC GRID IS SAFE TO READ HERE.  It is rebuilt from scratch
+   *  at the top of every collision substep and the render pass runs after
+   *  the sim has drained the accumulator, so at draw time it holds the last
+   *  substep's contents — which is exactly the state being drawn.  It is NOT
+   *  safe to read mid-substep, and nothing does.
+   *
+   *  The grid holds more than shards (player, enemies, projectiles) and
+   *  already excludes collectible drops, particles and fading nebula.
+   *  Callers filter for what they want; this layer does not know about
+   *  lighting. */
+  public forEachDynamicInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
+      this.forEachStaticCells(x, y, Math.ceil(r / SPATIAL_GRID_SIZE), r * r, cb, true);
   }
 
   /** True if world-space point (x, y) with radius `r` is clear of all static

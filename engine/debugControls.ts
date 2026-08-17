@@ -34,6 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
+    toggleShardShadows,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -345,6 +346,15 @@ export class DebugControls {
    *  divisor-3 layer, 4 lights, 24 occluders, radius 300, hard shadows. */
   cycleLightingTier() {
     cycleLightingTier();
+  }
+
+  /** DBG (Visual): do MOBILE SHARDS cast shadows as well as static tiles?
+   *  Only has an effect while Lighting is 'unified'.  On by default —
+   *  shards are the same family as tiles and about twice their radius, so
+   *  excluding them makes debris read as transparent to a light the rock it
+   *  broke off is not.  Off is the cost comparison. */
+  toggleShardShadows() {
+    toggleShardShadows();
   }
 
   /** DBG (Visual): gamepad force feedback on/off.  Separate from the

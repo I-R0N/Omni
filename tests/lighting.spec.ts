@@ -310,6 +310,76 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('debris cannot blank out the terrain shadows', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await engine(page, (e) => {
+      e.renderer.setLighting('unified');
+      if (!e.renderer.getShardShadows()) e.renderer.toggleShardShadows();
+    });
+    await parkInCluster(page);
+    await waitForEngine(page, e => e.renderer._lightOccluderCount > 0, 'occluders around the player');
+
+    // Shatter the nearest terrain repeatedly — the debris burst is what
+    // makes shards outrank tiles, since fragments land nearer than the
+    // intact terrain behind them.  Measured before the share cap existed:
+    // 100% of the 24 slots went to debris and the tiles stopped casting.
+    const share: Array<{ share: number; tilesInRange: number }> = await engine(page, async (e) => {
+      const px = e.player.position.x, py = e.player.position.y;
+      const shatter = () => {
+        const c = e.currentMap.entities
+          .filter((t: any) => t.active && t.type === 'STRUCTURE' && t.mass === Infinity
+                              && t.shardVariant !== 'indestructible-tile')
+          .map((t: any) => ({ t, d: (t.position.x - px) ** 2 + (t.position.y - py) ** 2 }))
+          .sort((a: any, b: any) => a.d - b.d).slice(0, 20);
+        for (const { t } of c) { t.killedByPlayer = true; t.health = 0; e.handleEntityDeath(t); t.active = false; }
+      };
+      // Sample the share ALONGSIDE how much intact terrain is actually in
+      // range.  Those two together are the invariant: shards may take the
+      // whole pool when there is no terrain left to reserve for (which a
+      // sustained shatter eventually causes, and which is correct), but they
+      // must NOT crowd terrain out while terrain is there to cast.
+      const frames: Array<{ share: number; tilesInRange: number }> = [];
+      const R = 300;
+      for (let round = 0; round < 3; round++) {
+        shatter();
+        await new Promise<void>(res => {
+          let n = 0;
+          const tick = () => {
+            e.player.position.x = px; e.player.position.y = py;
+            const k = e.renderer._lightOccluderCount;
+            if (k > 0) {
+              let mob = 0;
+              for (let i = 0; i < k; i++) if (e.renderer._lightOccluders[i].mobile) mob++;
+              let tilesInRange = 0;
+              const ents = e.currentMap.entities;
+              for (let i = 0; i < ents.length; i++) {
+                const t = ents[i];
+                if (!t.active || t.type !== 'STRUCTURE' || t.mass !== Infinity) continue;
+                if (t.shardVariant === 'nebula-tile') continue;
+                const dx = t.position.x - px, dy = t.position.y - py;
+                if (dx * dx + dy * dy < R * R) tilesInRange++;
+              }
+              frames.push({ share: mob / k, tilesInRange });
+            }
+            if (++n < 40) requestAnimationFrame(tick); else res();
+          };
+          requestAnimationFrame(tick);
+        });
+      }
+      return frames;
+    });
+
+    expect(share.length).toBeGreaterThan(0);
+    // The invariant: on any frame with terrain to spare, debris must not have
+    // taken more than its share of the pool.  Low tier gives shards 8 of 24.
+    const withTerrain = share.filter(f => f.tilesInRange >= 16);
+    expect(withTerrain.length).toBeGreaterThan(0);
+    const worst = Math.max(...withTerrain.map(f => f.share));
+    expect(worst).toBeLessThanOrEqual(8 / 24 + 0.01);
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
