@@ -872,7 +872,7 @@ export class RenderSystem {
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {
-        renderWaveAnnouncements(ctx, waveAnnouncements, width, height);
+        renderWaveAnnouncements(ctx, waveAnnouncements, width, height, minimapExpanded);
     }
 
     // 6. Render POI Indicators (Screen Space)
@@ -899,11 +899,11 @@ export class RenderSystem {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             const y = px.y + 46;
-            ctx.font = 'bold 11px monospace';
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.font = `bold ${UI_CONSTANTS.HUD.TEXT.BODY}px monospace`;
+            ctx.lineWidth = UI_CONSTANTS.HUD.OUTLINE_WIDTH;
+            ctx.strokeStyle = UI_CONSTANTS.HUD.OUTLINE;
             ctx.strokeText(player.interactPrompt, px.x, y);
-            ctx.fillStyle = '#e2e8f0';
+            ctx.fillStyle = UI_CONSTANTS.HUD.TEXT_COLOR;
             ctx.fillText(player.interactPrompt, px.x, y);
             ctx.restore();
         }
@@ -1336,7 +1336,7 @@ export class RenderSystem {
                   if (entity.type === EntityType.INTERACTABLE && entity.name) {
                       ctx.rotate(-entity.rotation);
                       ctx.fillStyle = '#ffffff';
-                      ctx.font = '12px monospace';
+                      ctx.font = `${UI_CONSTANTS.HUD.TEXT.ROW}px monospace`;
                       ctx.textAlign = 'center';
                       ctx.shadowColor = 'black';
                       ctx.shadowBlur = 4;

@@ -907,7 +907,56 @@ export const UI_CONSTANTS = {
       AGGRO:   '#ef4444',    // blink colour for a provoked rival / bubble
       OTHER:   '#94a3b8',    // slate-400 — any POI without a type of its own
     },
-  }
+  },
+
+  /**
+   * The CANVAS HUD's own vocabulary (gauntlet 5d, U3 — audit findings
+   * E3/E4).
+   *
+   * The DOM overlay names its type scale and its greys in
+   * `components/UIOverlay.tsx`; the canvas layer had neither, so its sizes
+   * were picked independently per draw site (8 / 9 / 11 / 14 px) and its
+   * greys were hardcoded hex at the point of use (`#475569`, `#64748b`,
+   * `#cbd5e1`, `#e2e8f0`, `#22d3ee`, `#fde047`, `#fca5a5`).  These are the
+   * same slate family the DOM uses, stated once.
+   *
+   * NOTE ON THE COLOUR LEGEND: `INDICATORS.COLORS` above is THE type-colour
+   * palette — what a contact IS, wherever it is drawn (edge arrow, minimap
+   * blip).  This block is the CHROME palette — text, rules and affordances,
+   * which carry no type meaning.  The two never overlap, and nothing in the
+   * canvas layer should introduce a third.
+   */
+  HUD: {
+    /** Type scale, mirroring the DOM's four named steps.  Canvas HUD text is
+     *  monospace by house style — that is a world-vs-chrome distinction and
+     *  is deliberate — but the SIZES are now the same set. */
+    TEXT: {
+      MICRO: 9,   // indicator labels, slot numbers, the empty-slot tag
+      BODY:  11,  // player messages, the interaction prompt
+      ROW:   12,  // loadout weapon names at full slot width
+      LOUD:  14,  // floating damage / points text
+    },
+    /** Chrome greys, brightest to dimmest.  `TEXT` is body copy on glass,
+     *  `MUTED` is a secondary readout, `DIM` is a disabled or empty state,
+     *  `RULE` is a hairline or dashed outline. */
+    TEXT_COLOR:  '#e2e8f0',   // slate-200
+    MUTED_COLOR: '#cbd5e1',   // slate-300
+    DIM_COLOR:   '#64748b',   // slate-500
+    RULE_COLOR:  '#475569',   // slate-600
+    /** Fill behind an inactive HUD widget (the resting loadout slot) — the
+     *  same slate-800 the DOM's panels use. */
+    PANEL_FILL:  '#1e293b',   // slate-800
+    /** The outline every string on the canvas wears so it survives arbitrary
+     *  bright terrain underneath.  One width, one alpha. */
+    OUTLINE: 'rgba(0,0,0,0.85)',
+    OUTLINE_WIDTH: 3,
+    /** ACCENTS.  Cyan is the HUD's "supporting information" colour (banner
+     *  subtext); the charge pair is the ship's charge ring read back on the
+     *  fire button, so the two must stay identical. */
+    ACCENT_COLOR: '#22d3ee',   // cyan-400
+    CHARGE_FULL:  '#fde047',   // yellow-300 — charge complete
+    CHARGE_PART:  '#fca5a5',   // red-300 — charge winding up
+  },
 };
 
 // 2-slot loadout HUD (pivot 1b — replaced the 8-cell ammo strip).  Two wide
@@ -4112,6 +4161,34 @@ export const DROP_PULL = {
  * Returns the per-slot x positions so the renderer and the tap hit-test
  * (GameEngine fire-event routing) share one geometry source.
  */
+/**
+ * The minimap's screen rect — ONE definition of the bottom-left corner
+ * (gauntlet 5d, U3; audit findings E1/E2).
+ *
+ * Four places computed this independently: the renderer that draws it, the
+ * fire-event handler that catches the expand tap, the joystick exclusion zone
+ * that must refuse it, and the wave banner that has to clear it.  The banner
+ * got it WRONG — it reserved `MINIMAP_CONSTANTS.SIZE` (75px, the COLLAPSED
+ * height) unconditionally, so with the map open the banner drew inside the
+ * 280px expanded one.  Two of the other three used `MARGIN` for the left
+ * offset and `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN` for the bottom, which is
+ * why "one corner, three margins" was a finding rather than a nitpick.
+ *
+ * Every caller now asks here, and the EXPANDED flag is a parameter rather
+ * than an assumption.
+ */
+export function computeMinimapRect(screenHeight: number, expanded: boolean): {
+  x: number; y: number; size: number;
+} {
+  const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
+  const size = expanded ? EXPANDED_SIZE : SIZE;
+  return {
+    x: MARGIN,
+    y: screenHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
+    size,
+  };
+}
+
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {
   startY: number;
   slotW: number;

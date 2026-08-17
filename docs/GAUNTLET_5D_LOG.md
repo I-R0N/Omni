@@ -33,7 +33,7 @@ Branch `claude/gauntlet-5d-ui-coherence-idqcdk`, off the
 |---|---|---|
 | U1 | Audit every surface, no fixes | **done** |
 | U2 | DOM coherence fixes (`components/UIOverlay.tsx`) | **done** |
-| U3 | Canvas HUD coherence (`engine/systems/render/hud.ts`) | pending |
+| U3 | Canvas HUD coherence (`engine/systems/render/hud.ts`) | **done** |
 | U4 | Viewport coverage matrix + mid-session resize | pending |
 | U5 | OPTIONAL — damage-triggered health/shield bars | pending |
 | U-final | Validation + handoff | pending |
@@ -280,6 +280,48 @@ the width actually available (`Math.min(vw, 672) - 32 - 24`, mirroring the
 per-frame one, so the EngineStats-only rule (which is about per-frame sim
 data) is untouched.
 
+### U3 — Canvas HUD coherence
+
+Same treatment as U2, one layer down. The canvas layer had no named
+vocabulary at all, so its sizes were chosen per draw site and its greys were
+hex literals at the point of use.
+
+**Two palettes, and they are now explicitly different things.**
+`UI_CONSTANTS.INDICATORS.COLORS` is the **type legend** — what a contact IS,
+wherever it is drawn. `UI_CONSTANTS.HUD` is the new **chrome palette** —
+text, rules, outlines and affordances, which carry no type meaning. Both
+are documented as such at their definitions, and the rule is that nothing in
+the canvas layer introduces a third. (One site was caught by that rule while
+writing it: the loadout strip's inactive slot NUMBER had been routed through
+the type legend's `OTHER`, which is chrome wearing a contact colour. It now
+reads `HUD.DIM_COLOR`.)
+
+`UI_CONSTANTS.HUD.TEXT` mirrors the DOM's four named steps
+(MICRO 9 / BODY 11 / ROW 12 / LOUD 14). Canvas HUD text stays MONOSPACE —
+that is a deliberate world-vs-chrome distinction, not drift — but the sizes
+are now one set rather than eight independent choices.
+
+**E1/E2 — one screen corner, one rect.** `computeMinimapRect(height,
+expanded)` joins `computeLoadoutHUDLayout` in `constants.ts`. Four call
+sites computed this independently: the renderer, the fire-event handler that
+catches the expand tap, the joystick exclusion zone, and the wave banner.
+The banner was the one that had it wrong — it reserved the COLLAPSED 75 px
+height unconditionally, so with the map open the banner drew **inside** the
+280 px expanded one. `minimapExpanded` is now a banner parameter rather than
+an assumption, and the baseline is clamped so a short landscape window keeps
+the banner on screen instead of pushing it off the top.
+
+Verified by capture: the banner now sits clear above the expanded map.
+
+**fitFontPx at the extremes** (checked, unchanged): at 1440–1920 nothing
+shrinks, which is right — `basePx` is the design size and the function only
+ever reduces. At 320 the widest real banner ("WARDEN DESTROYED", ~460 px at
+the 48 px design size) fits to ~30 px, comfortably above the 18 px
+readability floor, so the floor is a guard rather than a routine outcome.
+The `Math.max(80, …)` on the safe width keeps a degenerate viewport from
+inverting the ratio. Pinned as an assertion in U4 rather than left as a
+reading.
+
 ---
 
 ## Decisions taken
@@ -336,4 +378,30 @@ exists for the next person either way. Recorded rather than done quietly.
 
 *(Consolidated at U-final. Aesthetic judgment calls raised as they arise.)*
 
-Nothing yet — U1 changed no code.
+**R1 — Stage-clear CONTINUE moved from amber to the shared emerald** (D3).
+The argument for changing it is that amber on that screen is the descent
+rift's colour, so an amber button reads as "descend" when it actually just
+dismisses the screen. The argument for leaving it is that the screen is
+amber-themed throughout and the button tied it together. Taste could
+reasonably differ; before/after pair in the PR body.
+
+**R2 — A portal is GREEN on the screen edge and VIOLET/SKY on the minimap.**
+Not introduced here, and it is *documented* as deliberate (CLAUDE.md §5:
+the arrow wears the type legend, the blip carries the rift's own colour so
+an outbound rift and a return rift are tellable apart). But it is the one
+contact still exempt from the G5 faithfulness rule — "a contact that is red
+on the screen edge and teal on the map is two contacts as far as the player
+is concerned" — and this pass is where that inconsistency would be resolved
+if it is one. Left alone because reversing a documented decision silently is
+worse than either option. Two ways out if you want one: tint the arrow to
+match the rift, or keep the legend green and distinguish outbound from
+return by SHAPE on the minimap rather than by fill.
+
+**R3 — The expanded minimap and the loadout strip overlap.** Observed while
+verifying E1 (screenshot in the PR body). The loadout strip's horizontal
+clearance is computed from the COLLAPSED minimap width, the same class of
+assumption E1 fixed in the banner — but here the fix is not obviously right:
+moving the strip when the map opens makes it jump, and the map auto-collapses
+after five seconds. The loadout draws on top, so nothing is unreadable; what
+is occluded is the middle-bottom of a transient overlay. Left as-is because
+every fix I can see is a bigger aesthetic change than the problem.
