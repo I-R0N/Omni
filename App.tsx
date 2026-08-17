@@ -2,9 +2,11 @@
 import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
-import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
+import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
+         computeMinimapRect, computeLoadoutHUDLayout } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
+import { fitFontPx } from './engine/systems/render/hud';
 import { installMenuNav, pickNext } from './components/menuNav';
 
 const App: React.FC = () => {
@@ -59,6 +61,17 @@ const App: React.FC = () => {
     // test vector, so a suite can pin them without hardware.  Nothing in the
     // game reads this.
     (window as any).__omniHid = { crc32, buildTriggerData, buildRumbleData, buildOutputReport };
+
+    // Debug handle #4 (gauntlet 5d, U4) — the canvas HUD's LAYOUT functions,
+    // exposed for the same reason as __omniHid and on the same terms: they are
+    // pure, and they are wrong in a way nothing reports.  A banner that clips
+    // off both edges at 320px, a minimap rect that disagrees with the tap
+    // handler that catches its expand tap, a loadout strip that leaves the
+    // viewport — none of those throw, none of them log, and none of them are
+    // visible at the one viewport the suites used to run at.  Exposing the
+    // three functions lets the viewport matrix pin them at every width without
+    // sampling pixels off a starfield.  Nothing in the game reads this.
+    (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout };
     // Debug handle #4: the menu driver's geometric step rule, so a suite can
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.

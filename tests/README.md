@@ -47,15 +47,17 @@ Traces and screenshots are captured on failure only, under `test-results/`
 
 ## The debug handles
 
-`App.tsx` publishes two globals on mount, and they exist for exactly this
-(CLAUDE.md §8):
+`App.tsx` publishes these globals on mount, and they exist for exactly this
+(CLAUDE.md §8).  `__omniHid` (the DualSense output-report builders) is
+documented with `input.spec.ts`:
 
 | handle | what it is |
 |---|---|
 | `window.__omniEngine` | the live `GameEngine` instance |
 | `window.__omniStats` | the most recent `EngineStats` payload |
+| `window.__omniHud` | the canvas HUD's three PURE layout functions (`fitFontPx`, `computeMinimapRect`, `computeLoadoutHUDLayout`) — same rationale as `__omniHid`: they are wrong in a way nothing reports. A banner that clips at 320px, a minimap rect that disagrees with the tap handler catching its expand tap, and a loadout strip off the viewport all fail silently, and none of them are visible at the single viewport the suites used to run at. |
 
-Nothing in the game reads either one; they cost two assignments and no
+Nothing in the game reads any of them; they cost one assignment each and no
 per-frame work. Suites reach them through `tests/helpers.ts` rather than
 `page.evaluate` directly.
 
@@ -84,11 +86,16 @@ Two things worth knowing:
 | `input.spec.ts` | 58 | The gamepad mapping layer and the touch joystick (step 5, Pair C). The Gamepad API cannot be synthesised headless, so the layer is split at exactly that line: `pollGamepad()` finds and reads a pad, `applyPadSnapshot()` takes a plain object a test can write. The joystick half drives **real `TouchEvent`s** dispatched at the canvas, because the whole point of it is a second finger being down at the same time and `page.touchscreen` only does single taps. Also the five CONTROL SCHEMES (including both handednesses): the same touch in the same place flies the ship under one and becomes the stick under another; keyboard/controller keep touch alive while stopping the mouse from dragging; switching mid-run releases whatever the old scheme held; the ship aims where it flies under the stick; the mirrored layout puts the button clear of the minimap. Plus RUMBLE: the shake→effect curve, the throttle and interrupt rules, and — with a stand-in actuator, the one thing headless cannot supply — that an impact reaches the device and an unsupported browser is asked exactly once. Plus the DualSense ADAPTIVE TRIGGERS (WebHID, G12), which stop at the page boundary on purpose: no browser in CI has a pad, so what is pinned is the half that can be wrong with no symptom — a pad discards a report with a bad CRC or layout in silence, so the suite checks CRC-32 against its published vector (`0xCBF43926`) and the report SHAPE (which bytes move, and that no others do) via `window.__omniHid`. It also pins the sync (gun / charge / released-when-EMP'd) and that an unsupported browser offers no control at all. The offset test earns its keep: it pins the trigger blocks at data offsets 10/21 rather than the 11/22 most published samples quote, which are indices into a buffer that includes the report ID. Plus the FIRE POINT (an analogue read against the profile's own break, per shape, clamped so no profile strands the shot), the TRIGGER-THRUST scheme (stick steers, trigger throttles), and GAMEPAD MENU NAVIGATION — driven through the real DOM, because the driver's premise is that focus is the browser's focus and movement is geometric over whatever the panels render, so stubbing either would test something else. |
 | `help.spec.ts` | 5 | The Controls & Basics panel: reachable from both menus, identical rows in each, the active scheme marked, and it fits 390px — asserted against the document's scroll width AND every row's rect, since a fixed-basis label column beside wrapping prose is the shape that overflows sideways. |
 | `minimap.spec.ts` | 6 | The minimap's material layer and the portal arrow (step 5). Nebula gone from BOTH halves (the terrain layer is proved blank on the nebula-only showcase); the material mode decides whether shards are even collected; drops excluded in every mode; the streamline cache reused across pans and rebuilt across cells. Plus the portal indicator's two brackets — range-gated far, suppressed once on screen. |
+| `viewports.spec.ts` | 44 | **The viewport matrix** (roadmap 5d, the absorbed parking-lot item). The same handful of LAYOUT questions asked at six sizes instead of one — 320×568, 390×844, 430×932, 768×1024, 1024×768, 1440×900 — plus the case nothing covered before: a mid-session RESIZE. Per size: nothing laid out past either edge, no interactive control under the 40px floor, screen titles on one line, the two hex flowers never overlapping (they are pointer drop targets, so an overlap can take a drop meant for its neighbour), the boss bar clear of the HUD readout stack with the stack at its tallest, and the canvas HUD's minimap and loadout rects on screen. Plus the banner ENVELOPE: every string the game can really put in a banner — boss names read out of the sim by spawning each capstone, not from a list duplicated here — fits without reaching `fitFontPx`'s readability floor. The resize case rotates portrait → landscape → desktop → 320 → back, watching a planted probe keep drifting at every stop, because a cache keyed on canvas size that survives a resize incorrectly shows up either as a throw in the draw pass or as a world that stopped. |
 | `maps.spec.ts` | 4 | Map composition after `MAP_POPULATION` became the authority: per-variant population bands measured before and after the move, plus Seven Rings asserted exactly (its geometry is deterministic) and its ring ORDER by median radius. |
 
-**111 tests.** All run at **390×844** — the phone this game is played on, and
-the size every layout assertion is written against. Every test asserts a
-clean console.
+**155 tests.** All but `viewports.spec.ts` run at **390×844** — the phone
+this game is played on, and the size every layout assertion is written
+against. `viewports.spec.ts` sets its own viewport per describe block and
+covers six sizes plus a mid-session resize (roadmap 5d). 390×844 remains the
+DESIGN TARGET: the other five must be functional and unbroken, not designed
+for, and nothing in that suite asserts how they should look. Every test
+asserts a clean console.
 
 ## Harness rules
 
@@ -147,8 +154,12 @@ Stated plainly so the gap is not mistaken for a guarantee. See the
 completion summary in `docs/GAUNTLET_5B_LOG.md` for the full list and the
 reasoning; the headlines:
 
-- **Only 390×844.** No desktop, no landscape, no mid-session resize.
-  Parked as the viewport-coverage item, promoted into roadmap 5d.
+- **Layout only, across viewports.** `viewports.spec.ts` (5d) closed the
+  "only 390×844" gap for LAYOUT — six sizes and a resize. It deliberately
+  does NOT re-run the behavioural suites at six sizes: behaviour is not a
+  function of viewport, so that would buy a six-times-longer merge gate and
+  no information. It also does not screenshot; visual regression stays
+  parked.
 - **Almost nothing measured by pixel-sampling the canvas** — the off-screen
   indicator legend, the size ramp, the aggro blink, the wave-banner fit, and
   every colour choice in the step-5 minimap faithfulness pass. Those were

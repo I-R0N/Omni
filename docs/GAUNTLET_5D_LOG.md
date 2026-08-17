@@ -34,7 +34,7 @@ Branch `claude/gauntlet-5d-ui-coherence-idqcdk`, off the
 | U1 | Audit every surface, no fixes | **done** |
 | U2 | DOM coherence fixes (`components/UIOverlay.tsx`) | **done** |
 | U3 | Canvas HUD coherence (`engine/systems/render/hud.ts`) | **done** |
-| U4 | Viewport coverage matrix + mid-session resize | pending |
+| U4 | Viewport coverage matrix + mid-session resize | **done** |
 | U5 | OPTIONAL — damage-triggered health/shield bars | pending |
 | U-final | Validation + handoff | pending |
 
@@ -321,6 +321,59 @@ readability floor, so the floor is a guard rather than a routine outcome.
 The `Math.max(80, …)` on the safe width keeps a degenerate viewport from
 inverting the ratio. Pinned as an assertion in U4 rather than left as a
 reading.
+
+### U4 — Viewport coverage (the absorbed parking-lot item)
+
+`tests/viewports.spec.ts` — **44 tests**, taking the suite from 111 to 155.
+The same handful of LAYOUT questions asked at six sizes instead of one, plus
+the mid-session resize nothing covered before.
+
+Per viewport (320×568 / 390×844 / 430×932 / 768×1024 / 1024×768 / 1440×900):
+nothing laid out past either edge; no interactive control under the 40px
+floor; screen titles on one line; the hex flowers never overlapping; the
+boss bar clear of the HUD readout stack **with the stack at its tallest**
+(score + salvage + two status effects — the state the collision actually
+happened in); the canvas HUD's minimap and loadout rects on screen; and the
+banner envelope.
+
+The **resize** case rotates portrait → landscape → desktop → 320 → back,
+watching a planted probe keep drifting at every stop. That is the assertion
+that matters for caches keyed on canvas size (nebula fast-path, gradient
+caches, minimap terrain + streamline caches, static-tile cache): one that
+survives a resize incorrectly shows up either as a throw inside the draw
+pass — the console watch catches that — or as a world that stopped, which
+the probe catches. A second test pins that the hex flowers actually GROW
+between 320 and 1024, because a cached size would pass every overlap check
+while looking wrong at both ends.
+
+**The banner test found that my first assertion was wrong, not the code.**
+I asserted a fitted banner always fits the window. `fitFontPx` does not
+promise that: it floors at a readability minimum and lets the text clip
+below it, on the deliberate grounds that unreadable is worse than clipped.
+Three viewports failed on a deliberately absurd 53-character string. The
+test now pins two real things instead: the ENVELOPE — every string the game
+can actually produce (boss names read out of the sim by spawning each
+capstone, not from a list duplicated in the test) fits **without reaching
+the floor**, at every viewport — and the INVARIANT that a fitted line either
+measures inside the safe band or stopped exactly at the floor, never in
+between. Stated as an invariant because the pathological string floors at
+phone widths and fits at 768+, so any single number would only have been
+true somewhere.
+
+**`window.__omniHud`** (App.tsx, debug handle #4) exposes the three pure
+layout functions — `fitFontPx`, `computeMinimapRect`,
+`computeLoadoutHUDLayout`. Same rationale and same precedent as
+`__omniHid`: they are pure, and they are wrong in a way NOTHING REPORTS. A
+banner clipping at 320px, a minimap rect disagreeing with the tap handler
+that catches its expand tap, a loadout strip off the viewport — none throw,
+none log, and none are visible at the one viewport the suites used to run
+at. The alternative was sampling pixels off a starfield, which is neither
+robust nor honest.
+
+Deliberately NOT done: re-running the 111 behavioural tests at six sizes
+(behaviour is not a function of viewport — that buys a six-times-longer
+merge gate and no information), and screenshotting (visual regression is
+parked at tiers 3–5, and a capture with no assertion is not a test).
 
 ---
 
