@@ -27,6 +27,31 @@ Working rules for this branch:
 
 ---
 
+## ⚠️ THE PROBE PAGES HAVE BEEN REMOVED — and here is where they live
+
+The four standalone probe/harness pages this log refers to
+(`public/webgpu-probe.html`, `webgpu-harness.html`, `webgpu-stage2.html`,
+`webgpu-stage4.html`) were **deleted before merge**. They were throwaway
+test rigs, they were never loaded by the app, and leaving them in `public/`
+would have shipped ~2,200 lines of them into every `dist/` build.
+
+**They are recoverable in full at commit `c32d790`** (PR #87), e.g.:
+
+```
+git show c32d790:public/webgpu-stage2.html > /tmp/webgpu-stage2.html
+```
+
+Nothing is lost by their absence: **every measurement they produced, and
+every technique they proved, is written down below** — the blend-state
+table, the draw-order rule, the premultiplied-alpha requirement, the
+triangulation and stroke-expansion approach, and all the device numbers.
+A future attempt should read this file, not resurrect the probes.
+
+Every path reference below is kept as written, because it names the file
+that *produced* the result being reported.
+
+---
+
 ## Checklist
 
 - [x] **Stage 0** — Device support (**KG1 PASSED** on iPhone / iOS 26.6)
