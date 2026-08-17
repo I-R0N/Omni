@@ -525,10 +525,40 @@ anywhere, it would be there, and it was not.
    spike, not steady load, which usually means it is fixable rather than
    fundamental.
 
-**One render-side win that survives this finding**, and it needs no WebGPU:
-`tint peak 13.00 ms · 1916 total misses` against a **256-entry** cache is
-evicted-before-reuse thrashing, and it is the plausible source of the
-otherwise-unexplained `peak render 40.00 ms`.
+**A correction, recorded because the mistake is instructive.** This section
+first claimed the capture's `tint peak 13.00 ms · 1916 total misses` was
+"evicted-before-reuse thrashing" and "the plausible source of the
+unexplained `peak render 40.00 ms`". **Both halves were wrong**, and the
+operator caught it.
+
+- **The eviction policy was already fixed** — gauntlet 5c **P17** changed
+  the tint cache from FIFO to **LRU** (`RenderSystem.ts:480–493`), precisely
+  so a working set slightly over the cap stops discarding the entries about
+  to be reused. It is in the code, with the reasoning in a comment.
+- **P17 also established that tinting is NOT the render spikes**, from a
+  182 s capture. Attributing a render peak to it here contradicted an
+  existing measurement without taking a new one.
+- **Worst of all, P17's *first* finding was that this very report line used
+  to assert "THRASHING" unconditionally**, and was rewritten to state the
+  number and the threshold so the reader draws the conclusion. I read the
+  rewritten line and asserted thrashing anyway — the exact false
+  attribution the instrument had been rebuilt to prevent, one gauntlet
+  later. **A number above a threshold is not a diagnosis.**
+
+**What the number actually shows.** Not a regression: 1916 misses in 77.4 s
+(24.8/s) against P17's 890 in 182.1 s (4.9/s) is a **key-space** difference,
+not a policy one. P16 documented that the tint key `(sprite, tint)` spans 25
+rock density tiers plus metal tiers, glass opacity bands and plastic
+palettes — so a tile-dense scene legitimately holds more than 256 distinct
+pairs, and a correct LRU still misses. The remaining lever, named in P16 and
+deliberately not taken, is to **quantise the tint key** so the space is
+bounded by design; raising the cap was rejected (256 × 128² canvases ≈ 16 MB
+already, 1024 ≈ 64 MB on a phone).
+
+At ~24.8 misses/s × ~2.4 ms that is **≈1.2 ms/frame** — about half of
+`render avg 2.36 ms`, and therefore the named lever if rendering ever needs
+to be cheaper. Against 71 ms sim spikes it is noise, which does not change
+this section's conclusion.
 
 *(Single scene, single session. The margin is an order of magnitude, so the
 conclusion is robust — but a second capture on a different map would cost
