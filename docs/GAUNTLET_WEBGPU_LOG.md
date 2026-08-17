@@ -320,7 +320,71 @@ this write-up). Within cap.
 
 ## Stage 1 — Throwaway harness
 
-**Cap: 2 hours. Touches no game code.** In progress.
+**Cap: 2 hours. Touches no game code** — adds one standalone page under
+`public/`. Status: **built and functionally verified; device reading
+outstanding.**
+
+`public/webgpu-harness.html` — initialises WebGPU, clears to a colour, and
+draws textured quads from a real game sprite (`assets/drone.png`) at the
+device's true backing store, with frame-time percentiles on-screen.
+
+**Four decisions, each carried from an earlier finding rather than chosen
+for convenience.**
+
+1. **Nearest-neighbour sampling.** Omni sets `imageSmoothingEnabled =
+   false` globally (`RenderSystem.ts:626`). A linear sampler would look
+   subtly better and would not be comparing like with like.
+2. **GPU-side timing via `timestamp-query`**, the Stage 0 finding. The
+   repo's own `renderMs` times *CPU-side call issuing, not
+   rasterization* — the precise hazard a GPU port must not inherit, since
+   a GPU renderer moves work *out* of that timer. The harness reports
+   `frame` (rAF delta, the honest wall-clock number), `cpu` (JS spent
+   issuing) and `gpu` (measured on the device) as three separate rows, so
+   the three can be seen to disagree. Timing buffers are pooled and
+   sampled opportunistically — a mapped buffer cannot be rewritten by the
+   next frame's resolve, so an untimed frame is skipped rather than
+   stalling the loop.
+3. **Percentiles, not averages** — p50/p95/p99/max. Worst frame is this
+   repo's metric (gauntlet 5c): one 80 ms frame in a smooth minute *is*
+   the failure, and a mean hides exactly that.
+4. **One instanced draw call at every instance count.** This is H3's
+   required shape, wired in from the first line rather than retrofitted.
+   The instance-count control (1 / 100 / 500 / 2000) exists to prove it:
+   the "draw calls" readout stays at **1** while instances scale 2000×.
+   Discovering instancing was broken at Stage 5 would waste the spike.
+
+### Container functional check (no performance meaning)
+
+Software adapter (SwiftShader), 440×756 @ dpr 3 emulating the real device.
+Verified: texture loads and renders, alpha blending correct, rotation and
+per-instance tint correct, torus wrapping applied, **1 draw call at all
+counts**, GPU timing collecting samples, **zero console errors**.
+
+| Instances | Draw calls | frame p50 | cpu p50 | gpu p50 |
+|---|---|---|---|---|
+| 1 | **1** | 16.7 | 0.2 | 6.85 |
+| 500 | **1** | 33.3 | 0.2 | 22.09 |
+| 2000 | **1** | 83.3 | 0.3 | 68.11 |
+
+**These numbers say nothing about the port** — they are a CPU rasterizer
+rasterizing, and are recorded only as a correctness trace. The one
+*structural* observation that does carry: **`cpu` stays at 0.2–0.3 ms
+while `gpu` rises 10×**, i.e. the work is where a GPU renderer should put
+it, and the CPU-side cost of instancing is flat in the instance count.
+That shape should survive the move to real hardware even though the
+magnitudes will not.
+
+**One bug worth recording**, found by re-reading before running rather
+than by the error it would have caused: `queue.writeBuffer`'s first
+argument is the destination **GPUBuffer**, and it had been passed the
+source `ArrayBuffer`. It would have thrown on the first frame.
+
+### Outstanding
+
+Stage 1's gate is a device statement, like Stage 0's: *a quad renders on
+the target device at a stable frame rate, with frame-time percentiles
+readable on-device.* Awaiting the phone reading via the same Netlify
+preview URL.
 
 ---
 
