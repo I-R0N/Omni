@@ -26,7 +26,7 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial, computeMinimapRect,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, computeMinimapRect, computeIndicatorRect,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -126,7 +126,7 @@ export function renderIndicators(
     if (!Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.y)) return;
 
     const {
-        EDGE_INSET, TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
+        TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
         MAX_VISIBLE_BUBBLE, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
         SIZE_NEAR, SIZE_FAR, NEAR_DIST, FAR_DIST, BOSS_SCALE, AGGRO_BLINK_HZ,
         COLORS,
@@ -137,10 +137,16 @@ export function renderIndicators(
 
     const cx = width / 2;
     const cy = height / 2;
-    // Half-extents of the inset viewport rect the arrows ride.  Clamped so a
-    // very small window can't invert the rect.
-    const hx = Math.max(8, cx - EDGE_INSET);
-    const hy = Math.max(8, cy - EDGE_INSET);
+    // The inset viewport rect the arrows ride.  ASYMMETRIC (user call): the
+    // top and bottom edges clear the HUD bands, because a symmetric rect put
+    // every near-vertical bearing — directly ahead, directly behind — under
+    // the chip stack or behind the loadout strip.  See computeIndicatorRect.
+    const rect = computeIndicatorRect(width, height, r.bossBarActive);
+    // The RAY still starts at screen centre (that is where the ship is, and
+    // the bearing has to be from the ship).  Only the anchor is clamped, for
+    // the degenerate case of a rect that does not contain the centre.
+    const ax = Math.min(Math.max(cx, rect.left + 1), rect.right - 1);
+    const ay = Math.min(Math.max(cy, rect.top + 1), rect.bottom - 1);
     // One blink phase for the whole frame — every hunting contact pulses in
     // sync, which reads as a single alarm rather than N flickers.
     const blink = 0.55 + 0.45 * Math.sin(performance.now() * 0.001 * AGGRO_BLINK_HZ * Math.PI * 2);
@@ -217,14 +223,15 @@ export function renderIndicators(
         const dist = Math.sqrt(item.distSq);
 
         // Ride the SCREEN EDGE: intersect the bearing ray with the inset
-        // viewport rect (whichever axis it leaves first wins).
+        // viewport rect (whichever side it leaves first wins).  The rect is
+        // asymmetric about the anchor now, so each axis takes the distance to
+        // the side the ray is actually heading for rather than a half-extent.
         const ca = Math.cos(angle), sa = Math.sin(angle);
-        const tEdge = Math.min(
-            ca !== 0 ? hx / Math.abs(ca) : Infinity,
-            sa !== 0 ? hy / Math.abs(sa) : Infinity,
-        );
-        const ix = cx + ca * tEdge;
-        const iy = cy + sa * tEdge;
+        const tX = ca > 0 ? (rect.right - ax) / ca : ca < 0 ? (rect.left - ax) / ca : Infinity;
+        const tY = sa > 0 ? (rect.bottom - ay) / sa : sa < 0 ? (rect.top - ay) / sa : Infinity;
+        const tEdge = Math.max(0, Math.min(tX, tY));
+        const ix = ax + ca * tEdge;
+        const iy = ay + sa * tEdge;
 
         // SIZE carries distance: near contacts grow, far ones shrink to a
         // small tick.  This is what replaces the per-enemy distance number.
@@ -297,7 +304,7 @@ export function renderIndicators(
              // away from whichever horizontal edge the arrow is nearest.
              const lx = -ca * (size + 12);
              let ly = -sa * (size + 12);
-             const lineStep = iy > cy ? -11 : 11;
+             const lineStep = iy > (rect.top + rect.bottom) * 0.5 ? -11 : 11;
              if (portalName) {
                  // Arrows at similar bearings crowd the same stretch of edge,
                  // so labels are outlined to stay readable when they overlap.
@@ -511,13 +518,17 @@ export function renderLoadoutHUD(
         const wCfg   = WEAPONS[wType];
         const active = wType === activeWeapon;
 
-        ctx.globalAlpha = active ? 0.92 : 0.6;
+        // The FILL is the transparent half of the widget (user call: HUD
+        // elements read through to the world).  The stroke, pip and label
+        // below stay at full strength — a slot is legible because its MARKS
+        // are opaque, not because its panel is.
+        ctx.globalAlpha = active ? 0.62 : 0.32;
         ctx.fillStyle   = active ? wCfg.color : H.PANEL_FILL;
         ctx.beginPath();
         roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
         ctx.fill();
 
-        ctx.globalAlpha = active ? 1.0 : 0.5;
+        ctx.globalAlpha = active ? 1.0 : 0.45;
         ctx.strokeStyle = active ? wCfg.color : H.RULE_COLOR;
         ctx.lineWidth   = active ? 2 : 1;
         ctx.beginPath();

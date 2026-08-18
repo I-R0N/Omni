@@ -308,8 +308,15 @@ const CHIP_OFF = 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
  *  column; the audit found the status badges at `px-3 py-1` against
  *  `px-4 py-1.5` everywhere else, which is what made the stack's left edge
  *  ragged. */
+/*  TRANSPARENCY (user call): a HUD chip sits ON the world, so the world reads
+ *  through it.  The fill is the transparent half — the TEXT stays at full
+ *  strength and keeps its drop shadow, so legibility comes from the marks
+ *  rather than from hiding the map.  The blur is kept tiny for the same
+ *  reason `OVERLAY_SCRIM`'s is: a heavy backdrop-blur buys legibility by
+ *  smearing the motion the transparency exists to show. */
 const HUD_CHIP =
-  'bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right';
+  'bg-slate-900/35 border rounded-lg px-3 py-1 shadow-lg backdrop-blur-[2px] text-right ' +
+  'drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]';
 
 /** A COLLAPSIBLE SECTION toggle.  Colour is the semantic (amber = debug,
  *  sky = help, slate = neutral) and is passed in; everything else — size,
@@ -1890,7 +1897,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     !!stats.stageClear;
 
   return (
-    <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+    /*  p-2, not p-4 (user call: "collapse the hud elements more to the top and
+        bottom of the screen").  The in-game HUD is corner furniture — every
+        px of padding is play area it takes out of the middle of the screen —
+        while the full-screen overlays below carry their own p-4, so this
+        only tightens the HUD.  The top stack gains 8px of headroom and the
+        chevrons' top safe band (UI_CONSTANTS.INDICATORS.TOP_INSET) is sized
+        against the result. */
+    <div className="absolute inset-0 pointer-events-none p-2 flex flex-col justify-between">
 
       {!overlayUp && (<>
 
@@ -1980,7 +1994,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           return (
             <div
               data-testid="player-vitals"
-              className={`pointer-events-none ${HUD_CHIP} border-slate-600/50 text-left w-[104px] shrink-0 px-2.5`}
+              /*  WIDTH IS A FLOOR, NOT A FIGURE (user call).  It was a fixed
+                  w-[104px], which fits "100/100" and clips the moment hull
+                  plating takes the pool into four digits — exactly when the
+                  readout starts mattering.  min-w keeps the chip from
+                  twitching narrower than a bar worth looking at; the content
+                  takes it from there. */
+              className={`pointer-events-none ${HUD_CHIP} border-slate-600/30 text-left min-w-[104px] w-auto shrink-0 px-2.5`}
             >
               <div className="flex items-baseline justify-between gap-2">
                 <span className={`text-slate-400 ${T_MICRO} font-bold uppercase tracking-widest`}>Hull</span>
@@ -2016,14 +2036,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {stats.gameState === GameState.PLAYING && (
             <div className="flex flex-col items-end gap-1 min-w-0">
               {/* Run score */}
-              <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/50`}>
+              <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/30`}>
                 <span className={`text-amber-300 ${T_ROW} font-bold tracking-widest tabular-nums`}>
                   {(stats.score ?? 0).toLocaleString()} PTS
                 </span>
               </div>
               {/* Salvage (money) — silver to match the field drop, distinct
                   from the gold score chip.  Flashes +N on pickup. */}
-              <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/50`}>
+              <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/30`}>
                 <span className={`text-slate-200 ${T_ROW} font-bold tracking-widest tabular-nums`}>
                   ◈ {(stats.credits ?? 0).toLocaleString()}
                 </span>
@@ -2100,7 +2120,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && (
             <button
               onClick={onPause}
-              className={`pointer-events-auto shrink-0 bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border border-slate-600/60 transition-all active:scale-95`}
+              className={`pointer-events-auto shrink-0 bg-slate-900/35 hover:bg-slate-700/70 text-white rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border border-slate-600/30 backdrop-blur-[2px] transition-all active:scale-95`}
               aria-label="Pause"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">

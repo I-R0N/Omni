@@ -348,7 +348,12 @@ export class GameEngine {
   shakeIntensity: number = 0;
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
-  screenShakeEnabled: boolean = false;
+  // ON by default (user call).  Shake is the game's primary impact feedback —
+  // what a crash, a detonation and a boss landing all read through — and it
+  // shipped OFF, so the default build had no camera reaction to any of them.
+  // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
+  // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
+  screenShakeEnabled: boolean = true;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
   // When `asteroidFlowEnabled` is false, the per-asteroid / per-drop
@@ -5353,6 +5358,13 @@ export class GameEngine {
 
   private draw() {
       if (!this.currentMap) return;
+
+      // The DOM's capstone bar occupies the top of the screen while a boss is
+      // alive; the off-screen indicator rect reserves that band so an arrow
+      // pointing straight up does not draw underneath it.  One boolean, set
+      // where the frame is drawn rather than read out of the DOM.
+      this.renderer.bossBarActive =
+          !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
 
       this.renderer.render(
           this.frameEntities,

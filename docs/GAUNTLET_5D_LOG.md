@@ -585,7 +585,7 @@ stated as a before → after rather than as an opinion.
 | neutral panel recipes | 3 | **1** |
 | primary-button colours | 3 | **1** (+ one commented hero) |
 | viewports covered by tests | 1 | **6 + a resize** |
-| tests | 111 | **161** |
+| tests | 111 | **162** (161 at the PR, +1 in U6) |
 
 **Three findings the work produced that the audit could not have:**
 
@@ -620,3 +620,151 @@ either option.
 **Follow-on for step 6:** nothing here is balance, so nothing here should be
 re-litigated in the tuning pass — but the tuning pass is now judging feel on
 final presentation, which is what decision #47b sequenced 5d before it for.
+
+---
+
+## U6 — the play-test follow-up (user list, post-PR)
+
+Seven items off one round of play on the 5d build, in the order they were
+given. Not a new milestone in the 5d sense — no audit, no queue — but they
+are all 5d-shaped (coherence and legibility, no balance), so they land on the
+same branch and the same PR rather than opening a second one.
+
+Two of them REVERSE decisions this gauntlet made. Both reversals are recorded
+below with what the original argument was and why it did not survive contact
+with play, because "the ledger said so" is not a reason to keep something that
+reads wrong on a phone.
+
+### 1. The chevrons hid behind the HUD  ← the real defect in this list
+
+The off-screen arrows ride an inset viewport rect, and that rect was
+SYMMETRIC: `EDGE_INSET` (26px) on all four sides. So the top edge sat at
+y=26 — under the readout chip stack, which measures down to **y=118** at
+390×844 and to **y=168** with a capstone bar up — and the bottom edge sat
+under the loadout strip and the minimap.
+
+The bearings that landed there are not incidental ones. A near-vertical
+bearing is "directly ahead of you" and "directly behind you"; the arrow was
+invisible on exactly the two bearings it is most needed for.
+
+`computeIndicatorRect(width, height, bossBar)` now returns an ASYMMETRIC
+rect, and the ray→edge intersection takes the distance to the side the ray is
+actually heading for instead of a half-extent. Three things about it are
+deliberate:
+
+- **The bands are MEASURED, not guessed.** 118 and 168 are read off the live
+  DOM (scratchpad capture), not estimated from the class names.
+- **Each band adds ~`SIZE_NEAR` on top of the measurement**, because an arrow
+  is CENTRED on the rect edge — a rect that merely reaches the bottom of the
+  chips leaves the top half of every arrow tangent to them. This was visible
+  in the first capture and is why `TOP_INSET` is 108 rather than 96.
+- **The boss band comes and goes.** Reserving the capstone bar's 46px
+  permanently costs every ordinary fight play area for a widget that is not
+  on screen, so `RenderSystem.bossBarActive` (one boolean, set in
+  `GameEngine.draw` from `liveBoss`) widens the band only while it is up.
+  That is the ONE input the canvas layer takes from the HUD's shape, and it
+  is deliberately a fact the sim already knows rather than a DOM measurement:
+  the canvas layer must not start reading React's layout every frame.
+
+Pinned in `viewports.spec.ts` at all six sizes — the rect must clear the
+loadout strip and the minimap, stay on screen, and still leave a band worth
+drawing arrows in.
+
+### 2–3. Transparency, and collapsing to the edges
+
+One rule for both, and it is the rule `OVERLAY_SCRIM` already argued for its
+deliberately tiny blur: **the FILL goes translucent, the MARKS do not.**
+`HUD_CHIP` 0.75 → **0.35** (and `px-4 py-1.5` → `px-3 py-1`), the minimap
+ground 0.85 → **0.55** with its border 0.4 → 0.30, a resting loadout slot
+0.6 → **0.32**. Text, strokes, pips and blips all stay at full strength and
+the chips keep their drop shadow, so legibility comes from the marks rather
+than from hiding the map — which is what the transparency is FOR.
+
+Edges: the DOM overlay's root padding `p-4` → **`p-2`** (the five full-screen
+overlays carry their own `p-4`, so this tightens the in-game HUD only), the
+minimap's `MARGIN` 20 → **10**, and `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN`
+14 → **8** — which is also the minimap's bottom offset, since
+`computeMinimapRect` reads it, so the two bottom widgets stay on one baseline
+by construction rather than by two numbers that happen to match.
+
+### 4. The vitals chip is a floor now, not a figure
+
+It shipped as `w-[104px]`, which fits "100/100" and clips the moment hull
+plating takes the pool into four digits — i.e. exactly when the readout
+starts mattering. `min-w-[104px] w-auto`: the floor keeps the chip from
+twitching narrower than a bar worth looking at, the content takes it from
+there.
+
+### 5. The player's bar is back — REVERSES U5
+
+U5 removed the floating bar under the ship, arguing it was the HUD chip's
+number twice, drawn on top of the thing the player is looking at.
+
+In play it is not the same number twice, because the two answer at different
+costs: the bar is where the eye already is (on the ship, mid-fight) and the
+chip is where the exact figure is (in the corner, when you can look). The
+removal traded a glance for a saccade. So both ship.
+
+What keeps it from being genuine duplication is that they cannot disagree:
+same field, and the SAME three urgency bands (emerald > 50% / amber > 25% /
+rose). The bar is ALWAYS on rather than damage-triggered — your own condition
+is the one thing you must never have to provoke into view — and the shield
+strip rides under it only once `maxShield > 0`, since an empty strip is a
+permanent advert for a module the player has not bought ("whichever is
+active").
+
+Tested by driving the real draw call with a RECORDING context and reading the
+rects it asks for: below the ship, fill = hull fraction, full fills the
+track, empty draws nothing, and the shield pair appears only with a pool.
+That is the honest way to assert canvas geometry without sampling pixels.
+
+### 6–7. Two shipped defaults that were the wrong way round
+
+- **Minimap material: Flow → DOTS.** Flow won the G5 comparison as a
+  READING of the field; the question the map is asked in play is "what is out
+  there", which a dot answers directly. Flow is one step of the DBG cycle
+  away and every mode test still covers it.
+- **Screen shake: OFF → ON.** It is the game's primary impact feedback and it
+  shipped disabled, so the default build had no camera reaction to a crash, a
+  detonation or a boss landing. (Rumble was never affected — `handleScreenShake`
+  fires it ABOVE this gate on purpose.)
+
+Both are now asserted in `boot.spec.ts`, because a default nobody opts into
+is precisely the thing that drifts unnoticed.
+
+### A test-harness bug the default change exposed
+
+`minimap.spec.ts`'s `setMaterial` ran a whole cycle lap INSIDE one
+`engine()` call, comparing against `window.__omniStats` between clicks — but
+that payload is republished once a frame, so every comparison after the first
+read a stale name and the lap overshot. It had worked only while the wanted
+mode WAS the shipped default, i.e. while the loop did nothing.
+
+Rewritten to one click per step with a wait for the published mode to change.
+The wait then exposed a second, sharper version of the same class of bug: a
+predicate passed to `waitForStats` is SERIALISED into the page, so it cannot
+close over a local — the inlined-value form `healthbars.spec.ts` already uses
+is the pattern.
+
+Worth recording as a harness rule in its own right: **anything that reads
+`__omniStats` in a loop is reading a once-a-frame snapshot**, and anything
+handed to `waitForStats` crosses a process boundary.
+
+### Validation
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **162 passed** ✅
+(161 → 162: the U5 player-bar test split into two, one for the bar and one
+for the shield strip). One existing test's ASSERTION changed meaning
+legitimately — `minimap.spec.ts`'s shipped-default test now expects Dots —
+and its rewrite says why in the file. Captures at 390×844 with and without a
+capstone bar confirm the arrows clear both bands.
+
+### Still open after this pass
+
+- **The expanded minimap (280px) still reaches above the arrows' bottom
+  band.** The band is sized for the COLLAPSED map, deliberately: the expanded
+  map is a temporary takeover the player asks for, and sizing the permanent
+  rect around it would cost 200px of arrow space for a mode that is open for
+  seconds. This is the same family as R3 in FOR-USER-REVIEW and is left with
+  it.
+- **R1–R5 are unchanged** — none of the seven items touched them.

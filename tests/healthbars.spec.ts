@@ -1,11 +1,15 @@
 /** Damage-triggered health bars (gauntlet 5d, U5 — the parked
  *  "damage-triggered health / shield bars" item).
  *
- *  A bar is a HIT REACTION now, not a permanent label. That is a
+ *  An ENEMY bar is a HIT REACTION now, not a permanent label. That is a
  *  behaviour-VISIBLE change, so what it does is pinned rather than left to a
  *  screenshot: the trigger, the decay, the re-arm, the opt-out, the DBG A/B,
- *  and the two things that MOVED (the player's floating bar is gone; the
- *  shield strip is no longer player-only).
+ *  and what MOVED (the shield strip is no longer player-only).
+ *
+ *  The PLAYER is the exception and keeps a permanent bar under the ship —
+ *  U5 removed it and a later user call put it back, alongside the HUD chip
+ *  rather than instead of it. Both readouts are pinned below, including the
+ *  property that made the removal tempting: they read the same field.
  *
  *  The bar itself is canvas-drawn, so these read the STATE the renderer gates
  *  on — `healthBarTimer`, `alwaysShowHealthBar`, `damageTriggeredBars` —
@@ -154,14 +158,24 @@ test.describe('the bar is a hit reaction, not a label', () => {
   });
 });
 
-test.describe('what moved', () => {
-  test('the PLAYER has no world-space bar; the HUD carries the readout', async ({ page }) => {
+test.describe('the player readouts', () => {
+  /*  REVERSED (user call): the player's floating bar is BACK, and the HUD
+   *  chip stays.  U5 argued the two were the same number twice; in play they
+   *  are not — the bar is where the eye already is, the chip is where the
+   *  exact figure is — so this now pins BOTH, and pins the one property that
+   *  made the removal tempting: they never disagree.
+   *
+   *  The bar is canvas-drawn, so rather than sampling pixels this drives the
+   *  real draw call with a RECORDING context and reads the rects it asks
+   *  for.  Same move as calling `physics.resolveCollision` directly: the
+   *  method is private at compile time only, and the geometry is the thing
+   *  that can silently be wrong. */
+  test('the player keeps a bar under the ship AND the HUD chip', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
     // `vitals` is pushed EVERY frame — unlike `playerStats`, which is built
-    // only while a menu is open. It has to be, because the floating bar that
-    // used to carry these numbers during play is gone.
+    // only while a menu is open.
     const s = await waitForStats(page, x => !!x.vitals, 'the vitals payload');
     expect(s.vitals!.maxHealth, 'a hull pool').toBeGreaterThan(0);
     expect(s.vitals!.health, 'starts whole').toBe(s.vitals!.maxHealth);
@@ -176,6 +190,82 @@ test.describe('what moved', () => {
     );
     await expect(page.getByTestId('player-vitals'))
       .toContainText(`${hurt.vitals!.health}/${hurt.vitals!.maxHealth}`);
+
+    // And the world-space bar draws it too, at the same fraction.
+    const bar = await engine(page, e => {
+      const rects: { x: number; y: number; w: number; h: number }[] = [];
+      const rec: any = {
+        fillRect: (x: number, y: number, w: number, h: number) => rects.push({ x, y, w, h }),
+        set fillStyle(_v: any) {}, get fillStyle() { return ''; },
+      };
+      e.renderer.renderPlayerVitalsBar(rec, e.player, 500, 400);
+      return { rects, frac: e.player.health / e.player.maxHealth };
+    });
+
+    // Two rects with no shield installed: the track and the hull fill.
+    expect(bar.rects.length, 'track + fill, no shield on the lean start').toBe(2);
+    const [track, fill] = bar.rects;
+    expect(track.y, 'drawn BELOW the ship').toBeGreaterThan(400);
+    expect(fill.w / track.w, 'the fill is the hull fraction').toBeCloseTo(bar.frac, 2);
+
+    // Full hull fills the track; an empty one draws nothing over it. The bar
+    // and the chip are reading the same field, so they cannot disagree.
+    const ends = await engine(page, e => {
+      const run = (hp: number) => {
+        const rects: any[] = [];
+        const rec: any = {
+          fillRect: (x: number, y: number, w: number, h: number) => rects.push({ x, y, w, h }),
+          set fillStyle(_v: any) {}, get fillStyle() { return ''; },
+        };
+        e.player.health = hp;
+        e.renderer.renderPlayerVitalsBar(rec, e.player, 0, 0);
+        return rects;
+      };
+      const full = run(e.player.maxHealth);
+      const empty = run(0);
+      e.player.health = e.player.maxHealth;
+      return { fullW: full[1].w, trackW: full[0].w, emptyW: empty[1].w };
+    });
+    expect(ends.fullW).toBe(ends.trackW);
+    expect(ends.emptyW).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the shield strip rides along only once a Shield core is installed', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The lean start has no shield pool, and an empty strip would be a
+    // permanent reminder of a module the player has not bought.
+    const before = await engine(page, e => {
+      const rects: any[] = [];
+      const rec: any = {
+        fillRect: (x: number, y: number, w: number, h: number) => rects.push({ x, y, w, h }),
+        set fillStyle(_v: any) {}, get fillStyle() { return ''; },
+      };
+      e.renderer.renderPlayerVitalsBar(rec, e.player, 0, 0);
+      return { maxShield: e.player.maxShield ?? 0, rects: rects.length };
+    });
+    expect(before.maxShield, 'no shield on the lean start').toBe(0);
+    expect(before.rects, 'hull track + fill only').toBe(2);
+
+    const after = await engine(page, e => {
+      e.player.maxShield = 50;
+      e.player.shield = 25;
+      const rects: any[] = [];
+      const rec: any = {
+        fillRect: (x: number, y: number, w: number, h: number) => rects.push({ x, y, w, h }),
+        set fillStyle(_v: any) {}, get fillStyle() { return ''; },
+      };
+      e.renderer.renderPlayerVitalsBar(rec, e.player, 0, 0);
+      e.player.maxShield = 0; e.player.shield = 0;
+      return rects;
+    });
+    expect(after.length, 'hull pair + shield pair').toBe(4);
+    // The shield strip sits UNDER the hull bar, and reads half a pool.
+    expect(after[2].y).toBeGreaterThan(after[0].y);
+    expect(after[3].w / after[2].w).toBeCloseTo(0.5, 2);
 
     watch.assertClean();
   });

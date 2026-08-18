@@ -56,7 +56,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  161 tests.  All run at
+                          anti-flake rules).  162 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1585,14 +1585,24 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `hitFlash` in PhysicsSystem.  It is a SEPARATE field from `hitFlash` on
   purpose: that is a ~0.1–0.3s whiten-and-punch, and a bar living that long
   would strobe rather than inform.  Three consequences worth knowing:
-  the PLAYER has no world-space bar at all — `EngineStats.vitals` carries
-  hull + shield EVERY frame (unlike `playerStats`, which is menu-only) and
-  the HUD's top-left chip is the canonical readout; the shield strip draws
-  for ANY shielded entity, not just the player; and
+  the shield strip draws for ANY shielded entity, not just the player;
   `GameEntity.alwaysShowHealthBar` opts a priority target back into a
   permanent bar (the dragon takes it, capstone bosses deliberately do NOT —
-  they have the dedicated HUD bar).  DBG ▸ Visual ▸ "HP bars" restores the
-  always-on behaviour as the A/B.
+  they have the dedicated HUD bar); and the PLAYER is the standing
+  EXCEPTION — see below.  DBG ▸ Visual ▸ "HP bars" restores the always-on
+  behaviour as the A/B.
+- **The PLAYER gets BOTH readouts, and they are different questions**
+  (user call, reversing U5's removal).  `renderPlayerVitalsBar` draws a
+  permanent hull bar under the ship — never damage-triggered, because your
+  own condition is the one thing you must not have to provoke into view —
+  with the shield strip under it only once `maxShield > 0` (an empty strip
+  is a permanent advert for a module you have not bought).  The HUD's
+  top-left chip stays, fed by `EngineStats.vitals` EVERY frame (unlike
+  `playerStats`, which is menu-only).  U5 removed the bar as "the same
+  number twice"; it is not — the bar is where the eye already is and the
+  chip is where the exact figure is.  Both read `player.health`, and both
+  wear the SAME three urgency bands (emerald > 50% / amber > 25% / rose),
+  which is the property that keeps them from reading as two opinions.
 - **Shield absorption is generalized.** The PhysicsSystem projectile-
   damage path (and the GameEngine shockwave-AoE path) absorb into
   `shield` for ANY entity with `shield`/`maxShield` > 0 — not just the
@@ -1862,12 +1872,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - **`window.__omniEngine` / `window.__omniStats` / `window.__omniHud` are
   debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's three PURE
+  `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's PURE
   layout functions — `fitFontPx`, `computeMinimapRect`,
-  `computeLoadoutHUDLayout` — on exactly the `__omniHid` rationale: they are
+  `computeLoadoutHUDLayout`, `computeIndicatorRect` — on exactly the
+  `__omniHid` rationale: they are
   pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
   320px, a minimap rect disagreeing with the tap handler that catches its
-  expand tap, a loadout strip off the viewport: none throw, none log, and
+  expand tap, a loadout strip off the viewport, an edge arrow drawn under
+  the chip stack: none throw, none log, and
   none are visible at the one viewport the suites used to run at.  The
   alternative was sampling pixels off a starfield.  NOTHING in the game reads them — they exist so the headless
   Playwright suites in `tests/` can drive the real engine in a real browser
@@ -2138,6 +2150,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   outbound rift and a return rift are tellable apart) while its ARROW is the
   legend's green, and the SNITCH has its own gold.  Canvas HUD text stays
   MONOSPACE against the DOM's sans — a world-vs-chrome distinction, not drift.
+- **The HUD hugs the top and bottom edges, and reads THROUGH** (user call).
+  The DOM overlay's root padding is `p-2` (the full-screen overlays carry
+  their own `p-4`, so this only tightens the in-game HUD), and the two
+  canvas widgets share one 8px baseline via
+  `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN` with `MINIMAP_CONSTANTS.MARGIN` at
+  10.  Transparency is the same rule everywhere: the FILL is what goes
+  translucent (`HUD_CHIP` at `bg-slate-900/35`, the minimap ground at 0.55,
+  a resting loadout slot at 0.32) while the MARKS — text, strokes, pips,
+  blips — stay at full strength.  Legibility comes from the marks, not from
+  hiding the map, which is the same argument `OVERLAY_SCRIM` makes for its
+  deliberately tiny blur.
 - **ONE screen corner, one rect.**  `computeMinimapRect(height, expanded)`
   (beside `computeLoadoutHUDLayout` in `constants.ts`) is the single
   definition of the minimap's bottom-left rect, read by the renderer, the
@@ -2148,8 +2171,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   one.  `minimapExpanded` is a banner PARAMETER now, never an assumption.
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
-  INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
-  edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE
+  INSET VIEWPORT RECT (`computeIndicatorRect`) — the screen
+  edge, not the old fixed 120px centre ring.  That rect is ASYMMETRIC
+  (user call): the top and bottom edges clear the HUD's two bands
+  (`INDICATORS.TOP_INSET` + `BOSS_BAR_INSET` while a capstone bar is up,
+  `BOTTOM_INSET` for the loadout strip + minimap), because a symmetric
+  inset put every near-vertical bearing — which is "directly ahead" and
+  "directly behind" — underneath the chip stack.  Each band is the MEASURED
+  widget height plus ~`SIZE_NEAR`, since an arrow is centred on the rect
+  edge.  `RenderSystem.bossBarActive` is the one input from the sim (a
+  boolean, set in `GameEngine.draw`); the canvas layer must never start
+  measuring React's layout.  DISTANCE is carried by SIZE
   (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
   ordinary enemies no longer print a distance number: a dozen little
   "1234m" strings were most of the old clutter, and the glyph already says
@@ -2177,7 +2209,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
 
 - **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
-  object.**  Three rules, all decided in step 5 G5 (user directive,
+  object.**  (The shipped material default is DOTS, not flow — user call;
+  flow is one step of the DBG cycle away.  Screen shake likewise ships ON.)  Three rules, all decided in step 5 G5 (user directive,
   decision #43):
   1. **Nebula is off it entirely.**  Nebula tiles are skipped by
      `buildMinimapStaticLayer` and nebula shards never enter the

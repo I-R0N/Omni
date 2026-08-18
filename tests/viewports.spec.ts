@@ -280,6 +280,7 @@ for (const vp of VIEWPORTS) {
           minimap: hud.computeMinimapRect(H, false),
           minimapOpen: hud.computeMinimapRect(H, true),
           loadout: hud.computeLoadoutHUDLayout(W, H),
+          indicators: hud.computeIndicatorRect(W, H),
         };
       });
 
@@ -300,6 +301,30 @@ for (const vp of VIEWPORTS) {
       }
       expect(geom.loadout.slotW, 'loadout slot width').toBeGreaterThanOrEqual(TAP_FLOOR);
       expect(geom.loadout.startY, 'loadout strip top').toBeGreaterThanOrEqual(0);
+
+      /* The OFF-SCREEN INDICATOR rect (user call: "the chevrons hide behind
+       * the HUD").  The arrows ride this rect's edge, so what has to hold is
+       * that the rect CLEARS the two HUD bands — otherwise an arrow at a
+       * near-vertical bearing, which is "directly ahead" and "directly
+       * behind", draws underneath the chip stack or the loadout strip.
+       *
+       * This is the whole reason the rect is a pure exported function: an
+       * arrow under a chip throws nothing and logs nothing, and it is a
+       * function of viewport, which is exactly what this matrix is for. */
+      const ind = geom.indicators;
+      expect(ind.right, 'indicator rect is not inverted').toBeGreaterThan(ind.left);
+      expect(ind.bottom, 'indicator rect is not inverted').toBeGreaterThan(ind.top);
+      expect(ind.left, 'indicator rect left edge on screen').toBeGreaterThanOrEqual(0);
+      expect(ind.right, 'indicator rect right edge on screen').toBeLessThanOrEqual(geom.W);
+      expect(ind.top, 'indicator rect top edge on screen').toBeGreaterThanOrEqual(0);
+      expect(ind.bottom, 'indicator rect bottom edge on screen').toBeLessThanOrEqual(geom.H);
+      // Clear of the bottom furniture: the arrows stop above the loadout
+      // strip and above the collapsed minimap, which share one baseline.
+      expect(ind.bottom, 'arrows clear the loadout strip').toBeLessThanOrEqual(geom.loadout.startY);
+      expect(ind.bottom, 'arrows clear the minimap').toBeLessThanOrEqual(geom.minimap.y);
+      // And the band that is left is still worth drawing arrows in.
+      expect(ind.bottom - ind.top, 'a usable vertical band survives')
+        .toBeGreaterThanOrEqual(80);
 
       watch.assertClean();
     });

@@ -3,7 +3,7 @@ import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
-         computeMinimapRect, computeLoadoutHUDLayout } from './constants';
+         computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -71,7 +71,7 @@ const App: React.FC = () => {
     // visible at the one viewport the suites used to run at.  Exposing the
     // three functions lets the viewport matrix pin them at every width without
     // sampling pixels off a starfield.  Nothing in the game reads this.
-    (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout };
+    (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect };
     // Debug handle #4: the menu driver's geometric step rule, so a suite can
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.

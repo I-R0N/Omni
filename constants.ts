@@ -884,6 +884,37 @@ export const UI_CONSTANTS = {
   // "it's coming for you" signal.
   INDICATORS: {
     EDGE_INSET: 26,          // px in from the viewport edge the arrows ride
+    /** HUD SAFE BANDS (user call).  The arrows ride an inset viewport rect,
+     *  and that rect used to be SYMMETRIC — so an arrow at a near-vertical
+     *  bearing parked itself exactly under the top chip stack or behind the
+     *  loadout strip / minimap, which is where a contact directly ahead or
+     *  directly behind the ship always is.  The one bearing you most need
+     *  the arrow for was the one it hid on.
+     *
+     *  These reserve the two bands the HUD actually occupies, so the rect is
+     *  asymmetric: the top edge drops below the readout chips, the bottom
+     *  edge lifts above the loadout strip.  They are DELIBERATELY constants
+     *  rather than a measurement of the live DOM — the alternative is the
+     *  canvas layer reading React's layout every frame, and the bands only
+     *  change when the HUD is redesigned. */
+    /*  MEASURED, not guessed: at the 390x844 design target the top stack
+     *  (vitals chip on the left; score / salvage / wave chips on the right)
+     *  bottoms out at y=118 with the HUD's 8px padding, and the bottom
+     *  furniture (minimap at 75px, loadout slots at 48px, both on an 8px
+     *  baseline) tops out at y=H-83.  These are those numbers less the
+     *  EDGE_INSET the rect already carries. */
+    /*  Each band is the measured widget height PLUS ~SIZE_NEAR, because an
+     *  arrow is CENTRED on the rect edge: a rect that merely reaches the
+     *  bottom of the chips leaves the top half of every arrow tangent to
+     *  them. */
+    TOP_INSET: 108,          // px reserved for the top chip stack
+    BOSS_BAR_INSET: 52,      // ...plus this while a capstone bar is up
+    BOTTOM_INSET: 74,        // px reserved for the loadout strip + minimap
+    /** Never let the two bands close up on a short window — a landscape
+     *  phone is ~390px tall and would otherwise be left with no rect at
+     *  all.  Below this the bands give way and the arrows ride a thin
+     *  centre band instead of vanishing. */
+    MIN_BAND: 90,
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5, // Max arrows for POIs
     // Enemy chevrons are range-unlimited (maps are big and live wave
@@ -981,17 +1012,25 @@ export const LOADOUT_HUD_CONSTANTS = {
   SLOT_H:        48,
   SLOT_GAP:      8,
   SLOT_RADIUS:   5,
-  BOTTOM_MARGIN: 14,
+  // Hugs the bottom edge (user call: "collapse the hud elements more to the
+  // top and bottom of the screen").  This is also the minimap's bottom
+  // offset — computeMinimapRect reads it — so the two bottom widgets sit on
+  // one baseline by construction rather than by two matching numbers.
+  BOTTOM_MARGIN: 8,
 };
 
 export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
-  MARGIN: 20,          // Distance from screen edge
+  MARGIN: 10,          // Distance from screen edge (hugs the corner — user call)
   ZOOM_RANGE: 1000,    // World units radius shown in small (zoomed-in) minimap
   RANGE: 8000,         // World units radius shown in expanded (overview) map
-  BG_COLOR: 'rgba(15, 23, 42, 0.85)',
-  BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
+  // More transparent than a DOM panel on purpose (user call): the map sits
+  // ON the world and the world should read through it.  The blips and the
+  // static terrain layer draw at full strength on top, so legibility comes
+  // from the marks rather than from hiding what is behind them.
+  BG_COLOR: 'rgba(15, 23, 42, 0.55)',
+  BORDER_COLOR: 'rgba(56, 189, 248, 0.30)',
   PLAYER_DOT_COLOR: '#ffffff',
   VIEWPORT_COLOR: 'rgba(56, 189, 248, 0.25)',
   VIEWPORT_BORDER_COLOR: 'rgba(56, 189, 248, 0.8)',
@@ -3830,15 +3869,18 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
 // candidates can be judged against each other in motion rather than argued
 // about:
 //   'flow'  — streamlines sampled from the asteroid flow field: where material
-//             MOVES, instead of ten thousand dots saying where it is.  DEFAULT.
-//   'dots'  — the status quo ante: one dot per mobile shard.
+//             MOVES, instead of ten thousand dots saying where it is.
+//   'dots'  — one dot per mobile shard.  DEFAULT (user call): in play the
+//             question the map is asked is "what is out there", and a dot
+//             answers it directly where a streamline answers a question about
+//             the field.  Flow stays one step of the cycle away.
 //   'off'   — neither.  The control, and the honest answer if the streamlines
 //             fail to read at 75px.
 // Static TILES are unaffected — they come from the pre-rendered static layer,
 // which is the minimap's actual terrain reading.
 export const MINIMAP_MATERIAL_MODES = ['flow', 'dots', 'off'] as const;
 export type MinimapMaterialMode = typeof MINIMAP_MATERIAL_MODES[number];
-let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('flow');
+let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('dots');
 export function getActiveMinimapMaterial(): MinimapMaterialMode {
   return MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
 }
@@ -4200,6 +4242,46 @@ export function computeMinimapRect(screenHeight: number, expanded: boolean): {
     y: screenHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
     size,
   };
+}
+
+/**
+ * The OFF-SCREEN INDICATOR rect — the inset viewport rect the edge arrows
+ * ride (user call: "the chevrons hide behind the HUD").
+ *
+ * It used to be a symmetric inset of `EDGE_INSET` on all four sides, derived
+ * inline from the screen half-extents.  That put the top edge of the rect at
+ * y=26 — underneath the readout chip stack — and the bottom edge under the
+ * loadout strip and the minimap.  An arrow at a near-vertical bearing
+ * therefore drew BEHIND the HUD, and a near-vertical bearing is exactly
+ * "directly ahead of you" and "directly behind you".
+ *
+ * So the rect is asymmetric now: the two HUD bands are reserved, and the
+ * arrows ride the largest rect that clears them.  Pure and exported for the
+ * same reason `computeMinimapRect` is (5d U4): it is wrong in a way nothing
+ * reports — an arrow under a chip throws no error and logs nothing.
+ */
+export function computeIndicatorRect(
+  screenWidth: number,
+  screenHeight: number,
+  bossBar: boolean = false,
+): { left: number; right: number; top: number; bottom: number } {
+  const { EDGE_INSET, TOP_INSET, BOSS_BAR_INSET, BOTTOM_INSET, MIN_BAND } = UI_CONSTANTS.INDICATORS;
+  const left  = Math.min(EDGE_INSET, Math.max(0, screenWidth  * 0.5 - 8));
+  const right = screenWidth - left;
+  // The boss bar is the one part of the top band that comes and goes, and it
+  // is the tallest.  Reserving its height permanently would cost every
+  // ordinary fight 46px of play area for a widget that is not on screen, so
+  // the band grows while it is up instead.
+  let top     = EDGE_INSET + TOP_INSET + (bossBar ? BOSS_BAR_INSET : 0);
+  let bottom  = screenHeight - EDGE_INSET - BOTTOM_INSET;
+  // A short window (a landscape phone) would otherwise have the two bands
+  // meet or cross.  The bands give way rather than the arrows vanishing.
+  if (bottom - top < MIN_BAND) {
+    const mid = screenHeight * 0.5;
+    top    = Math.max(0, mid - MIN_BAND * 0.5);
+    bottom = Math.min(screenHeight, mid + MIN_BAND * 0.5);
+  }
+  return { left, right, top, bottom };
 }
 
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {

@@ -52,6 +52,14 @@ test.describe('boot', () => {
     // at their construction-time values.
     await waitForStats(page, s2 => s2.fps > 0, 'a nonzero frame rate');
 
+    // SHIPPED DEFAULTS the player never opts into (user call).  Both of these
+    // are one boolean/index deep in the engine, both are invisible until you
+    // look for them, and both shipped the wrong way round: screen shake — the
+    // game's primary impact feedback — was OFF, and the minimap's material
+    // layer was the flow field rather than the contact dots.
+    expect(s.screenShakeEnabled, 'screen shake ships ON').toBe(true);
+    expect(s.minimapMaterialName, 'the minimap ships with dots').toBe('Dots');
+
     watch.assertClean();
   });
 

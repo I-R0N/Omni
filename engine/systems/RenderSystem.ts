@@ -73,6 +73,12 @@ export class RenderSystem {
    *  out; when false, every enemy carries one every frame, which is the
    *  pre-5d behaviour and the A/B for judging the change (gauntlet 5d, U5). */
   public damageTriggeredBars: boolean = true;
+  /** Is the DOM's boss capstone bar on screen?  Read by the off-screen
+   *  indicator rect, which reserves the band the bar occupies so an arrow at
+   *  a near-vertical bearing does not draw under it.  A BOOLEAN of engine
+   *  state, deliberately — the canvas layer must not start measuring React's
+   *  layout, but "is a capstone alive" is something the sim already knows. */
+  public bossBarActive: boolean = false;
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -1522,12 +1528,16 @@ export class RenderSystem {
    *     player has no reason to track.  `healthBarTimer` is stamped by
    *     `markDamaged` at every damage path and ticked by PhysicsSystem, so
    *     the bars on screen are exactly the fights in progress.
-   *  2. **The PLAYER has no floating bar at all.**  `EngineStats.playerStats`
-   *     already feeds a persistent hull/shield readout to the HUD, which is
-   *     the canonical place for it — a second copy under the ship was the
-   *     same number twice, and it was under the thing the player is looking
-   *     at.  Hit feedback for the player is the hit-flash, the shield flash
-   *     and the screen shake, all of which stayed.
+   *  2. **The PLAYER's bar is BACK, and is the one permanent bar** (user
+   *     call, reversing the U5 removal).  U5 argued it was the HUD chip's
+   *     number twice; in play it is not, because the two answer at different
+   *     costs — the bar is where the eye already is (on the ship, mid-fight)
+   *     and the chip is where the exact figure is.  So both ship: the bar
+   *     under the hull for the glance, the chip for the reading.  It is
+   *     ALWAYS on rather than damage-triggered — your own condition is the
+   *     one thing you never want to have to provoke into view — and it shows
+   *     whichever pools are live, hull always and the shield strip only once
+   *     a Shield core is installed.
    *  3. **The SHIELD bar is no longer player-only.**  Shields are
    *     entity-agnostic now (the Bulwark, boss phases), so any shielded
    *     entity gets the strip on a shield hit.
@@ -1540,7 +1550,13 @@ export class RenderSystem {
    * frames — against one timer decrement per entity.
    */
   private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
-      // ENEMIES only.  The player's readout is the HUD's (rule 2).
+      // The PLAYER's own bar (rule 2) — always on, wider than an enemy's, and
+      // drawn from the same geometry so the two read as one family.
+      if (entity.type === EntityType.PLAYER) {
+          if (entity.isExploding || entity.maxHealth <= 0) return;
+          this.renderPlayerVitalsBar(ctx, entity, rx, ry);
+          return;
+      }
       if (entity.type !== EntityType.ENEMY || entity.maxHealth <= 0) return;
       // Bubbles (ambient fauna) carry no health bar — keep them reading as
       // neutral blobs, not tracked combatants.
@@ -1598,6 +1614,49 @@ export class RenderSystem {
       }
 
       ctx.globalAlpha = prevAlpha;
+  }
+
+  /**
+   * The player's own hull / shield bar, under the ship.
+   *
+   * Deliberately NOT the enemy path with a different width: it is a
+   * different KIND of readout.  An enemy bar is a hit reaction that appears
+   * and fades; this one is always on, because the player's condition is the
+   * one thing they must never have to provoke into view.  It also carries
+   * the same urgency colours as the HUD chip (emerald → amber → rose), so a
+   * glance at the ship and a glance at the corner say the same thing.
+   *
+   * The SHIELD strip is drawn only when a Shield core is installed
+   * (`maxShield` is 0 on the lean start), which is what "whichever is
+   * active" means here — an empty strip would be a permanent reminder of a
+   * module the player has not bought.
+   */
+  private renderPlayerVitalsBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
+      const { PLAYER_WIDTH, PLAYER_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
+      const width = PLAYER_WIDTH;
+      const height = PLAYER_HEIGHT;
+      const yOffset = Math.max(entity.size.x, entity.size.y) * OFFSET_MODIFIER + OFFSET_BASE;
+      const x = rx - width / 2;
+      const y = ry + yOffset;
+
+      const hp = Math.max(0, Math.min(1, entity.health / entity.maxHealth));
+      // Same three bands the DOM vitals chip uses.  One rule, two surfaces.
+      const hull = hp > 0.5 ? '#34d399' : hp > 0.25 ? '#fbbf24' : '#f43f5e';
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = hull;
+      ctx.fillRect(x, y, width * hp, height);
+
+      if (entity.maxShield && entity.maxShield > 0) {
+          const sh = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
+          const sy = y + height + 1;
+          const shh = Math.max(2, height - 2);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+          ctx.fillRect(x, sy, width, shh);
+          ctx.fillStyle = SHIELD_COLOR;
+          ctx.fillRect(x, sy, width * sh, shh);
+      }
   }
 
 
