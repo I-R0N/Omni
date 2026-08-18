@@ -838,7 +838,56 @@ export const COLLISION_CONFIG = {
     MICRO: 1, // Projectile hit
     MEDIUM: 10, // Enemy collision
     HEAVY: 20, // High speed crash
-    CAP_MULTIPLIER: 1.5 // Multiplier for velocity-based shake
+    CAP_MULTIPLIER: 1.5, // Multiplier for velocity-based shake
+
+    /* ── BODY IMPACTS: shake follows the player's own velocity STEP ──────
+     *
+     * The player-collision shake used to be `min(impactSpeed, HEAVY) *
+     * CAP_MULTIPLIER` — SPEED ALONE, with no mass anywhere in it.  Every
+     * other part of the collision code weighs mass: the crash gate is
+     * `mass * impactSpeed > ASTEROID_CRASH_MOMENTUM`, and the impulse solver
+     * splits by (bias-compressed) inverse mass.  Shake was the exception, so
+     * a 15px chip and a static wall shook the camera identically at the same
+     * closing speed, and the chip pinned the cap (user report: "very small
+     * shards moving at high enough speeds ... feels overpowered").
+     *
+     * The honest quantity is the one the solver is about to apply anyway:
+     * how much the PLAYER'S OWN velocity changes along the normal.
+     *
+     *     dv = (1 + ELASTICITY) * |v_n| * effInv_player
+     *                                   / (effInv_player + effInv_other)
+     *
+     * It is the sim's own velocity step, so it agrees with the physics by
+     * construction — bias exponent included — and it carries both masses
+     * without a second model to keep in sync.  Three consequences fall out
+     * rather than being written:
+     *
+     *   · A static tile has effInv = 0, so dv = (1+e)|v_n|: a wall is the
+     *     hardest possible hit, and with SCALE 1.0 / MAX 30 the wall curve
+     *     is IDENTICAL to the old one.  Nothing about crashing changed.
+     *   · A light body attenuates by the true mass ratio.  At |v_n| = 20:
+     *     wall 30 (was 30), 40px metal shard 12.3, 40px rock 10.5, 15px
+     *     glass chip 3.9, 8px chip 2.3 — under DV_MIN, so it is silent.
+     *   · A HEAVIER SHIP shrugs off hits, because player mass scales with
+     *     ship weight (SHIP_WEIGHT).  Free, and it ties the camera to the
+     *     outfitting system.
+     *
+     * DV_MIN is the old `impactSpeed > 2.0` threshold expressed in the new
+     * units: for a wall dv = 1.5 * v_n, so 3.0 is exactly v_n > 2. */
+    IMPACT_DV_MIN: 3.0,    // below this the hit is not felt at all
+    IMPACT_DV_SCALE: 1.0,  // shake per unit of player velocity change
+    IMPACT_MAX: 30,        // = the old min(speed, HEAVY) * CAP_MULTIPLIER cap
+
+    /* ── DIRECTION ──────────────────────────────────────────────────────
+     * A directional shake is a decaying OSCILLATION along the impact axis,
+     * not white noise: the camera lurches the way the ship was actually
+     * shoved and rings back.  `DIR_JITTER` keeps a little isotropic noise on
+     * top so it does not read as a mechanical slide, and `DIR_FREQ_HZ` is
+     * the ring rate over the SHAKE_DECAY window (~3 cycles at 0.3 s).
+     * Shakes with no meaningful direction — explosions, warp-ins, wave
+     * banners — pass none and keep the old isotropic jitter. */
+    DIR_FREQ_HZ: 11,
+    DIR_JITTER: 0.35,
   }
 };
 

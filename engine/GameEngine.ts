@@ -346,6 +346,10 @@ export class GameEngine {
   // Screen Shake State
   shakeTimer: number = 0;
   shakeIntensity: number = 0;
+  /** Impact axis for the current shake, normalised; (0,0) = no direction, so
+   *  the camera falls back to the isotropic jitter.  See handleScreenShake. */
+  shakeDirX: number = 0;
+  shakeDirY: number = 0;
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
   // ON by default (user call).  Shake is the game's primary impact feedback —
@@ -2112,7 +2116,11 @@ export class GameEngine {
       this.input.rumble(amount, kind);
   }
 
-  handleScreenShake = (amount: number, rumbleKind: RumbleKind = 'impact') => {
+  handleScreenShake = (
+      amount: number,
+      opts?: { dirX?: number; dirY?: number; rumble?: RumbleKind },
+  ) => {
+      const rumbleKind: RumbleKind = opts?.rumble ?? 'impact';
       // Force feedback rides this call — every impact in the game already
       // funnels through it with magnitudes tuned against each other, so the
       // hand feels what the camera feels.  Deliberately ABOVE the
@@ -2125,6 +2133,14 @@ export class GameEngine {
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
           this.shakeIntensity = amount;
           this.shakeTimer = CAMERA_CONSTANTS.SHAKE_DECAY;
+          // A DIRECTION is optional: an impact has one (the axis the ship was
+          // shoved along), an explosion or a warp-in does not.  Stored
+          // normalised; (0,0) means "no direction" and keeps the isotropic
+          // jitter, so every existing caller is unchanged.
+          const dx = opts?.dirX, dy = opts?.dirY;
+          const dm = dx !== undefined && dy !== undefined ? Math.hypot(dx, dy) : 0;
+          this.shakeDirX = dm > 0 ? dx! / dm : 0;
+          this.shakeDirY = dm > 0 ? dy! / dm : 0;
       }
   }
 
@@ -2861,6 +2877,18 @@ export class GameEngine {
         if (this.shakeTimer <= 0) {
             this.camera.shakeOffset.x = 0;
             this.camera.shakeOffset.y = 0;
+        } else if (this.shakeDirX !== 0 || this.shakeDirY !== 0) {
+            // DIRECTIONAL: lurch along the impact axis and ring back, rather
+            // than shiver.  cos() starts at 1, so the first frame is the
+            // hardest push and it is along the direction the ship was shoved
+            // — the camera moves with the hit instead of vibrating about it.
+            const S = COLLISION_CONFIG.SHAKE;
+            const elapsed = CAMERA_CONSTANTS.SHAKE_DECAY - this.shakeTimer;
+            const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
+            const along = mag * osc;
+            const jitter = mag * S.DIR_JITTER;
+            this.camera.shakeOffset.x = this.shakeDirX * along + (Math.random() - 0.5) * jitter;
+            this.camera.shakeOffset.y = this.shakeDirY * along + (Math.random() - 0.5) * jitter;
         } else {
             this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
             this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;

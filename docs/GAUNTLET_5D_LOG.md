@@ -1026,3 +1026,90 @@ Fix: push again with a new commit so a fresh event fires. Nothing to change
 in the workflows — `pr-preview.yml` already guards against building a STALE
 sha (it re-reads the PR head and skips if the event commit is behind), which
 is the opposite failure and the one worth having.
+
+---
+
+## U10 — screen shake follows the impact, not the closing speed
+
+> "The screen shake effect is triggered by very small shards moving at high
+> enough speeds, but this feels overpowered. Can you review the screen shake
+> magnitude calculation and see if it aligns with the energy/momentum we use
+> in the rest of the collision physics?"
+
+### The review
+
+It did not align. The player-collision shake was:
+
+```
+onShake(min(impactSpeed, SHAKE.HEAVY) * SHAKE.CAP_MULTIPLIER)
+```
+
+**Speed alone.** Mass appears nowhere in it, while it appears everywhere
+around it: the crash gate is `asteroid.mass * impactSpeed >
+ASTEROID_CRASH_MOMENTUM`, and the impulse solver splits by bias-compressed
+inverse mass. Shake was the one place the model was dropped, so a 15px glass
+chip and an immovable wall shook the camera *identically* at the same closing
+speed — and since the term saturates at `HEAVY`, both pinned the maximum.
+
+### The quantity to use
+
+Not momentum and not energy, but the one the solver is about to apply anyway:
+**how much the player's own velocity changes along the normal.**
+
+```
+dv = (1 + ELASTICITY) * |v_n| * effInv_player / (effInv_player + effInv_other)
+```
+
+It is the sim's own velocity step, mirrored line for line including the mass-
+bias exponent, so it agrees with the physics *by construction* rather than
+being a second model to keep in sync. It is also the physically right thing
+for a camera bolted to the ship: what you feel is how hard *you* were moved.
+
+Three properties fall out rather than being written:
+
+- **A static body has `effInv = 0`**, so `dv = (1+e)|v_n|` — a wall is the
+  hardest hit there is, and with `IMPACT_DV_SCALE` 1.0 / `IMPACT_MAX` 30 the
+  wall curve is **identical to the old one at every speed**, threshold
+  included (`IMPACT_DV_MIN` 3.0 is exactly the old `impactSpeed > 2`). The
+  change is isolated to light bodies; crashing into terrain is untouched.
+- **A light body attenuates by the true mass ratio.** Measured at |v_n| = 20,
+  where every row used to read 30:
+
+  | impactor | mass | old | new |
+  |---|---|---|---|
+  | static tile | ∞ | 30 | **30** |
+  | 40px metal shard | 48 | 30 | 12.3 |
+  | 40px rock shard | 28.8 | 30 | 10.5 |
+  | 25px rock shard | 11.2 | 30 | 7.5 |
+  | 15px glass shard | 2.25 | 30 | 3.9 |
+  | 8px glass chip | 0.64 | 30 | **silent** |
+
+- **A heavier SHIP shrugs hits off**, because `player.mass` scales with ship
+  weight (`SHIP_WEIGHT`). Free, and it ties the camera to the outfitting
+  system: a laden hull is harder to shove, so it is harder to shake.
+
+### Direction
+
+`handleScreenShake(amount, { dirX, dirY, rumble })`. A directional shake is a
+decaying **oscillation along the impact axis** — the camera lurches the way
+the ship was actually shoved and rings back — with `DIR_JITTER` of isotropic
+noise on top so it does not read as a mechanical slide. The axis is the
+impulse direction on the player (`±n`, sign by which body the player is), so
+it is the same vector the solver uses.
+
+The projectile hit on the player takes the **shot's travel direction** for the
+same reason, while keeping its damage-driven magnitude: a bolt's momentum is
+negligible against the hull, so what the player feels there is the hit, not
+the shove.
+
+Callers with no meaningful axis — explosions, warp-ins, boss beats, wave
+banners — pass a bare number and keep the isotropic jitter unchanged. The
+options object replaced a positional `rumbleKind` argument that would
+otherwise have collided with the direction parameters.
+
+### Validation
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **172 passed** ✅.
+`tests/shake.spec.ts` pins the three claims separately because they fail
+independently — and the PARITY test is the one that matters most: it fails if
+someone ever "fixes" an overpowered shake by scaling the whole curve down.

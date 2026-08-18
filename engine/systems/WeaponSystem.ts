@@ -104,7 +104,7 @@ export class WeaponSystem {
     entities: GameEntity[],
     player: GameEntity,
     target: Vector2,
-    onShake?: (amount: number, rumbleKind?: RumbleKind) => void,
+    onShake?: (amount: number, opts?: { rumble?: RumbleKind }) => void,
     charged: boolean = false,
     /** Haptic-only feedback: rumble WITHOUT a camera shake.  The plain
      *  Blaster is the case that needs it — it is the fastest gun in the game,
@@ -147,13 +147,13 @@ export class WeaponSystem {
     // it, and everywhere else it falls back to the ordinary handle thump.
     if (onShake) {
       if (config.type === WeaponType.SHOTGUN) {
-        onShake(isCharged ? 8 : 5, 'trigger');
+        onShake(isCharged ? 8 : 5, { rumble: 'trigger' });
       } else if (config.type === WeaponType.CANNON) {
-        onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM, 'trigger');
+        onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM, { rumble: 'trigger' });
       } else if (config.type === WeaponType.BURST) {
-        onShake(3, 'trigger');
+        onShake(3, { rumble: 'trigger' });
       } else if (config.type === WeaponType.BLASTER && isCharged) {
-        onShake(COLLISION_CONFIG.SHAKE.MEDIUM, 'trigger');
+        onShake(COLLISION_CONFIG.SHAKE.MEDIUM, { rumble: 'trigger' });
       }
     }
     // The plain Blaster shakes NO camera by design; it still kicks the pad.

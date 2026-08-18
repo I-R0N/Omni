@@ -353,7 +353,7 @@ export class PhysicsSystem {
     dt: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     const t0 = performance.now();
@@ -834,7 +834,7 @@ export class PhysicsSystem {
     timeScale: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     // 1. Reset ONLY the Dynamic Grid (Static Grid is persistent).  beginPass
@@ -1803,7 +1803,7 @@ export class PhysicsSystem {
       shards: GameEntity[],
       onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
       onDeath?: (entity: GameEntity) => void,
-      onShake?: (amount: number) => void,
+      onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): void {
       for (let i = 0; i < shards.length; i++) {
@@ -1990,7 +1990,7 @@ export class PhysicsSystem {
       shards: GameEntity[],
       onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
       onDeath?: (entity: GameEntity) => void,
-      onShake?: (amount: number) => void,
+      onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): void {
       for (let i = 0; i < shards.length; i++) {
@@ -2028,7 +2028,7 @@ export class PhysicsSystem {
       shards: GameEntity[],
       onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
       onDeath?: (entity: GameEntity) => void,
-      onShake?: (amount: number) => void,
+      onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): void {
       for (let i = 0; i < shards.length; i++) {
@@ -2272,7 +2272,7 @@ export class PhysicsSystem {
     b: GameEntity,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       // Non-nebula shards (metal / rock / glass) never collide with nebula.
@@ -2631,7 +2631,7 @@ export class PhysicsSystem {
     mtv: Vector2,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
@@ -3063,8 +3063,16 @@ export class PhysicsSystem {
                   // projectile's intrinsic damage (so a slug felt even through
                   // the shield).
                   const impactDmg = proj.damage || 1;
+                  // Along the SHOT's travel direction — a bolt to the flank
+                  // should throw the camera sideways, not shiver it.  The
+                  // magnitude stays damage-driven: a projectile's momentum is
+                  // negligible against the hull, so what the player feels is
+                  // the hit, not the shove.
+                  const pv = proj.velocity;
+                  const pvm = pv ? Math.hypot(pv.x, pv.y) : 0;
                   onShake(Math.min(HIT_FEEDBACK.PLAYER_SHAKE_MAX,
-                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG));
+                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG),
+                      pvm > 0 ? { dirX: pv!.x / pvm, dirY: pv!.y / pvm } : undefined);
                   if (proj.velocity && !target.isExploding) {
                       const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
                       const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
@@ -3237,15 +3245,39 @@ export class PhysicsSystem {
 
       if (velAlongNormal > 0) return; // Moving away
 
-      // Detect High Impact for Shake
+      // Detect High Impact for Shake.
+      //
+      // Driven by the PLAYER'S OWN velocity step, not by closing speed: the
+      // same quantity the impulse solver below is about to apply, so the
+      // camera agrees with the physics instead of modelling it a second time.
+      // Speed alone had no mass in it, which is why a chip and a wall shook
+      // identically — see COLLISION_CONFIG.SHAKE.IMPACT_DV_MIN.
       const isPlayerCollision = (a.type === EntityType.PLAYER || b.type === EntityType.PLAYER);
       if (isPlayerCollision && onShake) {
-          const impactSpeed = Math.abs(velAlongNormal);
-          const other = a.type === EntityType.PLAYER ? b : a;
+          const playerIsA = a.type === EntityType.PLAYER;
+          const player = playerIsA ? a : b;
+          const other  = playerIsA ? b : a;
           const isHardTarget = other.type === EntityType.ENEMY || other.type === EntityType.STRUCTURE;
-          
-          if (impactSpeed > 2.0 && isHardTarget) {
-              onShake(Math.min(impactSpeed, COLLISION_CONFIG.SHAKE.HEAVY) * COLLISION_CONFIG.SHAKE.CAP_MULTIPLIER);
+          if (isHardTarget) {
+              const S = COLLISION_CONFIG.SHAKE;
+              // Mirrors the impulse split exactly (bias exponent included).
+              // A static body contributes effInv 0, so the player takes the
+              // whole step — a wall is the hardest hit there is.
+              const effInvP = Math.pow(player.mass === Infinity ? 0 : 1 / player.mass,
+                                       COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+              const effInvO = Math.pow(other.mass === Infinity ? 0 : 1 / other.mass,
+                                       COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+              const share = effInvP + effInvO > 0 ? effInvP / (effInvP + effInvO) : 0;
+              const dv = (1 + COLLISION_CONFIG.ELASTICITY) * Math.abs(velAlongNormal) * share;
+              if (dv > S.IMPACT_DV_MIN) {
+                  // DIRECTION is the way the player is about to be shoved:
+                  // the impulse acts along +n on b and -n on a.
+                  const sign = playerIsA ? -1 : 1;
+                  onShake(
+                      Math.min(dv * S.IMPACT_DV_SCALE, S.IMPACT_MAX),
+                      { dirX: nx * sign, dirY: ny * sign },
+                  );
+              }
           }
       }
       // Shield contact flash — any collision lights up the shield ring

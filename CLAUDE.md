@@ -56,7 +56,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  167 tests.  All run at
+                          anti-flake rules).  172 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -2004,6 +2004,26 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   because rotation is derived from the pointer and a shot's target IS a
   pointer position; there is deliberately no second aim channel (step 5
   G2).  Four rules go with it:
+  - **BODY-IMPACT SHAKE IS THE PLAYER'S OWN VELOCITY STEP** (user call).  It
+    used to be `min(impactSpeed, HEAVY) × CAP_MULTIPLIER` — SPEED ALONE, no
+    mass — while every other part of the collision code weighs mass (the
+    crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`; the impulse
+    solver splits by bias-compressed inverse mass).  So a 15px chip shook the
+    camera exactly as hard as a static wall at the same closing speed.  The
+    magnitude is now `(1 + ELASTICITY) × |v_n| × effInv_player /
+    (effInv_player + effInv_other)` — the step the solver is about to apply,
+    so it agrees with the physics by construction rather than modelling it
+    twice.  Three things fall out rather than being written: a STATIC body
+    has `effInv = 0` so the wall curve is IDENTICAL to the old one (the
+    change is isolated to light bodies); a light body attenuates by the true
+    mass ratio (at |v_n| = 20: wall 30, 40px metal 12.3, 15px glass 3.9, 8px
+    chip silent under `IMPACT_DV_MIN`); and a HEAVIER SHIP shrugs hits off,
+    because `player.mass` scales with ship weight.  Shake also carries a
+    DIRECTION now (`handleScreenShake(amount, {dirX, dirY, rumble})`): a
+    decaying oscillation along the impact axis instead of white noise, with
+    `DIR_JITTER` of isotropic noise on top.  Callers with no meaningful axis
+    — explosions, warp-ins, reward beats — pass a bare number and keep the
+    old isotropic jitter.
   - **RUMBLE rides the screen shake.**  `GameEngine.handleScreenShake(amount)`
     is the funnel every impact in the game already goes through with
     magnitudes tuned against each other, so `InputSystem.rumble(amount)` hangs
