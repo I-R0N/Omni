@@ -1567,9 +1567,24 @@ worst case for it — a map with little glass pays almost nothing):
 | lower | 0.595 | 0.865 | +0.270 |
 | low | 0.975 | 1.280 | +0.305 |
 
+### The brightness is a knob, not a number
+
+DBG ▸ **Refr bright** cycles the caustic's brightness: `1/2` (default) →
+`1/3` → `1/4` → `1/6` → `1/10`, as fractions of the light's own peak.
+
+Named as fractions because that is the quantity the rule is stated in, and
+it starts at the CEILING so tuning only ever goes down from the brightest
+the rule allows. The ceiling lives in TWO places on purpose:
+`REFRACT_BRIGHTNESS_CYCLE` is where the look is chosen, and
+`REFRACT.MAX_BRIGHTNESS_FRAC` clamps on top of whatever it returns — so
+adding a row above 1/2 makes that row dead rather than makes the rule wrong.
+The test pins the TABLE itself (every entry is `1/N` with N >= 2), because
+that is where the intent is visible and the call site is where it is not.
+
 ### Gate
 
 `npm run typecheck`, `npm run build`, `npm test` — **121 passed** (119 + two
 new). The refraction test asserts the light still works AT ALL with the
 toggle on (the NaN case above), that the on-axis gain DROPS when the
-straight-through path is withheld, and that the toggle returns to off.
+straight-through path is withheld, that the brightness table respects the
+half-the-source rule, and that the toggle returns to off.
