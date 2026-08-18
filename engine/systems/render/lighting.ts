@@ -32,6 +32,7 @@
 import type { PhysicsSystem } from '../PhysicsSystem';
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
+import type { ShardVariantId } from '../ShardSystem.types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
@@ -80,8 +81,13 @@ export interface Occluder {
      *  is everything but glass. */
     transmit: number;
     /** `SHARD_VARIANTS[v].emits` — the fraction of received light this body
-     *  radiates back out.  0 for everything but metal and glass. */
+     *  radiates back out.  0 for everything that does not re-emit. */
     emits: number;
+    /** The COLOUR this body re-emits in, as an `'r, g, b'` string, or null to
+     *  use the light's own colour.  Resolved per BODY rather than per
+     *  variant, because a nebula's colour is blended from its own
+     *  composition and no two clouds match. */
+    emitRgb: string | null;
     /** Squared distance to the light — the nearest-first selection key. */
     distSq: number;
     /** True for a mobile shard, false for a static tile.  Selection needs to
@@ -125,7 +131,7 @@ function poolAt(i: number): Occluder {
     let o = _pool[i];
     if (o === undefined) {
         o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, transmit: 0,
-              emits: 0, distSq: 0, mobile: false };
+              emits: 0, emitRgb: null, distSq: 0, mobile: false };
         _pool[i] = o;
     }
     return o;
@@ -138,6 +144,145 @@ let _n = 0;
 let _lx = 0;
 let _ly = 0;
 
+/** THE EMITTER BUFFER — a SECOND output from the same walk.
+ *
+ *  A5g chose emitters by walking the shadow-caster set, which is exactly
+ *  right while every emitter is also an occluder.  Nebula broke that: it is
+ *  `passThrough`, so it casts nothing and never enters the occluder pool,
+ *  and it is also the most numerous static tile on the natural maps (1496 of
+ *  Universe's 2227).  Putting it in the shadow pool to make it visible to
+ *  the emitter walk would hand it the whole 24-slot budget and blank the
+ *  terrain shadows — the same starvation failure the shard share cap in
+ *  `selectOccluders` was written for, arriving from the other direction.
+ *
+ *  So passThrough emitters land in their own buffer, filled during the SAME
+ *  grid walk (no second query), and the emitter pass merges the two lists
+ *  nearest-first.  They cost the shadow pool nothing and the shadow pass
+ *  never sees them. */
+const _emitPool: Occluder[] = [];
+function emitPoolAt(i: number): Occluder {
+    let o = _emitPool[i];
+    if (o === undefined) {
+        o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, transmit: 0,
+              emits: 0, emitRgb: null, distSq: 0, mobile: false };
+        _emitPool[i] = o;
+    }
+    return o;
+}
+/** How many passThrough emitters a collection keeps.  Kept NEAREST-FIRST by
+ *  insertion rather than collect-then-sort, because on a nebula map the
+ *  candidate count is in the hundreds and the budget that consumes it is
+ *  single digits — an insertion that usually fails its first compare is
+ *  cheaper than sorting a list that is thrown away.  Sized to the largest
+ *  emitter budget any tier can ask for (`ultra`'s maxLights - 1). */
+const EMIT_CANDIDATES = 32;
+let _emitBuf: Occluder[] = [];
+let _emitN = 0;
+let _lastEmitN = 0;
+/** How many passThrough emitters the last `collectOccluders` kept.  A second
+ *  return value, in the shape this module already uses for its scratch. */
+export function lastEmitterCount(): number { return _lastEmitN; }
+
+/** The colour a body re-emits in: its OWN, normalised to full value.
+ *
+ *  NORMALISED because brightness belongs to the alpha, not to the tint.  A
+ *  body's fill colour is a surface colour — metal's is a dark steel — and
+ *  using it raw would make a lit metal plate radiate dark grey, which reads
+ *  as a smudge rather than as light.  Scaling the channels so the largest is
+ *  255 keeps the HUE and hands the brightness back to `_emA`.
+ *
+ *  QUANTISED to 32-step channels so the gradient cache is keyed on a small
+ *  set.  Nebula colours are blended per body and would otherwise mint a
+ *  cache entry each, on a map that has 1496 of them.
+ *
+ *  Cached on the entity against the source colour it was built from, so the
+ *  parse and the string build happen on a colour CHANGE and never per frame.
+ */
+function emitTintFor(t: GameEntity, v: ShardVariantId): string | null {
+    // THE BODY'S OWN COLOUR, in this order: a nebula's blended composition
+    // (per body — no two clouds match), then the entity's render colour, and
+    // only then the variant's legacy `glow.color` as a last resort.  The glow
+    // colours are VFX leftovers from the contact glow A5f deleted, and taking
+    // them first is measurably wrong: metal's is MAGENTA, so a lit steel
+    // plate radiated magenta light while its own surface stayed steel.
+    const src = t.nebulaBlendedHex ?? t.color ?? SHARD_VARIANTS[v].glow?.color;
+    if (src === undefined) return null;
+    if (t._emitTintKey === src) return t._emitTint ?? null;
+    const rgb = normalizedTint(src);
+    t._emitTintKey = src;
+    t._emitTint = rgb;
+    return rgb;
+}
+
+/** '#rgb' / '#rrggbb' -> 'r, g, b' at full value, quantised.  Anything else
+ *  (a named colour, an rgba() string) returns null and falls back to the
+ *  light's own colour — a parser for every CSS colour form is not what this
+ *  is for, and the bodies that emit all carry hex. */
+function normalizedTint(src: string): string | null {
+    if (src.charCodeAt(0) !== 35 /* # */) return null;
+    let r: number, g: number, b: number;
+    if (src.length === 7) {
+        r = parseInt(src.slice(1, 3), 16);
+        g = parseInt(src.slice(3, 5), 16);
+        b = parseInt(src.slice(5, 7), 16);
+    } else if (src.length === 4) {
+        r = parseInt(src[1] + src[1], 16);
+        g = parseInt(src[2] + src[2], 16);
+        b = parseInt(src[3] + src[3], 16);
+    } else return null;
+    if (!(r >= 0) || !(g >= 0) || !(b >= 0)) return null;
+    const max = Math.max(r, g, b);
+    if (max <= 0) return null;
+    const k = 255 / max;
+    const q = (c: number) => Math.min(255, Math.round(c * k / 32) * 32);
+    return `${q(r)}, ${q(g)}, ${q(b)}`;
+}
+
+/** Keep this body among the N nearest passThrough emitters.
+ *
+ *  Insertion into a fixed, always-sorted buffer: the common case is one
+ *  compare against the farthest kept and an immediate return, and the pooled
+ *  record evicted from the tail is the one reused for the insert, so a full
+ *  buffer allocates nothing at all. */
+function recordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void {
+    const ox = shiftX(_lx, t.position.x);
+    const oy = shiftY(_ly, t.position.y);
+    const dx = ox - _lx, dy = oy - _ly;
+    const d2 = dx * dx + dy * dy;
+    const full = _emitN === EMIT_CANDIDATES;
+    if (full && d2 >= _emitBuf[_emitN - 1].distSq) return;
+    let o: Occluder;
+    if (full) {
+        o = _emitBuf[_emitN - 1];
+    } else {
+        o = emitPoolAt(_emitN);
+        _emitN++;
+    }
+    let i = _emitN - 1;
+    while (i > 0 && _emitBuf[i - 1].distSq > d2) { _emitBuf[i] = _emitBuf[i - 1]; i--; }
+    _emitBuf[i] = o;
+    o.x = ox;
+    o.y = oy;
+    o.r = occluderRadius(t);
+    o.br = Math.max(t.size.x, t.size.y) * 0.5;
+    o.pts = t.polygonPoints;
+    o.rot = t.rotation;
+    o.transmit = SHARD_VARIANTS[v].transmit ?? 0;
+    o.emits = SHARD_VARIANTS[v].emits ?? 0;
+    o.emitRgb = emitTintFor(t, v);
+    o.distSq = d2;
+    o.mobile = mobile;
+}
+
+/** A passThrough body still LIGHTS if its variant says it does — it just
+ *  never shadows.  Skipped entirely when nothing asked for emitters, so a
+ *  collection with emission off costs exactly what it did before. */
+function maybeRecordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void {
+    if (_emitBuf === _EMPTY) return;
+    if ((SHARD_VARIANTS[v].emits ?? 0) <= 0) return;
+    recordEmitter(t, v, mobile);
+}
+
 /** Hoisted visitor.  A function CONSTRUCTED inside a per-frame path is
  *  rebuilt every frame; this one is built once and reads its captures from
  *  the module-scope scratch above (the `applyFlowTo` precedent). */
@@ -146,7 +291,7 @@ function visit(t: GameEntity): void {
     if (t.mass !== Infinity) return;
     const v = t.shardVariant;
     if (v === undefined) return;
-    if (SHARD_VARIANTS[v].passThrough === true) return;
+    if (SHARD_VARIANTS[v].passThrough === true) { maybeRecordEmitter(t, v, false); return; }
     record(t, false);
 }
 
@@ -163,7 +308,7 @@ function visitShard(t: GameEntity): void {
     if (t.mass === Infinity) return;
     const v = t.shardVariant;
     if (v === undefined) return;
-    if (SHARD_VARIANTS[v].passThrough === true) return;
+    if (SHARD_VARIANTS[v].passThrough === true) { maybeRecordEmitter(t, v, true); return; }
     if (Math.max(t.size.x, t.size.y) * 0.5 < MIN_SHARD_OCCLUDER_R) return;
     record(t, true);
 }
@@ -259,6 +404,7 @@ function record(t: GameEntity, mobile: boolean): void {
     const v = t.shardVariant;
     o.transmit = v !== undefined ? SHARD_VARIANTS[v].transmit ?? 0 : 0;
     o.emits = v !== undefined ? SHARD_VARIANTS[v].emits ?? 0 : 0;
+    o.emitRgb = v !== undefined && o.emits > 0 ? emitTintFor(t, v) : null;
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
     _outBuf[_n++] = o;
@@ -290,18 +436,28 @@ export function collectOccluders(
     radius: number,
     out: Occluder[],
     shards: boolean = false,
+    emitOut?: Occluder[],
 ): number {
     _outBuf = out;
     _n = 0;
     _lx = lx;
     _ly = ly;
+    // `emitOut` opts into the SECOND output: the passThrough bodies that
+    // re-emit.  Omit it and the walk behaves exactly as it did before, which
+    // is what the nested collection for a shadowing emitter wants (an
+    // emitter's own light does not go looking for more emitters).
+    _emitBuf = emitOut ?? _EMPTY;
+    _emitN = 0;
     physics.forEachStaticInRadius(lx, ly, radius, visit);
     if (shards) physics.forEachDynamicInRadius(lx, ly, radius, visitShard);
     const n = _n;
     if (out.length !== n) out.length = n;
-    // Drop the reference so a stale `out` can't be written by a later stray
-    // call, and so this module doesn't pin the caller's array alive.
+    _lastEmitN = _emitN;
+    if (emitOut !== undefined && emitOut.length !== _emitN) emitOut.length = _emitN;
+    // Drop the references so a stale `out` can't be written by a later stray
+    // call, and so this module doesn't pin the caller's arrays alive.
     _outBuf = _EMPTY;
+    _emitBuf = _EMPTY;
     return n;
 }
 
@@ -389,7 +545,7 @@ const PLAYER_LIGHT = {
  *  origin and moved by the transform, so a moving light reuses one object.
  *  Camera zoom is the only thing that changes the radius, so the map stays
  *  a handful of entries. */
-const _gradCache = new Map<number, CanvasGradient>();
+const _gradCache = new Map<string, Map<number, CanvasGradient>>();
 
 /** Graded passes used to fake a penumbra, AS A FUNCTION OF HOW WIDE THE
  *  BAND IS.  Three passes is the point where banding stops reading as
@@ -786,21 +942,33 @@ function emitQuad(
  *  clear happens on a keypress and never in steady state. */
 let _gradBrightness = -1;
 
-function lightGradient(lctx: CanvasRenderingContext2D, rPx: number): CanvasGradient {
+function lightGradient(
+    lctx: CanvasRenderingContext2D, rPx: number, tint: string | null = null,
+): CanvasGradient {
     const bright = getLightBrightness();
     if (bright !== _gradBrightness) {
         _gradCache.clear();
         _gradBrightness = bright;
     }
+    // Keyed by COLOUR then radius, so a tinted emitter cannot collide with
+    // the player's own light at the same radius.  The tints are normalised
+    // and quantised (`normalizedTint`), which is what keeps this map small
+    // on a map whose nebula blends a different colour per body.
+    const rgb = tint ?? PLAYER_LIGHT.RGB;
+    let byRadius = _gradCache.get(rgb);
+    if (byRadius === undefined) {
+        byRadius = new Map<number, CanvasGradient>();
+        _gradCache.set(rgb, byRadius);
+    }
     const key = Math.round(rPx);
-    let g = _gradCache.get(key);
+    let g = byRadius.get(key);
     if (g === undefined) {
         g = lctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(1, key));
-        g.addColorStop(0, `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.PEAK * bright})`);
+        g.addColorStop(0, `rgba(${rgb}, ${PLAYER_LIGHT.PEAK * bright})`);
         g.addColorStop(PLAYER_LIGHT.MID,
-                       `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.MID_ALPHA * bright})`);
-        g.addColorStop(1, `rgba(${PLAYER_LIGHT.RGB}, 0)`);
-        _gradCache.set(key, g);
+                       `rgba(${rgb}, ${PLAYER_LIGHT.MID_ALPHA * bright})`);
+        g.addColorStop(1, `rgba(${rgb}, 0)`);
+        byRadius.set(key, g);
     }
     return g;
 }
@@ -844,12 +1012,13 @@ function compositeLight(
     lx: number, ly: number, worldToPx: number,
     penumbraK: number,
     refract: boolean,
+    tint: string | null = null,
 ): void {
     // 1. Falloff.  Created at the origin and MOVED by the transform, so the
-    //    cache key stays the radius alone.  setTransform rather than
+    //    cache key stays the radius and the colour.  setTransform rather than
     //    save/translate/restore: same effect, no state stack.
     lctx.setTransform(1, 0, 0, 1, cx, cy);
-    lctx.fillStyle = lightGradient(lctx, rPx);
+    lctx.fillStyle = lightGradient(lctx, rPx, tint);
     lctx.fillRect(-rPx, -rPx, rPx * 2, rPx * 2);
     lctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -1131,6 +1300,10 @@ const EMIT_MIN_RECEIVED = 0.06;
 const _emX = new Float64Array(64);
 const _emY = new Float64Array(64);
 const _emA = new Float64Array(64);
+/** The chosen emitters' COLOURS.  A plain array because they are strings —
+ *  references to the cached tints on the entities, so filling this assigns
+ *  pointers and allocates nothing. */
+const _emC: (string | null)[] = new Array(64).fill(null);
 
 /**
  * Composite the SECONDARY lights: every lit body whose variant re-emits.
@@ -1158,6 +1331,7 @@ function compositeEmitters(
     lctx: CanvasRenderingContext2D,
     cx: number, cy: number, rPx: number,
     occ: Occluder[], count: number,
+    emit: Occluder[], emitCount: number,
     lx: number, ly: number, worldToPx: number,
     maxEmitters: number,
 ): number {
@@ -1167,21 +1341,34 @@ function compositeEmitters(
     const cap = Math.min(maxEmitters, _emX.length);
 
     // PASS 1 — choose, into storage that owns its values.  See _emX above.
-    let n = 0;
-    for (let i = 0; i < count && n < cap; i++) {
-        const o = occ[i];
-        if (o.emits <= 0) continue;
+    //
+    // TWO SORTED LISTS, MERGED NEAREST-FIRST: the shadow casters that emit
+    // (glass, metal) and the passThrough emitters that never entered the
+    // shadow pool (nebula).  Merging rather than concatenating is what keeps
+    // the rule one rule — the nearest emitters win the budget, whichever
+    // list they came from — so a nebula cloud you are standing in cannot be
+    // out-ranked by a metal plate across the room.
+    let n = 0, i = 0, j = 0;
+    while (n < cap && (i < count || j < emitCount)) {
+        let o: Occluder;
+        if (j >= emitCount || (i < count && occ[i].distSq <= emit[j].distSq)) {
+            o = occ[i++];
+            if (o.emits <= 0) continue;
+        } else {
+            o = emit[j++];
+        }
         const dx = (o.x - lx) * worldToPx;
         const dy = (o.y - ly) * worldToPx;
         const d = Math.sqrt(dx * dx + dy * dy);
         const received = falloffFrac(d / rPx);
         if (received < EMIT_MIN_RECEIVED) continue;
         // A body cannot radiate more light than fell on it.
-        let emit = o.emits * scale;
-        if (emit > 1) emit = 1;
+        let em = o.emits * scale;
+        if (em > 1) em = 1;
         _emX[n] = o.x;
         _emY[n] = o.y;
-        _emA[n] = received * emit;
+        _emA[n] = received * em;
+        _emC[n] = o.emitRgb;
         n++;
     }
     if (n === 0) return 0;
@@ -1204,7 +1391,7 @@ function compositeEmitters(
             // by how much of it the material throws back.  So it tracks the
             // brightness cycle for free and can never out-shine what lit it.
             lctx.setTransform(1, 0, 0, 1, ex, ey);
-            lctx.fillStyle = lightGradient(lctx, emitRPx);
+            lctx.fillStyle = lightGradient(lctx, emitRPx, _emC[k]);
             lctx.globalAlpha = _emA[k];
             lctx.globalCompositeOperation = 'lighter';
             lctx.fillRect(-emitRPx, -emitRPx, emitRPx * 2, emitRPx * 2);
@@ -1229,7 +1416,8 @@ function compositeEmitters(
                                     Math.min(shadowTier.maxOccluders, cn),
                                     Math.min(4, cn));
         compositeLight(sctx, ex, ey, emitRPx, r._emitOccluders, sel,
-                       _emX[k], _emY[k], worldToPx, getShadowSoftness(), false);
+                       _emX[k], _emY[k], worldToPx, getShadowSoftness(), false,
+                       _emC[k]);
 
         lctx.globalAlpha = _emA[k];
         lctx.globalCompositeOperation = 'lighter';
@@ -1342,8 +1530,13 @@ export function renderLightLayer(
         // exists to show that this costs an acceptable amount under maximum
         // churn rather than to add machinery.
         const tier = getActiveLightingTier();
+        // The emitter buffer is asked for only while emission is on, so a
+        // frame with it off walks exactly the geometry it always did.
+        const wantEmitters = getEmissiveEnabled();
         const n = collectOccluders(r.physics, playerPos.x, playerPos.y, tier.maxRadius,
-                                   r._lightOccluders, getShardShadowsEnabled());
+                                   r._lightOccluders, getShardShadowsEnabled(),
+                                   wantEmitters ? r._lightEmitters : undefined);
+        r._lightEmitterCount = wantEmitters ? lastEmitterCount() : 0;
         // Nearest-first, then SELECT — see selectOccluders for why a plain
         // cap is wrong once debris is in the pool.
         r._lightOccluders.sort(byDistSq);
@@ -1376,6 +1569,7 @@ export function renderLightLayer(
             if (getEmissiveEnabled()) {
                 lights += compositeEmitters(
                     r, lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
+                    r._lightEmitters, r._lightEmitterCount,
                     playerPos.x, playerPos.y, worldToPx, tier.maxLights - 1);
             }
         }

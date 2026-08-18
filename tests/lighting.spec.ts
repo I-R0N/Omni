@@ -1013,6 +1013,96 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('nebula emits in its OWN colour, and still casts nothing', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+
+    // Nebula is `passThrough`: it must never enter the occluder pool (it is
+    // the most numerous static tile on the natural maps, and handing it the
+    // pool would blank the terrain shadows), and it must still light, in the
+    // colour it blended for itself.  Those two requirements are why emitters
+    // have a buffer of their own.
+    const r = await engine(page, async (e) => {
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      const pick = tiles.find((t: any) => t.shardVariant === 'nebula-tile');
+      if (!pick) return { built: false } as any;
+      pick.active = true;
+      pick._occluderR = undefined;
+      pick.position.x = 110; pick.position.y = 0;
+      // A KNOWN colour, so the assertion is about the plumbing rather than
+      // about whatever this cloud happened to blend.  Pure red is chosen
+      // because the player's own light is blue-green (125, 211, 252): if the
+      // emitter were drawn in the light's colour instead of the body's, the
+      // green channel would lead, and it must not.
+      pick.nebulaBlendedHex = '#ff0000';
+      pick._emitTint = undefined; pick._emitTintKey = undefined;
+      e.player.position.x = 0; e.player.position.y = 0;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      e.renderer.setLighting('unified');
+
+      const settle = () => new Promise<void>(res => {
+        let n = 0;
+        const t = () => { e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++n < 25) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      const probe = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const sx = (wx: number, wy: number) => [
+          (W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr,
+          (H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr,
+        ];
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        let rr = 0, gg = 0, bb = 0, n = 0;
+        for (const [wx, wy] of [[110, 55], [110, -55], [150, 35], [150, -35]]) {
+          const [x, y] = sx(wx, wy);
+          const i = (Math.round(y) * cv.width + Math.round(x)) * 4;
+          rr += img[i]; gg += img[i + 1]; bb += img[i + 2]; n++;
+        }
+        return [rr / n, gg / n, bb / n];
+      };
+      const sample = async (want: boolean) => {
+        if (e.renderer.getEmissive() !== want) e.renderer.toggleEmissive();
+        await settle();
+        return { rgb: probe(), emitters: e.renderer._lightEmitterCount,
+                 occ: e.renderer._lightOccluderCount,
+                 lights: e.renderer.lastLightingLights };
+      };
+      const off = await sample(false);
+      const on = await sample(true);
+      return { built: true, off, on, tint: pick._emitTint };
+    });
+
+    expect(r.built).toBe(true);
+    // It casts NOTHING either way — the shadow pool never sees it.
+    expect(r.off.occ).toBe(0);
+    expect(r.on.occ).toBe(0);
+    // The emitter buffer is filled only when something asked for emitters,
+    // so a frame with emission off walks exactly the geometry it used to.
+    expect(r.off.emitters).toBe(0);
+    expect(r.on.emitters).toBeGreaterThan(0);
+    expect(r.off.lights).toBe(1);
+    expect(r.on.lights).toBeGreaterThan(1);
+
+    // The tint is the BODY's colour, normalised to full value: brightness
+    // belongs to the alpha, so a dark surface still radiates a bright light
+    // of its own hue.
+    expect(r.tint).toBe('255, 0, 0');
+    const d = r.on.rgb.map((v: number, i: number) => v - r.off.rgb[i]);
+    expect(d[0]).toBeGreaterThan(1);          // it lit something...
+    expect(d[0]).toBeGreaterThan(d[1]);       // ...in RED, not in the
+    expect(d[0]).toBeGreaterThan(d[2]);       // player light's blue-green.
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

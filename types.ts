@@ -963,6 +963,14 @@ export interface GameEntity {
    *  circumradius.  See render/lighting.ts for why.  Invalidated wherever
    *  the polygon is mutated, alongside `_satCacheAxes`. */
   _occluderR?: number;
+  /** Cached EMISSION TINT for the unified light layer: the body's own colour,
+   *  normalised to full value and quantised, as an `'r, g, b'` string ready
+   *  for a gradient stop.  `_emitTintKey` is the source colour it was built
+   *  from — nebula bodies blend theirs per-instance, so the cache has to
+   *  notice when it changes.  Built on first use and on change only; never
+   *  per frame. */
+  _emitTint?: string | null;
+  _emitTintKey?: string;
 
 
   // Composite asteroid — tracks every drop (including power-ups) stored

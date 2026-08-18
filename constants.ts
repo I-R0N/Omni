@@ -5898,6 +5898,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-tile': {
     id: 'nebula-tile',
+    // Re-emits half the light it receives (DBG "Emissive"), in its OWN
+    // colour — a nebula is a glowing cloud, and the one material in the game
+    // whose colour is per-BODY rather than per-variant (`nebulaBlendedHex`,
+    // blended from its composition).  It is also the one emitter that is
+    // `passThrough`: it casts no shadow and never enters the occluder pool,
+    // so emission had to stop being a by-product of being a shadow caster
+    // (see the emitter buffer in render/lighting.ts).
+    emits: 0.5,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: {
@@ -6205,6 +6213,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-shard': {
     id: 'nebula-shard',
+    // Same as the tile it broke off, and for the same reason: a shard of a
+    // glowing cloud is still glowing cloud.
+    emits: 0.5,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: { kind: 'merge-only' },              // tiles regrow only via transmutation

@@ -179,6 +179,13 @@ export class RenderSystem {
   _emitCtx: CanvasRenderingContext2D | null = null;
   _emitOccluders: Occluder[] = [];
   _lightOccluderCount: number = 0;
+  /** This frame's PASSTHROUGH EMITTERS — bodies that re-emit light but cast
+   *  no shadow, so they never enter the occluder pool (nebula).  A second
+   *  output of the same grid walk, kept nearest-first; empty while emission
+   *  is off.  See the emitter-buffer note in render/lighting.ts for why they
+   *  cannot simply join the occluders. */
+  _lightEmitters: Occluder[] = [];
+  _lightEmitterCount: number = 0;
 
   /** DBG passthroughs for the lighting mode.  The state itself is module
    *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so

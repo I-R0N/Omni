@@ -1914,3 +1914,113 @@ tests needed real changes rather than re-baselining:
   not flake: the test asserts a geometry, so it now pins the geometry.
 - The **refraction** and **emissive** tests assert the new defaults and
   restore them, instead of asserting "a prototype ships off".
+
+---
+
+## A5i — nebula emits, and every emitter is its OWN colour
+
+Two requests, one mechanism. Emission was white — the player light's own
+blue-green — and it was available only to bodies that already cast shadows.
+Nebula is neither: it is the game's one glowing material, and it is
+`passThrough`, so it never enters the occluder pool at all.
+
+### Emitters are no longer a by-product of being an occluder
+
+A5g chose emitters by walking the shadow-caster set, which is exactly right
+while every emitter is also an occluder. Nebula breaks that from both ends,
+and the obvious fix is the wrong one: putting nebula into the shadow pool so
+the emitter walk can see it would hand it the pool. **1496 of Universe's 2227
+static tiles are nebula**, all nearer than the terrain behind them, so
+nearest-first selection would spend the entire 24-slot budget on bodies that
+deliberately cast nothing — the same starvation the shard share cap in
+`selectOccluders` exists to prevent, arriving from the other direction.
+
+So passThrough emitters get a buffer of their own, filled **during the same
+grid walk** — no second spatial query — and the emitter pass merges the two
+lists nearest-first. They cost the shadow pool nothing, the shadow pass never
+sees them, and the merge keeps the rule one rule: the nearest emitters win the
+budget, whichever list they came from, so a cloud you are standing inside
+cannot be out-ranked by a metal plate across the room.
+
+The buffer is kept nearest-first **by insertion** rather than collect-then-
+sort, because the candidate count on a nebula map is in the hundreds and the
+budget consuming it is single digits: an insertion whose first compare
+usually fails is cheaper than sorting a list that is then thrown away. The
+record evicted from the tail is the one reused for the insert, so a full
+buffer allocates nothing.
+
+`collectOccluders` takes the emitter array as an OPTIONAL out-parameter.
+Omit it — as the nested collection for a shadowing emitter does — and the
+walk behaves exactly as it did before; an emitter's own light does not go
+looking for more emitters.
+
+### Colour
+
+Each emitter now radiates in the body's own colour, resolved in this order:
+
+1. `nebulaBlendedHex` — a nebula blends its colour from its own composition,
+   so this is the one material whose emission colour is per-BODY rather than
+   per-variant.
+2. the entity's render colour.
+3. the variant's legacy `glow.color`, as a last resort.
+
+**The order matters, and measuring it is what set it.** Taking `glow.color`
+first was the first implementation, and it is visibly wrong: those are VFX
+leftovers from the contact glow A5f deleted, and metal's is **magenta**
+(`#d946ef`) — so a lit steel plate radiated magenta while its own surface
+stayed steel. Reading the entity's colour instead gives glass its indigo
+(`#6366f1`) and metal its steel (`#5b8499`), which is what "the tile's
+colour" means.
+
+Two properties of the tint are deliberate:
+
+- **Normalised to full value.** A surface colour is dark by nature — steel is
+  `#5b8499` — and a dark gradient reads as a smudge rather than as light.
+  Scaling the channels so the largest is 255 keeps the HUE and leaves the
+  brightness where it belongs, in the alpha (`received × emits`).
+- **Quantised to 32-step channels**, because the gradient cache is keyed on
+  colour then radius and nebula would otherwise mint a cache entry per body
+  on a map that has 1496 of them. The tint is built on a colour CHANGE and
+  cached on the entity (`_emitTint` / `_emitTintKey`), never per frame.
+
+`lightGradient` gained the tint parameter and both emitter paths use it — the
+flat halo and the shadowed scratch-canvas composite — so a shadowing nebula
+emitter is the right colour too.
+
+Measured on a hand-built scene, one tile due east, emission off vs on:
+
+| map | body | tint | Δ R,G,B |
+|---|---|---|---|
+| NEBULA_FIELD | nebula-tile `#ff3d94` | `255, 64, 160` | +6.8, +1.5, +4.3 |
+| GLASS_FIELD | glass-tile `#6366f1` | `96, 96, 255` | +2.3, +2.5, +7.2 |
+| METAL_FIELD | metal-tile `#5b8499` | `160, 224, 255` | +4.3, +6.0, +7.2 |
+
+Pink stays pink, glass leads in blue, steel is a pale blue-white. The nebula
+row also reports `occluders 0` with `lights 2` — it lit the scene while
+casting nothing, which is the whole point.
+
+### Cost
+
+Container-measured, and the counts drift on these maps (nebula maps have few
+or no occluders and the ship drifts between rows), so these are indicative
+rather than a ladder:
+
+| map | A5h defaults, emission off | A5i defaults | note |
+|---|---|---|---|
+| NEBULA_FIELD | ~0.30 p95 | ~1.39 p95 | the light had nothing to draw before |
+| UNIVERSE | ~0.34 p95 | ~1.73 p95 | two thirds of its tiles are nebula |
+
+The nebula showcase is where this change does the most work, and it is the
+map where the old layer did the least: `passThrough` meant a bare falloff
+with no shadows and no emitters, which is why Universe read as "muted" in
+every earlier measurement. The emitter budget is still `maxLights - 1`, so
+the cost is bounded by the tier rather than by how much nebula is on screen.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **125 passed**. The new
+test pins the three things that could each be silently wrong: nebula
+collects as ZERO occluders (it must never eat the shadow pool), the emitter
+buffer fills only when emission asked for it, and the light it adds is RED
+for a body stamped red — the player's own light is blue-green, so a
+mis-plumbed tint would show up as the green channel leading.
