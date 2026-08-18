@@ -553,7 +553,7 @@ test.describe('occluder collection', () => {
     // observable, and the occluder count in a saturated cluster is the cap.
     const walk = await engine(page, async (e) => {
       const out: { name: string; w: number; occ: number }[] = [];
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 7; i++) {
         await new Promise<void>(res => {
           let k = 0;
           const t = () => { if (++k < 8) requestAnimationFrame(t); else res(); };
@@ -567,18 +567,22 @@ test.describe('occluder collection', () => {
       return out;
     });
 
-    expect(walk.map(t => t.name)).toEqual(['low', 'medium', 'high', 'lowest', 'lower']);
+    expect(walk.map(t => t.name)).toEqual(
+      ['low', 'medium', 'high', 'ultra', 'minimal', 'lowest', 'lower']);
     const by = (n: string) => walk.find(t => t.name === n)!;
 
     // A cheaper tier has to be cheaper in every term that drives cost, or it
     // is only cheaper in its name.  The light canvas gets COARSER going down
-    // (bigger divisor -> fewer pixels)...
-    expect(by('lowest').w).toBeLessThan(by('lower').w);
-    expect(by('lower').w).toBeLessThan(by('low').w);
-    expect(by('low').w).toBeLessThan(by('medium').w);
+    // (bigger divisor -> fewer pixels), across the WHOLE ladder...
+    const ladder = ['minimal', 'lowest', 'lower', 'low', 'medium'];
+    for (let i = 1; i < ladder.length; i++) {
+      expect(by(ladder[i - 1]).w).toBeLessThan(by(ladder[i]).w);
+    }
+    expect(by('medium').w).toBeLessThan(by('ultra').w);   // ultra is 1:1
 
     // ...and the occluder cap gets SMALLER.  The cluster saturates every cap,
     // so these are the caps themselves.
+    expect(by('minimal').occ).toBeLessThan(by('lowest').occ);
     expect(by('lowest').occ).toBeLessThan(by('lower').occ);
     expect(by('lower').occ).toBeLessThan(by('low').occ);
     watch.assertClean();
@@ -836,12 +840,46 @@ test.describe('occluder collection', () => {
       };
       const plain = await sample(false);
       const emit = await sample(true);
+
+      // The emit-brightness cycle, walked once.
+      const seen: string[] = [];
+      const firstEmit = e.renderer.getEmitBrightness();
+      for (let i = 0; i < 20; i++) {
+        seen.push(e.renderer.getEmitBrightness());
+        e.renderer.cycleEmitBrightness();
+        if (e.renderer.getEmitBrightness() === firstEmit) break;
+      }
+
+      // Emitter shadows: on, then measured, then back off.
+      const shadowsDefaultOff = !e.renderer.getEmitShadows();
+      e.renderer.toggleEmitShadows();
+      await settle();
+      const shadowed = { lum: probe() };
+      e.renderer.toggleEmitShadows();
+
       if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
-      return { built: true, plain, emit, backOff: e.renderer.getEmissive() };
+      return { built: true, plain, emit, shadowed, shadowsDefaultOff,
+               emitCycle: { first: firstEmit, seen },
+               backOff: e.renderer.getEmissive() };
     });
 
     expect(r.built).toBe(true);
     expect(r.backOff).toBe(false);
+    // The emitter brightness knob scales the variant's own value against the
+    // baseline it is authored at, so its default must be a no-op — and no
+    // entry may exceed 1/1, since a body cannot radiate more than fell on it.
+    expect(r.emitCycle.first).toBe('1/2');
+    for (const name of r.emitCycle.seen) {
+      const m = /^(\d+)\/(\d+)$/.exec(name);
+      expect(m).not.toBeNull();
+      expect(Number(m![1])).toBeLessThanOrEqual(Number(m![2]));
+    }
+    // Emitter shadows are a second prototype and ship off; turning them on
+    // must not break the light, which is the failure the scratch-canvas path
+    // could plausibly have (destination-out on the wrong surface erases the
+    // layer rather than the emitter's share, and the symptom is a dark hole).
+    expect(r.shadowsDefaultOff).toBe(true);
+    expect(r.shadowed.lum).toBeGreaterThan(r.plain.lum * 0.5);
     // OFF, the light is one light.  ON, the lit metal is a second.
     expect(r.plain.lights).toBe(1);
     expect(r.emit.lights).toBeGreaterThan(1);

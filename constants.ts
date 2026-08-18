@@ -1444,6 +1444,63 @@ export function toggleEmissive(): boolean {
   return emissiveEnabled;
 }
 
+/** DBG: how much of the light it receives a body re-emits, as a fraction —
+ *  the emissive sibling of "Refr bright".
+ *
+ *  It SCALES the variant's own `emits` against the 1/2 baseline those
+ *  variants are authored at, so the default is exactly what the table says
+ *  and a future variant that emits less than metal still emits less than
+ *  metal.  Clamped at 1 in the geometry: a body cannot radiate more light
+ *  than fell on it, which is the one physical claim this whole feature
+ *  rests on. */
+export const EMIT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
+  { name: '1/2',  frac: 0.5   },
+  { name: '2/3',  frac: 0.667 },
+  { name: '3/4',  frac: 0.75  },
+  { name: '1/1',  frac: 1     },
+  { name: '1/3',  frac: 0.333 },
+  { name: '1/4',  frac: 0.25  },
+  { name: '1/6',  frac: 0.167 },
+  { name: '1/10', frac: 0.1   },
+] as const;
+/** The fraction `SHARD_VARIANTS[*].emits` is authored against, so the cycle's
+ *  default is a no-op rather than a re-tuning. */
+export const EMIT_BASELINE = 0.5;
+let activeEmitBrightnessIndex = 0;
+export function getEmitBrightness(): number {
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].frac;
+}
+export function getEmitBrightnessName(): string {
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].name;
+}
+export function cycleEmitBrightness(): string {
+  activeEmitBrightnessIndex =
+    (activeEmitBrightnessIndex + 1) % EMIT_BRIGHTNESS_CYCLE.length;
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].name;
+}
+
+/** DBG: may the SECONDARY lights cast shadows of their own?  Off by default,
+ *  and off for a reason that is about cost rather than correctness.
+ *
+ *  Each emitter that shadows needs its OWN occluder collection — the pool is
+ *  shared and consumed per light — and its own compositing pass, which
+ *  cannot simply be drawn onto the accumulated layer: `destination-out`
+ *  would erase the light already there, not just the emitter's share.  So
+ *  the shadowing path composites each emitter into a scratch canvas and
+ *  blits the result, which is the honest way to do it and several times the
+ *  cost of the flat halo.
+ *
+ *  A true TERTIARY bounce — emitters lighting other emitters — is NOT what
+ *  this does, and is a different problem: it needs the emitters resolved in
+ *  dependency order and re-lit, where this pass reads every emitter's
+ *  brightness from the player's falloff alone. */
+let emitShadowsEnabled = false;
+export function getEmitShadowsEnabled(): boolean { return emitShadowsEnabled; }
+export function toggleEmitShadows(): boolean {
+  emitShadowsEnabled = !emitShadowsEnabled;
+  return emitShadowsEnabled;
+}
+
 let refractionEnabled = false;
 export function getRefractionEnabled(): boolean { return refractionEnabled; }
 export function toggleRefraction(): boolean {
@@ -1605,12 +1662,23 @@ export interface LightingTier {
   readonly ambientPerStage: number;
 }
 export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
+  { name: 'minimal', divisor: 7, maxLights: 1, maxOccluders: 4,  maxShardOccluders: 2,  maxRadius: 180, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'lowest', divisor: 5, maxLights: 2,  maxOccluders: 8,  maxShardOccluders: 3,  maxRadius: 220, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'lower',  divisor: 4, maxLights: 3,  maxOccluders: 14, maxShardOccluders: 5,  maxRadius: 260, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxShardOccluders: 16, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
   { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxShardOccluders: 32, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
+  { name: 'ultra',  divisor: 1, maxLights: 32, maxOccluders: 160, maxShardOccluders: 56, maxRadius: 650, penumbraK: 5.0, ambientPerStage: 0.14 },
 ] as const;
+// SEVEN RUNGS, and the ends are the interesting ones.  `minimal` renders
+// the light layer at a SEVENTH of screen resolution with a single light and
+// four occluders — the setting for a device that cannot afford `lowest`,
+// where the question is whether to have a light at all.  `ultra` runs the
+// layer at FULL screen resolution with 32 lights: not a play setting, but
+// the one that answers "what would this look like without the budget", and
+// the emissive prototype in particular is bounded by `maxLights`, so it has
+// nowhere to show itself below `medium`.
+//
 // TWO TIERS BELOW LOW, added when the worst-case cost stopped having
 // comfortable headroom (~1.7 ms p95 against a 2.0 ms budget that has never
 // been re-derived on a device).  Every knob that drives cost moves together

@@ -1681,6 +1681,10 @@ export interface EngineStats {
   lightBrightnessName?: string;
   /** DBG: do metal and glass re-emit the light that falls on them? */
   emissiveEnabled?: boolean;
+  /** DBG: re-emitted fraction, as a label. */
+  emitBrightnessName?: string;
+  /** DBG: may the secondary lights cast shadows of their own? */
+  emitShadowsEnabled?: boolean;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

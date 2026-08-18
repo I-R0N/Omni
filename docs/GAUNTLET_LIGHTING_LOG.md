@@ -33,6 +33,7 @@ recorded rather than quietly dropped.
 - [x] **A5d** — Penumbra as a cone, not an offset; glass transmits light
 - [x] **A5e** — Two tiers below Low; refraction prototype behind a DBG toggle
 - [x] **A5f** — Light brightness; softer shadows; brighter caustics; metal/glass emit
+- [x] **A5g** — Seven tiers; an emission knob; optional (costly) emitter shadows
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
@@ -1703,3 +1704,103 @@ it: the brightness cycle must dim, and the tier cycle must not. The emissive
 test pins that the light count goes up AND that something beside the tile
 actually brightens — a count that rose while nothing brightened would mean
 the emitter was composited where nobody can see it.
+
+---
+
+## A5g — seven tiers, an emission knob, and optional emitter shadows
+
+### 1. Two more rungs, one at each end
+
+`LIGHTING_TIERS` is now seven, and the ends are the interesting ones:
+
+| tier | divisor | maxLights | maxOccluders | maxRadius |
+|---|---|---|---|---|
+| **minimal** | 7 | 1 | 4 | 180 |
+| lowest | 5 | 2 | 8 | 220 |
+| lower | 4 | 3 | 14 | 260 |
+| low *(default)* | 3 | 4 | 24 | 300 |
+| medium | 2 | 8 | 48 | 400 |
+| high | 2 | 16 | 96 | 500 |
+| **ultra** | 1 | 32 | 160 | 650 |
+
+`minimal` renders the light layer at a SEVENTH of screen resolution with one
+light and four occluders — the setting for a device that cannot afford
+`lowest`, where the question is whether to have a light at all. `ultra` runs
+it at FULL screen resolution with 32 lights: not a play setting, but the one
+that answers "what would this look like without the budget". The emissive
+prototype in particular is bounded by `maxLights`, so it had nowhere to show
+itself above three emitters before this.
+
+### 2. Emit bright — the emission knob
+
+`EMIT_BRIGHTNESS_CYCLE`, the emissive sibling of `Refr bright`: `1/2`
+(default) → 2/3 → 3/4 → 1/1 → 1/3 → 1/4 → 1/6 → 1/10.
+
+It SCALES the variant's own `emits` against `EMIT_BASELINE` (the 1/2 those
+variants are authored at) rather than replacing it, so the default is exactly
+what the table says and a future material that emits less than metal still
+emits less than metal. Clamped at 1 in the geometry: **a body cannot radiate
+more light than fell on it**, which is the one physical claim the whole
+feature rests on.
+
+### 3. Emit shadow — secondary lights that occlude, and what it costs
+
+A5f declined this on cost. It is now a toggle, off by default, because the
+question "what would it look like" deserves an answer even when the answer is
+"more than we can afford".
+
+Two things had to be built rather than switched on:
+
+- **Its own compositing surface.** An emitter's shadows cannot be drawn onto
+  the accumulated light layer: `destination-out` there erases the light
+  already present, not just the emitter's share. So each shadowing emitter
+  composites into a scratch canvas and blits its own box back with `lighter`.
+  Clearing and blitting only the emitter's box keeps the cost proportional to
+  the halo rather than to the screen.
+- **A snapshot before the second collection.** Emitters are chosen by walking
+  the player light's occluder set, and collecting occluders for an emitter
+  OVERWRITES the shared pool that set points into. So the choosing now
+  finishes into `Float64Array` storage that owns its values before any second
+  collection happens. Reading `o.x` in the drawing loop would silently read
+  whatever the last collection left there — emitters drifting onto other
+  bodies' positions, and only when shadows are on. This is precisely the
+  hazard the pool comment has warned about since A3, arriving on schedule.
+
+Measured on the metal showcase, Emissive on, before any cap:
+
+| tier | shadows off p95 | shadows on p95 | emitters |
+|---|---|---|---|
+| low | 0.865 | 2.130 | 3 |
+| medium | 1.590 | **7.145** | 7 |
+| high | 2.310 | **14.865** | 15 |
+
+**14.9 ms from a debug toggle** — an entire frame budget, and it scales with
+the emitter count because the cost is almost entirely the per-emitter
+occluder collection. So `EMIT_SHADOW_MAX = 4` caps how many may SHADOW,
+whatever the tier allows to exist; the rest fall back to the flat halo rather
+than vanishing, so the light count is still what the tier promised and only
+the treatment degrades. After the cap:
+
+| tier | off p95 | on p95 |
+|---|---|---|
+| low | 1.260 | 2.560 |
+| medium | 2.365 | 5.975 |
+| high | 3.225 | **7.200** |
+
+Still heavy, and still a debug toggle. What it buys is roughly constant now
+rather than growing with the tier, which is the shape a cap is for.
+
+**This is not a TERTIARY bounce**, despite the phrasing that prompted it.
+Emitters do not light other emitters: every emitter reads its brightness from
+the player light's falloff alone. A real second bounce needs the emitters
+resolved in dependency order and re-lit, which is a different problem and a
+much larger one.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **123 passed**. The tier
+test walks all seven rungs and asserts the divisor and occluder ladders are
+monotone across the whole range. The emissive test gained the brightness
+table's proper-fraction rule and a check that turning emitter shadows ON does
+not darken the scene — the plausible failure of the scratch-canvas path is a
+`destination-out` landing on the wrong surface, whose symptom is a hole.

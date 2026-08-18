@@ -34,7 +34,7 @@ import {
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
-    cycleLightBrightness, toggleEmissive,
+    cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -392,6 +392,23 @@ export class DebugControls {
    *  rather than when light reached them. */
   toggleEmissive() {
     toggleEmissive();
+  }
+
+  /** DBG (Visual): how much of the light it receives a body re-emits.
+   *  Scales the variant's own `emits` against the 1/2 baseline it is
+   *  authored at, so the default is a no-op.  Clamped at 1 in the geometry —
+   *  a body cannot radiate more light than fell on it. */
+  cycleEmitBrightness() {
+    cycleEmitBrightness();
+  }
+
+  /** DBG (Visual): may the SECONDARY lights cast shadows of their own?  Off
+   *  by default and expensive on: each shadowing emitter needs its own
+   *  occluder collection and its own compositing surface, because
+   *  destination-out on the shared layer would erase light that is not its
+   *  own. */
+  toggleEmitShadows() {
+    toggleEmitShadows();
   }
 
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.

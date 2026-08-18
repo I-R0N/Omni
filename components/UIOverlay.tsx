@@ -89,6 +89,8 @@ interface UIOverlayProps {
   onCycleRefractBrightness?: () => void;
   onCycleLightBrightness?: () => void;
   onToggleEmissive?: () => void;
+  onCycleEmitBrightness?: () => void;
+  onToggleEmitShadows?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -262,6 +264,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleRefractBrightness,
   onCycleLightBrightness,
   onToggleEmissive,
+  onCycleEmitBrightness,
+  onToggleEmitShadows,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1501,6 +1505,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Emissive', onToggleEmissive,
                   stats.emissiveEnabled === true ? 'On' : 'Off',
                   'PROTOTYPE. Do METAL and GLASS re-emit the light that falls on them? On, every lit body of those materials becomes a SECOND light at its own position — half the light it received, uniform in every direction, falling off the way the player\'s does. It replaces the contact-driven glow those two materials used to carry, which lit up when something TOUCHED them rather than when light reached them, so a metal plate across the room stayed dead however brightly it was lit. Secondary lights deliberately cast no shadows of their own: each would need its own occluder collection, and the pool is shared and consumed per light, so N emitters would cost N collections on the tightest budget in the system.')}
+                {ctrlRow('Emit bright', onCycleEmitBrightness,
+                  stats.emitBrightnessName ?? '1/2',
+                  'How much of the light it receives a body re-emits, as a fraction. Only has an effect while Emissive is on. It SCALES the variant\'s own emits value against the 1/2 baseline those variants are authored at, so the default is exactly what the table says and a future material that emits less than metal still emits less than metal. Clamped at 1 in the geometry: a body cannot radiate more light than fell on it, which is the one physical claim this feature rests on.')}
+                {ctrlRow('Emit shadow', onToggleEmitShadows,
+                  stats.emitShadowsEnabled === true ? 'On' : 'Off',
+                  'May the SECONDARY lights cast shadows of their own? Off by default, and off for cost rather than correctness. Each shadowing emitter needs its OWN occluder collection — the pool is shared and consumed per light — and its own compositing surface, because destination-out drawn onto the accumulated layer would erase the light already there rather than only the emitter\'s share. So each one composites into a scratch canvas and blits its own box back. Note this is not a TERTIARY bounce: emitters do not light other emitters, since every emitter reads its brightness from the player light\'s falloff alone.')}
                 {ctrlRow('Shadow soft', onCycleShadowSoftness,
                   stats.shadowSoftnessName ?? 'soft',
                   'Shadow-edge softness. A point light casts a perfectly HARD shadow, which is what made the first version read as a drawn line rather than as lighting. Softness here is an ANGLE, so the soft band WIDENS with distance from the caster the way a real area light\'s does — tight against the tile, spreading further out — rather than being a uniform blur. Off is the hard-edged original, kept as the control. Costs two extra wedge passes per light when on.')}

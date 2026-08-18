@@ -36,6 +36,7 @@ import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
+    getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -1106,6 +1107,34 @@ const EMIT_RADIUS_FRAC = 0.32;
  *  light, `emits` of almost nothing is exactly nothing, and it would still
  *  cost a gradient fill to draw. */
 const EMIT_MIN_RECEIVED = 0.06;
+/** Occluder cap for a SHADOWING emitter, on top of the tier's.  A secondary
+ *  light is a third the radius of the primary, so it sees far less geometry
+ *  anyway; this keeps the worst case bounded when the toggle is on. */
+const EMIT_MAX_OCCLUDERS = 12;
+/** How many emitters may SHADOW, whatever the tier allows to exist.
+ *
+ *  Measured on the metal showcase with the toggle on: +1.3 ms at Low (3
+ *  emitters), +5.6 at Medium (7), and **+12.6 ms at High (15)** — an entire
+ *  frame budget, from a debug toggle.  The cost is per emitter and almost
+ *  entirely its own occluder collection, so it scales with the count and
+ *  nothing else.  Four shadowing emitters answer the question the toggle
+ *  exists to ask ("what would this look like") as well as fifteen do, and
+ *  the rest fall back to the flat halo rather than disappearing. */
+const EMIT_SHADOW_MAX = 4;
+
+/** Emitter snapshot: world position, radius and alpha, as PLAIN NUMBERS.
+ *
+ *  THIS EXISTS BECAUSE THE OCCLUDER POOL IS SHARED.  Emitters are chosen by
+ *  walking the player light's own occluder set, and collecting occluders for
+ *  an emitter overwrites the pool records that set points into — so the
+ *  choosing has to FINISH, into storage that owns its values, before any
+ *  second collection happens.  Reading `o.x` inside the second loop would
+ *  silently read whatever the last collection put there, and the symptom
+ *  (emitters drifting onto other bodies' positions, only when shadows are
+ *  on) is exactly the kind the pool comment warns about. */
+const _emX = new Float64Array(64);
+const _emY = new Float64Array(64);
+const _emA = new Float64Array(64);
 
 /**
  * Composite the SECONDARY lights: every lit body whose variant re-emits.
@@ -1119,13 +1148,17 @@ const EMIT_MIN_RECEIVED = 0.06;
  * arithmetic operations. Reading it off the canvas would be a CPU readback
  * of the light layer, which this system does not do at any price.
  *
- * NO SHADOWS FROM SECONDARY LIGHTS, deliberately. Each would need its own
- * occluder collection — the pool is shared and consumed per light — so
- * shadowing N emitters costs N collections on the tightest budget in the
- * system. They are dim and small; what it costs is a halo bleeding a little
- * through a wall, which is a far better trade than the frame time.
+ * SHADOWS ARE OPTIONAL AND EXPENSIVE. Without them an emitter is one
+ * gradient fill. With them it needs its own occluder collection AND its own
+ * compositing surface — it cannot be drawn straight onto the accumulated
+ * layer, because `destination-out` there would erase the light already
+ * present rather than only the emitter's share. So the shadowing path
+ * composites into a scratch canvas and blits the result, clearing and
+ * blitting only the emitter's own box so the cost stays proportional to the
+ * halo rather than to the screen.
  */
 function compositeEmitters(
+    r: RenderSystem,
     lctx: CanvasRenderingContext2D,
     cx: number, cy: number, rPx: number,
     occ: Occluder[], count: number,
@@ -1134,10 +1167,12 @@ function compositeEmitters(
 ): number {
     if (maxEmitters <= 0) return 0;
     const emitRPx = Math.max(1, rPx * EMIT_RADIUS_FRAC);
-    let drawn = 0;
-    // `occ` is sorted nearest-first, so this takes the emitters the light
-    // falls on hardest without a second sort.
-    for (let i = 0; i < count && drawn < maxEmitters; i++) {
+    const scale = getEmitBrightness() / EMIT_BASELINE;
+    const cap = Math.min(maxEmitters, _emX.length);
+
+    // PASS 1 — choose, into storage that owns its values.  See _emX above.
+    let n = 0;
+    for (let i = 0; i < count && n < cap; i++) {
         const o = occ[i];
         if (o.emits <= 0) continue;
         const dx = (o.x - lx) * worldToPx;
@@ -1145,22 +1180,88 @@ function compositeEmitters(
         const d = Math.sqrt(dx * dx + dy * dy);
         const received = falloffFrac(d / rPx);
         if (received < EMIT_MIN_RECEIVED) continue;
+        // A body cannot radiate more light than fell on it.
+        let emit = o.emits * scale;
+        if (emit > 1) emit = 1;
+        _emX[n] = o.x;
+        _emY[n] = o.y;
+        _emA[n] = received * emit;
+        n++;
+    }
+    if (n === 0) return 0;
 
-        // The emitter IS the player light, smaller and dimmer: same cached
-        // gradient, scaled by how much light reached the body and by how
-        // much of it the material throws back.  So it tracks the brightness
-        // cycle for free, and can never out-shine what lit it.
-        lctx.setTransform(1, 0, 0, 1, cx + dx, cy + dy);
-        lctx.fillStyle = lightGradient(lctx, emitRPx);
-        lctx.globalAlpha = received * o.emits;
+    const shadowed = getEmitShadowsEnabled() && r.physics !== undefined;
+    const emitWorldR = emitRPx / worldToPx;
+
+    // PASS 2 — draw.  Only now may a second collection touch the pool.
+    for (let k = 0; k < n; k++) {
+        const ex = cx + (_emX[k] - lx) * worldToPx;
+        const ey = cy + (_emY[k] - ly) * worldToPx;
+
+        // Past the shadow budget, an emitter still lights — it just lights
+        // flatly.  Falling back beats vanishing: the count is what the tier
+        // promised, and only the treatment degrades.
+        if (!shadowed || k >= EMIT_SHADOW_MAX) {
+            // The emitter IS the player light, smaller and dimmer: same
+            // cached gradient, scaled by how much light reached the body and
+            // by how much of it the material throws back.  So it tracks the
+            // brightness cycle for free and can never out-shine what lit it.
+            lctx.setTransform(1, 0, 0, 1, ex, ey);
+            lctx.fillStyle = lightGradient(lctx, emitRPx);
+            lctx.globalAlpha = _emA[k];
+            lctx.globalCompositeOperation = 'lighter';
+            lctx.fillRect(-emitRPx, -emitRPx, emitRPx * 2, emitRPx * 2);
+            lctx.globalCompositeOperation = 'source-over';
+            lctx.globalAlpha = 1;
+            lctx.setTransform(1, 0, 0, 1, 0, 0);
+            continue;
+        }
+
+        const sctx = ensureEmitCanvas(r);
+        if (sctx === null) continue;
+        // Clear and composite only this emitter's own box.
+        const bx = Math.floor(ex - emitRPx), by = Math.floor(ey - emitRPx);
+        const bw = Math.ceil(emitRPx * 2) + 1, bh = bw;
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.clearRect(bx, by, bw, bh);
+
+        const cn = collectOccluders(r.physics!, _emX[k], _emY[k], emitWorldR,
+                                    r._emitOccluders, getShardShadowsEnabled());
+        r._emitOccluders.sort(byDistSq);
+        const sel = selectOccluders(r._emitOccluders, cn,
+                                    Math.min(EMIT_MAX_OCCLUDERS, cn),
+                                    Math.min(4, cn));
+        compositeLight(sctx, ex, ey, emitRPx, r._emitOccluders, sel,
+                       _emX[k], _emY[k], worldToPx, getShadowSoftness(), false);
+
+        lctx.globalAlpha = _emA[k];
         lctx.globalCompositeOperation = 'lighter';
-        lctx.fillRect(-emitRPx, -emitRPx, emitRPx * 2, emitRPx * 2);
+        lctx.drawImage(r._emitCanvas!, bx, by, bw, bh, bx, by, bw, bh);
         lctx.globalCompositeOperation = 'source-over';
         lctx.globalAlpha = 1;
-        lctx.setTransform(1, 0, 0, 1, 0, 0);
-        drawn++;
     }
-    return drawn;
+    return n;
+}
+
+/** Scratch surface for a SHADOWING emitter.  One canvas, reused across
+ *  emitters and frames, sized to the light canvas — only the emitter's own
+ *  box is ever cleared or blitted, so its size costs memory rather than
+ *  fill rate.  Null when the toggle has never been on, so the ordinary path
+ *  allocates nothing. */
+function ensureEmitCanvas(r: RenderSystem): CanvasRenderingContext2D | null {
+    if (r._emitCanvas !== null && r._emitCanvas.width === r._lightW
+        && r._emitCanvas.height === r._lightH) {
+        return r._emitCtx;
+    }
+    if (typeof document === 'undefined') return null;
+    if (r._emitCanvas === null) {
+        r._emitCanvas = document.createElement('canvas');
+        r._emitCtx = r._emitCanvas.getContext('2d');
+        if (r._emitCtx === null) { r._emitCanvas = null; return null; }
+    }
+    r._emitCanvas.width = r._lightW;
+    r._emitCanvas.height = r._lightH;
+    return r._emitCtx;
 }
 
 /**
@@ -1277,7 +1378,7 @@ export function renderLightLayer(
             // the tier's budget is shared rather than added to.
             if (getEmissiveEnabled()) {
                 lights += compositeEmitters(
-                    lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
+                    r, lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
                     playerPos.x, playerPos.y, worldToPx, tier.maxLights - 1);
             }
         }
