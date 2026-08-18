@@ -52,6 +52,88 @@ that *produced* the result being reported.
 
 ---
 
+## ⚠️ MERGE DEFERRED — the seam waits for PRs #88 and #89
+
+**Decision: merge this branch LAST, after the two large in-flight PRs land.**
+Operator's call, and the measurement below is why.
+
+### What was measured
+
+The seam was trial-merged into both open PRs against the shared base
+`claude/plan-completion`:
+
+| PR | Subject | Size |
+|---|---|---|
+| **#88** | unified tile lighting A0–A5, shard occluders, static-query convergence | 5,122 insertions / 16 files |
+| **#89** | gauntlet 5d — UI coherence | 2,849 insertions / 18 files |
+
+**Git merges BOTH cleanly — and the merged tree does NOT typecheck.** A clean
+textual merge is not the test; the type-level one is:
+
+| PR | Missing from `Renderer` | Referenced at |
+|---|---|---|
+| #88 | `lastLightingMs`, `lastLightingLights` | `GameEngine.ts` ×2 |
+| #89 | `damageTriggeredBars` | `GameEngine.ts` ×2, `debugControls.ts` ×2 |
+| #89 | `bossBarActive` | `GameEngine.ts` ×1 |
+
+Both PRs are green today. Merging the seam first turns whichever merges
+*second* red, with errors reading `Property 'lastLightingMs' does not exist
+on type 'Renderer'` — a confusing failure on work unrelated to WebGPU.
+
+### Why "last" rather than "now"
+
+The asymmetry decides it. The seam is **4 files and two lines of real
+change** with zero behavioural risk, and rebasing it is trivial. Forcing two
+large in-flight PRs to absorb an interface change is a far worse trade, and
+the seam's value does not decay while it waits.
+
+### THE REAL FINDING: this is the seam's ONGOING cost, and it is larger than
+§Stage 3 represented
+
+Stage 3 recorded that **19 of 28** interface members are debug flags and
+perf counters, and framed it as a static observation about coupling. The
+trial merge turns that into a measured rate:
+
+> **In roughly one day of parallel work, TWO separate PRs each added new
+> renderer fields.**
+
+With the seam merged, every renderer feature edits **two** files instead of
+one, and forgetting the second **breaks the build** rather than degrading
+gracefully. That is a standing tax on the codebase's most active subsystem,
+paid by every future renderer change — not a one-off.
+
+**This should be resolved BEFORE the seam lands, not after.** Two options,
+both deferred to the operator:
+
+1. **Narrow the interface** to the 9 genuine members (7 rendering API + 2
+   sim-wiring) and leave debug flags and perf counters reached through the
+   concrete `RenderSystem`. The seam then covers the draw path only — which
+   is the part a renderer swap actually needs — and new perf counters stop
+   touching it at all.
+2. **`RendererStats`** — the object the engine asks for once per frame,
+   noted in Stage 3 as the obvious follow-up. Centralises the counters, but
+   they still have to be declared somewhere, so it reduces the churn without
+   eliminating it.
+
+Option 1 is the cheaper answer to the problem actually measured.
+
+### The sequence when this resumes
+
+1. Merge **#88** and **#89**.
+2. Rebase this branch onto the updated `claude/plan-completion`.
+3. Decide the interface question above; if the interface stays as-is, add the
+   four missing members:
+   ```ts
+   lastLightingMs: number;
+   lastLightingLights: number;
+   damageTriggeredBars: boolean;
+   bossBarActive: boolean;
+   ```
+4. Re-run the three gates, confirm the emitted JS is still byte-identical
+   (normalise the build timestamp first — see §Stage 3), and merge.
+
+---
+
 ## Checklist
 
 - [x] **Stage 0** — Device support (**KG1 PASSED** on iPhone / iOS 26.6)
@@ -711,7 +793,9 @@ WebGPU or otherwise:
    `setTrailShape`.
 
 **Group 3 is the awkward two-thirds**, and naming it is the point of doing
-this stage carefully. Those are *fields*, not methods, so the interface must
+this stage carefully. **It is also the seam's standing cost — see the
+MERGE DEFERRED section at the top, where a trial merge against two in-flight
+PRs measured the rate at which new renderer fields appear.** Those are *fields*, not methods, so the interface must
 expose them as mutable properties, and a second renderer has to carry all
 thirteen even where they are meaningless to it — a GPU renderer has no "tint
 cache miss", and `lastRenderMs` measures CPU-side call issuing, which is
