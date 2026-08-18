@@ -1541,6 +1541,58 @@ export function cycleEmitShadowTier(): string {
   return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
 }
 
+/** DBG: how hard the CAUSTIC edges are — the two fades that keep a refracted
+ *  cone from switching on and off.
+ *
+ *  Reported from the device as a click or flash on glass while drifting past
+ *  it slowly, and it is two separate cliffs behind one symptom:
+ *
+ *   - TOTAL INTERNAL REFLECTION is a step.  Past the critical angle a face
+ *     transmits nothing, so each face's cone appeared and vanished at FULL
+ *     length as the body turned relative to the light.  Real transmission
+ *     falls to zero AT that angle instead (Fresnel), so `tir` fades the cone
+ *     out over a band of the Snell discriminant, which is 0 exactly at the
+ *     critical angle.
+ *   - THE OCCLUDER CAP is a step.  In a dense field the pool sits saturated
+ *     — measured at 24 of 24 on the glass showcase — so bodies swap in and
+ *     out of it as the ship moves, and an entering body brought its whole
+ *     caustic at full strength.  `cap` fades a body's caustic out as it
+ *     approaches the eviction boundary, so nothing visible is ever evicted.
+ *
+ *  Both are expressed as fractions rather than as alphas because every cone
+ *  in a transmit group shares ONE compound path and therefore one fill: the
+ *  weight rides the cone's THROW instead, and since the fill is the light's
+ *  own falloff gradient, a shorter cone is a dimmer one.
+ *
+ *  'off' restores the cliffs exactly, which is the control case the fix was
+ *  measured against. */
+export const CAUSTIC_FADE_CYCLE: ReadonlyArray<{ name: string; tir: number; cap: number }> = [
+  // The two fades are tuned very differently ON PURPOSE, because only one of
+  // them has a measured benefit.  The TIR taper removes a cliff that was
+  // MEASURED — per-face transmission flipping from full to nothing in a
+  // single step of movement, now ramping over several.  The CAP fade is
+  // mechanically sound but its benefit could not be separated from the
+  // ordinary churn of 24 bodies moving, while its COST is measurable: at a
+  // quarter of the ranks it costs a third of the caustic's total throw.  So
+  // it ships light and is there to be turned up if the device disagrees.
+  { name: 'smooth', tir: 0.25, cap: 0.08 },
+  { name: 'soft',   tir: 0.45, cap: 0.20 },
+  { name: 'heavy',  tir: 0.60, cap: 0.35 },
+  { name: 'light',  tir: 0.12, cap: 0    },
+  { name: 'off',    tir: 0,    cap: 0    },
+] as const;
+let activeCausticFadeIndex = 0;
+export function getCausticFade(): { name: string; tir: number; cap: number } {
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex];
+}
+export function getCausticFadeName(): string {
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex].name;
+}
+export function cycleCausticFade(): string {
+  activeCausticFadeIndex = (activeCausticFadeIndex + 1) % CAUSTIC_FADE_CYCLE.length;
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex].name;
+}
+
 /** DBG: how long an emitter takes to FADE in or out, in seconds.
  *
  *  ADDED BECAUSE EMISSION FLASHED.  The set of emitters is chosen nearest-

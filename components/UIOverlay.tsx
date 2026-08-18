@@ -93,6 +93,7 @@ interface UIOverlayProps {
   onToggleEmitShadows?: () => void;
   onCycleEmitShadowTier?: () => void;
   onCycleEmitFade?: () => void;
+  onCycleCausticFade?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -270,6 +271,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleEmitShadows,
   onCycleEmitShadowTier,
   onCycleEmitFade,
+  onCycleCausticFade,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1530,6 +1532,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Refraction', onToggleRefraction,
                   stats.refractionEnabled === true ? 'On' : 'Off',
                   'ON by default, after device testing. Off: glass passes light STRAIGHT THROUGH at reduced brightness, which is right for a parallel-faced pane — a slab offsets a ray sideways but does not bend it, and a regular hexagon has three pairs of parallel faces. On (default): each exit face refracts by Snell\'s law and throws an additive cone along the DEVIATED direction, scaled by the Refr bright fraction and never above the source\'s own peak, while the straight-through path is withheld in full — so the light is moved rather than added and the toggle is a real A/B. Only the exit face is refracted (a real ray bends twice, and for parallel faces the two cancel), so this over-states the bend for a tile and is about right for a wedge-shaped shard. Past the critical angle nothing is transmitted at all. The question it existed to answer — whether a caustic is legible on a light layer rendered at a third of screen resolution — was answered on the device, which is why it now ships on.')}
+                {ctrlRow('Caustic fade', onCycleCausticFade,
+                  stats.causticFadeName ?? 'smooth',
+                  'How hard the CAUSTIC edges are. Only has an effect while Refraction is on. Two separate cliffs sit behind one symptom — glass clicking as you drift slowly past it. TOTAL INTERNAL REFLECTION is a step: past the critical angle a face transmits nothing, so its cone used to appear and vanish at full length as the body turned. THE OCCLUDER CAP is a step: in a dense field the pool sits saturated (measured 24 of 24 on the glass showcase), so bodies swap in and out of it as you move and an entering body brought its whole caustic at once. Both now fade the cone\'s THROW rather than its alpha — every cone in a transmit group shares one fill, and since that fill is the light\'s own falloff gradient, a shorter cone is a dimmer one. Off restores both cliffs, and is the control the fix was measured against.')}
                 {ctrlRow('Refr bright', onCycleRefractBrightness,
                   stats.refractBrightnessName ?? '1/2',
                   'How bright the REFRACTED cone is, as a fraction of the light\'s own peak. Only has an effect while Refraction is on. Named as fractions because that is the quantity the rule is stated in — refracted light is a redistribution of light that already lost some of itself passing through the body, so it can never out-shine the source, and the geometry clamps at 1/1 regardless of what is selected here. Starts at 1/2 — half the source, which was the original ceiling — and cycles UP first, because a caustic that cannot be seen cannot be judged.')}

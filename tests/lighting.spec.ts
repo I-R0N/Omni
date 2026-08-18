@@ -1191,6 +1191,86 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('the caustic ramps into total internal reflection instead of flipping', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    // ONE glass tile, and the ship walked slowly past it.  A hex face stops
+    // transmitting entirely past the critical angle, so without a fade each
+    // face's cone appears and vanishes AT FULL LENGTH as the body turns
+    // relative to the light — reported from the device as glass clicking.
+    // `causticStats().weight` is the caustic's effective throw, so a cliff is
+    // a step change in it and the fade is a ramp.
+    const r = await engine(page, async (e) => {
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      const pick = tiles[0];
+      if (!pick) return { built: false } as any;
+      pick.shardVariant = 'glass-tile';
+      pick._occluderR = undefined;
+      pick.position.x = 0; pick.position.y = 0;
+      e.renderer.setLighting('unified');
+      if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+
+      let px = -180;
+      // The map regenerates tiles, so the scene is re-quieted every frame
+      // rather than once — one stray tile drifting into the pool would put a
+      // second body's caustic into the series and read as a cliff.
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          for (const o of e.currentMap.entities) {
+            if (o !== pick && o.type === 'STRUCTURE') o.active = false;
+          }
+          pick.active = true;
+          e.player.position.x = px; e.player.position.y = -120;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          e.camera.position.x = px; e.camera.position.y = -120;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+
+      const walk = async (fade: string) => {
+        for (let i = 0; i < 8 && e.renderer.getCausticFade() !== fade; i++) {
+          e.renderer.cycleCausticFade();
+        }
+        const w: number[] = [];
+        for (let step = 0; step < 40; step++) {
+          px = -140 + step * 5;
+          await frames(3);
+          w.push(e.renderer.causticStats().weight);
+        }
+        let maxStep = 0;
+        for (let i = 1; i < w.length; i++) {
+          const d = Math.abs(w[i] - w[i - 1]);
+          if (d > maxStep) maxStep = d;
+        }
+        const mean = w.reduce((s, x) => s + x, 0) / w.length;
+        return { maxStep, mean, fade: e.renderer.getCausticFade() };
+      };
+      const off = await walk('off');
+      const smooth = await walk('smooth');
+      return { built: true, off, smooth, back: e.renderer.getCausticFade() };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.back).toBe('smooth');            // the shipped default
+    // The caustic is actually being drawn in both runs — an assertion about
+    // its smoothness is worthless if it is empty.
+    expect(r.off.mean).toBeGreaterThan(0.5);
+    expect(r.smooth.mean).toBeGreaterThan(0.3);
+    // OFF, some single step of the walk moves the caustic by a large
+    // fraction of everything it was drawing: that is the cliff.
+    expect(r.off.maxStep).toBeGreaterThan(r.off.mean * 0.25);
+    // ON, the worst step is smaller — the same geometry, arrived at
+    // continuously.
+    expect(r.smooth.maxStep).toBeLessThan(r.off.maxStep);
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

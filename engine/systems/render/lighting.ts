@@ -38,7 +38,7 @@ import {
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
-    getEmitFadeSec,
+    getEmitFadeSec, getCausticFade,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -821,6 +821,42 @@ const REFRACT = {
      *  radius.  Shorter than the shadow's 1.6x: a caustic that runs to the
      *  edge of the light reads as a searchlight rather than as a glint. */
     FAR_FRAC: 1.1,
+    /** DEFAULTS ONLY — the live values come from `CAUSTIC_FADE_CYCLE` (DBG
+     *  "Caustic fade"), because these are a look call and the control case
+     *  ('off', the old cliffs) has to stay reachable.
+     *
+     *  How wide the CAP fade is, as a fraction of the distance to the
+     *  farthest occluder the tier's cap let in.
+     *
+     *  THIS IS THE SAME BUG AS THE EMITTER FLASH, from the other direction.
+     *  In a dense field the occluder pool sits saturated — measured at 24 of
+     *  24 translucent bodies across a glass showcase — so bodies swap in and
+     *  out of it constantly as the ship moves, and a body entering brought
+     *  its ENTIRE caustic with it at full strength.  Measured while drifting
+     *  slowly: the caustic's total face weight moved by 5-10 % per step, in
+     *  jumps of three to five faces at a time.
+     *
+     *  A shadow at the cap boundary is far away and subtle; a bright cone
+     *  appearing out of nowhere is not, which is exactly why this was
+     *  reported on glass and only on glass.  So a body approaching the cap
+     *  fades its caustic out before it can be evicted.  Only when the pool
+     *  is SATURATED: with room to spare the boundary is the light's own
+     *  radius, where a caustic is already invisible, and tapering there
+     *  would dim bodies that were never at risk of leaving. */
+    CAP_FADE_FRAC: 0.25,
+    /** How wide the fade INTO total internal reflection is, measured in the
+     *  discriminant `k` that the Snell solve already computes (`k` is 0 at
+     *  the critical angle and 1 at normal incidence).
+     *
+     *  THIS EXISTS BECAUSE TIR IS A CLIFF.  Past the critical angle a face
+     *  transmits nothing, so as a body drifts past the light each face's
+     *  cone appeared and disappeared AT FULL LENGTH — reported from the
+     *  device as a click or flash on glass, and measured as a single-frame
+     *  luminance jump of 30 against a median of 0.075.  Real transmission
+     *  does not do that: the Fresnel coefficient falls to zero AT the
+     *  critical angle, so the light is already gone by the time the cliff
+     *  arrives.  Fading over a band of `k` is that behaviour, cheaply. */
+    TIR_FADE_K: 0.25,
 };
 
 /** Emit one translucent body's REFRACTED cones into the open path.
@@ -834,15 +870,33 @@ const REFRACT = {
  *  all, and the formula's discriminant goes negative.  A silent `sqrt` of a
  *  negative would put NaN into the compound path, and ONE NaN discards the
  *  whole path — which is exactly how A4 shipped with no shadows at all. */
+export let _causticFaces = 0;
+export let _causticWeight = 0;
+export function resetCausticStats(): void { _causticFaces = 0; _causticWeight = 0; }
+export function causticStats(): { faces: number; weight: number } {
+    return { faces: _causticFaces, weight: _causticWeight };
+}
+
 function emitRefractedLight(
     lctx: CanvasRenderingContext2D,
     cx: number, cy: number,
     ocx: number, ocy: number,
     far: number,
+    farBase: number,
     n: number,
 ): boolean {
+    if (far <= 0) return false;
     let drew = false;
     const eta = REFRACT.IOR;
+    const tirBand = getCausticFade().tir;
+    // TAPER, NOT ALPHA.  Every cone in a transmit group shares ONE compound
+    // path and therefore ONE fill, so a per-face opacity would cost a fill
+    // per face.  The transmission weight rides the cone's THROW instead: a
+    // face approaching the critical angle reaches less far, and since the
+    // fill is the light's own falloff gradient a shorter cone is a dimmer
+    // one.  At weight 0 the far points coincide with the near points and the
+    // quad is degenerate — it fills nothing, which is the same result the old
+    // `continue` produced, arrived at continuously.
     for (let i = 0; i < n; i++) {
         const j = i + 1 === n ? 0 : i + 1;
         const ax = _svx[i], ay = _svy[i];
@@ -864,11 +918,21 @@ function emitRefractedLight(
         const nx = sgn * (-ey / elen), ny = sgn * (ex / elen);
 
         // Refract both endpoints.  `refractTo` writes into the scratch pair
-        // rather than returning a vector, so the hot path allocates nothing.
-        if (!refractTo(ax - cx, ay - cy, nx, ny, eta)) continue;
+        // rather than returning a vector, so the hot path allocates nothing,
+        // and returns the transmission WEIGHT (0 under total internal
+        // reflection) rather than a boolean — PER ENDPOINT, so a face with
+        // one end near the critical angle tapers rather than switching.
+        const wa = refractTo(ax - cx, ay - cy, nx, ny, eta, tirBand);
         const rax = _rx, ray = _ry;
-        if (!refractTo(bx - cx, by - cy, nx, ny, eta)) continue;
+        const wb = refractTo(bx - cx, by - cy, nx, ny, eta, tirBand);
         const rbx = _rx, rby = _ry;
+        if (wa <= 0 && wb <= 0) continue;
+        const fa = far * wa, fb = far * wb;
+        // Instrumentation: the caustic's EFFECTIVE contribution — the throw
+        // actually drawn, against the throw a fully-transmitting face at the
+        // centre of the pool would get.  A pop is a step change in this.
+        _causticFaces++;
+        _causticWeight += (fa + fb) * 0.5 / farBase;
 
         // The quad is built in the SAME rotational order the shadow quads use
         // — near-a, far-a, far-b, near-b — but it is filled additively rather
@@ -876,14 +940,19 @@ function emitRefractedLight(
         // the winding does not have to be canonical.  Left in the same order
         // anyway, so the two emitters read as the same construction.
         lctx.moveTo(ax, ay);
-        lctx.lineTo(ax + rax * far, ay + ray * far);
-        lctx.lineTo(bx + rbx * far, by + rby * far);
+        lctx.lineTo(ax + rax * fa, ay + ray * fa);
+        lctx.lineTo(bx + rbx * fb, by + rby * fb);
         lctx.lineTo(bx, by);
         lctx.closePath();
         drew = true;
     }
     return drew;
 }
+
+/** Per-occluder CAP-FADE weight, indexed by position in the selected set.
+ *  Module scratch rather than a field on the record: it is derived from the
+ *  SELECTION, not from the body, and the pool is shared across lights. */
+const _capW = new Float64Array(256);
 
 /** Scratch for `refractTo` — see the allocation note at the top of the file. */
 let _rx = 0, _ry = 0;
@@ -893,22 +962,36 @@ let _rx = 0, _ry = 0;
  * — it is normalised here), `(nx, ny)` the OUTWARD surface normal, `eta` the
  * ratio of the indices the ray is leaving over the one it enters.
  *
- * Writes the unit refracted direction into `_rx`/`_ry` and returns true, or
- * returns false under total internal reflection, where nothing is
- * transmitted.
+ * Writes the unit refracted direction into `_rx`/`_ry` and returns the
+ * TRANSMISSION WEIGHT in 0..1: 0 where nothing is transmitted (a face that
+ * is not an exit face, or one past the critical angle), ramping to 1 well
+ * inside it.
+ *
+ * The weight is read off `k` — the discriminant the solve already computes,
+ * which is 0 exactly at the critical angle and 1 at normal incidence — so
+ * the fade costs one compare and a multiply, and is zero at precisely the
+ * angle where the old boolean flipped.  TOTAL INTERNAL REFLECTION is still a
+ * real branch, not a guard bolted on: `k < 0` must never reach the `sqrt`,
+ * because ONE NaN discards the whole compound path, which is exactly how A4
+ * shipped with no shadows at all.
  */
-function refractTo(ix: number, iy: number, nx: number, ny: number, eta: number): boolean {
+function refractTo(
+    ix: number, iy: number, nx: number, ny: number, eta: number, tirBand: number,
+): number {
+    _rx = nx; _ry = ny;                         // finite, for a zero-weight quad
     const ilen = Math.sqrt(ix * ix + iy * iy);
-    if (ilen === 0) return false;
+    if (ilen === 0) return 0;
     const dx = ix / ilen, dy = iy / ilen;
     const ci = dx * nx + dy * ny;               // cos of the incidence angle
-    if (ci <= 0) return false;                  // not actually an exit face
+    if (ci <= 0) return 0;                      // not actually an exit face
     const k = 1 - eta * eta * (1 - ci * ci);
-    if (k < 0) return false;                    // TOTAL INTERNAL REFLECTION
+    if (k <= 0) return 0;                       // TOTAL INTERNAL REFLECTION
     const g = Math.sqrt(k) - eta * ci;
     _rx = eta * dx + g * nx;
     _ry = eta * dy + g * ny;
-    return true;
+    if (tirBand <= 0 || k >= tirBand) return 1;
+    const u = k / tirBand;
+    return u * u * (3 - 2 * u);                 // smoothstep into the cliff
 }
 
 /** One back-facing edge's extrusion, from the vertex scratch. */
@@ -1208,6 +1291,46 @@ function compositeLight(
     //    withheld again by the very shadow it belongs to.
     if (!refract) return;
     const causticFar = rPx * REFRACT.FAR_FRAC;
+    resetCausticStats();
+    // THE CAP FADE.  `occ` is nearest-first and `count` is what the tier's
+    // cap let through, so the farthest selected body IS the eviction
+    // boundary — but only when the pool is saturated (see CAP_FADE_FRAC).
+    // THE CAP FADE RIDES RANK, NOT DISTANCE, because rank is the axis
+    // eviction actually happens on: `occ` is nearest-first, so the LAST few
+    // entries are the ones a step of movement will drop.  A distance band
+    // was the first attempt and it is the wrong shape — measured, a band of
+    // 25 % of the cut distance dimmed the whole caustic by 40 % on the glass
+    // showcase, because in a packed field that band holds most of the pool.
+    // The last few SLOTS are a handful of bodies however dense the terrain.
+    //
+    // PER KIND, because eviction is per kind: `selectOccluders` reserves a
+    // share of the pool for mobile shards, so a TILE can be evicted while a
+    // NEARER shard keeps its slot.  Fading against the wrong ranking leaves
+    // tiles popping at their own boundary.
+    const poolCap = getActiveLightingTier().maxOccluders;
+    const fade = getCausticFade();
+    const capFade = count > 0 && count >= poolCap && fade.cap > 0
+                    && count <= _capW.length;
+    if (capFade) {
+        // ONE pre-pass over the whole selected set, because rank is a
+        // property of the POOL and the draw loop below runs once per transmit
+        // GROUP — counting ranks inside it would restart them per group and
+        // fade the wrong bodies.
+        let tileTotal = 0, shardTotal = 0;
+        for (let i = 0; i < count; i++) {
+            if (occ[i].mobile) shardTotal++; else tileTotal++;
+        }
+        const tileBand = Math.max(1, Math.round(tileTotal * fade.cap));
+        const shardBand = Math.max(1, Math.round(shardTotal * fade.cap));
+        let tileRank = 0, shardRank = 0;
+        for (let i = 0; i < count; i++) {
+            const mobile = occ[i].mobile;
+            const total = mobile ? shardTotal : tileTotal;
+            const rank = mobile ? shardRank++ : tileRank++;
+            const u = (total - 1 - rank) / (mobile ? shardBand : tileBand);
+            _capW[i] = u >= 1 ? 1 : u <= 0 ? 0 : u * u * (3 - 2 * u);
+        }
+    }
     for (let g = 0; g < groups; g++) {
         const transmit = _transmits[g];
         if (transmit <= 0) continue;                 // opaque: nothing to bend
@@ -1224,6 +1347,11 @@ function compositeLight(
             const d = Math.sqrt(dx * dx + dy * dy);
             if (d <= brPx) continue;                 // light inside the body
             if (d - brPx > rPx) continue;            // past the light's reach
+            // Taper the THROW toward the cap boundary, the same trick the
+            // TIR fade uses and for the same reason: one fill per group, so
+            // the weight cannot ride the alpha.
+            const capW = capFade ? _capW[i] : 1;
+            if (capW <= 0) continue;
             const ocx = cx + dx, ocy = cy + dy;
             const n = pts.length;
             const cosR = Math.cos(o.rot), sinR = Math.sin(o.rot);
@@ -1232,7 +1360,8 @@ function compositeLight(
                 _svx[k] = ocx + (p.x * cosR - p.y * sinR) * worldToPx;
                 _svy[k] = ocy + (p.x * sinR + p.y * cosR) * worldToPx;
             }
-            if (emitRefractedLight(lctx, cx, cy, ocx, ocy, causticFar, n)) drew = true;
+            if (emitRefractedLight(lctx, cx, cy, ocx, ocy, causticFar * capW,
+                                   causticFar, n)) drew = true;
         }
         if (!drew) continue;
 

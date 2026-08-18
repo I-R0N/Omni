@@ -2100,3 +2100,109 @@ rather than a level: two frames after emission is switched on the faded
 emitter is well short of its settled value, `off` is essentially all the way
 there, and both settle to the SAME brightness — a fade changes when the light
 arrives, never how much of it there is.
+
+---
+
+## A5k — glass clicked; the caustic had two cliffs in it
+
+Reported from the device, with a hypothesis attached: a click or flash on
+**glass tiles** while drifting slowly past them, guessed to be "the refraction
+beam exciting a single side of the hex tile at a time". The guess was right
+about the mechanism and there turned out to be a second one behind it.
+
+### Measuring it first
+
+The first metric was wrong in an instructive way. A box-mean of the canvas
+gave a max frame-to-frame jump of **30 luminance against a median of 0.075** —
+which looked like the pop, and was the run's first frame settling. Per-pixel
+deltas were worse: the star field scrolls under a moving camera, so **12 % of
+pixels change by >8 every frame even on `legacy`**. Anything measured off the
+main canvas while the camera moves is measuring parallax.
+
+What worked was differencing the same camera position twice (unified minus
+legacy — the trick the shadow tests already use) and, better, instrumenting
+the caustic directly: `causticStats()` reports the face count and the
+effective THROW being drawn. A cliff is then a step change in a number
+instead of a judgement about pixels.
+
+That trace answered it immediately. Stepping the ship past a single glass
+tile, per-face transmission moved **1 → 0 in a single step**, in weight
+increments of exactly 0.5 — one endpoint of one face going from fully
+transmitting to nothing between one frame and the next.
+
+### Cliff 1 — total internal reflection
+
+Past the critical angle (41.8° for IOR 1.5) a face transmits nothing, and the
+code took that literally: `refractTo` returned a boolean and the face was
+skipped. So a cone appeared and disappeared at full length as the body turned
+relative to the light. Real transmission does not do that — the Fresnel
+coefficient falls to zero AT the critical angle, so the light is already gone
+by the time the cliff arrives.
+
+`refractTo` now returns a WEIGHT, read off `k` — the discriminant the Snell
+solve already computes, which is 0 exactly at the critical angle and 1 at
+normal incidence. The fade costs one compare and a multiply, and is zero at
+precisely the angle where the boolean flipped. Total internal reflection is
+still a real branch: `k < 0` must never reach the `sqrt`, because one NaN
+discards the whole compound path, which is how A4 shipped with no shadows.
+
+**The weight rides the cone's THROW, not its alpha.** Every cone in a transmit
+group shares one compound path and therefore one fill, so a per-face opacity
+would cost a fill per face. A face approaching the critical angle reaches less
+far instead, and since the fill is the light's own falloff gradient, a shorter
+cone is a dimmer one. At weight 0 the far points coincide with the near ones
+and the quad is degenerate — the same result the old `continue` produced,
+arrived at continuously.
+
+### Cliff 2 — the occluder cap
+
+The trace also showed face counts jumping by three to five at a time, and more
+faces than a hexagon has: other bodies were entering and leaving the pool. On
+the real glass showcase the pool sits **saturated at 24 of 24 translucent
+bodies**, so membership churns constantly as the ship moves — and an entering
+body brought its ENTIRE caustic at full strength.
+
+This is the emitter flash of A5j from the other direction, and it is why the
+report was about glass and only glass: a shadow at the cap boundary is far
+away and subtle, a bright cone appearing out of nowhere is not.
+
+So a body approaching eviction fades its caustic out first. Two things about
+how, both from measurement:
+
+- **Rank, not distance.** A distance band was the first attempt and it is the
+  wrong shape: a band of 25 % of the cut distance dimmed the whole caustic by
+  **40 %** on the glass showcase, because in packed terrain that band holds
+  most of the pool. The last few SLOTS are a handful of bodies however dense
+  the terrain is.
+- **Per kind.** `selectOccluders` reserves a share of the pool for mobile
+  shards, so a TILE can be evicted while a NEARER shard keeps its slot. The
+  ranking has to be per kind or tiles keep popping at their own boundary.
+
+### What is proven and what is not
+
+Stated plainly, because the two halves of this fix have very different
+evidence:
+
+- The **TIR taper** removes a cliff that was measured directly, and the trace
+  after it shows the same faces ramping over several steps instead of
+  flipping. That is the mechanism the report described.
+- The **cap fade** is mechanically sound but its benefit could NOT be
+  separated from the ordinary churn of 24 bodies moving: on a same-map A/B
+  the aggregate step-to-step change did not improve, while the cost is
+  measurable (a third of the caustic's throw at a quarter of the ranks). So
+  it ships LIGHT — 8 % of the ranks, a couple of bodies — with stronger
+  settings one click away.
+
+New DBG row **Caustic fade**: `smooth` (default) / `soft` / `heavy` /
+`light` (TIR only) / `off`. `off` restores both cliffs exactly and is the
+control the fix was measured against.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **127 passed**. The new
+test walks a ship past one glass tile at two fade settings and asserts the
+shape: with `off` some single step moves the caustic by more than a quarter
+of everything it draws, and with `smooth` the worst step is smaller — the
+same geometry, arrived at continuously. It re-quiets the scene every frame,
+because the map regenerates tiles and one drifting into the pool would put a
+second body's caustic in the series and read as a cliff.

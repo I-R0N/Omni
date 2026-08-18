@@ -1698,6 +1698,8 @@ export interface EngineStats {
   emitShadowTierName?: string;
   /** DBG: how long an emitter takes to fade in or out. */
   emitFadeName?: string;
+  /** DBG: caustic edge softness — the TIR and occluder-cap fades. */
+  causticFadeName?: string;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

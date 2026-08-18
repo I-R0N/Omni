@@ -35,7 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
-    cycleEmitShadowTier, cycleEmitFade,
+    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -428,6 +428,14 @@ export class DebugControls {
    *  all the next.  'off' is the old instantaneous behaviour. */
   cycleEmitFade() {
     cycleEmitFade();
+  }
+
+  /** DBG (Visual): how hard the CAUSTIC edges are.  Two cliffs behind one
+   *  reported symptom (glass clicking as you drift past it): total internal
+   *  reflection switching a face's cone off at full length, and the occluder
+   *  cap evicting a body's whole caustic at once.  'off' restores both. */
+  cycleCausticFade() {
+    cycleCausticFade();
   }
 
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.
