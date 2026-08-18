@@ -315,7 +315,7 @@ const CHIP_OFF = 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
  *  reason `OVERLAY_SCRIM`'s is: a heavy backdrop-blur buys legibility by
  *  smearing the motion the transparency exists to show. */
 const HUD_CHIP =
-  'bg-slate-900/35 border rounded-lg px-3 py-1 shadow-lg backdrop-blur-[2px] text-right ' +
+  'bg-slate-900/35 border rounded-lg px-2.5 py-1 shadow-lg backdrop-blur-[2px] text-right ' +
   'drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]';
 
 /** A COLLAPSIBLE SECTION toggle.  Colour is the semantic (amber = debug,
@@ -1918,9 +1918,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           problem to the layout engine — the bar takes the width it needs, the
           chips start below whatever is left, and it holds at every viewport
           without a magic offset to keep in sync. */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2" data-testid="hud-top">
 
-      {/* Boss capstone bar — full width, above the readout stack. */}
+      {/* Boss capstone bar — full width, above the readout row. */}
       {stats.gameState === GameState.PLAYING && stats.boss && (
         <div className="pointer-events-none w-full max-w-[560px] mx-auto px-1" data-testid="boss-bar">
           <div className="flex items-center justify-between gap-2 mb-1">
@@ -1971,7 +1971,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      <div className="flex justify-between items-start">
+      {/*  ONE ROW ALONG THE UPPER EDGE (user call), not a left chip plus a
+           right-hand STACK.  The readouts are peers — hull, score, salvage,
+           wave — and stacking three of them drove the HUD band down the
+           screen, which is also what the chevrons' top safe band has to
+           clear.  They run along the edge instead and WRAP only when the
+           window genuinely cannot hold them (320px does; 390 and up do not).
+           The pause button stays outside the wrapping band and `shrink-0`,
+           so it is pinned to the corner on the first line whatever the chips
+           do — an unshrinkable middle is what evicted it at 320px in 5d. */}
+      <div className="flex items-start gap-2">
+        <div className="flex flex-wrap items-start gap-1.5 min-w-0 flex-1">
         {/* ── Player vitals (gauntlet 5d, U5) ──────────────────────────
             The top-left used to be empty (the debug menu moved into the
             pause Player Menu), and the player's hull was a floating bar
@@ -2000,10 +2010,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   readout starts mattering.  min-w keeps the chip from
                   twitching narrower than a bar worth looking at; the content
                   takes it from there. */
-              className={`pointer-events-none ${HUD_CHIP} border-slate-600/30 text-left min-w-[104px] w-auto shrink-0 px-2.5`}
+              className={`pointer-events-none ${HUD_CHIP} border-slate-600/30 text-left min-w-[92px] w-auto shrink-0`}
             >
-              <div className="flex items-baseline justify-between gap-2">
-                <span className={`text-slate-400 ${T_MICRO} font-bold uppercase tracking-widest`}>Hull</span>
+              {/*  NO WORD LABEL in the in-game chip (user call, one row along
+                   the edge).  The band is width-bound at 390px and "HULL"
+                   cost ~40px of it — the difference between the wave chip
+                   fitting on the row and wrapping under it.  What the word
+                   was doing is done by the BAR directly beneath: the hull
+                   number and its bar carry the same three urgency colours as
+                   the bar under the ship, and the shield pair below is cyan,
+                   which is the shield's colour everywhere in this game.  The
+                   pause menu's CONDITION block keeps the spelled-out
+                   version, which is where an unfamiliar player is reading
+                   rather than glancing. */}
+              <div className="flex items-baseline justify-end">
                 <span className={`${hullText} ${T_ROW} font-bold tabular-nums`}>
                   {v.health}<span className="text-slate-500">/{v.maxHealth}</span>
                 </span>
@@ -2013,8 +2033,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
               {v.maxShield > 0 && (
                 <>
-                  <div className="flex items-baseline justify-between gap-2 mt-1">
-                    <span className={`text-slate-400 ${T_MICRO} font-bold uppercase tracking-widest`}>Shield</span>
+                  <div className="flex items-baseline justify-end mt-1">
                     <span className={`text-cyan-300 ${T_MICRO} font-bold tabular-nums`}>
                       {v.shield}<span className="text-slate-500">/{v.maxShield}</span>
                     </span>
@@ -2027,14 +2046,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
           );
         })()}
-        {!(stats.gameState === GameState.PLAYING && stats.vitals) && <div />}
 
-        {/* Top-right: wave HUD + pause button */}
-        <div className="flex items-start gap-3 min-w-0">
-
-          {/* Wave info — only while playing */}
+          {/* Readouts — only while playing */}
           {stats.gameState === GameState.PLAYING && (
-            <div className="flex flex-col items-end gap-1 min-w-0">
+            <>
               {/* Run score */}
               <div className={`pointer-events-none ${HUD_CHIP} border-slate-600/30`}>
                 <span className={`text-amber-300 ${T_ROW} font-bold tracking-widest tabular-nums`}>
@@ -2095,10 +2110,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     : 'pointer-events-none border-slate-600/50'
                 }`}
               >
+                {/*  "W1" rather than "WAVE 1", and a bare count rather than
+                     "6 left": in a single-row band the wave chip is the one
+                     that decides whether the row fits, and it was the widest
+                     by 60px.  The colours carry what the words did — rose is
+                     the enemy count everywhere in this HUD, cyan the clock —
+                     and the tracking is what keeps the abbreviation legible
+                     rather than cramped. */}
                 <span className={`text-slate-300 ${T_ROW} font-bold uppercase tracking-wide`}>
-                  Wave {stats.waveNumber ?? 1}
+                  W{stats.waveNumber ?? 1}
                   {stats.enemiesRemaining !== undefined && (
-                    <span className="text-rose-300"> · {stats.enemiesRemaining} left</span>
+                    <span className="text-rose-300"> · {stats.enemiesRemaining}</span>
                   )}
                   {stats.waveElapsedSec !== undefined && (
                     <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
@@ -2111,8 +2133,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 )}
               </div>
               )}
-            </div>
+            </>
           )}
+        </div>
 
           {/* Pause button — hidden while docked or dead (the station UI and
               the run-summary screen already freeze the sim and own the
@@ -2129,7 +2152,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </svg>
             </button>
           )}
-        </div>
       </div>
 
       </div>
@@ -2335,19 +2357,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
               )}
 
-              {/* The choice is IN THE WORLD, not on this screen — so the screen
-                  explains where the two rifts are rather than offering buttons
-                  that would bypass flying to them. */}
+              {/* The choice is IN THE WORLD, not on this screen.  The DESCENT
+                  rift is switched off for now (user call — that flow is being
+                  reworked), so this says what is actually true of the arena
+                  the player is about to be returned to: the ladder is done and
+                  the way out is the rift they arrived through.  The copy is
+                  the first thing that would lie if it were left promising an
+                  amber rift that no longer opens. */}
               <div className={`${panelAccent('border-amber-600/30')} ${T_BODY} leading-relaxed text-slate-300`}>
-                <p className={`text-amber-300 ${HEADING} mb-1.5`}>A rift has opened</p>
+                <p className={`text-amber-300 ${HEADING} mb-1.5`}>The arena is quiet</p>
                 <p>
-                  <span className="text-amber-300 font-bold">Descend</span> through the new amber rift to
-                  {' '}<span className="text-white font-bold">Stage {sc.nextStage}</span> — five more waves and a tougher capstone.
-                  Your hull carries through as-is.
-                </p>
-                <p className="mt-1.5">
-                  Or take the <span className="text-sky-300 font-bold">sky rift</span> home to repair, sell and refit — the
-                  ladder restarts at Stage 1 when you do.
+                  No further waves will start here. Mop up what is left, then take the
+                  {' '}<span className="text-sky-300 font-bold">sky rift</span> home to repair, sell and refit.
                 </p>
               </div>
 

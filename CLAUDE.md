@@ -56,7 +56,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  162 tests.  All run at
+                          anti-flake rules).  164 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -226,6 +226,9 @@ engine/
                           COUNTED enemy is dead (clear-the-field;
                           `countsTowardWave !== false`); the clock just
                           grades the speed bonus.  Survivors carry over.
+                          `haltForBoss()` ENDS the ladder when a boss
+                          reaches the field and nothing but a map load
+                          restarts it (see §3)
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
@@ -397,14 +400,33 @@ at FULL value (the snitch board-clear, minus the half-value scale), so
 the escort explodes, pays its kill points and sprays its salvage rather
 than being left to mop up after the fight is over — NEUTRAL third
 parties (`thirdParty`: bubbles, dragons) and RIVALS are spared, since
-they are not the boss's forces.  It also HALTS
-the arena's ladder (`WaveSystem.halted`) — no further wave starts there,
-so the choice between the two rifts is made in quiet.  It opens a DESCENT
-rift beside the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
-`PORTAL_CONSTANTS.DESCENT_COLOR`).  `dismissStageClear()` resumes the
-cleared arena; the CHOICE is then made IN THE WORLD by flying to a rift,
-which is why the screen offers no travel buttons: down the amber rift to
-stage N+1, or back through the arena's return rift to the hub.
+they are not the boss's forces.  The arena's ladder is already HALTED by
+then — see the paragraph below: it stops when the boss APPEARS, not when
+it dies.  `dismissStageClear()` resumes the cleared arena, and the way out
+is the arena's own return rift.
+
+**THE DESCENT RIFT IS SWITCHED OFF** (user call, pending a rework of the
+descent flow).  `openDescentPortal` still exists in `engine/bosses.ts`,
+verbatim and uncalled; `GameEntity.isDescent`, the amber
+`PORTAL_CONSTANTS.DESCENT_COLOR` and the whole
+`transitionToMap(id, {descend:true})` path — depth, `waveOffset`, the
+stage stride — are untouched and still tested.  What was removed is the
+one CALL that put a rift in the world.  So a cleared stage currently ends
+by flying home rather than deeper.
+
+**A BOSS ENDS THE LADDER** (user call).  Waves used to keep arriving while
+a boss was on the field and to resume after it died; a boss fight with a
+wave landing on top of it is two encounters at once.  `handleBossSpawn` —
+the ONE seam both the capstone wave's own spawn and the DBG warp-in pass
+through — calls `WaveSystem.haltForBoss()`, which sets `halted`, zeroes
+any grace countdown (so the HUD stops advertising a wave that is not
+coming) and, for a boss warped in MID-wave, drops the ordinary spawns
+still queued behind it.  A capstone's own escort (`BossDef.companions`)
+is deliberately kept: that is the boss's designed encounter, not the
+ladder.  Nothing clears `halted` except `WaveSystem.init`, i.e. loading a
+map — so it does not resume when the boss dies, and a fresh arena runs its
+own ladder.  This is deliberately blunt while the wave/boss relationship
+is redesigned.
 `GameEngine.stageIndex` is 0-based DEPTH — incremented by
 `transitionToMap(id, {descend:true})`, zeroed on arrival at the HUB (the
 hub is the surface), and reset per run.  It drives
@@ -2174,8 +2196,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   INSET VIEWPORT RECT (`computeIndicatorRect`) — the screen
   edge, not the old fixed 120px centre ring.  That rect is ASYMMETRIC
   (user call): the top and bottom edges clear the HUD's two bands
-  (`INDICATORS.TOP_INSET` + `BOSS_BAR_INSET` while a capstone bar is up,
-  `BOTTOM_INSET` for the loadout strip + minimap), because a symmetric
+  (`INDICATORS.TOP_INSET`, plus `BOSS_BAR_INSET` while a capstone bar is up
+  and `WRAP_INSET` below `NARROW_WIDTH` where the readout row wraps to two
+  lines; `BOTTOM_INSET` for the loadout strip + minimap), because a symmetric
   inset put every near-vertical bearing — which is "directly ahead" and
   "directly behind" — underneath the chip stack.  Each band is the MEASURED
   widget height plus ~`SIZE_NEAR`, since an arrow is centred on the rect
@@ -2264,14 +2287,21 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (START is the indigo `rounded-full` HERO rather than the shared emerald
   PRIMARY, and the debug menu takes a smaller 22–24px floor because a
   developer surface of ~90 diagnostic rows trades reach for density).
-- **The top HUD bar is a COLUMN, and `justify-between` evicts its LAST
-  item.**  The boss capstone bar and the readout chip stack live in one flex
-  column so the layout engine owns the band they share — as an `absolute`
-  block beside a separate stack, the boss health bar landed exactly on top
-  of the Salvage chip.  Within the row under it (vitals chip · readout stack
-  · pause button), the readout column must keep `min-w-0` and the pause
-  button `shrink-0`: an unshrinkable middle pushes the last item off the
-  screen, which is how the pause button left the viewport at 320px.
+- **The top HUD bar is a COLUMN of two things, and the second is ONE ROW.**
+  The boss capstone bar and the readout chips live in one flex column
+  (`data-testid="hud-top"`) so the layout engine owns the band they share —
+  as an `absolute` block beside a separate stack, the boss health bar landed
+  exactly on top of the Salvage chip.  Under it the readouts (hull · score ·
+  salvage · wave) run along the edge in ONE WRAPPING ROW rather than a
+  right-hand stack (user call): they are peers, and stacking them drove the
+  HUD band down the screen — which is also the band the chevrons' top safe
+  inset has to clear.  Two consequences: the row is WIDTH-BOUND at 390px, so
+  the chips are terse by necessity (`W1 · 6 · 12s`, and the vitals chip
+  carries no word label — the bar under each number is the label, and the
+  pause menu keeps the spelled-out version); and the pause button lives
+  OUTSIDE the wrapping band with `shrink-0`, because an unshrinkable middle
+  pushes the last item off the screen, which is how the pause button left the
+  viewport at 320px.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
   `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
   `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,

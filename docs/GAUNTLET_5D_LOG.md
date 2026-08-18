@@ -768,3 +768,94 @@ capstone bar confirm the arrows clear both bands.
   seconds. This is the same family as R3 in FOR-USER-REVIEW and is left with
   it.
 - **R1–R5 are unchanged** — none of the seven items touched them.
+
+---
+
+## U7 — second play-test round (user list)
+
+Three items. The first is UI; the other two are WAVE/BOSS behaviour, which
+5d's brief put out of scope — the user asked for them directly, and both are
+explicitly interim ("I'll adjust this system more thoroughly later"), so they
+are written to be easy to undo rather than to be right forever.
+
+### 1. The readouts run along the top edge instead of stacking
+
+Hull sat top-left; score, salvage and wave stacked downward top-right. Three
+chips stacked is a 118px band at 390×844 — and that band is exactly what the
+chevrons' top safe inset has to clear, so the stack was costing the play area
+twice over.
+
+They are peers, so they now run along the edge as ONE wrapping row, with the
+pause button OUTSIDE the wrapping band and `shrink-0` (an unshrinkable middle
+is what evicted it at 320px during U4). Measured band: **118 → 50px**, and
+`TOP_INSET` drops 108 → 40 with it, returning ~68px of play area.
+
+The row is width-bound, which forced two calls:
+
+- **The wave chip is terse**: `W1 · 6 · 12s` rather than `WAVE 1 · 6 LEFT ·
+  12S`. It was the widest chip by 60px and decided whether the row fit. The
+  colours carry what the words did — rose is the enemy count everywhere in
+  this HUD, cyan the clock.
+- **The vitals chip lost its word labels.** "HULL" alone cost ~40px, the
+  difference between fitting and wrapping. What the word was doing is done by
+  the bar directly under the number, which wears the same three urgency
+  colours as the bar under the ship; the shield pair below it is cyan, the
+  shield's colour throughout. The pause menu's CONDITION block keeps the
+  spelled-out version, which is where an unfamiliar player reads rather than
+  glances.
+
+Below `NARROW_WIDTH` (372px) the row genuinely cannot fit and wraps — measured
+50 → 84px — so `WRAP_INSET` widens the band there. A width threshold, not a
+DOM measurement, for the same reason the rest of that block is one.
+
+The viewport matrix now asserts the indicator rect clears the **live** top
+band (`[data-testid="hud-top"]`), not the constant that was tuned to it: a
+constant agreeing with itself is not the property that matters.
+
+### 2. A boss ends the ladder
+
+Waves kept arriving while a boss was on the field and resumed after it died.
+A boss fight with a wave landing on top of it is two encounters at once.
+
+`GameEngine.handleBossSpawn` is the ONE seam both routes pass through — the
+capstone wave's own spawn and the debug menu's warp-in — so the halt goes
+there: `WaveSystem.haltForBoss()` sets `halted`, zeroes any grace countdown
+(otherwise the HUD keeps advertising a wave that is not coming, and offers a
+"tap to skip" that does nothing), and drops the ordinary spawns still queued
+behind a boss warped in MID-wave.
+
+Two deliberate non-changes:
+
+- **A capstone's own escort survives.** `BossDef.companions` is the boss's
+  designed encounter, not the ladder. `WaveSystem.capstoneWave` is what tells
+  the two cases apart — both bosses land in `waveEnemyIds`, so tracking alone
+  cannot distinguish them.
+- **Nothing clears `halted` except `WaveSystem.init`**, i.e. loading a map.
+  That is what makes "does not restart after the boss dies" true without a
+  second flag, and it keeps a fresh arena running its own ladder.
+
+The test that matters is the second half: dismiss the stage-clear screen, let
+the arena run *longer than a grace period* with the sim live, and assert no
+wave started. The old behaviour only showed up at that moment, which is
+precisely when nobody is watching.
+
+### 3. The descent rift is switched off
+
+`openDescentPortal` is kept verbatim and uncalled; `GameEntity.isDescent`, the
+amber portal colours and the whole `transitionToMap(id, {descend:true})` path
+(depth, `waveOffset`, the stage stride) are untouched and still tested. What
+was removed is the one CALL that puts a rift in the world — the smallest
+possible switch-off for something the user intends to rework.
+
+Two things had to follow it or they would have been lying: the stage-clear
+screen's copy (it promised an amber rift by name) now says the arena is quiet
+and points home, and `screens.spec.ts`'s rift assertion is INVERTED rather
+than deleted, so a rift cannot come back silently.
+
+### Validation
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **164 passed** ✅
+(162 → 164: two new ladder tests). Two existing assertions changed meaning by
+user directive and say so in the file — the descent rift, and the minimap
+default from U6. Captures at 390×844 and 320×568, with and without a capstone
+bar, confirm the chevrons clear both bands.

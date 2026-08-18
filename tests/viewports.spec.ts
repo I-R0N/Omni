@@ -281,6 +281,12 @@ for (const vp of VIEWPORTS) {
           minimapOpen: hud.computeMinimapRect(H, true),
           loadout: hud.computeLoadoutHUDLayout(W, H),
           indicators: hud.computeIndicatorRect(W, H),
+          // The LIVE top band, measured off the DOM — the thing the rect's
+          // top inset exists to clear.
+          hudTop: (() => {
+            const el = document.querySelector('[data-testid="hud-top"]');
+            return el ? el.getBoundingClientRect().bottom : 0;
+          })(),
         };
       });
 
@@ -322,6 +328,13 @@ for (const vp of VIEWPORTS) {
       // strip and above the collapsed minimap, which share one baseline.
       expect(ind.bottom, 'arrows clear the loadout strip').toBeLessThanOrEqual(geom.loadout.startY);
       expect(ind.bottom, 'arrows clear the minimap').toBeLessThanOrEqual(geom.minimap.y);
+      // Clear of the top furniture too, and this one is checked against the
+      // LIVE DOM rather than against the constant that was tuned to it — the
+      // constant agreeing with itself is not the property that matters, the
+      // arrows clearing the actual chips is.  (No capstone bar is up here,
+      // which is the case the un-widened band is sized for.)
+      expect(ind.top, 'arrows clear the readout row').toBeGreaterThan(geom.hudTop);
+
       // And the band that is left is still worth drawing arrows in.
       expect(ind.bottom - ind.top, 'a usable vertical band survives')
         .toBeGreaterThanOrEqual(80);

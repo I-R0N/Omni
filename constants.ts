@@ -907,9 +907,15 @@ export const UI_CONSTANTS = {
      *  arrow is CENTRED on the rect edge: a rect that merely reaches the
      *  bottom of the chips leaves the top half of every arrow tangent to
      *  them. */
-    TOP_INSET: 108,          // px reserved for the top chip stack
-    BOSS_BAR_INSET: 52,      // ...plus this while a capstone bar is up
+    TOP_INSET: 40,           // px reserved for the top readout row
+    BOSS_BAR_INSET: 62,      // ...plus this while a capstone bar is up
     BOTTOM_INSET: 74,        // px reserved for the loadout strip + minimap
+    /*  Below this width the readout row can no longer fit on one line and
+     *  WRAPS, so the band it occupies grows with it (measured: 50px -> 84px
+     *  at 320).  A width threshold rather than a DOM measurement, for the
+     *  same reason the rest of this block is one. */
+    NARROW_WIDTH: 372,
+    WRAP_INSET: 36,
     /** Never let the two bands close up on a short window — a landscape
      *  phone is ~390px tall and would otherwise be left with no rect at
      *  all.  Below this the bands give way and the arrows ride a thin
@@ -4265,14 +4271,20 @@ export function computeIndicatorRect(
   screenHeight: number,
   bossBar: boolean = false,
 ): { left: number; right: number; top: number; bottom: number } {
-  const { EDGE_INSET, TOP_INSET, BOSS_BAR_INSET, BOTTOM_INSET, MIN_BAND } = UI_CONSTANTS.INDICATORS;
+  const {
+    EDGE_INSET, TOP_INSET, BOSS_BAR_INSET, BOTTOM_INSET, MIN_BAND,
+    NARROW_WIDTH, WRAP_INSET,
+  } = UI_CONSTANTS.INDICATORS;
   const left  = Math.min(EDGE_INSET, Math.max(0, screenWidth  * 0.5 - 8));
   const right = screenWidth - left;
   // The boss bar is the one part of the top band that comes and goes, and it
   // is the tallest.  Reserving its height permanently would cost every
-  // ordinary fight 46px of play area for a widget that is not on screen, so
-  // the band grows while it is up instead.
-  let top     = EDGE_INSET + TOP_INSET + (bossBar ? BOSS_BAR_INSET : 0);
+  // ordinary fight ~60px of play area for a widget that is not on screen, so
+  // the band grows while it is up instead — and likewise narrows back when
+  // the readout row is wide enough not to wrap.
+  let top     = EDGE_INSET + TOP_INSET
+              + (bossBar ? BOSS_BAR_INSET : 0)
+              + (screenWidth < NARROW_WIDTH ? WRAP_INSET : 0);
   let bottom  = screenHeight - EDGE_INSET - BOTTOM_INSET;
   // A short window (a landscape phone) would otherwise have the two bands
   // meet or cross.  The bands give way rather than the arrows vanishing.

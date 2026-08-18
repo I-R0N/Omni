@@ -259,7 +259,15 @@ g.audio.play('boss.death');
         // but the arena stops feeding the fight so the choice between the
         // two rifts is made in quiet.
         g.waves.halted = true;
-        openDescentPortal(g, boss.position);
+        // NO DESCENT RIFT for now (user call — the descent flow is being
+        // reworked).  The arena's own RETURN rift is untouched, so the way
+        // out of a cleared stage is the way you came in.  Everything the
+        // descent needs on the other side is intact and still tested:
+        // `transitionToMap(id, { descend: true })` steps `stageIndex` and
+        // the wave offset, `GameEntity.isDescent` and the amber portal
+        // colours still exist, and `openDescentPortal` below is kept
+        // verbatim for the same reason — what was removed is the one CALL
+        // that puts a rift in the world, not the mechanism behind it.
         g.lastStageClear = {
             stage: g.stageIndex + 1,
             bossName: def?.name ?? 'Boss',
@@ -312,6 +320,8 @@ function grantBossModule(g: GameEngine): { label?: string; desc?: string; credit
  *  Marked `isDescent` so `enterPortal` knows to increment the depth; the
  *  arena's own return rift is untouched, which is what makes the choice
  *  in-world rather than a menu button. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- see the call
+// site above: the rift is switched off pending a rework, not deleted.
 function openDescentPortal(g: GameEngine, pos: Vector2) {
     if (!g.currentMap) return;
     const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled

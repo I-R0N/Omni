@@ -4922,6 +4922,12 @@ export class GameEngine {
    *  the same `openPortal` abstraction the dragon and the rivals use. */
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
+      // THE LADDER STOPS HERE (user call).  One seam for both ways a boss
+      // reaches the field — the capstone wave's own spawn and the debug
+      // menu's warp-in — so neither can leave the ladder running underneath
+      // the fight.  It does not resume when the boss dies; see
+      // WaveSystem.haltForBoss.
+      this.waves.haltForBoss();
       this.audio.play('boss.intro');
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
