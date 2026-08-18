@@ -175,18 +175,52 @@ for (const vp of VIEWPORTS) {
       watch.assertClean();
     });
 
-    test('the station fits, shop rows included', async ({ page }) => {
+    test('the station fits on EVERY tab, and the money never scrolls away', async ({ page }) => {
       const watch = await boot(page);
       await startRun(page);
       await engine(page, e => e.addDebugCredits(200000));
       await dockAtStation(page);
 
-      expect(await lineCount(page, '[data-overlay="station"] h2'), 'station title lines').toBe(1);
-      expect((await flowerExtents(page)).overlap, 'flower overlap').toBe(0);
-      expect(await offViewport(page), 'station').toEqual([]);
-      // The shop purchase rows are the primary commerce action and were the
-      // shortest control on any player-facing surface (24.5px) before U2.
-      expect(await smallTargets(page), 'station tap targets').toEqual([]);
+      /*  The docked screen is TABBED now (user call: the shop sat at the
+       *  bottom of one long scroll, so buying meant scrolling up to read the
+       *  balance and back down to spend it).  So the layout questions are
+       *  asked once per tab — a panel that only fits while it is hidden is
+       *  not a panel that fits — and the flower check moves to the tab that
+       *  actually renders the flowers. */
+      for (const tabId of ['shop', 'outfit', 'ship'] as const) {
+        const tab = page.getByTestId(`station-tab-${tabId}`);
+        if (!(await tab.count())) continue;   // service not offered here
+        await tab.click();
+        await page.waitForTimeout(100);
+
+        expect(await lineCount(page, '[data-overlay="station"] h2'), `${tabId}: title lines`).toBe(1);
+        expect(await offViewport(page), `${tabId}: off-viewport`).toEqual([]);
+        // The shop purchase rows are the primary commerce action and were the
+        // shortest control on any player-facing surface (24.5px) before U2.
+        expect(await smallTargets(page), `${tabId}: tap targets`).toEqual([]);
+        if (tabId === 'outfit') {
+          expect((await flowerExtents(page)).overlap, 'flower overlap').toBe(0);
+        }
+      }
+
+      /*  THE COMPLAINT ITSELF, as an assertion: scroll the longest tab to the
+       *  bottom and the balance must still be on screen.  This is the whole
+       *  point of the sticky header, and it is exactly the kind of thing that
+       *  survives a redesign only if something checks it. */
+      await page.getByTestId('station-tab-shop').click();
+      await page.evaluate(() => {
+        const el = document.querySelector('[data-overlay="station"]')!;
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.waitForTimeout(150);
+      const bal = await page.evaluate(() => {
+        const r = document.querySelector('[data-testid="station-balance"]')!.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, h: window.innerHeight };
+      });
+      expect(bal.top, 'balance still on screen at the bottom of the shop')
+        .toBeGreaterThanOrEqual(0);
+      expect(bal.bottom, 'balance still on screen at the bottom of the shop')
+        .toBeLessThanOrEqual(bal.h);
 
       watch.assertClean();
     });

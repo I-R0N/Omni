@@ -486,6 +486,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // cargo panel).  'inventory' selections drive the sell/scrap strip; the
   // detail strip below the flowers acts on this slot.
   const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon' | 'inventory'; i: number } | null>(null);
+  /** Which station panel is showing (user call: the shop was at the bottom
+   *  of one long scroll, so buying meant scrolling up to read the balance
+   *  and back down to spend it).  The docked screen is THREE JOBS — buy,
+   *  outfit, read the ship — and they are now tabs rather than a column, so
+   *  no page is longer than a phone screen and the money lives in a header
+   *  that never scrolls away.
+   *
+   *  Not normalised in an effect: the render picks the first AVAILABLE tab
+   *  when this one is not offered here (the home drydock sells nothing), so
+   *  a station's services decide what exists and this only remembers a
+   *  preference. */
+  const [stationTab, setStationTab] = useState<'shop' | 'outfit' | 'ship'>('shop');
   // Which Ship Status stat row is expanded to its per-module contributors
   // (A2).  Controlled so it survives the 60 Hz overlay re-render, same as the
   // pause-menu section collapse state.
@@ -2172,32 +2184,122 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         const ps = stats.playerStats;
         const svc = stats.dock?.services;
         const canEdit = canEditInstalled;
+        const hasShop = !!(svc?.shipShop || svc?.weaponShop);
+        // What this station actually offers, in the order a docked player
+        // wants it.  `stationTab` is a preference; this is the authority.
+        const tabs: { id: 'shop' | 'outfit' | 'ship'; label: string }[] = [
+          ...(hasShop ? [{ id: 'shop' as const, label: 'Shop' }] : []),
+          { id: 'outfit' as const, label: 'Outfit' },
+          { id: 'ship' as const, label: 'Ship' },
+        ];
+        const tab = tabs.some(t => t.id === stationTab) ? stationTab : tabs[0].id;
+        const cargoUsed = (out?.inventory ?? []).filter(Boolean).length;
+        const cargoCap = (out?.inventory ?? []).length;
+        const needsRepair = !!svc?.repair && (stats.station?.missingHull ?? 0) > 0;
         return (
         <div
           /* No justify-center: on a scrollable flex column it clips
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
           className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain`} data-overlay="station">
-          <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
+          {/*  TOP-ALIGNED, not `my-auto` like the other overlays: this panel
+               has a sticky header, and a vertically centred block puts that
+               header in the middle of the screen whenever the active tab is
+               shorter than the viewport — which, now that the tabs are
+               short, is most of the time. */}
+          <div className="w-full max-w-2xl flex flex-col gap-3">
 
-            <div className="flex items-center justify-between gap-3">
-              <h2 className={`${SCREEN_TITLE} text-sky-300`}>⬡ {stats.dock?.name ?? 'STATION'}</h2>
-              {/* The `Salvage` word came off this chip in 5d U2: the ◈ glyph
-                  is the money mark on every other surface (the in-game HUD
-                  chip is exactly `◈ N`), and spelled out it pushed the
-                  header past 390px and wrapped BOTH halves onto two lines. */}
-              <span className={`text-amber-300 ${T_ROW} font-bold tabular-nums shrink-0`}>◈ {(stats.credits ?? 0).toLocaleString()}</span>
+            {/* ── STICKY HEADER (user call) ──────────────────────────────
+                The balance used to be a row at the top of one long scroll
+                and the shop was at the bottom of it, so buying meant
+                scrolling up to read the money and back down to spend it.
+                Money is relevant to every job on this screen — buying,
+                selling, scrapping, repairing — so it does not scroll.  The
+                same goes for CARGO, which is what a purchase actually
+                consumes and which the shop could not see at all, and for
+                UNDOCK, the way out.
+                `-mx-4 px-4` bleeds the bar to the overlay's padding edges so
+                content passing behind it is covered rather than showing in
+                the gutters. */}
+            <div className="sticky -top-4 z-20 -mx-4 px-4 pt-4 pb-2 bg-slate-950/95 backdrop-blur-sm flex flex-col gap-2 border-b border-slate-700/40">
+
+              <div className="flex items-center justify-between gap-2">
+                {/*  Smaller than the shared SCREEN_TITLE (a departure, so it
+                     says why): this title now shares its line with UNDOCK,
+                     and at 2xl "TRADE HUB" ellipsized to "TRADE H…".  A
+                     station's name is how the player knows which services
+                     they are looking at, so it gets to be complete rather
+                     than large. */}
+                <h2 className={`text-lg sm:text-xl font-bold tracking-[0.12em] truncate min-w-0 text-sky-300`}>
+                  ⬡ {stats.dock?.name ?? 'STATION'}
+                </h2>
+                <button
+                  onClick={onUndock}
+                  data-testid="station-undock"
+                  className={`${BTN_COMPACT} shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white tracking-widest uppercase flex items-center gap-1.5`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  Undock <span className={`text-emerald-200 ${T_NOTE} font-mono`}>[E]</span>
+                </button>
+              </div>
+
+              {/* The two running totals every action on this screen spends.
+                  `◈` is the money mark everywhere in this game; `⬢` is the
+                  inventory tile, so cargo is named in the shape it is stored
+                  in rather than in a word. */}
+              <div className="flex items-center gap-3">
+                <span className={`text-amber-300 ${T_ROW} font-bold tabular-nums`} data-testid="station-balance">
+                  ◈ {(stats.credits ?? 0).toLocaleString()}
+                </span>
+                <span className={`${T_ROW} font-bold tabular-nums ${cargoUsed >= cargoCap ? 'text-rose-300' : 'text-slate-400'}`}>
+                  ⬢ {cargoUsed}/{cargoCap}
+                </span>
+                {/* Repair is CONTEXTUAL: the commonest reason to dock, but
+                    only while there is damage to pay for.  A permanently
+                    disabled "HULL FULL" button in a header that never
+                    scrolls away would be clutter that never resolves. */}
+                {needsRepair && (
+                  <button
+                    disabled={!stats.station?.canRepair}
+                    onClick={onRepairHull}
+                    className={`${BTN_COMPACT} ml-auto shrink-0 ${
+                      stats.station?.canRepair
+                        ? 'bg-rose-700/60 hover:bg-rose-600/70 text-rose-100'
+                        : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                    }`}
+                  >
+                    Repair ◈{(stats.station?.fullRepairCost ?? 0).toLocaleString()}
+                  </button>
+                )}
+              </div>
+
+              {/* Tabs.  `flex-1` so they share the width evenly and stay
+                  above the tap floor at 320px, where four of anything would
+                  not fit — which is why REPAIR is a header action rather
+                  than a fourth tab. */}
+              <div className="flex gap-1.5" role="tablist">
+                {tabs.map(t => (
+                  <button
+                    key={t.id}
+                    role="tab"
+                    aria-selected={tab === t.id}
+                    data-testid={`station-tab-${t.id}`}
+                    onClick={() => setStationTab(t.id)}
+                    className={`${CHIP_BASE} flex-1 min-w-0 text-center ${
+                      tab === t.id
+                        ? 'bg-sky-600/30 border-sky-400/60 text-sky-100'
+                        : CHIP_OFF
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <button
-              onClick={onUndock}
-              className={`${BTN_PRIMARY} flex items-center justify-center gap-2`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-              UNDOCK <span className={`text-emerald-200 ${T_NOTE} font-mono`}>[E]</span>
-            </button>
-
-            {/* Hull repair — pay-per-HP, pro-rated (repair-service stations) */}
+            {/* ── SHIP: condition + the full derived-stat breakdown ────── */}
+            {tab === 'ship' && (
+            <>
             {svc?.repair && (
             <div className={`${panelAccent('border-rose-600/30')} flex items-center justify-between gap-3 flex-wrap`}>
               <div className={T_ROW}>
@@ -2222,17 +2324,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
             )}
 
-            {/* Hex outfitting + inventory.  Modules FUNCTION only while
-                their adjacency requirement is met (engine⇢hull,
-                thrusters⇢engine, shield/plating⇢hull, capacitor⇢shield,
-                weapon-mods⇢gun; hull + guns are the roots).  Drag tiles
-                between the inventory and the flowers — drydock only. */}
             {/* Full derived-stat set with per-module attribution (A2) — the
                 same shared widget the pause menu shows, so an outfitting
                 change here can be read back immediately. */}
             {renderShipStatus()}
+            </>
+            )}
 
-            {out && (
+            {/* ── OUTFIT: the two flowers, the inventory, the detail strip ──
+                Modules FUNCTION only while their adjacency requirement is met
+                (engine⇢hull, thrusters⇢engine, shield/plating⇢hull,
+                capacitor⇢shield, weapon-mods⇢gun; hull + guns are the roots).
+                Drag tiles between the inventory and the flowers — drydock
+                only. */}
+            {tab === 'outfit' && out && (
               <div className={`${panelAccent('border-sky-600/30')} flex flex-col gap-2`}>
                 {!canEdit && (
                   <p className={`text-slate-500 ${T_NOTE} text-center -mb-1`}>
@@ -2254,10 +2359,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             )}
 
-            {/* Module shops — items are fixed Mk varieties (no upgrades);
-                a purchase lands in the inventory. */}
-            {out && (svc?.shipShop || svc?.weaponShop) && (
+            {/* ── SHOP: items are fixed Mk varieties (no upgrades); a
+                purchase lands in the inventory, which is why the header
+                carries the cargo count beside the money. */}
+            {tab === 'shop' && out && hasShop && (
               <div className={`${panelAccent('border-amber-600/30')} flex flex-col gap-3`}>
+                {/*  A purchase needs a free cargo tile, and `purchaseModule`
+                     silently rejects without one.  Saying so beats a button
+                     that looks affordable and does nothing. */}
+                {cargoUsed >= cargoCap && (
+                  <p className={`text-rose-300 ${T_NOTE} text-center`}>
+                    Cargo is full — scrap or install something before buying.
+                  </p>
+                )}
                 {(['ship', 'weapon'] as const).filter(g => (g === 'ship' ? svc?.shipShop : svc?.weaponShop)).map(g => (
                   <div key={g}>
                     <h3 className={`${HEADING} mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
@@ -2267,11 +2381,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       {out.catalog.filter(c => c.group === g).map(c => (
                         <button
                           key={c.id}
-                          disabled={!c.affordable}
+                          disabled={!c.affordable || cargoUsed >= cargoCap}
                           onClick={() => onPurchaseModule?.(c.id)}
                           title={`${c.desc} — bought into the inventory`}
                           className={`${BTN_COMPACT} flex items-center justify-between gap-2 ${
-                            c.affordable
+                            c.affordable && cargoUsed < cargoCap
                               ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100'
                               : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
                           }`}

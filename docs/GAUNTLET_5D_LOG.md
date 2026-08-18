@@ -859,3 +859,81 @@ than deleted, so a rift cannot come back silently.
 user directive and say so in the file — the descent rift, and the minimap
 default from U6. Captures at 390×844 and 320×568, with and without a capstone
 bar, confirm the chevrons clear both bands.
+
+---
+
+## U8 — the docked station: a requirements pass, then tabs
+
+> "I have to scroll from the bottom of the menu to the top to see how much
+> salvage I have left and then scroll all the way back to the bottom to buy
+> something."
+
+### The requirements, first
+
+The docked screen was one long column: title + balance, UNDOCK, repair, the
+full stat breakdown, the flowers + inventory + detail strip, and then the
+shops **last**. At 390×844 that is roughly three screens of scroll with the
+money at the top and the spending at the bottom.
+
+What a docked player actually does is four things — **buy**, **outfit**,
+**sell/scrap**, **repair** — and reading the ship's stats, which is a
+reference for the first two rather than a job of its own. Two facts fall out
+of that list and neither was expressed in the layout:
+
+1. **Money is relevant to every one of those jobs.** It is not a header
+   ornament; it is the constraint. So it must not be able to scroll away.
+2. **Cargo is the second constraint and was invisible.** A purchase lands in
+   the inventory, `purchaseModule` silently rejects with no free tile, and
+   the shop could not see the inventory at all — an affordable-looking button
+   that does nothing.
+
+### What shipped
+
+**A sticky header**, bled to the overlay's padding edges so content passes
+behind rather than beside it: station name, `◈ balance`, `⬢ used/capacity`,
+UNDOCK, and repair. Repair is **contextual** — it appears only while there is
+damage to pay for, because a permanently disabled "HULL FULL" button in a bar
+that never scrolls away is clutter that never resolves.
+
+**Three tabs** — SHOP / OUTFIT / SHIP — so no page is longer than a phone
+screen. Measured at 390×844: Outfit and Ship are exactly one screen (844px,
+no scroll at all); Shop is 1005px, one short scroll, with the balance pinned.
+
+Four decisions worth recording:
+
+- **Repair is a header action, not a fourth tab.** Four tabs do not clear the
+  40px tap floor at 320px, and repair is one control rather than a panel.
+- **The tab list comes from the station's SERVICES**, and `stationTab` is only
+  a remembered preference — the home drydock sells nothing, so it falls back
+  to the first tab it does offer. No effect, no normalisation, no state that
+  can disagree with the station you are docked at.
+- **The panel is TOP-aligned**, unlike every other overlay's `my-auto`. A
+  vertically centred block puts a sticky header in the middle of the screen
+  whenever the tab is shorter than the viewport — which, now that the tabs
+  are short, is most of the time.
+- **The station title dropped from `SCREEN_TITLE` to `text-lg`** — a
+  documented departure from the shared vocabulary. It shares its line with
+  UNDOCK now, and at 2xl "TRADE HUB" ellipsized to "TRADE H…". A station's
+  name is how you know which services you are looking at, so it gets to be
+  complete rather than large.
+
+**Cargo is now enforced in the UI**, not just in the engine: purchase buttons
+disable when cargo is full and the shop says why.
+
+### Validation
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **164 passed** ✅.
+The viewport matrix's station test was rewritten rather than left alone: it
+now asks its layout questions **once per tab** (a panel that only fits while
+it is hidden is not a panel that fits) and adds the complaint itself as an
+assertion — scroll the longest tab to the bottom, the balance must still be
+on screen.
+
+### Not done, deliberately
+
+- **The pause menu's cargo panel is untouched.** It has the same shape and
+  probably the same problem, but the user asked about stations and the pause
+  panel is read-only where the station is transactional.
+- **The shop is still one list per group.** It is 160px past the fold at 390
+  with the header pinned, which is a scroll, not a hunt. Splitting it further
+  (sub-tabs per family) would add taps to buy one thing.

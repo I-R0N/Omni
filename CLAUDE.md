@@ -1136,7 +1136,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   inventory + catalog; inventory items carry `sellValue`/`scrapValue`)
   drives the station UI: two hex flowers, the
   inventory tile grid, pointer-based DRAG-AND-DROP (touch + mouse; a
-  <8px press falls through to tap-select), and the shop.  The PAUSE menu
+  <8px press falls through to tap-select), and the shop.
+  **The DOCKED screen is TABBED with a STICKY HEADER** (user call): it was
+  one long column with the balance at the top and the shop at the bottom,
+  so buying meant scrolling up to read the money and back down to spend
+  it.  The header never scrolls and carries the things every job on the
+  screen spends — `◈` balance, `⬢` cargo used/capacity, UNDOCK, and a
+  CONTEXTUAL repair button that appears only while there is damage to pay
+  for.  Under it, three tabs (`stationTab`, falling back to the first
+  offered when a station lacks the service): SHOP (catalog grids; a
+  purchase needs a free cargo tile, so the buttons disable and say so when
+  cargo is full), OUTFIT (the flowers + inventory + detail strip) and SHIP
+  (hull repair detail + `renderShipStatus()`).  Repair is a header action
+  rather than a fourth tab because four tabs do not clear the 40px tap
+  floor at 320px.  The panel is TOP-aligned, not `my-auto` like the other
+  overlays — a centred block puts a sticky header in the middle of the
+  screen.  The PAUSE menu
   hosts the same widgets as a CARGO panel: READ-ONLY flowers (tap to
   inspect; no drag source / drop target — outfitting stays drydock-only)
   + the fully live inventory honeycomb (drag-reorder + tap → a detail
