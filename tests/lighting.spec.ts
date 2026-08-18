@@ -260,6 +260,26 @@ test.describe('occluder collection', () => {
     // scene is hand-built: every static tile deactivated, exactly one revived
     // due east of the player.  The bearings are then unambiguous.
     const r = await engine(page, async (e) => {
+      // THIS TEST PINS THE TRANSMISSION MODEL, so the two prototypes that
+      // ship on top of it are held off for its duration: REFRACTION moves the
+      // transmitted light out of the straight-through path by design (that is
+      // its own test), and EMISSIVE would add a second light at the glass
+      // tile's own position, inside the band being measured.  Neither belongs
+      // in a measurement of "how much light does a translucent body withhold".
+      if (e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      // SOFTNESS is pinned for the same reason, and it is the one that
+      // actually moved the numbers: the bearings below are derived from the
+      // occluder's own angular size (asin(22/120) = 10.6 deg), so a penumbra
+      // four times wider than the one they were derived for puts the
+      // outermost samples inside the graded band and grades the whole
+      // measurement down.  The shipped default is 'diffuse'; this test wants
+      // the narrow band its geometry is written against.
+      const softness0 = e.renderer.getShadowSoftness();
+      for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== 'soft'; i++) {
+        e.renderer.cycleShadowSoftness();
+      }
+
       // The showcase map is single-variant, so the OCCLUDER'S VARIANT is
       // stamped on rather than searched for.  That is safe because the ring
       // is sampled at 220 units and the tile sits at 120 — the probe never
@@ -329,6 +349,11 @@ test.describe('occluder collection', () => {
       await place('nebula-tile');          // passThrough — casts nothing
       const nebula = await profile();
       const nebulaOcc = e.renderer._lightOccluderCount;
+      if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== softness0; i++) {
+        e.renderer.cycleShadowSoftness();
+      }
       return { solid, solidOcc, glass, glassOcc, nebula, nebulaOcc };
     });
 
@@ -592,8 +617,11 @@ test.describe('occluder collection', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
 
-    const off = await engine(page, e => e.renderer.getRefraction());
-    expect(off).toBe(false);          // a prototype ships off
+    // SHIPS ON as of A5h (user call, after device testing).  It was off while
+    // the question the prototype exists to ask — is a caustic legible at a
+    // third of screen resolution — was still open.
+    const dflt = await engine(page, e => e.renderer.getRefraction());
+    expect(dflt).toBe(true);
 
     // One glass tile due east, same hand-built scene as the shadow test.
     const r = await engine(page, async (e) => {
@@ -646,12 +674,11 @@ test.describe('occluder collection', () => {
       const plain = await profile();
       e.renderer.toggleRefraction();
       const bent = await profile();
-      e.renderer.toggleRefraction();
-      return { built: true, plain, bent, refractOff: e.renderer.getRefraction() };
+      return { built: true, plain, bent, refractOn: e.renderer.getRefraction() };
     });
 
     expect(r.built).toBe(true);
-    expect(r.refractOff).toBe(false);          // and it toggles back
+    expect(r.refractOn).toBe(true);            // and it toggles back to the default
 
     // THE BRIGHTNESS RULE, pinned at the table rather than at one call site.
     // It CHANGED at A5f: half the source was a hard ceiling, and is now the
@@ -784,8 +811,10 @@ test.describe('occluder collection', () => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
 
-    const off = await engine(page, e => e.renderer.getEmissive());
-    expect(off).toBe(false);            // a prototype ships off
+    // SHIPS ON as of A5h (user call, after device testing) — it is what metal
+    // and glass do with light now that the contact-driven glow is deleted.
+    const dflt = await engine(page, e => e.renderer.getEmissive());
+    expect(dflt).toBe(true);
 
     const r = await engine(page, async (e) => {
       // One metal tile due east of the light, nothing else.
@@ -857,14 +886,14 @@ test.describe('occluder collection', () => {
       const shadowed = { lum: probe() };
       e.renderer.toggleEmitShadows();
 
-      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
       return { built: true, plain, emit, shadowed, shadowsDefaultOff,
                emitCycle: { first: firstEmit, seen },
-               backOff: e.renderer.getEmissive() };
+               backOn: e.renderer.getEmissive() };
     });
 
     expect(r.built).toBe(true);
-    expect(r.backOff).toBe(false);
+    expect(r.backOn).toBe(true);
     // The emitter brightness knob scales the variant's own value against the
     // baseline it is authored at, so its default must be a no-op — and no
     // entry may exceed 1/1, since a body cannot radiate more than fell on it.
@@ -874,7 +903,9 @@ test.describe('occluder collection', () => {
       expect(m).not.toBeNull();
       expect(Number(m![1])).toBeLessThanOrEqual(Number(m![2]));
     }
-    // Emitter shadows are a second prototype and ship off; turning them on
+    // Emitter shadows stay OFF by default even though emission itself now
+    // ships on — they are the expensive half, and the row above is what pays
+    // for them.  Turning them on
     // must not break the light, which is the failure the scratch-canvas path
     // could plausibly have (destination-out on the wrong surface erases the
     // layer rather than the emitter's share, and the symptom is a dark hole).
@@ -887,6 +918,98 @@ test.describe('occluder collection', () => {
     // the tile.  A count that goes up while nothing brightens would mean the
     // emitter was composited somewhere nobody can see.
     expect(r.emit.lum).toBeGreaterThan(r.plain.lum);
+    watch.assertClean();
+  });
+
+  test('the emitter-shadow ladder is monotone, and stays off by default', async ({ page }) => {
+    const watch = await boot(page);
+
+    // Read BEFORE the run starts, so nothing in the boot path can have
+    // cycled them.  These four are what A5h changed, and each is a decision
+    // rather than an accident: the two prototypes that measured well on the
+    // device now ship on, the softness moved four rungs softer, and the one
+    // knob whose cost is measured in whole milliseconds stayed off.
+    const d = await engine(page, e => ({
+      refraction: e.renderer.getRefraction(),
+      emissive: e.renderer.getEmissive(),
+      emitShadows: e.renderer.getEmitShadows(),
+      softness: e.renderer.getShadowSoftness(),
+      tier: e.renderer.getEmitShadowTier().name,
+    }));
+    expect(d.refraction).toBe(true);
+    expect(d.emissive).toBe(true);
+    expect(d.emitShadows).toBe(false);   // the expensive half stays opt-in
+    expect(d.softness).toBe('diffuse');
+    expect(d.tier).toBe('std');
+
+    await startRun(page, 'METAL_FIELD');
+
+    // The ladder itself, walked once.  Its rungs must MOVE TOGETHER — the
+    // cost of a shadowing emitter is almost entirely its own occluder
+    // collection, so a rung that cut the count while raising the cap would
+    // not be a cheaper rung at all.
+    const r = await engine(page, (e) => {
+      const seen: { name: string; maxEmitters: number; maxOccluders: number }[] = [];
+      const first = e.renderer.getEmitShadowTier().name;
+      for (let i = 0; i < 20; i++) {
+        seen.push({ ...e.renderer.getEmitShadowTier() });
+        e.renderer.cycleEmitShadowTier();
+        if (e.renderer.getEmitShadowTier().name === first) break;
+      }
+      return { first, seen, back: e.renderer.getEmitShadowTier().name };
+    });
+    expect(r.first).toBe('std');
+    expect(r.back).toBe('std');          // and the cycle closes
+    expect(r.seen.length).toBeGreaterThan(2);
+
+    const by = (n: string) => r.seen.find(t => t.name === n)!;
+    for (const t of r.seen) {
+      expect(t.maxEmitters).toBeGreaterThan(0);
+      expect(t.maxOccluders).toBeGreaterThan(0);
+    }
+    // Sorted by emitter count, the occluder cap must never go DOWN — that is
+    // what makes "cheaper rung" mean one thing rather than two.
+    const ladder = [...r.seen].sort((a, b) => a.maxEmitters - b.maxEmitters);
+    for (let i = 1; i < ladder.length; i++) {
+      expect(ladder[i].maxOccluders).toBeGreaterThanOrEqual(ladder[i - 1].maxOccluders);
+    }
+    // The rungs BELOW the default are the point of the row: they exist so the
+    // toggle can be judged at a cost the phone can pay.
+    expect(by('min').maxEmitters).toBeLessThan(by('lite').maxEmitters);
+    expect(by('lite').maxEmitters).toBeLessThan(by('std').maxEmitters);
+
+    // And the cheapest rung must still LIGHT the scene with the toggle on —
+    // past the emitter count the halo falls back to flat rather than
+    // vanishing, so no rung may darken anything.
+    const lit = await engine(page, async (e) => {
+      const settle = () => new Promise<void>(res => {
+        let n = 0;
+        const t = () => { if (++n < 20) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      const lum = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        let sum = 0;
+        for (let i = 0; i < img.length; i += 4 * 97) sum += img[i] + img[i + 1] + img[i + 2];
+        return sum;
+      };
+      e.renderer.setLighting('unified');
+      if (!e.renderer.getEmitShadows()) e.renderer.toggleEmitShadows();
+      while (e.renderer.getEmitShadowTier().name !== 'min') e.renderer.cycleEmitShadowTier();
+      await settle();
+      const min = lum();
+      while (e.renderer.getEmitShadowTier().name !== 'std') e.renderer.cycleEmitShadowTier();
+      await settle();
+      const std = lum();
+      e.renderer.toggleEmitShadows();
+      return { min, std };
+    });
+    expect(lit.min).toBeGreaterThan(0);
+    // Within a wide band of each other: the tier changes the TREATMENT of a
+    // handful of small haloes, not how much of the scene is lit.
+    expect(lit.min).toBeGreaterThan(lit.std * 0.5);
     watch.assertClean();
   });
 

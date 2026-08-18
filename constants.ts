@@ -1418,11 +1418,14 @@ export function toggleShardShadows(): boolean {
  *  is a dark shadow with a bright band beside it — instead of stacking one
  *  effect on the other and reading as "glass got brighter".
  *
- *  Off by default because the open question is whether a caustic is legible
- *  at all on a light layer rendered at a third of screen resolution, and
- *  that is a look call to be made on the device. */
-/** DBG: do METAL and GLASS RE-EMIT the light that falls on them?  A
- *  prototype, OFF by default, and the sibling of the refraction toggle.
+ *  SHIPPED ON (user call, after device testing).  It was off while the open
+ *  question — is a caustic legible at all on a light layer rendered at a
+ *  third of screen resolution — was still open; the device answered yes at
+ *  the brightnesses the cycle now reaches, so the prototype is the default
+ *  and the toggle is what turns it off. */
+/** DBG: do METAL and GLASS RE-EMIT the light that falls on them?  SHIPPED ON
+ *  (user call, after device testing), and the sibling of the refraction
+ *  toggle.
  *
  *  ON, every lit body whose variant carries `emits` becomes a SECOND light
  *  at its own position — dimmer by that fraction, uniform in every
@@ -1437,7 +1440,7 @@ export function toggleShardShadows(): boolean {
  *  emitters costs N full collections, on a budget that is already the
  *  tightest thing in this system.  The emitters are dim and small; the
  *  place that shows is a halo bleeding slightly through a wall. */
-let emissiveEnabled = false;
+let emissiveEnabled = true;
 export function getEmissiveEnabled(): boolean { return emissiveEnabled; }
 export function toggleEmissive(): boolean {
   emissiveEnabled = !emissiveEnabled;
@@ -1501,7 +1504,44 @@ export function toggleEmitShadows(): boolean {
   return emitShadowsEnabled;
 }
 
-let refractionEnabled = false;
+/** DBG: HOW MUCH shadowing the secondary lights get, when they get any.
+ *
+ *  A COST LADDER for the toggle above, in the same shape as `LIGHTING_TIERS`
+ *  is for the primary light and for the same reason: the cost of a shadowing
+ *  emitter is almost entirely its own occluder collection, so the two knobs
+ *  that matter — how MANY emitters shadow, and how much geometry each of
+ *  them sees — move together rather than one at a time.  Measured on the
+ *  metal showcase at A5g: +1.3 ms at Low (3 emitters), +5.6 at Medium (7),
+ *  +12.6 ms at High (15).  That is what a rung below the default is for.
+ *
+ *  Past `maxEmitters` an emitter still LIGHTS, flatly — the tier degrades
+ *  the treatment, never the count, so dropping a rung dims no part of the
+ *  scene.  Cycling from the default goes DOWN first: the question asked of
+ *  this ladder is "can the cheap end still be seen", not "how expensive can
+ *  it get". */
+export const EMIT_SHADOW_TIERS: ReadonlyArray<{
+  name: string; maxEmitters: number; maxOccluders: number;
+}> = [
+  { name: 'std',  maxEmitters: 4, maxOccluders: 12 },
+  { name: 'lite', maxEmitters: 2, maxOccluders: 8  },
+  { name: 'min',  maxEmitters: 1, maxOccluders: 6  },
+  { name: 'more', maxEmitters: 6, maxOccluders: 12 },
+  { name: 'max',  maxEmitters: 8, maxOccluders: 16 },
+] as const;
+let activeEmitShadowTierIndex = 0;
+export function getEmitShadowTier(): { name: string; maxEmitters: number; maxOccluders: number } {
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex];
+}
+export function getEmitShadowTierName(): string {
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
+}
+export function cycleEmitShadowTier(): string {
+  activeEmitShadowTierIndex =
+    (activeEmitShadowTierIndex + 1) % EMIT_SHADOW_TIERS.length;
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
+}
+
+let refractionEnabled = true;
 export function getRefractionEnabled(): boolean { return refractionEnabled; }
 export function toggleRefraction(): boolean {
   refractionEnabled = !refractionEnabled;
@@ -1614,7 +1654,12 @@ export const SHADOW_SOFTNESS_CYCLE: ReadonlyArray<{ name: string; k: number }> =
   { name: 'off',     k: 0   },
   { name: 'subtle',  k: 1.2 },
 ] as const;
-let activeSoftnessIndex = 0;
+/** SHIPPED DEFAULT: `diffuse` (user call, after device testing) — four rungs
+ *  softer than the 'soft' this shipped at, and paid for by the pass count
+ *  that scales with k, so the wider band is graded rather than striped.
+ *  Found by NAME, like the lighting tier's default, so inserting a rung
+ *  above it cannot silently change what ships. */
+let activeSoftnessIndex = SHADOW_SOFTNESS_CYCLE.findIndex(s => s.name === 'diffuse');
 export function getShadowSoftness(): number { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].k; }
 export function getShadowSoftnessName(): string { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name; }
 export function cycleShadowSoftness(): string {

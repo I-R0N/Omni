@@ -36,7 +36,7 @@ import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
-    getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled,
+    getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -1107,20 +1107,16 @@ const EMIT_RADIUS_FRAC = 0.32;
  *  light, `emits` of almost nothing is exactly nothing, and it would still
  *  cost a gradient fill to draw. */
 const EMIT_MIN_RECEIVED = 0.06;
-/** Occluder cap for a SHADOWING emitter, on top of the tier's.  A secondary
- *  light is a third the radius of the primary, so it sees far less geometry
- *  anyway; this keeps the worst case bounded when the toggle is on. */
-const EMIT_MAX_OCCLUDERS = 12;
-/** How many emitters may SHADOW, whatever the tier allows to exist.
- *
- *  Measured on the metal showcase with the toggle on: +1.3 ms at Low (3
- *  emitters), +5.6 at Medium (7), and **+12.6 ms at High (15)** — an entire
- *  frame budget, from a debug toggle.  The cost is per emitter and almost
- *  entirely its own occluder collection, so it scales with the count and
- *  nothing else.  Four shadowing emitters answer the question the toggle
- *  exists to ask ("what would this look like") as well as fifteen do, and
- *  the rest fall back to the flat halo rather than disappearing. */
-const EMIT_SHADOW_MAX = 4;
+// How many emitters may SHADOW, and how much geometry each of them sees,
+// both come from EMIT_SHADOW_TIERS (constants.ts) — a cost ladder for the
+// toggle, cycled at DBG "Emit shd tier".
+//
+// Measured on the metal showcase with the toggle on: +1.3 ms at Low (3
+// emitters), +5.6 at Medium (7), and +12.6 ms at High (15) — an entire frame
+// budget, from a debug toggle.  The cost is per emitter and almost entirely
+// its own occluder collection, so it scales with the count and nothing else,
+// which is why the ladder's rungs move the count first.  Past the cap an
+// emitter still lights, flatly, rather than disappearing.
 
 /** Emitter snapshot: world position, radius and alpha, as PLAIN NUMBERS.
  *
@@ -1191,6 +1187,7 @@ function compositeEmitters(
     if (n === 0) return 0;
 
     const shadowed = getEmitShadowsEnabled() && r.physics !== undefined;
+    const shadowTier = getEmitShadowTier();
     const emitWorldR = emitRPx / worldToPx;
 
     // PASS 2 — draw.  Only now may a second collection touch the pool.
@@ -1201,7 +1198,7 @@ function compositeEmitters(
         // Past the shadow budget, an emitter still lights — it just lights
         // flatly.  Falling back beats vanishing: the count is what the tier
         // promised, and only the treatment degrades.
-        if (!shadowed || k >= EMIT_SHADOW_MAX) {
+        if (!shadowed || k >= shadowTier.maxEmitters) {
             // The emitter IS the player light, smaller and dimmer: same
             // cached gradient, scaled by how much light reached the body and
             // by how much of it the material throws back.  So it tracks the
@@ -1229,7 +1226,7 @@ function compositeEmitters(
                                     r._emitOccluders, getShardShadowsEnabled());
         r._emitOccluders.sort(byDistSq);
         const sel = selectOccluders(r._emitOccluders, cn,
-                                    Math.min(EMIT_MAX_OCCLUDERS, cn),
+                                    Math.min(shadowTier.maxOccluders, cn),
                                     Math.min(4, cn));
         compositeLight(sctx, ex, ey, emitRPx, r._emitOccluders, sel,
                        _emX[k], _emY[k], worldToPx, getShadowSoftness(), false);

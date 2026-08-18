@@ -294,6 +294,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleEmitBrightness();
   };
 
+  const handleCycleEmitShadowTier = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitShadowTier();
+  };
+
   const handleToggleEmitShadows = () => {
       if (engineRef.current) engineRef.current.dbg.toggleEmitShadows();
   };
@@ -652,6 +656,7 @@ const App: React.FC = () => {
         onToggleEmissive={handleToggleEmissive}
         onCycleEmitBrightness={handleCycleEmitBrightness}
         onToggleEmitShadows={handleToggleEmitShadows}
+        onCycleEmitShadowTier={handleCycleEmitShadowTier}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}

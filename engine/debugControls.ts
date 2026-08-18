@@ -35,6 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
+    cycleEmitShadowTier,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -386,7 +387,7 @@ export class DebugControls {
   }
 
   /** DBG (Visual): do METAL and GLASS re-emit the light that falls on them?
-   *  Off by default.  On, each lit body of those materials becomes a second,
+   *  ON by default (user call, after device testing).  On, each lit body of those materials becomes a second,
    *  dimmer light at its own position — replacing the contact-driven glow
    *  those materials used to carry, which lit up when something touched them
    *  rather than when light reached them. */
@@ -409,6 +410,16 @@ export class DebugControls {
    *  own. */
   toggleEmitShadows() {
     toggleEmitShadows();
+  }
+
+  /** DBG (Visual): HOW MUCH shadowing the secondary lights get, when the row
+   *  above turns them on — a cost ladder, not a look knob.  The rungs move
+   *  the emitter COUNT and that emitter's own occluder cap together, because
+   *  a shadowing emitter costs almost exactly one occluder collection.  Past
+   *  the count an emitter still lights, flatly, so a cheaper rung dims
+   *  nothing. */
+  cycleEmitShadowTier() {
+    cycleEmitShadowTier();
   }
 
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.

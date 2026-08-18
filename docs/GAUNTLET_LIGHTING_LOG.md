@@ -1804,3 +1804,113 @@ monotone across the whole range. The emissive test gained the brightness
 table's proper-fraction rule and a check that turning emitter shadows ON does
 not darken the scene — the plausible failure of the scratch-canvas path is a
 `destination-out` landing on the wrong surface, whose symptom is a hole.
+
+---
+
+## A5h — the prototypes become the defaults, and the expensive one gets a ladder
+
+Four changes, all of them decisions rather than discoveries: the device
+testing that A5e and A5f were built to enable came back, and it liked what it
+saw. Refraction and emissive re-radiation SHIP ON; shadow softness ships four
+rungs softer at `diffuse`; emitter shadows stay OFF and gain a cost ladder of
+their own.
+
+### What moved
+
+| knob | was | now |
+|---|---|---|
+| Refraction | off | **on** |
+| Emissive | off | **on** |
+| Shadow soft | `soft` (k 2.5) | **`diffuse`** (k 10) |
+| Emit shadow | off | off — unchanged, and deliberately |
+| Emit shd tier | — | **new row**: std / lite / min / more / max |
+
+The softness default is found by NAME (`findIndex(s => s.name === 'diffuse')`)
+rather than written as an index, the same guard the lighting tier's default
+already carries: inserting a rung above it would otherwise silently change
+what ships, which is the class of mistake nobody notices until a look call
+mysteriously regresses.
+
+### The emitter-shadow ladder
+
+The row that was added is a COST ladder, not a look knob, and it moves the two
+things that drive the cost together — how many emitters shadow, and how much
+geometry each of those sees:
+
+| tier | maxEmitters | maxOccluders |
+|---|---|---|
+| **std** (default) | 4 | 12 |
+| lite | 2 | 8 |
+| min | 1 | 6 |
+| more | 6 | 12 |
+| max | 8 | 16 |
+
+Both numbers move because the cost of a shadowing emitter is almost entirely
+its own occluder collection: a rung that cut the count while raising the cap
+would not be a cheaper rung at all. Cycling from the default goes DOWN first,
+because the question asked of this ladder is whether the cheap end can still
+be seen — the fixed `EMIT_SHADOW_MAX = 4` and `EMIT_MAX_OCCLUDERS = 12` of
+A5g are now simply the `std` row, so the default behaviour is unchanged.
+
+Past `maxEmitters` an emitter still LIGHTS, flatly. The tier degrades the
+TREATMENT and never the count, so no rung darkens any part of the scene —
+which is what the suite asserts rather than trusting.
+
+### Cost
+
+Container-measured at 390×844, ship parked in the densest cluster, all rows
+in ONE page at the SAME cluster so the occluder count (the dominant term) is
+identical down each column. p95 `lightingMs`:
+
+| config | METAL_FIELD p95 | GLASS_FIELD p95 |
+|---|---|---|
+| A5g defaults (soft / no refr / no emit) | 0.785 | 1.045 |
+| + `diffuse` alone | 1.045 | 1.470 |
+| + refraction alone | 0.815 | 1.490 |
+| + emissive alone | 0.890 | 1.130 |
+| **A5h defaults (all three)** | **1.150** | **1.710** |
+| ...+ emit shadows, `std` | 3.345 | 3.540 |
+| ...+ emit shadows, `min` | 1.760 | 1.710* |
+
+*(both at 24 occluders except the last GLASS row, which drifted to 16 and is
+not comparable — noted rather than quietly tabulated.)*
+
+Three things worth reading off it:
+
+- **The softness rung is the biggest single contributor**, +0.26 ms on metal
+  and +0.43 on glass. That is the pass count doing exactly what A5f built it
+  to do: `softSteps` scales with k and `diffuse` buys six passes where `soft`
+  bought three, because a band four times wider graded over three passes
+  would read as stripes.
+- **Refraction is nearly free where there is no glass** (+0.03 on metal) and
+  the dominant cost where everything is glass (+0.45). Only bodies with
+  `transmit > 0` enter the pass, so the map decides the bill.
+- **The emit-shadow ladder earns its place.** On metal, `std` costs +2.2 ms
+  over the defaults and `min` costs +0.6 — roughly a quarter. That is the
+  difference between "unaffordable" and "judgeable on a phone", which is
+  what the row exists for.
+
+**The worst case is now over the notional 2.0 ms budget in the worst
+synthetic scene.** ASTEROID_FIELD's occluder count drifts run to run (its
+occluders are mobile shards), so its rows do not compare cleanly, but at 18
+occluders the `diffuse` rung alone measured 2.63 p95 there. The levers are
+already built and unchanged — the `lower` / `lowest` / `minimal` tiers and
+the softness cycle itself — and the missing measurement is still the same
+one: a `PerfRecorder` capture on the device, where the software rasterizer
+in this container is not the thing being measured.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **124 passed** (a new test
+pins the four defaults and walks the emitter-shadow ladder). Two existing
+tests needed real changes rather than re-baselining:
+
+- The **transmission** test now holds refraction, emissive AND softness at
+  known values for its duration. It measures how much light a translucent
+  body withholds along a bearing derived from the occluder's own angular
+  size (`asin(22/120)` = 10.6°) — and a penumbra four times wider puts the
+  outermost samples inside the graded band, which graded the whole
+  measurement down to 3.80 against a 3.83 bar. The failure was arithmetic,
+  not flake: the test asserts a geometry, so it now pins the geometry.
+- The **refraction** and **emissive** tests assert the new defaults and
+  restore them, instead of asserting "a prototype ships off".
