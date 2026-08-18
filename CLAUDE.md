@@ -56,7 +56,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  164 tests.  All run at
+                          anti-flake rules).  167 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1602,6 +1602,21 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   map-load bake (`materialNeighborCount`); `densityCachedTint` must
   be invalidated at every site that mutates its inputs. Master DBG
   `Tile shade` toggle gates both compute and render.
+- **EVERY structure death goes through `onDeath` — including collision
+  kills.**  `PhysicsSystem.killStructureByImpact` is the one path for a
+  tile/shard killed by a COLLISION (player crash, asteroid crash, asteroid
+  pressure): it stamps `lastImpactVelocity` + `lastImpactDamage`, drops the
+  static-grid entry, and calls `onDeath` so `handleEntityDeath` fans out
+  exactly as it does for a projectile kill.  The two asteroid sites used to
+  set `health = 0; active = false` WITHOUT the callback, so a tile crushed
+  by a drifting rock simply vanished — no shatter, no debris, no sound —
+  while the same tile shot broke normally (the player's own crash path did
+  call it, which is what made the asymmetry easy to miss).  The two stamps
+  are what make a shatter read as an impact: velocity gives the fragments a
+  direction, and damage (mapped 1..5 from how far over the threshold the
+  hit was) scales how many pieces and how fine.  `killedByPlayer` is passed
+  separately and only the player's crash sets it — ambient destruction
+  scores nothing.
 - **Death routing.** `PhysicsSystem` raises an on-death callback
   that `GameEngine.handleEntityDeath` dispatches: explosions for
   player/enemy, variant-driven shatter + regen-queue via

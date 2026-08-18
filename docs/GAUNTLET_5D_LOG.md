@@ -937,3 +937,73 @@ on screen.
 - **The shop is still one list per group.** It is 160px past the fold at 390
   with the header pinned, which is a scroll, not a hunt. Splitting it further
   (sub-tabs per family) would add taps to buy one thing.
+
+---
+
+## U9 — a crushed tile now breaks instead of vanishing
+
+> "When asteroids collide with static tiles with enough momentum they break
+> the tiles. When this happens currently, the tile just disappears."
+
+### The cause
+
+Three places in `PhysicsSystem.resolveCollision` can take a structure's last
+hit point by CONTACT: the player crashing into it, an asteroid crashing into
+it, and an asteroid grinding it down through the sub-threshold pressure
+accumulator. All three did the same three things — `health = 0`,
+`active = false`, `removeStaticEntity` — but only the PLAYER's went on to
+call `onDeath`.
+
+Without that call `GameEngine.handleEntityDeath` never runs, and that handler
+IS the break: the variant shatter, the glass-shard fan, the debris burst, the
+regen queue, the flow-field patch and the destruction sound all hang off it.
+So the tile was deleted rather than destroyed.
+
+The player's path calling it is why this survived: crashing into a tile
+yourself looked completely right, and that is the case a developer tests.
+
+### The fix
+
+One shared `killStructureByImpact(structure, impactor, impactDamage,
+byPlayer, onDeath)`, used by all three sites so they cannot drift again. It
+does what the projectile path already did:
+
+- **`lastImpactVelocity`** — the fragments scatter along the impact instead of
+  puffing symmetrically.
+- **`lastImpactDamage`**, which `ShardSystem.shatterAsteroidStyle` and
+  `DropSystem.spawnGlassShards` read as 1..5 → few-and-large .. many-and-fine.
+  Derived from how far OVER the threshold the hit was (`momentum /
+  ASTEROID_CRASH_MOMENTUM - 1`, clamped over 3×), so a bare-threshold nudge
+  leaves chunks and a real slam powders it. The pressure path passes 1
+  outright: that is the slow grind, not a smash.
+- **`killedByPlayer` only when it is** — a tile crushed by a drifting rock is
+  nobody's kill and scores nothing, which is the existing rule for the score
+  stamp, not a new one.
+
+The player's crash gained the two stamps as a side effect (it had neither, so
+its breaks defaulted to the blandest shatter). A hard crash now breaks a tile
+more finely than a scrape.
+
+**No economy change.** `DropSystem.spawnDrops` only rolls salvage for MOBILE
+shards; a static tile's "drops" are its physical debris. So this adds
+destruction, not income.
+
+### Making sure the test could fail
+
+The first draft of `tests/terrain.spec.ts` **passed with the fix reverted**.
+The synthetic impactor is itself a mobile shard, and it sat inside the radius
+the test counted debris in — so the count went up by one whatever happened to
+the tile. Fixed by creating the impactor BEFORE the baseline is taken, and
+then verified the honest way: revert the fix, watch the crush case fail,
+restore it, watch it pass.
+
+Two other things the file records because they cost time: `resolveCollision`
+returns before the crash branch when handed a degenerate MTV (so a test must
+pass a real separation vector, not `{0,0}`), and `prepareFrameEntities`
+compacts `currentMap.entities`, so neither an index nor an id into that array
+survives a round trip once the entity it names is dead — each measurement
+runs inside one page evaluation.
+
+### Validation
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **167 passed** ✅.

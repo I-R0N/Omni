@@ -1848,6 +1848,52 @@ export class PhysicsSystem {
    * there (DropSystem.spawnGlassShards for glass-tile, ShardSystem
    * .shatter tier chain for glass-shard).
    */
+  /**
+   * A structure killed by a COLLISION, routed through the SAME death
+   * pipeline a projectile kill takes.
+   *
+   * This exists because it was not always so: the two asteroid-impact kill
+   * sites below used to set `health = 0; active = false` and remove the tile
+   * from the static grid WITHOUT calling `onDeath`, so
+   * `GameEngine.handleEntityDeath` never ran — no shatter, no debris, no
+   * salvage roll, no sound.  A tile shot with a projectile broke; the same
+   * tile crushed by a rock simply blinked out of existence.  (The PLAYER's
+   * own crash path always did call it, which is what made the asymmetry easy
+   * to miss: crashing into a tile yourself looked right.)
+   *
+   * The two stamps are what make the shatter read as an IMPACT rather than a
+   * spontaneous crumble, and they are the same two the projectile path sets:
+   * `lastImpactVelocity` gives the fragments a direction to scatter along,
+   * and `lastImpactDamage` scales how many pieces and how fine
+   * (ShardSystem.shatterAsteroidStyle / DropSystem.spawnGlassShards read it
+   * as 1..5 → few-and-large .. many-and-small).
+   *
+   * ORDER MATTERS: the static grid entry has to go before `onDeath`, because
+   * the death fan-out spawns mobile shards where the tile was and they would
+   * otherwise collide with the corpse of their own parent.
+   */
+  private killStructureByImpact(
+      structure: GameEntity,
+      impactor: GameEntity,
+      impactDamage: number,
+      byPlayer: boolean,
+      onDeath?: (entity: GameEntity) => void,
+  ) {
+      structure.health = 0;
+      if (impactor.velocity) {
+          structure.lastImpactVelocity = { x: impactor.velocity.x, y: impactor.velocity.y };
+      }
+      structure.lastImpactDamage = impactDamage;
+      // Player-attributed kills score (handleEntityDeath reads this stamp);
+      // a tile crushed by a drifting rock is nobody's kill.
+      if (byPlayer) structure.killedByPlayer = true;
+      structure.active = false;
+      if (structure.mass === Infinity) {
+          this.removeStaticEntity(structure);
+      }
+      if (onDeath) onDeath(structure);
+  }
+
   private tryPassthroughShatter(
       a: GameEntity,
       b: GameEntity,
@@ -3304,14 +3350,12 @@ export class PhysicsSystem {
               PhysicsSystem.maybeRockEarlyBreak(structure);
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               if (structure.health <= 0) {
-                  structure.health = 0;
-                  structure.active = false;
-                  // Crash kills are player-attributed for scoring.
-                  structure.killedByPlayer = true;
-                  if (structure.mass === Infinity) {
-                      this.removeStaticEntity(structure);
-                  }
-                  if (onDeath) onDeath(structure);
+                  // Same helper as the two asteroid sites, so all three
+                  // collision kills break identically; only the attribution
+                  // differs (a crash IS the player's kill, and scores).
+                  const over = impactSpeed / STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD - 1;
+                  const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
+                  this.killStructureByImpact(structure, player, impactDamage, true, onDeath);
               }
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
@@ -3385,11 +3429,13 @@ export class PhysicsSystem {
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
-                      structure.health = 0;
-                      structure.active = false;
-                      if (structure.mass === Infinity) {
-                          this.removeStaticEntity(structure);
-                      }
+                      // How HARD it was hit decides how finely it breaks: a
+                      // bare-threshold nudge leaves a few big chunks, a slam
+                      // several times over the threshold powders it.  Mapped
+                      // onto the 1..5 the shatter tables already speak.
+                      const over = momentum / STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM - 1;
+                      const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
+                      this.killStructureByImpact(structure, asteroid, impactDamage, false, onDeath);
                   }
                   return;
               }
@@ -3418,11 +3464,11 @@ export class PhysicsSystem {
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
-                      structure.health = 0;
-                      structure.active = false;
-                      if (structure.mass === Infinity) {
-                          this.removeStaticEntity(structure);
-                      }
+                      // Pressure is the SLOW kill — a tile ground down by
+                      // repeated sub-threshold nudges rather than smashed —
+                      // so it takes the gentlest break the tables offer: a
+                      // few large chunks, drifting rather than sprayed.
+                      this.killStructureByImpact(structure, asteroid, 1, false, onDeath);
                   }
                   return;
               }
