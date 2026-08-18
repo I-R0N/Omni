@@ -92,6 +92,7 @@ interface UIOverlayProps {
   onCycleEmitBrightness?: () => void;
   onToggleEmitShadows?: () => void;
   onCycleEmitShadowTier?: () => void;
+  onCycleEmitFade?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -268,6 +269,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleEmitBrightness,
   onToggleEmitShadows,
   onCycleEmitShadowTier,
+  onCycleEmitFade,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1510,6 +1512,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Emit bright', onCycleEmitBrightness,
                   stats.emitBrightnessName ?? '1/2',
                   'How much of the light it receives a body re-emits, as a fraction. Only has an effect while Emissive is on. It SCALES the variant\'s own emits value against the 1/2 baseline those variants are authored at, so the default is exactly what the table says and a future material that emits less than metal still emits less than metal. Clamped at 1 in the geometry: a body cannot radiate more light than fell on it, which is the one physical claim this feature rests on.')}
+                {ctrlRow('Emit fade', onCycleEmitFade,
+                  stats.emitFadeName ?? 'smooth',
+                  'How long an emitter takes to FADE in or out. Only has an effect while Emissive is on. Emission FLASHED without this, and not because of its brightness: the emitter set is chosen nearest-first and capped by the tier, so a body crossing that budget was drawn at full strength on one frame and not at all on the next. Both frames were individually right; the swap is what reads as a strobe, and near-equal distances reorder constantly as the ship moves. So a halo now eases toward its alpha and OUTLIVES its selection — a body that drops out of the budget fades where it stood rather than vanishing, and a destroyed tile\'s halo fades out too. Off is the old instantaneous behaviour, kept as the control.')}
                 {ctrlRow('Emit shadow', onToggleEmitShadows,
                   stats.emitShadowsEnabled === true ? 'On' : 'Off',
                   'May the SECONDARY lights cast shadows of their own? Off by default, and off for cost rather than correctness. Each shadowing emitter needs its OWN occluder collection — the pool is shared and consumed per light — and its own compositing surface, because destination-out drawn onto the accumulated layer would erase the light already there rather than only the emitter\'s share. So each one composites into a scratch canvas and blits its own box back. Note this is not a TERTIARY bounce: emitters do not light other emitters, since every emitter reads its brightness from the player light\'s falloff alone.')}

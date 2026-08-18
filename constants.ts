@@ -1541,6 +1541,43 @@ export function cycleEmitShadowTier(): string {
   return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
 }
 
+/** DBG: how long an emitter takes to FADE in or out, in seconds.
+ *
+ *  ADDED BECAUSE EMISSION FLASHED.  The set of emitters is chosen nearest-
+ *  first and capped by the tier, so as the ship moves, bodies cross into and
+ *  out of that budget — and a halo that is drawn at full strength on one
+ *  frame and not at all on the next reads as a strobe, which is worse than
+ *  no emission at all.  It is not a brightness problem: the alphas either
+ *  side of the swap are both correct, and the swap itself is what the eye
+ *  objects to.
+ *
+ *  So an emitter's alpha EASES toward its target and a body that leaves the
+ *  budget fades out rather than vanishing — which needs the emitter to
+ *  persist for a moment after it stops being chosen (see the emitter slots
+ *  in render/lighting.ts).  `off` is the old instantaneous behaviour, kept
+ *  as the control.
+ *
+ *  Time-based rather than per-frame, so the fade takes the same wall-clock
+ *  time whatever the frame rate. */
+export const EMIT_FADE_CYCLE: ReadonlyArray<{ name: string; sec: number }> = [
+  { name: 'smooth', sec: 0.25 },
+  { name: 'slow',   sec: 0.5  },
+  { name: 'languid',sec: 1    },
+  { name: 'fast',   sec: 0.12 },
+  { name: 'off',    sec: 0    },
+] as const;
+let activeEmitFadeIndex = 0;
+export function getEmitFadeSec(): number {
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].sec;
+}
+export function getEmitFadeName(): string {
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].name;
+}
+export function cycleEmitFade(): string {
+  activeEmitFadeIndex = (activeEmitFadeIndex + 1) % EMIT_FADE_CYCLE.length;
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].name;
+}
+
 let refractionEnabled = true;
 export function getRefractionEnabled(): boolean { return refractionEnabled; }
 export function toggleRefraction(): boolean {

@@ -38,6 +38,7 @@ import {
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
+    getEmitFadeSec,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -88,6 +89,10 @@ export interface Occluder {
      *  variant, because a nebula's colour is blended from its own
      *  composition and no two clouds match. */
     emitRgb: string | null;
+    /** The emitting entity's id.  Carried ONLY so a halo can be matched to
+     *  the same body across frames and eased rather than popped — see
+     *  `EmitSlot`.  Nothing else in the shadow path reads it. */
+    id: string;
     /** Squared distance to the light — the nearest-first selection key. */
     distSq: number;
     /** True for a mobile shard, false for a static tile.  Selection needs to
@@ -131,7 +136,7 @@ function poolAt(i: number): Occluder {
     let o = _pool[i];
     if (o === undefined) {
         o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, transmit: 0,
-              emits: 0, emitRgb: null, distSq: 0, mobile: false };
+              emits: 0, emitRgb: null, id: '', distSq: 0, mobile: false };
         _pool[i] = o;
     }
     return o;
@@ -164,7 +169,7 @@ function emitPoolAt(i: number): Occluder {
     let o = _emitPool[i];
     if (o === undefined) {
         o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, transmit: 0,
-              emits: 0, emitRgb: null, distSq: 0, mobile: false };
+              emits: 0, emitRgb: null, id: '', distSq: 0, mobile: false };
         _emitPool[i] = o;
     }
     return o;
@@ -270,6 +275,7 @@ function recordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void 
     o.transmit = SHARD_VARIANTS[v].transmit ?? 0;
     o.emits = SHARD_VARIANTS[v].emits ?? 0;
     o.emitRgb = emitTintFor(t, v);
+    o.id = t.id;
     o.distSq = d2;
     o.mobile = mobile;
 }
@@ -405,6 +411,7 @@ function record(t: GameEntity, mobile: boolean): void {
     o.transmit = v !== undefined ? SHARD_VARIANTS[v].transmit ?? 0 : 0;
     o.emits = v !== undefined ? SHARD_VARIANTS[v].emits ?? 0 : 0;
     o.emitRgb = v !== undefined && o.emits > 0 ? emitTintFor(t, v) : null;
+    o.id = t.id;
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
     _outBuf[_n++] = o;
@@ -1304,6 +1311,136 @@ const _emA = new Float64Array(64);
  *  references to the cached tints on the entities, so filling this assigns
  *  pointers and allocates nothing. */
 const _emC: (string | null)[] = new Array(64).fill(null);
+/** The chosen emitters' entity IDS, so a halo can be matched to the same
+ *  body across frames.  See `EmitSlot`. */
+const _emId: string[] = new Array(64).fill('');
+
+/** ONE PERSISTENT EMITTER HALO.
+ *
+ *  Emission USED TO FLASH, and the cause was not brightness: the emitter set
+ *  is chosen nearest-first and capped by the tier, so a body crossing that
+ *  budget was drawn at full strength on one frame and not at all on the
+ *  next.  Both frames were individually correct; the SWAP is what the eye
+ *  reads as a strobe, and it happens constantly because near-equal distances
+ *  reorder every time the ship moves.
+ *
+ *  A slot is a halo that OUTLIVES its selection.  Chosen bodies ease toward
+ *  their computed alpha; a body that drops out keeps its last position and
+ *  eases toward zero, so it fades out where it stood instead of vanishing.
+ *  That is also why the slot stores the position rather than following the
+ *  entity: a fading emitter may have been destroyed, and a dead tile's halo
+ *  fading out over a quarter of a second is exactly the right behaviour.
+ *
+ *  `chosen` gates the expensive treatment: only a body in THIS frame's
+ *  budget may cast emitter shadows.  A fading halo losing its shadow detail
+ *  for 250 ms is not something anyone can see. */
+export interface EmitSlot {
+    /** The emitting entity, or '' for a free slot. */
+    id: string;
+    /** Last known WORLD position — deliberately not re-read from the entity. */
+    x: number;
+    y: number;
+    tint: string | null;
+    /** Eased alpha, what is actually drawn. */
+    a: number;
+    /** This frame's computed alpha; 0 when the body is not in the budget. */
+    target: number;
+    /** In this frame's budget — see above. */
+    chosen: boolean;
+}
+
+/** How many halos may be alive at once, INCLUDING the ones fading out.  Sized
+ *  well above the largest emitter budget (`ultra`'s maxLights - 1 = 31) so a
+ *  sweep across dense terrain never has to evict a halo that is still
+ *  visible. */
+const EMIT_SLOTS = 48;
+/** Below this alpha a halo is finished: it is freed rather than drawn.  One
+ *  part in ~350 of full strength, which is under a single 8-bit level once
+ *  the gradient's own peak alpha is applied. */
+const EMIT_SLOT_EPS = 0.003;
+/** The received-light band over which an emitter fades IN, as a multiple of
+ *  `EMIT_MIN_RECEIVED`.  The threshold was a hard cutoff, so a body drifting
+ *  toward the rim of the light switched off mid-glow — the same pop as the
+ *  budget swap, from the other cause. */
+const EMIT_FADE_IN_SPAN = 3;
+
+/** Ease every slot toward its target, free the ones that have finished, and
+ *  return how many remain alive.  Time-based so the fade takes the same
+ *  wall-clock time at any frame rate; `performance.now()` is the render
+ *  side's clock and the sim never sees this (CLAUDE.md §8). */
+function tickEmitSlots(r: RenderSystem): number {
+    const now = performance.now();
+    const dt = r._emitSlotAtMs === 0 ? 0 : Math.min(0.25, (now - r._emitSlotAtMs) / 1000);
+    r._emitSlotAtMs = now;
+    const tau = getEmitFadeSec();
+    // `off` is the old instantaneous behaviour, and it is a JUMP rather than
+    // a very fast ease — a control case has to be the thing it controls for.
+    const k = tau > 0 ? 1 - Math.exp(-dt / tau) : 1;
+    let n = r._emitSlotCount;
+    for (let i = 0; i < n; i++) {
+        const sl = r._emitSlots[i];
+        sl.a += (sl.target - sl.a) * k;
+        if (sl.target <= 0 && sl.a < EMIT_SLOT_EPS) {
+            // Swap-with-last removal: order carries no meaning here, since
+            // the shadow budget is decided by `chosen`, not by slot index.
+            const last = r._emitSlots[n - 1];
+            r._emitSlots[i] = last;
+            r._emitSlots[n - 1] = sl;
+            sl.id = '';
+            n--; i--;
+        }
+    }
+    r._emitSlotCount = n;
+    return n;
+}
+
+/** How many halos may be alive at once, as a multiple of the tier's emitter
+ *  budget.  A HALO THAT IS FADING STILL COSTS A FILL, and the budget refills
+ *  every frame while a fade lasts a quarter of a second, so an unbounded slot
+ *  table would let a sweep through dense terrain accumulate a fade's worth of
+ *  frames — around fifteen times the budget — of gradient fills.  Three times
+ *  the budget is enough that a swap always has somewhere to fade, and bounds
+ *  the extra fill cost at something in the same order as the budget itself.
+ *  MEASURED at 2x and 3x under motion on the metal showcase: +0.42 vs +0.43
+ *  ms p95, i.e. the halo count is not the term that costs — so the larger,
+ *  smoother bound is the one to keep.  Parked, the chosen set is stable and
+ *  the fade costs nothing at all. */
+const EMIT_SLOTS_PER_BUDGET = 3;
+
+/** Find this body's slot, or claim one.  Linear over at most `EMIT_SLOTS`
+ *  entries — a hash would cost more than it saves at this size, and would
+ *  allocate.
+ *
+ *  At the cap the DIMMEST fading halo is recycled, never a chosen one: the
+ *  budget is smaller than the cap by construction, so there is always a
+ *  fading slot to take, and taking the dimmest is the one eviction nobody
+ *  can see. */
+function slotFor(r: RenderSystem, id: string, maxLive: number): EmitSlot | null {
+    const n = r._emitSlotCount;
+    for (let i = 0; i < n; i++) if (r._emitSlots[i].id === id) return r._emitSlots[i];
+    if (n >= maxLive) {
+        let dim = -1, dimA = Infinity;
+        for (let i = 0; i < n; i++) {
+            const sl = r._emitSlots[i];
+            if (sl.chosen) continue;
+            if (sl.a < dimA) { dimA = sl.a; dim = i; }
+        }
+        if (dim < 0) return null;
+        const sl = r._emitSlots[dim];
+        sl.id = id;
+        sl.a = 0;
+        return sl;
+    }
+    let sl = r._emitSlots[n];
+    if (sl === undefined) {
+        sl = { id: '', x: 0, y: 0, tint: null, a: 0, target: 0, chosen: false };
+        r._emitSlots[n] = sl;
+    }
+    sl.id = id;
+    sl.a = 0;
+    r._emitSlotCount = n + 1;
+    return sl;
+}
 
 /**
  * Composite the SECONDARY lights: every lit body whose variant re-emits.
@@ -1334,8 +1471,12 @@ function compositeEmitters(
     emit: Occluder[], emitCount: number,
     lx: number, ly: number, worldToPx: number,
     maxEmitters: number,
+    enabled: boolean,
 ): number {
-    if (maxEmitters <= 0) return 0;
+    // Called even while emission is OFF, so the halos that were alive when it
+    // was switched off fade out instead of snapping.  With no live slots that
+    // is one compare and a return.
+    if (!enabled && r._emitSlotCount === 0) return 0;
     const emitRPx = Math.max(1, rPx * EMIT_RADIUS_FRAC);
     const scale = getEmitBrightness() / EMIT_BASELINE;
     const cap = Math.min(maxEmitters, _emX.length);
@@ -1349,7 +1490,7 @@ function compositeEmitters(
     // list they came from — so a nebula cloud you are standing in cannot be
     // out-ranked by a metal plate across the room.
     let n = 0, i = 0, j = 0;
-    while (n < cap && (i < count || j < emitCount)) {
+    while (enabled && n < cap && (i < count || j < emitCount)) {
         let o: Occluder;
         if (j >= emitCount || (i < count && occ[i].distSq <= emit[j].distSq)) {
             o = occ[i++];
@@ -1361,38 +1502,77 @@ function compositeEmitters(
         const dy = (o.y - ly) * worldToPx;
         const d = Math.sqrt(dx * dx + dy * dy);
         const received = falloffFrac(d / rPx);
-        if (received < EMIT_MIN_RECEIVED) continue;
+        // A SMOOTH BAND, not a cutoff.  The threshold exists because an
+        // emitter at the rim of the light costs a gradient fill to add
+        // nothing; switching it off at a hard edge just moves the pop from
+        // the budget to the rim.
+        if (received <= EMIT_MIN_RECEIVED) continue;
+        let w = 1;
+        if (received < EMIT_MIN_RECEIVED * EMIT_FADE_IN_SPAN) {
+            const u = (received - EMIT_MIN_RECEIVED)
+                    / (EMIT_MIN_RECEIVED * (EMIT_FADE_IN_SPAN - 1));
+            w = u * u * (3 - 2 * u);          // smoothstep
+        }
         // A body cannot radiate more light than fell on it.
         let em = o.emits * scale;
         if (em > 1) em = 1;
         _emX[n] = o.x;
         _emY[n] = o.y;
-        _emA[n] = received * em;
+        _emA[n] = received * em * w;
         _emC[n] = o.emitRgb;
+        _emId[n] = o.id;
         n++;
     }
-    if (n === 0) return 0;
+
+    // PASS 1b — into the persistent slots.  Everything alive decays unless
+    // this frame's choice says otherwise, so leaving the budget IS the fade.
+    for (let sI = 0; sI < r._emitSlotCount; sI++) {
+        const sl = r._emitSlots[sI];
+        sl.target = 0;
+        sl.chosen = false;
+    }
+    const maxLive = Math.min(EMIT_SLOTS, Math.max(2, cap * EMIT_SLOTS_PER_BUDGET));
+    for (let k = 0; k < n; k++) {
+        const sl = slotFor(r, _emId[k], maxLive);
+        if (sl === null) continue;      // every halo busy fading; next frame
+        sl.x = _emX[k];
+        sl.y = _emY[k];
+        sl.tint = _emC[k];
+        sl.target = _emA[k];
+        sl.chosen = true;
+    }
+    const live = tickEmitSlots(r);
+    if (live === 0) return 0;
 
     const shadowed = getEmitShadowsEnabled() && r.physics !== undefined;
     const shadowTier = getEmitShadowTier();
     const emitWorldR = emitRPx / worldToPx;
 
     // PASS 2 — draw.  Only now may a second collection touch the pool.
-    for (let k = 0; k < n; k++) {
-        const ex = cx + (_emX[k] - lx) * worldToPx;
-        const ey = cy + (_emY[k] - ly) * worldToPx;
+    let shadowsDrawn = 0;
+    let drawn = 0;
+    for (let k = 0; k < live; k++) {
+        const sl = r._emitSlots[k];
+        const alpha = sl.a;
+        if (alpha < EMIT_SLOT_EPS) continue;
+        drawn++;
+        const ex = cx + (sl.x - lx) * worldToPx;
+        const ey = cy + (sl.y - ly) * worldToPx;
 
         // Past the shadow budget, an emitter still lights — it just lights
         // flatly.  Falling back beats vanishing: the count is what the tier
-        // promised, and only the treatment degrades.
-        if (!shadowed || k >= shadowTier.maxEmitters) {
+        // promised, and only the treatment degrades.  A halo that is FADING
+        // OUT is never shadowed: it is no longer in the budget, its body may
+        // not even exist any more, and nobody can see shadow detail in a
+        // quarter-second fade.
+        if (!shadowed || !sl.chosen || shadowsDrawn >= shadowTier.maxEmitters) {
             // The emitter IS the player light, smaller and dimmer: same
             // cached gradient, scaled by how much light reached the body and
             // by how much of it the material throws back.  So it tracks the
             // brightness cycle for free and can never out-shine what lit it.
             lctx.setTransform(1, 0, 0, 1, ex, ey);
-            lctx.fillStyle = lightGradient(lctx, emitRPx, _emC[k]);
-            lctx.globalAlpha = _emA[k];
+            lctx.fillStyle = lightGradient(lctx, emitRPx, sl.tint);
+            lctx.globalAlpha = alpha;
             lctx.globalCompositeOperation = 'lighter';
             lctx.fillRect(-emitRPx, -emitRPx, emitRPx * 2, emitRPx * 2);
             lctx.globalCompositeOperation = 'source-over';
@@ -1403,29 +1583,30 @@ function compositeEmitters(
 
         const sctx = ensureEmitCanvas(r);
         if (sctx === null) continue;
+        shadowsDrawn++;
         // Clear and composite only this emitter's own box.
         const bx = Math.floor(ex - emitRPx), by = Math.floor(ey - emitRPx);
         const bw = Math.ceil(emitRPx * 2) + 1, bh = bw;
         sctx.setTransform(1, 0, 0, 1, 0, 0);
         sctx.clearRect(bx, by, bw, bh);
 
-        const cn = collectOccluders(r.physics!, _emX[k], _emY[k], emitWorldR,
+        const cn = collectOccluders(r.physics!, sl.x, sl.y, emitWorldR,
                                     r._emitOccluders, getShardShadowsEnabled());
         r._emitOccluders.sort(byDistSq);
         const sel = selectOccluders(r._emitOccluders, cn,
                                     Math.min(shadowTier.maxOccluders, cn),
                                     Math.min(4, cn));
         compositeLight(sctx, ex, ey, emitRPx, r._emitOccluders, sel,
-                       _emX[k], _emY[k], worldToPx, getShadowSoftness(), false,
-                       _emC[k]);
+                       sl.x, sl.y, worldToPx, getShadowSoftness(), false,
+                       sl.tint);
 
-        lctx.globalAlpha = _emA[k];
+        lctx.globalAlpha = alpha;
         lctx.globalCompositeOperation = 'lighter';
         lctx.drawImage(r._emitCanvas!, bx, by, bw, bh, bx, by, bw, bh);
         lctx.globalCompositeOperation = 'source-over';
         lctx.globalAlpha = 1;
     }
-    return n;
+    return drawn;
 }
 
 /** Scratch surface for a SHADOWING emitter.  One canvas, reused across
@@ -1566,12 +1747,11 @@ export function renderLightLayer(
             // cast from — the bodies the light reaches are exactly the ones
             // that can re-emit it.  `maxLights` counts the player's own, so
             // the tier's budget is shared rather than added to.
-            if (getEmissiveEnabled()) {
-                lights += compositeEmitters(
-                    r, lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
-                    r._lightEmitters, r._lightEmitterCount,
-                    playerPos.x, playerPos.y, worldToPx, tier.maxLights - 1);
-            }
+            lights += compositeEmitters(
+                r, lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
+                r._lightEmitters, r._lightEmitterCount,
+                playerPos.x, playerPos.y, worldToPx,
+                wantEmitters ? tier.maxLights - 1 : 0, wantEmitters);
         }
     } else {
         r._lightOccluderCount = 0;

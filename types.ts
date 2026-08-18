@@ -1696,6 +1696,8 @@ export interface EngineStats {
   /** DBG: emitter-shadow cost tier (how many emitters shadow, and how much
    *  geometry each of them sees). */
   emitShadowTierName?: string;
+  /** DBG: how long an emitter takes to fade in or out. */
+  emitFadeName?: string;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

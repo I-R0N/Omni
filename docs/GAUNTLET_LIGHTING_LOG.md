@@ -2024,3 +2024,79 @@ collects as ZERO occluders (it must never eat the shadow pool), the emitter
 buffer fills only when emission asked for it, and the light it adds is RED
 for a body stamped red — the player's own light is blue-green, so a
 mis-plumbed tint would show up as the green channel leading.
+
+---
+
+## A5j — emission flashed; halos now outlive their selection
+
+Reported from the device: the emitters "turn on and off instantly". They did,
+and the cause is not brightness — it is **membership**.
+
+The emitter set is chosen nearest-first and capped by the tier (`maxLights -
+1`, so three at Low). Bodies cross that budget constantly as the ship moves,
+because near-equal distances reorder every frame; a body drawn at full
+strength on one frame and not at all on the next reads as a strobe. Both
+frames were individually correct. The SWAP is the artefact.
+
+A second, smaller pop came from `EMIT_MIN_RECEIVED`: a hard cutoff, so a body
+drifting toward the rim of the light switched off mid-glow.
+
+### The fix: a halo that outlives its selection
+
+The lightweight version of this is tempting and wrong — easing the alpha of
+the CHOSEN emitters smooths a fade-in but does nothing for a fade-out, because
+a body that leaves the budget is simply not drawn any more. There is nothing
+left to ease.
+
+So emitters got a small persistent table (`EmitSlot`), keyed on the emitting
+entity's id:
+
+- Chosen bodies ease toward their computed alpha.
+- A body that drops out keeps its **last known position** and eases toward
+  zero — it fades out where it stood. Deliberately the last position rather
+  than the entity's live one: a fading emitter may have been destroyed, and a
+  dead tile's halo fading over a quarter-second is exactly right.
+- `chosen` gates the expensive treatment: only a body in THIS frame's budget
+  may cast emitter shadows. A fading halo losing its shadow detail for 250 ms
+  is not visible to anyone.
+- The ease is WALL-CLOCK (`performance.now()`, render side only — the sim
+  never sees it), so the fade takes the same time at any frame rate, with the
+  step clamped so a stalled tab does not jump.
+
+The rim cutoff became a smoothstep band over `EMIT_MIN_RECEIVED` → 3x that,
+so entering the light is a fade rather than a switch.
+
+New DBG row **Emit fade**: `smooth` (0.25 s, default) / `slow` / `languid` /
+`fast` / `off`. `off` is a JUMP, not a very fast ease — a control case has to
+be the thing it controls for.
+
+### Bounding it
+
+**A halo that is fading still costs a fill.** The budget refills every frame
+while a fade lasts a quarter of a second, so an unbounded table would let a
+sweep through dense terrain accumulate roughly a fade's worth of frames —
+about fifteen times the budget — of gradient fills. Live halos are therefore
+capped at `3x` the tier's emitter budget, and at the cap the DIMMEST fading
+halo is recycled (never a chosen one — the budget is smaller than the cap by
+construction, so there is always a fading slot to take).
+
+Measured FLYING through the terrain, which is the worst case for this
+(parked, the chosen set is stable and the fade costs nothing):
+
+| map | fade off | `smooth` | live halos |
+|---|---|---|---|
+| METAL_FIELD | 1.205 p95 | 1.635 p95 | 3 → 9 |
+| UNIVERSE | 0.510 p95 | 1.235 p95 | 1 → 1..5 |
+
+At 2x the cap instead of 3x the same scene measured +0.42 vs +0.43 ms, so the
+halo COUNT is not the term that costs — which is why the larger, smoother
+bound is the one kept.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **126 passed**. The new
+test runs the same experiment at two fade settings and asserts the shape
+rather than a level: two frames after emission is switched on the faded
+emitter is well short of its settled value, `off` is essentially all the way
+there, and both settle to the SAME brightness — a fade changes when the light
+arrives, never how much of it there is.

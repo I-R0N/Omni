@@ -35,7 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
-    cycleEmitShadowTier,
+    cycleEmitShadowTier, cycleEmitFade,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -420,6 +420,14 @@ export class DebugControls {
    *  nothing. */
   cycleEmitShadowTier() {
     cycleEmitShadowTier();
+  }
+
+  /** DBG (Visual): how long an emitter takes to fade in or out.  Emission
+   *  flashed without it: the emitter set is capped by the tier, so a body
+   *  crossing that budget was drawn at full strength one frame and not at
+   *  all the next.  'off' is the old instantaneous behaviour. */
+  cycleEmitFade() {
+    cycleEmitFade();
   }
 
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.

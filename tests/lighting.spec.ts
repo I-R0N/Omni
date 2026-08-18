@@ -1103,6 +1103,94 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('emitters FADE rather than pop, and `off` restores the pop', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    const r = await engine(page, async (e) => {
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      const pick = tiles[0];
+      if (!pick) return { built: false } as any;
+      pick.active = true;
+      pick.shardVariant = 'metal-tile';
+      pick._occluderR = undefined;
+      pick.position.x = 120; pick.position.y = 0;
+      e.player.position.x = 0; e.player.position.y = 0;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      e.renderer.setLighting('unified');
+
+      const hold = () => { e.player.position.x = 0; e.player.position.y = 0;
+        e.player.velocity.x = 0; e.player.velocity.y = 0; };
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => { hold(); if (++i < n) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      const probe = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const sx = (wx: number, wy: number) => [
+          (W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr,
+          (H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr,
+        ];
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        let sum = 0, n = 0;
+        for (const [wx, wy] of [[120, 55], [120, -55], [155, 35], [155, -35]]) {
+          const [x, y] = sx(wx, wy);
+          const i = (Math.round(y) * cv.width + Math.round(x)) * 4;
+          sum += (img[i] + img[i + 1] + img[i + 2]) / 3; n++;
+        }
+        return sum / n;
+      };
+      // One run of the same experiment at a given fade setting: emission off
+      // and settled, then ON for a couple of frames, then ON and settled.
+      const run = async (fade: string) => {
+        for (let i = 0; i < 12 && e.renderer.getEmitFade() !== fade; i++) e.renderer.cycleEmitFade();
+        if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+        await frames(30);
+        const base = probe();
+        e.renderer.toggleEmissive();
+        await frames(2);
+        const early = probe();
+        await frames(40);
+        const settled = probe();
+        return { fade: e.renderer.getEmitFade(), base, early, settled };
+      };
+      const smooth = await run('smooth');
+      const instant = await run('off');
+      for (let i = 0; i < 12 && e.renderer.getEmitFade() !== 'smooth'; i++) e.renderer.cycleEmitFade();
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      return { built: true, smooth, instant, backTo: e.renderer.getEmitFade() };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.backTo).toBe('smooth');           // the shipped default
+
+    // The settled brightness is the SAME either way — a fade changes when the
+    // light arrives, never how much of it there is.  (Compared against each
+    // setting's own base, since the two runs are separate captures.)
+    const smoothGain = r.smooth.settled - r.smooth.base;
+    const instantGain = r.instant.settled - r.instant.base;
+    expect(smoothGain).toBeGreaterThan(1);
+    expect(instantGain).toBeGreaterThan(1);
+    expect(Math.abs(smoothGain - instantGain)).toBeLessThan(smoothGain * 0.5);
+
+    // Two frames in, the faded emitter is well short of its settled value...
+    const smoothEarly = r.smooth.early - r.smooth.base;
+    expect(smoothEarly).toBeLessThan(smoothGain * 0.7);
+    // ...where `off` is essentially all the way there, which is the pop this
+    // exists to remove and the control that proves the fade is doing it.
+    const instantEarly = r.instant.early - r.instant.base;
+    expect(instantEarly).toBeGreaterThan(instantGain * 0.9);
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
