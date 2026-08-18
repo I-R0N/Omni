@@ -34,7 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
-    toggleShardShadows, cycleShadowSoftness,
+    toggleShardShadows, cycleShadowSoftness, toggleRefraction,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -355,6 +355,16 @@ export class DebugControls {
    *  broke off is not.  Off is the cost comparison. */
   toggleShardShadows() {
     toggleShardShadows();
+  }
+
+  /** DBG (Visual): REFRACTION through translucent bodies — a prototype.
+   *  Off by default.  On, glass stops passing light straight through and
+   *  instead bends it: each exit face refracts by Snell's law and throws an
+   *  additive cone in the deviated direction, capped at half the source
+   *  light's brightness.  The straight-through path is withheld in full, so
+   *  the toggle is a real A/B rather than one effect stacked on the other. */
+  toggleRefraction() {
+    toggleRefraction();
   }
 
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.

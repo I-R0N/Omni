@@ -85,6 +85,7 @@ interface UIOverlayProps {
   onCycleLighting?: () => void;
   onCycleLightingTier?: () => void;
   onToggleShardShadows?: () => void;
+  onToggleRefraction?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -257,6 +258,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleLighting,
   onCycleLightingTier,
   onToggleShardShadows,
+  onToggleRefraction,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1499,6 +1501,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Shard shadows', onToggleShardShadows,
                   stats.shardShadowsEnabled === false ? 'Off' : 'On',
                   'Do MOBILE SHARDS cast shadows too, or only static tiles? Only has an effect while Lighting is unified. On by default: a shard is the same shard family as the tile it broke off and about twice its radius (measured 43.6 median against a tile\'s 22), so leaving them out makes debris read as transparent to a light that solid rock is not. Nebula shards are excluded either way — same soft cloud as a nebula tile. Shards are drawn from the DYNAMIC grid, so this is a second spatial query per light; turn it off to see what that costs.')}
+                {ctrlRow('Refraction', onToggleRefraction,
+                  stats.refractionEnabled === true ? 'On' : 'Off',
+                  'PROTOTYPE. Off (default): glass passes light STRAIGHT THROUGH at reduced brightness, which is right for a parallel-faced pane — a slab offsets a ray sideways but does not bend it, and a regular hexagon has three pairs of parallel faces. On: each exit face refracts by Snell\'s law and throws an additive cone along the DEVIATED direction, capped at half the source light\'s brightness, while the straight-through path is withheld in full — so the light is moved rather than added and the toggle is a real A/B. Only the exit face is refracted (a real ray bends twice, and for parallel faces the two cancel), so this over-states the bend for a tile and is about right for a wedge-shaped shard. Past the critical angle nothing is transmitted at all. The open question it exists to answer is whether a caustic is legible on a light layer rendered at a third of screen resolution.')}
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}

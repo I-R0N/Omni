@@ -537,6 +537,135 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('the tier ladder is monotone, and low is still the default', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await engine(page, e => e.renderer.setLighting('unified'));
+    await parkInCluster(page);
+
+    // Low is the SHIPPED default, and adding tiers BELOW it must not move
+    // that — which is why the default index is derived from the name rather
+    // than written as a literal.
+    expect(await engine(page, e => e.renderer.getLightTier())).toBe('low');
+
+    // Walk the whole cycle, recording what each tier actually DOES rather
+    // than what its row says: the light-canvas width is the divisor made
+    // observable, and the occluder count in a saturated cluster is the cap.
+    const walk = await engine(page, async (e) => {
+      const out: { name: string; w: number; occ: number }[] = [];
+      for (let i = 0; i < 5; i++) {
+        await new Promise<void>(res => {
+          let k = 0;
+          const t = () => { if (++k < 8) requestAnimationFrame(t); else res(); };
+          requestAnimationFrame(t);
+        });
+        out.push({ name: e.renderer.getLightTier(), w: e.renderer._lightW,
+                   occ: e.renderer._lightOccluderCount });
+        e.renderer.cycleLightTier();
+      }
+      while (e.renderer.getLightTier() !== 'low') e.renderer.cycleLightTier();
+      return out;
+    });
+
+    expect(walk.map(t => t.name)).toEqual(['low', 'medium', 'high', 'lowest', 'lower']);
+    const by = (n: string) => walk.find(t => t.name === n)!;
+
+    // A cheaper tier has to be cheaper in every term that drives cost, or it
+    // is only cheaper in its name.  The light canvas gets COARSER going down
+    // (bigger divisor -> fewer pixels)...
+    expect(by('lowest').w).toBeLessThan(by('lower').w);
+    expect(by('lower').w).toBeLessThan(by('low').w);
+    expect(by('low').w).toBeLessThan(by('medium').w);
+
+    // ...and the occluder cap gets SMALLER.  The cluster saturates every cap,
+    // so these are the caps themselves.
+    expect(by('lowest').occ).toBeLessThan(by('lower').occ);
+    expect(by('lower').occ).toBeLessThan(by('low').occ);
+    watch.assertClean();
+  });
+
+  test('refraction: OFF by default, and ON it MOVES the light rather than adding it', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    const off = await engine(page, e => e.renderer.getRefraction());
+    expect(off).toBe(false);          // a prototype ships off
+
+    // One glass tile due east, same hand-built scene as the shadow test.
+    const r = await engine(page, async (e) => {
+      e.player.position.x = 0; e.player.position.y = 0;
+      e.player.velocity.x = 0; e.player.velocity.y = 0;
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      for (const t of tiles) t.active = false;
+      const pick = tiles[0];
+      if (!pick) return { built: false } as any;
+      pick.active = true;
+      pick.shardVariant = 'glass-tile';
+      pick._occluderR = undefined;
+      pick.position.x = 120; pick.position.y = 0;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+
+      const settle = () => new Promise<void>(res => {
+        let n = 0;
+        const t = () => { e.player.position.x = 0; e.player.position.y = 0;
+          if (++n < 30) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      const ring = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const lcx = (W / 2 + (0 - cam.position.x + shake.x) * cam.zoom) * dpr;
+        const lcy = (H / 2 + (0 - cam.position.y + shake.y) * cam.zoom) * dpr;
+        const rpx = 220 * cam.zoom * dpr;
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        const out: number[] = [];
+        for (let k = 0; k < 72; k++) {
+          const a = (k / 72) * Math.PI * 2;
+          const x = Math.round(lcx + Math.cos(a) * rpx), y = Math.round(lcy + Math.sin(a) * rpx);
+          const i = (y * cv.width + x) * 4;
+          out.push((img[i] + img[i + 1] + img[i + 2]) / 3);
+        }
+        return out;
+      };
+      const profile = async () => {
+        e.renderer.setLighting('unified'); await settle();
+        const on = ring();
+        e.renderer.setLighting('legacy'); await settle();
+        const base = ring();
+        return on.map((v, i) => v - base[i]);
+      };
+
+      if (e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      const plain = await profile();
+      e.renderer.toggleRefraction();
+      const bent = await profile();
+      e.renderer.toggleRefraction();
+      return { built: true, plain, bent, refractOff: e.renderer.getRefraction() };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.refractOff).toBe(false);          // and it toggles back
+    const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
+    const onAxis = (p: number[]) => mean([70, 71, 0, 1, 2].map(i => p[i]));
+    const around = (p: number[]) => mean(p.filter((_: number, i: number) => i > 5 && i < 67));
+
+    // The light must still work at all — the refraction maths has a square
+    // root that goes imaginary past the critical angle, and ONE NaN discards
+    // the entire compound path.  That failure looks like "the lighting turned
+    // off", which is precisely how A4 shipped broken.
+    expect(around(r.bent)).toBeGreaterThan(5);
+
+    // ON, the straight-through path is withheld IN FULL, so the light
+    // directly behind the glass must drop toward the opaque case.  That is
+    // the "moved, not added" half of the claim, and it is the half that would
+    // silently not happen if the erase override were dropped.
+    expect(onAxis(r.bent)).toBeLessThan(onAxis(r.plain));
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

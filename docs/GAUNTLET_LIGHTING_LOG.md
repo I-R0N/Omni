@@ -31,6 +31,7 @@ recorded rather than quietly dropped.
 - [x] **A5b** — Cast from the polygon inradius, not the bounding box
 - [x] **A5c** — Cast from the BODY (per-edge shadow volume); ship on unified
 - [x] **A5d** — Penumbra as a cone, not an offset; glass transmits light
+- [x] **A5e** — Two tiers below Low; refraction prototype behind a DBG toggle
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
@@ -1463,3 +1464,112 @@ Low), which scales the umbra pass directly.
   would have failed on this change. Worth noting as a small win for the
   suite: the assertion that had to move was the one that was accidentally
   wrong about which material it was measuring.
+
+---
+
+## A5e — two tiers below Low, and a refraction prototype
+
+> *"Let's test it behind the debug toggle. Include the low light setting too
+> and add two more levels that are lower than the current low light.
+> Additionally, refracted light shall have a half or less the brightness of
+> the source light."*
+
+### Two tiers below Low
+
+`LIGHTING_TIERS` is now five rows. Every knob that drives cost moves
+together on the way down — a coarser light canvas, fewer occluders, a
+shorter radius — because the point is a real step, not a nudge:
+
+| tier | divisor | maxOccluders | maxShard | maxRadius |
+|---|---|---|---|---|
+| **lowest** | 5 | 8 | 3 | 220 |
+| **lower** | 4 | 14 | 5 | 260 |
+| low | 3 | 24 | 8 | 300 |
+| medium | 2 | 48 | 16 | 400 |
+| high | 2 | 96 | 32 | 500 |
+
+Measured on the glass showcase, ship parked in the densest cluster:
+
+| tier | p50 | p95 | occluders |
+|---|---|---|---|
+| lowest | 0.370 | **0.460** | 8 |
+| lower | 0.465 | 0.595 | 14 |
+| low | 0.615 | 0.975 | 20 |
+
+So `lowest` runs at roughly **half** the cost of `low`. It is meant to be
+the setting that keeps the light at all on a device that cannot afford
+`low`, not one anyone would pick for looks.
+
+**Low remains the shipped default**, and the default index is now derived
+from the name (`findIndex(t => t.name === 'low')`) rather than written as a
+literal — inserting rows above it would otherwise have silently changed what
+ships. `tests/lighting.spec.ts` asserts both the default and that each step
+down really is coarser and really does cast from fewer bodies, read off the
+live light canvas and occluder count rather than off a copy of the table.
+
+### Refraction, behind DBG ▸ Refraction (off by default)
+
+The shipped translucency sends light STRAIGHT THROUGH glass at reduced
+brightness. That is the right first-order model for a parallel-faced pane —
+a slab offsets a ray sideways but does not deviate it, and a regular hexagon
+has three pairs of parallel faces — but a wedge-shaped shard is a prism, and
+a prism bends light.
+
+ON, each exit face refracts by Snell's law and throws an additive cone along
+the deviated direction. Three things make it a real A/B rather than a
+decoration:
+
+- **The energy is MOVED, not added.** With refraction on, translucent bodies
+  erase in full — the straight-through path is withheld — and the caustic
+  carries the transmitted light. Stacking the cone on top of the existing
+  transmission would just read as "glass got brighter", and the umbra it is
+  supposed to be visible against would already be lit.
+- **Brightness is structural.** The caustic is filled with the light's OWN
+  falloff gradient scaled by at most `REFRACT.MAX_BRIGHTNESS_FRAC = 0.5`, so
+  "no brighter than half the source" is a property of the construction
+  rather than a number to keep in step, and the deviated light fades with
+  distance exactly as the direct light does.
+- **Total internal reflection is a branch, not a guard.** Past the critical
+  angle (41.8° at IOR 1.5) nothing is transmitted and the discriminant goes
+  negative. An unguarded `sqrt` would put NaN into the compound path, and
+  ONE NaN discards the whole path — which is precisely how A4 shipped with
+  no shadows at all. `refractTo` returns false instead.
+
+**The approximation, stated plainly:** only the EXIT face is refracted. A
+ray really bends twice, and for a body with parallel faces the two bends
+cancel exactly. Finding the entry face needs a ray-polygon intersection per
+vertex. So this over-states the deviation for a hex tile and is about right
+for a wedge-shaped shard — the useful direction to be wrong in for a
+prototype whose question is "can you see it at all".
+
+### The answer to that question, measured
+
+Same frame, refraction off then on, differenced pixel by pixel:
+
+| tier | pixels changed by >4 luminance | p99.9 change |
+|---|---|---|
+| low (divisor 3) | 2.2 % | 78 |
+| high (divisor 2) | 9.2 % | 134 |
+
+**At `high` it clearly reads** — full-strength umbra with brighter wedges
+between, banding visibly through a glass cluster. **At `low` it is
+marginal**: the deviation is there and measurable, but at a third of screen
+resolution most of it lands within a couple of pixels of where the straight
+line would have gone. That is the honest finding, and it is why this stays a
+toggle rather than becoming a tier flag: the look call belongs on the device.
+
+Cost, glass showcase (where EVERY occluder is translucent, so this is the
+worst case for it — a map with little glass pays almost nothing):
+
+| tier | off p95 | on p95 | delta |
+|---|---|---|---|
+| lowest | 0.460 | 0.585 | +0.125 |
+| lower | 0.595 | 0.865 | +0.270 |
+| low | 0.975 | 1.280 | +0.305 |
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **121 passed** (119 + two
+new). The refraction test asserts the light still works AT ALL with the
+toggle on (the NaN case above), that the on-axis gain DROPS when the
+straight-through path is withheld, and that the toggle returns to off.

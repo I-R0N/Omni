@@ -1435,6 +1435,32 @@ export function toggleShardShadows(): boolean {
   return shardShadowsEnabled;
 }
 
+/** DBG: REFRACTION through translucent bodies — a prototype, OFF by default.
+ *
+ *  The shipped translucency (`SHARD_VARIANTS[v].transmit`) sends light
+ *  STRAIGHT THROUGH glass at reduced brightness.  That is the right
+ *  first-order model for a parallel-faced pane — a slab offsets a ray
+ *  laterally but does not deviate it, and a regular hexagon has three pairs
+ *  of parallel faces — but it says nothing about a wedge-shaped shard, which
+ *  is a prism.
+ *
+ *  ON, the transmitted light is instead BENT: each exit face refracts by
+ *  Snell's law and emits an additive cone in the deviated direction, and the
+ *  straight-through path is withheld in full so the energy is MOVED rather
+ *  than added.  That makes the toggle a real A/B — off is a dim shadow, on
+ *  is a dark shadow with a bright band beside it — instead of stacking one
+ *  effect on the other and reading as "glass got brighter".
+ *
+ *  Off by default because the open question is whether a caustic is legible
+ *  at all on a light layer rendered at a third of screen resolution, and
+ *  that is a look call to be made on the device. */
+let refractionEnabled = false;
+export function getRefractionEnabled(): boolean { return refractionEnabled; }
+export function toggleRefraction(): boolean {
+  refractionEnabled = !refractionEnabled;
+  return refractionEnabled;
+}
+
 /** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
  *
  *  A point light casts a perfectly hard shadow, which is what made the first
@@ -1501,12 +1527,25 @@ export interface LightingTier {
   readonly ambientPerStage: number;
 }
 export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
+  { name: 'lowest', divisor: 5, maxLights: 2,  maxOccluders: 8,  maxShardOccluders: 3,  maxRadius: 220, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'lower',  divisor: 4, maxLights: 3,  maxOccluders: 14, maxShardOccluders: 5,  maxRadius: 260, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxShardOccluders: 16, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
   { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxShardOccluders: 32, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
 ] as const;
-// Index 0 = Low, PINNED for the 390x844 phone the game is played on.
-let activeLightingTierIndex = 0;
+// TWO TIERS BELOW LOW, added when the worst-case cost stopped having
+// comfortable headroom (~1.7 ms p95 against a 2.0 ms budget that has never
+// been re-derived on a device).  Every knob that drives cost moves together
+// — a coarser light canvas, fewer occluders, a shorter radius — because the
+// point is a real step down in work, not a nudge.  `lowest` renders the
+// layer at a FIFTH of screen resolution and casts from 8 bodies; it is meant
+// to be the setting that keeps the light at all on a device that cannot
+// afford `low`, not a setting anyone would choose for looks.
+//
+// LOW REMAINS THE DEFAULT.  This index must track the position of 'low' in
+// the array above rather than being a literal, or inserting a tier silently
+// changes what ships.
+let activeLightingTierIndex = LIGHTING_TIERS.findIndex(t => t.name === 'low');
 export function getActiveLightingTier(): LightingTier { return LIGHTING_TIERS[activeLightingTierIndex]; }
 export function cycleLightingTier(): LightingTier {
   activeLightingTierIndex = (activeLightingTierIndex + 1) % LIGHTING_TIERS.length;

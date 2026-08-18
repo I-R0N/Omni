@@ -282,6 +282,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.toggleShardShadows();
   };
 
+  const handleToggleRefraction = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleRefraction();
+  };
+
   const handleCycleShadowSoftness = () => {
       if (engineRef.current) engineRef.current.dbg.cycleShadowSoftness();
   };
@@ -631,6 +635,7 @@ const App: React.FC = () => {
         onCycleLighting={handleCycleLighting}
         onCycleLightingTier={handleCycleLightingTier}
         onToggleShardShadows={handleToggleShardShadows}
+        onToggleRefraction={handleToggleRefraction}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}

@@ -34,7 +34,7 @@ import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
-    getShardShadowsEnabled, getShadowSoftness,
+    getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -601,6 +601,128 @@ function collectTransmitGroups(occ: Occluder[], count: number): number {
     return n;
 }
 
+/** REFRACTION — the prototype behind the DBG "Refraction" row.
+ *
+ *  WHAT IT MODELS.  The shipped translucency sends light straight through
+ *  glass at reduced brightness, which is right for a parallel-faced pane: a
+ *  slab offsets a ray laterally but does not deviate it, and a regular
+ *  hexagon has three pairs of parallel faces.  A wedge-shaped SHARD is a
+ *  prism, though, and a prism bends light.  So each exit face refracts by
+ *  Snell's law and emits an additive cone along the deviated direction.
+ *
+ *  WHAT IT DOES NOT MODEL, deliberately, and the error that follows: only
+ *  the EXIT face is refracted.  A ray really bends twice — once entering,
+ *  once leaving — and for a body with parallel faces the two cancel exactly.
+ *  Finding the entry face means a ray-polygon intersection per vertex, so
+ *  this is the thin-body approximation: correct in kind for a wedge, an
+ *  OVER-estimate of the deviation for a slab.  That is the useful direction
+ *  to be wrong in for a prototype whose question is "can you see it at all".
+ *
+ *  The caustic REPLACES the straight-through transmission rather than adding
+ *  to it (see the erase pass), so the light is moved, not created. */
+const REFRACT = {
+    /** Index of refraction, glass into vacuum.  Ordinary crown glass. */
+    IOR: 1.5,
+    /** Ceiling on the caustic's alpha as a fraction of the light's OWN peak
+     *  — a hard clamp, not a suggestion.  Refracted light is a redistribution
+     *  of light that already passed through a body that absorbs some of it,
+     *  so it can never out-shine the source; and a caustic brighter than the
+     *  lamp reads as a bug rather than as glass. */
+    MAX_BRIGHTNESS_FRAC: 0.5,
+    /** How far the deviated cone is thrown, as a fraction of the light
+     *  radius.  Shorter than the shadow's 1.6x: a caustic that runs to the
+     *  edge of the light reads as a searchlight rather than as a glint. */
+    FAR_FRAC: 1.1,
+};
+
+/** Emit one translucent body's REFRACTED cones into the open path.
+ *
+ *  Reuses the vertex scratch that `emitSilhouetteShadow` just filled, and
+ *  the same back-facing test — the faces light LEAVES through are exactly
+ *  the ones that cast the shadow.  Returns true if anything was emitted.
+ *
+ *  TOTAL INTERNAL REFLECTION is a real branch, not a guard bolted on: past
+ *  the critical angle (41.8 degrees for IOR 1.5) nothing is transmitted at
+ *  all, and the formula's discriminant goes negative.  A silent `sqrt` of a
+ *  negative would put NaN into the compound path, and ONE NaN discards the
+ *  whole path — which is exactly how A4 shipped with no shadows at all. */
+function emitRefractedLight(
+    lctx: CanvasRenderingContext2D,
+    cx: number, cy: number,
+    ocx: number, ocy: number,
+    far: number,
+    n: number,
+): boolean {
+    let drew = false;
+    const eta = REFRACT.IOR;
+    for (let i = 0; i < n; i++) {
+        const j = i + 1 === n ? 0 : i + 1;
+        const ax = _svx[i], ay = _svy[i];
+        const bx = _svx[j], by = _svy[j];
+        const ex = bx - ax, ey = by - ay;
+        // Same back-facing test as the shadow: the light and the body's own
+        // centre on the SAME side of the edge means light leaves here.
+        const sL = ex * (cy - ay) - ey * (cx - ax);
+        const sC = ex * (ocy - ay) - ey * (ocx - ax);
+        if ((sL >= 0) !== (sC >= 0)) continue;
+
+        // OUTWARD edge normal.  Either perpendicular is a normal; the one
+        // that points away from the body's centre is the outward one, and
+        // `sC` already carries that sign — no winding knowledge needed, which
+        // matters because the shard polygons come from several generators.
+        const elen = Math.sqrt(ex * ex + ey * ey);
+        if (elen === 0) continue;
+        const sgn = sC >= 0 ? -1 : 1;
+        const nx = sgn * (-ey / elen), ny = sgn * (ex / elen);
+
+        // Refract both endpoints.  `refractTo` writes into the scratch pair
+        // rather than returning a vector, so the hot path allocates nothing.
+        if (!refractTo(ax - cx, ay - cy, nx, ny, eta)) continue;
+        const rax = _rx, ray = _ry;
+        if (!refractTo(bx - cx, by - cy, nx, ny, eta)) continue;
+        const rbx = _rx, rby = _ry;
+
+        // The quad is built in the SAME rotational order the shadow quads use
+        // — near-a, far-a, far-b, near-b — but it is filled additively rather
+        // than with destination-out, so overlapping cones simply brighten and
+        // the winding does not have to be canonical.  Left in the same order
+        // anyway, so the two emitters read as the same construction.
+        lctx.moveTo(ax, ay);
+        lctx.lineTo(ax + rax * far, ay + ray * far);
+        lctx.lineTo(bx + rbx * far, by + rby * far);
+        lctx.lineTo(bx, by);
+        lctx.closePath();
+        drew = true;
+    }
+    return drew;
+}
+
+/** Scratch for `refractTo` — see the allocation note at the top of the file. */
+let _rx = 0, _ry = 0;
+
+/**
+ * Snell's law in 2D.  `(ix, iy)` is the incident direction (need not be unit
+ * — it is normalised here), `(nx, ny)` the OUTWARD surface normal, `eta` the
+ * ratio of the indices the ray is leaving over the one it enters.
+ *
+ * Writes the unit refracted direction into `_rx`/`_ry` and returns true, or
+ * returns false under total internal reflection, where nothing is
+ * transmitted.
+ */
+function refractTo(ix: number, iy: number, nx: number, ny: number, eta: number): boolean {
+    const ilen = Math.sqrt(ix * ix + iy * iy);
+    if (ilen === 0) return false;
+    const dx = ix / ilen, dy = iy / ilen;
+    const ci = dx * nx + dy * ny;               // cos of the incidence angle
+    if (ci <= 0) return false;                  // not actually an exit face
+    const k = 1 - eta * eta * (1 - ci * ci);
+    if (k < 0) return false;                    // TOTAL INTERNAL REFLECTION
+    const g = Math.sqrt(k) - eta * ci;
+    _rx = eta * dx + g * nx;
+    _ry = eta * dy + g * ny;
+    return true;
+}
+
 /** One back-facing edge's extrusion, from the vertex scratch. */
 function emitQuad(
     lctx: CanvasRenderingContext2D, cx: number, cy: number, i: number, j: number,
@@ -668,6 +790,7 @@ function compositeLight(
     occ: Occluder[], count: number,
     lx: number, ly: number, worldToPx: number,
     penumbraK: number,
+    refract: boolean,
 ): void {
     // 1. Falloff.  Created at the origin and MOVED by the transform, so the
     //    cache key stays the radius alone.  setTransform rather than
@@ -734,7 +857,12 @@ function compositeLight(
         // single path it always was.
         for (let g = 0; g < groups; g++) {
         const transmit = _transmits[g];
-        const eraseAlpha = erase * (1 - transmit);
+        // WITH REFRACTION ON, translucent bodies erase in FULL and their
+        // transmitted light comes back as a deviated cone below — the energy
+        // is moved, not added.  (The groups are still walked separately here,
+        // which costs one redundant fill while the prototype is on; splitting
+        // that out would mean a second grouping path for a debug toggle.)
+        const eraseAlpha = erase * (1 - (refract ? 0 : transmit));
         if (eraseAlpha <= 0) continue;      // fully transparent: casts nothing
 
         lctx.beginPath();
@@ -844,7 +972,61 @@ function compositeLight(
         lctx.globalAlpha = 1;
         }
     }
-    if (wedges === 0) return;
+    if (wedges === 0 && !refract) return;
+
+    // 4. REFRACTION (DBG prototype).  Additive, and LAST — a caustic is light
+    //    inside the umbra, so anything drawn before the erase passes would be
+    //    withheld again by the very shadow it belongs to.
+    if (!refract) return;
+    const causticFar = rPx * REFRACT.FAR_FRAC;
+    for (let g = 0; g < groups; g++) {
+        const transmit = _transmits[g];
+        if (transmit <= 0) continue;                 // opaque: nothing to bend
+        lctx.beginPath();
+        let drew = false;
+        for (let i = 0; i < count; i++) {
+            const o = occ[i];
+            if (o.transmit !== transmit) continue;
+            const pts = o.pts;
+            if (pts === undefined || pts.length < 3 || pts.length > MAX_SIL_VERTS) continue;
+            const dx = (o.x - lx) * worldToPx;
+            const dy = (o.y - ly) * worldToPx;
+            const brPx = o.br * worldToPx;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d <= brPx) continue;                 // light inside the body
+            if (d - brPx > rPx) continue;            // past the light's reach
+            const ocx = cx + dx, ocy = cy + dy;
+            const n = pts.length;
+            const cosR = Math.cos(o.rot), sinR = Math.sin(o.rot);
+            for (let k = 0; k < n; k++) {
+                const p = pts[k];
+                _svx[k] = ocx + (p.x * cosR - p.y * sinR) * worldToPx;
+                _svy[k] = ocy + (p.x * sinR + p.y * cosR) * worldToPx;
+            }
+            if (emitRefractedLight(lctx, cx, cy, ocx, ocy, causticFar, n)) drew = true;
+        }
+        if (!drew) continue;
+
+        // BRIGHTNESS.  The caustic is filled with the light's OWN falloff
+        // gradient, scaled by at most REFRACT.MAX_BRIGHTNESS_FRAC — so
+        // "no brighter than half the source" is structural rather than a
+        // number someone has to keep in step, and the deviated light fades
+        // with distance exactly as the direct light does.
+        //
+        // The gradient is created at the origin and placed by the transform.
+        // The PATH is unaffected: Canvas2D bakes each segment into device
+        // space as it is added, so a transform set afterwards moves only the
+        // fill's own coordinate space.  Same trick as the falloff in step 1.
+        const alpha = Math.min(REFRACT.MAX_BRIGHTNESS_FRAC, transmit);
+        lctx.setTransform(1, 0, 0, 1, cx, cy);
+        lctx.fillStyle = lightGradient(lctx, rPx);
+        lctx.globalAlpha = alpha;
+        lctx.globalCompositeOperation = 'lighter';
+        lctx.fill();
+        lctx.globalCompositeOperation = 'source-over';
+        lctx.globalAlpha = 1;
+        lctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -969,7 +1151,7 @@ export function renderLightLayer(
             compositeLight(lctx, cx, cy, tier.maxRadius * worldToPx,
                            r._lightOccluders, r._lightOccluderCount,
                            playerPos.x, playerPos.y, worldToPx,
-                           getShadowSoftness());
+                           getShadowSoftness(), getRefractionEnabled());
         }
     } else {
         r._lightOccluderCount = 0;
