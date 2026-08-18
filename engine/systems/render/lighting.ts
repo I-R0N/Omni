@@ -613,12 +613,6 @@ const _sfy = new Float64Array(MAX_SIL_VERTS);
 /** Per-edge back-facing classification.  Only filled on the slow path — see
  *  the note on the light-inside bail. */
 const _sback = new Uint8Array(MAX_SIL_VERTS);
-/** How far the penumbra passes may dilate a body.  The dilation is derived
- *  from the widening ANGLE and the distance, so for a small shard far away it
- *  is legitimately large — but past 2x the body it stops reading as a soft
- *  edge and starts reading as a second, bigger shadow. */
-const DILATE_MAX = 2;
-
 /**
  * Emit ONE occluder's shadow volume into the already-open path, extruded from
  * the body's OWN POLYGON rather than from a circle around it.
@@ -653,11 +647,16 @@ function emitSilhouetteShadow(
     pts: Vector2[],
     rot: number,
     scale: number,
-    dilate: number,
+    widenRad: number,
     lightOutside: boolean,
 ): boolean {
     const n = pts.length;
     const cosR = Math.cos(rot), sinR = Math.sin(rot);
+    // The penumbra is an ANGLE about the light, so the widening is applied as
+    // a rotation of each far point's bearing — cos/sin hoisted, since every
+    // vertex uses the same magnitude and only the SIGN differs.
+    const cosW = Math.cos(widenRad), sinW = Math.sin(widenRad);
+    const ccx = ocx - cx, ccy = ocy - cy;   // light -> body centre
     for (let i = 0; i < n; i++) {
         const p = pts[i];
         const lx = p.x * cosR - p.y * sinR;
@@ -681,17 +680,50 @@ function emitSilhouetteShadow(
         // even 28-unit shards pinned the clamp.  Reported from the device as
         // exactly that.
         //
-        // Taking the far point's BEARING from the dilated vertex and the near
-        // point from the true one gives the cone instead: the extra bearing
-        // works out to (k-1)*r/d, which is the intended widening angle by
-        // construction, while the near boundary stays exactly on the body.
-        const fx = ocx + lx * scale * dilate;
-        const fy = ocy + ly * scale * dilate;
-        const rx = fx - cx, ry = fy - cy;
+        // Taking the far point's BEARING from the widened vertex and the near
+        // point from the true one gives the cone: the near boundary stays
+        // exactly on the body and the shadow opens out with distance.
+        //
+        // THE WIDENING IS A ROTATION, NOT A DILATION, and that distinction is
+        // the whole of A5l.  A5d scaled each vertex radially away from the
+        // body's CENTRE and read the far bearing off the scaled point, which
+        // does deliver the right average widening — but it moves each vertex
+        // by a different angle, because the amount depends on where that
+        // vertex sits relative to the centre.  For an edge lying nearly along
+        // the light ray (one that is about to flip between front- and
+        // back-facing) the two endpoints therefore ended up at DIFFERENT
+        // bearings, so the quad that should have been zero-width at the flip
+        // had real area, and it appeared and vanished between frames.
+        // MEASURED sweeping a light around one hex: at hard shadows an edge
+        // flip changed the total shadow area by 0.8 %, and at the shipped
+        // softness by 5-6 % — the click reported from the device.
+        //
+        // Rotating the bearing by a fixed angle instead gives BOTH endpoints
+        // of such an edge the same shift (they are on the same flank, so the
+        // same sign), so the quad stays degenerate through the flip, while
+        // the terminator vertices — the shadow's lateral boundary, where the
+        // penumbra actually reads — still get their full +/- widening.
+        //
+        // The sign is which side of the body's own bearing the vertex falls,
+        // so the widening is always OUTWARD.  A vertex exactly on that
+        // bearing takes an arbitrary sign; it is the one directly behind the
+        // body's centre, deep inside the umbra, where both choices are
+        // covered by its neighbours.
+        const rx = x - cx, ry = y - cy;
         const len = Math.sqrt(rx * rx + ry * ry);
-        const k = len > 0 ? far / len : 0;
-        _sfx[i] = cx + rx * k;
-        _sfy[i] = cy + ry * k;
+        if (len > 0) {
+            const ux = rx / len, uy = ry / len;
+            if (ccx * ry - ccy * rx >= 0) {
+                _sfx[i] = cx + (ux * cosW - uy * sinW) * far;
+                _sfy[i] = cy + (ux * sinW + uy * cosW) * far;
+            } else {
+                _sfx[i] = cx + (ux * cosW + uy * sinW) * far;
+                _sfy[i] = cy + (uy * cosW - ux * sinW) * far;
+            }
+        } else {
+            _sfx[i] = x;
+            _sfy[i] = y;
+        }
     }
 
     // TWO SHAPES OF THIS LOOP, and which one runs is decided by whether the
@@ -994,6 +1026,18 @@ function refractTo(
     return u * u * (3 - 2 * u);                 // smoothstep into the cliff
 }
 
+/** Shadow-geometry instrumentation, the sibling of `causticStats`.  Counts
+ *  the quads emitted and their total area, so a POP — a quad appearing at
+ *  finite width rather than growing from zero — is a step change in a number
+ *  instead of a judgement about pixels.  Two adds and a cross product per
+ *  quad, on a path that already builds four points. */
+export let _shadowQuads = 0;
+export let _shadowArea = 0;
+export function resetShadowStats(): void { _shadowQuads = 0; _shadowArea = 0; }
+export function shadowStats(): { quads: number; area: number } {
+    return { quads: _shadowQuads, area: _shadowArea };
+}
+
 /** One back-facing edge's extrusion, from the vertex scratch. */
 function emitQuad(
     lctx: CanvasRenderingContext2D, cx: number, cy: number, i: number, j: number,
@@ -1022,6 +1066,11 @@ function emitQuad(
     lctx.lineTo(fbx, fby);
     lctx.lineTo(bx, by);
     lctx.closePath();
+    _shadowQuads++;
+    // Shoelace over the four corners, halved and unsigned.
+    _shadowArea += Math.abs(
+        (ax * fay - fax * ay) + (fax * fby - fbx * fay)
+        + (fbx * by - bx * fby) + (bx * ay - ax * by)) * 0.5;
 }
 
 /** Brightness the cache was built at.  The gradient bakes its alphas into
@@ -1111,6 +1160,7 @@ function compositeLight(
     lctx.fillStyle = lightGradient(lctx, rPx, tint);
     lctx.fillRect(-rPx, -rPx, rPx * 2, rPx * 2);
     lctx.setTransform(1, 0, 0, 1, 0, 0);
+    resetShadowStats();
 
     if (count === 0) return;
 
@@ -1197,28 +1247,17 @@ function compositeLight(
             const pts = o.pts;
             if (pts !== undefined && pts.length >= 3 && pts.length <= MAX_SIL_VERTS) {
                 const far = rPx * 1.6;
-                let k = 1;
-                if (widen > 0 && rad > 0) {
-                    // Angular widening `widen` at distance `d` is a body
-                    // `widen * d` px wider, i.e. this factor against the
-                    // inradius.  It scales the FAR points only, so it opens
-                    // the shadow out with distance instead of fattening the
-                    // body — see `emitSilhouetteShadow`.
-                    k = 1 + widen * d / rad;
-                    if (k > DILATE_MAX) k = DILATE_MAX;
-                    // Never let the dilated vertices reach the light: one
-                    // landing on it has no bearing at all, and the quad
-                    // collapses onto the light's own centre and erases a
-                    // sliver out of the middle of it.
-                    const kMax = brPx > 0 ? 0.9 * d / brPx : 1;
-                    if (k > kMax) k = kMax;
-                    if (k < 1) k = 1;
-                }
-                // `d > brPx` proves the light is outside the body — the
-                // NEAR vertices are undilated now, so this is the true
-                // outline — which lets the emitter fuse its two passes.
+                // The widening goes to the silhouette as the ANGLE it is,
+                // rather than being converted into a radial scale factor
+                // first — see the long note in `emitSilhouetteShadow`.  That
+                // also retires `DILATE_MAX` and the "never let a dilated
+                // vertex reach the light" clamp: both existed to bound a
+                // radial scale, and a bearing rotation has nothing to bound.
+                // `d > brPx` proves the light is outside the body — the NEAR
+                // vertices are the true outline — which lets the emitter fuse
+                // its two passes.
                 if (emitSilhouetteShadow(lctx, cx, cy, ocx, ocy, far, pts, o.rot,
-                                         worldToPx, k, d > brPx)) drew++;
+                                         worldToPx, widen, d > brPx)) drew++;
                 continue;
             }
 

@@ -2206,3 +2206,97 @@ of everything it draws, and with `smooth` the worst step is smaller — the
 same geometry, arrived at continuously. It re-quiets the scene every frame,
 because the map regenerates tiles and one drifting into the pool would put a
 second body's caustic in the series and read as a cliff.
+
+---
+
+## A5l — the click was the penumbra, and the perf report could not see the light
+
+Two reports in one message, and they wanted opposite treatment: one was a
+real bug found by following the reporter's own hypothesis, the other was a
+suspicion the evidence did not support.
+
+### The click: "a shadow cone appears and disappears from one edge to an
+### adjacent edge"
+
+That is exactly what was happening, and it is not the caustic — A5k fixed a
+different cliff on the same symptom. This one is in the SHADOW, and it is
+the penumbra's construction.
+
+As a light crosses an edge's plane, that edge starts or stops casting. At
+that instant the edge lies along the light ray, so its quad must be
+DEGENERATE — an edge-on caster casts nothing, and the transition is
+continuous. Instrumenting the shadow geometry (`shadowStats()` — quads
+emitted and their total area) and sweeping a light around one hex tile
+showed it was not:
+
+| shadow soft | at an edge flip | total shadow area change |
+|---|---|---|
+| `off` (no widening) | 4 quads → 3 | **0.8 %** |
+| `diffuse` (shipped) | 24 → 18 | **5–6 % in one step** |
+
+Hard shadows behave correctly. The widening is what breaks it, and the
+reason is the CONSTRUCTION A5d chose: it scaled each vertex radially away
+from the body's CENTRE and read the far bearing off the scaled point. That
+delivers the right average widening, but it moves each vertex by a DIFFERENT
+angle — the amount depends on where the vertex sits relative to the centre.
+So for an edge about to flip, the two endpoints landed at different bearings
+and the quad had real area at the exact moment it should have had none.
+
+**A penumbra is a rotation, not a dilation.** The far point's bearing is now
+rotated by the widening angle directly, with the sign taken from which side
+of the body's own bearing the vertex falls (so the widening is always
+outward). Both endpoints of a nearly-edge-on edge are on the same flank and
+therefore take the SAME shift, so the quad stays degenerate through the flip
+— while the terminator vertices, which are the shadow's lateral boundary and
+where the penumbra actually reads, still get their full ± widening. After it,
+the same sweep measures **0.6–2.4 %** at a flip, against ~0.4 % for an
+ordinary step of the same sweep.
+
+It also retires two clamps. `DILATE_MAX` and the "never let a dilated vertex
+reach the light" guard both existed to bound a radial SCALE; a bearing
+rotation has nothing to bound, and small or distant bodies — the ones that
+used to pin those clamps — now get the same soft band as everything else.
+
+The measurement route is worth recording, because two metrics measured the
+wrong thing first. Differencing unified against legacy at a FIXED camera is
+clean (noise floor 0.00 with the light held still), but with the camera
+following the ship it measures the pan, and per-pixel deltas off a moving
+camera are swamped by the star field. What worked was instrumenting the
+geometry: a pop is a step change in a number, not a judgement about pixels.
+
+### The frame rate: the report cannot answer that question yet
+
+The capture supplied with the report (`Tile Heavy`, 1507x960, 680 frames)
+does not show the drops it was offered as evidence of:
+
+- **FPS avg 60, median 59, 1 %-low 56, min 53, ≥55 for 100 % of frames.**
+- Worst frame **19.0 ms** — one missed vsync at most.
+
+And the line that reads like a smoking gun is not one: that worst frame is
+`render 4.00 · sim 1.00 · other 14.0`, and OTHER at a locked frame rate is
+mostly IDLE. The frame clock is wall time between rAF callbacks, so a 16.7 ms
+frame containing 5 ms of our JS necessarily carries ~11 ms of vsync wait in
+that column. The report's own caption said "GC pause, compositing or an OS
+stall, i.e. NOT our JS", which invites exactly the misreading — fixed, in the
+same spirit as A0's `ui` correction.
+
+The capture ALSO cannot attribute anything to the lighting, because it never
+printed it: `lightingMs` has been on `PerfSnapshot` since A0 and is inside
+`renderMs` like everything else the renderer does. So the recorder now prints
+
+    light avg X ms of render · peak Y ms · lights avg Z
+
+on its own line — a SLICE of render rather than a term beside it — plus the
+light's share of the worst frame in the spike line. `lights` is the mean
+number composited per frame, because the cost is per light and a mean of 4
+against a mean of 1 is most of any answer about it.
+
+A capture taken while approaching a cluster will now say whether the light
+layer is what costs, in the same units as everything else.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **128 passed**. The new
+test sweeps a light around one hex and asserts that a flip may not move the
+shadow area much more than an ordinary step of the same sweep does — and
+asserts its own premise first, that the sweep contains a flip at all.

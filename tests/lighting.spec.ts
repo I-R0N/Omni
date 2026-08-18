@@ -1271,6 +1271,79 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('an edge flip is continuous: the penumbra is an angle, not a dilation', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    // Sweep a light around ONE opaque hex (no caustic in play) and watch the
+    // shadow geometry.  As the light crosses an edge's plane that edge starts
+    // or stops casting, and at that instant it lies along the light ray, so
+    // its quad MUST be degenerate — an edge-on caster casts nothing.  A5d's
+    // radial dilation broke that: it moved each vertex by a different angle,
+    // so the quad had real area at the flip and appeared between frames.
+    const r = await engine(page, async (e) => {
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      const pick = tiles[0];
+      if (!pick) return { built: false } as any;
+      pick._occluderR = undefined;
+      pick.position.x = 0; pick.position.y = 0;
+      e.renderer.setLighting('unified');
+      if (e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+
+      let px = 0, py = -150;
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          for (const o of e.currentMap.entities) {
+            if (o !== pick && o.type === 'STRUCTURE') o.active = false;
+          }
+          pick.active = true;
+          e.player.position.x = px; e.player.position.y = py;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+
+      for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== 'diffuse'; i++) {
+        e.renderer.cycleShadowSoftness();
+      }
+      // 1.2 degrees per step over 84 degrees — more than one hex edge plane,
+      // so at least one flip is guaranteed to be in the series.
+      let flips = 0, worstFlip = 0, worstStep = 0;
+      let prev: { quads: number; area: number } | null = null;
+      for (let step = 0; step < 70; step++) {
+        const a = -Math.PI / 2 + step * (1.2 * Math.PI / 180);
+        px = Math.cos(a) * 150; py = Math.sin(a) * 150;
+        await frames(3);
+        const st = e.renderer.shadowStats();
+        if (prev !== null && prev.area > 0) {
+          const rel = Math.abs(st.area - prev.area) / prev.area;
+          if (st.quads !== prev.quads) { flips++; if (rel > worstFlip) worstFlip = rel; }
+          else if (rel > worstStep) worstStep = rel;
+        }
+        prev = st;
+      }
+      return { built: true, flips, worstFlip, worstStep, quads: prev!.quads };
+    });
+
+    expect(r.built).toBe(true);
+    // The sweep has to actually contain a flip, or the assertion below is
+    // vacuous — this is the test asserting its own premise.
+    expect(r.flips).toBeGreaterThan(0);
+    expect(r.quads).toBeGreaterThan(0);
+    // A flip may not move the total shadow area by much more than an ordinary
+    // step of the same sweep does.  Before the fix the same sweep measured
+    // 5-6 % at a flip against ~0.4 % typical; the bar is deliberately loose
+    // (the area double-counts overlapping quads, so it over-reads) and still
+    // an order of magnitude below the old behaviour.
+    expect(r.worstFlip).toBeLessThan(0.04);
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

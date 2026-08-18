@@ -23,7 +23,7 @@ import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
-import { renderLightLayer, causticStats, type Occluder, type EmitSlot } from './render/lighting';
+import { renderLightLayer, causticStats, shadowStats, type Occluder, type EmitSlot } from './render/lighting';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -224,6 +224,7 @@ export class RenderSystem {
   public cycleCausticFade(): string { return cycleCausticFade(); }
   public getCausticFade(): string { return getCausticFadeName(); }
   public causticStats(): { faces: number; weight: number } { return causticStats(); }
+  public shadowStats(): { quads: number; area: number } { return shadowStats(); }
   public cycleEmitShadowTier(): string { return cycleEmitShadowTier(); }
   /** The live emitter-shadow tier ROW, not just its name — the suites read
    *  the caps off it, so the ladder is pinned where it is authored. */
