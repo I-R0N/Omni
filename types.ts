@@ -1677,6 +1677,10 @@ export interface EngineStats {
   refractionEnabled?: boolean;
   /** DBG: refracted-cone brightness, as a fraction of the light's peak. */
   refractBrightnessName?: string;
+  /** DBG: player-light brightness multiplier, as a percentage label. */
+  lightBrightnessName?: string;
+  /** DBG: do metal and glass re-emit the light that falls on them? */
+  emissiveEnabled?: boolean;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

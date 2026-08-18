@@ -87,6 +87,8 @@ interface UIOverlayProps {
   onToggleShardShadows?: () => void;
   onToggleRefraction?: () => void;
   onCycleRefractBrightness?: () => void;
+  onCycleLightBrightness?: () => void;
+  onToggleEmissive?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -101,9 +103,6 @@ interface UIOverlayProps {
   onCyclePlasticPalette?: () => void;
   onCyclePlasticShardPalette?: () => void;
   onCyclePlasticGlowBrightness?: () => void;
-  onCycleMetalGlowBrightness?: () => void;
-  onCycleGlassGlowColor?: () => void;
-  onCycleMetalGlowColor?: () => void;
   onCycleNebulaPalette?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
@@ -261,6 +260,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardShadows,
   onToggleRefraction,
   onCycleRefractBrightness,
+  onCycleLightBrightness,
+  onToggleEmissive,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -275,9 +276,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticPalette,
   onCyclePlasticShardPalette,
   onCyclePlasticGlowBrightness,
-  onCycleMetalGlowBrightness,
-  onCycleGlassGlowColor,
-  onCycleMetalGlowColor,
   onCycleNebulaPalette,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
@@ -1497,6 +1495,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Light tier', onCycleLightingTier,
                   stats.lightingTierName ?? 'low',
                   'Lighting budget. LOW (default) is the 390x844 phone: the light layer renders at a third of screen resolution, 4 lights, 24 occluders each, radius 300, hard shadows. Medium/High halve the divisor and raise every cap. The occluder cap is load-bearing rather than defensive — a radius-300 light can cover ~225 hexes in solid terrain, and the cap takes the NEAREST, which subtend the largest shadow angle, so truncation degrades gracefully.')}
+                {ctrlRow('Light bright', onCycleLightBrightness,
+                  stats.lightBrightnessName ?? '100%',
+                  'How bright the player light is, 100% (default) down to 8%. This is NOT the Light tier row above: that one is a COST ladder — canvas resolution, occluder cap, radius — so dropping it to lowest changes how much work the light does and not how bright it looks. The ladder runs a long way down because the complaint it answers was not that the light was slightly hot.')}
+                {ctrlRow('Emissive', onToggleEmissive,
+                  stats.emissiveEnabled === true ? 'On' : 'Off',
+                  'PROTOTYPE. Do METAL and GLASS re-emit the light that falls on them? On, every lit body of those materials becomes a SECOND light at its own position — half the light it received, uniform in every direction, falling off the way the player\'s does. It replaces the contact-driven glow those two materials used to carry, which lit up when something TOUCHED them rather than when light reached them, so a metal plate across the room stayed dead however brightly it was lit. Secondary lights deliberately cast no shadows of their own: each would need its own occluder collection, and the pool is shared and consumed per light, so N emitters would cost N collections on the tightest budget in the system.')}
                 {ctrlRow('Shadow soft', onCycleShadowSoftness,
                   stats.shadowSoftnessName ?? 'soft',
                   'Shadow-edge softness. A point light casts a perfectly HARD shadow, which is what made the first version read as a drawn line rather than as lighting. Softness here is an ANGLE, so the soft band WIDENS with distance from the caster the way a real area light\'s does — tight against the tile, spreading further out — rather than being a uniform blur. Off is the hard-edged original, kept as the control. Costs two extra wedge passes per light when on.')}
@@ -1530,18 +1534,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('P glow', onCyclePlasticGlowBrightness,
                   stats.plasticGlowBrightnessName ?? '1x',
                   'Cycle the plastic-tile proximity-glow brightness multiplier (1×–5×). Multiplies the variant peakAlpha so the green bloom lights up from farther away and reads brighter near contact. Plastic-shards are unaffected.')}
-                {ctrlRow('M glow', onCycleMetalGlowBrightness,
-                  stats.metalGlowBrightnessName ?? '1x',
-                  'Cycle the metal-tile proximity-glow brightness multiplier (1×–5×). Multiplies the variant peakAlpha so the fuchsia repel-glow lights up from farther away and reads brighter near contact.')}
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
-                {ctrlRow('Glass', onCycleGlassGlowColor,
-                  stats.glassGlowColorName ?? 'sky',
-                  'Cycle the glass-tile proximity glow ONLY through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Glass shatter dust + main background nebula clusters now live on the Nebula cycle. Default sky.')}
-                {ctrlRow('M color', onCycleMetalGlowColor,
-                  stats.metalGlowColorName ?? 'magenta',
-                  'Cycle the metal-tile proximity glow through the same 11-entry colour list as Glass (independent index). Default magenta — closest match to the legacy fuchsia. Range + peakAlpha stay with the variant; the M glow brightness multiplier is independent.')}
                 {ctrlRow('Nebula', onCycleNebulaPalette,
                   stats.nebulaPaletteName ?? 'sky',
                   'Cycle the glass-side nebula palette through the same 11-entry list. Governs glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition). Main background nebula tiles + shards, BG puffs, and NebulaSystem colour drift all stay on the legacy default palette and are NOT affected. Rock-side dust (rock tile original + regenerated + shards) is fixed at white. Default sky.')}

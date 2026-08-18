@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -187,6 +187,10 @@ export class RenderSystem {
   public getRefraction(): boolean { return getRefractionEnabled(); }
   public cycleRefractBrightness(): string { return cycleRefractBrightness(); }
   public getRefractBrightness(): string { return getRefractBrightnessName(); }
+  public cycleLightBrightness(): string { return cycleLightBrightness(); }
+  public getLightBrightness(): string { return getLightBrightnessName(); }
+  public toggleEmissive(): boolean { return toggleEmissive(); }
+  public getEmissive(): boolean { return getEmissiveEnabled(); }
   public cycleShadowSoftness(): string { return cycleShadowSoftness(); }
   public getShadowSoftness(): string { return getShadowSoftnessName(); }
 
@@ -1248,23 +1252,18 @@ export class RenderSystem {
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
             || entity.shardVariant === 'indestructible-tile');
-      // Skip the fast path while the player is inside this tile's
-      // variant glow range so the slow path's layer 2b can paint.
-      // Glass-tile reads `repelImpulse` (the PLAYER or an ENEMY ramps
-      // the glow — mobile shards deliberately do not; see the gate in
-      // PhysicsSystem); indestructible-tile keeps player-distance
-      // because it has no repel field.
+      // Skip the fast path while the player is inside this tile's variant
+      // glow range so the slow path can paint it.  Only INDESTRUCTIBLE-tile
+      // reaches this now: glass-tile used to bail out of the fast path on
+      // `repelImpulse` — a CONTACT glow, which the unified light replaced —
+      // so glass now stays cached while something is touching it.
       let inGlowRange = false;
-      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined) {
-          if (entity.shardVariant === 'glass-tile') {
-              inGlowRange = (entity.repelImpulse ?? 0) > 0;
-          } else if (playerPos) {
-              const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
-              if (fpGlow !== undefined) {
-                  const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
-                  const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
-                  inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
-              }
+      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined && playerPos) {
+          const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
+          if (fpGlow !== undefined) {
+              const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+              const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+              inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
           }
       }
       if (isGlassFamilyStaticTile

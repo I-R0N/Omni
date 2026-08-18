@@ -29,12 +29,12 @@ import {
     NEBULA_CONSTANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS,
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
-    cycleMetalGlowBrightness, cycleGlassGlowColor, cycleMetalGlowColor,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
+    cycleLightBrightness, toggleEmissive,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -377,6 +377,23 @@ export class DebugControls {
     cycleRefractBrightness();
   }
 
+  /** DBG (Visual): how bright the player light is, 100% down to 8%.  This
+   *  is NOT the "Light tier" row — that one is a COST ladder (canvas
+   *  resolution, occluder cap, radius) and changes how much work the light
+   *  does, not how bright it looks. */
+  cycleLightBrightness() {
+    cycleLightBrightness();
+  }
+
+  /** DBG (Visual): do METAL and GLASS re-emit the light that falls on them?
+   *  Off by default.  On, each lit body of those materials becomes a second,
+   *  dimmer light at its own position — replacing the contact-driven glow
+   *  those materials used to carry, which lit up when something touched them
+   *  rather than when light reached them. */
+  toggleEmissive() {
+    toggleEmissive();
+  }
+
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.
    *  Softness is an ANGLE, so the band widens with distance from the caster
    *  rather than being a uniform blur.  'off' is the hard-shadow control. */
@@ -490,37 +507,8 @@ export class DebugControls {
     cyclePlasticGlowBrightness();
   }
 
-  /**
-   * Cycle the metal-tile proximity-glow brightness multiplier
-   * (MATERIAL_GLOW_BRIGHTNESS_CYCLE, 1× … 5×).  RenderSystem reads
-   * the multiplier live each frame inside the metal-tile glow draw.
-   */
-  cycleMetalGlowBrightness() {
-    cycleMetalGlowBrightness();
-  }
 
-  /**
-   * Cycle the DBG glass palette through GLASS_GLOW_COLORS.  Governs
-   * the glass-tile proximity glow ONLY (RenderSystem reads the hex
-   * live per draw).  Glass-shatter dust + main background nebula
-   * clusters live on the Nebula cycle (see cycleNebulaPalette).
-   * Default 'sky'.  No entity re-roll needed — the glow is read live.
-   */
-  cycleGlassGlowColor() {
-    cycleGlassGlowColor();
-  }
 
-  /**
-   * Cycle the DBG metal-glow palette through the same 11-entry list
-   * Glass uses (GLASS_GLOW_COLORS).  RenderSystem reads the active
-   * hex via getActiveMetalGlowColor() in the metal-tile glow render
-   * branch — range + peakAlpha stay with the variant.  Default
-   * 'magenta' (closest to the legacy fuchsia baked into the
-   * variant config).
-   */
-  cycleMetalGlowColor() {
-    cycleMetalGlowColor();
-  }
 
   /**
    * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Now

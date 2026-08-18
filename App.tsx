@@ -286,6 +286,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.toggleRefraction();
   };
 
+  const handleCycleLightBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightBrightness();
+  };
+
+  const handleToggleEmissive = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleEmissive();
+  };
+
   const handleCycleRefractBrightness = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRefractBrightness();
   };
@@ -346,17 +354,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePlasticGlowBrightness();
   };
 
-  const handleCycleMetalGlowBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowBrightness();
-  };
 
-  const handleCycleGlassGlowColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleGlassGlowColor();
-  };
 
-  const handleCycleMetalGlowColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowColor();
-  };
 
   const handleCycleNebulaPalette = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaPalette();
@@ -641,6 +640,8 @@ const App: React.FC = () => {
         onToggleShardShadows={handleToggleShardShadows}
         onToggleRefraction={handleToggleRefraction}
         onCycleRefractBrightness={handleCycleRefractBrightness}
+        onCycleLightBrightness={handleCycleLightBrightness}
+        onToggleEmissive={handleToggleEmissive}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}
@@ -655,9 +656,6 @@ const App: React.FC = () => {
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticShardPalette={handleCyclePlasticShardPalette}
         onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
-        onCycleMetalGlowBrightness={handleCycleMetalGlowBrightness}
-        onCycleGlassGlowColor={handleCycleGlassGlowColor}
-        onCycleMetalGlowColor={handleCycleMetalGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}

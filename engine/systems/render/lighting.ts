@@ -35,7 +35,7 @@ import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
-    getRefractBrightness,
+    getRefractBrightness, getLightBrightness, getEmissiveEnabled,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -78,6 +78,9 @@ export interface Occluder {
      *  THROUGH rather than being withheld.  0 for everything opaque, which
      *  is everything but glass. */
     transmit: number;
+    /** `SHARD_VARIANTS[v].emits` — the fraction of received light this body
+     *  radiates back out.  0 for everything but metal and glass. */
+    emits: number;
     /** Squared distance to the light — the nearest-first selection key. */
     distSq: number;
     /** True for a mobile shard, false for a static tile.  Selection needs to
@@ -121,7 +124,7 @@ function poolAt(i: number): Occluder {
     let o = _pool[i];
     if (o === undefined) {
         o = { x: 0, y: 0, r: 0, br: 0, pts: undefined, rot: 0, transmit: 0,
-              distSq: 0, mobile: false };
+              emits: 0, distSq: 0, mobile: false };
         _pool[i] = o;
     }
     return o;
@@ -254,6 +257,7 @@ function record(t: GameEntity, mobile: boolean): void {
     o.rot = t.rotation;
     const v = t.shardVariant;
     o.transmit = v !== undefined ? SHARD_VARIANTS[v].transmit ?? 0 : 0;
+    o.emits = v !== undefined ? SHARD_VARIANTS[v].emits ?? 0 : 0;
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
     _outBuf[_n++] = o;
@@ -386,10 +390,21 @@ const PLAYER_LIGHT = {
  *  a handful of entries. */
 const _gradCache = new Map<number, CanvasGradient>();
 
-/** Graded passes used to fake a penumbra.  Three is the point where the
- *  banding stops reading as banding at this layer's resolution; more passes
- *  cost another compound path each for a difference nobody can see. */
-const SOFT_STEPS = 3;
+/** Graded passes used to fake a penumbra, AS A FUNCTION OF HOW WIDE THE
+ *  BAND IS.  Three passes is the point where banding stops reading as
+ *  banding for the default softness, and for a long time that was the whole
+ *  story — but the softness ladder now runs to k=14, and a band five times
+ *  as wide graded over the same three steps reads as three stripes rather
+ *  than as a soft edge.  So gradations are bought only where they are
+ *  needed: k=2.5 still resolves to exactly 3, so the shipped default is
+ *  bit-for-bit what it was, and only the settings someone deliberately
+ *  cycled to pay for more.  Capped at 6, past which the passes cost more
+ *  than the smoothness is worth at this layer's resolution. */
+function softSteps(k: number): number {
+    if (k <= 0) return 1;
+    const n = 2 + Math.round(k / 2);
+    return n < 3 ? 3 : n > 6 ? 6 : n;
+}
 /** Degrees of angular widening per unit of the tier's `penumbraK`.  The
  *  softness is an ANGLE, which is why the resulting soft band widens with
  *  distance from the caster instead of being a uniform blur. */
@@ -630,11 +645,14 @@ const REFRACT = {
      *  so it can never out-shine the source; and a caustic brighter than the
      *  lamp reads as a bug rather than as glass.
      *
-     *  The TUNABLE value is `getRefractBrightness()` (DBG "Refr bright"),
-     *  and this clamps on top of it.  Two places on purpose: the cycle is
-     *  where the look is chosen, and this is where the rule holds even if a
-     *  row is added to that cycle above the ceiling. */
-    MAX_BRIGHTNESS_FRAC: 0.5,
+     *  RAISED FROM 0.5 TO 1 on device feedback: the caustic measured as only
+     *  marginally legible at Low, and a prototype you cannot see is one you
+     *  cannot judge.  Half the source is still the DEFAULT the cycle starts
+     *  at — the physical instinct behind it was right — but it is no longer
+     *  a ceiling, and 1 is: refracted light is a redistribution of light
+     *  that already passed through the body, so out-shining the source
+     *  outright remains meaningless. */
+    MAX_BRIGHTNESS_FRAC: 1,
     /** How far the deviated cone is thrown, as a fraction of the light
      *  radius.  Shorter than the shadow's 1.6x: a caustic that runs to the
      *  edge of the light reads as a searchlight rather than as a glint. */
@@ -759,17 +777,45 @@ function emitQuad(
     lctx.closePath();
 }
 
+/** Brightness the cache was built at.  The gradient bakes its alphas into
+ *  colour stops, so a cache keyed on radius alone would keep serving the old
+ *  brightness after the DBG cycle moved — a stale-cache bug whose symptom is
+ *  "the setting does nothing", which is the hardest kind to see.  One
+ *  compare per light per frame; the cycle is a handful of entries, so the
+ *  clear happens on a keypress and never in steady state. */
+let _gradBrightness = -1;
+
 function lightGradient(lctx: CanvasRenderingContext2D, rPx: number): CanvasGradient {
+    const bright = getLightBrightness();
+    if (bright !== _gradBrightness) {
+        _gradCache.clear();
+        _gradBrightness = bright;
+    }
     const key = Math.round(rPx);
     let g = _gradCache.get(key);
     if (g === undefined) {
         g = lctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(1, key));
-        g.addColorStop(0, `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.PEAK})`);
-        g.addColorStop(PLAYER_LIGHT.MID, `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.MID_ALPHA})`);
+        g.addColorStop(0, `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.PEAK * bright})`);
+        g.addColorStop(PLAYER_LIGHT.MID,
+                       `rgba(${PLAYER_LIGHT.RGB}, ${PLAYER_LIGHT.MID_ALPHA * bright})`);
         g.addColorStop(1, `rgba(${PLAYER_LIGHT.RGB}, 0)`);
         _gradCache.set(key, g);
     }
     return g;
+}
+
+/** The falloff's value at `t` = distance / radius, as a FRACTION of the
+ *  light's own peak — so it is 1 at the centre and 0 at the rim, whatever
+ *  brightness is selected.  This is the same piecewise ramp the gradient's
+ *  three stops describe, evaluated rather than sampled: reading the canvas
+ *  back to find out how lit something is would be a CPU readback of the
+ *  light layer, which this system does not do. */
+function falloffFrac(t: number): number {
+    if (t >= 1) return 0;
+    if (t <= 0) return 1;
+    const midFrac = PLAYER_LIGHT.MID_ALPHA / PLAYER_LIGHT.PEAK;
+    if (t < PLAYER_LIGHT.MID) return 1 + (midFrac - 1) * (t / PLAYER_LIGHT.MID);
+    return midFrac * (1 - (t - PLAYER_LIGHT.MID) / (1 - PLAYER_LIGHT.MID));
 }
 
 /**
@@ -835,7 +881,7 @@ function compositeLight(
     // f_i = 1 - R_(i+1)/R_i.  For N = 3 that is 1/3, 1/2, 1 — and the last
     // pass is 1 so the umbra is fully dark rather than nearly so.
     const kRad = penumbraK * PENUMBRA_DEG_PER_K * DEG2RAD;
-    const steps = kRad > 0 ? SOFT_STEPS : 1;
+    const steps = softSteps(penumbraK);
     const groups = collectTransmitGroups(occ, count);
     let wedges = 0;
     for (let step = 0; step < steps; step++) {
@@ -1051,6 +1097,72 @@ function compositeLight(
 //  runtime cycle.
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** How far a re-emitting body throws its own light, as a fraction of the
+ *  light that lit it.  Small on purpose: an emitter is a lit SURFACE, not a
+ *  lamp, and a halo the size of the player's own light would read as a
+ *  second ship rather than as metal catching the light. */
+const EMIT_RADIUS_FRAC = 0.32;
+/** Emitters below this received fraction are skipped — at the rim of the
+ *  light, `emits` of almost nothing is exactly nothing, and it would still
+ *  cost a gradient fill to draw. */
+const EMIT_MIN_RECEIVED = 0.06;
+
+/**
+ * Composite the SECONDARY lights: every lit body whose variant re-emits.
+ *
+ * Runs after the shadow passes, so an emitter shines INTO the darkness
+ * beside it — which is the whole point, and is why it is not simply a
+ * brighter body. Returns how many were drawn.
+ *
+ * HOW MUCH LIGHT A BODY RECEIVES is evaluated, never sampled: the falloff is
+ * a known piecewise ramp, so `falloffFrac` gives the answer in three
+ * arithmetic operations. Reading it off the canvas would be a CPU readback
+ * of the light layer, which this system does not do at any price.
+ *
+ * NO SHADOWS FROM SECONDARY LIGHTS, deliberately. Each would need its own
+ * occluder collection — the pool is shared and consumed per light — so
+ * shadowing N emitters costs N collections on the tightest budget in the
+ * system. They are dim and small; what it costs is a halo bleeding a little
+ * through a wall, which is a far better trade than the frame time.
+ */
+function compositeEmitters(
+    lctx: CanvasRenderingContext2D,
+    cx: number, cy: number, rPx: number,
+    occ: Occluder[], count: number,
+    lx: number, ly: number, worldToPx: number,
+    maxEmitters: number,
+): number {
+    if (maxEmitters <= 0) return 0;
+    const emitRPx = Math.max(1, rPx * EMIT_RADIUS_FRAC);
+    let drawn = 0;
+    // `occ` is sorted nearest-first, so this takes the emitters the light
+    // falls on hardest without a second sort.
+    for (let i = 0; i < count && drawn < maxEmitters; i++) {
+        const o = occ[i];
+        if (o.emits <= 0) continue;
+        const dx = (o.x - lx) * worldToPx;
+        const dy = (o.y - ly) * worldToPx;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const received = falloffFrac(d / rPx);
+        if (received < EMIT_MIN_RECEIVED) continue;
+
+        // The emitter IS the player light, smaller and dimmer: same cached
+        // gradient, scaled by how much light reached the body and by how
+        // much of it the material throws back.  So it tracks the brightness
+        // cycle for free, and can never out-shine what lit it.
+        lctx.setTransform(1, 0, 0, 1, cx + dx, cy + dy);
+        lctx.fillStyle = lightGradient(lctx, emitRPx);
+        lctx.globalAlpha = received * o.emits;
+        lctx.globalCompositeOperation = 'lighter';
+        lctx.fillRect(-emitRPx, -emitRPx, emitRPx * 2, emitRPx * 2);
+        lctx.globalCompositeOperation = 'source-over';
+        lctx.globalAlpha = 1;
+        lctx.setTransform(1, 0, 0, 1, 0, 0);
+        drawn++;
+    }
+    return drawn;
+}
+
 /**
  * Ensure the light canvas exists and matches the current viewport and tier.
  *
@@ -1154,10 +1266,20 @@ export function renderLightLayer(
                         - camera.position.x + shake.x) * camera.zoom) * k;
             const cy = (height / 2 + (shiftY(camera.position.y, playerPos.y)
                         - camera.position.y + shake.y) * camera.zoom) * k;
-            compositeLight(lctx, cx, cy, tier.maxRadius * worldToPx,
+            const rPx = tier.maxRadius * worldToPx;
+            compositeLight(lctx, cx, cy, rPx,
                            r._lightOccluders, r._lightOccluderCount,
                            playerPos.x, playerPos.y, worldToPx,
                            getShadowSoftness(), getRefractionEnabled());
+            // SECONDARY lights, from the same occluder set the shadows were
+            // cast from — the bodies the light reaches are exactly the ones
+            // that can re-emit it.  `maxLights` counts the player's own, so
+            // the tier's budget is shared rather than added to.
+            if (getEmissiveEnabled()) {
+                lights += compositeEmitters(
+                    lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
+                    playerPos.x, playerPos.y, worldToPx, tier.maxLights - 1);
+            }
         }
     } else {
         r._lightOccluderCount = 0;

@@ -292,23 +292,13 @@ export function cyclePlasticGlowBrightness(): number {
   return activePlasticGlowBrightnessIndex;
 }
 
-export function getActiveMetalGlowBrightness(): number {
-  return MATERIAL_GLOW_BRIGHTNESS_CYCLE[activeMetalGlowBrightnessIndex];
-}
-export function getActiveMetalGlowBrightnessName(): string {
-  return `${getActiveMetalGlowBrightness()}x`;
-}
-export function cycleMetalGlowBrightness(): number {
-  activeMetalGlowBrightnessIndex =
-    (activeMetalGlowBrightnessIndex + 1) % MATERIAL_GLOW_BRIGHTNESS_CYCLE.length;
-  return activeMetalGlowBrightnessIndex;
-}
 
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
 // The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
 // .glow.color (#a5f3fc); the cycle adds warm + diverse families so we
-// can A/B the look.  RenderSystem reads the active hex through
-// getActiveGlassGlowColor() (range + peakAlpha stay with the variant).
+// can A/B the look.  The glass GLOW itself is gone — the unified light
+// layer replaced it — so nothing reads this table for a tile's colour any
+// more; it survives for the `nebulaPalette` companion below.
 //
 // Each entry ALSO bundles a `nebulaPalette` — when the DBG 'Neb follows
 // glow' toggle is on, getActiveNebulaPalette() returns this companion
@@ -336,24 +326,12 @@ export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
   { name: 'white',   hex: '#f8fafc', nebulaPalette: { hueMin: 0,   hueRange: 360, saturation: 0,  lightness: 90 } },
 ] as const;
 
-let activeGlassGlowIndex = 8; // default 'sky' — covers glass-tile glow + glass dust
 
-export function getActiveGlassGlowColor(): string {
-  return GLASS_GLOW_COLORS[activeGlassGlowIndex].hex;
-}
-export function getActiveGlassGlowColorName(): string {
-  return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
-}
-export function cycleGlassGlowColor(): number {
-  activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
-  return activeGlassGlowIndex;
-}
 
 // ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
-// Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
-// the palette so the two tile glows can be A/B'd against a shared
-// vocabulary.  RenderSystem reads the live hex via
-// getActiveMetalGlowColor() in the metal-tile glow branch.
+// REMOVED with the metal-tile contact glow it tuned (the unified light
+// layer replaced that glow).  The note below is kept because the default it
+// argues about is still baked into SHARD_VARIANTS.
 //
 // DEFAULT CHANGED index 4 'magenta' → 0 'cyan' (material-palette-residual,
 // decision #30 → gauntlet step 5 G7).  Magenta was never chosen: it was the
@@ -363,18 +341,7 @@ export function cycleGlassGlowColor(): number {
 // got close.  Cyan is the same cold family as the body, and it is NOT the
 // glass glow's 'sky' (index 8), so the two tile glows still read apart:
 // glass glows a soft sky, metal an icy cyan.
-let activeMetalGlowIndex = 0; // 'cyan' — the cold family the metal body lives in
 
-export function getActiveMetalGlowColor(): string {
-  return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
-}
-export function getActiveMetalGlowColorName(): string {
-  return GLASS_GLOW_COLORS[activeMetalGlowIndex].name;
-}
-export function cycleMetalGlowColor(): number {
-  activeMetalGlowIndex = (activeMetalGlowIndex + 1) % GLASS_GLOW_COLORS.length;
-  return activeMetalGlowIndex;
-}
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
 // Independent cycle into the same GLASS_GLOW_COLORS list, governing
@@ -1454,6 +1421,29 @@ export function toggleShardShadows(): boolean {
  *  Off by default because the open question is whether a caustic is legible
  *  at all on a light layer rendered at a third of screen resolution, and
  *  that is a look call to be made on the device. */
+/** DBG: do METAL and GLASS RE-EMIT the light that falls on them?  A
+ *  prototype, OFF by default, and the sibling of the refraction toggle.
+ *
+ *  ON, every lit body whose variant carries `emits` becomes a SECOND light
+ *  at its own position — dimmer by that fraction, uniform in every
+ *  direction, and falling off the same way the player's does.  It replaces
+ *  the legacy repel-impulse glow those two materials used to carry, which
+ *  lit up on CONTACT rather than on light, so a metal plate across the room
+ *  stayed dead no matter how brightly it was lit.
+ *
+ *  What it deliberately does NOT do is cast shadows of its own.  A second
+ *  light needs a second occluder collection, and the occluder pool is
+ *  shared and consumed per light (see `collectOccluders`) — so shadowing N
+ *  emitters costs N full collections, on a budget that is already the
+ *  tightest thing in this system.  The emitters are dim and small; the
+ *  place that shows is a halo bleeding slightly through a wall. */
+let emissiveEnabled = false;
+export function getEmissiveEnabled(): boolean { return emissiveEnabled; }
+export function toggleEmissive(): boolean {
+  emissiveEnabled = !emissiveEnabled;
+  return emissiveEnabled;
+}
+
 let refractionEnabled = false;
 export function getRefractionEnabled(): boolean { return refractionEnabled; }
 export function toggleRefraction(): boolean {
@@ -1477,10 +1467,21 @@ export function toggleRefraction(): boolean {
  *  goes down from the brightest the rule allows. */
 export const REFRACT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
   { name: '1/2',  frac: 0.5   },
+  // ABOVE the old ceiling, on device feedback: the caustic measured as only
+  // marginally legible at Low (2.2 % of pixels changed), and a prototype you
+  // cannot see is one you cannot judge.  "No brighter than half the source"
+  // was the right instinct physically — refracted light is a redistribution
+  // of light that already lost some of itself passing through the body — but
+  // it is now the DEFAULT rather than a ceiling.  Cycling from the default
+  // goes UP first, because that is the direction the question was asked in.
+  { name: '2/3',  frac: 0.667 },
+  { name: '3/4',  frac: 0.75  },
+  { name: '1/1',  frac: 1     },
   { name: '1/3',  frac: 0.333 },
   { name: '1/4',  frac: 0.25  },
   { name: '1/6',  frac: 0.167 },
   { name: '1/10', frac: 0.1   },
+  { name: '1/16', frac: 0.0625 },
 ] as const;
 let activeRefractBrightnessIndex = 0;
 export function getRefractBrightness(): number {
@@ -1493,6 +1494,41 @@ export function cycleRefractBrightness(): string {
   activeRefractBrightnessIndex =
     (activeRefractBrightnessIndex + 1) % REFRACT_BRIGHTNESS_CYCLE.length;
   return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+
+/** DBG: how bright the player light is, as a multiplier on its own peak.
+ *
+ *  ADDED BECAUSE THE TIER CYCLE IS NOT THIS.  "Light tier" is a COST ladder
+ *  — canvas resolution, occluder cap, radius — and dropping to `lowest`
+ *  changes how much work the light does, not how bright it is.  Reported
+ *  from the device as "I'm at the lowest setting and it still feels very
+ *  bright", which is exactly right and exactly what that cycle does.
+ *
+ *  The ladder runs a long way down, because the complaint was not that the
+ *  light was slightly hot: the bottom rung is a twelfth of today's value,
+ *  which reads as a faint wash rather than a lamp.  100% is the current
+ *  shipped look and stays the default, so this changes nothing until it is
+ *  asked to. */
+export const LIGHT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: '100%', mult: 1    },
+  { name: '70%',  mult: 0.7  },
+  { name: '50%',  mult: 0.5  },
+  { name: '35%',  mult: 0.35 },
+  { name: '25%',  mult: 0.25 },
+  { name: '15%',  mult: 0.15 },
+  { name: '8%',   mult: 0.08 },
+] as const;
+let activeLightBrightnessIndex = 0;
+export function getLightBrightness(): number {
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].mult;
+}
+export function getLightBrightnessName(): string {
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
+}
+export function cycleLightBrightness(): string {
+  activeLightBrightnessIndex =
+    (activeLightBrightnessIndex + 1) % LIGHT_BRIGHTNESS_CYCLE.length;
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
 }
 
 /** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
@@ -1508,10 +1544,18 @@ export function cycleRefractBrightness(): string {
  *  'off' restores the hard shadow exactly, which is also the A5 penumbra
  *  stage's control case. */
 export const SHADOW_SOFTNESS_CYCLE: ReadonlyArray<{ name: string; k: number }> = [
-  { name: 'soft',   k: 2.5 },
-  { name: 'softer', k: 4.5 },
-  { name: 'off',    k: 0   },
-  { name: 'subtle', k: 1.2 },
+  { name: 'soft',    k: 2.5 },
+  { name: 'softer',  k: 4.5 },
+  // Three rungs past 'softer', added on device feedback.  They are usable
+  // rather than decorative because the PASS COUNT scales with k (see
+  // SOFT_STEPS in render/lighting.ts): a 14-degree band graded over the
+  // three passes that suit 2.5 would read as three stripes, not as a soft
+  // edge, so the softest settings buy themselves more gradations.
+  { name: 'softest', k: 7   },
+  { name: 'diffuse', k: 10  },
+  { name: 'hazy',    k: 14  },
+  { name: 'off',     k: 0   },
+  { name: 'subtle',  k: 1.2 },
 ] as const;
 let activeSoftnessIndex = 0;
 export function getShadowSoftness(): number { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].k; }
@@ -5520,6 +5564,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Re-emits half the light it receives (DBG "Emissive").  Glass is
+    // translucent and scatters what passes into it; a pane that simply
+    // absorbed every photon reaching it would read as slate.
+    emits: 0.5,
     // Glass is drawn as a translucent panel, so a solid umbra behind it
     // contradicts the art.  Roughly half the unified light layer's
     // contribution passes through instead of being withheld — enough that
@@ -5605,6 +5653,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Re-emits half the light it receives (DBG "Emissive").  Metal is the
+    // specular case: it does not scatter light so much as throw it back,
+    // and a matte plate is the one thing it should never look like.
+    emits: 0.5,
     // Metal brightness is driven by densityTier (shard layers), NOT this
     // automata — see metalDensityBrightness.  The automata block is kept
     // only as the marker that makes recomputeMaterialNeighbors count a
@@ -5817,6 +5869,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-shard': {
     id: 'glass-shard',
     carrier: EntityType.STRUCTURE,
+    emits: 0.5,                               // as the tile it broke off
     // Same translucency as the tile it broke off — see 'glass-tile'.
     transmit: 0.55,
     spawn: GLASS_SHARD_SPAWN_SHAPE,
@@ -5965,6 +6018,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-shard': {
     id: 'metal-shard',
     carrier: EntityType.STRUCTURE,
+    emits: 0.5,                               // as the tile it broke off
     spawn: SHARD_SPAWN_SHAPE_METAL,
     regen: { kind: 'none' },
     merge: {

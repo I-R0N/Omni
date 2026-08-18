@@ -32,6 +32,7 @@ recorded rather than quietly dropped.
 - [x] **A5c** — Cast from the BODY (per-edge shadow volume); ship on unified
 - [x] **A5d** — Penumbra as a cone, not an offset; glass transmits light
 - [x] **A5e** — Two tiers below Low; refraction prototype behind a DBG toggle
+- [x] **A5f** — Light brightness; softer shadows; brighter caustics; metal/glass emit
 - [ ] **A4b** — Migrate the legacy receivers
 - [ ] **A6** — N lights with culling
 - [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
@@ -1588,3 +1589,117 @@ new). The refraction test asserts the light still works AT ALL with the
 toggle on (the NaN case above), that the on-axis gain DROPS when the
 straight-through path is withheld, that the brightness table respects the
 half-the-source rule, and that the toggle returns to off.
+
+---
+
+## A5f — dimmer, softer, brighter caustics; and metal/glass now light UP
+
+Five, from one round of device testing.
+
+### 1. The tier cycle was never a brightness control
+
+> *"I'm at the lowest setting now and it still feels very bright."*
+
+Exactly right, and exactly what that cycle does. **Light tier** is a COST
+ladder — canvas divisor, occluder cap, radius — so `lowest` changes how much
+work the light does and nothing about how bright it looks. There was no
+brightness control at all; `PLAYER_LIGHT.PEAK` was a hardcoded 0.34.
+
+New **Light bright** cycle: 100% (default, today's look) → 70 → 50 → 35 → 25
+→ 15 → **8%**. The ladder runs a long way down because the complaint was not
+that the light was slightly hot.
+
+One thing about it is load-bearing rather than obvious: the gradient bakes
+its alphas into COLOUR STOPS, and the gradient cache is keyed on radius. A
+cache keyed on radius alone would keep serving the old brightness after the
+cycle moved — a stale-cache bug whose symptom is "the setting does nothing",
+which is the hardest kind to see. The cache now clears when the brightness
+changes: one compare per light per frame, and the clear happens on a
+keypress, never in steady state.
+
+### 2. Softer than 'softer', and the passes to make it read
+
+Three rungs past `softer`: **softest** (k=7), **diffuse** (10), **hazy**
+(14).
+
+They are usable rather than decorative because `SOFT_STEPS` is now a
+FUNCTION of k. Three graded passes is the point where banding stops reading
+as banding at k=2.5 — but a band five times as wide graded over the same
+three steps reads as three stripes, not as a soft edge. `softSteps(k)` buys
+gradations only where they are needed, and `softSteps(2.5) === 3` exactly,
+so the shipped default is bit-for-bit what it was.
+
+### 3. The refraction ceiling becomes a default
+
+The caustic measured as only marginally legible at Low (2.2 % of pixels),
+and a prototype you cannot see is one you cannot judge. **Refr bright** now
+runs `1/2` (still the default) → 2/3 → 3/4 → **1/1** → 1/3 → 1/4 → 1/6 →
+1/10 → 1/16, cycling UP first because that is the direction the question was
+asked in.
+
+"No brighter than half the source" was the right physical instinct, and it
+survives as the DEFAULT rather than as the ceiling. What remains a ceiling
+is 1/1: refracted light is a redistribution of light that already passed
+through the body, so out-shining the source outright stays meaningless. The
+test moved with it — it pinned `1/N` with N ≥ 2, and now pins that every
+entry is a proper fraction.
+
+### 4. The metal and glass contact glow is gone
+
+Both were driven by `repelImpulse` — a per-substep CONTACT accumulator. So a
+pane lit up when something touched it, and a pane across the room stayed
+dead however brightly it was lit. That is the wrong way round, and the
+unified light answers the question it was standing in for.
+
+Deleted: the glass-tile layer-2b glow, the metal-tile glow block, and
+`repelGlowIntensity`. **Two `inGlowRange` gates went with them**, and that is
+a quiet perf win: glass tiles used to DROP OUT of the static tile cache
+whenever something touched them, and now stay cached.
+
+Three DBG cycles tuned only those glows and had zero call sites left — glass
+glow colour, metal glow colour, metal glow brightness. They are removed
+rather than left as controls that do nothing. `GLASS_GLOW_COLORS` itself
+stays: the nebula palette indexes the same table through its own index.
+
+### 5. Lit metal and glass RE-EMIT — DBG ▸ Emissive, off by default
+
+New optional variant field `SHARD_VARIANTS[v].emits` (0..1), **0.5** on
+`metal-tile` / `metal-shard` / `glass-tile` / `glass-shard`. ON, every lit
+body of those materials becomes a SECOND light at its own position: half the
+light it received, uniform in every direction, falling off exactly as the
+player's does.
+
+Three things worth knowing:
+
+- **How much light a body receives is EVALUATED, never sampled.** The
+  falloff is a known piecewise ramp, so `falloffFrac` answers in three
+  operations. Reading it back off the canvas would be a CPU readback of the
+  light layer, which this system does not do at any price.
+- **The emitter IS the player light, smaller and dimmer** — same cached
+  gradient, scaled by received × `emits`. So it tracks the brightness cycle
+  for free and can never out-shine what lit it.
+- **Secondary lights cast no shadows, deliberately.** Each would need its
+  own occluder collection, and the pool is shared and consumed per light, so
+  N emitters would cost N collections on the tightest budget in the system.
+  They are dim and small; the price is a halo bleeding a little through a
+  wall, which is a far better trade than the frame time. The emitter count
+  is bounded by `tier.maxLights - 1` — the tier's budget is shared with the
+  player's own light rather than added to.
+
+Cost, ship parked in the densest cluster at Low:
+
+| map | emissive off p95 | on p95 | delta |
+|---|---|---|---|
+| METAL_FIELD | 0.885 | 1.215 | **+0.330** |
+| GLASS_FIELD | 1.515 | 1.435 | −0.080 (noise) |
+
+So ~+0.3 ms worst case for three emitters, bounded by the tier.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **123 passed** (121 + two
+new). The brightness test pins BOTH halves of the distinction that prompted
+it: the brightness cycle must dim, and the tier cycle must not. The emissive
+test pins that the light count goes up AND that something beside the tile
+actually brightens — a count that rose while nothing brightened would mean
+the emitter was composited where nobody can see it.

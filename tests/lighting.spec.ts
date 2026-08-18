@@ -649,28 +649,32 @@ test.describe('occluder collection', () => {
     expect(r.built).toBe(true);
     expect(r.refractOff).toBe(false);          // and it toggles back
 
-    // THE BRIGHTNESS RULE, pinned at the table rather than at one call site:
-    // refracted light is a redistribution of light that already lost some of
-    // itself passing through the body, so no setting may make it brighter
-    // than half the source.  The geometry clamps on top of this, but a row
-    // added above the ceiling would be dead rather than wrong — worth
-    // catching here, where the intent is visible.
+    // THE BRIGHTNESS RULE, pinned at the table rather than at one call site.
+    // It CHANGED at A5f: half the source was a hard ceiling, and is now the
+    // DEFAULT the cycle starts at, because the caustic measured as only
+    // marginally legible and a prototype you cannot see is one you cannot
+    // judge.  What survives as a ceiling is 1/1 — refracted light is a
+    // redistribution of light that already passed through the body, so
+    // out-shining the source outright stays meaningless.
     const cyc = await engine(page, (e) => {
       const seen: string[] = [];
       const first = e.renderer.getRefractBrightness();
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 20; i++) {
         seen.push(e.renderer.getRefractBrightness());
         e.renderer.cycleRefractBrightness();
         if (e.renderer.getRefractBrightness() === first) break;
       }
       return { first, seen };
     });
-    expect(cyc.first).toBe('1/2');             // starts at the ceiling
-    expect(cyc.seen.length).toBeGreaterThan(1);
+    expect(cyc.first).toBe('1/2');             // the default, not the ceiling
+    expect(cyc.seen).toContain('1/1');         // ...and the ceiling is reachable
+    expect(cyc.seen.length).toBeGreaterThan(5);
     for (const name of cyc.seen) {
-      const m = /^1\/(\d+)$/.exec(name);
+      const m = /^(\d+)\/(\d+)$/.exec(name);
       expect(m).not.toBeNull();
-      expect(Number(m![1])).toBeGreaterThanOrEqual(2);   // 1/N, N >= 2
+      // Every entry is a proper fraction of the source: numerator <=
+      // denominator, so nothing in the table can out-shine what lit it.
+      expect(Number(m![1])).toBeLessThanOrEqual(Number(m![2]));
     }
     const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
     const onAxis = (p: number[]) => mean([70, 71, 0, 1, 2].map(i => p[i]));
@@ -687,6 +691,164 @@ test.describe('occluder collection', () => {
     // the "moved, not added" half of the claim, and it is the half that would
     // silently not happen if the erase override were dropped.
     expect(onAxis(r.bent)).toBeLessThan(onAxis(r.plain));
+    watch.assertClean();
+  });
+
+  test('the brightness cycle really dims the light, and the tier cycle does not', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    // The distinction this pins is the one that was reported from the
+    // device: "I'm at the lowest setting and it still feels very bright".
+    // `Light tier` is a COST ladder and is SUPPOSED to leave brightness
+    // alone; `Light bright` is the one that dims.  Asserting both halves
+    // keeps a future refactor from quietly conflating them.
+    const r = await engine(page, async (e) => {
+      // No occluders at all — this measures the falloff, not a shadow.
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      e.player.position.x = 0; e.player.position.y = 0;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      e.renderer.setLighting('unified');
+
+      const settle = () => new Promise<void>(res => {
+        let n = 0;
+        const t = () => { e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++n < 25) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      // Mean luminance on a tight ring, where the falloff is strongest.
+      const ring = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const lcx = (W / 2 + (0 - cam.position.x + shake.x) * cam.zoom) * dpr;
+        const lcy = (H / 2 + (0 - cam.position.y + shake.y) * cam.zoom) * dpr;
+        const rpx = 90 * cam.zoom * dpr;
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        let sum = 0;
+        for (let k = 0; k < 36; k++) {
+          const a = (k / 36) * Math.PI * 2;
+          const x = Math.round(lcx + Math.cos(a) * rpx), y = Math.round(lcy + Math.sin(a) * rpx);
+          const i = (y * cv.width + x) * 4;
+          sum += (img[i] + img[i + 1] + img[i + 2]) / 3;
+        }
+        return sum / 36;
+      };
+      const gainAt = async (setup: () => void) => {
+        setup();
+        e.renderer.setLighting('unified'); await settle();
+        const on = ring();
+        e.renderer.setLighting('legacy'); await settle();
+        return on - ring();
+      };
+
+      const setBright = (want: string) => {
+        for (let i = 0; i < 12 && e.renderer.getLightBrightness() !== want; i++) {
+          e.renderer.cycleLightBrightness();
+        }
+      };
+      const setTier = (want: string) => {
+        for (let i = 0; i < 12 && e.renderer.getLightTier() !== want; i++) {
+          e.renderer.cycleLightTier();
+        }
+      };
+
+      const full = await gainAt(() => { setTier('low'); setBright('100%'); });
+      const dim = await gainAt(() => { setBright('25%'); });
+      const dimmest = await gainAt(() => { setBright('8%'); });
+      const tierOnly = await gainAt(() => { setBright('100%'); setTier('lowest'); });
+      setTier('low');
+      return { full, dim, dimmest, tierOnly, names: e.renderer.getLightBrightness() };
+    });
+
+    // The light has to be doing something at all, or the rest is vacuous.
+    expect(r.full).toBeGreaterThan(4);
+    // ...and each rung down must actually be dimmer.
+    expect(r.dim).toBeLessThan(r.full * 0.6);
+    expect(r.dimmest).toBeLessThan(r.dim);
+    // The TIER, by contrast, must leave brightness essentially alone — it
+    // buys resolution and reach, not lumens.
+    expect(r.tierOnly).toBeGreaterThan(r.full * 0.5);
+    watch.assertClean();
+  });
+
+  test('emissive: lit metal re-radiates, and only when asked to', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    const off = await engine(page, e => e.renderer.getEmissive());
+    expect(off).toBe(false);            // a prototype ships off
+
+    const r = await engine(page, async (e) => {
+      // One metal tile due east of the light, nothing else.
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      const pick = tiles[0];
+      if (!pick) return { built: false } as any;
+      pick.active = true;
+      pick.shardVariant = 'metal-tile';
+      pick._occluderR = undefined;
+      pick.position.x = 120; pick.position.y = 0;
+      e.player.position.x = 0; e.player.position.y = 0;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      e.renderer.setLighting('unified');
+
+      const settle = () => new Promise<void>(res => {
+        let n = 0;
+        const t = () => { e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++n < 25) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      // Sample BESIDE the tile, off the player-light axis — the emitter
+      // radiates in every direction, so the place it shows is where the
+      // direct light is weak but the tile is close.
+      const probe = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const sx = (wx: number, wy: number) => [
+          (W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr,
+          (H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr,
+        ];
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        let sum = 0, n = 0;
+        for (const [wx, wy] of [[120, 60], [120, -60], [160, 40], [160, -40]]) {
+          const [x, y] = sx(wx, wy);
+          const i = (Math.round(y) * cv.width + Math.round(x)) * 4;
+          sum += (img[i] + img[i + 1] + img[i + 2]) / 3; n++;
+        }
+        return sum / n;
+      };
+      const sample = async (want: boolean) => {
+        if (e.renderer.getEmissive() !== want) e.renderer.toggleEmissive();
+        await settle();
+        const lum = probe();
+        return { lum, lights: e.renderer.lastLightingLights };
+      };
+      const plain = await sample(false);
+      const emit = await sample(true);
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      return { built: true, plain, emit, backOff: e.renderer.getEmissive() };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.backOff).toBe(false);
+    // OFF, the light is one light.  ON, the lit metal is a second.
+    expect(r.plain.lights).toBe(1);
+    expect(r.emit.lights).toBeGreaterThan(1);
+    // ...and that second light must actually put light on the canvas beside
+    // the tile.  A count that goes up while nothing brightens would mean the
+    // emitter was composited somewhere nobody can see.
+    expect(r.emit.lum).toBeGreaterThan(r.plain.lum);
     watch.assertClean();
   });
 
