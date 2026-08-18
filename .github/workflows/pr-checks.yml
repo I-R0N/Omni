@@ -84,14 +84,27 @@ jobs:
       # backwards.  Six minutes is ~10x either step's normal cost, so this can
       # only fire on a hang — and when it does, it fails FAST, names the step
       # that broke, and leaves the 45 minutes for the suite it was sized for.
+      # ...and neither step is allowed to BE the verdict.  These prepare the
+      # browser; the three gates are typecheck, build and test, and a prepare
+      # step that cannot reach a mirror has not told us anything about the
+      # diff.  On 2026-08-18 the outage above ran for over an hour and turned
+      # the merge gate red twice without a single test having executed, which
+      # is a gate reporting on the weather.
+      #
+      # This cannot hide a real problem, which is the whole reason it is safe:
+      # if the libraries genuinely are missing, Chromium fails to launch and
+      # `npm test` says so in as many words — a far clearer signal than a
+      # timed-out apt call — and the suite still has to pass either way.
       - name: Install Playwright browser
         if: steps.pw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 6
+        continue-on-error: true
         run: npx playwright install --with-deps chromium
 
       - name: Install Playwright system dependencies
         if: steps.pw-cache.outputs.cache-hit == 'true'
         timeout-minutes: 6
+        continue-on-error: true
         run: npx playwright install-deps chromium
 
       # Gate 3 — the smoke suites.  playwright.config.ts's webServer builds and
