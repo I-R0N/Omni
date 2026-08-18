@@ -35,6 +35,7 @@ import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
+    getRefractBrightness,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -627,7 +628,12 @@ const REFRACT = {
      *  — a hard clamp, not a suggestion.  Refracted light is a redistribution
      *  of light that already passed through a body that absorbs some of it,
      *  so it can never out-shine the source; and a caustic brighter than the
-     *  lamp reads as a bug rather than as glass. */
+     *  lamp reads as a bug rather than as glass.
+     *
+     *  The TUNABLE value is `getRefractBrightness()` (DBG "Refr bright"),
+     *  and this clamps on top of it.  Two places on purpose: the cycle is
+     *  where the look is chosen, and this is where the rule holds even if a
+     *  row is added to that cycle above the ceiling. */
     MAX_BRIGHTNESS_FRAC: 0.5,
     /** How far the deviated cone is thrown, as a fraction of the light
      *  radius.  Shorter than the shadow's 1.6x: a caustic that runs to the
@@ -1017,7 +1023,7 @@ function compositeLight(
         // The PATH is unaffected: Canvas2D bakes each segment into device
         // space as it is added, so a transform set afterwards moves only the
         // fill's own coordinate space.  Same trick as the falloff in step 1.
-        const alpha = Math.min(REFRACT.MAX_BRIGHTNESS_FRAC, transmit);
+        const alpha = Math.min(REFRACT.MAX_BRIGHTNESS_FRAC, getRefractBrightness(), transmit);
         lctx.setTransform(1, 0, 0, 1, cx, cy);
         lctx.fillStyle = lightGradient(lctx, rPx);
         lctx.globalAlpha = alpha;

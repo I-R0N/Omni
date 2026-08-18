@@ -1461,6 +1461,40 @@ export function toggleRefraction(): boolean {
   return refractionEnabled;
 }
 
+/** DBG: how bright the refracted cone is, as a fraction of the light's OWN
+ *  peak — the tuning knob for the prototype above.
+ *
+ *  Named as fractions rather than decimals because that is the quantity the
+ *  rule is stated in: refracted light must be no more than HALF the source.
+ *  Every entry therefore sits at or below 1/2, and `REFRACT.MAX_BRIGHTNESS_FRAC`
+ *  in render/lighting.ts clamps on top of whatever this returns — so the rule
+ *  survives someone adding a row here, which is the point of having it in two
+ *  places.
+ *
+ *  A cycle rather than a number in a file, for the same reason as the shadow
+ *  softness beside it: it is a look call, and the look call belongs on the
+ *  device against real terrain.  Starts at the ceiling, so tuning only ever
+ *  goes down from the brightest the rule allows. */
+export const REFRACT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
+  { name: '1/2',  frac: 0.5   },
+  { name: '1/3',  frac: 0.333 },
+  { name: '1/4',  frac: 0.25  },
+  { name: '1/6',  frac: 0.167 },
+  { name: '1/10', frac: 0.1   },
+] as const;
+let activeRefractBrightnessIndex = 0;
+export function getRefractBrightness(): number {
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].frac;
+}
+export function getRefractBrightnessName(): string {
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+export function cycleRefractBrightness(): string {
+  activeRefractBrightnessIndex =
+    (activeRefractBrightnessIndex + 1) % REFRACT_BRIGHTNESS_CYCLE.length;
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+
 /** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
  *
  *  A point light casts a perfectly hard shadow, which is what made the first

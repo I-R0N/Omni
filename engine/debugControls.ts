@@ -34,7 +34,7 @@ import {
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
-    toggleShardShadows, cycleShadowSoftness, toggleRefraction,
+    toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -365,6 +365,16 @@ export class DebugControls {
    *  the toggle is a real A/B rather than one effect stacked on the other. */
   toggleRefraction() {
     toggleRefraction();
+  }
+
+  /** DBG (Visual): how bright the refracted cone is, as a fraction of the
+   *  light's own peak — 1/2 down to 1/10.  Only has an effect while
+   *  Refraction is on.  Capped at 1/2 in the geometry regardless of what
+   *  this returns: refracted light is a redistribution of light that already
+   *  lost some of itself passing through the body, so it can never out-shine
+   *  the source. */
+  cycleRefractBrightness() {
+    cycleRefractBrightness();
   }
 
   /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.

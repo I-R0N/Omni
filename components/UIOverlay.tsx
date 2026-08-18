@@ -86,6 +86,7 @@ interface UIOverlayProps {
   onCycleLightingTier?: () => void;
   onToggleShardShadows?: () => void;
   onToggleRefraction?: () => void;
+  onCycleRefractBrightness?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -259,6 +260,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleLightingTier,
   onToggleShardShadows,
   onToggleRefraction,
+  onCycleRefractBrightness,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1504,6 +1506,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Refraction', onToggleRefraction,
                   stats.refractionEnabled === true ? 'On' : 'Off',
                   'PROTOTYPE. Off (default): glass passes light STRAIGHT THROUGH at reduced brightness, which is right for a parallel-faced pane — a slab offsets a ray sideways but does not bend it, and a regular hexagon has three pairs of parallel faces. On: each exit face refracts by Snell\'s law and throws an additive cone along the DEVIATED direction, capped at half the source light\'s brightness, while the straight-through path is withheld in full — so the light is moved rather than added and the toggle is a real A/B. Only the exit face is refracted (a real ray bends twice, and for parallel faces the two cancel), so this over-states the bend for a tile and is about right for a wedge-shaped shard. Past the critical angle nothing is transmitted at all. The open question it exists to answer is whether a caustic is legible on a light layer rendered at a third of screen resolution.')}
+                {ctrlRow('Refr bright', onCycleRefractBrightness,
+                  stats.refractBrightnessName ?? '1/2',
+                  'How bright the REFRACTED cone is, as a fraction of the light\'s own peak. Only has an effect while Refraction is on. Named as fractions because that is the quantity the rule is stated in — refracted light is a redistribution of light that already lost some of itself passing through the body, so it can never out-shine the source, and the geometry clamps at 1/2 regardless of what is selected here. Starts at the ceiling, so tuning only goes down.')}
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}

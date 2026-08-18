@@ -648,6 +648,30 @@ test.describe('occluder collection', () => {
 
     expect(r.built).toBe(true);
     expect(r.refractOff).toBe(false);          // and it toggles back
+
+    // THE BRIGHTNESS RULE, pinned at the table rather than at one call site:
+    // refracted light is a redistribution of light that already lost some of
+    // itself passing through the body, so no setting may make it brighter
+    // than half the source.  The geometry clamps on top of this, but a row
+    // added above the ceiling would be dead rather than wrong — worth
+    // catching here, where the intent is visible.
+    const cyc = await engine(page, (e) => {
+      const seen: string[] = [];
+      const first = e.renderer.getRefractBrightness();
+      for (let i = 0; i < 12; i++) {
+        seen.push(e.renderer.getRefractBrightness());
+        e.renderer.cycleRefractBrightness();
+        if (e.renderer.getRefractBrightness() === first) break;
+      }
+      return { first, seen };
+    });
+    expect(cyc.first).toBe('1/2');             // starts at the ceiling
+    expect(cyc.seen.length).toBeGreaterThan(1);
+    for (const name of cyc.seen) {
+      const m = /^1\/(\d+)$/.exec(name);
+      expect(m).not.toBeNull();
+      expect(Number(m![1])).toBeGreaterThanOrEqual(2);   // 1/N, N >= 2
+    }
     const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
     const onAxis = (p: number[]) => mean([70, 71, 0, 1, 2].map(i => p[i]));
     const around = (p: number[]) => mean(p.filter((_: number, i: number) => i > 5 && i < 67));

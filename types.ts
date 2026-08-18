@@ -1675,6 +1675,8 @@ export interface EngineStats {
   shardShadowsEnabled?: boolean;
   /** DBG: is the refraction prototype on? */
   refractionEnabled?: boolean;
+  /** DBG: refracted-cone brightness, as a fraction of the light's peak. */
+  refractBrightnessName?: string;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
