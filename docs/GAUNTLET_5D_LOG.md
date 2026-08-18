@@ -1007,3 +1007,22 @@ runs inside one page evaluation.
 ### Validation
 
 `npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **167 passed** ✅.
+
+### Footnote: the U9 push did not rebuild the preview
+
+Worth recording because it looked exactly like a caching problem and was not
+one. After `7448811` was pushed, the branch ref on GitHub WAS `7448811`
+(`git ls-remote` confirms it), but PR #89 still reported `dcddabb` as its
+head, and neither `PR checks` nor `PR preview` ran for the new commit — so
+the standalone preview kept serving U8. The user checked in a second browser
+first, which ruled out their cache and pointed at the publish side.
+
+The tell is that the PR's own metadata was internally inconsistent: `commits`
+had already gone 8 → 9 and the diffstat had grown to include U9, while
+`head.sha` still named the previous commit. GitHub had ingested the push but
+not emitted the `pull_request: synchronize` event both workflows trigger on.
+
+Fix: push again with a new commit so a fresh event fires. Nothing to change
+in the workflows — `pr-preview.yml` already guards against building a STALE
+sha (it re-reads the PR head and skips if the event commit is behind), which
+is the opposite failure and the one worth having.
