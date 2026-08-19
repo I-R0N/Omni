@@ -1561,12 +1561,55 @@ export function cycleEmitShadowTier(): string {
  *  Half-angles, so `wide` is a 120-degree beam. */
 export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> = [
   { name: 'radial', halfDeg: 180 },
+  // A HALF-CIRCLE.  Not a torch — everything ahead of the ship, nothing
+  // behind it — which is the shape a headlight has and a useful middle
+  // ground between the glow and a beam.
+  { name: 'half',   halfDeg: 90  },
   { name: 'wide',   halfDeg: 60  },
   { name: 'beam',   halfDeg: 40  },
   { name: 'narrow', halfDeg: 22  },
   { name: 'tight',  halfDeg: 12  },
+  // A 12-degree pencil.  At this width the soft edge (EDGE_DEG, 12) is as
+  // wide as the beam itself, so it reads as a spot with no hard boundary at
+  // all rather than as a narrower version of `tight`.
+  { name: 'pin',    halfDeg: 6   },
   { name: 'off',    halfDeg: 0   },
 ] as const;
+/** DBG: what COLOUR the player's light is.
+ *
+ *  `ship` is the engine-glow blue the layer has always used — chosen so the
+ *  light reads as coming FROM the ship rather than as a new system
+ *  announcing itself — and stays the default.  The rest exist because a
+ *  flashlight is a piece of equipment, and equipment has a character: a warm
+ *  tungsten beam and a cold blue-white one light the same terrain into two
+ *  different games.
+ *
+ *  The colour reaches everything the player's light does, including the
+ *  REFRACTED cone, which is right: light that passes through glass keeps the
+ *  colour it arrived with.  The secondary emitters are unaffected — they
+ *  radiate the colour of the BODY, not of what lit it, which is the
+ *  approximation A5i settled on. */
+export const LIGHT_COLOR_CYCLE: ReadonlyArray<{ name: string; rgb: string }> = [
+  { name: 'ship',   rgb: '125, 211, 252' },   // sky-300, the shipped light
+  { name: 'white',  rgb: '245, 245, 245' },
+  { name: 'warm',   rgb: '255, 214, 150' },   // tungsten
+  { name: 'amber',  rgb: '255, 176,  80' },
+  { name: 'green',  rgb: '150, 255, 170' },
+  { name: 'violet', rgb: '198, 160, 255' },
+  { name: 'red',    rgb: '255, 120, 110' },
+] as const;
+let activeLightColorIndex = 0;
+export function getLightColorRgb(): string {
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].rgb;
+}
+export function getLightColorName(): string {
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].name;
+}
+export function cycleLightColor(): string {
+  activeLightColorIndex = (activeLightColorIndex + 1) % LIGHT_COLOR_CYCLE.length;
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].name;
+}
+
 /** Beam shaping, all of it a look call rather than physics.
  *
  *  SPILL is why the ship is not standing in a void: a real flashlight is held
@@ -4835,6 +4878,14 @@ export const DISABLE = {
 // GameEngine.updateBubbles.  The AI feel (wander vs seek) lives in
 // AI_CONFIG.BUBBLE; this block is the engagement payload.
 export const BUBBLE_CONSTANTS = {
+  /** How much of the light falling on a bubble it RE-EMITS (unified light
+   *  layer, DBG "Emissive").  A bubble is a translucent membrane, so a beam
+   *  sweeping across one should light it up like a paper lantern — the same
+   *  treatment glass and nebula get, at a lower fraction because a bubble is
+   *  thin and mostly empty.  It emits WITHOUT occluding: a soft blob casting
+   *  a hard shadow volume would read wrong, and the emitter buffer exists
+   *  exactly for "lights but does not shadow". */
+  EMITS: 0.35,
   // Latch: when a provoked bubble touches the player it attaches and EMPs.
   CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
   LATCH_DURATION: 2.6,    // seconds the bubble clings before it tires + falls off
@@ -5872,6 +5923,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    // TRANSLUCENT, but the DULL end of it.  Plastic is the cloudy material of
+    // the three: it passes light and re-emits its own colour like glass does,
+    // at roughly half glass's strength, which is what "more opaque" means in
+    // the two numbers this system has.  Its colour is per INSTANCE (the
+    // plastic palettes), so a field of it emits in its own greens and pinks
+    // rather than in one authored tint.
+    transmit: 0.28,
+    emits: 0.25,
     // Soft light-green proximity glow — the tile FACE brightens as the
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
@@ -5959,6 +6018,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    // Glass-like: the deep violet reads as a solid crystal, and a crystal
+    // that stopped every photon would be indistinguishable from rock.  A
+    // shade under glass on both counts, because it is the denser-looking
+    // material of the two.
+    transmit: 0.5,
+    emits: 0.45,
     // Deep-purple proximity lighting (fill-only radial bloom, no edge
     // stroke).  Reads as the "void" tile — the unbreakable face of
     // the map — distinct from glass's cyan and rock's orange.
@@ -6182,6 +6247,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'plastic-shard': {
     id: 'plastic-shard',
+    // Same as the tile it broke off — see plastic-tile.
+    transmit: 0.28,
+    emits: 0.25,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },

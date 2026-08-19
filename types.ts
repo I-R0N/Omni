@@ -1703,6 +1703,8 @@ export interface EngineStats {
   /** DBG: the player's light as a directional beam — its width, or
    *  'radial' / 'off'. */
   flashlightName?: string;
+  /** DBG: the player light's colour. */
+  lightColorName?: string;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

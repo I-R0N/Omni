@@ -95,6 +95,7 @@ interface UIOverlayProps {
   onCycleEmitFade?: () => void;
   onCycleCausticFade?: () => void;
   onCycleFlashlight?: () => void;
+  onCycleLightColor?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -274,6 +275,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleEmitFade,
   onCycleCausticFade,
   onCycleFlashlight,
+  onCycleLightColor,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1512,7 +1514,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'How bright the player light is, 100% (default) down to 8%. This is NOT the Light tier row above: that one is a COST ladder — canvas resolution, occluder cap, radius — so dropping it to lowest changes how much work the light does and not how bright it looks. The ladder runs a long way down because the complaint it answers was not that the light was slightly hot.')}
                 {ctrlRow('Flashlight', onCycleFlashlight,
                   stats.flashlightName ?? 'radial',
-                  'The player\'s light as a directional BEAM instead of a radial glow. Points along the AIM — the same angle shots travel — so the torch goes where the ship is looking and there is no second control to fight over. Widths are the full cone: wide 120°, beam 80°, narrow 45°, tight 25°. RADIAL (default) is the shipped 360° glow and costs nothing extra. OFF is a zero-width beam rather than a special case: the player\'s light draws nothing, so what is left on the layer is exactly the emitters (to turn the whole layer off, use Lighting: legacy). The beam masks everything the player\'s light does — falloff, shadows and caustics — but NOT the secondary emitters, because a lit metal plate is its own light and radiates in every direction; that is what makes sweeping the beam past one read as the beam finding it. A body outside the cone is also skipped entirely, since a shadow runs radially outward and cannot reach into the beam — which is what makes a narrow beam cheaper than the radial light rather than merely darker.')}
+                  'The player\'s light as a directional BEAM instead of a radial glow. Points along the AIM — the same angle shots travel — so the torch goes where the ship is looking and there is no second control to fight over. Widths are the full cone: half 180° (a headlight — everything ahead, nothing behind), wide 120°, beam 80°, narrow 45°, tight 25°, pin 12° (at which point the soft edge is as wide as the beam, so it reads as a spot with no boundary at all). RADIAL (default) is the shipped 360° glow and costs nothing extra. OFF is a zero-width beam rather than a special case: the player\'s light draws nothing, so what is left on the layer is exactly the emitters (to turn the whole layer off, use Lighting: legacy). The beam masks everything the player\'s light does — falloff, shadows and caustics — but NOT the secondary emitters, because a lit metal plate is its own light and radiates in every direction; that is what makes sweeping the beam past one read as the beam finding it. A body outside the cone is also skipped entirely, since a shadow runs radially outward and cannot reach into the beam — which is what makes a narrow beam cheaper than the radial light rather than merely darker.')}
+                {ctrlRow('Light color', onCycleLightColor,
+                  stats.lightColorName ?? 'ship',
+                  'What COLOUR the player\'s light is. SHIP (default) is the engine-glow blue the layer has always used, chosen so the light reads as coming from the ship rather than as a new system announcing itself; white / warm / amber / green / violet / red are there because a flashlight is equipment and equipment has a character — a tungsten beam and a cold blue-white one light the same terrain into two different games. The colour reaches everything the player\'s light does, the REFRACTED cone included, which is right: light that passes through glass keeps the colour it arrived with. The secondary emitters are deliberately unaffected — they radiate the colour of the BODY, not of what lit it.')}
                 {ctrlRow('Emissive', onToggleEmissive,
                   stats.emissiveEnabled === true ? 'On' : 'Off',
                   'Do METAL and GLASS re-emit the light that falls on them? ON by default, after device testing. Every lit body of those materials becomes a SECOND light at its own position — half the light it received, uniform in every direction, falling off the way the player\'s does. It replaces the contact-driven glow those two materials used to carry, which lit up when something TOUCHED them rather than when light reached them, so a metal plate across the room stayed dead however brightly it was lit. Secondary lights cast no shadows of their own unless Emit shadow asks them to: each would need its own occluder collection, and the pool is shared and consumed per light, so N emitters cost N collections on the tightest budget in the system.')}

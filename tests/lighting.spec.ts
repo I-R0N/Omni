@@ -346,6 +346,8 @@ test.describe('occluder collection', () => {
       await place('glass-tile');           // translucent (transmit 0.55)
       const glass = await profile();
       const glassOcc = e.renderer._lightOccluderCount;
+      await place('plastic-tile');         // translucent, DULLER (0.28)
+      const plastic = await profile();
       await place('nebula-tile');          // passThrough — casts nothing
       const nebula = await profile();
       const nebulaOcc = e.renderer._lightOccluderCount;
@@ -354,7 +356,7 @@ test.describe('occluder collection', () => {
       for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== softness0; i++) {
         e.renderer.cycleShadowSoftness();
       }
-      return { solid, solidOcc, glass, glassOcc, nebula, nebulaOcc };
+      return { solid, solidOcc, glass, glassOcc, plastic, nebula, nebulaOcc };
     });
 
     // asin(22/120) = 10.6 deg, so at 5 deg per sample the shadow covers
@@ -382,6 +384,14 @@ test.describe('occluder collection', () => {
     expect(gIn).toBeLessThan(gOut * 0.80);
     // ...and strictly lighter than the opaque case, on the same geometry.
     expect(gIn).toBeGreaterThan(mean(inShadow));
+
+    // PLASTIC transmits too, and LESS than glass — it is the cloudy one of
+    // the family, which is the whole content of "more opaque" in the two
+    // numbers this system has.  Between the opaque case and the glass case,
+    // and strictly so in both directions.
+    const pIn = mean([70, 71, 0, 1, 2].map(i => r.plastic[i]));
+    expect(pIn).toBeGreaterThan(mean(inShadow));
+    expect(pIn).toBeLessThan(gIn);
 
     // passThrough casts NOTHING: nebula collects as zero occluders, so the
     // ring is uniformly lit.
@@ -1195,13 +1205,59 @@ test.describe('occluder collection', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
 
-    // ONE glass tile, and the ship walked slowly past it.  A hex face stops
-    // transmitting entirely past the critical angle, so without a fade each
-    // face's cone appears and vanishes AT FULL LENGTH as the body turns
-    // relative to the light — reported from the device as glass clicking.
-    // `causticStats().weight` is the caustic's effective throw, so a cliff is
-    // a step change in it and the fade is a ramp.
-    const r = await engine(page, async (e) => {
+    // PINNED AT THE FUNCTION, not through a scene.  A face stops transmitting
+    // entirely past the critical angle, and taking that literally is what
+    // made glass CLICK: each cone appeared and vanished at full length as the
+    // body turned.  Measuring the fix through a live map measures whichever
+    // polygon the generator produced — a walk containing no critical angle
+    // fails on its own premise rather than on the behaviour, which is exactly
+    // how this test flaked before being written this way.
+    const r = await engine(page, (e) => {
+      const sweep = (band: number) => {
+        const w: number[] = [];
+        // 0 to 60 degrees of incidence in half-degree steps: the critical
+        // angle for IOR 1.5 is 41.8, so the cliff is inside the range.
+        for (let i = 0; i <= 120; i++) {
+          w.push(e.renderer.transmissionWeight(i * 0.5 * Math.PI / 180, band));
+        }
+        let maxStep = 0, mid = 0;
+        for (let i = 1; i < w.length; i++) {
+          const d = Math.abs(w[i] - w[i - 1]);
+          if (d > maxStep) maxStep = d;
+          if (w[i] > 0.02 && w[i] < 0.98) mid++;
+        }
+        return { first: w[0], last: w[w.length - 1], maxStep, mid, w };
+      };
+      return { off: sweep(0), on: sweep(0.25) };
+    });
+
+    // Both agree at the ends: fully transmitting at normal incidence, nothing
+    // at all past the critical angle.  The fade changes the APPROACH, never
+    // the physics either side of it.
+    expect(r.off.first).toBe(1);
+    expect(r.on.first).toBe(1);
+    expect(r.off.last).toBe(0);
+    expect(r.on.last).toBe(0);
+
+    // OFF is a cliff: one step of the sweep carries the whole transition, and
+    // no sample lands anywhere in between.
+    expect(r.off.maxStep).toBe(1);
+    expect(r.off.mid).toBe(0);
+
+    // ON it is a ramp: no single step is large, and the transition is spread
+    // over many samples.
+    expect(r.on.maxStep).toBeLessThan(0.2);
+    expect(r.on.mid).toBeGreaterThan(5);
+    // ...and monotone, so the "fade" cannot be a wobble that happens to
+    // visit the intermediate values.
+    for (let i = 1; i < r.on.w.length; i++) {
+      expect(r.on.w[i]).toBeLessThanOrEqual(r.on.w[i - 1] + 1e-9);
+    }
+
+    // AND THE SCENE STILL DRAWS ONE.  The function above is the mechanism;
+    // this is the wiring — a caustic that stopped reaching the canvas would
+    // satisfy every assertion so far.
+    const drew = await engine(page, async (e) => {
       const tiles = e.currentMap.entities.filter(
         (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
       const pick = tiles[0];
@@ -1209,65 +1265,29 @@ test.describe('occluder collection', () => {
       pick.shardVariant = 'glass-tile';
       pick._occluderR = undefined;
       pick.position.x = 0; pick.position.y = 0;
+      // The static grid is built at map load, so a tile MOVED afterwards is
+      // still filed under its old cell and the radius walk never finds it.
+      e.physics.initializeStaticGrid(e.currentMap.entities);
       e.renderer.setLighting('unified');
       if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
-      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
-
-      let px = -180;
-      // The map regenerates tiles, so the scene is re-quieted every frame
-      // rather than once — one stray tile drifting into the pool would put a
-      // second body's caustic into the series and read as a cliff.
-      const frames = (n: number) => new Promise<void>(res => {
+      await new Promise<void>(res => {
         let i = 0;
         const t = () => {
           for (const o of e.currentMap.entities) {
             if (o !== pick && o.type === 'STRUCTURE') o.active = false;
           }
           pick.active = true;
-          e.player.position.x = px; e.player.position.y = -120;
+          e.player.position.x = -150; e.player.position.y = -110;
           e.player.velocity.x = 0; e.player.velocity.y = 0;
-          e.camera.position.x = px; e.camera.position.y = -120;
-          if (++i < n) requestAnimationFrame(t); else res();
+          if (++i < 25) requestAnimationFrame(t); else res();
         };
         requestAnimationFrame(t);
       });
-      e.physics.initializeStaticGrid(e.currentMap.entities);
-
-      const walk = async (fade: string) => {
-        for (let i = 0; i < 8 && e.renderer.getCausticFade() !== fade; i++) {
-          e.renderer.cycleCausticFade();
-        }
-        const w: number[] = [];
-        for (let step = 0; step < 40; step++) {
-          px = -140 + step * 5;
-          await frames(3);
-          w.push(e.renderer.causticStats().weight);
-        }
-        let maxStep = 0;
-        for (let i = 1; i < w.length; i++) {
-          const d = Math.abs(w[i] - w[i - 1]);
-          if (d > maxStep) maxStep = d;
-        }
-        const mean = w.reduce((s, x) => s + x, 0) / w.length;
-        return { maxStep, mean, fade: e.renderer.getCausticFade() };
-      };
-      const off = await walk('off');
-      const smooth = await walk('smooth');
-      return { built: true, off, smooth, back: e.renderer.getCausticFade() };
+      return { built: true, ...e.renderer.causticStats() };
     });
-
-    expect(r.built).toBe(true);
-    expect(r.back).toBe('smooth');            // the shipped default
-    // The caustic is actually being drawn in both runs — an assertion about
-    // its smoothness is worthless if it is empty.
-    expect(r.off.mean).toBeGreaterThan(0.5);
-    expect(r.smooth.mean).toBeGreaterThan(0.3);
-    // OFF, some single step of the walk moves the caustic by a large
-    // fraction of everything it was drawing: that is the cliff.
-    expect(r.off.maxStep).toBeGreaterThan(r.off.mean * 0.25);
-    // ON, the worst step is smaller — the same geometry, arrived at
-    // continuously.
-    expect(r.smooth.maxStep).toBeLessThan(r.off.maxStep);
+    expect(drew.built).toBe(true);
+    expect(drew.faces).toBeGreaterThan(0);
+    expect(drew.weight).toBeGreaterThan(0);
     watch.assertClean();
   });
 
@@ -1465,6 +1485,125 @@ test.describe('occluder collection', () => {
     // OFF draws no player light at all — a zero-width beam, not a special
     // case.  (Emitters are off in this scene, so nothing is left.)
     expect(Math.max(...off.gain)).toBeLessThan(3);
+    watch.assertClean();
+  });
+
+  test('the beam ladder, the light colour, and a bubble that lights up', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    // THE BEAM LADDER.  Walked off the live cycle rather than a copy of the
+    // table, so a row added in the wrong place fails here.
+    const beams = await engine(page, (e) => {
+      const seen: string[] = [];
+      const first = e.renderer.getFlashlight();
+      for (let i = 0; i < 12; i++) {
+        seen.push(e.renderer.getFlashlight());
+        e.renderer.cycleFlashlight();
+        if (e.renderer.getFlashlight() === first) break;
+      }
+      return { first, seen, back: e.renderer.getFlashlight() };
+    });
+    expect(beams.first).toBe('radial');       // the shipped default
+    expect(beams.back).toBe('radial');        // and the cycle closes
+    // Widest first and narrowing all the way to nothing: 'half' is the
+    // headlight (everything ahead, nothing behind) and 'pin' the pencil.
+    expect(beams.seen).toEqual(
+      ['radial', 'half', 'wide', 'beam', 'narrow', 'tight', 'pin', 'off']);
+
+    const r = await engine(page, async (e) => {
+      // Empty scene, emitters off: the colour is measured off the light
+      // itself, not off whatever it happens to be shining on.
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      e.renderer.setLighting('unified');
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          for (const o of e.currentMap.entities) {
+            if (o.type === 'STRUCTURE') o.active = false;
+          }
+          e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      // Per-channel gain at one lit point 120 units out.
+      const rgb = async () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const x = Math.round((W / 2 + (120 - cam.position.x + shake.x) * cam.zoom) * dpr);
+        const y = Math.round((H / 2 + (0 - cam.position.y + shake.y) * cam.zoom) * dpr);
+        e.renderer.setLighting('unified'); await frames(18);
+        const on = g.getImageData(x, y, 1, 1).data;
+        e.renderer.setLighting('legacy'); await frames(18);
+        const off = g.getImageData(x, y, 1, 1).data;
+        e.renderer.setLighting('unified');
+        return [on[0] - off[0], on[1] - off[1], on[2] - off[2]];
+      };
+      const pick = async (name: string) => {
+        for (let i = 0; i < 10 && e.renderer.getLightColor() !== name; i++) {
+          e.renderer.cycleLightColor();
+        }
+        return rgb();
+      };
+      const ship = await pick('ship');
+      const red = await pick('red');
+      const green = await pick('green');
+      for (let i = 0; i < 10 && e.renderer.getLightColor() !== 'ship'; i++) {
+        e.renderer.cycleLightColor();
+      }
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      return { ship, red, green, back: e.renderer.getLightColor() };
+    });
+
+    expect(r.back).toBe('ship');
+    // SHIP is the engine-glow blue the layer has always used: blue leads.
+    expect(r.ship[2]).toBeGreaterThan(r.ship[0]);
+    // ...and the cycle really repaints the light rather than relabelling it.
+    expect(r.red[0]).toBeGreaterThan(r.red[2]);
+    expect(r.green[1]).toBeGreaterThan(r.green[0]);
+    expect(r.green[1]).toBeGreaterThan(r.green[2]);
+
+    // A BUBBLE LIGHTS UP.  It is an emitter without being an occluder — the
+    // nebula shape — and it is an ENEMY, so it reaches the emitter buffer
+    // through the dynamic grid rather than through SHARD_VARIANTS.  Ambient
+    // fauna, so the map already has some.
+    const bub = await engine(page, async (e) => {
+      const bubble = e.currentMap.entities.find((o: any) => o.enemySubtype === 'BUBBLE');
+      if (!bubble) return { built: false } as any;
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      e.renderer.setLighting('unified');
+      const settle = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          bubble.position.x = 90; bubble.position.y = 0;
+          bubble.velocity.x = 0; bubble.velocity.y = 0;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      // Away from it first, so the count below is about THIS bubble.
+      bubble.position.x = 6000; bubble.position.y = 6000;
+      await settle(1);
+      await new Promise<void>(res => requestAnimationFrame(() => res()));
+      await settle(25);
+      return { built: true, emitters: e.renderer._lightEmitterCount,
+               tint: bubble._emitTint ?? null,
+               occ: e.renderer._lightOccluderCount };
+    });
+    expect(bub.built).toBe(true);
+    expect(bub.emitters).toBeGreaterThan(0);   // it emits...
+    expect(bub.occ).toBe(0);                   // ...and casts nothing
+    expect(bub.tint).toMatch(/^\d+, \d+, \d+$/);
     watch.assertClean();
   });
 

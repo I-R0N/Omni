@@ -35,7 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
-    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight,
+    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -437,6 +437,14 @@ export class DebugControls {
    *  zero-width beam, which leaves the emitters alone on the layer. */
   cycleFlashlight() {
     cycleFlashlight();
+  }
+
+  /** DBG (Visual): what colour the player's light is.  Reaches everything
+   *  the player's light does, refracted cones included — light that passes
+   *  through glass keeps the colour it arrived with.  The emitters are
+   *  unaffected: they radiate the colour of the BODY, not of what lit it. */
+  cycleLightColor() {
+    cycleLightColor();
   }
 
   /** DBG (Visual): how hard the CAUSTIC edges are.  Two cliffs behind one

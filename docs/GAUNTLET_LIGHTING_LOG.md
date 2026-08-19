@@ -2390,3 +2390,109 @@ it measures nothing), then asserts: radial is uniform and unmasked, narrow is
 bright along the aim and at least 3x dimmer across and behind it, the spill
 floor is present rather than a hard cut, the lobe follows the aim through
 half a turn, and `off` draws no player light at all.
+
+---
+
+## A5n — two more beam widths, two more translucent materials, a coloured
+## light, and bubbles that glow
+
+Four requests, and one flaky test that had to be rewritten rather than
+re-run.
+
+### The beam ladder gains both ends
+
+`radial` / **`half` 180** / `wide` 120 / `beam` 80 / `narrow` 45 / `tight` 25
+/ **`pin` 12** / `off`.
+
+`half` is not a torch — everything ahead of the ship and nothing behind it,
+which is what a headlight does and a useful middle ground between the glow
+and a beam. `pin` is where the soft edge (12 degrees) is as wide as the beam
+itself, so it reads as a spot with no boundary at all rather than as a
+narrower `tight`.
+
+### Plastic and indestructible transmit and emit
+
+| variant | transmit | emits |
+|---|---|---|
+| glass | 0.55 | 0.50 |
+| indestructible | 0.50 | 0.45 |
+| plastic | **0.28** | **0.25** |
+
+Plastic is the cloudy one, and "more opaque" has exactly two numbers to live
+in. Measured behind one tile with HARD shadows, where the residual light in
+the umbra IS the transmit: rock 0.15, plastic 0.38, glass 0.71,
+indestructible 0.82 (the probe carries a constant offset and cannot separate
+0.50 from 0.55 — glass and indestructible are within its noise, and the
+ordering that matters, rock < plastic < the translucent pair, is not).
+
+Plastic's colour is per INSTANCE, so a plastic field emits in its own greens
+and pinks rather than in one authored tint — the per-body tint resolution
+from A5i pays for itself here with no new code.
+
+One thing to know before adding a sixth: `_transmits` holds FOUR distinct
+values and snaps the rest to the nearest. The shipped set is exactly four
+(opaque / 0.28 / 0.50 / 0.55), so a fifth would silently merge into a
+neighbour rather than misbehave — but it would merge.
+
+### The light has a colour
+
+`LIGHT_COLOR_CYCLE`: `ship` (the engine-glow blue the layer has always used,
+and still the default) / white / warm / amber / green / violet / red.
+
+It reaches everything the player's light does, the REFRACTED cone included —
+light that passes through glass keeps the colour it arrived with. The
+emitters are deliberately unaffected: they radiate the colour of the BODY,
+not of what lit it, which is the approximation A5i settled on. Measured as
+per-channel gain at a lit point: ship 22/36/44, warm 44/37/26, green
+26/44/29, red 44/21/19.
+
+The gradient cache was already keyed on colour (A5i), so this cost nothing
+but a table.
+
+### Bubbles glow
+
+A lit bubble is a paper lantern, and it now re-emits `BUBBLE_CONSTANTS.EMITS`
+(0.35) of what falls on it, in its own membrane colour — which drifts as it
+feeds and sickens, and the tint cache notices because it is keyed on that
+colour.
+
+It emits WITHOUT occluding: the nebula shape exactly, and for the same reason
+— a soft blob has no business casting a hard shadow volume. A bubble is an
+ENEMY rather than a shard-family body, so it has no `shardVariant` and its
+numbers come from `BUBBLE_CONSTANTS`; the dynamic grid holds every moving
+body, so it was already in hand and cost no extra query. `recordEmitter` now
+takes the two numbers and a tint rather than a variant id, which is what let
+a non-variant body join without a second path.
+
+One consequence worth naming: the dynamic walk now runs when EMITTERS are
+wanted, not only when shard SHADOWS are on. Turning shard shadows off is a
+statement about what casts, not about what glows.
+
+### The test that had to be rewritten
+
+A5k's caustic test passed alone and failed in the full suite. Two attempts to
+stabilise it by changing the WALK (straight line, then a 120-degree orbit)
+made it worse — the second failed three runs in four.
+
+The cause is that it measured a mechanism through a generated scene. The
+cliff it exists to pin lives in one pure function; whether a given walk
+crosses a critical angle at all depends on the polygon the map happened to
+generate, so the test kept failing on its own premise rather than on the
+behaviour.
+
+So `transmissionWeight` is now factored out and exported, `refractTo` calls
+it (the suite pins what the draw path runs, not a copy), and the test sweeps
+incidence from 0 to 60 degrees: with the fade off exactly one step carries
+the whole transition and no sample lands in between; with it on no step
+exceeds 0.2, the transition spans many samples, and the series is monotone.
+A scene-level check follows it, because a caustic that stopped reaching the
+canvas would satisfy every assertion about the function.
+
+That scene check found its own bug immediately: a tile MOVED after map load
+is still filed under its old cell in the static grid, so the radius walk
+never finds it. Every hand-built scene in this suite has to rebuild the grid,
+and now they all do.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **130 passed**.

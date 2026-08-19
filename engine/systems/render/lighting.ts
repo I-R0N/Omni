@@ -31,7 +31,7 @@
  */
 import type { PhysicsSystem } from '../PhysicsSystem';
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType, CameraState, Vector2 } from '../../../types';
+import { GameEntity, EntityType, EnemySubtype, CameraState, Vector2 } from '../../../types';
 import type { ShardVariantId } from '../ShardSystem.types';
 import {
     SHARD_VARIANTS, effectiveDpr, getActiveLightingMode, getActiveLightingTier,
@@ -39,6 +39,7 @@ import {
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
     getEmitFadeSec, getCausticFade, getFlashlightHalfDeg, FLASHLIGHT,
+    getLightColorRgb, BUBBLE_CONSTANTS,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -184,6 +185,9 @@ const EMIT_CANDIDATES = 32;
 let _emitBuf: Occluder[] = [];
 let _emitN = 0;
 let _lastEmitN = 0;
+/** Whether this collection wants shard SHADOWS, as opposed to only their
+ *  emission — the dynamic walk now runs for either. */
+let _shardShadows = true;
 /** How many passThrough emitters the last `collectOccluders` kept.  A second
  *  return value, in the shape this module already uses for its scratch. */
 export function lastEmitterCount(): number { return _lastEmitN; }
@@ -203,14 +207,14 @@ export function lastEmitterCount(): number { return _lastEmitN; }
  *  Cached on the entity against the source colour it was built from, so the
  *  parse and the string build happen on a colour CHANGE and never per frame.
  */
-function emitTintFor(t: GameEntity, v: ShardVariantId): string | null {
+function emitTintFor(t: GameEntity, fallbackHex?: string): string | null {
     // THE BODY'S OWN COLOUR, in this order: a nebula's blended composition
     // (per body — no two clouds match), then the entity's render colour, and
     // only then the variant's legacy `glow.color` as a last resort.  The glow
     // colours are VFX leftovers from the contact glow A5f deleted, and taking
     // them first is measurably wrong: metal's is MAGENTA, so a lit steel
     // plate radiated magenta light while its own surface stayed steel.
-    const src = t.nebulaBlendedHex ?? t.color ?? SHARD_VARIANTS[v].glow?.color;
+    const src = t.nebulaBlendedHex ?? t.color ?? fallbackHex;
     if (src === undefined) return null;
     if (t._emitTintKey === src) return t._emitTint ?? null;
     const rgb = normalizedTint(src);
@@ -249,7 +253,9 @@ function normalizedTint(src: string): string | null {
  *  compare against the farthest kept and an immediate return, and the pooled
  *  record evicted from the tail is the one reused for the insert, so a full
  *  buffer allocates nothing at all. */
-function recordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void {
+function recordEmitter(
+    t: GameEntity, emits: number, transmit: number, tint: string | null, mobile: boolean,
+): void {
     const ox = shiftX(_lx, t.position.x);
     const oy = shiftY(_ly, t.position.y);
     const dx = ox - _lx, dy = oy - _ly;
@@ -272,9 +278,9 @@ function recordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void 
     o.br = Math.max(t.size.x, t.size.y) * 0.5;
     o.pts = t.polygonPoints;
     o.rot = t.rotation;
-    o.transmit = SHARD_VARIANTS[v].transmit ?? 0;
-    o.emits = SHARD_VARIANTS[v].emits ?? 0;
-    o.emitRgb = emitTintFor(t, v);
+    o.transmit = transmit;
+    o.emits = emits;
+    o.emitRgb = tint;
     o.id = t.id;
     o.distSq = d2;
     o.mobile = mobile;
@@ -285,8 +291,25 @@ function recordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void 
  *  collection with emission off costs exactly what it did before. */
 function maybeRecordEmitter(t: GameEntity, v: ShardVariantId, mobile: boolean): void {
     if (_emitBuf === _EMPTY) return;
-    if ((SHARD_VARIANTS[v].emits ?? 0) <= 0) return;
-    recordEmitter(t, v, mobile);
+    const def = SHARD_VARIANTS[v];
+    const emits = def.emits ?? 0;
+    if (emits <= 0) return;
+    recordEmitter(t, emits, def.transmit ?? 0, emitTintFor(t, def.glow?.color), mobile);
+}
+
+/** A BUBBLE lit by the light re-emits like the translucent membrane it is.
+ *
+ *  It is an emitter WITHOUT being an occluder — the same shape as nebula, and
+ *  for the same reason: a soft blob has no business casting a hard shadow
+ *  volume, and the emitter buffer is exactly the seam for "lights but does
+ *  not shadow".  A bubble is an ENEMY rather than a shard-family body, so it
+ *  has no `shardVariant` and its numbers come from BUBBLE_CONSTANTS; its
+ *  colour is its own membrane, which drifts as it feeds and sickens, and the
+ *  tint cache notices because it is keyed on that colour. */
+function maybeRecordBubble(t: GameEntity): void {
+    if (_emitBuf === _EMPTY) return;
+    if (BUBBLE_CONSTANTS.EMITS <= 0) return;
+    recordEmitter(t, BUBBLE_CONSTANTS.EMITS, 0, emitTintFor(t), true);
 }
 
 /** Hoisted visitor.  A function CONSTRUCTED inside a per-frame path is
@@ -310,11 +333,17 @@ function visit(t: GameEntity): void {
  *  around the light at once, and the small ones would each cost a wedge to
  *  draw a sliver too thin to see. */
 function visitShard(t: GameEntity): void {
-    if (t.type !== EntityType.STRUCTURE) return;
+    if (t.type !== EntityType.STRUCTURE) {
+        // The dynamic grid holds every moving body, so the bubbles are
+        // already in hand here — no extra query to light them.
+        if (t.enemySubtype === EnemySubtype.BUBBLE) maybeRecordBubble(t);
+        return;
+    }
     if (t.mass === Infinity) return;
     const v = t.shardVariant;
     if (v === undefined) return;
     if (SHARD_VARIANTS[v].passThrough === true) { maybeRecordEmitter(t, v, true); return; }
+    if (!_shardShadows) { maybeRecordEmitter(t, v, true); return; }
     if (Math.max(t.size.x, t.size.y) * 0.5 < MIN_SHARD_OCCLUDER_R) return;
     record(t, true);
 }
@@ -410,7 +439,8 @@ function record(t: GameEntity, mobile: boolean): void {
     const v = t.shardVariant;
     o.transmit = v !== undefined ? SHARD_VARIANTS[v].transmit ?? 0 : 0;
     o.emits = v !== undefined ? SHARD_VARIANTS[v].emits ?? 0 : 0;
-    o.emitRgb = v !== undefined && o.emits > 0 ? emitTintFor(t, v) : null;
+    o.emitRgb = v !== undefined && o.emits > 0
+        ? emitTintFor(t, SHARD_VARIANTS[v].glow?.color) : null;
     o.id = t.id;
     o.distSq = dx * dx + dy * dy;
     o.mobile = mobile;
@@ -456,7 +486,13 @@ export function collectOccluders(
     _emitBuf = emitOut ?? _EMPTY;
     _emitN = 0;
     physics.forEachStaticInRadius(lx, ly, radius, visit);
-    if (shards) physics.forEachDynamicInRadius(lx, ly, radius, visitShard);
+    // The dynamic walk runs for EMITTERS too, not only for shard shadows:
+    // turning shard shadows off is a statement about what casts, not about
+    // what glows, and the bubbles live in that grid.
+    _shardShadows = shards;
+    if (shards || emitOut !== undefined) {
+        physics.forEachDynamicInRadius(lx, ly, radius, visitShard);
+    }
     const n = _n;
     if (out.length !== n) out.length = n;
     _lastEmitN = _emitN;
@@ -535,6 +571,9 @@ export function selectOccluders(
  *  two files.  It is config-as-code and belongs in `constants.ts` beside the
  *  tier table; move it there when the DBG row lands. */
 const PLAYER_LIGHT = {
+    /** The SHIPPED colour, and the fallback if the cycle is ever empty.  The
+     *  live value comes from `LIGHT_COLOR_CYCLE` (DBG "Light color"); this
+     *  row is that cycle's first entry. */
     RGB: '125, 211, 252',
     PEAK: 0.34,
     /** Where the falloff reaches zero, as a fraction of the light radius.
@@ -1007,6 +1046,32 @@ let _rx = 0, _ry = 0;
  * because ONE NaN discards the whole compound path, which is exactly how A4
  * shipped with no shadows at all.
  */
+/** The TRANSMISSION WEIGHT for a ray leaving a body at `incidenceRad` from
+ *  the face normal — the pure half of `refractTo`, factored out so it can be
+ *  pinned directly.
+ *
+ *  Exported for the suite.  The fade this implements is invisible in
+ *  aggregate: measuring it through a live scene means measuring whatever
+ *  polygon the map generated, and a walk that happens to contain no critical
+ *  angle fails on its own premise rather than on the behaviour.  The
+ *  function IS the mechanism, so the test asserts it here — the same motive
+ *  as `__omniHid` in the input suite.
+ *
+ *  0 past the critical angle, 1 well inside it, and a smoothstep in between
+ *  whose width is `tirBand`, measured in the Snell discriminant `k` (0
+ *  exactly at the critical angle, 1 at normal incidence). */
+export function transmissionWeight(
+    incidenceRad: number, tirBand: number, eta: number = REFRACT.IOR,
+): number {
+    const ci = Math.cos(incidenceRad);
+    if (ci <= 0) return 0;
+    const k = 1 - eta * eta * (1 - ci * ci);
+    if (k <= 0) return 0;                       // TOTAL INTERNAL REFLECTION
+    if (tirBand <= 0 || k >= tirBand) return 1;
+    const u = k / tirBand;
+    return u * u * (3 - 2 * u);
+}
+
 function refractTo(
     ix: number, iy: number, nx: number, ny: number, eta: number, tirBand: number,
 ): number {
@@ -1021,9 +1086,10 @@ function refractTo(
     const g = Math.sqrt(k) - eta * ci;
     _rx = eta * dx + g * nx;
     _ry = eta * dy + g * ny;
-    if (tirBand <= 0 || k >= tirBand) return 1;
-    const u = k / tirBand;
-    return u * u * (3 - 2 * u);                 // smoothstep into the cliff
+    // The WEIGHT comes from the shared pure function, so what the suite pins
+    // is what the draw path runs.  `ci` is already in hand, hence acos rather
+    // than a second dot product.
+    return transmissionWeight(Math.acos(ci > 1 ? 1 : ci), tirBand, eta);
 }
 
 /** Signed shortest angle from `a` to `b`, in (-PI, PI]. */
@@ -1170,7 +1236,9 @@ function lightGradient(
     // the player's own light at the same radius.  The tints are normalised
     // and quantised (`normalizedTint`), which is what keeps this map small
     // on a map whose nebula blends a different colour per body.
-    const rgb = tint ?? PLAYER_LIGHT.RGB;
+    // The player's own light takes the colour cycle; an emitter passes its
+    // body's colour and overrides it.
+    const rgb = tint ?? getLightColorRgb();
     let byRadius = _gradCache.get(rgb);
     if (byRadius === undefined) {
         byRadius = new Map<number, CanvasGradient>();
