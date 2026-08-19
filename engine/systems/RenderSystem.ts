@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -23,7 +23,7 @@ import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
-import { renderLightLayer, causticStats, shadowStats, type Occluder, type EmitSlot } from './render/lighting';
+import { renderLightLayer, causticStats, shadowStats, beamMaskCount, type Occluder, type EmitSlot } from './render/lighting';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -221,10 +221,13 @@ export class RenderSystem {
   public getEmitShadows(): boolean { return getEmitShadowsEnabled(); }
   public cycleEmitFade(): string { return cycleEmitFade(); }
   public getEmitFade(): string { return getEmitFadeName(); }
+  public cycleFlashlight(): string { return cycleFlashlight(); }
+  public getFlashlight(): string { return getFlashlightName(); }
   public cycleCausticFade(): string { return cycleCausticFade(); }
   public getCausticFade(): string { return getCausticFadeName(); }
   public causticStats(): { faces: number; weight: number } { return causticStats(); }
   public shadowStats(): { quads: number; area: number } { return shadowStats(); }
+  public beamMasks(): number { return beamMaskCount(); }
   public cycleEmitShadowTier(): string { return cycleEmitShadowTier(); }
   /** The live emitter-shadow tier ROW, not just its name — the suites read
    *  the caps off it, so the ladder is pinned where it is authored. */
@@ -976,7 +979,7 @@ export class RenderSystem {
     // it never tints the HUD, and AFTER ctx.restore() because the layer is
     // screen-space and must not inherit the camera translation.  No-op at
     // LIGHTING_CYCLE 'legacy' (the default).
-    renderLightLayer(this, ctx, width, height, playerPos, camera);
+    renderLightLayer(this, ctx, width, height, playerPos, camera, player?.rotation);
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

@@ -1344,6 +1344,130 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('the flashlight is a cone that follows the aim, with a spill floor', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    // Ships radial, so the beam changes nothing until it is asked for.
+    const dflt = await engine(page, e => e.renderer.getFlashlight());
+    expect(dflt).toBe('radial');
+
+    // Empty scene: a ring drawn through terrain measures shadows, and
+    // emitters would add light the beam deliberately does not mask.  The pin
+    // holds the ship at the origin but NOT its rotation — see below.
+    await engine(page, (e) => {
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      e.renderer.setLighting('unified');
+      (window as any).__beamPin = setInterval(() => {
+        e.player.position.x = 0; e.player.position.y = 0;
+        e.player.velocity.x = 0; e.player.velocity.y = 0;
+        e.player.health = e.player.maxHealth;
+      }, 8);
+    });
+
+    // AIMING IS DONE WITH THE POINTER, not by writing `player.rotation`.
+    // The engine recomputes that from the pointer every sim step, so a test
+    // that assigns it measures nothing — and going through the pointer is
+    // the path the feature actually uses.
+    const aimAt = async (dx: number, dy: number) => {
+      await page.mouse.move(195 + dx, 422 + dy);
+      await page.waitForTimeout(120);
+    };
+    const sample = async (name: string) => engine(page, async (e, n: string) => {
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== n; i++) {
+        e.renderer.cycleFlashlight();
+      }
+      const frames = (k: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => { if (++i < k) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      const ring = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        const lcx = (W / 2 + (0 - cam.position.x + shake.x) * cam.zoom) * dpr;
+        const lcy = (H / 2 + (0 - cam.position.y + shake.y) * cam.zoom) * dpr;
+        const rpx = 190 * cam.zoom * dpr;
+        const img = g.getImageData(0, 0, cv.width, cv.height).data;
+        const out: number[] = [];
+        for (let k = 0; k < 24; k++) {
+          const a = (k / 24) * Math.PI * 2;
+          const x = Math.round(lcx + Math.cos(a) * rpx);
+          const y = Math.round(lcy + Math.sin(a) * rpx);
+          const i = (y * cv.width + x) * 4;
+          out.push((img[i] + img[i + 1] + img[i + 2]) / 3);
+        }
+        return out;
+      };
+      e.renderer.setLighting('unified'); await frames(20);
+      const on = ring();
+      e.renderer.setLighting('legacy'); await frames(20);
+      const off = ring();
+      e.renderer.setLighting('unified');
+      return { gain: on.map((v, i) => v - off[i]), rot: e.player.rotation,
+               masks: e.renderer.beamMasks() };
+    }, name);
+
+    await aimAt(120, 0);                       // aim +X
+    const radial = await sample('radial');
+    const narrow = await sample('narrow');
+    await aimAt(-120, 0);                      // aim -X, half a turn away
+    const behindAim = await sample('narrow');
+    const off = await sample('off');
+
+    await engine(page, (e) => {
+      clearInterval((window as any).__beamPin);
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
+        e.renderer.cycleFlashlight();
+      }
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+    });
+
+    const mean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
+    // Bearing k is k*15 degrees; sample three around a direction.
+    const lobe = (g: number[], k: number) => mean([(k + 23) % 24, k, (k + 1) % 24].map(i => g[i]));
+
+    // The pointer really did aim the ship, or the rest of this is vacuous.
+    expect(Math.abs(narrow.rot)).toBeLessThan(0.4);
+    expect(Math.abs(Math.abs(behindAim.rot) - Math.PI)).toBeLessThan(0.4);
+
+    // RADIAL is the control: the same light in every direction, and no mask.
+    const rMin = Math.min(...radial.gain), rMax = Math.max(...radial.gain);
+    expect(rMin).toBeGreaterThan(5);
+    expect(rMax / rMin).toBeLessThan(1.6);
+    expect(narrow.masks).toBeGreaterThan(radial.masks);
+
+    // NARROW is a cone: bright along the aim, dim across it.  THE MASK
+    // RUNNING IS NOT THE SAME AS THE MASK WORKING — this shipped once with
+    // the erase inheriting the falloff gradient as its fillStyle (alpha 0 out
+    // where the sector is), so it ran, threw nothing, and did nothing.
+    const ahead = lobe(narrow.gain, 0);
+    const across = lobe(narrow.gain, 6);
+    const behind = lobe(narrow.gain, 12);
+    expect(ahead).toBeGreaterThan(5);
+    expect(ahead).toBeGreaterThan(across * 3);
+    expect(ahead).toBeGreaterThan(behind * 3);
+    // The SPILL floor: outside the cone is dim, never black.  A hard cut
+    // reads as a rendering error rather than as a torch.
+    expect(across).toBeGreaterThan(ahead * 0.03);
+
+    // IT FOLLOWS THE AIM.  Pointing the other way puts the lobe behind, which
+    // is what makes it the ship's torch and not a fixed cone in world space.
+    expect(lobe(behindAim.gain, 12)).toBeGreaterThan(lobe(behindAim.gain, 0) * 3);
+    expect(lobe(behindAim.gain, 12)).toBeGreaterThan(5);
+
+    // OFF draws no player light at all — a zero-width beam, not a special
+    // case.  (Emitters are off in this scene, so nothing is left.)
+    expect(Math.max(...off.gain)).toBeLessThan(3);
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

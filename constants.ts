@@ -1541,6 +1541,67 @@ export function cycleEmitShadowTier(): string {
   return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
 }
 
+/** DBG: the player's light as a DIRECTIONAL BEAM — a flashlight — instead of
+ *  a radial glow.
+ *
+ *  The beam points along `player.rotation`, which is the AIM angle (the same
+ *  one shots travel along), so the light goes where the ship is looking and
+ *  needs no second control.  Everything the player's light does is masked by
+ *  it — falloff, shadows and caustics alike — while the secondary emitters
+ *  are not: a lit metal plate is its own light and radiates in every
+ *  direction, which is what makes a beam sweeping past one read as the beam
+ *  finding it.
+ *
+ *  `radial` is the current 360-degree glow and stays the default.  `off` is
+ *  a zero-width beam rather than a special case: the player's light draws
+ *  nothing, so what is left on the layer is exactly the emitters — which
+ *  makes it a useful thing to look at rather than a way to disable the
+ *  feature (that is `Lighting: legacy`).
+ *
+ *  Half-angles, so `wide` is a 120-degree beam. */
+export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> = [
+  { name: 'radial', halfDeg: 180 },
+  { name: 'wide',   halfDeg: 60  },
+  { name: 'beam',   halfDeg: 40  },
+  { name: 'narrow', halfDeg: 22  },
+  { name: 'tight',  halfDeg: 12  },
+  { name: 'off',    halfDeg: 0   },
+] as const;
+/** Beam shaping, all of it a look call rather than physics.
+ *
+ *  SPILL is why the ship is not standing in a void: a real flashlight is held
+ *  by someone who can still see their own hands, and a hard cut at the cone's
+ *  edge reads as a rendering error rather than as a torch.  It is the
+ *  fraction of the light left OUTSIDE the beam.
+ *
+ *  EDGE_DEG is the angular width of the soft edge, graded over PASSES erases
+ *  — the same construction as the shadow penumbra, for the same reason: a
+ *  hard angular edge sweeping across terrain is exactly the kind of moving
+ *  hard line this whole gauntlet has been removing. */
+export const FLASHLIGHT = {
+  SPILL: 0.14,
+  EDGE_DEG: 12,
+  PASSES: 3,
+  /** Extra bearing margin on the occluder cull, in degrees.  A body outside
+   *  the beam cannot shadow into it (a shadow runs radially outward), so
+   *  those bodies are skipped entirely — which is where a narrow beam gets
+   *  cheaper than the radial light.  The margin covers the body's own
+   *  angular size, the penumbra, and the fact that a REFRACTED cone leaves
+   *  its body deviated rather than radial. */
+  CULL_MARGIN_DEG: 25,
+} as const;
+let activeFlashlightIndex = 0;
+export function getFlashlightHalfDeg(): number {
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
+}
+export function getFlashlightName(): string {
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+export function cycleFlashlight(): string {
+  activeFlashlightIndex = (activeFlashlightIndex + 1) % FLASHLIGHT_CYCLE.length;
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+
 /** DBG: how hard the CAUSTIC edges are — the two fades that keep a refracted
  *  cone from switching on and off.
  *

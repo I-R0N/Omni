@@ -2300,3 +2300,93 @@ layer is what costs, in the same units as everything else.
 test sweeps a light around one hex and asserts that a flip may not move the
 shadow area much more than an ordinary step of the same sweep does — and
 asserts its own premise first, that the sweep contains a flip at all.
+
+---
+
+## A5m — a flashlight: the player's light as a directional beam
+
+Requested as a prototype behind a toggle, alongside the radial glow and off.
+
+### What it is
+
+`FLASHLIGHT_CYCLE` (DBG "Flashlight"): `radial` (default, the shipped
+360-degree glow) / `wide` 120 / `beam` 80 / `narrow` 45 / `tight` 25 / `off`.
+Values are full cone angles; the table stores half-angles.
+
+Three decisions worth their own lines:
+
+- **The aim is `player.rotation`**, which is the angle shots travel along, so
+  the torch points where the ship is looking and there is no second control
+  to fight over. It follows the pointer, the stick, and the pad, for free.
+- **`off` is a zero-width beam, not a special case.** The player's light draws
+  nothing, so what remains on the layer is exactly the emitters — a useful
+  thing to look at rather than a way to disable the feature (`Lighting:
+  legacy` is that).
+- **`radial` is a half-angle of 180**, so the beam costs nothing at all when
+  it is not in use: no mask, no cull, no branch beyond one compare.
+
+### The mask masks the LIGHT, not the layer
+
+The beam is applied at the END of `compositeLight`, after the shadows and the
+caustic, and it erases the complement of a cone. Two consequences fall out of
+that placement, both deliberate:
+
+- Everything the player's light does is masked TOGETHER — falloff, shadows
+  and caustics. A caustic added after the mask would put light outside the
+  beam and unmake it.
+- The **emitters are not masked**, because they are composited afterwards. A
+  lit metal plate is its own light and radiates in every direction; that is
+  what makes sweeping a beam past one read as the beam FINDING it. What the
+  emitters do take from the beam is how much light they RECEIVE: an emitter's
+  `received` is scaled by the beam's own profile, with the same soft edge and
+  spill floor, so a body at the cone's edge fades in rather than switching —
+  the A5j lesson applied at the source instead of at the halo.
+
+The complement of a cone is ONE sector of more than half a circle, so the
+mask is one path per pass rather than a winding trick, graded over
+`FLASHLIGHT.PASSES` erases for a soft angular edge. `SPILL` (0.14) is why the
+ship is not standing in a void: a torch is held by someone who can still see
+their own hands, and a hard cut at the cone's edge reads as a rendering error.
+
+### It is CHEAPER, not just darker
+
+A shadow runs radially outward from its caster, so a body outside the beam
+cannot cast into it — those bodies are skipped entirely, with a margin
+covering the body's own angular size, the penumbra, and the deviation a
+refracted cone leaves with. Measured on the metal showcase, parked in a
+cluster at 24 occluders throughout:
+
+| beam | lightingMs p50 | p95 |
+|---|---|---|
+| radial | 0.850 | 1.075 |
+| wide | 0.755 | 0.975 |
+| beam / narrow / tight | 0.41–0.46 | 0.50–0.54 |
+| off | 0.115 | 0.165 |
+
+**Roughly half the cost of the radial light** from `beam` inward, at the same
+occluder count.
+
+### The bug it shipped with, for one build
+
+The first working version ran the mask and did nothing: the ring measured
+identical at `radial` and `narrow`, to the decimal. The cause is worth
+recording because it is the SAME failure A4 shipped with — `destination-out`
+erases by the SOURCE's alpha, and the fillStyle in hand at that point is the
+light's own falloff gradient, which is anchored at the canvas origin and
+reads alpha 0 out where the sector is. The mask ran 25 times a second and
+erased nothing.
+
+What found it was instrumentation, not inspection: a counter proving the mask
+was called, against a ring proving the picture had not changed. "It runs" and
+"it works" are different claims and the gap between them is exactly where
+this class of bug lives — so the test now asserts BOTH.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **129 passed**. The new
+test aims the ship WITH THE POINTER rather than by writing `player.rotation`
+(the sim recomputes that from the pointer every step, so a test that assigns
+it measures nothing), then asserts: radial is uniform and unmasked, narrow is
+bright along the aim and at least 3x dimmer across and behind it, the spill
+floor is present rather than a hard cut, the lobe follows the aim through
+half a turn, and `off` draws no player light at all.

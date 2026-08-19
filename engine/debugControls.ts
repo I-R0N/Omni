@@ -35,7 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
-    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade,
+    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -428,6 +428,15 @@ export class DebugControls {
    *  all the next.  'off' is the old instantaneous behaviour. */
   cycleEmitFade() {
     cycleEmitFade();
+  }
+
+  /** DBG (Visual): the player's light as a directional BEAM instead of a
+   *  radial glow.  Points along the aim, masks everything the player's light
+   *  draws (falloff, shadows, caustics) but not the secondary emitters — a
+   *  lit plate is its own light.  'radial' is the shipped glow; 'off' is a
+   *  zero-width beam, which leaves the emitters alone on the layer. */
+  cycleFlashlight() {
+    cycleFlashlight();
   }
 
   /** DBG (Visual): how hard the CAUSTIC edges are.  Two cliffs behind one

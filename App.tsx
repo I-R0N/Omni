@@ -294,6 +294,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleEmitBrightness();
   };
 
+  const handleCycleFlashlight = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFlashlight();
+  };
+
   const handleCycleCausticFade = () => {
       if (engineRef.current) engineRef.current.dbg.cycleCausticFade();
   };
@@ -667,6 +671,7 @@ const App: React.FC = () => {
         onCycleEmitShadowTier={handleCycleEmitShadowTier}
         onCycleEmitFade={handleCycleEmitFade}
         onCycleCausticFade={handleCycleCausticFade}
+        onCycleFlashlight={handleCycleFlashlight}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}

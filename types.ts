@@ -1700,6 +1700,9 @@ export interface EngineStats {
   emitFadeName?: string;
   /** DBG: caustic edge softness — the TIR and occluder-cap fades. */
   causticFadeName?: string;
+  /** DBG: the player's light as a directional beam — its width, or
+   *  'radial' / 'off'. */
+  flashlightName?: string;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

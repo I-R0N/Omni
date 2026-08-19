@@ -38,7 +38,7 @@ import {
     getShardShadowsEnabled, getShadowSoftness, getRefractionEnabled,
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
-    getEmitFadeSec, getCausticFade,
+    getEmitFadeSec, getCausticFade, getFlashlightHalfDeg, FLASHLIGHT,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -1026,6 +1026,83 @@ function refractTo(
     return u * u * (3 - 2 * u);                 // smoothstep into the cliff
 }
 
+/** Signed shortest angle from `a` to `b`, in (-PI, PI]. */
+function angleDelta(a: number, b: number): number {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+}
+
+/** Is this body far enough outside the beam to skip entirely?
+ *
+ *  A shadow runs RADIALLY OUTWARD from its caster, so a body outside the
+ *  beam cannot cast into it — which is what makes a narrow beam cheaper than
+ *  the radial light rather than merely darker.  The margin covers the body's
+ *  own angular size (so a body straddling the edge still casts), the
+ *  penumbra, and the deviation a refracted cone leaves its body with. */
+function outsideBeam(
+    beamAim: number, beamHalf: number,
+    dx: number, dy: number, bodyRadPx: number,
+): boolean {
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= bodyRadPx) return false;               // light inside the body
+    const own = Math.asin(Math.min(1, bodyRadPx / d));
+    const margin = beamHalf + own + FLASHLIGHT.EDGE_DEG * DEG2RAD
+                 + FLASHLIGHT.CULL_MARGIN_DEG * DEG2RAD;
+    return Math.abs(angleDelta(beamAim, Math.atan2(dy, dx))) > margin;
+}
+
+/** Mask everything the player's light drew down to a CONE.
+ *
+ *  Runs LAST, after the shadows and the caustic, so it masks the whole of
+ *  this light rather than a stage of it — a caustic added after the mask
+ *  would put light outside the beam and unmake it.  It is safe to erase with
+ *  `destination-out` here because the layer holds only this light: the
+ *  emitters are composited afterwards, and are deliberately not masked.
+ *
+ *  The complement of a cone is ONE sector (of more than half the circle), so
+ *  this is one path per pass rather than a winding trick.  Passes grade the
+ *  edge, widest first, exactly like the shadow penumbra above.
+ */
+export let _beamMasks = 0;
+export function beamMaskCount(): number { return _beamMasks; }
+function applyBeamMask(
+    lctx: CanvasRenderingContext2D,
+    cx: number, cy: number, reach: number,
+    aim: number, half: number,
+): void {
+    _beamMasks++;
+    const passes = FLASHLIGHT.PASSES;
+    const edge = FLASHLIGHT.EDGE_DEG * DEG2RAD;
+    // Per-pass alpha so the passes COMPOSE to the spill floor: what survives
+    // outside the beam is spill, and what survives inside the soft band is
+    // one or two passes' worth of that.
+    const a = 1 - Math.pow(FLASHLIGHT.SPILL, 1 / passes);
+    // A SOLID FILL STYLE, EXPLICITLY.  `destination-out` erases by the
+    // SOURCE's alpha, and the fillStyle in hand at this point is the light's
+    // own falloff gradient — which is anchored at the canvas origin once the
+    // transform is reset, and reads alpha 0 out where this sector is.  That
+    // exact mistake is how A4 shipped with no shadows at all (see the header
+    // of tests/lighting.spec.ts); it cost an afternoon then and would have
+    // cost another one here, since the mask runs, throws nothing, and does
+    // nothing.
+    lctx.fillStyle = '#000';
+    lctx.globalCompositeOperation = 'destination-out';
+    lctx.globalAlpha = a;
+    for (let i = 0; i < passes; i++) {
+        const h = half + edge * (passes - 1 - i) / passes;
+        if (h >= Math.PI) continue;                 // nothing outside to erase
+        lctx.beginPath();
+        lctx.moveTo(cx, cy);
+        lctx.arc(cx, cy, reach, aim + h, aim - h + Math.PI * 2);
+        lctx.closePath();
+        lctx.fill();
+    }
+    lctx.globalCompositeOperation = 'source-over';
+    lctx.globalAlpha = 1;
+}
+
 /** Shadow-geometry instrumentation, the sibling of `causticStats`.  Counts
  *  the quads emitted and their total area, so a POP — a quad appearing at
  *  finite width rather than growing from zero — is a step change in a number
@@ -1152,6 +1229,12 @@ function compositeLight(
     penumbraK: number,
     refract: boolean,
     tint: string | null = null,
+    /** Beam aim in radians, or null for a radial light.  Only the PLAYER's
+     *  light passes it: a secondary emitter is a lit surface radiating in
+     *  every direction, not a torch. */
+    beamAim: number | null = null,
+    /** Beam half-angle in radians.  Unused when `beamAim` is null. */
+    beamHalf: number = Math.PI,
 ): void {
     // 1. Falloff.  Created at the origin and MOVED by the transform, so the
     //    cache key stays the radius and the colour.  setTransform rather than
@@ -1162,7 +1245,14 @@ function compositeLight(
     lctx.setTransform(1, 0, 0, 1, 0, 0);
     resetShadowStats();
 
-    if (count === 0) return;
+    if (count === 0) {
+        // Nothing to shadow, but the beam still has to be cut — an empty
+        // scene under a flashlight is a cone, not a disc.
+        if (beamAim !== null && beamHalf < Math.PI) {
+            applyBeamMask(lctx, cx, cy, rPx * 1.8, beamAim, beamHalf);
+        }
+        return;
+    }
 
     // 2. The shadow volumes, in SOFT_STEPS graded passes.
     //
@@ -1242,6 +1332,9 @@ function compositeLight(
             // so a body whose near edge is in range is not culled on its
             // centre.
             if (d - brPx > rPx) continue;
+            // Outside the beam: it cannot shadow into it, so skip the whole
+            // body rather than draw a shadow the mask will erase.
+            if (beamAim !== null && outsideBeam(beamAim, beamHalf, dx, dy, brPx)) continue;
             const ocx = cx + dx, ocy = cy + dy;
 
             const pts = o.pts;
@@ -1323,12 +1416,22 @@ function compositeLight(
         lctx.globalAlpha = 1;
         }
     }
-    if (wedges === 0 && !refract) return;
+    if (wedges === 0 && !refract) {
+        if (beamAim !== null && beamHalf < Math.PI) {
+            applyBeamMask(lctx, cx, cy, rPx * 1.8, beamAim, beamHalf);
+        }
+        return;
+    }
 
     // 4. REFRACTION (DBG prototype).  Additive, and LAST — a caustic is light
     //    inside the umbra, so anything drawn before the erase passes would be
     //    withheld again by the very shadow it belongs to.
-    if (!refract) return;
+    if (!refract) {
+        if (beamAim !== null && beamHalf < Math.PI) {
+            applyBeamMask(lctx, cx, cy, rPx * 1.8, beamAim, beamHalf);
+        }
+        return;
+    }
     const causticFar = rPx * REFRACT.FAR_FRAC;
     resetCausticStats();
     // THE CAP FADE.  `occ` is nearest-first and `count` is what the tier's
@@ -1386,6 +1489,7 @@ function compositeLight(
             const d = Math.sqrt(dx * dx + dy * dy);
             if (d <= brPx) continue;                 // light inside the body
             if (d - brPx > rPx) continue;            // past the light's reach
+            if (beamAim !== null && outsideBeam(beamAim, beamHalf, dx, dy, brPx)) continue;
             // Taper the THROW toward the cap boundary, the same trick the
             // TIR fade uses and for the same reason: one fill per group, so
             // the weight cannot ride the alpha.
@@ -1423,6 +1527,11 @@ function compositeLight(
         lctx.globalCompositeOperation = 'source-over';
         lctx.globalAlpha = 1;
         lctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    // 5. THE BEAM.  Last, so it masks everything this light drew.
+    if (beamAim !== null && beamHalf < Math.PI) {
+        applyBeamMask(lctx, cx, cy, rPx * 1.8, beamAim, beamHalf);
     }
 }
 
@@ -1640,6 +1749,8 @@ function compositeEmitters(
     lx: number, ly: number, worldToPx: number,
     maxEmitters: number,
     enabled: boolean,
+    beamAim: number | null,
+    beamHalf: number,
 ): number {
     // Called even while emission is OFF, so the halos that were alive when it
     // was switched off fade out instead of snapping.  With no live slots that
@@ -1669,7 +1780,26 @@ function compositeEmitters(
         const dx = (o.x - lx) * worldToPx;
         const dy = (o.y - ly) * worldToPx;
         const d = Math.sqrt(dx * dx + dy * dy);
-        const received = falloffFrac(d / rPx);
+        let received = falloffFrac(d / rPx);
+        // UNDER A BEAM, a body is lit by what the beam puts on it.  Without
+        // this an emitter outside the cone would glow as brightly as one
+        // inside it, which is the single thing that would give the beam away
+        // as a mask rather than as a light.  Same soft edge and spill floor
+        // as the mask itself, so a body at the beam's edge fades rather than
+        // switching — the A5j lesson, applied at the source this time
+        // instead of at the halo.
+        if (beamAim !== null && beamHalf < Math.PI && d > 0) {
+            const off = Math.abs(angleDelta(beamAim, Math.atan2(dy, dx)));
+            const edge = FLASHLIGHT.EDGE_DEG * DEG2RAD;
+            let lit: number = FLASHLIGHT.SPILL;
+            if (off <= beamHalf) lit = 1;
+            else if (off < beamHalf + edge) {
+                const u = 1 - (off - beamHalf) / edge;
+                lit = FLASHLIGHT.SPILL
+                    + (1 - FLASHLIGHT.SPILL) * (u * u * (3 - 2 * u));
+            }
+            received *= lit;
+        }
         // A SMOOTH BAND, not a cutoff.  The threshold exists because an
         // emitter at the rim of the light costs a gradient fill to add
         // nothing; switching it off at a hard edge just moves the pop from
@@ -1848,7 +1978,7 @@ export function ensureLightCanvas(r: RenderSystem, ctx: CanvasRenderingContext2D
  */
 export function renderLightLayer(
     r: RenderSystem, ctx: CanvasRenderingContext2D, width: number, height: number,
-    playerPos?: Vector2, camera?: CameraState,
+    playerPos?: Vector2, camera?: CameraState, playerRot?: number,
 ): void {
     const mode = getActiveLightingMode();
     if (mode === 'legacy') return;
@@ -1907,10 +2037,22 @@ export function renderLightLayer(
             const cy = (height / 2 + (shiftY(camera.position.y, playerPos.y)
                         - camera.position.y + shake.y) * camera.zoom) * k;
             const rPx = tier.maxRadius * worldToPx;
-            compositeLight(lctx, cx, cy, rPx,
-                           r._lightOccluders, r._lightOccluderCount,
-                           playerPos.x, playerPos.y, worldToPx,
-                           getShadowSoftness(), getRefractionEnabled());
+            // THE BEAM.  Half-angle 180 is the radial light and costs nothing
+            // extra (no mask, no cull); 0 draws no player light at all, so
+            // what is left on the layer is exactly the emitters.  The aim is
+            // `player.rotation` — the angle shots travel along — so the torch
+            // points where the ship is looking and needs no second control.
+            const halfDeg = getFlashlightHalfDeg();
+            const beamOn = halfDeg < 180;
+            const beamHalf = halfDeg * DEG2RAD;
+            const beamAim = beamOn ? (playerRot ?? 0) : null;
+            if (!beamOn || halfDeg > 0) {
+                compositeLight(lctx, cx, cy, rPx,
+                               r._lightOccluders, r._lightOccluderCount,
+                               playerPos.x, playerPos.y, worldToPx,
+                               getShadowSoftness(), getRefractionEnabled(),
+                               null, beamAim, beamHalf);
+            }
             // SECONDARY lights, from the same occluder set the shadows were
             // cast from — the bodies the light reaches are exactly the ones
             // that can re-emit it.  `maxLights` counts the player's own, so
@@ -1919,7 +2061,8 @@ export function renderLightLayer(
                 r, lctx, cx, cy, rPx, r._lightOccluders, r._lightOccluderCount,
                 r._lightEmitters, r._lightEmitterCount,
                 playerPos.x, playerPos.y, worldToPx,
-                wantEmitters ? tier.maxLights - 1 : 0, wantEmitters);
+                wantEmitters ? tier.maxLights - 1 : 0, wantEmitters,
+                beamAim, beamHalf);
         }
     } else {
         r._lightOccluderCount = 0;
