@@ -1931,7 +1931,13 @@ export type ControlScheme =
   /** Controller with the LEFT TRIGGER as an analogue throttle; the left
    *  stick steers only.  Its own scheme rather than a toggle because it
    *  changes what a stick deflection MEANS. */
-  | 'gamepad-thrust';
+  | 'gamepad-thrust'
+  /** ONE-STICK controller (user call): the LEFT stick — or the left D-pad —
+   *  supplies heading, aim AND throttle together, and the gun moves to the
+   *  bottom face button.  The right stick is unused, so a pad that has only
+   *  a left stick plays it in full.  Distinct from `gamepad-thrust`, where
+   *  the throttle is a trigger and the stick's magnitude is discarded. */
+  | 'gamepad-left';
 
 export interface PlayerHUDMessage {
   id: string;

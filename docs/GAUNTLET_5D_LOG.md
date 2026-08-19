@@ -1276,3 +1276,64 @@ either scale is retuned later. Verified non-vacuous: it fails with the old
 values restored.
 
 `npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **176 passed** ✅.
+
+---
+
+## U13 — `gamepad-left`: one thumb flies and aims
+
+> "There should be a gamepad controller scheme where the left analog stick and
+> left d-pad is directional aim and thrust, and the down button on the right
+> side button pad is shoot (left button on right pad remains action button)."
+
+A seventh scheme rather than a toggle, for the reason the scheme list exists:
+it changes what a stick deflection MEANS, and two answers to that cannot be
+live at once. It sits one flag away from the schemes either side of it:
+
+| scheme | left stick | aim | gun |
+|---|---|---|---|
+| `gamepad` | thrust | RIGHT stick | right trigger (or face) |
+| **`gamepad-left`** | **thrust AND aim** | **left stick / D-pad** | **bottom face button** |
+| `gamepad-thrust` | heading only | either stick | bottom face button |
+
+**What actually changed is only the aim.** The left stick's magnitude is
+still the throttle — the ordinary `gamepad` meaning — so flying is untouched;
+what is added is that the same deflection writes the synthetic pointer, which
+is how the hull's rotation and every shot's target are already derived. The
+D-PAD rides along for free: it has always written a unit vector into
+`padMove`, so it now aims in its eight directions at full throttle without a
+line of its own.
+
+Three decisions worth recording:
+
+- **The right stick is IGNORED, not merged.** Two channels writing one
+  reticle is a fight the player feels as it snapping between their thumbs.
+  `gamepad-thrust` is the deliberate exception *within* that rule — it lets
+  whichever stick is deflected further win, because on a minimal pad the one
+  stick may be either.
+- **The fire group got its own rule.** It used to be derived from
+  `triggerThrust`, which was true only by coincidence. `fireFace` now says it
+  directly, and both schemes that give up the triggers set it.
+- **The triggers go slack under both.** `usesFaceFire()` gates the adaptive
+  weapon profile off, on the argument the code already made for
+  trigger-thrust: resistance on a control that fires nothing is just a stiff
+  trigger.
+
+Buttons are unchanged from the request: bottom face (`FIRE_FACE`, index 0) is
+the gun, left face (`INTERACT`, index 2) is still dock / portal / undock.
+
+**One existing test legitimately changed meaning**: `help.spec.ts` enumerates
+the scheme dropdown's options, and there is a seventh now. The list stays
+written out rather than derived from `CONTROL_SCHEMES` — a scheme that exists
+in the table but never reaches the picker is unreachable to the player, and
+nothing else would say so.
+
+**Customisable bindings parked**, as asked — `docs/PARKING_LOT.md` now carries
+the entry, including what already exists (the button table is already
+action → indices, and `padGroupValue` already takes a GROUP), and the three
+things genuinely missing: persistence (the game keeps no state across reloads
+by design, so this needs the first real answer to where user config lives), a
+binding UI with capture and conflict detection, and the axis question — what a
+stick MEANS is semantics rather than a binding, so the honest design is
+probably custom BUTTONS on top of a chosen axis model.
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **178 passed** ✅.

@@ -3980,6 +3980,7 @@ export const CONTROL_SCHEMES: ReadonlyArray<{
   { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
   { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
   { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'Either trigger throttles · either stick steers + aims' },
+  { id: 'gamepad-left',   label: 'Controller (left stick)',      blurb: 'Left stick / D-pad flies + aims · bottom face button shoots' },
 ] as const;
 
 export function controlSchemeDef(id: ControlScheme) {
@@ -4008,6 +4009,16 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
    *  stick's magnitude is thrust, here it is discarded — and two answers to
    *  that cannot be live at once. */
   triggerThrust?: boolean;
+  /** Does the MOVE stick also write the aim — the ship aiming where it flies?
+   *  True for both pad schemes that give up the right stick: under
+   *  `gamepad-thrust` because a minimal pad may not have one, and under
+   *  `gamepad-left` because the user asked for the left stick to carry
+   *  direction and thrust together.  When set, the right stick is ignored
+   *  rather than allowed to fight for the pointer. */
+  stickAims?: boolean;
+  /** Is the gun the bottom FACE button rather than the right trigger?  Set
+   *  wherever the triggers are doing something else or may not exist. */
+  fireFace?: boolean;
 }> = {
   touch:            { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true,  pointerAims: true },
   'joystick-left':  { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'left'  },
@@ -4016,7 +4027,11 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
   gamepad:          { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
   // Same as `gamepad` in every touch respect — the trigger changes what the
   // LEFT STICK means, not what a finger means, so touch stays exactly alive.
-  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true },
+  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true, stickAims: true, fireFace: true },
+  // Same again: the LEFT stick carries heading, aim and throttle together and
+  // the gun sits on the bottom face button, which changes nothing a finger
+  // does.
+  'gamepad-left':   { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, stickAims: true, fireFace: true },
 };
 
 // ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────

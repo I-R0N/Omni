@@ -1268,9 +1268,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ], null, ['keyboard'])}
 
         {group('Gamepad', 'text-violet-300', [
-          ['Left stick / D-pad', 'Fly.'],
-          ['Right stick', 'Aim.'],
+          ['Left stick / D-pad', 'Fly. On the left-stick scheme it aims too — the ship points where it flies.'],
+          ['Right stick', 'Aim. Unused on the left-stick scheme, where one thumb does both.'],
           ['Right trigger', 'Shoot — the moment you reach the break point. Hold for a charged shot. (Bottom face button too.)'],
+          ['Bottom face button', 'Shoot. The only gun on the left-stick and trigger-thrust schemes, where the triggers are doing something else or may not exist. ✕ on PlayStation, A on Xbox.'],
           ['Left trigger', 'Throttle, on the trigger-thrust scheme: the stick steers, the trigger decides how hard.'],
           ['Left face button', 'Dock, enter a portal, or undock. □ on PlayStation, X on Xbox.'],
           ['Right shoulder', 'Switch weapon. (Top face button too.)'],
@@ -1281,7 +1282,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           <span className={`text-violet-200/80 font-mono ${T_MICRO} normal-case tracking-normal bg-violet-500/15 px-1.5 py-0.5 rounded`}>
             connected
           </span>
-        ) : null, ['gamepad', 'gamepad-thrust'])}
+        ) : null, ['gamepad', 'gamepad-thrust', 'gamepad-left'])}
 
         {group('The run', 'text-amber-300', [
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],

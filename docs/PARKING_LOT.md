@@ -1168,3 +1168,50 @@ stay pinned to one viewport.
 
 **Depends on** the test-suite entry above: this is only worth building on top
 of a harness that outlives a session.
+
+---
+
+## Fully customisable control scheme (rebindable pad / key mapping)
+
+**Parked deliberately** (user call, alongside the `gamepad-left` scheme that
+prompted it): the schemes have grown to seven, and each new one is a row in
+`CONTROL_SCHEMES` plus a row in `CONTROL_SCHEME_RULES` plus a branch or two in
+`InputSystem`. That is cheap for the first few and stops being cheap when the
+answer to "can I put fire on the right bumper" is a new scheme.
+
+**What exists already, and is most of the substrate:**
+
+- `INPUT_CONSTANTS.GAMEPAD.BUTTONS` is already a table of *action → button
+  indices* (`FIRE`, `FIRE_FACE`, `INTERACT`, `CYCLE_WEAPON`, `PAUSE`, `DPAD`,
+  `THROTTLE`, plus the menu-nav group). A rebind is a write to that table, not
+  new plumbing — the poll reads it through `padGroupValue` / `padGroupEdge`,
+  which already accept a GROUP of indices rather than one button.
+- `CONTROL_SCHEME_RULES` is the one table every "what does this scheme do"
+  read goes through, so a custom scheme is a rules row with user-supplied
+  values rather than a new code path.
+- The three input devices already converge on one set of outputs (movement
+  vector, synthetic pointer, fire queues), so nothing downstream of
+  `InputSystem` would need to know a binding had moved.
+
+**What is genuinely missing:**
+
+1. **Persistence.** The game keeps no state across reloads by design
+   (difficulty and control scheme are in-memory preferences). A rebind that
+   does not survive a reload is worse than no rebind, so this needs the first
+   real answer to "where does user configuration live" — which is a decision
+   with scope well beyond controls.
+2. **A binding UI**, including the "press the button you want" capture mode,
+   conflict detection, and a reset-to-default. On a 390px screen that is a
+   screen of its own, not a section of the pause menu.
+3. **The axis question.** Buttons rebind cleanly; AXES do not. What the left
+   stick MEANS differs per scheme (thrust magnitude under `gamepad`, discarded
+   under `gamepad-thrust`, heading+aim+throttle under `gamepad-left`), and
+   those are semantics rather than bindings. A custom scheme needs to expose
+   that choice as a small set of named behaviours — which is what the scheme
+   list already is, so the honest design may be "custom BUTTONS on top of a
+   chosen axis model" rather than a blank slate.
+
+**Cheapest path when it comes up:** buttons only, on top of an existing
+scheme, with the axis model still chosen from the current list. That covers
+the common ask ("move fire off the trigger") without answering (3), and it
+needs only (1) and (2).

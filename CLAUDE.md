@@ -682,7 +682,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ship, since on those schemes steering belongs to the keys or the stick and
   a click should only shoot.  `CONTROL_SCHEME_RULES` is the one table every
   read goes through (`joystick` / `fireButton` / `mouseDragMoves` /
-  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide`), so a scheme's
+  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide` /
+  `triggerThrust` / `stickAims` / `fireFace`), so a scheme's
   behaviour is a lookup rather than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
   it survives `restartGame()` and every map load.
   `INPUT_CONSTANTS.FIRE_BUTTON` carries the button's geometry.
@@ -2174,6 +2175,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     they can be spent, so no press fires later out of context.
   - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
     which must exceed `SHIP_SELECT_RADIUS` — see §5.
+  - **`gamepad-left` is the ONE-THUMB scheme** (user call).  The LEFT stick —
+    or the left D-PAD, which has always written the same movement vector —
+    carries heading, aim AND throttle together: the deflection's direction
+    steers and aims, its magnitude is the throttle, which is the ordinary
+    `gamepad` meaning of that stick, so only the AIM moves.  The right stick
+    is then IGNORED rather than left to fight for the pointer (two channels
+    writing one reticle is a fight the player feels as it snapping between
+    their thumbs), and the gun moves to the bottom FACE button with the left
+    face button still the action button.  Shares the `stickAims` and
+    `fireFace` rules with `gamepad-thrust`; what separates the two is that
+    this one KEEPS the stick's magnitude as the throttle where trigger-thrust
+    discards it.  Both leave the triggers slack (`usesFaceFire()` gates the
+    weapon profile off): a clutch on a control that fires nothing is just a
+    stiff trigger.
   - **`gamepad-thrust` is the MINIMAL-PAD scheme** (G15/G16): a TRIGGER
     supplies thrust magnitude and a STICK supplies direction.  Which trigger
     and which stick is deliberately not specified — EITHER stick steers (and

@@ -172,11 +172,16 @@ test.describe('controls & basics — reachable from both menus', () => {
     expect(box!.height).toBeGreaterThanOrEqual(30);
     expect(box!.x + box!.width).toBeLessThanOrEqual(PHONE_W);
 
-    // Every scheme is reachable from it, including both handednesses.
+    /*  Every scheme is reachable from it, including both handednesses.  The
+     *  list is written out rather than derived from CONTROL_SCHEMES on
+     *  purpose (harness rule 7): adding a scheme should be a VISIBLE edit
+     *  here, because a scheme that exists in the table but never reaches the
+     *  picker is unreachable to the player and nothing else would say so. */
     const options = await select.locator('option').evaluateAll(
       els => els.map(e => (e as HTMLOptionElement).value));
     expect(options).toEqual([
-      'touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad', 'gamepad-thrust',
+      'touch', 'joystick-left', 'joystick-right', 'keyboard',
+      'gamepad', 'gamepad-thrust', 'gamepad-left',
     ]);
 
     await select.selectOption('joystick-right');

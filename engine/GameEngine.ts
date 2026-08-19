@@ -3296,6 +3296,10 @@ export class GameEngine {
       // Under trigger-thrust the RIGHT trigger is a throttle too, so a weapon
       // profile on it would be describing a control the player is not using.
       thrustScheme ? THRUST_TRIGGER(this.playerSpeedFraction())
+      // ...and where the gun has moved to a FACE button (`gamepad-left`) the
+      // trigger is not the gun either, so it goes slack rather than
+      // resisting for a control that fires nothing.
+      : this.input.usesFaceFire() ? TRIGGER_OFF
       : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
       : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
       : WEAPON_TRIGGERS[this.player.currentWeapon]);

@@ -469,6 +469,14 @@ export class InputSystem {
     return !!this.rules.triggerThrust;
   }
 
+  /** Is the GUN on a face button right now?  Read by the adaptive-trigger
+   *  sync: a weapon profile on the right trigger describes a control the
+   *  player is not using under these schemes, and a clutch on a control that
+   *  does nothing is just a stiff trigger. */
+  public usesFaceFire(): boolean {
+    return !!this.rules.fireFace;
+  }
+
   /** DBG readout: whether the WebHID path is unsupported, idle, or live —
    *  and, when live, the head of the last report actually sent, because a
    *  wrong byte layout is otherwise indistinguishable from a dead pad. */
@@ -1103,7 +1111,12 @@ export class InputSystem {
     const aimMag = this.applyStickDeadzone(
       ax[G.AXES.RX] ?? 0, ax[G.AXES.RY] ?? 0, G.STICK_DEADZONE, this.padAimRead,
     );
-    if (aimMag > 0) {
+    // Suppressed entirely under `stickAims`: those schemes give the aim to the
+    // MOVE stick, and two channels writing one pointer is a fight the player
+    // feels as the reticle snapping between their thumbs.  `gamepad-thrust`
+    // is the exception WITHIN that — it lets whichever stick is deflected
+    // further win, because on a minimal pad the one stick may be either.
+    if (aimMag > 0 && (!this.rules.stickAims || this.rules.triggerThrust)) {
       // Keep `padAim` a UNIT heading — magnitude is throttle for the left
       // stick, but for aim it is only "is the player steering".  Committed
       // only while the stick is live, so releasing it holds the heading.
@@ -1124,6 +1137,27 @@ export class InputSystem {
     // On a full pad this means the two sticks do the same job rather than
     // fighting; the larger deflection is the player's actual intent, and the
     // other one being centred costs nothing.
+    // 2c. LEFT STICK CARRIES EVERYTHING (`gamepad-left`, user call).
+    //
+    // Heading, aim and throttle from one thumb: the deflection's DIRECTION
+    // steers and aims, its MAGNITUDE is the throttle — which is the ordinary
+    // `gamepad` meaning of the left stick, so nothing about flying changes,
+    // only that the ship now points where it flies.  The D-pad rides along
+    // for free: it has already written a unit vector into `padMove` above, so
+    // it aims in its eight directions at full throttle.
+    //
+    // `padMove` KEEPS its magnitude here — that is the whole difference from
+    // the trigger-thrust branch below, which normalises it away because a
+    // trigger owns the throttle there.
+    if (this.rules.stickAims && !this.rules.triggerThrust) {
+      const mag = Math.sqrt(this.padMove.x * this.padMove.x + this.padMove.y * this.padMove.y);
+      if (mag > 0) {
+        this.padAim.x = this.padMove.x / mag;
+        this.padAim.y = this.padMove.y / mag;
+        this.writePadPointer();
+      }
+    }
+
     if (this.rules.triggerThrust) {
       const moveMag = Math.sqrt(this.padMove.x * this.padMove.x + this.padMove.y * this.padMove.y);
       const useAim = aimMag > moveMag;
@@ -1179,9 +1213,11 @@ export class InputSystem {
     // DualSense trigger leaves rest, so reading it fires the gun before the
     // clutch has resisted anything.  A digital face button reports 1, which
     // clears any threshold, so it is unaffected.
-    // Under trigger-thrust the triggers are the THROTTLE, so the gun is the
-    // face button alone — see FIRE_FACE.
-    const fireGroup = this.rules.triggerThrust ? G.BUTTONS.FIRE_FACE : G.BUTTONS.FIRE;
+    // `fireFace` schemes put the gun on the bottom face button: under
+    // trigger-thrust because both triggers are the THROTTLE there, and under
+    // `gamepad-left` because the user asked for it — the left thumb flies
+    // and the right thumb shoots, with the trigger left free.
+    const fireGroup = this.rules.fireFace ? G.BUTTONS.FIRE_FACE : G.BUTTONS.FIRE;
     const fireHeld = fireEnabled && this.padGroupValue(snap, fireGroup) >= this.padFirePoint();
     if (fireHeld && !this.padFireDown) {
       this.padFireDown = true;
