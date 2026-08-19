@@ -226,6 +226,9 @@ export function updateExplosionRings(g: GameEngine) {
 }
 
 export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {      if (!g.currentMap) return;
+// Compact splash blast — deliberately not the boss-death boom, since
+// a Cannon build fires this several times a fight.
+g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
 
     // Impact-frame visuals (instant): bright spark burst + screen shake.
     // These don't wait for the wavefront — the player should feel the

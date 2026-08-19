@@ -1379,16 +1379,31 @@ export function cycleRenderScale(): number {
 // ─── DBG: HUD (React) update rate ────────────────────────────────────────────
 //
 // `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.
-// The reconciliation it triggers walks the whole (unmemoized, ~2100-line)
-// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer ever
-// saw it.  A hardware capture (2026-08-09, Ring World, iPhone) showed 35 ms
-// frames carrying only 1 ms render + 2 ms sim — ~32 ms unaccounted — which is
-// what made this worth a knob.
+// The reconciliation it triggers walks the whole (unmemoized, ~2500-line)
+// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer saw
+// it — until one was built for it.
+//
+// THE ORIGINAL JUSTIFICATION FOR THIS KNOB WAS WRONG.  It read: a hardware
+// capture (2026-08-09, Ring World, iPhone) showed 35 ms frames carrying only
+// 1 ms render + 2 ms sim, ~32 ms unaccounted, and that residual was
+// attributed here.  It is not this.  Measured with a React `<Profiler>`,
+// reconciliation costs **0.1 ms median / 0.2 ms p95 in play** and 0.3 / 0.5 ms
+// with the heaviest overlay up — three orders of magnitude off the number
+// that motivated the knob.  Cutting React out of the frame entirely moves
+// frame time ~2 %.  The 32 ms residual is real but lives somewhere else;
+// `renderMs` times CPU-side canvas call issuing, not the rasterization those
+// calls queue.  See docs/GAUNTLET_REACT_LOG.md.
+//
+// So this knob is a LEFTOVER, kept because it is harmless and occasionally
+// handy for A/B work — NOT a tuning lever, and not evidence that the HUD is
+// expensive.  Its ceiling is ~0.05 ms in play.  Do not cite it, or the
+// capture above, as a reason to go optimizing the React layer; that case was
+// investigated in full and declined on evidence.
 //
 // The HUD is text chips and bars; it does not need 60 Hz.  Everything that
 // must stay frame-perfect is canvas-drawn (minimap, loadout strip, wave
 // banners, damage text) and is unaffected by this.  60 is index 0 and stays
-// the default, so the shipping path is unchanged until someone chooses.
+// the default — now on the measurement above rather than on caution.
 export const HUD_RATE_CYCLE: ReadonlyArray<number> = [60, 30, 15] as const;
 let activeHudRateIndex = 0;
 export function getActiveHudRate(): number { return HUD_RATE_CYCLE[activeHudRateIndex]; }
@@ -2342,6 +2357,12 @@ export const STRUCTURE_CONSTANTS = {
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
   CRASH_VELOCITY_THRESHOLD: 4, // Player speed needed to break through
+  // AUDIO ONLY (no gameplay effect): the relative speed above which player
+  // contact with a MOBILE SHARD makes a sound.  Far below the break
+  // threshold above, because a loose rock knocking off the hull is an
+  // audible event long before it is a destructive one — gating shard
+  // contact at the break speed made ordinary bumping silent.  PROVISIONAL.
+  SHARD_CONTACT_SPEED: 1.2,
   // Fraction of velocity the player KEEPS per breakable-tile crash-
   // through.  At 0.5 a 3-tile plow retained ~12 % of entry speed and
   // read as bouncing off the cluster; 0.65 retains ~27 % and reads as
@@ -2959,6 +2980,165 @@ export const ENEMY_CONSTANTS = {
 // death burst.  Purely cosmetic — the puffs drift, fade in, and feed the
 // normal nebula merge/condense system like any other nebula-shard.  The
 // burst is gated by MAX_COUNT > 0; set it to 0 to disable.
+// ── Explosion variety (Phase 3 Pair B, roadmap step (b)) ─────────────────────
+// Per-class death FX on the EXISTING ParticleSystem.  Before this table every
+// enemy died the same way, tinted by `entity.color` — so a gnat, a tank and a
+// bomber were the same event at three sizes.  A profile differentiates the
+// four things the eye actually reads: SHAPE (ring scale + how many rings),
+// COUNT/SPEED/SIZE of debris, PALETTE (an accent colour mixed into the debris,
+// so a class reads by hue and not only by tint), and SCALE (shake).
+//
+// PARTICLE BUDGET.  `debris + spark + accent` is the profile's total particle
+// spend, and the whole table is calibrated against the PR #69 trimmed budgets:
+// the previous single burst spent 15–18 particles, and STANDARD still spends
+// 16.  Where a profile spends more (HEAVY, KAMIKAZE, BOSS) it is on a rarer
+// death; where a death happens in BULK (SWARM) it spends less than before.
+// The MAX_PARTICLES cap is the backstop either way, exactly as it was.
+//
+// `sfx` is the profile's SFX_INVENTORY id, carried HERE rather than resolved
+// separately, so the differentiated visual and its sound are chosen by one
+// lookup and cannot drift apart.
+//
+// PROVISIONAL: every number reasoned about, not measured on the user's
+// hardware (see docs/GAUNTLET_PAIR_B_LOG.md, FOR-USER-REVIEW).
+export interface ExplosionProfile {
+  /** Main ring radius as a multiple of the entity's diameter.  0 = no ring. */
+  ringScale: number;
+  ringLifetime: number;
+  /** Inner white core-flash ring.  0 = none (the "no hot core" classes). */
+  coreScale: number;
+  coreLifetime: number;
+  /** Accent colour blended into the burst alongside the entity's own colour;
+   *  undefined = pure body colour. */
+  accent?: string;
+  accentCount: number;
+  debrisCount: number;
+  debrisSpeedMin: number; debrisSpeedMax: number;
+  debrisSizeMin: number;  debrisSizeMax: number;
+  debrisLifeMin: number;  debrisLifeMax: number;
+  /** Hot spark layer (white).  0 = none. */
+  sparkCount: number;
+  sparkSpeedMin: number; sparkSpeedMax: number;
+  /** Screen punch.  Added to the tier scaling where the class uses it. */
+  shake: number;
+  /** SFX_INVENTORY id fired with this burst. */
+  sfx: string;
+}
+
+export const EXPLOSION_PROFILES = {
+  // A gnat POPS.  Deliberately the cheapest profile in the table: dozens die
+  // in one step, so it spends 7 particles and no shake at all.
+  SWARM: {
+    ringScale: 1.6, ringLifetime: 0.2, coreScale: 0, coreLifetime: 0,
+    accentCount: 0,
+    debrisCount: 5, debrisSpeedMin: 3, debrisSpeedMax: 10,
+    debrisSizeMin: 1.5, debrisSizeMax: 3, debrisLifeMin: 0.18, debrisLifeMax: 0.4,
+    sparkCount: 2, sparkSpeedMin: 6, sparkSpeedMax: 14,
+    shake: 0, sfx: 'destroy.enemy.small',
+  },
+  // The workhorse kill — the shape everything else is read against.
+  STANDARD: {
+    ringScale: 2.4, ringLifetime: 0.34, coreScale: 1.3, coreLifetime: 0.22,
+    accentCount: 0,
+    debrisCount: 11, debrisSpeedMin: 4, debrisSpeedMax: 16,
+    debrisSizeMin: 2, debrisSizeMax: 4.5, debrisLifeMin: 0.3, debrisLifeMax: 0.7,
+    sparkCount: 5, sparkSpeedMin: 7, sparkSpeedMax: 20,
+    shake: 2.5, sfx: 'destroy.enemy.standard',
+  },
+  // Structural failure: BIGGER but SLOWER, with amber embers that outlive the
+  // flash.  Slow heavy debris is what makes a tank's death read as mass.
+  HEAVY: {
+    ringScale: 3.1, ringLifetime: 0.5, coreScale: 1.6, coreLifetime: 0.3,
+    accent: '#fbbf24', accentCount: 6,
+    debrisCount: 12, debrisSpeedMin: 2.5, debrisSpeedMax: 11,
+    debrisSizeMin: 3, debrisSizeMax: 6.5, debrisLifeMin: 0.5, debrisLifeMax: 1.1,
+    sparkCount: 4, sparkSpeedMin: 5, sparkSpeedMax: 14,
+    shake: 5, sfx: 'destroy.enemy.heavy',
+  },
+  // A real bomb: fastest debris in the table, hot orange core, heavy punch.
+  KAMIKAZE: {
+    ringScale: 3.6, ringLifetime: 0.42, coreScale: 2.0, coreLifetime: 0.26,
+    accent: '#fb923c', accentCount: 8,
+    debrisCount: 14, debrisSpeedMin: 8, debrisSpeedMax: 26,
+    debrisSizeMin: 2, debrisSizeMax: 5, debrisLifeMin: 0.25, debrisLifeMax: 0.6,
+    sparkCount: 7, sparkSpeedMin: 12, sparkSpeedMax: 30,
+    shake: 8, sfx: 'destroy.enemy.kamikaze',
+  },
+  // A membrane bursting, not a hull exploding: NO hot core, no shake, slow
+  // fat droplets that fall apart rather than fly.  The one death in the game
+  // that should not look like combustion.
+  BUBBLE: {
+    ringScale: 2.0, ringLifetime: 0.45, coreScale: 0, coreLifetime: 0,
+    accent: '#a5f3fc', accentCount: 7,
+    debrisCount: 10, debrisSpeedMin: 1.5, debrisSpeedMax: 6,
+    debrisSizeMin: 3, debrisSizeMax: 7, debrisLifeMin: 0.5, debrisLifeMax: 1.0,
+    sparkCount: 0, sparkSpeedMin: 0, sparkSpeedMax: 0,
+    shake: 0, sfx: 'destroy.enemy.bubble',
+  },
+  // A player-pattern ship dying, seen from outside: the player's own cyan
+  // energy signature rather than an enemy's.
+  RIVAL: {
+    ringScale: 2.6, ringLifetime: 0.4, coreScale: 1.5, coreLifetime: 0.26,
+    accent: '#38bdf8', accentCount: 6,
+    debrisCount: 11, debrisSpeedMin: 4, debrisSpeedMax: 15,
+    debrisSizeMin: 2, debrisSizeMax: 4.5, debrisLifeMin: 0.35, debrisLifeMax: 0.75,
+    sparkCount: 5, sparkSpeedMin: 8, sparkSpeedMax: 20,
+    shake: 3, sfx: 'destroy.rival',
+  },
+  // The run ending.  The biggest ring in the table and the longest-lived
+  // debris, because the player is looking straight at it.
+  PLAYER: {
+    ringScale: 3.4, ringLifetime: 0.6, coreScale: 1.8, coreLifetime: 0.32,
+    accent: '#ffffff', accentCount: 6,
+    debrisCount: 14, debrisSpeedMin: 4, debrisSpeedMax: 14,
+    debrisSizeMin: 2, debrisSizeMax: 4.5, debrisLifeMin: 0.5, debrisLifeMax: 1.2,
+    sparkCount: 6, sparkSpeedMin: 6, sparkSpeedMax: 16,
+    shake: 6, sfx: 'destroy.player',
+  },
+  // A boss dies in ITS PHASE COLOUR (the caller passes the phase tint as the
+  // body colour), so the last thing you see is the state you beat.  The
+  // payout beat in payBossBounty layers on top of this.
+  BOSS: {
+    ringScale: 4.2, ringLifetime: 0.7, coreScale: 2.2, coreLifetime: 0.36,
+    accent: '#ffffff', accentCount: 10,
+    debrisCount: 18, debrisSpeedMin: 5, debrisSpeedMax: 22,
+    debrisSizeMin: 3, debrisSizeMax: 7, debrisLifeMin: 0.5, debrisLifeMax: 1.3,
+    sparkCount: 8, sparkSpeedMin: 10, sparkSpeedMax: 26,
+    shake: 9, sfx: 'boss.death',
+  },
+  // ── Materials ──
+  // Glass SHATTERS: fast, small, bright, with a white sparkle layer.  The
+  // most kinetic material break.
+  GLASS: {
+    ringScale: 0, ringLifetime: 0, coreScale: 0, coreLifetime: 0,
+    accent: '#e0f2fe', accentCount: 4,
+    debrisCount: 6, debrisSpeedMin: 5, debrisSpeedMax: 14,
+    debrisSizeMin: 1, debrisSizeMax: 2.2, debrisLifeMin: 0.2, debrisLifeMax: 0.5,
+    sparkCount: 0, sparkSpeedMin: 0, sparkSpeedMax: 0,
+    shake: 0, sfx: '',
+  },
+  // Rock CRUMBLES: slow, fat, dull, no sparkle.  The inverse of glass on
+  // every axis, which is what makes the two tellable apart at a glance.
+  ROCK: {
+    ringScale: 0, ringLifetime: 0, coreScale: 0, coreLifetime: 0,
+    accent: '#64748b', accentCount: 3,
+    debrisCount: 6, debrisSpeedMin: 1.5, debrisSpeedMax: 5,
+    debrisSizeMin: 2, debrisSizeMax: 4, debrisLifeMin: 0.35, debrisLifeMax: 0.8,
+    sparkCount: 0, sparkSpeedMin: 0, sparkSpeedMax: 0,
+    shake: 0, sfx: '',
+  },
+  // Metal FAILS: grey chips plus hot orange sparks, the only material break
+  // with a spark layer — it is the only one that reads as stressed steel.
+  METAL: {
+    ringScale: 0, ringLifetime: 0, coreScale: 0, coreLifetime: 0,
+    accent: '#fb923c', accentCount: 5,
+    debrisCount: 6, debrisSpeedMin: 3, debrisSpeedMax: 9,
+    debrisSizeMin: 1.5, debrisSizeMax: 3.2, debrisLifeMin: 0.3, debrisLifeMax: 0.7,
+    sparkCount: 3, sparkSpeedMin: 8, sparkSpeedMax: 18,
+    shake: 0, sfx: '',
+  },
+} as const satisfies Record<string, ExplosionProfile>;
+
 export const ENEMY_NEBULA_BURST = {
   MIN_COUNT: 2,
   MAX_COUNT: 4,
@@ -3617,6 +3797,64 @@ export const TIMED_WAVE_CONFIG = {
   // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
   TIER_SET_LENGTH: 3,
 };
+
+// ── Audio ─────────────────────────────────────────────────────────────────────
+// Mixer + voice-budget tuning for AudioSystem.  WHAT plays and with what
+// per-sound parameters lives in docs/SFX_INVENTORY.md (and, in code, in the
+// SfxRegistry defs); this block is only the global machinery.
+//
+// The three voice ceilings are the anti-mass-death budget: a single sim step
+// in this engine can kill 40 enemies (snitch board-clear) or shatter a merged
+// rock parent into 200 fragments.  Tier 3 stops being admitted first, then
+// tier 2; tier 1 (the sounds the player acts on) always plays.  Together with
+// the per-id retrigger COLLAPSE (which bumps the live voice's gain instead of
+// stacking a new one), a bulk event reads as one HEAVIER sound rather than as
+// hundreds of thin ones — the same "cosmetic output, safe to drop" reasoning
+// as enforceCap for particles, applied to a budget the ear rather than the
+// frame time enforces.
+//
+// PROVISIONAL: every number here was reasoned about, not measured on the
+// user's hardware (gauntlet log, FOR-USER-REVIEW).
+export const AUDIO_CONSTANTS = {
+    /** A decoded sample peaking below this is treated as a BROKEN export and
+     *  discarded in favour of the synth draft.  `play()` multiplies by the
+     *  def's mix gain (~0.3) and then by distance attenuation, so anything
+     *  under this cannot be heard in play whatever it was meant to be — the
+     *  file has not made the sound quieter, it has removed it.  ~-26 dBFS. */
+    SAMPLE_MIN_PEAK: 0.05,
+
+  DEFAULT_VOLUME: 0.7,     // master gain at boot; in-memory only (no persistence)
+  MAX_VOICES: 24,          // hard ceiling across all tiers
+  MAX_VOICES_TIER2: 20,    // tier-2 triggers stop being admitted here
+  MAX_VOICES_TIER3: 14,    // tier-3 (material chatter) stops first
+  COLLAPSE_BUMP: 1.22,     // gain multiplier per collapsed retrigger
+  COLLAPSE_BUMP_CAP: 2.2,  // saturation, so 40 collapses ≠ 40× loud
+  VOICE_RELEASE_PAD: 0.03, // slack added to a voice's tracked lifetime (s)
+  LOOP_RAMP: 0.09,         // loop fade in/out time constant (s)
+  NOISE_BUFFER_SEC: 2,     // shared white-noise buffer length
+  // Positional model.  Distances are world units, measured torus-wrapped.
+  NEAR_RADIUS: 420,        // full volume inside this
+  FAR_RADIUS: 2600,        // inaudible beyond this (linear between)
+  // AMBIENT shard chatter — shards colliding, merging and snapping with
+  // each other somewhere the player is not.  At the normal radius a dense
+  // field chatters constantly from events the player has nothing to do
+  // with, so these carry only in CLOSE PROXIMITY.  The same material
+  // destroyed BY the player (killedByPlayer: shot, rammed, chained,
+  // splashed) is played at the normal radius instead — proximity is the
+  // rule for ambient events, not for the player's own.
+  SHARD_NEAR_RADIUS: 240,
+  SHARD_FAR_RADIUS: 850,
+  // POI presence loops.  Both swell with proximity rather than switching
+  // on at the interaction range — the loop starts from the NEAREST POI at
+  // any distance and the attenuation does the work, so walking toward a
+  // station or a rift is an audible approach.  The station carries further
+  // because it is a much larger object.
+  PORTAL_NEAR_RADIUS: 300,
+  PORTAL_FAR_RADIUS: 1600,
+  STATION_NEAR_RADIUS: 420,
+  STATION_FAR_RADIUS: 2200,
+  PAN_WIDTH: 900,          // world units mapping to full L/R pan
+} as const;
 
 // ── Snitch ───────────────────────────────────────────────────────────────────
 // A golden-comet snitch rides the asteroid flow field with a burst/coast AI

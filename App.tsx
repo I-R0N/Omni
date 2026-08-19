@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
@@ -248,6 +248,31 @@ const App: React.FC = () => {
 
   const handleToggleScreenShake = () => {
       if (engineRef.current) engineRef.current.dbg.toggleScreenShake();
+  };
+
+  // Audio settings.  The slider is a live user gesture, so it doubles as
+  // an unlock trigger on the rare path where the AudioContext is still
+  // locked when the pause menu opens.
+  const handleSetVolume = (v: number) => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.setVolume(v);
+  };
+
+  const handleToggleMute = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.toggleMute();
+  };
+
+  // Synth drafts on/off — the audition switch for recorded takes.
+  const handleToggleDrafts = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.draftsEnabled = !e.audio.draftsEnabled;
   };
 
   const handleToggleTileOutlines = () => {
@@ -558,12 +583,43 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
 
+  // ── The React-cost instrument ────────────────────────────────────────────
+  //
+  // The engine times its own sim and render, but the third per-frame cost —
+  // reconciling this tree, once per `onStatsUpdate` — was never measurable
+  // from inside the engine: a setState called from a rAF callback is batched,
+  // and the render happens after that callback has returned.  A timer around
+  // the setState (GameEngine's `lastStatsScheduleMs`) therefore reads ~0
+  // regardless of what the tree costs.
+  //
+  // React's own `<Profiler>` is the instrument that CAN see it: it is part of
+  // React proper rather than devtools, it survives a production build, and it
+  // needs no inspector attached — which matters because the target device is
+  // an iPhone, where the whole devtools route is out of reach and the repo
+  // already measures via the on-device PerfRecorder for exactly that reason.
+  //
+  // The callback writes PLAIN FIELDS on the engine.  It must never setState:
+  // an instrument that re-renders the tree it measures is its own load, and
+  // would also loop.
+  const handleUiRender = (
+      _id: string,
+      _phase: 'mount' | 'update' | 'nested-update',
+      actualDuration: number,
+      baseDuration: number,
+  ) => {
+      engineRef.current?.noteUiRender(actualDuration, baseDuration);
+  };
+
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
       <canvas 
         ref={canvasRef} 
         className="block w-full h-full"
       />
+      {/* Children deliberately left at their original indentation: wrapping
+          them is a two-line change, reindenting them is a hundred-line diff
+          through the middle of a measurement commit. */}
+      <Profiler id="ui" onRender={handleUiRender}>
       <UIOverlay
         stats={stats}
         onCycleWeapon={handleCycleWeapon}
@@ -594,6 +650,9 @@ const App: React.FC = () => {
         onToggleShardLod={handleToggleShardLod}
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
+        onSetVolume={handleSetVolume}
+        onToggleMute={handleToggleMute}
+            onToggleDrafts={handleToggleDrafts}
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
         onToggleJoystickDebug={handleToggleJoystickDebug}
@@ -676,6 +735,7 @@ const App: React.FC = () => {
         onSetMapType={handleSetMapType}
         onSetForcedEnemy={handleSetForcedEnemy}
       />
+      </Profiler>
     </div>
   );
 };
