@@ -3087,9 +3087,32 @@ export const HIT_FEEDBACK = {
   // barely registers — both shake and a directional knockback.  Uses the
   // projectile's own damage (not the post-shield/armor value) so a heavy hit
   // jolts even when the shield eats it.
-  PLAYER_SHAKE_BASE: 4,        // floor shake on any player hit
-  PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
-  PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
+  /* A SHOT MUST NOT RIVAL A COLLISION (user call).
+   *
+   * These numbers predate the impact model and were on their own scale, so
+   * they landed far up the body-impact range: a 5-damage Drone PELLET
+   * produced 10.0 — as much as a 40px rock hitting the hull at speed 20 —
+   * and a 16-damage slug produced 23.2, nearly a full-tilt wall crash (30).
+   * Being shot by a pea-shooter outweighed flying into terrain.
+   *
+   * A projectile's actual momentum against the hull is negligible (mass 1 at
+   * speed 16 against a 100-mass ship is dv = 0.16, an order of magnitude
+   * under `SHAKE.IMPACT_DV_MIN`), so this shake is deliberately a LEGIBILITY
+   * signal — "you got hurt" — rather than a physical one, and damage is the
+   * right input for it.  What it needed was a place in the same scale:
+   *
+   *   pellet (5 dmg)  -> 4.0   below a wall crash at the break threshold (6)
+   *   Charger (7)     -> 5.0
+   *   slug (16)       -> 9.5
+   *   Bastion (18)    -> 10.5  about a 40px rock at speed 20 (10.5)
+   *   cap             -> 11    under a wall crash at speed 8 (12)
+   *
+   * So the heaviest shell in the game feels like a real rock hitting you,
+   * a pellet feels like less than a scrape, and nothing fired can approach
+   * ramming terrain.  Direction is unchanged: the shot's travel axis. */
+  PLAYER_SHAKE_BASE: 1.5,      // floor shake on any player hit
+  PLAYER_SHAKE_PER_DMG: 0.5,   // + this per point of shot damage
+  PLAYER_SHAKE_MAX: 11,        // cap — under a moderate crash, never near HEAVY
   /* The player's own shove is the same rule, normalised so the LEAN ship is
    * unchanged: 12 / PHYSICS_CONSTANTS.PLAYER_MASS (100) = the old 0.12 per
    * damage point.  Only a laden hull differs, and it differs the way the

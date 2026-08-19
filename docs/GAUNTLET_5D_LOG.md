@@ -1219,3 +1219,60 @@ collapsed to 87 passed with the rest never starting — which reads like a mass
 failure rather than a port conflict. Re-run clean it was 175. If a suite run
 ever reports a large number of tests simply not running, check for something
 else on 4173 before believing the failures.
+
+---
+
+## U12 — a shot must not rival a collision
+
+> "The screen shake on player hit by projectile is very strong. Can we reduce
+> this within the framework without adjusting projectile damage or speed?"
+
+Yes, and the framework is what makes it a two-line change rather than a
+guess. `HIT_FEEDBACK.PLAYER_SHAKE_*` predates the impact model and lived on
+its own scale, so it landed far up the body-impact range:
+
+| event | shake (before) |
+|---|---|
+| Drone pellet (5 dmg) | 10.0 |
+| Charger fan (7) | 12.4 |
+| Sniper slug (16) | 23.2 |
+| Bastion shell (18) | 24.0 (cap) |
+| — *the scale it sits inside* — | |
+| wall crash at the break threshold (speed 4) | 6.0 |
+| 40px rock shard at speed 20 | 10.5 |
+| wall crash at speed 12 | 18.0 |
+| wall crash, full tilt | 30.0 |
+
+A five-damage PELLET shook the camera as hard as a 40px rock hitting the hull
+at speed 20, and a slug nearly as hard as flying into terrain at full speed.
+
+**Why the input stays damage.** A projectile's actual momentum against the
+hull is `mass 1 × speed 16 / mass 100` = `dv` 0.16 — an order of magnitude
+under `SHAKE.IMPACT_DV_MIN`, so on the physical model a bolt would shake the
+camera not at all. This shake is deliberately a LEGIBILITY signal ("you got
+hurt"), not a physical one, and damage is the right input for it. What it
+lacked was a place in the same scale, which is exactly what the impact model
+now provides to compare against.
+
+Re-pointed so the range lands under collisions: base 4 → 1.5, per-damage
+1.2 → 0.5, cap 24 → 11.
+
+| event | now | reads as |
+|---|---|---|
+| pellet (5) | 4.0 | less than a scrape |
+| Charger (7) | 5.0 | |
+| slug (16) | 9.5 | |
+| Bastion shell (18) | 10.5 | about a 40px rock at speed 20 |
+| cap | 11 | under a wall crash at speed 8 (12) |
+
+So the heaviest shell in the game feels like a real rock hitting you, a
+pellet feels like less than a scrape, and nothing fired can approach ramming
+terrain. Direction is unchanged (the shot's travel axis), and the player's
+knockback KICK is untouched — the complaint was the camera.
+
+Pinned in `shake.spec.ts` as an ORDERING against LIVE body-impact numbers
+rather than against constants copied into the test, so it keeps meaning if
+either scale is retuned later. Verified non-vacuous: it fails with the old
+values restored.
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **176 passed** ✅.

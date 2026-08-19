@@ -144,6 +144,58 @@ test.describe('shake magnitude follows the impact, not the speed', () => {
   });
 });
 
+test.describe('a shot never rivals a collision', () => {
+  /** Shoot the PLAYER and report the shake it armed. The projectile-hit
+   *  shake is deliberately damage-driven rather than momentum-driven — a
+   *  bolt's actual momentum against the hull is an order of magnitude under
+   *  the body-impact floor — so what has to hold is not a formula but a
+   *  PLACE IN THE SCALE: being shot must read as less violent than flying
+   *  into terrain. */
+  function shootPlayer(page: any, damage: number) {
+    return engine(page, (e, dmg: number) => {
+      const p = e.player;
+      e.shakeIntensity = 0; e.shakeTimer = 0; e.shakeDirX = 0; e.shakeDirY = 0;
+      const proj = {
+        id: 'shake_shot', type: 'PROJECTILE',
+        position: { x: p.position.x + p.size.x * 0.5 + 4, y: p.position.y },
+        velocity: { x: -16, y: 0 }, rotation: Math.PI,
+        size: { x: 6, y: 6 }, mass: 1, active: true, color: '#f00',
+        damage: dmg, ownerType: 'ENEMY', ownerId: 'e1', hitEntityIds: [],
+      };
+      e.physics.resolveCollision(proj, p, { x: 0, y: 0 }, undefined, undefined, e.handleScreenShake);
+      return { intensity: e.shakeIntensity, dirX: e.shakeDirX };
+    }, damage);
+  }
+
+  test('the heaviest shell shakes less than a moderate crash', async ({ page }) => {
+    const watch = await boot(page);
+    await quietPlayer(page);
+
+    // The two ends of the shipped enemy-damage range: a Drone pellet and a
+    // Bastion siege shell.
+    const pellet = await shootPlayer(page, 5);
+    const shell  = await shootPlayer(page, 18);
+
+    // Reference points on the BODY-impact scale, measured the same way the
+    // rest of this file does, so the comparison is between live numbers
+    // rather than against constants copied into the test.
+    const crashAtThreshold = await impact(page, null, 4);   // wall, break speed
+    const crashModerate    = await impact(page, null, 8);   // wall, twice that
+
+    expect(shell.intensity, 'a heavy shell stays under a moderate crash')
+      .toBeLessThan(crashModerate.intensity);
+    expect(pellet.intensity, 'a pellet stays under the crash threshold itself')
+      .toBeLessThan(crashAtThreshold.intensity);
+    // ...but a shell still outweighs a pellet: the readout is not flattened.
+    expect(shell.intensity).toBeGreaterThan(pellet.intensity);
+
+    // And it is still directional, along the shot's travel.
+    expect(shell.dirX).toBeLessThan(0);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('shake direction follows the impact vector', () => {
   test('a head-on hit lurches the camera along the shove, not at random', async ({ page }) => {
     const watch = await boot(page);
