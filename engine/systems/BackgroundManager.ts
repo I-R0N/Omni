@@ -3,39 +3,26 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, getActiveStarRegion, resolveStarParallax,
-  STAR_REGION_FADE,
+  getActiveStarBands, resolveStarParallax,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
-import { wrapDeltaX, wrapDeltaY, MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import { hexToRgb } from './render/drawUtils';
-
-/** Amplitude of each region-field wave, descending — one dominant structure
- *  with two finer ones laid over it.  Equal weights average into mush. */
-const REGION_WAVE_WEIGHTS = [1.0, 0.6, 0.35] as const;
-/** Phase offsets, so the waves do not all peak at the origin (which would put
- *  a conspicuous bullseye at the map centre, where the player spawns). */
-const REGION_WAVE_PHASES = [0.13, 0.71, 0.29] as const;
 
 /** A run of stars sharing one `fillStyle`, so the draw loop sets canvas state
  *  once per group instead of once per star.  Colour AND opacity are baked into
  *  the rgba string: a `globalAlpha` write costs the same as a `fillStyle`
- *  write, so folding alpha into the colour halves the state changes. */
+ *  write, so folding alpha into the colour halves the state changes.
+ *
+ *  ONE state change per group is the invariant.  A region field briefly split
+ *  each group into a solid run plus a fade band (up to six writes per group);
+ *  it was removed because the gating read as stars appearing and disappearing
+ *  in view — see the S13 decision in docs/GAUNTLET_STARFIELD_LOG.md. */
 interface StarGroup {
   fill: string;
   start: number;
   count: number;
-  /** Descending-opacity variants of `fill`, for the region field's fade band.
-   *  Precomputed because building an rgba string per frame would allocate in
-   *  the draw loop. */
-  fadeFills: string[];
-  /** How many of this group's leading stars are MILKY-WAY stars.  They sort
-   *  first and are never gated away by the region field — the galactic band is
-   *  a landmark, and a landmark that dissolves when you fly into a void is not
-   *  one.  Everything after them is ordered by a stable random threshold, so
-   *  drawing a PREFIX of the group is a spatially unbiased sample of it. */
-  mwCount: number;
 }
 
 interface NebulaPuff {
@@ -467,12 +454,7 @@ public setMapType(type: MapType) {
     const gY: number[][] = [];
     const gS: number[][] = [];
     const gB: number[][] = [];
-    // Stable random draw-order key per star.  Sorting each group by it is what
-    // lets the region field gate stars by taking a PREFIX of the group rather
-    // than testing every star every frame — see `renderStars`.  Milky-way stars
-    // get -1 so they sort ahead of everything and survive any gating.
-    const gT: number[][] = [];
-    for (let i = 0; i < NUM_GROUPS; i++) { gX.push([]); gY.push([]); gS.push([]); gB.push([]); gT.push([]); }
+    for (let i = 0; i < NUM_GROUPS; i++) { gX.push([]); gY.push([]); gS.push([]); gB.push([]); }
 
     const emit = (xDev: number, yDev: number, sizeCss: number, band: number,
                   colorIdx: number, opacity: number) => {
@@ -481,7 +463,6 @@ public setMapType(type: MapType) {
         gY[g].push(yDev);
         gS[g].push(this.starDevicePx(sizeCss, dpr));
         gB[g].push(band);
-        gT[g].push(band === MW_BAND ? -1 : this.starRand());
     };
 
     // WHOLE DEVICE PIXELS, both position and size.
@@ -552,33 +533,16 @@ public setMapType(type: MapType) {
         const colorIdx = (g / ALPHA_BUCKETS) | 0;
         const alpha = (g % ALPHA_BUCKETS) / (ALPHA_BUCKETS - 1);
         const [r, gg, bl] = hexToRgb(PALETTE[colorIdx]);
-        // Order the group by its draw-order key.  An INDEX permutation rather
-        // than sorting five parallel arrays in lockstep; generation-time, so
-        // the allocation is fine (the per-frame path still allocates nothing).
-        const keys = gT[g];
-        const order = new Uint32Array(n);
-        for (let i = 0; i < n; i++) order[i] = i;
-        order.sort((a, b) => keys[a] - keys[b]);
-        let mwCount = 0;
-        while (mwCount < n && keys[order[mwCount]] < 0) mwCount++;
-        const fadeFills: string[] = [];
-        for (let k = 1; k < STAR_REGION_FADE.STEPS; k++) {
-            const m = (STAR_REGION_FADE.STEPS - k) / STAR_REGION_FADE.STEPS;
-            fadeFills.push(`rgba(${r},${gg},${bl},${(alpha * m).toFixed(3)})`);
-        }
         this.starGroups.push({
             fill: `rgba(${r},${gg},${bl},${alpha.toFixed(3)})`,
-            fadeFills,
             start: cursor,
             count: n,
-            mwCount,
         });
         for (let i = 0; i < n; i++) {
-            const j = order[i];
-            this.starX[cursor] = gX[g][j];
-            this.starY[cursor] = gY[g][j];
-            this.starSize[cursor] = gS[g][j];
-            this.starBandIdx[cursor] = gB[g][j];
+            this.starX[cursor] = gX[g][i];
+            this.starY[cursor] = gY[g][i];
+            this.starSize[cursor] = gS[g][i];
+            this.starBandIdx[cursor] = gB[g][i];
             cursor++;
         }
     }
@@ -690,7 +654,7 @@ public setMapType(type: MapType) {
 
     // RENDER STARS — drawn directly from the star arrays, no intermediate
     // canvas.  See `renderStars`.
-    this.renderStars(ctx, dx, dy, dpr, cameraPos);
+    this.renderStars(ctx, dx, dy, dpr);
 
     // Back to CSS-pixel space for the shooting stars, which are laid out in
     // CSS units like the rest of the renderer.
@@ -722,44 +686,7 @@ public setMapType(type: MapType) {
    *  Hoisted to a method rather than a closure inside `render` on purpose: a
    *  function constructed in a per-frame path is rebuilt every frame
    *  (CLAUDE.md §8, the refill idiom's sibling rule). */
-  /** Star-density field: how rich the sky is at a world position, in [0, 1].
-   *
-   *  Three plane waves with INTEGER wave numbers.  Integer is the whole trick —
-   *  it makes the field exactly periodic over MAP_WIDTH x MAP_HEIGHT, so it is
-   *  seam-continuous on the torus with no special case at the wrap (the same
-   *  device FlowFieldGrid's breathing term uses).  Irregular-looking because the
-   *  three wave VECTORS are not multiples of one another; a single wave, or a
-   *  product of two, would read as stripes or a checkerboard.
-   *
-   *  Deliberately NOT the asteroid flow field, which was evaluated for this:
-   *  that is a normalised DIRECTION field with no density signal in its
-   *  magnitude, it is re-baked when tiles are destroyed and slowly breathes, and
-   *  reading it here would couple the backdrop to a gameplay system.  A sky that
-   *  reshuffles when you shoot a nearby rock is a bug that would be very hard to
-   *  recognise as one.  See the S7 decision in the ledger. */
-  private regionDensityAt(
-    wx: number, wy: number,
-    waves: ReadonlyArray<readonly [number, number]> = getActiveStarRegion().waves,
-  ): number {
-    if (waves.length === 0) return 1;
-    const u = wx / MAP_WIDTH;
-    const v = wy / MAP_HEIGHT;
-    const TAU = Math.PI * 2;
-    // Fixed weights, descending: one dominant structure with two finer ones on
-    // top.  Equal weights would average into mush.
-    const W = REGION_WAVE_WEIGHTS;
-    let n = 0;
-    let norm = 0;
-    for (let i = 0; i < waves.length; i++) {
-      const w = i < W.length ? W[i] : W[W.length - 1];
-      n += w * Math.sin(TAU * (waves[i][0] * u + waves[i][1] * v + REGION_WAVE_PHASES[i % REGION_WAVE_PHASES.length]));
-      norm += w;
-    }
-    const d = 0.5 + n / (2 * norm);
-    return d < 0 ? 0 : d > 1 ? 1 : d;
-  }
-
-  private renderStars(ctx: CanvasRenderingContext2D, dx: number, dy: number, dpr: number, cameraPos: Vector2) {
+  private renderStars(ctx: CanvasRenderingContext2D, dx: number, dy: number, dpr: number) {
     const pw = this.bandPixelWidth;
     const ph = this.bandPixelHeight;
     if (pw <= 0 || ph <= 0) return;
@@ -778,71 +705,32 @@ public setMapType(type: MapType) {
         this.bandOffsetY[b] = ((this.bandOffsetY[b] - sy) % ph + ph) % ph;
     }
 
-    // REGION GATING (S7).  Star density varies by where in the MAP the camera
-    // is: rich regions fill the sky in, voids thin it out.  Because each group
-    // is sorted by a stable random key, drawing a PREFIX of it is a spatially
-    // unbiased random sample — so this costs ONE field sample per frame and a
-    // multiply per group, not a test per star.  Milky-way stars sort ahead of
-    // the key and are never gated away.
-    const region = getActiveStarRegion();
-    const frac = region.waves.length > 0
-      ? region.minFrac + (1 - region.minFrac)
-                       * this.regionDensityAt(cameraPos.x, cameraPos.y, region.waves)
-      : 1;
-
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1.0;
     // Opacity is baked into each group's rgba fill, so `globalAlpha` stays 1
-    // and a group costs one state change (plus the fade band's, below).
+    // and a group costs exactly ONE state change followed by a contiguous walk.
     const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
     const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
     const groups = this.starGroups;
-    const FADE_STEPS = STAR_REGION_FADE.STEPS;
 
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
-        const gated = grp.count - grp.mwCount;
-        const visible = frac >= 1 ? gated : Math.round(gated * frac);
-        // The last slice of the visible run FADES rather than ending abruptly.
-        // Without this a star switches on or off in a single frame, anywhere on
-        // screen including the middle of it, which is exactly the flashing the
-        // region field must never cause.
-        const band = (frac >= 1 || visible <= 0)
-          ? 0
-          : Math.min(visible, Math.round(gated * STAR_REGION_FADE.EDGE_FRAC));
-        const solidEnd = grp.start + grp.mwCount + visible - band;
-
-        // Full-opacity run, then the fade band in descending steps.  Each run
-        // is one fillStyle write and a contiguous walk; the star loop itself is
-        // identical in every run, so this costs state changes, not per-star work.
-        let runStart = grp.start;
-        let runEnd = solidEnd;
-        for (let step = 0; step <= FADE_STEPS - 1; step++) {
-            if (step === 0) {
-                ctx.fillStyle = grp.fill;
-            } else {
-                ctx.fillStyle = grp.fadeFills[step - 1];
-                runStart = runEnd;
-                runEnd = solidEnd + Math.round((band * step) / (FADE_STEPS - 1));
-            }
-            if (runEnd <= runStart) { if (step === 0) { runEnd = solidEnd; } continue; }
-
-            // SUB-PIXEL: the exact fractional position, so the field moves
-            // continuously at any speed.  Canvas antialiases the rect across
-            // the pixels it straddles — coverage antialiasing on an
-            // axis-aligned rect, which is analytic and consistent across
-            // engines, unlike the drawImage resampling filter this gauntlet
-            // began by removing (and which S4 deleted from this path).
-            for (let i = runStart; i < runEnd; i++) {
-                const b = B[i];
-                let x = X[i] + bofx[b];
-                if (x >= pw) x -= pw;
-                let y = Y[i] + bofy[b];
-                if (y >= ph) y -= ph;
-                const sz = S[i];
-                ctx.fillRect(x, y, sz, sz);
-            }
-            if (band <= 0) break;   // nothing gated — the solid run was all of it
+        ctx.fillStyle = grp.fill;
+        const end = grp.start + grp.count;
+        // SUB-PIXEL: the exact fractional position, so the field moves
+        // continuously at any speed.  Canvas antialiases the rect across the
+        // pixels it straddles — coverage antialiasing on an axis-aligned rect,
+        // which is analytic and consistent across engines, unlike the
+        // drawImage resampling filter this gauntlet began by removing (and
+        // which S4 deleted from this path).
+        for (let i = grp.start; i < end; i++) {
+            const b = B[i];
+            let x = X[i] + bofx[b];
+            if (x >= pw) x -= pw;
+            let y = Y[i] + bofy[b];
+            if (y >= ph) y -= ph;
+            const sz = S[i];
+            ctx.fillRect(x, y, sz, sz);
         }
     }
   }

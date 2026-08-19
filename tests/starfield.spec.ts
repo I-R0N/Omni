@@ -367,151 +367,6 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('fades stars in and out at the region edge — they never pop', async ({ page }) => {
-    // The bug this fixes: region gating drew a hard PREFIX of each group, so a
-    // star switched fully on or fully off in one frame, anywhere on screen
-    // including the middle of it. Stars must never flash.
-    //
-    // The fix draws the last slice of the visible run at descending opacity, so
-    // a star crosses several intermediate alphas as the cut sweeps past it.
-    // This asserts the fade band exists, is ordered, and reaches low enough
-    // that the final step is close to invisible before a star is dropped.
-    const watch = await boot(page);
-    await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
-
-    const fades = await engine(page, e => {
-      const bg = e.renderer.backgroundManager;
-      // Take the group with the most stars — the one most likely to be seen.
-      let biggest = bg.starGroups[0];
-      for (const g of bg.starGroups) if (g.count > biggest.count) biggest = g;
-      const alphaOf = (fill: string) => Number(fill.slice(fill.lastIndexOf(',') + 1, -1));
-      return {
-        steps: biggest.fadeFills.length,
-        base: alphaOf(biggest.fill),
-        ladder: biggest.fadeFills.map(alphaOf),
-      };
-    });
-
-    // A fade band exists and has real depth to it.
-    expect(fades.steps).toBeGreaterThanOrEqual(3);
-
-    // Strictly descending, and all below the group's own opacity — otherwise a
-    // "fading" star would be drawn brighter than a solid one.
-    for (let i = 0; i < fades.ladder.length; i++) {
-      expect(fades.ladder[i]).toBeLessThan(i === 0 ? fades.base : fades.ladder[i - 1]);
-    }
-
-    // The dimmest step is a small fraction of full, so the last thing that
-    // happens before a star vanishes is nearly invisible rather than a pop.
-    expect(fades.ladder[fades.ladder.length - 1]).toBeLessThan(fades.base * 0.35);
-
-    watch.assertClean();
-  });
-
-  test('varies density by map REGION without ever emptying the sky', async ({ page }) => {
-    // S7. Density is gated by a world-space field sampled at the camera, and
-    // the gate is a PREFIX of each fill group (groups are sorted by a stable
-    // random key, so a prefix is a spatially unbiased sample). Two things have
-    // to hold and neither is visible in a screenshot taken in one place:
-    // the field must actually VARY across the map, and it must never reach zero.
-    const watch = await boot(page);
-    await startRun(page);
-    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
-
-    const probe = await engine(page, (e) => {
-      const bg = e.renderer.backgroundManager;
-      // Walk the map and record the drawn fraction the renderer would use.
-      // Reading the field directly rather than counting pixels: the sim
-      // exposes the same fact (harness rule 3).
-      let min = Infinity, max = -Infinity;
-      const mw = e.currentMap.width, mh = e.currentMap.height;
-      for (let i = 0; i < 40; i++) {
-        for (let j = 0; j < 40; j++) {
-          const d = bg.regionDensityAt((i / 40 - 0.5) * mw, (j / 40 - 0.5) * mh);
-          if (d < min) min = d;
-          if (d > max) max = d;
-        }
-      }
-      // Seam continuity: the field is built from integer wave numbers so it
-      // must agree exactly across the torus wrap. A discontinuity here would
-      // show in game as a visible line in the sky at the map edge.
-      //
-      // The period is the LIVE map size, read off the loaded map rather than
-      // assumed — the field is periodic over MAP_WIDTH x MAP_HEIGHT, and every
-      // map is a different size.
-      const W = e.currentMap.width, H = e.currentMap.height;
-      const seam = Math.abs(
-        bg.regionDensityAt(-W / 2, 123) - bg.regionDensityAt(W / 2, 123),
-      );
-      const seamY = Math.abs(
-        bg.regionDensityAt(456, -H / 2) - bg.regionDensityAt(456, H / 2),
-      );
-      // NO SUB-MAP REPETITION. The wave vectors have no common factor, so the
-      // field must NOT also be periodic over half the map — if it were, a
-      // player flying in one direction would pass the identical sky twice.
-      // (The first draft scaled every vector by a common multiplier and did
-      // exactly that; `perf/starfield-regions.mjs` showed the tiling.)
-      let halfPeriodMaxDiff = 0;
-      for (let i = 0; i < 24; i++) {
-        const px = (i / 24 - 0.5) * W;
-        const d0 = bg.regionDensityAt(px, 77);
-        const d1 = bg.regionDensityAt(px + W / 2, 77);
-        halfPeriodMaxDiff = Math.max(halfPeriodMaxDiff, Math.abs(d0 - d1));
-      }
-      return { min, max, seam, seamY, halfPeriodMaxDiff, mapW: W, mapH: H, groups: bg.starGroups.length };
-    });
-
-    // Sanity that we sampled a real map, not a 0x0 one.
-    expect(probe.mapW).toBeGreaterThan(100);
-    expect(probe.mapH).toBeGreaterThan(100);
-
-    // The field genuinely varies — a flat field would gate nothing.
-    expect(probe.max - probe.min).toBeGreaterThan(0.5);
-    expect(probe.min).toBeGreaterThanOrEqual(0);
-    expect(probe.max).toBeLessThanOrEqual(1);
-
-    // …and it wraps seamlessly on the torus, on both axes.
-    expect(probe.seam).toBeLessThan(1e-9);
-    expect(probe.seamY).toBeLessThan(1e-9);
-
-    // …while NOT repeating at half the map. This is the bug the region
-    // visualiser caught: a common factor in the wave vectors tiles the field.
-    expect(probe.halfPeriodMaxDiff).toBeGreaterThan(0.2);
-
-    // The emptiest region still keeps a real share of the budget. A sky that
-    // can reach zero reads as a rendering failure, not as a void.
-    //
-    // Measured over the WHOLE FIELD, not per group: a rare-colour group holding
-    // three stars legitimately rounds to zero in a void, and that is invisible.
-    // What must not collapse is the sky.
-    const floor = await engine(page, e => {
-      const bg = e.renderer.backgroundManager;
-      let drawn = 0, total = 0;
-      for (const g of bg.starGroups) {
-        // Reproduce the renderer's prefix arithmetic at the sparsest field
-        // value any cycle step allows, which is what `minFrac` bounds.
-        const gated = g.count - g.mwCount;
-        drawn += g.mwCount + Math.round(gated * 0.10);
-        total += g.count;
-      }
-      return drawn / total;
-    });
-    expect(floor).toBeGreaterThan(0.08);
-
-    // …and the Milky Way survives it intact — it is a landmark, and a landmark
-    // that dissolves in a void is not one.
-    const mw = await engine(page, e => {
-      const bg = e.renderer.backgroundManager;
-      let kept = 0;
-      for (const g of bg.starGroups) kept += g.mwCount;
-      return { kept, expected: bg.milkyWayStarCount };
-    });
-    expect(mw.kept).toBe(mw.expected);
-
-    watch.assertClean();
-  });
-
   test('parallax SPREAD is independent of the layer COUNT', async ({ page }) => {
     // The two were conflated before the spread became its own parameter: the
     // span between the farthest and nearest layer is set by SPREAD, so adding
@@ -711,6 +566,57 @@ test.describe('the star field', () => {
 
     expect(after.milkyWayStarCount / before.milkyWayStarCount).toBeGreaterThan(1.8);
     expect(after.milkyWayStarCount / before.milkyWayStarCount).toBeLessThan(2.2);
+
+    watch.assertClean();
+  });
+
+  test('the density cycle reaches PAST the per-map range, up to the old sky', async ({ page }) => {
+    // S13, user report: a mobile browser handles 1200 easily at the 'device'
+    // star size, so the ceiling is worth being able to look at. The cycle's top
+    // steps therefore run above STAR_DENSITY_RANGE.MAX (729), up to ~2700 — the
+    // density the field carried before S2 derived the count from area.
+    //
+    // What is asserted is that the high steps are REAL: an override of N puts N
+    // stars per 10 000 CSS px² on screen. A step that silently clamped at MAX
+    // would still cycle, still show its label, and change nothing — which is
+    // exactly the failure mode the seeded sky was introduced to make visible.
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
+
+    // Walk the whole cycle once and record every density it actually produces,
+    // rather than assuming which index holds which step.
+    //
+    // Waiting on `initialized` rather than on the star count: the cycle only
+    // invalidates the field and the next RENDER rebuilds it, and two adjacent
+    // steps can legitimately produce the same count (AUTO resolves to the hub's
+    // own 729, which is also an explicit step). `initialized` goes false on
+    // invalidation and true again when the rebuild lands, which is the actual
+    // event being waited for.
+    const seen: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      await engine(page, e => {
+        e.dbg.cycleStarDensity();
+        e.renderer.backgroundManager.initialized = false;
+      });
+      await waitForEngine(page, e => e.renderer.backgroundManager.initialized === true,
+        'the field to regenerate');
+      seen.push(densityOf(await readField(page)));
+    }
+
+    const top = Math.max(...seen);
+    // Well past the top of the per-map range, and close to the pre-gauntlet sky.
+    expect(top).toBeGreaterThan(DEFAULT_DENSITY * 1.5);
+    expect(top).toBeGreaterThan(2600);
+    expect(top).toBeLessThan(2800);
+
+    // Every step lands on the density it names — ±1% for the per-band integer
+    // rounding, which is the same tolerance the area test uses.
+    for (const want of [1200, 1800, 2700]) {
+      const hit = seen.find(d => Math.abs(d - want) < want * 0.01);
+      expect(hit, `no cycle step produced ~${want}; got ${seen.map(Math.round).join(', ')}`)
+        .toBeDefined();
+    }
 
     watch.assertClean();
   });

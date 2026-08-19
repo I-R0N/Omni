@@ -424,10 +424,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleStarParallax();
   };
 
-  const handleCycleStarRegion = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleStarRegion();
-  };
-
 
   const handleApplyCorrosion = () => {
       if (engineRef.current) engineRef.current.debugApplyCorrosion();
@@ -641,7 +637,6 @@ const App: React.FC = () => {
         onCycleStarSize={handleCycleStarSize}
         onCycleStarBands={handleCycleStarBands}
         onCycleStarParallax={handleCycleStarParallax}
-        onCycleStarRegion={handleCycleStarRegion}
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}

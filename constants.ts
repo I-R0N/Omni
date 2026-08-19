@@ -2112,7 +2112,18 @@ export const STAR_DENSITY_BY_MAP: Record<MapType, number> = {
 // A density override does NOT drag parallax with it: the two DBG rows are
 // independent so either can be isolated. The DERIVED inverse relation applies
 // to the per-map values, which is where it belongs.
-export const STAR_DENSITY_CYCLE: ReadonlyArray<number> = [0, 729, 400, 185, 90, 1200] as const;
+//
+// The cycle runs PAST the top of STAR_DENSITY_RANGE on purpose.  1200 was
+// reported handling easily on a mobile browser at the 'device' star size, and
+// the pre-gauntlet phone sky measured ~2693 stars per 10k CSS px^2 — so the
+// steps above MAX exist to reach the density the field used to have, which is
+// the one comparison the per-map ladder cannot make on its own.  They are
+// OVERRIDES only: no map declares a density above MAX, because the parallax
+// relation is defined across the range and `parallaxForDensity` merely clamps
+// beyond it.  If one of these ever becomes a map's own value, raise MAX and
+// re-space the ladder rather than leaving a map outside the range.
+export const STAR_DENSITY_CYCLE: ReadonlyArray<number> =
+  [0, 729, 400, 185, 90, 1200, 1800, 2700] as const;
 let activeStarDensityIndex = 0;
 export function getStarDensityOverride(): number { return STAR_DENSITY_CYCLE[activeStarDensityIndex]; }
 export function cycleStarDensity(): number {
@@ -2151,64 +2162,22 @@ export function getActiveStarParallaxName(mapType?: MapType): string {
   return mapType === undefined ? 'Auto' : `Auto ${resolveStarParallax(mapType).toFixed(1)}x`;
 }
 
-// ─── DBG: star REGIONS (non-uniform density across the map) ──────────────────
+// STAR REGIONS (non-uniform density across the map) WERE TRIED AND REMOVED.
 //
-// Star density varies by WHERE IN THE MAP the camera is, instead of being
-// uniform everywhere: fly into a rich region and the sky fills in, fly into a
-// void and it thins out.  This modulates whatever the map's own density is —
-// it is a variation ACROSS a map, where STAR_DENSITY_BY_MAP is the difference
-// BETWEEN maps.
+// The idea was that density would vary by WHERE IN THE MAP the camera sits —
+// fly into a rich region and the sky fills in, fly into a void and it thins
+// out — implemented as a torus-periodic plane-wave field gating a prefix of
+// each draw group.  It worked as specified and it read as a defect: stars
+// appearing and disappearing in view.  The edge fade bought smoothness, not
+// legitimacy — the stars still arrived and left in front of the player, which
+// is not something a sky does.  See the S13 decision in the ledger, and S7 for
+// the flow field this was NOT built on and why.
 //
-// WHY NOT THE FLOW FIELD (evaluated, rejected — see the S7 decision in
-// docs/GAUNTLET_STARFIELD_LOG.md):
-//   - It is a DIRECTION field.  `sampleAsteroidFlow` returns normalised vectors
-//     deflected around obstacles, so its magnitude carries no density signal to
-//     read.  We would be inventing one from a quantity that does not encode it.
-//   - It MUTATES with gameplay.  Cells are re-baked when a tile is destroyed
-//     and the whole field slowly breathes.  Stars are the most distant thing in
-//     the scene; a backdrop that reshuffles when you shoot a nearby rock is a
-//     category error, not a feature.
-//   - It would couple the backdrop to a gameplay system.  BackgroundManager
-//     currently knows about toroidal maths, constants and assets, and nothing
-//     else.
-//
-// `minFrac` is the share of the star budget still drawn in the emptiest region
-// — never 0, because a completely empty sky reads as a rendering failure rather
-// than as a void.
-//
-// `waves` are the field's wave VECTORS, as integer (kx, ky) pairs.  Integer is
-// what makes the field exactly periodic over the map, and the pairs MUST HAVE
-// NO COMMON FACTOR.  That is not a style note: a common factor f makes the
-// field periodic over map/f as well, so the same regions repeat f times across
-// the map and a player flying in one direction passes through the identical
-// sky pattern over and over.  The first draft used a single `scale` multiplier
-// over a fixed base, which gives every vector the factor `scale` by
-// construction — `perf/starfield-regions.mjs` printed the field as ASCII and
-// the 2x2 tiling was immediately visible.  Wave vectors are therefore chosen
-// per step rather than scaled.
-//
-// Bigger wave numbers mean SMALLER regions.  The 'Medium' set spans roughly
-// one map down to a fifth of it, which is a few seconds of travel per region.
-export interface StarRegionStep {
-  name: string;
-  minFrac: number;
-  waves: ReadonlyArray<readonly [number, number]>;
-}
-export const STAR_REGION_CYCLE: ReadonlyArray<StarRegionStep> = [
-  // gcd(1,2,3,1,2,5) = 1 — no sub-map repetition.
-  { name: 'Medium', minFrac: 0.30, waves: [[1, 2], [3, -1], [2, 5]] },
-  { name: 'Strong', minFrac: 0.10, waves: [[1, 2], [3, -1], [2, 5]] },
-  // gcd(2,3,5,2,7,4) = 1 — smaller regions, still no repetition.
-  { name: 'Fine',   minFrac: 0.25, waves: [[2, 3], [5, -2], [7, 4]] },
-  { name: 'Off',    minFrac: 1.00, waves: [] },
-] as const;
-let activeStarRegionIndex = 0;
-export function getActiveStarRegion(): StarRegionStep { return STAR_REGION_CYCLE[activeStarRegionIndex]; }
-export function getActiveStarRegionName(): string { return STAR_REGION_CYCLE[activeStarRegionIndex].name; }
-export function cycleStarRegion(): StarRegionStep {
-  activeStarRegionIndex = (activeStarRegionIndex + 1) % STAR_REGION_CYCLE.length;
-  return STAR_REGION_CYCLE[activeStarRegionIndex];
-}
+// The parts worth keeping are recorded rather than the code: a field built
+// from INTEGER wave vectors is exactly periodic over the map and therefore
+// seam-continuous on the torus, and those vectors must share NO COMMON FACTOR
+// or the same regions tile several times across the map.  Anything that varies
+// the backdrop spatially will need both facts again.
 
 // STAR MOTION IS SUB-PIXEL, AND THERE IS NO LONGER A CHOICE ABOUT IT.
 //
@@ -2228,22 +2197,6 @@ export function cycleStarRegion(): StarRegionStep {
 // `drawImage` BLIT FILTER on the old pre-rendered band canvases, and those
 // canvases are gone.  What remains is fillRect coverage antialiasing on an
 // axis-aligned rect — analytic, and consistent across engines.
-
-// How the region field's edge is FADED, so gated stars never pop.
-//
-// Region gating draws a prefix of each (threshold-sorted) draw group, so a
-// hard cut makes a star switch on or off in one frame — anywhere on screen,
-// including the middle of it.  Stars must never flash, so the stars nearest the
-// cut are drawn at reduced alpha instead: the last `EDGE_FRAC` of the visible
-// run is split into `STEPS` sub-runs of descending opacity, and a star crosses
-// them one at a time as the cut sweeps past.  Costs STEPS extra fillStyle
-// writes per group, not a per-star test.
-export const STAR_REGION_FADE = {
-  /** Share of a group's gated stars that form the fade band. */
-  EDGE_FRAC: 0.35,
-  /** Opacity steps across that band.  More = smoother, at one fillStyle each. */
-  STEPS: 6,
-} as const;
 
 // ─── DBG: star size floor ────────────────────────────────────────────────────
 //

@@ -34,8 +34,9 @@
  *  number and not the device's.  Draw-call count and byte count are the
  *  device-independent halves of that cost, and they are what this reports.
  *
- *  Sibling probes: `starfield-regions.mjs` (the S7 region field, as ASCII)
- *  and `starfield-motion.mjs` (the S8 low-speed jitter).
+ *  Sibling probe: `starfield-motion.mjs` (the S8 low-speed jitter).
+ *  (`starfield-regions.mjs` printed the S7 region field as ASCII; the field
+ *  was removed in S13 and the probe went with it.)
  *
  *  Usage:
  *    npx vite build && npx vite preview --port 4183 --strictPort &
@@ -163,7 +164,7 @@ const PROBE = () => {
   const scratch = document.createElement('canvas');
   scratch.width = bandW; scratch.height = bandH;
   const sctx = scratch.getContext('2d', { willReadFrequently: true });
-  bg.renderStars(sctx, 0, 0, bg.sceneDpr, e.camera.position);
+  bg.renderStars(sctx, 0, 0, bg.sceneDpr);
   const composed = litOf(scratch);
   const sampled = [{ band: 'composed', ...composed }];
   const meanLitPerBand = composed.lit;
@@ -431,7 +432,7 @@ const BENCH = (iters) => {
   // A/B of two structures rather than an A/B of this file's opinion of them
   // (tests/README.md harness rule 6, which applies to probes too).
   const n = bg.starCount + bg.milkyWayStarCount;
-  const pathDirect = () => { bg.renderStars(g, 0, 0, bg.sceneDpr, e.camera.position); };
+  const pathDirect = () => { bg.renderStars(g, 0, 0, bg.sceneDpr); };
 
   const time = (fn) => {
     for (let w = 0; w < 3; w++) { fn(); flush(); }         // warm up

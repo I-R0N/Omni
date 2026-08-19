@@ -1957,19 +1957,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   to look like it did.  `effectiveDpr()` is a
   GENERATION input here, not just a draw-time one, so `sceneDpr` is part of
   the rebuild guard — a render-scale cap change must regenerate the field.
-  (3) **Star density varies by MAP REGION, and the field's wave vectors must
-  have NO COMMON FACTOR.**  `regionDensityAt` sums plane waves with INTEGER
-  wave vectors, which is what makes it periodic over `MAP_WIDTH ×
-  MAP_HEIGHT` and therefore seam-continuous on the torus.  A common factor
-  `f` also makes it periodic over `map/f`, so the same regions tile `f`
-  times across the map and a player flying one direction passes the
-  identical sky repeatedly — that shipped in a first draft and is invisible
-  in any single frame.  Control region SIZE by picking bigger wave numbers,
-  never by multiplying the set by a scale.  Gating is a PREFIX of each
-  fill-style group (groups are sorted by a stable random key at generation,
-  so a prefix is a spatially unbiased sample), which is why it costs one
-  sample per frame rather than a test per star.  `perf/starfield-regions.mjs`
-  prints the field as ASCII — use it, not a screenshot, to judge the shape.
+  (3) **The sky is UNIFORM across a map, and per-map density is the only
+  spatial variation there is.**  A region field that varied density by where
+  in the map the camera sat was built and then REMOVED: gating stars by a
+  world-space field means stars arrive and leave in front of the player,
+  which reads as a rendering defect however smoothly it is faded.  Two facts
+  from it are worth keeping if anything ever varies the backdrop spatially
+  again — a field built from INTEGER wave vectors is exactly periodic over
+  the map and so seam-continuous on the torus, and those vectors must share
+  NO COMMON FACTOR or the same regions tile several times across it (that
+  shipped in a first draft and is invisible in any single frame).  Density
+  itself is DBG-cyclable well past `STAR_DENSITY_RANGE.MAX`, up to the
+  ~2700 the field carried before this gauntlet, so the top of the range can
+  be re-judged on a device rather than argued about.
 
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**  `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
   INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen

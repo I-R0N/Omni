@@ -1713,8 +1713,6 @@ export interface EngineStats {
   starBandsName?: string;
   /** DBG: active parallax SPREAD (nearest-vs-farthest scroll range). */
   starParallaxName?: string;
-  /** DBG: active star-region density variation ('Medium' / 'Off' / …). */
-  starRegionName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).

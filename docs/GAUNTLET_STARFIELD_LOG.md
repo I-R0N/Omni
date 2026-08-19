@@ -41,6 +41,10 @@ Base: `claude/plan-completion`. Branch: `claude/starfield-density-resampling-qpp
 - [x] **S12 — Per-map skies + a hub test rack** (user request). Every map has
       its own density (90–729) with parallax DERIVED inversely; six test portals
       beside the home station step the range top-to-bottom.
+- [x] **S13 — Regions removed; the density ceiling raised** (user report).
+      S7's region field is deleted outright — it read as stars appearing and
+      disappearing in view. The DBG density cycle now reaches 1200 / 1800 /
+      2700, past the per-map range, up to the pre-gauntlet sky.
 
 ---
 
@@ -953,6 +957,77 @@ the source. The explicit steps are overrides for comparing two settings on one
 map. A density override deliberately does NOT drag parallax with it: the rows
 stay independent so either can be isolated.
 
+## S13 — the region field is deleted, and the ceiling is raised
+
+> *"mobile browser with star size set to device px can handle 1200 star density
+> easily. Can we add back in the higher limits on density to the debug menu?
+> Additionally, star regions don't work as well as I had hoped, they feel like
+> stars are just appearing and disappear in view. Let's remove this feature
+> completely."*
+
+### The regions are gone, and the S9 fade did not save them
+
+S7 built the field, S9 fixed the popping it caused by fading the cut, and the
+report says the fade did not address the actual objection: stars still **arrive
+and leave in front of the player**. That is a different complaint from the one
+S9 answered. S9 fixed the *discontinuity* — a star switching state in a single
+frame — and it did fix it; what remains is that a star fading in mid-screen is
+still a star that was not there a moment ago, and a sky does not do that. A
+smoother transition into a wrong behaviour is still the wrong behaviour, which
+is the second time in this gauntlet that a measurable improvement (S8's dither
+scored better, S9's fade removed a real discontinuity) failed to be a
+perceptual one.
+
+Removed rather than defaulted to Off, per the request. What went:
+
+| | |
+|---|---|
+| `constants.ts` | `StarRegionStep`, `STAR_REGION_CYCLE`, `STAR_REGION_FADE`, the three cycle functions |
+| `BackgroundManager` | `regionDensityAt`, the wave weight/phase tables, the per-frame gate, the fade-band draw loop, `StarGroup.fadeFills`, `StarGroup.mwCount`, and the generation-time per-group sort |
+| wiring | `EngineStats.starRegionName`, `dbg.cycleStarRegion`, the App handler, the UIOverlay row |
+| tooling | `perf/starfield-regions.mjs` and two tests |
+
+The **sort went with it**, and that is the part worth noting rather than the
+deletions. Each group was ordered by a stable random key for exactly one
+reason: so that drawing a PREFIX of it was a spatially unbiased sample. With no
+prefix to draw, the sort ordered stars that are all the same colour, all the
+same opacity, and drawn in one run — invisible work at generation time and a
+false clue for the next reader. Removing it also restores the invariant
+CLAUDE.md states: **one state change per group**. Region fading cost up to six
+`fillStyle` writes per group; the draw loop is back to one `fillStyle` and a
+contiguous walk.
+
+Two things from S7 are recorded in `constants.ts` and CLAUDE.md instead of
+being carried as code, because anything that ever varies the backdrop spatially
+will need them again: integer wave vectors are what make a field seam-continuous
+on the torus, and those vectors must share no common factor or the regions tile
+several times across the map.
+
+Side effect worth stating plainly: **every sky in the game is now a different
+sky**. The removed `gT` push consumed one seeded random per star, so dropping it
+shifts the whole generation sequence. Deterministic as before, reproducible as
+before, just not the same arrangement.
+
+### The ceiling
+
+`STAR_DENSITY_CYCLE` gains 1800 and 2700 above the existing 1200. 2700 is not
+an arbitrary top — it is approximately the density the phone actually rendered
+before S2 (**2692.92** stars per 10k CSS px², measured in S1), so the cycle now
+spans from the sparsest per-map sky all the way back to the field this gauntlet
+started from. That makes the S2 decision re-judgeable by looking at it rather
+than by reading the table.
+
+They are **overrides only**. `STAR_DENSITY_RANGE.MAX` stays at 729 and no map
+declares a density above it, because `parallaxForDensity` is defined across the
+range and merely clamps outside it — a map above MAX would silently get the
+MAX-end spread. If one of these steps ever becomes a map's own value, the fix is
+to raise MAX and re-space the ladder, and that is written next to the cycle.
+
+Pinned by a new test that walks the whole cycle and asserts each high step
+produces the density it names to within 1%. A step that silently clamped at MAX
+would still cycle and still show its label — the exact failure the seeded sky
+was introduced to make visible.
+
 ## Merge with `claude/plan-completion` (PR #84 landed)
 
 PR #84 (Pair C — input/polish) merged into the base while this branch was open,
@@ -1246,9 +1321,62 @@ furthest parallax layer measurably denser than the rest, which is exactly the
 artifact the density work is trying to remove — and it would be invisible in
 any aggregate check. Even split costs at most 30 stars of the ~6 000 budget.
 
+**D32 — DELETE the region field rather than default it to Off.** Beat: keeping
+the code and shipping `Off` as the default step, which costs nothing at runtime
+and leaves the feature one tap away. Rejected because a dead feature behind a
+DBG toggle is not free: it holds the per-group sort, `mwCount`, `fadeFills` and
+a branch in the hottest draw loop in the renderer hostage, and every one of
+those reads as load-bearing to someone who does not know the history. The design
+facts worth keeping (integer wave vectors, no common factor) survive as comments
+in `constants.ts` and CLAUDE.md, which is where a future attempt would look —
+not in a code path nothing calls. The user asked for removal "completely"; this
+takes that at its word.
+
+**D33 — Remove the per-group sort with the gating it existed for.** Beat:
+leaving it, on the grounds that it is generation-time and therefore free. It IS
+free in cycles, and that is not the cost that matters: the sort's only purpose
+was making a PREFIX an unbiased sample, so with no prefix it orders identically
+coloured stars inside a single fill run — invisible, and a false clue about why
+the ordering matters. Removing it also puts the draw loop back to the ONE
+state change per group that CLAUDE.md claims. The one real consequence is
+recorded rather than hidden: dropping its per-star random shifts the seeded
+sequence, so every map's sky is a new (still deterministic) arrangement.
+
+**D34 — Take the DBG ceiling to the PRE-GAUNTLET density, not to a round
+number.** Beat: adding 1500/2000, or simply doubling to 1458. 2700 is
+approximately the 2692.92 the phone measured in S1, so the cycle now spans from
+the sparsest per-map sky to the exact field this gauntlet was opened to fix.
+That makes S2 — the single biggest judgement call here, and one already
+overturned once by looking — re-testable on a device instead of re-argued. A
+round number would have measured nothing in particular.
+
+**D35 — The high steps stay OVERRIDES; `STAR_DENSITY_RANGE.MAX` does not
+move.** Beat: raising MAX to 2700 so the new steps sit inside the range. MAX is
+not a limit on what can be drawn, it is one endpoint of the
+density→parallax relation, and moving it silently re-spaces every map's derived
+spread — a change to all thirteen skies, made as a side effect of adding a debug
+step. Keeping MAX put means the new steps clamp to the MAX-end spread, which is
+correct for an override whose purpose is to isolate density. The condition for
+revisiting is written next to the cycle: if a step ever becomes a map's own
+value, raise MAX and re-space the ladder deliberately.
+
 ---
 
 ## FOR-USER-REVIEW
+
+- **S13 — regions are gone, and density now goes to 2700.** The region field is
+  deleted rather than switched off, so Visual ▸ "Star regions" is no longer in
+  the menu. Density gains **1800** and **2700** on top of 1200; 2700 is roughly
+  what the phone was rendering before this gauntlet, so the cycle now reaches
+  from the sparsest map sky all the way back to the original field. If a high
+  step looks right on a device, that is an argument for raising the per-map
+  ladder — say which, and it is a table edit rather than a redesign.
+  - **One thing changed that you did not ask for and should know about:** every
+    map's sky is now a different arrangement of stars. The removed code consumed
+    one random number per star, so dropping it shifts the whole seeded sequence.
+    Same density, same determinism, different stars.
+  - The density steps do NOT change parallax (that has been true since S12, and
+    still is). If 2700 looks too flat, the Parallax row is the other half.
 
 - **S12 — every map has its own sky, and there is a test rack to compare them.**
   Six portals in a column beside the home station, `x = +1400`, stepping down
@@ -1412,6 +1540,30 @@ three details refuted. No production code touched this iteration, by design:
 if the diagnosis were wrong the rest of the queue would be wrong with it, and
 one detail (2b, the source-level smear) did turn out to change what S3 has to
 do.
+
+### Iteration 13 — S13 (regions removed; density ceiling raised)
+
+Deleted the S7 region field across seven files plus its perf probe, and took
+the per-group sort with it — the sort's only consumer was the prefix gate, and
+leaving a generation-time ordering behind with nothing reading it is a false
+clue, not a saving. The draw loop is back to one `fillStyle` per group, which
+is what CLAUDE.md has claimed throughout.
+
+Added 1800 and 2700 to `STAR_DENSITY_CYCLE` and left `STAR_DENSITY_RANGE.MAX`
+alone, so the new steps are overrides rather than range members; the condition
+for revisiting that is written beside the cycle rather than left implicit.
+
+**Two tests deleted, one added, and the deletions need justifying** (brief
+rule: no test may be edited to accommodate a change unless the ledger records
+why its meaning legitimately changed). The two removed tests — the region fade
+ladder and the region field's variation/seam/no-half-period properties — tested
+a feature that no longer exists; they were authored by this PR two milestones
+ago and there is nothing left for them to assert. Nothing else in the suite
+changed. The added test walks the whole density cycle and pins that each high
+step produces the density it names to within 1%, which is the assertion that
+would catch a step silently clamping at MAX.
+
+Gates green: typecheck, build, full suite.
 
 ### Iteration 12 — S12 (per-map skies + the hub test rack)
 
