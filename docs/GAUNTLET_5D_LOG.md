@@ -1337,3 +1337,114 @@ stick MEANS is semantics rather than a binding, so the honest design is
 probably custom BUTTONS on top of a chosen axis model.
 
 `npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **178 passed** ✅.
+
+---
+
+## P1 — Parking-lot review + housekeeping
+
+A read of all 23 entries against the current code. One structural defect, five
+entries stale, four partly overtaken.
+
+**The defect:** the Swarm-gnat / Bubble tuning checklist had lost its `##`
+heading and was rendering *inside* the "Weapon ammo model — SUPERSEDED" entry
+above it. A live tuning list filed under a superseded banner reads as dead.
+Heading restored, with a note saying why it moved.
+
+**Closed as shipped**, each with what shipped it:
+
+| entry | shipped by |
+|---|---|
+| Damage-triggered health / shield bars | gauntlet 5d, U5 |
+| Viewport coverage — more than 390×844 | gauntlet 5d, U4 |
+| Portal off-screen indicators | step 5, G6 (option 2 + no distance) |
+| Exotic enemies + AI taxonomy / wave accounting | Stages 0–7 |
+| Pause-menu per-module stat attribution | Phase 3 Pair A |
+
+The health-bar entry is the interesting one: it shipped, but one of its
+prescriptions was **reversed** in U6 — it argued the player's floating bar was
+redundant with the HUD readout, and in play it is not. Closing it silently
+would have left a design argument on file that the game now contradicts, so
+the note records the reversal and the reason (the bar is where the eye already
+is; the chip is where the exact figure is).
+
+**Amended rather than closed:** the test-suite entry (its "is this wanted at
+all" stance is decided — tiers 1/2/6 shipped, 3–5 still parked), the salvage
+death penalty (an interim 25%-or-12,500 charge is live; the corpse-run and
+uninsured-cargo variants are what remain), the one-stick/two-button scheme
+(`gamepad-left` took the hard half of its premise), and the controller
+refinement pass (three pad schemes now, not two).
+
+**What is actually live** clusters harder than a flat list suggests: portal
+persistence, area composition and the map graph are ONE project sequenced
+behind stable node identity — and the descent rift is switched off, so nothing
+downstream of it is reachable today.
+
+---
+
+## P2/P3 — One deflection primitive, and every shield uses it
+
+> "do the deflection helper and apply it to the player shield and any other
+> existing shields right now."
+
+Bouncing a bolt off a surface existed **twice**, written independently: the
+Bulwark's arc shield reflected about a radial normal; the bouncer round
+negated one velocity component off a tile face. Both now call
+`PhysicsSystem.deflectProjectile(proj, nx, ny, opts)`, which owns the mirror,
+the rotation, the snap, and the rule that a bolt already travelling outward is
+never deflected again. For an axis-aligned normal the general mirror reduces
+to negating one component, so the bouncer's arithmetic is unchanged by the
+fold — `deflect.spec.ts` pins that rather than asserting it.
+
+`DeflectOptions` carries the axes the parked entry named as future use cases —
+`reownType`/`reownId` (a parry: the bolt becomes yours, and the already-hit
+set clears or it would refuse the targets it is now aimed at), `speedScale`,
+`spread`. Nothing ships using them; they are the seam, and they cost nothing
+unset.
+
+**Then the shield side generalized.** Deflection required an ARC
+(`shieldArcHalfWidth`), so the player's own bubble and the bosses' pools
+silently swallowed shots the Bulwark visibly turned away — the same event
+reading as two different ones. `shieldReach()` now answers for both: an arc
+keeps its own ring, any other pool uses the shield's physical standoff, which
+is the same `COLLISION_MULTIPLIER` the player's inflated collision shape and
+its rendered ring already use — so the ricochet happens exactly where the
+player sees the bubble. The enemy bubble ring moved from `r * 1.4` to that
+same figure (a ~3.7% change) so the drawn ring and the deflect radius cannot
+drift; it is also now derived from `size` rather than the hit-punched `r`,
+because physics does not punch.
+
+**The arithmetic is deliberately untouched.** A deflected shot drains exactly
+the damage the absorb path would have absorbed; a shot bigger than the pool
+still falls through to that path and lands its remainder on the hull. This is
+a legibility change, not a shield buff — which is why the punch-through case
+is a test rather than a comment.
+
+**Three things the generalization forced, none of them cosmetic:**
+
+- **An EMP'd shield now declines.** The absorb path has always checked
+  `systemsDisabled`; the arc-deflect path never did. Harmless while deflection
+  was enemy-only — the bubble's latch EMPs the *player* — so the hole only
+  became live the moment the player's shield started deflecting.
+- **A shot that may not hit you may not bounce off you.** An ally rival's fire
+  is `sparesPlayer` and the damage path declines it; ricocheting it off the
+  player's shield would invent a collision that has never existed. Same for a
+  rival's `hitsEnemies` shot against another rival.
+- **A deflected bolt stops homing.** Enemy missiles home on the player with no
+  range gate, so a deflected missile that kept steering would turn straight
+  back into the shield and grind the pool down in a loop — a case that could
+  not arise while only enemy shields deflected. `keepHoming` opts out; the
+  bouncer sets it, because a tile bounce is the weapon working as designed.
+
+Also: a deflect that empties the pool plays the louder `impact.shield.break`
+instead of `impact.shield.deflect`. "That was the last of it" outranks "that
+bounced", and the absorb path has always said it.
+
+**Not done, deliberately:** deflected enemy fire is a plain ricochet, not a
+parry — it keeps its owner, so it flies off without hitting anything (the
+friendly-fire filter still applies). Re-owning is a module-sized decision, and
+the option exists for whoever makes it.
+
+`tests/deflect.spec.ts` — 7 tests. Each gate was verified non-vacuous by
+reverting it and watching the matching test fail: restoring the arc-only gate
+fails 1 and 5; dropping the EMP gate fails 3; dropping `sparesPlayer` fails 4;
+dropping the `v·n` guard fails 6.

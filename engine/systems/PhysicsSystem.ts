@@ -8,6 +8,32 @@ import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 import { CellBuckets } from './CellBuckets';
 
+/**
+ * How a projectile should come off a surface — see
+ * `PhysicsSystem.deflectProjectile`.  Everything is optional: with no options
+ * at all a deflection is a plain mirror that keeps the shot's owner, which is
+ * what both shipped callers want.
+ */
+export interface DeflectOptions {
+    /** Where to put the bolt after the reflection, in the CALLER'S frame
+     *  (see the toroidal note on `deflectProjectile`).  Omit either axis to
+     *  leave it where it is. */
+    snapX?: number;
+    snapY?: number;
+    /** Scale the outgoing speed.  1 (the default) is a perfect mirror. */
+    speedScale?: number;
+    /** Random angular scatter in radians, applied as ±spread/2 — for a
+     *  surface that shouldn't return fire along a clean optical path. */
+    spread?: number;
+    /** Re-own the bolt: a PARRY rather than a ricochet.  Clears the
+     *  already-hit set so the redirected shot can strike its new targets. */
+    reownType?: EntityType;
+    reownId?: string;
+    /** Keep a homing bolt steering.  Default is to CLEAR homing — see the
+     *  re-home loop noted on `deflectProjectile`. */
+    keepHoming?: boolean;
+}
+
 // Number of spatial-grid cells along each axis of the toroidal map.  The
 // broadphase identifies a cell by the dense index `cx * SPATIAL_ROWS + cy`,
 // with both coordinates wrapped into [0, SPATIAL_COLS) / [0, SPATIAL_ROWS)
@@ -1157,6 +1183,92 @@ export class PhysicsSystem {
   public sfx: ((id: string, x: number, y: number,
                 opts?: { gain?: number; pitch?: number }) => void) | null = null;
 
+  /**
+   * Reflect a projectile off a surface — the ONE deflection primitive.
+   *
+   * Three places in this engine bounce a bolt off something: a shield ring, a
+   * bouncer round off a tile face, and (eventually) a parry or a mirror
+   * hazard.  They differ only in WHERE the normal comes from and what happens
+   * to ownership afterwards, so the mirror itself lives here and the caller
+   * decides when it fires.
+   *
+   * `nx`/`ny` must be a UNIT normal pointing OUT of the surface.  Returns false
+   * — changing nothing — when the bolt is not travelling into that surface
+   * (`v·n >= 0`), which is what stops a just-deflected shot from being
+   * deflected again by the same surface on the following step.  A projectile
+   * with no velocity therefore also declines: it is not entering anything.
+   *
+   * TOROIDAL NOTE: positions are written in the CALLER'S frame.  The
+   * broadphase shifts one body into the other's frame across a seam and
+   * re-wraps afterwards, so this must not wrap on its own — doing so would
+   * undo that shift mid-pair.
+   */
+  public static deflectProjectile(
+      proj: GameEntity, nx: number, ny: number, opts?: DeflectOptions,
+  ): boolean {
+      const vx = proj.velocity?.x ?? 0;
+      const vy = proj.velocity?.y ?? 0;
+      const vdotn = vx * nx + vy * ny;
+      if (vdotn >= 0) return false;
+
+      // v' = v − 2(v·n)n.  For an axis-aligned normal this reduces to negating
+      // one component, which is exactly what the bouncer's tile path did by
+      // hand before it was folded onto this.
+      let rx = vx - 2 * vdotn * nx;
+      let ry = vy - 2 * vdotn * ny;
+
+      const scale = opts?.speedScale;
+      if (scale !== undefined && scale !== 1) { rx *= scale; ry *= scale; }
+
+      const spread = opts?.spread;
+      if (spread !== undefined && spread > 0) {
+          const ang = (Math.random() - 0.5) * spread;
+          const c = Math.cos(ang), sn = Math.sin(ang);
+          const tx = rx * c - ry * sn;
+          ry = rx * sn + ry * c;
+          rx = tx;
+      }
+
+      proj.velocity.x = rx;
+      proj.velocity.y = ry;
+      proj.rotation = Math.atan2(ry, rx);
+
+      if (opts?.snapX !== undefined) proj.position.x = opts.snapX;
+      if (opts?.snapY !== undefined) proj.position.y = opts.snapY;
+
+      // A deflected bolt is a DUMB ricochet unless the caller says otherwise.
+      // A homing shot that keeps steering turns straight back into whatever
+      // just turned it away and grinds the shield down in a loop — a real case
+      // now that the PLAYER'S shield deflects, since enemy missiles home on
+      // the player with no range gate.
+      if (opts?.keepHoming !== true && proj.homing) {
+          proj.homing = false;
+          proj.targetEntityId = undefined;
+      }
+
+      // Re-owning is a PARRY rather than a ricochet: the bolt becomes the
+      // deflector's, so the already-hit set has to clear or it would refuse
+      // the very targets it is now aimed at.
+      if (opts?.reownType !== undefined) {
+          proj.ownerType = opts.reownType;
+          proj.ownerId = opts.reownId;
+          if (proj.hitEntityIds) proj.hitEntityIds.length = 0;
+      }
+      return true;
+  }
+
+  /** Radius at which a shield turns a shot away.
+   *
+   *  An ARC shield uses its own ring (which the Bulwark's render matches); any
+   *  other pool uses the shield's physical standoff — the same
+   *  `COLLISION_MULTIPLIER` the player's inflated collision shape and its
+   *  rendered hit ring already use, so the ricochet happens exactly where the
+   *  player sees the bubble. */
+  public static shieldReach(e: GameEntity): number {
+      if (e.shieldArcHalfWidth !== undefined) return PhysicsSystem.arcShieldReach(e);
+      return getCollisionR(e) * SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+  }
+
   public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
       const half = target.shieldArcHalfWidth;
       if (half === undefined) return true; // full bubble
@@ -1202,39 +1314,62 @@ export class PhysicsSystem {
   }
 
   /** World-unit radius of an arc shield's interception ring (matches the
-   *  rendered ring).  Used by the broadphase reach + tryArcShieldIntercept. */
+   *  rendered ring).  The arc branch of `shieldReach`. */
   public static arcShieldReach(e: GameEntity): number {
       return Math.max(e.size.x, e.size.y) * SHIELD_CONSTANTS.ARC_REACH_FACTOR;
   }
 
   /**
-   * Directional arc-shield interception (Bulwark).  When an incoming hostile
-   * projectile crosses the shield ring within the covered sector, the shield
-   * DEFLECTS it off the ring surface (reflects its velocity about the radial
-   * normal) and drains by the shot's damage — so the bolt ricochets away
-   * (readable, and a hazard to other enemies) instead of vanishing, while the
-   * shield still wears down.  Returns true if the pair was handled (caller
-   * skips the body SAT).  Returns false — letting the shot proceed to the
-   * hull — when:
-   *   - the pair isn't projectile-vs-arc-shield,
-   *   - the shot is outside the ring or on an UNCOVERED bearing (flank the gap),
+   * Shield interception — EVERY live shield, not just the Bulwark's arc.
+   *
+   * When an incoming hostile projectile crosses the shield ring, the shield
+   * DEFLECTS it off that surface and drains by the shot's damage — so the bolt
+   * ricochets away (readable, and a hazard to whatever it can still hit)
+   * instead of vanishing, while the shield still wears down.  This was
+   * arc-only; the player's own bubble and the bosses' pools now go through the
+   * same path, because "my shield ate that" and "my shield turned that away"
+   * are the same event and were reading as two different ones.
+   *
+   * THE ARITHMETIC IS UNCHANGED by that generalization: a deflected shot drains
+   * exactly the `damage` the SAT absorb path would have absorbed, and a shot
+   * bigger than the remaining pool still falls through to that path.  What
+   * changes is what the bolt does afterwards.
+   *
+   * Returns true if the pair was handled (caller skips the body SAT).  Returns
+   * false — letting the shot proceed to the hull — when:
+   *   - the pair isn't projectile-vs-shielded-entity,
+   *   - the shield is empty, has no capacity, or is EMP'd offline,
+   *   - the shot is one this target may not be hit by at all (own fire, an
+   *     ally's shot passing through the player, a rival's shot at a rival),
+   *   - the shot is outside the ring or, for an ARC, on an UNCOVERED bearing,
    *   - the shot's damage exceeds the remaining shield (it punches through; the
    *     body-SAT path drains the remaining shield and lands the remainder).
    */
-  private tryArcShieldIntercept(
+  private tryShieldDeflect(
       a: GameEntity,
       b: GameEntity,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): boolean {
       let proj: GameEntity, shielded: GameEntity;
-      if (a.type === EntityType.PROJECTILE && b.shieldArcHalfWidth !== undefined) { proj = a; shielded = b; }
-      else if (b.type === EntityType.PROJECTILE && a.shieldArcHalfWidth !== undefined) { proj = b; shielded = a; }
+      if (a.type === EntityType.PROJECTILE && b.type !== EntityType.PROJECTILE) { proj = a; shielded = b; }
+      else if (b.type === EntityType.PROJECTILE && a.type !== EntityType.PROJECTILE) { proj = b; shielded = a; }
       else return false;
-      if ((shielded.shield ?? 0) <= 0) return false;
+      if ((shielded.shield ?? 0) <= 0 || (shielded.maxShield ?? 0) <= 0) return false;
+      // An EMP'd shield is OFFLINE — it neither absorbs nor recharges, so it
+      // cannot deflect either.  The SAT absorb path has always checked this;
+      // the arc path did not, which only stopped being a live hole once the
+      // player — the one entity the bubble's latch EMPs — started deflecting.
+      if (shielded.systemsDisabled) return false;
       // Don't let the shield deflect its owner's own fire (same-team projectile).
       if (proj.ownerType === shielded.type) return false;
+      // These two mirror the SAT path's filters.  A shot that may not hit this
+      // target must not bounce off it either — an ally rival's fire passes
+      // THROUGH the player, so ricocheting it off the player's shield would
+      // invent a collision the damage path has always declined.
+      if (shielded.type === EntityType.PLAYER && proj.sparesPlayer) return false;
+      if (proj.hitsEnemies && shielded.isRival) return false;
 
-      const reach = PhysicsSystem.arcShieldReach(shielded);
+      const reach = PhysicsSystem.shieldReach(shielded);
       const dx = wrapDeltaX(shielded.position.x, proj.position.x);
       const dy = wrapDeltaY(shielded.position.y, proj.position.y);
       const distSq = dx * dx + dy * dy;
@@ -1247,30 +1382,29 @@ export class PhysicsSystem {
       const projDmg = proj.damage || 1;
       if (projDmg > shielded.shield!) return false;
 
-      // Radial normal at the impact (outward from the shield centre).  Only
-      // deflect shots actually travelling INTO the shield; an outward-moving
-      // bolt (already deflected) falls through harmlessly.
+      // Radial normal at the impact (outward from the shield centre), and a
+      // snap to the ring surface so the bolt rides outward and can't
+      // re-trigger / SAT the hull on the next step.  The shared helper
+      // declines an outward-moving bolt — one already deflected — which is
+      // what keeps a ricochet from being deflected again every step.
       const dist = Math.sqrt(distSq) || 1;
       const nx = dx / dist, ny = dy / dist;
-      const vdotn = proj.velocity.x * nx + proj.velocity.y * ny;
-      if (vdotn >= 0) return false;
-
-      // Reflect velocity about the normal: v' = v − 2(v·n)n, then snap the bolt
-      // to the ring surface so it rides outward and can't re-trigger / SAT the
-      // hull on the next step.
-      proj.velocity.x -= 2 * vdotn * nx;
-      proj.velocity.y -= 2 * vdotn * ny;
-      proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
-      proj.position.x = shielded.position.x + nx * (reach + 1);
-      proj.position.y = shielded.position.y + ny * (reach + 1);
+      if (!PhysicsSystem.deflectProjectile(proj, nx, ny, {
+          snapX: shielded.position.x + nx * (reach + 1),
+          snapY: shielded.position.y + ny * (reach + 1),
+      })) return false;
 
       shielded.shield! -= projDmg;
       markShieldDamaged(shielded);
       shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
       shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
       // A ricochet, not a landing: the deflect voice RISES in pitch, which
-      // is the information the player needs.
-      this.sfx?.('impact.shield.deflect', proj.position.x, proj.position.y);
+      // is the information the player needs.  A hit that empties the pool
+      // still gets the louder COLLAPSE cue instead — "that was the last of
+      // it" is the one thing more urgent than "that bounced", and the SAT
+      // absorb path has always said it.
+      this.sfx?.(shielded.shield! <= 0 ? 'impact.shield.break' : 'impact.shield.deflect',
+                 proj.position.x, proj.position.y);
       if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
       return true;
   }
@@ -2344,11 +2478,16 @@ export class PhysicsSystem {
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
-      // Extend reach to the arc-shield ring (Bulwark) so an incoming shot is
-      // considered out to the visible ring — tryArcShieldIntercept then absorbs
-      // a covered shot there instead of letting it tunnel to the hull.
-      if ((a.shield ?? 0) > 0 && a.shieldArcHalfWidth !== undefined) rA = Math.max(rA, PhysicsSystem.arcShieldReach(a));
-      if ((b.shield ?? 0) > 0 && b.shieldArcHalfWidth !== undefined) rB = Math.max(rB, PhysicsSystem.arcShieldReach(b));
+      // Extend reach to the SHIELD ring so an incoming shot is considered out
+      // to where the shield actually turns it away — tryShieldDeflect then
+      // handles it there instead of letting it tunnel to the hull.  Gated to
+      // pairs that contain a projectile: a shield is not a bigger body, and
+      // inflating the radius for body pairs would only buy extra SAT work that
+      // `fillVertices` (player-only inflation) would then decline anyway.
+      if (a.type === EntityType.PROJECTILE || b.type === EntityType.PROJECTILE) {
+          if ((a.shield ?? 0) > 0 && (a.maxShield ?? 0) > 0) rA = Math.max(rA, PhysicsSystem.shieldReach(a));
+          if ((b.shield ?? 0) > 0 && (b.maxShield ?? 0) > 0) rB = Math.max(rB, PhysicsSystem.shieldReach(b));
+      }
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;
@@ -2379,10 +2518,11 @@ export class PhysicsSystem {
           b.position.y += offsetY;
       }
 
-      // Arc-shield interception: a covered enemy shot is absorbed at the ring
-      // (before SAT), so it visibly stops at the shield instead of reaching the
-      // hull.  Open-side shots fall through to the normal SAT body hit.
-      if (this.tryArcShieldIntercept(a, b, onHit)) {
+      // Shield interception: a hostile shot is DEFLECTED at the ring (before
+      // SAT), so it visibly glances off the shield instead of reaching the
+      // hull.  Uncovered arc bearings and punch-through shots fall through to
+      // the normal SAT body hit, which drains the pool the old way.
+      if (this.tryShieldDeflect(a, b, onHit)) {
           if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
           return;
       }
@@ -2920,6 +3060,13 @@ export class PhysicsSystem {
                   // Pick the entry axis: the one with the SMALLER reverse-unwind
                   // time was crossed last, so that's the face we're reflecting off.
                   // Snap the projectile position to just outside that face + ε.
+                  //
+                  // The face normal then goes through the SHARED deflection
+                  // helper — the same one the shield ring uses.  For an
+                  // axis-aligned normal its mirror reduces to negating one
+                  // component, which is exactly the arithmetic this branch used
+                  // to do by hand.  `keepHoming` because a tile bounce is the
+                  // bouncer working as designed, not a shot being turned away.
                   if (tX <= tY) {
                       const nx = vx > 0 ? -1 : 1;
                       contactX = target.position.x + nx * tileHX;
@@ -2927,8 +3074,10 @@ export class PhysicsSystem {
                           target.position.y - tileHY,
                           Math.min(target.position.y + tileHY, proj.position.y)
                       );
-                      proj.velocity.x = -vx;
-                      proj.position.x = target.position.x + nx * (tileHX + hxEff + 0.5);
+                      PhysicsSystem.deflectProjectile(proj, nx, 0, {
+                          snapX: target.position.x + nx * (tileHX + hxEff + 0.5),
+                          keepHoming: true,
+                      });
                   } else {
                       const ny = vy > 0 ? -1 : 1;
                       contactY = target.position.y + ny * tileHY;
@@ -2936,10 +3085,11 @@ export class PhysicsSystem {
                           target.position.x - tileHX,
                           Math.min(target.position.x + tileHX, proj.position.x)
                       );
-                      proj.velocity.y = -vy;
-                      proj.position.y = target.position.y + ny * (tileHY + hyEff + 0.5);
+                      PhysicsSystem.deflectProjectile(proj, 0, ny, {
+                          snapY: target.position.y + ny * (tileHY + hyEff + 0.5),
+                          keepHoming: true,
+                      });
                   }
-                  proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
 
                   // Decrement remaining-bounces counter (set on bouncer
                   // projectiles via WeaponConfig.bounceCount).  Counter is

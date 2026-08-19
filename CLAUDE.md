@@ -52,11 +52,12 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
-                          plus input / help / minimap / maps (step 5) and
-                          viewports / healthbars (5d),
+                          plus input / help / minimap / maps (step 5),
+                          viewports / healthbars (5d) and the play-test
+                          follow-ups terrain / shake / knockback / deflect,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  176 tests.  All run at
+                          anti-flake rules).  185 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1664,15 +1665,43 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   A DIRECTIONAL arc shield (`shieldArcHalfWidth` set) only absorbs hits
   whose bearing falls in the covered sector — gated by the shot's TRAVEL
   direction, not its position, so a fast bolt that overshoots can't tunnel
-  past (`PhysicsSystem.shieldCoversHit`, toroidal).  A covered hostile shot
-  is DEFLECTED off the ring (`tryArcShieldIntercept`, broadphase reach
-  extended via `arcShieldReach`): its velocity reflects about the radial
-  normal and the shield drains by the shot's damage, so the bolt ricochets
-  away (and can hit other enemies) while the shield still wears down.
-  Open-side shots — and shots bigger than the remaining shield — fall
-  through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
+  past (`PhysicsSystem.shieldCoversHit`, toroidal).  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
+- **EVERY live shield DEFLECTS, and there is ONE deflection primitive.**
+  `PhysicsSystem.deflectProjectile(proj, nx, ny, opts?)` owns the mirror
+  (`v' = v − 2(v·n)n`), the rotation, the optional snap, and the rule that
+  a bolt already travelling outward (`v·n >= 0`) is NEVER deflected again —
+  which is what stops a ricochet re-triggering every step.  It takes a UNIT
+  OUTWARD normal and writes positions in the CALLER'S frame (the broadphase
+  shifts across a seam and re-wraps, so the helper must not wrap on its
+  own).  Both reflection sites go through it: `tryShieldDeflect` (radial
+  normal) and the bouncer's tile-face branch in `resolveCollision`
+  (axis-aligned normal, for which the general mirror reduces to negating one
+  component — so the fold changed no arithmetic).  `DeflectOptions` carries
+  the unused-but-intended axes: `reownType`/`reownId` (a PARRY — clears
+  `hitEntityIds` so the redirected bolt can strike its new targets),
+  `speedScale`, `spread`, `keepHoming`.
+  `tryShieldDeflect` was arc-only; it now runs for ANY entity with a live
+  pool, so the player's own bubble and the bosses' shields turn shots away
+  instead of swallowing them.  `PhysicsSystem.shieldReach` answers for both
+  kinds: an ARC keeps `arcShieldReach`, any other pool uses
+  `getCollisionR × SHIELD_CONSTANTS.COLLISION_MULTIPLIER` — the same figure
+  as the player's inflated collision shape and both rendered rings, so the
+  ricochet happens where the shield is drawn.  THE ARITHMETIC IS UNCHANGED:
+  a deflected shot drains exactly the damage the absorb path would have
+  absorbed, and a shot bigger than the pool still falls through to that path
+  and lands its remainder — a legibility change, not a shield buff.  Four
+  rules go with it, all of them consequences rather than choices: an
+  EMP'd shield (`systemsDisabled`) declines, because it is offline for
+  absorption too; a shot the target may not be hit by at all (own fire, an
+  ally's `sparesPlayer` bolt, a rival's `hitsEnemies` shot at a rival) may
+  not bounce off it either; a deflected bolt STOPS HOMING by default, or an
+  enemy missile — which homes on the player with no range gate — would turn
+  straight back into the shield and grind the pool down in a loop; and a
+  deflect that empties the pool plays `impact.shield.break` rather than
+  `impact.shield.deflect`.  Uncovered arc bearings still fall through to the
+  normal body hit.
 - **Stage-3 reusable mechanics (all three now wired by the Stage-5 BUBBLE).**
   Three build-once primitives for the exotic enemies:
   (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
