@@ -2496,3 +2496,92 @@ and now they all do.
 ### Gate
 
 `npm run typecheck`, `npm run build`, `npm test` — **130 passed**.
+
+---
+
+## A5o — the material's colour rides the light it passes on
+
+Asked with the right question attached: is this complicated and bloating?
+Split three ways, the answer is different for each — which is why it is
+worth writing down rather than just saying "done".
+
+The layer had the physics wrong in OPPOSITE directions. Transmitted light
+carried the LIGHT's colour with no trace of the material it passed through;
+an emitter carried the MATERIAL's colour with no trace of what lit it. Light
+through green glass comes out green, and a body under a red torch cannot
+re-emit blue.
+
+One knob — `TINT_MIX_CYCLE` (DBG "Tint mix"), default `1/2` — two
+applications, each monotone with the old behaviour at an end:
+
+| path | what the mix does | cost |
+|---|---|---|
+| Emission | `lerp(light, material, mix)` on the halo's tint | **nothing** |
+| Refracted caustic | the same blend, into the fill it already does | **nothing** |
+| Straight-through transmission | tints the umbra after the fact | one fill per translucent group |
+
+The first two are free because the colour was already a parameter: A5i made
+the gradient cache colour-keyed and resolves a tint per body, so both are a
+different string reaching an existing fill. The blend itself is memoised
+against the body tint and dropped wholesale when the light colour or the mix
+changes — a keypress, never a frame.
+
+The third is the one with a real cost, and the reason is structural: the
+transmitted light is **not drawn** by the shadow pass. It is what the pass
+chose not to erase, so it cannot be given a colour at fill time; it has to be
+coloured afterwards. That means a second fill over the same geometry — free
+of geometry, since `fill()` does not consume the path, and taken only on the
+UMBRA pass so the tint lands once rather than once per graded pass.
+
+Measured at 24 occluders and one light, on the showcase where EVERY occluder
+is translucent:
+
+| config | p95 |
+|---|---|
+| refraction **on**, mix off | 3.070 |
+| refraction **on**, mix full | 2.950 |
+| refraction off, mix off | 2.480 |
+| refraction off, mix full | 2.955 |
+
+**With refraction on — the shipped default — it costs nothing at all**,
+because the straight-through path does not run: the light is moved into the
+caustic, which carries the blend in its own fill. With refraction off it is
++0.47 ms p95 in the all-glass worst case, and unmeasurable on metal (nothing
+translucent, so no group qualifies).
+
+### Two bugs it shipped through on the way
+
+**`multiply` is wrong on a mostly-transparent layer.** It is the operation
+this wants physically, and where the destination alpha is 0 the formula
+reduces to the SOURCE — so it painted solid colour across the unlit part of
+the umbra rather than tinting the light in it. Measured as a gain of
+**(0, 255, 0)** behind a green tile: a green hole, not green glass.
+`source-atop` is the one that means "colour what is already there": clipped
+to the destination, keeping its alpha, with the strength carried in the
+fill's own alpha.
+
+**A shared parse scratch aliased the two colours.** `parseRgb` wrote into one
+module-level triple, so parsing the body colour and then the light colour
+left both names pointing at the light's channels, and the blend returned the
+light's colour at every mix. The nebula test caught it: a body stamped pure
+red emitted blue-green. Two destinations now, and the note says why.
+
+### And two tests that had to be re-aimed rather than re-baselined
+
+Both were measuring something the new knob legitimately changes:
+
+- The **transmission** test measures how much light a body WITHHOLDS, in
+  luminance — and tinting what comes through toward the material's colour
+  changes that luminance without changing what was withheld (glass is
+  indigo, so a half-tinted beam reads dimmer through an identical shadow).
+  It now pins the mix `off` for its duration, beside the refraction,
+  emissive and softness pins it already had.
+- The **nebula emission** test asserted "a body stamped red emits red",
+  which is only the whole truth at `full` now. It asserts the two ENDS
+  instead — red at `full`, the light's colour at `off` — and states the
+  second as a SHIFT rather than against an absolute baseline, since the two
+  samples come from different moments of a live scene.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **131 passed**.

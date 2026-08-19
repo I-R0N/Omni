@@ -1705,6 +1705,9 @@ export interface EngineStats {
   flashlightName?: string;
   /** DBG: the player light's colour. */
   lightColorName?: string;
+  /** DBG: how much of the material's colour rides transmitted / re-emitted
+   *  light. */
+  tintMixName?: string;
   /** DBG label for the shadow-edge softness cycle. */
   shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'

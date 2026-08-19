@@ -96,6 +96,7 @@ interface UIOverlayProps {
   onCycleCausticFade?: () => void;
   onCycleFlashlight?: () => void;
   onCycleLightColor?: () => void;
+  onCycleTintMix?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
@@ -276,6 +277,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleCausticFade,
   onCycleFlashlight,
   onCycleLightColor,
+  onCycleTintMix,
   onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
@@ -1518,6 +1520,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Light color', onCycleLightColor,
                   stats.lightColorName ?? 'ship',
                   'What COLOUR the player\'s light is. SHIP (default) is the engine-glow blue the layer has always used, chosen so the light reads as coming from the ship rather than as a new system announcing itself; white / warm / amber / green / violet / red are there because a flashlight is equipment and equipment has a character — a tungsten beam and a cold blue-white one light the same terrain into two different games. The colour reaches everything the player\'s light does, the REFRACTED cone included, which is right: light that passes through glass keeps the colour it arrived with. The secondary emitters are deliberately unaffected — they radiate the colour of the BODY, not of what lit it.')}
+                {ctrlRow('Tint mix', onCycleTintMix,
+                  stats.tintMixName ?? '1/2',
+                  'How much of the MATERIAL\'s colour rides the light it passes on. Light through green glass comes out green, and a body lit by a red torch cannot re-emit blue — the layer got both wrong in opposite directions: transmitted light carried the LIGHT\'s colour with no trace of the material, and an emitter carried the MATERIAL\'s with no trace of what lit it. One knob, two applications. Emission and the refracted caustic take a blend between the two colours (0 = the light\'s, 1 = the body\'s). Straight-through transmission is tinted by MULTIPLYING the umbra by the material colour, because that light is not drawn by the shadow pass — it is what the pass chose not to erase — so it can only be coloured after the fact; 0 changes nothing there. A true product everywhere is the physical answer and it reads too dark (two saturated colours multiply toward black), so the default is a half blend. OFF restores exactly what shipped before.')}
                 {ctrlRow('Emissive', onToggleEmissive,
                   stats.emissiveEnabled === true ? 'On' : 'Off',
                   'Do METAL and GLASS re-emit the light that falls on them? ON by default, after device testing. Every lit body of those materials becomes a SECOND light at its own position — half the light it received, uniform in every direction, falling off the way the player\'s does. It replaces the contact-driven glow those two materials used to carry, which lit up when something TOUCHED them rather than when light reached them, so a metal plate across the room stayed dead however brightly it was lit. Secondary lights cast no shadows of their own unless Emit shadow asks them to: each would need its own occluder collection, and the pool is shared and consumed per light, so N emitters cost N collections on the tightest budget in the system.')}

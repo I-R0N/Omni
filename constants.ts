@@ -1575,6 +1575,46 @@ export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> 
   { name: 'pin',    halfDeg: 6   },
   { name: 'off',    halfDeg: 0   },
 ] as const;
+/** DBG: how much of the MATERIAL's colour is in the light it passes on.
+ *
+ *  Light that goes through green glass comes out green, and a body lit by a
+ *  red torch cannot re-emit blue — both of which the layer got wrong in
+ *  opposite directions.  Transmitted light carried the LIGHT's colour with no
+ *  trace of the material, and an emitter carried the MATERIAL's colour with
+ *  no trace of what lit it.
+ *
+ *  One knob, two applications, each monotone with today's behaviour at an
+ *  end of the range:
+ *
+ *   - EMISSION and the refracted caustic take a blend `lerp(light, material,
+ *     mix)`.  0 is the light's own colour, 1 is the body's (what A5i
+ *     shipped).
+ *   - STRAIGHT-THROUGH transmission is tinted by MULTIPLYING the light
+ *     already in the umbra by `lerp(white, material, mix)` — 0 changes
+ *     nothing (what shipped), 1 is the full product.  It has to be a
+ *     multiply because that light is not drawn by the shadow pass; it is
+ *     what the pass chose not to erase.
+ *
+ *  A true product everywhere would be the physical answer and it reads too
+ *  dark: two saturated colours multiply toward black, and a light that goes
+ *  black on contact with coloured glass looks broken rather than physical.
+ *  So the default is a half-blend, which is a look call and lives in a cycle
+ *  like every other look call here. */
+export const TINT_MIX_CYCLE: ReadonlyArray<{ name: string; mix: number }> = [
+  { name: '1/2',  mix: 0.5  },
+  { name: '3/4',  mix: 0.75 },
+  { name: 'full', mix: 1    },
+  { name: '1/4',  mix: 0.25 },
+  { name: 'off',  mix: 0    },
+] as const;
+let activeTintMixIndex = 0;
+export function getTintMix(): number { return TINT_MIX_CYCLE[activeTintMixIndex].mix; }
+export function getTintMixName(): string { return TINT_MIX_CYCLE[activeTintMixIndex].name; }
+export function cycleTintMix(): string {
+  activeTintMixIndex = (activeTintMixIndex + 1) % TINT_MIX_CYCLE.length;
+  return TINT_MIX_CYCLE[activeTintMixIndex].name;
+}
+
 /** DBG: what COLOUR the player's light is.
  *
  *  `ship` is the engine-glow blue the layer has always used — chosen so the

@@ -39,7 +39,7 @@ import {
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
     getEmitFadeSec, getCausticFade, getFlashlightHalfDeg, FLASHLIGHT,
-    getLightColorRgb, BUBBLE_CONSTANTS,
+    getLightColorRgb, BUBBLE_CONSTANTS, getTintMix,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -247,6 +247,74 @@ function normalizedTint(src: string): string | null {
     return `${q(r)}, ${q(g)}, ${q(b)}`;
 }
 
+/** THE MATERIAL/LIGHT BLEND, memoised.
+ *
+ *  Both callers want a colour derived from two: the body's own tint and the
+ *  light's, mixed by `TINT_MIX_CYCLE`.  Computing it per emitter per frame
+ *  would parse two colour strings and build a third; instead the results are
+ *  memoised against the body tint, and the whole memo is dropped when the
+ *  light colour or the mix changes — a keypress, never a frame.
+ *
+ *  `toward` is what the mix runs TO at 0: the light's colour for an emitter
+ *  (which radiates something between the two), and WHITE for the multiply
+ *  pass (where 0 must mean "change nothing"). */
+const _blendCache = new Map<string, string>();
+const _blendWhiteCache = new Map<string, string>();
+let _blendLight = '';
+let _blendMix = -1;
+
+function blendTint(bodyRgb: string | null, towardWhite: boolean): string | null {
+    // `towardWhite` survives for the transmission path's sake conceptually,
+    // but that path now carries its strength in the fill's ALPHA (see the
+    // source-atop note), so today every caller mixes toward the light.
+    if (bodyRgb === null) return null;
+    const light = getLightColorRgb();
+    const mix = getTintMix();
+    if (light !== _blendLight || mix !== _blendMix) {
+        _blendCache.clear();
+        _blendWhiteCache.clear();
+        _blendLight = light;
+        _blendMix = mix;
+    }
+    const cache = towardWhite ? _blendWhiteCache : _blendCache;
+    const hit = cache.get(bodyRgb);
+    if (hit !== undefined) return hit;
+    // TWO DESTINATIONS, deliberately.  A single shared scratch aliases the
+    // two results — the second parse overwrites the first, both names end up
+    // pointing at the light's channels, and the blend silently returns the
+    // LIGHT's colour at every mix.  Caught by the nebula test, which stamps a
+    // body pure red and watched it emit blue-green.
+    const b = parseRgb(bodyRgb, _rgbB);
+    const a = towardWhite ? _WHITE : parseRgb(light, _rgbA);
+    if (b === null || a === null) return bodyRgb;
+    const out = `${Math.round(a[0] + (b[0] - a[0]) * mix)}, `
+              + `${Math.round(a[1] + (b[1] - a[1]) * mix)}, `
+              + `${Math.round(a[2] + (b[2] - a[2]) * mix)}`;
+    cache.set(bodyRgb, out);
+    return out;
+}
+
+const _WHITE: [number, number, number] = [255, 255, 255];
+const _rgbA: [number, number, number] = [0, 0, 0];
+const _rgbB: [number, number, number] = [0, 0, 0];
+
+/** `'r, g, b'` -> channels, or null if it is not that shape.  Writes into the
+ *  CALLER's triple rather than a shared one — see the aliasing note in
+ *  `blendTint`.  Runs on a cache MISS, never per frame. */
+function parseRgb(s: string, out: [number, number, number]): [number, number, number] | null {
+    let i = 0, n = 0;
+    for (let k = 0; k < 3; k++) {
+        while (i < s.length && (s[i] === ' ' || s[i] === ',')) i++;
+        let v = 0, digits = 0;
+        while (i < s.length && s[i] >= '0' && s[i] <= '9') {
+            v = v * 10 + (s.charCodeAt(i) - 48); i++; digits++;
+        }
+        if (digits === 0) return null;
+        out[k] = v; n++;
+    }
+    return n === 3 ? out : null;
+}
+
 /** Keep this body among the N nearest passThrough emitters.
  *
  *  Insertion into a fixed, always-sorted buffer: the common case is one
@@ -439,7 +507,9 @@ function record(t: GameEntity, mobile: boolean): void {
     const v = t.shardVariant;
     o.transmit = v !== undefined ? SHARD_VARIANTS[v].transmit ?? 0 : 0;
     o.emits = v !== undefined ? SHARD_VARIANTS[v].emits ?? 0 : 0;
-    o.emitRgb = v !== undefined && o.emits > 0
+    // The tint is needed for TRANSMISSION as well as emission now, so it is
+    // resolved for anything that passes light on in either way.
+    o.emitRgb = v !== undefined && (o.emits > 0 || o.transmit > 0)
         ? emitTintFor(t, SHARD_VARIANTS[v].glow?.color) : null;
     o.id = t.id;
     o.distSq = dx * dx + dy * dy;
@@ -1387,9 +1457,17 @@ function compositeLight(
 
         lctx.beginPath();
         let drew = 0;
+        // THE GROUP'S COLOUR, for the transmission tint below.  Taken from
+        // the first member that has one: a transmit group is one MATERIAL by
+        // construction (the value comes from the variant), so its members
+        // agree — except plastic, whose shade is per instance, and there the
+        // first member's shade stands for the group.  One fill per group is
+        // the whole point; a fill per body would be a fill per body.
+        let groupTint: string | null = null;
         for (let i = 0; i < upTo; i++) {
             const o = occ[i];
             if (o.transmit !== transmit) continue;
+            if (groupTint === null) groupTint = o.emitRgb;
             const dx = (o.x - lx) * worldToPx;
             const dy = (o.y - ly) * worldToPx;
             const rad = o.r * worldToPx;
@@ -1482,6 +1560,39 @@ function compositeLight(
         lctx.fill();
         lctx.globalCompositeOperation = 'source-over';
         lctx.globalAlpha = 1;
+
+        // TINT WHAT CAME THROUGH.  The transmitted light is not drawn by this
+        // pass — it is what the pass chose not to erase — so it cannot be
+        // given a colour at fill time the way the caustic can.  Multiplying
+        // the umbra by the material's colour is the operation that matches
+        // what happened physically: the light that survived the body passed
+        // THROUGH it.
+        //
+        // On the UMBRA pass only, so the tint lands once rather than once per
+        // graded pass, and it reuses the path already in hand — `fill()` does
+        // not consume it — so this costs one fill and no geometry.
+        if (transmit > 0 && groupTint !== null && step === steps - 1
+            && !refract) {
+            const mix = getTintMix();
+            if (mix > 0) {
+                // `source-atop`, NOT `multiply`.  Multiply is the operation
+                // this wants physically and it is wrong on a layer that is
+                // mostly transparent: where the destination alpha is 0 the
+                // formula reduces to the SOURCE, so it paints solid colour
+                // across the unlit part of the umbra instead of tinting the
+                // light in it — measured as a gain of (0, 255, 0) behind a
+                // green tile, which is a green hole rather than green glass.
+                //
+                // `source-atop` is clipped to what is already there and keeps
+                // the destination's alpha, so it pulls the LIT pixels toward
+                // the material's colour in proportion to how lit they are,
+                // and adds nothing where there is nothing.
+                lctx.fillStyle = `rgba(${groupTint}, ${mix})`;
+                lctx.globalCompositeOperation = 'source-atop';
+                lctx.fill();
+                lctx.globalCompositeOperation = 'source-over';
+            }
+        }
         }
     }
     if (wedges === 0 && !refract) {
@@ -1546,9 +1657,11 @@ function compositeLight(
         if (transmit <= 0) continue;                 // opaque: nothing to bend
         lctx.beginPath();
         let drew = false;
+        let causticTint: string | null = null;
         for (let i = 0; i < count; i++) {
             const o = occ[i];
             if (o.transmit !== transmit) continue;
+            if (causticTint === null) causticTint = o.emitRgb;
             const pts = o.pts;
             if (pts === undefined || pts.length < 3 || pts.length > MAX_SIL_VERTS) continue;
             const dx = (o.x - lx) * worldToPx;
@@ -1588,7 +1701,11 @@ function compositeLight(
         // fill's own coordinate space.  Same trick as the falloff in step 1.
         const alpha = Math.min(REFRACT.MAX_BRIGHTNESS_FRAC, getRefractBrightness(), transmit);
         lctx.setTransform(1, 0, 0, 1, cx, cy);
-        lctx.fillStyle = lightGradient(lctx, rPx);
+        // The caustic IS transmitted light, so it carries the material's
+        // colour the same way — and unlike the straight-through case it has
+        // its own fill, so the blend goes into the gradient rather than
+        // costing a multiply pass.
+        lctx.fillStyle = lightGradient(lctx, rPx, blendTint(causticTint, false));
         lctx.globalAlpha = alpha;
         lctx.globalCompositeOperation = 'lighter';
         lctx.fill();
@@ -1937,7 +2054,7 @@ function compositeEmitters(
             // by how much of it the material throws back.  So it tracks the
             // brightness cycle for free and can never out-shine what lit it.
             lctx.setTransform(1, 0, 0, 1, ex, ey);
-            lctx.fillStyle = lightGradient(lctx, emitRPx, sl.tint);
+            lctx.fillStyle = lightGradient(lctx, emitRPx, blendTint(sl.tint, false));
             lctx.globalAlpha = alpha;
             lctx.globalCompositeOperation = 'lighter';
             lctx.fillRect(-emitRPx, -emitRPx, emitRPx * 2, emitRPx * 2);
@@ -1964,7 +2081,7 @@ function compositeEmitters(
                                     Math.min(4, cn));
         compositeLight(sctx, ex, ey, emitRPx, r._emitOccluders, sel,
                        sl.x, sl.y, worldToPx, getShadowSoftness(), false,
-                       sl.tint);
+                       blendTint(sl.tint, false));
 
         lctx.globalAlpha = alpha;
         lctx.globalCompositeOperation = 'lighter';

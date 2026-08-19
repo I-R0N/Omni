@@ -35,7 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
-    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor,
+    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -445,6 +445,15 @@ export class DebugControls {
    *  unaffected: they radiate the colour of the BODY, not of what lit it. */
   cycleLightColor() {
     cycleLightColor();
+  }
+
+  /** DBG (Visual): how much of the MATERIAL's colour rides the light it
+   *  passes on — transmitted light, the refracted caustic, and what a body
+   *  re-emits.  'off' is what shipped before: transmitted light kept the
+   *  light's colour with no trace of the material, and an emitter kept the
+   *  material's with no trace of what lit it. */
+  cycleTintMix() {
+    cycleTintMix();
   }
 
   /** DBG (Visual): how hard the CAUSTIC edges are.  Two cliffs behind one

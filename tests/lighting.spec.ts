@@ -279,6 +279,15 @@ test.describe('occluder collection', () => {
       for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== 'soft'; i++) {
         e.renderer.cycleShadowSoftness();
       }
+      // THE TINT MIX likewise.  This test measures how much light a body
+      // WITHHOLDS, in luminance; tinting what comes through toward the
+      // material's colour changes that luminance without changing how much
+      // was withheld — glass is indigo, so a half-tinted beam through it
+      // reads dimmer while the shadow is identical.
+      const mix0 = e.renderer.getTintMix();
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'off'; i++) {
+        e.renderer.cycleTintMix();
+      }
 
       // The showcase map is single-variant, so the OCCLUDER'S VARIANT is
       // stamped on rather than searched for.  That is safe because the ring
@@ -355,6 +364,9 @@ test.describe('occluder collection', () => {
       if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
       for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== softness0; i++) {
         e.renderer.cycleShadowSoftness();
+      }
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== mix0; i++) {
+        e.renderer.cycleTintMix();
       }
       return { solid, solidOcc, glass, glassOcc, plastic, nebula, nebulaOcc };
     });
@@ -1086,9 +1098,23 @@ test.describe('occluder collection', () => {
                  occ: e.renderer._lightOccluderCount,
                  lights: e.renderer.lastLightingLights };
       };
+      const mix = async (name: string) => {
+        for (let i = 0; i < 8 && e.renderer.getTintMix() !== name; i++) {
+          e.renderer.cycleTintMix();
+        }
+        return sample(true);
+      };
+      // The COLOUR assertions run at the ends of the tint-mix knob, because
+      // at the shipped default an emitter is deliberately half the body's
+      // colour and half the light's — so "it emits red" is only the whole
+      // truth at `full`, and `off` is where the old behaviour lives.
       const off = await sample(false);
-      const on = await sample(true);
-      return { built: true, off, on, tint: pick._emitTint };
+      const on = await mix('full');
+      const asLight = await mix('off');
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== '1/2'; i++) {
+        e.renderer.cycleTintMix();
+      }
+      return { built: true, off, on, asLight, tint: pick._emitTint };
     });
 
     expect(r.built).toBe(true);
@@ -1110,6 +1136,14 @@ test.describe('occluder collection', () => {
     expect(d[0]).toBeGreaterThan(1);          // it lit something...
     expect(d[0]).toBeGreaterThan(d[1]);       // ...in RED, not in the
     expect(d[0]).toBeGreaterThan(d[2]);       // player light's blue-green.
+    // ...and at the other end of the knob the same body emits in the LIGHT's
+    // colour instead, which is what makes the mix a mix rather than a label.
+    // Asserted as a SHIFT rather than against an absolute baseline: the two
+    // samples are taken at different moments in a live scene, so what is
+    // stable is the direction the knob moves the colour, not the level.
+    const l = r.asLight.rgb.map((v: number, i: number) => v - r.off.rgb[i]);
+    expect(l[2] - l[0]).toBeGreaterThan(d[2] - d[0]);
+    expect(l[1] - l[0]).toBeGreaterThan(d[1] - d[0]);
     watch.assertClean();
   });
 
@@ -1604,6 +1638,118 @@ test.describe('occluder collection', () => {
     expect(bub.emitters).toBeGreaterThan(0);   // it emits...
     expect(bub.occ).toBe(0);                   // ...and casts nothing
     expect(bub.tint).toMatch(/^\d+, \d+, \d+$/);
+    watch.assertClean();
+  });
+
+  test('the material colour rides the light it passes on', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    const dflt = await engine(page, e => e.renderer.getTintMix());
+    expect(dflt).toBe('1/2');
+
+    const r = await engine(page, async (e) => {
+      const tiles = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      const pick = tiles[0];
+      if (!pick) return { built: false } as any;
+      pick.shardVariant = 'glass-tile';
+      pick._occluderR = undefined;
+      pick.position.x = 120; pick.position.y = 0;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      // STRAIGHT-THROUGH transmission is the path under test, so refraction
+      // is held off: with it on the light is moved into the caustic instead
+      // (which carries the same blend, by its own fill).
+      if (e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      e.renderer.setLighting('unified');
+
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          for (const o of e.currentMap.entities) {
+            if (o !== pick && o.type === 'STRUCTURE') o.active = false;
+          }
+          pick.active = true;
+          // A KNOWN material colour, re-stamped: the map regenerates tiles,
+          // and a regenerated one would carry its own shade.
+          if (pick.color !== '#00ff00') {
+            pick.color = '#00ff00';
+            pick._emitTint = undefined; pick._emitTintKey = undefined;
+          }
+          e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      // Mean gain over a small box INSIDE the umbra, where the transmitted
+      // light is — one pixel of a 5-luminance signal is noise.
+      const umbra = async () => {
+        const read = () => {
+          const cv = document.querySelector('canvas') as HTMLCanvasElement;
+          const g = cv.getContext('2d')!;
+          const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+          const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+          const sx = (wx: number, wy: number) => [
+            Math.round((W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr),
+            Math.round((H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr),
+          ];
+          let rr = 0, gg = 0, bb = 0, n = 0;
+          for (const [wx, wy] of [[180, 0], [200, 0], [220, 0], [200, 10], [200, -10]]) {
+            const [x, y] = sx(wx, wy);
+            const d = g.getImageData(x, y, 1, 1).data;
+            rr += d[0]; gg += d[1]; bb += d[2]; n++;
+          }
+          return [rr / n, gg / n, bb / n];
+        };
+        e.renderer.setLighting('unified'); await frames(20);
+        const on = read();
+        e.renderer.setLighting('legacy'); await frames(20);
+        const off = read();
+        e.renderer.setLighting('unified');
+        return on.map((v, i) => v - off[i]);
+      };
+      const at = async (mix: string) => {
+        for (let i = 0; i < 8 && e.renderer.getTintMix() !== mix; i++) {
+          e.renderer.cycleTintMix();
+        }
+        return umbra();
+      };
+      const none = await at('off');
+      const full = await at('full');
+      const cyc: string[] = [];
+      const firstName = e.renderer.getTintMix();
+      for (let i = 0; i < 8; i++) {
+        cyc.push(e.renderer.getTintMix());
+        e.renderer.cycleTintMix();
+        if (e.renderer.getTintMix() === firstName) break;
+      }
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== '1/2'; i++) {
+        e.renderer.cycleTintMix();
+      }
+      if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      return { built: true, none, full, cyc, back: e.renderer.getTintMix() };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.back).toBe('1/2');
+    expect(r.cyc).toContain('off');            // the control case is reachable
+    expect(r.cyc.length).toBeGreaterThan(3);
+
+    // OFF: the light that came through the tile is the LIGHT's own colour,
+    // which is blue-green, and carries no trace of the green tile.
+    expect(r.none[0]).toBeGreaterThan(0.5);    // there IS transmitted light...
+    expect(Math.abs(r.none[2] - r.none[0])).toBeLessThan(r.none[1] + 2);
+
+    // FULL: it comes out GREEN, because it came through green glass.  Red and
+    // blue are extinguished; green survives.
+    expect(r.full[1]).toBeGreaterThan(1);
+    expect(r.full[1]).toBeGreaterThan(r.full[0] + 1.5);
+    expect(r.full[1]).toBeGreaterThan(r.full[2] + 1.5);
+    // ...and the tint does not ADD light — it colours what was already there.
+    expect(r.full[1]).toBeLessThan(r.none[1] + 2);
     watch.assertClean();
   });
 
