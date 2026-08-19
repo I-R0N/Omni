@@ -1600,6 +1600,18 @@ export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> 
  *  black on contact with coloured glass looks broken rather than physical.
  *  So the default is a half-blend, which is a look call and lives in a cycle
  *  like every other look call here. */
+/** With REFRACTION on, how much of a body's transmitted light goes straight
+ *  through rather than into the deviated caustic.
+ *
+ *  A5e's refraction prototype MOVED all of it into the cone — "the energy is
+ *  moved, not added" — which is right for a wedge and wrong for a pane, and
+ *  it had a consequence nobody asked for: with refraction on (the shipped
+ *  default) there is no straight-through light at all, so there is nothing
+ *  for the material tint to colour and the umbra behind glass is simply
+ *  dark.  Splitting it is both closer to a real slab and the difference
+ *  between a feature you can see and one you cannot. */
+export const TRANSMIT_STRAIGHT_FRAC = 0.5;
+
 export const TINT_MIX_CYCLE: ReadonlyArray<{ name: string; mix: number }> = [
   { name: '1/2',  mix: 0.5  },
   { name: '3/4',  mix: 0.75 },

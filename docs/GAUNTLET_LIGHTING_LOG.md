@@ -2585,3 +2585,74 @@ Both were measuring something the new knob legitimately changes:
 ### Gate
 
 `npm run typecheck`, `npm run build`, `npm test` — **131 passed**.
+
+---
+
+## A5p — the tint was invisible, and the blend operation was the smaller half
+
+Reported as "I'm not seeing the mixing — can we use a different blend
+operation than multiply?". The operation had already stopped being multiply
+in A5o (it shipped as `source-atop`), so the report was right about the
+symptom and the diagnosis had to go elsewhere. Two causes, and the bigger
+one is not a blend mode at all.
+
+### Cause 1: in the shipped configuration the tint never ran
+
+The straight-through tint was gated `!refract`, and **refraction ships on**.
+With it on, A5e's prototype MOVES all of a body's transmitted light into the
+deviated caustic — "the energy is moved, not added" — so there is no
+straight-through light left to colour, and the umbra behind glass is simply
+dark. A feature can be correct, tested, and invisible at the same time, and
+this one was all three.
+
+`TRANSMIT_STRAIGHT_FRAC` (0.5) now splits it: the caustic carries the
+deviated share and the straight-through path carries the rest. That is also
+closer to the physics than either extreme — a prism sends light sideways, a
+parallel-faced pane sends it straight, and glass tiles are panes.
+
+### Cause 2: light you did not draw cannot be given a colour
+
+The deeper problem is that "transmitted light" was never DRAWN. It was the
+light's own light, sitting where the shadow pass declined to erase it, and
+every operation that tints in place fails on it in a different way:
+
+- `multiply` is the physically right one and paints solid colour where the
+  destination alpha is 0 — a green hole instead of green glass (A5o).
+- `source-atop` can only pull what is already there toward the tint, so its
+  effect scales with how DIFFERENT the two colours are. Glass is indigo
+  (`#6366f1`) and the lamp is sky blue: at a half mix that is a few
+  luminance levels on a dim umbra. Invisible, and correctly so.
+
+So transmitted light is now ERASED IN FULL and ADDED BACK as its own light,
+in the blended colour, filled with the light's own falloff gradient — the
+construction the caustic has used since A5e. The colour goes in at fill time,
+where it can actually be chosen. At mix `off` the old partial-erase runs
+instead, so the control case stays exact.
+
+Measured behind a glass tile stamped pure green, as R,G,B gain in the umbra:
+
+| config | mix off | mix 1/2 | mix full |
+|---|---|---|---|
+| refraction off | 3, 5, 5 | 3, **10**, 6 | 0, **11**, 0 |
+| refraction **on** (shipped) | 5, 9, 10 | 2, **10**, 5 | 0, **11**, 0 |
+
+Both rows now carry the material's colour, and the transmitted light is
+brighter than it was — it is added deliberately rather than left over.
+
+### Two tests corrected rather than re-baselined
+
+- The A5o test asserted "the tint does not ADD light", which was true of
+  `source-atop` and is false of the new construction by design. The bound
+  that survives is the physical one — a body passes light on, it does not
+  make any — so it now samples OPEN SPACE at the same distance and asserts
+  the transmitted light stays under it.
+- The transmission test's lower bound was `0.30` against a measured ~0.30:
+  it flaked twice in three full-suite runs sitting exactly on its own
+  threshold. It now states what it is for — glass strictly BETWEEN the two
+  failure modes — with the lower bound tied to the opaque case as well as to
+  a fraction.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **131 passed**, twice in
+a row including the previously flaky one.

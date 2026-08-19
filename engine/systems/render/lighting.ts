@@ -39,7 +39,7 @@ import {
     getRefractBrightness, getLightBrightness, getEmissiveEnabled,
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
     getEmitFadeSec, getCausticFade, getFlashlightHalfDeg, FLASHLIGHT,
-    getLightColorRgb, BUBBLE_CONSTANTS, getTintMix,
+    getLightColorRgb, BUBBLE_CONSTANTS, getTintMix, TRANSMIT_STRAIGHT_FRAC,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -1452,7 +1452,23 @@ function compositeLight(
         // is moved, not added.  (The groups are still walked separately here,
         // which costs one redundant fill while the prototype is on; splitting
         // that out would mean a second grouping path for a debug toggle.)
-        const eraseAlpha = erase * (1 - (refract ? 0 : transmit));
+        // TRANSMITTED LIGHT IS RE-ADDED, NOT LEFT UNERASED — whenever it is
+        // going to carry the material's colour.
+        //
+        // Leaving it unerased was the original construction and it cannot be
+        // coloured: that light is the light's own, sitting where the shadow
+        // pass declined to remove it, and every operation that tints it in
+        // place either paints over the unlit part of the umbra (`multiply`)
+        // or can only pull what is already there (`source-atop`), which is
+        // invisible when the material's colour is close to the light's — and
+        // glass is indigo against a sky-blue lamp, so it was.
+        //
+        // Erasing in FULL and adding the transmitted share back as its own
+        // light is the construction the caustic already uses, and it puts the
+        // colour in at fill time where it belongs.  At mix `off` the old
+        // partial-erase runs instead, so the control case is exact.
+        const tinting = transmit > 0 && getTintMix() > 0;
+        const eraseAlpha = erase * (1 - (refract || tinting ? 0 : transmit));
         if (eraseAlpha <= 0) continue;      // fully transparent: casts nothing
 
         lctx.beginPath();
@@ -1571,27 +1587,25 @@ function compositeLight(
         // On the UMBRA pass only, so the tint lands once rather than once per
         // graded pass, and it reuses the path already in hand — `fill()` does
         // not consume it — so this costs one fill and no geometry.
-        if (transmit > 0 && groupTint !== null && step === steps - 1
-            && !refract) {
-            const mix = getTintMix();
-            if (mix > 0) {
-                // `source-atop`, NOT `multiply`.  Multiply is the operation
-                // this wants physically and it is wrong on a layer that is
-                // mostly transparent: where the destination alpha is 0 the
-                // formula reduces to the SOURCE, so it paints solid colour
-                // across the unlit part of the umbra instead of tinting the
-                // light in it — measured as a gain of (0, 255, 0) behind a
-                // green tile, which is a green hole rather than green glass.
-                //
-                // `source-atop` is clipped to what is already there and keeps
-                // the destination's alpha, so it pulls the LIT pixels toward
-                // the material's colour in proportion to how lit they are,
-                // and adds nothing where there is nothing.
-                lctx.fillStyle = `rgba(${groupTint}, ${mix})`;
-                lctx.globalCompositeOperation = 'source-atop';
-                lctx.fill();
-                lctx.globalCompositeOperation = 'source-over';
-            }
+        if (tinting && groupTint !== null && step === steps - 1) {
+            // ADDITIVE, in the blended colour, filled with the light's own
+            // falloff gradient — so the transmitted light fades with distance
+            // exactly as the direct light does and can never out-shine it.
+            //
+            // With REFRACTION on this is the UNDEVIATED share: the caustic
+            // takes the rest.  A prism sends most of it sideways and a pane
+            // sends it straight; splitting the two is closer to a real slab
+            // than either extreme, and it is what makes the material's colour
+            // visible in the shipped configuration at all.
+            const straight = refract ? TRANSMIT_STRAIGHT_FRAC : 1;
+            lctx.setTransform(1, 0, 0, 1, cx, cy);
+            lctx.fillStyle = lightGradient(lctx, rPx, blendTint(groupTint, false));
+            lctx.globalAlpha = transmit * straight;
+            lctx.globalCompositeOperation = 'lighter';
+            lctx.fill();
+            lctx.globalCompositeOperation = 'source-over';
+            lctx.globalAlpha = 1;
+            lctx.setTransform(1, 0, 0, 1, 0, 0);
         }
         }
     }
@@ -1699,7 +1713,12 @@ function compositeLight(
         // The PATH is unaffected: Canvas2D bakes each segment into device
         // space as it is added, so a transform set afterwards moves only the
         // fill's own coordinate space.  Same trick as the falloff in step 1.
-        const alpha = Math.min(REFRACT.MAX_BRIGHTNESS_FRAC, getRefractBrightness(), transmit);
+        // The caustic carries the DEVIATED share; the straight-through pass
+        // above carries the rest, so the two together are the body's transmit
+        // rather than twice it.
+        const deviated = getTintMix() > 0 ? 1 - TRANSMIT_STRAIGHT_FRAC : 1;
+        const alpha = Math.min(REFRACT.MAX_BRIGHTNESS_FRAC, getRefractBrightness(),
+                               transmit) * deviated;
         lctx.setTransform(1, 0, 0, 1, cx, cy);
         // The caustic IS transmitted light, so it carries the material's
         // colour the same way — and unlike the straight-through case it has
