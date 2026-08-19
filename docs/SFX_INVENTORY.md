@@ -136,8 +136,10 @@ The exception is what makes this feel right rather than merely quieter:
 player damage path — projectile, crash, lightning chain, cannon splash —
 so a shard you shot from range is still your shard and still audible,
 while the identical break happening across the map is not. Direct
-player↔shard contact is covered separately by `crash.player.tile`, which
-is full-range because shards are `STRUCTURE`s.
+player↔shard contact is covered separately by `crash.player.shard`
+(and by `crash.player.tile` for the static-tile case), both full-range
+because the player is a party to them — the near-field rule is about
+physics the player is *not* part of.
 
 Any row may override its radii; the caller may override them again. The
 precedence is caller → row → global default.
@@ -190,6 +192,11 @@ Central hook: **`GameEngine.handleProjectileHit`** already switches on
 `target.type` and material variant, so it is the single wiring point for
 almost this whole table. Shield rows come from `PhysicsSystem`.
 
+The `crash.*` rows at the foot of the table are BODY collisions rather
+than projectile hits, and their per-instance `{ gain, pitch }` is not a
+row parameter — it comes from the shared impact-strength model in §4.4,
+the same number the camera shake is computed from.
+
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
 | `impact.hull.enemy` | `handleProjectileHit`, `EntityType.ENEMY` | 2 | 90 | Sharp metallic tick with a tiny spark fizz. Reads as "connected". | 1.6 kHz click + noise HP 3 kHz; 1→75 | pitch ±12% **(required — the most-fired sound in the game)** | 6, ≥30 ms **+gain** | 0.34 | world |
@@ -205,10 +212,194 @@ almost this whole table. Shield rows come from `PhysicsSystem`.
 | `impact.armor.chip` | `PhysicsSystem` damage path, `armor` trait reduced the hit | 2 | 100 | Thick, dead clunk — an obviously *absorbed* hit. Pairs with the reduced damage number the game already shows. | 300 Hz LP 600 Hz; 1→85 | pitch ±8% | 4, ≥40 ms **+gain** | 0.30 | world |
 | `impact.lightning.arc` | `GameEngine.fireLightningChainFromImpact`, per arc segment | 2 | 120 | Crackling zap. Short, bright, electrical. Chains fire several at once — variation matters. | noise HP 3 kHz + 90 Hz AM; 1→100 | pitch ±14% **(required)** | 4, ≥25 ms **+gain** | 0.34 | world |
 | `impact.explosion.aoe` | `GameEngine.applyExplosionAoE` / `spawnShockwave` (player-owned) | 2 | 400 | Compact splash blast. Low thump, mid crackle, quick out. Not the boss-death boom — this fires several times a fight. | 70 Hz sine 3→320 + noise LP 2 kHz 2→260 | pitch ±7% | 3, ≥180 ms | 0.58 | world |
-| `crash.player.tile` | `PhysicsSystem` static-tile contact past `CRASH_VELOCITY_THRESHOLD` | 1 | 260 | Heavy scraping collision. You flew into a wall. Grinding, not explosive. Loudness scales with impact speed. | 130 Hz thud 2→200 + noise LP 900 Hz 5→240 | pitch ±8%, gain ∝ impact speed | 2, ≥180 ms | 0.55 | world |
-| `crash.player.shard` | `PhysicsSystem` player↔MOBILE-shard contact above `SHARD_CONTACT_SPEED` (1.2 — far below the wall-break speed of 4) | 1 | 140 | A loose rock knocking off the hull. Light, hollow and short — a nudge, not a collision. Distinct from `crash.player.tile`: hitting a drifting pebble must not sound like flying into masonry. Pitched by shard SIZE (small knocks higher) and gained by impact speed, so one id spans pebble-tap to boulder-slam and a busy field stays coherent. | 280→170 Hz triangle + LP noise 900→380 Hz; 1→120 | pitch ±12%, plus caller size-pitch and speed-gain | 3, ≥70 ms **+gain** | 0.34 | world |
-| `crash.player.enemy` | `PhysicsSystem` player↔enemy body contact | 1 | 200 | Metallic body slam. Harder-edged than the tile crash, with a hull ring. | 200 Hz thud + 1.1 kHz ring; 1→180 | pitch ±8% | 2, ≥140 ms | 0.52 | world |
-| `crash.shard.tile` | `PhysicsSystem` shard↔tile / shard↔shard above the momentum threshold. **NOT CURRENTLY WIRED** — registered and specified, but no call site fires it. Deliberate: shard-on-shard contact is exactly the chatter being suppressed, so adding it would work against the proximity rule above. Wire it only alongside a reason to. | 3 | 110 | Distant knock of debris hitting debris. Quiet — this happens constantly in a shard field. | 350 Hz LP 1.5 kHz; 1→95 | pitch ±16% | 4, ≥60 ms **+gain** | 0.14 | **near-field** |
+| `crash.player.tile` | `PhysicsSystem` static-tile contact past `CRASH_VELOCITY_THRESHOLD` | 1 | 260 | Heavy scraping collision. You flew into a wall. Grinding, not explosive. Loudness scales with **impact strength** (§4.4), which for a static tile is the impact-speed curve it has always had — the wall is the one hit the new model leaves bit-for-bit unchanged. | 130 Hz thud 2→200 + noise LP 900 Hz 5→240 | pitch ±8%, gain from `I` (§4.4), floor 0 | 2, ≥180 ms | 0.55 | world |
+| `crash.player.shard` | `PhysicsSystem` player↔MOBILE-shard contact above `SHARD_CONTACT_SPEED` (1.2 — far below the wall-break speed of 4) | 1 | 140 | A loose rock knocking off the hull. Light, hollow and short — a nudge, not a collision. Distinct from `crash.player.tile`: hitting a drifting pebble must not sound like flying into masonry. Pitched by shard MASS (small knocks higher) and gained by **impact strength** (§4.4) rather than raw speed, so one id spans pebble-tap to boulder-slam, a 40 px metal shard outweighs a same-size rock by ear as well as on the camera, and a busy field stays coherent. | 280→170 Hz triangle + LP noise 900→380 Hz; 1→120 | pitch ±12%, plus the §4.4 mass-pitch and strength-gain, floor 0.25 | 3, ≥70 ms **+gain** | 0.34 | world |
+| `crash.player.enemy` | `PhysicsSystem` player↔enemy body contact | 1 | 200 | Metallic body slam. Harder-edged than the tile crash, with a hull ring. Gain and pitch come from **impact strength** (§4.4) over the ENEMY's mass, so a gnat glances off the hull and a Bastion stops you dead. | 200 Hz thud + 1.1 kHz ring; 1→180 | pitch ±8%, plus the §4.4 mass-pitch and strength-gain, floor 0.30 | 2, ≥140 ms | 0.52 | world |
+| `crash.shard.tile` | `PhysicsSystem` shard↔tile / shard↔shard above the momentum threshold. **NOT CURRENTLY WIRED** — registered and specified, but no call site fires it. Deliberate: shard-on-shard contact is exactly the chatter being suppressed, so adding it would work against the proximity rule above. Wire it only alongside a reason to. | 3 | 110 | Distant knock of debris hitting debris. Quiet — this happens constantly in a shard field. | 350 Hz LP 1.5 kHz; 1→95 | pitch ±16%, plus the §4.4 mass-pitch and strength-gain taken over the SHARD's own step, floor 0.20 | 4, ≥60 ms **+gain** | 0.14 | **near-field** |
+
+### 4.4 Impact strength — one number for the camera and the ear
+
+A body collision produces two pieces of feedback: the camera shakes, and
+something is heard. They were computed from two unrelated scales — the
+shake from `min(impactSpeed, HEAVY) × CAP_MULTIPLIER`, the `crash.*`
+gains from raw `impactSpeed` over hand-picked spans — with no mass in
+either, so a 15 px chip and a static wall shook the camera identically
+*and* sounded within a hair of each other at the same closing speed.
+`COLLISION_CONFIG.SHAKE` fixed the camera by reading the quantity the
+impulse solver is about to apply anyway. This section puts the SOUND on
+that same quantity, so how hard a hit reads to the eye and to the ear is
+one decision rather than two that drift.
+
+**The quantity.** For a collision between `self` — the body whose voice
+is playing, which is the player for every `crash.player.*` row — and
+`other`:
+
+```
+effInv(x) = x.mass === Infinity ? 0 : (1 / x.mass) ^ MASS_BIAS_EXPONENT   // 0.5
+dv        = (1 + ELASTICITY) · |v_n| · effInv(self) / (effInv(self) + effInv(other))
+I         = clamp(dv / SHAKE.IMPACT_MAX, 0, 1)                           // IMPACT_MAX = 30
+```
+
+`dv` is `self`'s own velocity STEP along the collision normal — the
+number the solver applies a few lines later, bias exponent included — so
+it carries both masses without a second model to keep in sync. `I` is
+that step normalised to 0..1, which is literally `shake / 30`: a row's
+gain and the camera's lurch become two readings of one dial.
+
+With today's constants (`ELASTICITY 0.5`, `MASS_BIAS_EXPONENT 0.5`,
+`PHYSICS_CONSTANTS.PLAYER_MASS 100`) the player-side form collapses to a
+single line, which is what the numbers below are computed from:
+
+```
+dv = 1.5 · |v_n| · √m / (√m + 10)      m = impactor mass; a static tile is ∞, so √m/(√m+10) → 1
+```
+
+**Gain.** `gain = clamp(dv / SPAN, FLOOR, 1)`, where `SPAN` is the row's
+own — the `dv` at which it reaches full gain. The row's `mix` still
+scales it; this is the per-instance factor the call site passes, as
+`{ gain }`.
+
+| row | span | floor |
+|---|---|---|
+| `crash.player.tile` | 18 | 0 |
+| `crash.player.shard` | 6 | 0.25 |
+| `crash.player.enemy` | 12 | 0.30 |
+| `crash.shard.tile` | 6 | 0.20 |
+
+The TILE span is not a taste knob. A static body takes the whole
+velocity step, so `dv = 1.5 |v_n|` and `dv / 18` is *exactly* the
+`min(1, impactSpeed / 12)` curve `crash.player.tile` ships today: at the
+break threshold (4) both give 0.33, at 12 both give 1.0. Flying into a
+wall sounds bit-for-bit the way it always has, and every lighter impactor
+gets quieter by the true mass ratio — the same isolating claim
+`COLLISION_CONFIG.SHAKE` makes, for the same reason. This is a fix for
+light bodies, not a global nerf, and the wall is the sound nobody
+complained about.
+
+**The span is PER ROW because the rows do not cover the same range.**
+A single global span was tried first and was wrong: the tile crash is
+gated at closing speed 4 and reaches `dv` 30, while the shard row is
+gated at 1.2 (a loose rock is audible long before it is destructive) and
+tops out near `dv` 7. Normalising both by 18 pinned essentially every
+shard contact to its floor — a voice with no dynamics at all, which is a
+worse outcome than the loudness it was fixing. Each row now uses the
+range it can actually reach, so "harder is louder" holds WITHIN a row,
+while the absolute ordering BETWEEN rows stays where the `mix` column
+puts it.
+
+What the model gives up is discrimination above a row's span: past it the
+ear is already at full gain, so the camera can separate a hard crash from
+a catastrophic one and the ear cannot. Accepted deliberately — the only
+way to recover it on the tile row is to re-tune the wall, which costs the
+parity above.
+
+**Pitch.** `pitch = clamp((25 / m) ^ 0.25, 0.70, 1.60)` — from MASS, not
+from size.
+
+Gain says how hard, pitch says how big, and because mass is already the
+term inside `I` the two cues cannot disagree with each other or with the
+camera. Shard mass goes as `size²` for every variant, so *within* one
+material this reproduces the `√(38 / size)` law the caller ships today (a
+40 px rock lands on 0.97 either way); *across* materials it is strictly
+better, because a 40 px metal shard is 1.7× the mass of the same-size
+rock and should knock lower as well as louder. `25` is the reference
+mass — the mass that plays a take at its native pitch, roughly a 37 px
+rock shard. A static tile has no finite mass and takes no mass-pitch:
+`crash.player.tile` keeps its fixed voice and its ±8 % jitter.
+
+**Worked numbers.** Closing speed |v_n| = 20 against the stock 100-mass
+hull. The `dv` column is `COLLISION_CONFIG.SHAKE`'s own output,
+unchanged — that it is also the gain column is the whole point.
+
+| impactor | mass | dv (= shake) | gain (shard span 6) | pitch |
+|---|---|---|---|---|
+| static tile | ∞ | 30.0 (capped) | 1.00 (tile span 18) | fixed voice, ±8 % |
+| 40 px metal shard | 48 | 12.3 | 1.00 | 0.85 |
+| 40 px rock shard | 28.8 | 10.5 | 1.00 | 0.97 |
+| 25 px rock shard | 11.2 | 7.5 | 1.00 | 1.22 |
+| 15 px glass shard | 2.25 | 3.9 | 0.65 | 1.60 (clamped; raw 1.83) |
+| 8 px glass chip | 0.64 | 2.2 — under `IMPACT_DV_MIN`, camera silent | 0.37 | 1.60 (clamped; raw 2.50) |
+
+The same rows at the gentler contact speeds the shard voice actually
+lives at — `|v_n|` = 4, which is where most hull-brushing happens:
+
+| impactor | dv | gain |
+|---|---|---|
+| 40 px metal shard | 2.5 | 0.41 |
+| 40 px rock shard | 2.1 | 0.35 |
+| 25 px rock shard | 1.5 | 0.25 (floor) |
+| 8 px glass chip | 0.4 | 0.25 (floor) |
+
+The chip row is the model working, not failing: a body too light to move
+the camera is still *heard*, because it did touch the hull — quietly at
+brushing speed, and never at the masonry level whatever speed it arrives
+at. Below the floor there is deliberately no loudness discrimination
+left; pitch carries the difference instead.
+
+The same line for `crash.player.enemy` (span 12) at `|v_n|` = 20, over
+the roster's hull masses: gnat (4) → gain 0.42 / pitch 1.58 · Drone
+(10) → 0.60 / 1.26 · Tank (18) → 0.74 / 1.09 · Turret (50) → 1.00 /
+0.84 · Warden (140) → 1.00 / 0.70 · Bastion (200) → 1.00 / 0.70 ·
+Dragon (500) → 1.00 / 0.70. Ramming a gnat and ramming a Bastion are
+now different events to the ear, where this row previously passed no
+per-instance parameters at all.
+
+**Per-row floors.** The floor is the audibility guarantee for a contact
+too light to earn gain on its own; it is the only per-row freedom in the
+model.
+
+| id | self | other | floor | gate (unchanged) |
+|---|---|---|---|---|
+| `crash.player.tile` | player | static tile (∞) | 0 — the gate already puts the quietest hit at 0.33 | `impactSpeed > CRASH_VELOCITY_THRESHOLD` (4) |
+| `crash.player.shard` | player | mobile shard | 0.25 | `impactSpeed > SHARD_CONTACT_SPEED` (1.2) |
+| `crash.player.enemy` | player | enemy hull | 0.30 — tier 1, must always read | `abs(v_n) > 2.0` |
+| `crash.shard.tile` | the SHARD being voiced | tile or other shard | 0.20 | momentum threshold (still unwired) |
+
+**The gate stays a SPEED gate.** Whether a contact is heard at all is a
+contact question — `crash.player.shard` firing at 1.2 while the wall
+needs 4 is the whole reason the two voices were split, and a `dv` gate
+would silence exactly the pebble bumps it exists for. Only the CURVE
+above the gate moves to `I`.
+
+**`crash.shard.tile` generalises rather than special-cases.** It has no
+player in it, so `self` is the shard whose break is being voiced and
+`other` is what it hit; against a static tile `effInv(other) = 0`, the
+shard takes the whole step, and the expression is the wall case again
+with the shard in the player's seat. Nothing about the model is
+player-specific — it is only ever used from the player's seat today.
+
+**Range and attribution are orthogonal to intensity, and stay exactly as
+§3 states them.** `I` sets how loud a hit is at the listener; the
+near-field radii (`SHARD_NEAR_RADIUS` / `SHARD_FAR_RADIUS`, 240/850) set
+how far it carries, and the `killedByPlayer` exception promotes a break
+to normal radius. A player-attributed shard break is not made LOUDER by
+the stamp — it is made AUDIBLE FURTHER. Do not fold one into the other:
+gain answers "how hard was that", radius answers "is that mine".
+
+**Out of scope, stated so it is not inferred.** The `impact.*` rows are
+PROJECTILE hits routed through `handleProjectileHit`; their intensity is
+DAMAGE, not a collision step, and they keep their flat per-row gains.
+`move.dent` fires from `DropSystem.spawnDentShard` for crash-driven and
+shot-driven dents alike and cannot tell them apart at the call site, so
+it stays flat until it can. Impact-KILLED destruction (`destroy.tile.*` /
+`destroy.shard.*` reached via `PhysicsSystem.killStructureByImpact`)
+already carries `lastImpactDamage`, a 1..5 grade of how far over the
+break threshold the hit was, and that — not `I` — is the quantity a
+future intensity pass on those rows should read.
+
+**Wiring status.** The two live call sites still pass the OLD
+speed-derived values: `crash.player.tile` passes
+`min(1, impactSpeed / (CRASH_VELOCITY_THRESHOLD × 3))` and no pitch,
+`crash.player.shard` passes `clamp(impactSpeed / 8, 0.25, 1)` with
+`clamp(√(38 / size), 0.7, 1.6)`, and `crash.player.enemy` passes no
+options at all. Landing this section needs no signature change anywhere:
+`PhysicsSystem.resolveCollision` already computes this exact `dv` in its
+shake block (search `Detect High Impact for Shake`), the crash-audio
+block is further down the same function with `velAlongNormal`,
+`player.mass` and `structure.mass` all in scope, and
+`this.sfx?.(id, x, y, { gain, pitch })` already carries both fields. Hoist
+the `dv` computation above both blocks and read it from each.
+
 
 ---
 

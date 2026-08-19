@@ -3051,7 +3051,36 @@ export const ENEMY_NEBULA_BURST = {
 // kick is purely KICK_PER_DMG × applied (post-armor) damage, so heavy hits
 // shove hard and chip hits on armor barely nudge.
 export const HIT_FEEDBACK = {
-  KICK_PER_DMG: 1.0,  // knockback velocity per point of applied damage (uncapped)
+  /* ── KNOCKBACK IS AN IMPULSE, NOT A VELOCITY (user call) ──────────────
+   *
+   * This used to be `KICK_PER_DMG: 1.0` applied as `dv = damage * 1.0` —
+   * a velocity step with NO MASS IN IT, so one Plasma Cannon hit added
+   * dv = 18 to a mass-4 gnat and to a mass-500 dragon alike, and dv = 18 is
+   * several times any enemy's own top speed.  That is what launched NPCs off
+   * screen on every hit, and it is why they behaved unlike shards: the shard
+   * push right below is `projSpeed * 0.20 / max(1, mass/10)` — mass-aware,
+   * landing in the 0.7 .. 3.2 range.  (The dragon's ENEMY_VARIANTS row even
+   * says "heavy: barely shoved", documenting an intent the code did not
+   * implement.)
+   *
+   * Momentum in, velocity out — the same move the screen shake made:
+   *
+   *     dv = damage * KICK_IMPULSE_PER_DMG / mass
+   *
+   * At the shipped weapon damages that lands NPCs in the shard range, and
+   * orders them by weight the way everything else in the collision code
+   * does.  dv from one Cannon hit (18 dmg): gnat 9.0, Charger 4.5, Drone
+   * 3.6, Tank 2.0, Turret 0.7, Warden 0.26, Dragon 0.07 (was 18 for every
+   * one of them).
+   *
+   * The cap is expressed in the TARGET'S OWN top speed rather than as an
+   * absolute, so it means the same thing across a roster whose speeds vary
+   * 4x: a hit can never shove a body faster than it can fly under its own
+   * power.  The floor keeps a bolted-down emplacement (maxSpeed 0: Turret,
+   * Nest) flinching rather than being immovable. */
+  KICK_IMPULSE_PER_DMG: 2.0,   // momentum per point of applied damage
+  KICK_MAX_SPEED_FRAC: 0.9,    // never shove past this fraction of own maxSpeed
+  KICK_SPEED_FLOOR: 3.0,       // ...but a maxSpeed-0 body still flinches
   STUN_SEC: 0.12,     // stagger: no AI force AND no speed-clamp while > 0
   // Player-hit response scales with the incoming shot's intrinsic damage so a
   // heavy slug (Tank, 16) lands like a wallop and a chip pellet (Drone, 5)
@@ -3061,7 +3090,11 @@ export const HIT_FEEDBACK = {
   PLAYER_SHAKE_BASE: 4,        // floor shake on any player hit
   PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
   PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
-  PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
+  /* The player's own shove is the same rule, normalised so the LEAN ship is
+   * unchanged: 12 / PHYSICS_CONSTANTS.PLAYER_MASS (100) = the old 0.12 per
+   * damage point.  Only a laden hull differs, and it differs the way the
+   * screen shake already does — more ship, less shove. */
+  PLAYER_KICK_IMPULSE_PER_DMG: 12,
   // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
   // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
   // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
@@ -3718,6 +3751,50 @@ export const AUDIO_CONSTANTS = {
      *  under this cannot be heard in play whatever it was meant to be — the
      *  file has not made the sound quieter, it has removed it.  ~-26 dBFS. */
     SAMPLE_MIN_PEAK: 0.05,
+
+  /** IMPACT VOICING — the ear reads the same dial as the camera
+   *  (docs/SFX_INVENTORY.md §4.4).  A body collision produces two pieces of
+   *  feedback, and they used to be computed from two unrelated scales with
+   *  no mass in either.  Both now come from `I` — the struck body's own
+   *  velocity step normalised by `COLLISION_CONFIG.SHAKE.IMPACT_MAX`, i.e.
+   *  literally `shake / 30`.
+   *
+   *  The TILE span is load-bearing rather than taste: dividing dv by 18
+   *  reproduces the shipped `impactSpeed / 12` curve exactly, so the wall
+   *  crash is bit-for-bit unchanged and only lighter impactors get quieter —
+   *  the same isolating claim the shake change makes.  The trade it buys is
+   *  that above its span a row is already at full gain, so the camera can
+   *  still separate a hard crash from a catastrophic one and the ear cannot.
+   *
+   *  PITCH is taken from MASS, not size, because mass is already the term
+   *  inside `I` — so the two cues cannot disagree, and a 40px metal shard
+   *  knocks lower than a same-size rock, which it should, since it also
+   *  shakes harder. */
+  /** The dv at which a row reaches FULL gain.  Per row, not global: the tile
+   *  crash is gated at closing speed 4 and can reach dv 30, while the shard
+   *  row is gated at 1.2 and tops out around dv 7 — normalising both by the
+   *  same span pinned every shard contact to its floor, i.e. a voice with no
+   *  dynamics at all.  Each row now uses the range it can actually reach, so
+   *  "harder is louder" holds WITHIN a row; the absolute level ordering
+   *  BETWEEN rows stays where the mix levels put it.
+   *
+   *  TILE is 18 because that is the parity number: it reproduces the shipped
+   *  `impactSpeed / 12` curve exactly (a static body takes the whole step, so
+   *  dv = 1.5 v). */
+  IMPACT_SPAN_TILE: 18,
+  IMPACT_SPAN_SHARD: 6,
+  IMPACT_SPAN_ENEMY: 12,
+  IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
+  IMPACT_PITCH_EXP: 0.25,
+  IMPACT_PITCH_MIN: 0.70,
+  IMPACT_PITCH_MAX: 1.60,
+  /** Per-row gain floors (docs/SFX_INVENTORY.md §4.4).  A floor is what stops
+   *  a voice fading to nothing: the tile crash has none because it is gated
+   *  hard enough that a quiet one is meaningful, while the light-contact rows
+   *  keep a presence. */
+  IMPACT_FLOOR_TILE: 0,
+  IMPACT_FLOOR_SHARD: 0.25,
+  IMPACT_FLOOR_ENEMY: 0.30,
 
   DEFAULT_VOLUME: 0.7,     // master gain at boot; in-memory only (no persistence)
   MAX_VOICES: 24,          // hard ceiling across all tiers

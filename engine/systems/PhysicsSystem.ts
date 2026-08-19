@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged} from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1894,6 +1894,43 @@ export class PhysicsSystem {
       if (onDeath) onDeath(structure);
   }
 
+  /**
+   * IMPACT STRENGTH — one number for the camera and the ear.
+   *
+   * `self`'s own velocity STEP along the collision normal: the quantity the
+   * impulse solver applies a few lines later, mirrored here including the
+   * mass-bias exponent, so nothing downstream is modelling the collision a
+   * second time.  A STATIC `other` contributes `effInv = 0`, so `self` takes
+   * the whole step — a wall is the hardest hit there is.
+   *
+   * Read by the screen shake (`SHAKE.IMPACT_*`) and by the crash voices
+   * (`AUDIO_CONSTANTS.IMPACT_*`, docs/SFX_INVENTORY.md §4.4), which is the
+   * point: how hard a hit reads to the eye and to the ear is one decision.
+   */
+  public static impactStrength(self: GameEntity, other: GameEntity, velAlongNormal: number): number {
+      const k = COLLISION_CONFIG.MASS_BIAS_EXPONENT;
+      const effSelf  = Math.pow(self.mass  === Infinity ? 0 : 1 / self.mass,  k);
+      const effOther = Math.pow(other.mass === Infinity ? 0 : 1 / other.mass, k);
+      const denom = effSelf + effOther;
+      if (denom <= 0) return 0;
+      return (1 + COLLISION_CONFIG.ELASTICITY) * Math.abs(velAlongNormal) * (effSelf / denom);
+  }
+
+  /** The `{gain, pitch}` a crash voice plays at, from that same strength.
+   *  `floor` and `span` are the row's own (docs/SFX_INVENTORY.md §4.4) — the
+   *  span is the dv at which it reaches full gain, which differs per row
+   *  because the rows are gated at different speeds and reach different
+   *  strengths.  Pass the IMPACTOR's mass for pitch; `Infinity` (a static
+   *  tile) keeps the fixed voice the row already had. */
+  private static impactVoice(dv: number, impactorMass: number, floor: number, span: number): { gain: number; pitch?: number } {
+      const A = AUDIO_CONSTANTS;
+      const gain = Math.max(floor, Math.min(1, dv / span));
+      if (impactorMass === Infinity) return { gain };
+      const pitch = Math.max(A.IMPACT_PITCH_MIN, Math.min(A.IMPACT_PITCH_MAX,
+          Math.pow(A.IMPACT_PITCH_REF_MASS / Math.max(0.01, impactorMass), A.IMPACT_PITCH_EXP)));
+      return { gain, pitch };
+  }
+
   private tryPassthroughShatter(
       a: GameEntity,
       b: GameEntity,
@@ -3037,7 +3074,17 @@ export class PhysicsSystem {
                   // off its line nor hold it in permanent hit-stun.  Absent →
                   // unchanged behaviour for every rank-and-file enemy.
                   const poise = target.poise;
-                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG * (poise ? poise.knockScale : 1);
+                  // MOMENTUM in, velocity out — mass matters here exactly as
+                  // it does for the shard push below and for the screen shake.
+                  // Capped in the target's OWN top speed so a hit can never
+                  // shove a body faster than it can fly under its own power.
+                  const kickCap = HIT_FEEDBACK.KICK_MAX_SPEED_FRAC
+                      * Math.max(target.maxSpeed ?? 0, HIT_FEEDBACK.KICK_SPEED_FLOOR);
+                  const kickMass = target.mass === Infinity ? Infinity : Math.max(0.01, target.mass);
+                  const kick = Math.min(
+                      projDmg * HIT_FEEDBACK.KICK_IMPULSE_PER_DMG / kickMass,
+                      kickCap,
+                  ) * (poise ? poise.knockScale : 1);
                   target.velocity.x += (proj.velocity.x / vmag) * kick;
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
                   if (!poise || projDmg >= poise.stunDamage) target.hitStun = HIT_FEEDBACK.STUN_SEC;
@@ -3075,7 +3122,10 @@ export class PhysicsSystem {
                       pvm > 0 ? { dirX: pv!.x / pvm, dirY: pv!.y / pvm } : undefined);
                   if (proj.velocity && !target.isExploding) {
                       const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
-                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
+                      // Same impulse rule, so a laden hull is shoved less —
+                      // normalised to leave the lean ship exactly as it was.
+                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_IMPULSE_PER_DMG
+                          / Math.max(1, target.mass);
                       target.velocity.x += (proj.velocity.x / vmag) * kick;
                       target.velocity.y += (proj.velocity.y / vmag) * kick;
                       markDamaged(target, Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012)));
@@ -3260,15 +3310,7 @@ export class PhysicsSystem {
           const isHardTarget = other.type === EntityType.ENEMY || other.type === EntityType.STRUCTURE;
           if (isHardTarget) {
               const S = COLLISION_CONFIG.SHAKE;
-              // Mirrors the impulse split exactly (bias exponent included).
-              // A static body contributes effInv 0, so the player takes the
-              // whole step — a wall is the hardest hit there is.
-              const effInvP = Math.pow(player.mass === Infinity ? 0 : 1 / player.mass,
-                                       COLLISION_CONFIG.MASS_BIAS_EXPONENT);
-              const effInvO = Math.pow(other.mass === Infinity ? 0 : 1 / other.mass,
-                                       COLLISION_CONFIG.MASS_BIAS_EXPONENT);
-              const share = effInvP + effInvO > 0 ? effInvP / (effInvP + effInvO) : 0;
-              const dv = (1 + COLLISION_CONFIG.ELASTICITY) * Math.abs(velAlongNormal) * share;
+              const dv = PhysicsSystem.impactStrength(player, other, velAlongNormal);
               if (dv > S.IMPACT_DV_MIN) {
                   // DIRECTION is the way the player is about to be shoved:
                   // the impulse acts along +n on b and -n on a.
@@ -3290,7 +3332,13 @@ export class PhysicsSystem {
           // crash, and gated on a real impact so drifting contact is silent.
           const other = a.type === EntityType.PLAYER ? b : a;
           if (other.type === EntityType.ENEMY && Math.abs(velAlongNormal) > 2.0) {
-              this.sfx?.('crash.player.enemy', player.position.x, player.position.y);
+              // Voiced by the same strength the camera reads, so a gnat
+              // glances off the hull and a Bastion stops you dead.  This row
+              // used to pass nothing at all.
+              this.sfx?.('crash.player.enemy', player.position.x, player.position.y,
+                  PhysicsSystem.impactVoice(
+                      PhysicsSystem.impactStrength(player, other, velAlongNormal),
+                      other.mass, AUDIO_CONSTANTS.IMPACT_FLOOR_ENEMY, AUDIO_CONSTANTS.IMPACT_SPAN_ENEMY));
           }
       }
 
@@ -3325,21 +3373,25 @@ export class PhysicsSystem {
           // and hard shard contact sound like masonry.
           if (structure.mass !== Infinity) {
               if (impactSpeed > STRUCTURE_CONSTANTS.SHARD_CONTACT_SPEED) {
-                  const span = Math.max(1, STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 2);
-                  // Smaller shards knock higher; bigger ones thud.  Size is
-                  // the perceptual cue here, not mass.
-                  const size = Math.max(6, structure.size.x);
-                  this.sfx?.('crash.player.shard', player.position.x, player.position.y, {
-                      gain: Math.max(0.25, Math.min(1, impactSpeed / span)),
-                      pitch: Math.max(0.7, Math.min(1.6, Math.sqrt(38 / size))),
-                  });
+                  // Gain and pitch from the shared impact strength: a light
+                  // shard is quieter AND higher than a heavy one at the same
+                  // closing speed, where before both came from raw speed and
+                  // the shard's on-screen SIZE.  The speed GATE above is
+                  // untouched — whether a contact is heard at all stays a
+                  // contact question.
+                  this.sfx?.('crash.player.shard', player.position.x, player.position.y,
+                      PhysicsSystem.impactVoice(
+                          PhysicsSystem.impactStrength(player, structure, velAlongNormal),
+                          structure.mass, AUDIO_CONSTANTS.IMPACT_FLOOR_SHARD, AUDIO_CONSTANTS.IMPACT_SPAN_SHARD));
               }
           } else if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
-              // Grinding, not explosive — and scaled by how hard you hit,
-              // so a graze and a full-speed wall are different sounds.
-              this.sfx?.('crash.player.tile', player.position.x, player.position.y, {
-                  gain: Math.min(1, impactSpeed / (STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 3)),
-              });
+              // Grinding, not explosive — and scaled by how hard you hit.  A
+              // static tile takes the whole velocity step, which makes this
+              // curve identical to the impactSpeed/12 it has always used.
+              this.sfx?.('crash.player.tile', player.position.x, player.position.y,
+                  PhysicsSystem.impactVoice(
+                      PhysicsSystem.impactStrength(player, structure, velAlongNormal),
+                      Infinity, AUDIO_CONSTANTS.IMPACT_FLOOR_TILE, AUDIO_CONSTANTS.IMPACT_SPAN_TILE));
           }
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {

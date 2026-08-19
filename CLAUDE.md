@@ -56,7 +56,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  172 tests.  All run at
+                          anti-flake rules).  175 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1881,6 +1881,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   POI of their kind at ANY distance so volume swells on approach, and
   `AudioSystem.loop` treats an out-of-earshot positional loop as OFF so a
   far POI holds no oscillators.
+- **A hit's LOUDNESS and its SHAKE come from one number.**
+  `PhysicsSystem.impactStrength(self, other, velAlongNormal)` is the struck
+  body's own velocity step (see the shake note above); the camera reads it
+  through `COLLISION_CONFIG.SHAKE.IMPACT_*` and the `crash.*` voices read it
+  through `AUDIO_CONSTANTS.IMPACT_*` (`impactVoice`), so how hard a hit reads
+  to the eye and to the ear cannot drift apart.  GAIN is `clamp(dv / SPAN,
+  FLOOR, 1)` with the span and floor PER ROW, because the rows do not cover
+  the same range — the tile crash is gated at closing speed 4 and reaches
+  dv 30, the shard row is gated at 1.2 and tops out near 7, and one global
+  span pinned every shard contact to its floor.  The TILE span (18) is
+  load-bearing: it reproduces the shipped `impactSpeed / 12` curve exactly,
+  so the wall crash is unchanged and only lighter impactors get quieter.
+  PITCH comes from the impactor's MASS, not its on-screen size, because mass
+  is already the term inside the strength — so a 40px metal shard knocks
+  lower AND louder than a same-size rock.  `docs/SFX_INVENTORY.md` §4.4 is
+  the spec; the numbers there are worked, not estimated.
 - **Player contact is split by WHAT was hit, at two different speeds.**
   `crash.player.tile` (static wall) fires above
   `STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD`; `crash.player.shard`
@@ -1899,8 +1915,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   the NORMAL radius, keyed off the `killedByPlayer` stamp that already
   exists for scoring (set by the projectile / crash / lightning / AoE
   paths) — so a shard you shot from range is still yours to hear.  Direct
-  player↔shard contact is covered by `crash.player.tile` at full range,
-  because mobile shards are `STRUCTURE`s.  Radii resolve caller → def →
+  player↔shard contact is covered by `crash.player.shard` (and
+  `crash.player.tile` for the static case), both at full range: the
+  near-field rule is about physics the player is not part of.  Radii resolve caller → def →
   global default (`SfxDef.near`/`.far`, `play(id, {near, far})`).
 - **The engine loop IDLES; it does not switch on and off.**
   `move.thrust` runs continuously while the player is alive and THROTTLE

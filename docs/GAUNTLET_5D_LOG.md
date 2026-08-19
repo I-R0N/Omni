@@ -1113,3 +1113,109 @@ otherwise have collided with the direction parameters.
 `tests/shake.spec.ts` pins the three claims separately because they fail
 independently — and the PARITY test is the one that matters most: it fails if
 someone ever "fixes" an overpowered shake by scaling the whole curve down.
+
+---
+
+## U11 — the ear reads the shake's dial; NPC knockback becomes an impulse
+
+Two requests in one round, and they turned out to be the same defect twice:
+a feedback channel that ignored mass while the physics around it did not.
+
+### 1. Impact sound follows impact strength (delegated, then amended)
+
+A subagent updated `docs/SFX_INVENTORY.md` §4.4 to define ONE quantity for
+both the camera and the ear — `dv`, the struck body's own velocity step,
+which `COLLISION_CONFIG.SHAKE` already computes. Its key finding is the one
+worth keeping: at a span of 18 the tile-crash gain law reproduces the shipped
+`impactSpeed / 12` curve **exactly**, so the wall crash is bit-for-bit
+unchanged and only lighter impactors get quieter — the same isolating claim
+the shake change makes, verified numerically at both ends.
+
+**I amended the spec on one point**, and it is worth recording as a case of
+a good rule producing a bad outcome. The agent specified ONE global span
+(`I / 0.6`, i.e. `dv / 18`) for every crash row. Measured against the range
+each row actually covers, that pinned essentially every shard contact to its
+0.25 floor: the shard voice is gated at closing speed 1.2 — a loose rock is
+audible long before it is destructive — and tops out near `dv` 7, so
+dividing it by 18 left a voice with no dynamics at all. Quieter, and worse.
+The span is per row now (tile 18, shard 6, enemy 12), so "harder is louder"
+holds WITHIN a row while the absolute ordering BETWEEN rows stays where the
+mix column puts it. Doc updated to match, with both the old failure and the
+reason stated in it.
+
+Also wired, which the agent deliberately left alone per its brief: the three
+`crash.*` call sites now pass `impactVoice(...)` instead of speed-derived
+numbers. It needed no signature changes — `resolveCollision` already computed
+this `dv` a few lines above for the shake, so the change is a shared helper
+(`PhysicsSystem.impactStrength`) and three call sites. `crash.player.enemy`
+gained per-instance parameters it never had: ramming a gnat and ramming a
+Bastion are now different events to the ear.
+
+Two smaller things fell out: the agent found a stale sentence in the doc
+(player↔shard contact attributed to `crash.player.tile`, which predates the
+tile/shard voice split) and flagged that CLAUDE.md §8 carried the same claim.
+Both fixed.
+
+### 2. NPC knockback is an impulse, not a velocity
+
+> "NPCs take significant momentum hits when the player shoots them. This is
+> different than the behavior when the player shoots shards."
+
+Exactly right, and the diff is one term. The feedback kick was
+`dv = damage * KICK_PER_DMG` (1.0) — **a velocity step with no mass in it**
+— so one Plasma Cannon hit (18 damage) added `dv = 18` to a mass-4 gnat and
+to a mass-500 dragon alike. Enemy top speeds are 2–12, so a single hit was
+several times a body's own top speed, and hits stack. Meanwhile the shard
+push twenty lines away is `projSpeed * 0.20 / max(1, mass/10)` — mass-aware,
+landing in the 0.7–3.2 range. The dragon's own `ENEMY_VARIANTS` row says
+"heavy: barely shoved", documenting an intent the code did not implement.
+
+Momentum in, velocity out: `dv = damage * KICK_IMPULSE_PER_DMG / mass`,
+capped at a fraction of the target's OWN top speed. `dv` from one Cannon hit,
+was 18 for every row:
+
+| target | mass | was | now |
+|---|---|---|---|
+| Swarm gnat | 4 | 18 | 9.0 |
+| Charger | 8 | 18 | 4.5 |
+| Drone | 10 | 18 | 3.6 |
+| Tank | 18 | 18 | 2.0 |
+| Turret | 50 | 18 | 0.72 |
+| Warden boss | 140 | 18 | 0.26 |
+| Dragon | 500 | 18 | 0.07 |
+
+The cap is expressed in the target's own `maxSpeed` rather than as an
+absolute, so it means the same thing across a roster whose speeds vary 4×: a
+hit can never shove a body faster than it can fly under its own power. A
+floor keeps a bolted-down emplacement (`maxSpeed` 0: Turret, Nest) flinching
+rather than immovable.
+
+**What was already right and is left alone:** the perfectly-inelastic
+momentum transfer the projectile itself carries
+(`target.velocity += proj.velocity * projMass / targetMass`). That is real
+physics and was always mass-aware; at `PROJECTILE_CONSTANTS.MASS = 1` it is
+small against any real hull. The tests assert the RESULTING speed, so they
+account for both terms rather than pretending the feedback kick is the whole
+story.
+
+The player's own shot-knockback got the same treatment, normalised so the
+LEAN ship is unchanged (`12 / PLAYER_MASS` = the old 0.12 per damage point).
+Only a laden hull differs, and it differs the way the screen shake already
+does.
+
+### Validation
+
+`npm run typecheck` ✅ · `npm run build` ✅ · `npm test` **175 passed** ✅ ·
+`node scripts/smoke/b3.mjs` **49 passed** (the doc↔registry parity smoke,
+including "every documented id is registered" in both directions).
+
+`tests/knockback.spec.ts` was verified NON-VACUOUS by reverting the fix and
+watching all three fail.
+
+**A harness note worth keeping:** the subagent ran `vite preview` on port
+4173 while a full `npm test` was in flight, and Playwright's `webServer` uses
+that port with `--strictPort` and `reuseExistingServer: false`. The run
+collapsed to 87 passed with the rest never starting — which reads like a mass
+failure rather than a port conflict. Re-run clean it was 175. If a suite run
+ever reports a large number of tests simply not running, check for something
+else on 4173 before believing the failures.
