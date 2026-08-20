@@ -2751,3 +2751,93 @@ could never have passed, and did not, on the first full-suite run.
 ### Gate
 
 `npm run typecheck`, `npm run build`, `npm test` — **132 passed**.
+
+---
+
+## A5r — the minimap carries the fog's memory
+
+> "the minimap should reflect the memory of the fog for all fog modes except
+> off"
+
+### What moved
+
+The explored memory used to be recorded only on the three-layer rung,
+because that was the only rung that spent it. It is now recorded at **every
+rung above `off`**, and the minimap veils its terrain with it at all of them.
+The split the change makes explicit: RECORDING is cheap and unconditional
+(one arc into a 125×125 canvas), SPENDING it on the world fog is what the
+`memory` rung buys.
+
+`renderMinimapFog` draws a veil in the fog's own colour at the fog's own
+darkness, cut by the memory, between the terrain layers and the contacts.
+Measured on the collapsed map, mean luminance of a patch the ship has never
+been near:
+
+| rung | minimap terrain | at the ship |
+|---|---|---|
+| off | 34.3 | 60.8 |
+| dim | 15.5 | unchanged |
+| dark | 4.0 | unchanged |
+| memory | 2.5 | unchanged |
+
+### Three decisions inside it
+
+**Terrain only — the contacts read straight through.** Enemies, the boss,
+portals, stations and the snitch are drawn after the veil. They are live
+sensor contacts, not map knowledge, and wave enemies spawn on an offscreen
+ring: a minimap that hid them until you had flown there would not be a fog of
+war, it would be a broken threat display. The fog hides the MAP, not the
+radar.
+
+**Cut with the memory, never with the light.** The lit region moves every
+frame; a minimap that lit and unlit itself at walking pace would strobe at
+75px. The world fog is the live layer, the map is the remembered one.
+
+**Gated on `_fogActive`, not on `getFog()`.** The fog is composed from the
+light layer and does not draw at all under legacy lighting — and nothing
+stamps the memory on a frame the fog pass skipped. A minimap that fogged
+itself off a memory nobody was writing would black out entirely.
+
+### Two bugs found on the way
+
+**The memory's wrap period was the canvas width.** It is the map's extent in
+cells, which is that rounded UP: 15000/48 = 312.5 against a 313-wide canvas.
+Wrapping on the canvas width put the seam half a cell off and would have slid
+the world fog against the minimap fog. Both consumers now read
+`fogMemoryPeriodX/Y`, and the world draw samples `0..period` rather than the
+whole texture, so the never-stamped padding column is never sampled.
+
+**One wrapped blit, two copies.** The pre-rendered terrain layer and the fog
+veil both sample a camera-centred window out of a texture that repeats with
+the map, splitting into up to four draws at the seam. `wrapBlit` in `hud.ts`
+is now the one copy — with the period as a parameter, since the terrain
+layer's period is its canvas size and the fog memory's is not.
+
+### Three tests, and the same lesson twice
+
+The full-suite run failed on the fog test's own guard — `offAway > 2` against
+a measured 1.91 — the third time in this gauntlet that a measurement of a
+mechanism has been decided by what the map generator happened to put in the
+sample box. Parking in the densest cluster raised it to 5.5–20 but did not
+fix the class of problem, so the fog test's scene is now **hand-built** like
+the shadow tests above it: a 3×3 block of tiles placed at the remembered
+patch and another at the never-visited control, symmetric about the vantage
+point, both outside the light's reach.
+
+The minimap test then flaked on the same underlying mistake wearing different
+clothes: it sampled a FIXED minimap offset while the camera was still lerping
+home from the exploration flight, so on a slow-camera run the probe landed on
+world +850 instead of +600 — outside the disc it had just stamped, reading as
+"the memory did not take". The offset is now computed from the LIVE camera
+position, which is the rule the shadow test already states in its own comment
+about taking bearings from the light's real centre rather than from screen
+centre.
+
+Both patches also baseline each spot against ITSELF with the fog off, so
+neither comparison can be decided by which of the two happens to hold more
+terrain.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **133 passed**. The two
+fog tests were additionally run four times each on their own.

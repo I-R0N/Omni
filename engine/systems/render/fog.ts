@@ -13,9 +13,16 @@
  *  before", which needs a MEMORY of where the player has been — a small
  *  world-space texture (one texel per `FOG.CELL` units, so 125x125 on a
  *  6000-unit map) stamped as the ship moves and reset on every map load.
- *  That reset is the whole reason the memory rung is opt-in: it is the only
- *  piece of per-map persistent state the renderer owns, and a stale one
- *  would show the last map's explored shape on this one.
+ *  That reset is the only piece of per-map persistent state the renderer
+ *  owns, and a stale one would show the last map's explored shape on this
+ *  one.
+ *
+ *  THE MEMORY IS KEPT AT EVERY RUNG above `off`, even though the WORLD fog
+ *  spends it only at the three-layer one.  The MINIMAP fogs itself with it
+ *  at all of them (user directive), and a memory that only accumulated on
+ *  one rung would leave the map blank on the other two — the recording is
+ *  cheap (one arc into a 125x125 canvas), the SPENDING is what the rung
+ *  chooses.
  *
  *  ALL OF IT IS SCREEN SPACE and runs after the light blit, before the HUD —
  *  so the fog darkens the world and never the interface.
@@ -27,6 +34,15 @@ import { getFog, FOG, effectiveDpr, getActiveLightingTier, PLAYER_LIGHT_PEAK,
 import { MAP_WIDTH, MAP_HEIGHT } from '../../toroidal';
 import { shiftX, shiftY } from './drawUtils';
 
+/** The explored texture TILES with the map, and its period is the map's
+ *  extent in cells — NOT the canvas width, which is that rounded UP.  On a
+ *  15000-unit map at 48 units a cell that is 312.5 against a 313-wide
+ *  canvas, so wrapping on the canvas width shifts the seam by half a cell
+ *  and slides the world fog against the minimap fog.  Both consumers read
+ *  the period from here. */
+export function fogMemoryPeriodX(): number { return MAP_WIDTH / FOG.CELL; }
+export function fogMemoryPeriodY(): number { return MAP_HEIGHT / FOG.CELL; }
+
 /** Drop the explored memory.  Called on every map load: the texture is world
  *  space, and world space means something different on the next map. */
 export function resetFogMemory(r: RenderSystem): void {
@@ -37,9 +53,9 @@ export function resetFogMemory(r: RenderSystem): void {
 }
 
 /** Ensure the two scratch surfaces exist at the light layer's size, and the
- *  memory texture at the MAP's size.  Both are null until the fog is first
+ *  memory texture at the MAP's size.  All are null until the fog is first
  *  switched on, so `off` allocates nothing. */
-function ensureCanvases(r: RenderSystem, w: number, h: number, memory: boolean): boolean {
+function ensureCanvases(r: RenderSystem, w: number, h: number): boolean {
     if (typeof document === 'undefined') return false;
     if (r._fogCanvas === null) {
         r._fogCanvas = document.createElement('canvas');
@@ -57,7 +73,6 @@ function ensureCanvases(r: RenderSystem, w: number, h: number, memory: boolean):
     if (r._fogMaskCanvas.width !== w || r._fogMaskCanvas.height !== h) {
         r._fogMaskCanvas.width = w; r._fogMaskCanvas.height = h;
     }
-    if (!memory) return true;
     const mw = Math.max(1, Math.ceil(MAP_WIDTH / FOG.CELL));
     const mh = Math.max(1, Math.ceil(MAP_HEIGHT / FOG.CELL));
     if (r._fogMem === null) {
@@ -86,13 +101,14 @@ function stampMemory(r: RenderSystem, px: number, py: number, radius: number): v
     if (mctx === null || mem === null) return;
     const cx = px / FOG.CELL, cy = py / FOG.CELL;
     const rad = Math.max(1, radius / FOG.CELL);
+    const perX = fogMemoryPeriodX(), perY = fogMemoryPeriodY();
     mctx.setTransform(1, 0, 0, 1, 0, 0);
     mctx.globalCompositeOperation = 'source-over';
     mctx.globalAlpha = 1;
     mctx.fillStyle = '#fff';
     for (let ox = -1; ox <= 1; ox++) {
         for (let oy = -1; oy <= 1; oy++) {
-            const x = cx + ox * mem.width, y = cy + oy * mem.height;
+            const x = cx + ox * perX, y = cy + oy * perY;
             if (x + rad < 0 || x - rad > mem.width) continue;
             if (y + rad < 0 || y - rad > mem.height) continue;
             mctx.beginPath();
@@ -124,8 +140,9 @@ export function renderFogLayer(
     const light = r._lightCanvas;
     const fw = r._lightW, fh = r._lightH;
     if (cfg.dark <= 0 || !playerPos || !camera || light === null
-        || fw <= 0 || fh <= 0 || !ensureCanvases(r, fw, fh, cfg.memory)) {
+        || fw <= 0 || fh <= 0 || !ensureCanvases(r, fw, fh)) {
         r.lastFogMs = 0;
+        r._fogActive = false;
         return;
     }
     const t0 = performance.now();
@@ -165,10 +182,14 @@ export function renderFogLayer(
     fctx.fillStyle = `rgba(${FOG.COLOR}, ${cfg.dark})`;
     fctx.fillRect(0, 0, fw, fh);
 
-    // ── 2. EXPLORED, for the three-layer version ─────────────────────────
+    // ── 2. EXPLORED ──────────────────────────────────────────────────────
+    //
+    // RECORDING is unconditional above `off` — the minimap reads the memory
+    // at every rung (see the header).  SPENDING it on the world fog is what
+    // the three-layer rung buys.
+    const tier = getActiveLightingTier();
+    stampMemory(r, playerPos.x, playerPos.y, tier.maxRadius * FOG.MEMORY_FRAC);
     if (cfg.memory && r._fogMem !== null) {
-        const tier = getActiveLightingTier();
-        stampMemory(r, playerPos.x, playerPos.y, tier.maxRadius * FOG.MEMORY_FRAC);
         // The memory is world space; draw the whole map through the camera,
         // at each wrap offset, and let the canvas clip.  Nine scaled blits of
         // a 125x125 texture is cheaper than working out which are visible.
@@ -186,7 +207,10 @@ export function renderFogLayer(
             for (let oy = -1; oy <= 1; oy++) {
                 const dx = baseX + ox * mapW, dy = baseY + oy * mapH;
                 if (dx + mapW < 0 || dx > fw || dy + mapH < 0 || dy > fh) continue;
-                fctx.drawImage(mem, dx, dy, mapW, mapH);
+                // Source rect stops at the tile PERIOD, not the canvas
+                // width: the padding column past it was never stamped.
+                fctx.drawImage(mem, 0, 0, fogMemoryPeriodX(), fogMemoryPeriodY(),
+                               dx, dy, mapW, mapH);
             }
         }
         fctx.imageSmoothingEnabled = prevSmooth;
@@ -232,5 +256,6 @@ export function renderFogLayer(
     ctx.imageSmoothingEnabled = prevSmoothing;
 
     r.lastFogMs = performance.now() - t0;
+    r._fogActive = true;
     void effectiveDpr;   // dimensions come from the light layer, which used it
 }

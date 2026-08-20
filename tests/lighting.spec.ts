@@ -1784,9 +1784,37 @@ test.describe('occluder collection', () => {
     const dflt = await engine(page, e => e.renderer.getFog());
     expect(dflt).toBe('off');
 
+    // THE SCENE IS HAND-BUILT, like the shadow tests above it and for the
+    // same reason: a generated map gives no control over what is WHERE, and
+    // the fog can only be measured against world that is actually in the
+    // frame.  Two earlier versions guarded with an absolute floor on "is
+    // there anything here" and each failed on the run where the terrain fell
+    // the other way — the test's own premise flaking, not the fog.  So the
+    // two patches this test compares are PLACED: a 3x3 block of tiles at each,
+    // far enough out that the light cannot reach either.
     const r = await engine(page, async (e) => {
       e.renderer.setLighting('unified');
-      let px = 0, py = 0;
+      const bx = 0, by = 0;
+      e.player.position.x = bx; e.player.position.y = by;
+      let px = bx, py = by;
+      // AWAY / REMEMBERED at -330, NEVER-SEEN at -1030: the same offset
+      // either side of the vantage point the memory half ends at (-700), so
+      // the two are symmetric in everything but having been visited.
+      const stock = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      const patch = (cy: number, from: number) => {
+        for (let i = 0; i < 9; i++) {
+          const t = stock[from + i];
+          if (!t) return false;
+          t.active = true;
+          t._occluderR = undefined;
+          t.position.x = bx + ((i % 3) - 1) * 60;
+          t.position.y = cy + (Math.floor(i / 3) - 1) * 60;
+        }
+        return true;
+      };
+      const placed = patch(by - 330, 0) && patch(by - 1030, 9);
+      e.physics.initializeStaticGrid(e.currentMap.entities);
       const frames = (n: number) => new Promise<void>(res => {
         let i = 0;
         const t = () => {
@@ -1827,37 +1855,49 @@ test.describe('occluder collection', () => {
       // and below is the loadout strip.  A patch measured there reads as "the
       // fog barely works" when what it is measuring is the interface.
       //
-      // So: drop the light to its smallest radius, and sample ABOVE the ship,
-      // between the top chips and the light.
+      // So: drop the light to its smallest radius (180 units), and sample
+      // ABOVE the ship, between the top chips and the light.
       for (let i = 0; i < 10 && e.renderer.getLightTier() !== 'minimal'; i++) {
         e.renderer.cycleLightTier();
       }
-      const away = () => box(0, -330, 70);
-      const home = () => box(0, 0, 55);
+      const away = () => box(bx, by - 330, 70);
+      const home = () => box(bx, by, 55);
       await set('off');
       const offAway = away(), offHome = home();
       await set('dark');
       const darkAway = away(), darkHome = home();
 
       // MEMORY: fly past a patch and look back at it.  A patch the ship has
-      // never been near, at the same distance, is the control.
+      // never been near, at the same distance on the other side, is the
+      // control — and BOTH are baselined against themselves with the fog off,
+      // from the same camera, so the comparison cannot be decided by which of
+      // the two happens to have more terrain in it.
+      await set('off');
+      px = bx; py = by - 700; await frames(40);
+      const offRemembered = box(bx, by - 330, 70);
+      const offNeverSeen = box(bx, by - 1030, 70);
+
       await set('memory');
-      px = 0; py = -330; await frames(45);      // stand ON the patch: explored
-      px = 0; py = -700; await frames(45);      // fly past; it is behind us
-      const remembered = box(0, -330, 70);
-      const neverSeen = box(0, -1030, 70);      // the same distance, never visited
+      px = bx; py = by - 330; await frames(45);      // stand ON the patch
+      px = bx; py = by - 700; await frames(45);      // fly past; it is behind
+      const remembered = box(bx, by - 330, 70);
+      const neverSeen = box(bx, by - 1030, 70);
       await set('off');
       for (let i = 0; i < 10 && e.renderer.getLightTier() !== 'low'; i++) {
         e.renderer.cycleLightTier();
       }
-      return { offAway, offHome, darkAway, darkHome, remembered, neverSeen,
-               back: e.renderer.getFog(), tier: e.renderer.getLightTier() };
+      return { offAway, offHome, darkAway, darkHome, offRemembered, offNeverSeen,
+               remembered, neverSeen,
+               placed, back: e.renderer.getFog(), tier: e.renderer.getLightTier() };
     });
 
     expect(r.back).toBe('off');
     expect(r.tier).toBe('low');
-    // The scene has something to darken in the first place.
-    expect(r.offAway).toBeGreaterThan(2);
+    // The scene has something to darken in the first place — and now it has
+    // it BY CONSTRUCTION, so this is a check on the construction.
+    expect(r.placed).toBe(true);
+    expect(r.offAway).toBeGreaterThan(5);
+    expect(r.offNeverSeen).toBeGreaterThan(5);
 
     // TWO LAYERS: the far patch goes dark, and the ship's own surroundings do
     // not — the light cuts the fog where it reaches.
@@ -1868,8 +1908,111 @@ test.describe('occluder collection', () => {
     expect(r.darkHome).toBeGreaterThan(r.darkAway * 2);
 
     // THREE LAYERS: somewhere the ship has BEEN is brighter than somewhere it
-    // has never been, at the same distance and neither of them lit now.
-    expect(r.remembered).toBeGreaterThan(r.neverSeen);
+    // has never been, at the same distance and neither of them lit now —
+    // stated both raw and normalised for what was there to begin with.
+    expect(r.remembered).toBeGreaterThan(r.neverSeen * 2);
+    expect(r.remembered / r.offRemembered)
+      .toBeGreaterThan(2 * (r.neverSeen / r.offNeverSeen));
+    watch.assertClean();
+  });
+
+  test('the minimap carries the fog memory at every rung but off', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    const r = await engine(page, async (e) => {
+      let px = 0, py = 0;
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          e.player.position.x = px; e.player.position.y = py;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      e.renderer.setLighting('unified');
+
+      // THE COLLAPSED MINIMAP: 75px square at (MARGIN, H - SIZE - BOTTOM_MARGIN)
+      // in CSS px, showing ZOOM_RANGE world units to a side of centre.  Read in
+      // MINIMAP px offsets from its centre, so the sample follows the map and
+      // not the world.
+      const SIZE = 75, MARGIN = 20, BOTTOM = 14, ZOOM_RANGE = 1000;
+      const perUnit = (SIZE / 2) / ZOOM_RANGE;
+      const box = (ox: number, oy: number, half: number) => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, H = cv.height / dpr;
+        const cx = MARGIN + SIZE / 2 + ox, cy = (H - SIZE - BOTTOM) + SIZE / 2 + oy;
+        let sum = 0, n = 0;
+        for (let y = cy - half; y <= cy + half; y++) {
+          for (let x = cx - half; x <= cx + half; x++) {
+            const d = g.getImageData(Math.round(x * dpr), Math.round(y * dpr), 1, 1).data;
+            sum += (d[0] + d[1] + d[2]) / 3; n++;
+          }
+        }
+        return sum / n;
+      };
+      const set = async (name: string) => {
+        for (let i = 0; i < 8 && e.renderer.getFog() !== name; i++) e.renderer.cycleFog();
+        await frames(20);
+      };
+      // Two spots either side of the ship, far enough out that the stamp it is
+      // making RIGHT NOW cannot reach either: the memory disc is
+      // maxRadius x MEMORY_FRAC = 210 units at the `low` tier, and these are
+      // 600 away.  Terrain density is not uniform, so each is measured
+      // against ITSELF with the fog off rather than against the other.
+      //
+      // The offset is taken from the LIVE CAMERA, not from the ship: the
+      // minimap is centred on the camera, the camera follows with lag, and a
+      // fixed offset silently samples a different WORLD point on the frames
+      // after a move — which is exactly the spot the ship has not explored.
+      const at = (wx: number) =>
+        box((wx - e.camera.position.x) * perUnit, -e.camera.position.y * perUnit, 3);
+      const plus = () => at(600);
+      const minus = () => at(-600);
+
+      await set('off');
+      const offPlus = plus(), offMinus = minus(), offHome = at(0);
+
+      // Every rung above `off` fogs the map — INCLUDING the two-layer ones,
+      // whose world fog keeps no memory of its own.
+      const rung: Record<string, number> = {};
+      for (const name of ['dim', 'dark', 'memory']) {
+        await set(name);
+        rung[name] = plus();
+      }
+
+      // Now EARN the memory: fly out to the +x spot, sit there, come back.
+      await set('dark');                     // a TWO-layer rung, deliberately
+      px = 600; py = 0; await frames(45);
+      px = 0; py = 0; await frames(45);
+      const seenPlus = plus(), unseenMinus = minus(), homeAfter = at(0);
+
+      await set('off');
+      return { offPlus, offMinus, offHome, dim: rung.dim, dark: rung.dark,
+               memory: rung.memory, seenPlus, unseenMinus, homeAfter,
+               back: e.renderer.getFog() };
+    });
+
+    expect(r.back).toBe('off');
+    // The map has terrain to hide in the first place.
+    expect(r.offPlus).toBeGreaterThan(8);
+    expect(r.offMinus).toBeGreaterThan(8);
+
+    // EVERY RUNG BUT OFF veils unexplored ground, and the darker the rung the
+    // darker the veil — the minimap wears the fog's own setting.
+    expect(r.dim).toBeLessThan(r.offPlus * 0.75);
+    expect(r.dark).toBeLessThan(r.dim);
+    expect(r.memory).toBeLessThanOrEqual(r.dark + 0.5);
+
+    // THE MEMORY IS EARNED, and it is earned on a TWO-layer rung: after flying
+    // out to +x and back, that spot is legible and the mirror-image spot the
+    // ship never visited is not.
+    expect(r.seenPlus).toBeGreaterThan(r.dark * 2);
+    expect(r.seenPlus / r.offPlus).toBeGreaterThan(2 * (r.unseenMinus / r.offMinus));
+    // ...and the ship's own surroundings were never veiled at all.
+    expect(r.homeAfter).toBeGreaterThan(r.offHome * 0.6);
     watch.assertClean();
   });
 

@@ -197,15 +197,27 @@ export class RenderSystem {
   _emitSlotAtMs: number = 0;
   /** FOG OF WAR surfaces (render/fog.ts).  All null until the fog is first
    *  switched on, so `off` allocates nothing: the composited fog, the
-   *  boosted light MASK it is cut with, and — only for the three-layer
-   *  rung — the world-space EXPLORED memory, which is the renderer's one
-   *  piece of per-map persistent state and is reset on every map load. */
+   *  boosted light MASK it is cut with, and the world-space EXPLORED
+   *  memory, which is the renderer's one piece of per-map persistent state
+   *  and is reset on every map load.  The memory is kept at EVERY fog rung
+   *  above `off`, not only at the three-layer one: the WORLD fog uses it
+   *  only there, but the MINIMAP uses it at all of them. */
   _fogCanvas: HTMLCanvasElement | null = null;
   _fogCtx: CanvasRenderingContext2D | null = null;
   _fogMaskCanvas: HTMLCanvasElement | null = null;
   _fogMaskCtx: CanvasRenderingContext2D | null = null;
   _fogMem: HTMLCanvasElement | null = null;
   _fogMemCtx: CanvasRenderingContext2D | null = null;
+  /** Veil the minimap paints over unexplored ground — sized to whichever
+   *  minimap is up, so it is rebuilt only when the map is expanded or
+   *  collapsed. */
+  _minimapFogCanvas: HTMLCanvasElement | null = null;
+  _minimapFogCtx: CanvasRenderingContext2D | null = null;
+  /** Did the fog pass actually DRAW this frame?  Not the same question as
+   *  "is the fog switched on": the fog is composed from the light layer, so
+   *  it is a no-op under legacy lighting, and a minimap that fogged itself
+   *  anyway would black out a map whose memory nothing is stamping. */
+  _fogActive: boolean = false;
   /** Wall time the fog pass took last frame, for the perf recorder. */
   lastFogMs: number = 0;
 

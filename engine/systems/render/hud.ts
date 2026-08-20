@@ -26,10 +26,11 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, getFog, FOG,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
+import { fogMemoryPeriodX, fogMemoryPeriodY } from './fog';
 
 /**
  * Pre-render all STRUCTURE entities to an offscreen minimap canvas.
@@ -698,6 +699,104 @@ function renderMinimapFlow(
     ctx.restore();
 }
 
+/** Blit a window of a TOROIDAL source texture, splitting it into up to four
+ *  draws where the window straddles the tile seam.
+ *
+ *  Two callers with the same problem and, until now, one copy each: the
+ *  pre-rendered terrain layer and the fog veil both sample a camera-centred
+ *  window out of a texture that repeats with the map.  `perX`/`perY` are the
+ *  repeat PERIOD in source pixels, which is not always the canvas size — the
+ *  fog memory is a rounded-up canvas holding a fractional period.
+ *
+ *  `sx`/`sy` are the window's top-left in source pixels, pre-modulo. */
+function wrapBlit(
+    ctx: CanvasRenderingContext2D, src: CanvasImageSource,
+    sx: number, sy: number, sw: number, sh: number,
+    perX: number, perY: number,
+    dx: number, dy: number, dw: number, dh: number,
+) {
+    const sxMod = ((sx % perX) + perX) % perX;
+    const syMod = ((sy % perY) + perY) % perY;
+    const kx = dw / sw, ky = dh / sh;
+    const sw1 = Math.min(sw, perX - sxMod);
+    const sh1 = Math.min(sh, perY - syMod);
+    const sw2 = sw - sw1;
+    const sh2 = sh - sh1;
+    ctx.drawImage(src, sxMod, syMod, sw1, sh1, dx, dy, sw1 * kx, sh1 * ky);
+    if (sw2 > 0) ctx.drawImage(src, 0, syMod, sw2, sh1,
+        dx + sw1 * kx, dy, sw2 * kx, sh1 * ky);
+    if (sh2 > 0) ctx.drawImage(src, sxMod, 0, sw1, sh2,
+        dx, dy + sh1 * ky, sw1 * kx, sh2 * ky);
+    if (sw2 > 0 && sh2 > 0) ctx.drawImage(src, 0, 0, sw2, sh2,
+        dx + sw1 * kx, dy + sh1 * ky, sw2 * kx, sh2 * ky);
+}
+
+/** Veil the minimap's TERRAIN where the ship has never been (user directive).
+ *
+ *  It runs at EVERY fog rung above `off`, including the two-layer ones whose
+ *  world fog is stateless — the map is a record of where you have been, and
+ *  that is exactly what the memory holds, so gating it on the three-layer
+ *  rung would have made the map contradict the fog beside it.
+ *
+ *  TERRAIN ONLY.  It is drawn after the static layer and the flow field and
+ *  BEFORE the contacts, so enemies, the boss, portals, stations and the
+ *  snitch still read through it.  Those are live sensor contacts, not map
+ *  knowledge: wave enemies spawn on an offscreen ring, and a minimap that
+ *  hid them until you had flown there would not be a fog of war, it would be
+ *  a broken threat display.
+ *
+ *  Cut with the MEMORY, never with the light: the lit region moves every
+ *  frame, and a minimap that lit and unlit itself at walking pace would
+ *  strobe.  The world fog is the live layer; the map is the remembered one.
+ */
+function renderMinimapFog(
+    r: RenderSystem, ctx: CanvasRenderingContext2D, camera: CameraState,
+    mapX: number, mapY: number, size: number, range: number,
+) {
+    // `_fogActive`, not `getFog()` alone: the fog is composed from the light
+    // layer and does not draw under legacy lighting, and nothing stamps the
+    // memory on a frame it skipped.  Fogging the map off a memory nobody is
+    // writing blacks the whole thing out.
+    const mem = r._fogMem;
+    if (!r._fogActive || mem === null) return;
+    const cfg = getFog();
+    if (cfg.dark <= 0) return;
+    if (typeof document === 'undefined') return;
+
+    if (r._minimapFogCanvas === null) {
+        r._minimapFogCanvas = document.createElement('canvas');
+        r._minimapFogCtx = r._minimapFogCanvas.getContext('2d');
+        if (r._minimapFogCtx === null) { r._minimapFogCanvas = null; return; }
+    }
+    const vc = r._minimapFogCanvas, vctx = r._minimapFogCtx!;
+    const res = Math.max(1, Math.round(size));
+    if (vc.width !== res || vc.height !== res) { vc.width = res; vc.height = res; }
+
+    // Veil first, then ERASE what is remembered — the memory is white where
+    // explored, so one `destination-out` is the whole mask.
+    vctx.setTransform(1, 0, 0, 1, 0, 0);
+    vctx.globalCompositeOperation = 'source-over';
+    vctx.globalAlpha = 1;
+    vctx.clearRect(0, 0, res, res);
+    // The SAME colour and the SAME darkness the world fog is using, so the
+    // two rungs read as one setting rather than as two.
+    vctx.fillStyle = `rgba(${FOG.COLOR}, ${cfg.dark})`;
+    vctx.fillRect(0, 0, res, res);
+
+    const cell = FOG.CELL;
+    const half = range / cell;
+    vctx.globalCompositeOperation = 'destination-out';
+    vctx.imageSmoothingEnabled = true;    // the remembered edge is soft
+    wrapBlit(vctx, mem,
+        camera.position.x / cell - half, camera.position.y / cell - half,
+        half * 2, half * 2,
+        fogMemoryPeriodX(), fogMemoryPeriodY(),
+        0, 0, res, res);
+    vctx.globalCompositeOperation = 'source-over';
+
+    ctx.drawImage(vc, mapX, mapY, size, size);
+}
+
 export function renderMinimap(
     r: RenderSystem,
     ctx: CanvasRenderingContext2D,
@@ -763,30 +862,10 @@ export function renderMinimap(
         const syRaw = srcCenterY - srcHalf;
         const sw = srcHalf * 2;
         const sh = srcHalf * 2;
-        const sxMod = ((sxRaw % sRes) + sRes) % sRes;
-        const syMod = ((syRaw % sRes) + sRes) % sRes;
-        const dScaleX = currentSize / sw;
-        const dScaleY = currentSize / sh;
-        const sw1 = Math.min(sw, sRes - sxMod);
-        const sh1 = Math.min(sh, sRes - syMod);
-        const sw2 = sw - sw1;
-        const sh2 = sh - sh1;
-        // part 1 (no wrap)
-        ctx.drawImage(staticCanvas,
-            sxMod, syMod, sw1, sh1,
-            mapX, mapY, sw1 * dScaleX, sh1 * dScaleY);
-        // part 2 (x-wrap)
-        if (sw2 > 0) ctx.drawImage(staticCanvas,
-            0, syMod, sw2, sh1,
-            mapX + sw1 * dScaleX, mapY, sw2 * dScaleX, sh1 * dScaleY);
-        // part 3 (y-wrap)
-        if (sh2 > 0) ctx.drawImage(staticCanvas,
-            sxMod, 0, sw1, sh2,
-            mapX, mapY + sh1 * dScaleY, sw1 * dScaleX, sh2 * dScaleY);
-        // part 4 (both-wrap)
-        if (sw2 > 0 && sh2 > 0) ctx.drawImage(staticCanvas,
-            0, 0, sw2, sh2,
-            mapX + sw1 * dScaleX, mapY + sh1 * dScaleY, sw2 * dScaleX, sh2 * dScaleY);
+        // The terrain layer's period IS its canvas size — it was baked to
+        // cover exactly one wrap unit (see buildMinimapStaticLayer).
+        wrapBlit(ctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
+                 mapX, mapY, currentSize, currentSize);
     }
 
     // ── Material layer (decision #43, G5) ──────────────────────────────
@@ -798,6 +877,9 @@ export function renderMinimap(
     if (materialMode === 'flow') {
         renderMinimapFlow(r, ctx, camera, centerX, centerY, scale, range);
     }
+
+    // ── The FOG's memory, over the terrain and under the contacts ────────
+    renderMinimapFog(r, ctx, camera, mapX, mapY, currentSize, range);
 
     // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
     // Enemy blips pulse so they pop against the static layer; the phase
