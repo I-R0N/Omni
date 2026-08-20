@@ -1168,3 +1168,47 @@ stay pinned to one viewport.
 
 **Depends on** the test-suite entry above: this is only worth building on top
 of a harness that outlives a session.
+
+---
+
+## Depth-scoped darkness belongs to the universe map structure (2026-08-20)
+
+**The mechanism is BUILT, TESTED, and SHIPPED OFF** (`constants.ts`
+`depthAmbientEnabled = false`; DBG ▸ Debug Menu ▸ "Depth dark" turns it on).
+A7 of the lighting gauntlet added depth-scoped ambient darkness: each descent
+adds the light tier's `ambientPerStage` of fog-dark (capped at
+`AMBIENT_DEPTH_CAP` = 4 stages), folded into the fog compositor's dark fill
+as `max(fogSetting, depth)` — so it is cut by the player's light, respects
+shadows, and darkens the minimap's memory veil through the one mechanism.
+`tests/lighting.spec.ts` ("A7: depth darkens the world…") pins the monotone
+ladder, the cap, and the toggle restore.
+
+**Why it ships off (user call):** the "depth" it keys on is not yet a real
+place.
+
+- **Today's post-boss rifts have no depth in them.**  A descent rift just
+  travels the player from one arena to another — every arena hangs off the
+  one Overworld, and the "descent target" is a RANDOM interchangeable
+  descriptor.  `stageIndex` is a linear counter that says how many amber
+  rifts a run has entered, not where the player IS.
+- **No persistence.**  Travel "down" a layer, leave through the arena's
+  overworld return portal, then re-enter the same arena: `stageIndex` was
+  zeroed at the hub, so the darkness is gone.  A darkness that evaporates on
+  a round trip reads as a bug, not as depth.
+- In other words the SUB-LAYER PORTAL SYSTEM hasn't been established; the
+  portals just bounce between maps on the primary overworld layer.
+
+**Where it should land:** the planned universe-map work — see "Area
+composition — material combinations + a real map graph" (its Shape 4, the
+node/edge graph) and "Portal persistence — stages that stay cleared".  Once a
+node has a stable identity and a real DEPTH coordinate that survives
+travelling away and back, the darkness becomes a property of the node
+(read `depth` off the node the player is in, instead of off the linear
+`stageIndex`) and the default flips on.  That is a one-line source change
+(`fogEffectiveDark` in `engine/systems/render/fog.ts` reads
+`r.stageDepth`, stamped from the engine each frame — re-point the stamp) —
+the compositor, the cap, the tier scaling and the tests all carry over.
+
+**Related knob already noted in the map-graph entry's open questions:**
+whether the regional material composition also drifts with depth — if it
+does, depth-darkness and depth-composition should read the same coordinate.

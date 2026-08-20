@@ -1613,9 +1613,18 @@ export const WORLD_LIGHTS = {
  *  It rides the fog compositor: the ambient level is folded into the fog's
  *  dark fill (whichever of the two is darker wins), so it is cut by the
  *  player's light, respects shadows, and darkens the minimap's memory veil
- *  — all for free, and `off` restores the exact pre-A7 picture. */
+ *  — all for free, and `off` restores the exact pre-A7 picture.
+ *
+ *  SHIPS OFF (user call, 2026-08-20).  The descent "depth" it keys on is
+ *  not yet a real place: today's post-boss rifts bounce between arenas that
+ *  all hang off the one Overworld, `stageIndex` is a linear counter rather
+ *  than a position in a world, and nothing persists — leave a "deep" arena
+ *  through the overworld portal and return, and the darkness is gone.  The
+ *  mechanism is built and tested; it switches on when the universe map
+ *  structure gives depth an address (see docs/PARKING_LOT.md, "Depth-scoped
+ *  darkness belongs to the universe map structure"). */
 export const AMBIENT_DEPTH_CAP = 4;
-let depthAmbientEnabled = true;
+let depthAmbientEnabled = false;
 export function toggleDepthAmbient(): boolean {
   depthAmbientEnabled = !depthAmbientEnabled;
   return depthAmbientEnabled;

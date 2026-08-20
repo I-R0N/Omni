@@ -2990,3 +2990,31 @@ paired-read measurement in the suite now fenced.
 
 `npm run typecheck`, `npm run build`, `npm test` — **136 passed**; the
 three new tests three times green in a row on their own.
+
+---
+
+## A7b — depth darkness ships OFF, parked for the universe map structure
+
+User call, after reviewing how depth is actually reached today. The A7
+mechanism is unchanged — built, tested, one toggle away — but
+`depthAmbientEnabled` now defaults to `false`.
+
+The reasoning, recorded in full in `docs/PARKING_LOT.md` ("Depth-scoped
+darkness belongs to the universe map structure"): the `stageIndex` the
+darkness keys on is not yet a real place. A post-boss descent rift just
+moves the player between arenas that all hang off the one Overworld — the
+target is a random interchangeable descriptor — and nothing persists:
+leave a "deep" arena through its overworld return portal and come back,
+and `stageIndex` was zeroed at the hub, so the darkness is gone. A
+darkness that evaporates on a round trip reads as a bug, not as depth.
+The sub-layer portal system is planned future work, and that is where
+this switches on — re-point the `stageDepth` stamp at the node's real
+depth coordinate and flip the default; the compositor, cap, tier scaling
+and tests all carry over.
+
+The A7 test now turns the mechanism on itself (and restores off), and
+asserts the shipped default is `false`.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **136 passed**.

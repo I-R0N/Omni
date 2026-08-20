@@ -2313,7 +2313,12 @@ test.describe('occluder collection', () => {
       // whose ambientPerStage the feature actually ships with (the
       // emergency tiers below it are authored zero, so dropping the tier
       // here would measure the OFF branch and call it broken).
+      // SHIPS OFF: depth is not yet a real place (the parked universe-map
+      // work owns switching this on), so the test turns the mechanism on
+      // itself and restores off afterwards — the default it asserts is only
+      // the default.
       const dflt = e.renderer.getDepthAmbient();
+      if (!e.renderer.getDepthAmbient()) e.renderer.toggleDepthAmbient();
 
       // DEPTH is a renderer field stamped by the engine each frame; writing
       // the ENGINE's stageIndex is the honest path — the stamp carries it.
@@ -2328,7 +2333,6 @@ test.describe('occluder collection', () => {
       const d9 = await at(9);         // capped at 4 — no darker than d4
       e.renderer.toggleDepthAmbient();
       const off9 = await at(9);       // toggled off: full brightness back
-      e.renderer.toggleDepthAmbient();
       e.stageIndex = 0;
       await frames(6);
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== beam0; i++) {
@@ -2337,8 +2341,8 @@ test.describe('occluder collection', () => {
       return { dflt, hub, d2, d4, d9, off9, back: e.renderer.getDepthAmbient() };
     });
 
-    expect(r.dflt).toBe(true);
-    expect(r.back).toBe(true);
+    expect(r.dflt).toBe(false);
+    expect(r.back).toBe(false);
     // The patch is visible at the surface...
     expect(r.hub).toBeGreaterThan(5);
     // ...and MONOTONE with depth: two stages down is darker, four darker
