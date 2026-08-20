@@ -1587,3 +1587,26 @@ The five aesthetic calls raised at U-final moved to `docs/PARKING_LOT.md`
 ("5d aesthetic calls") as one bundle for a dedicated look pass (user call).
 The ledger section above stays as the reference text; a banner there points
 at the parking lot.
+
+---
+
+## P9 — CI red on f727615: the streamer test measured the weather
+
+CI failed the real-fight deflect test with `99.017/100` hull while the event
+log showed zero absorbs and every shot deflected — the deflection was
+correct; the test's bonus assertion ("nothing got through to the hull") was
+not a property the world offers. The test parks the player in a LIVE glass
+field for several seconds, and a drifting mobile shard that grazes the hull
+deals environmental damage that **bypasses the shield by design**
+(`PhysicsSystem`, the mobile-shard `ENV_DAMAGE` branch). A ~1 HP ambient
+graze is the same signature as the one unexplained local flake earlier in
+P7 — one root cause, now understood.
+
+Dropped the hull assertion with the reasoning inline; the event list is the
+whole claim (deflect and absorb are emitted by the two paths a shield-up hit
+can take, and by nothing else). Suite-local reruns cannot catch this class —
+it is flow-field timing — which is why the comment names the CI failure.
+
+Noted, not changed: tile bumps route environmental damage through the shield
+first, shard bumps bypass it. Both are commented as deliberate; whether they
+should agree is a design question for the shield/feel pass, not a test fix.
