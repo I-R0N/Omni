@@ -35,7 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
-    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix,
+    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix, cycleFog,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -445,6 +445,14 @@ export class DebugControls {
    *  unaffected: they radiate the colour of the BODY, not of what lit it. */
   cycleLightColor() {
     cycleLightColor();
+  }
+
+  /** DBG (Visual): FOG OF WAR — darkness the player's light cuts through.
+   *  Off / dim / dark are two-layer (lit or not); `memory` is the
+   *  traditional three, adding "seen before but not lit now", which needs a
+   *  per-map memory of where the ship has been. */
+  cycleFog() {
+    cycleFog();
   }
 
   /** DBG (Visual): how much of the MATERIAL's colour rides the light it

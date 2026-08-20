@@ -1575,6 +1575,85 @@ export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> 
   { name: 'pin',    halfDeg: 6   },
   { name: 'off',    halfDeg: 0   },
 ] as const;
+/** FOG OF WAR — darkness the player's light cuts through.
+ *
+ *  The light layer already answers "what can I see": it is a lit shape with
+ *  shadows cut out of it, so using it as the fog's MASK gives
+ *  occlusion-aware fog for free — a tile's shadow stays dark, and a beam
+ *  sweeping a room opens exactly what it illuminates.  Nothing about the
+ *  geometry is computed twice.
+ *
+ *  TWO LAYERS or THREE.  `dim` and `dark` are the two-layer version: lit or
+ *  not.  `memory` is the traditional three: never seen (darkest), seen
+ *  before but not lit now (dimmed), and lit (clear).  The third layer needs
+ *  a memory of where the player has been, which is a per-map texture that
+ *  has to be reset on every map load — cheap (one texel per
+ *  `FOG.CELL` world units, so a 6000-unit map is 125x125) but it is state,
+ *  and state is the reason it is a separate rung rather than the default.
+ *
+ *  OFF is the default: this changes how the whole game reads, and which maps
+ *  want it is a design question rather than a rendering one. */
+export const FOG_CYCLE: ReadonlyArray<{
+  name: string; dark: number; explored: number; memory: boolean;
+}> = [
+  { name: 'off',    dark: 0,    explored: 0,    memory: false },
+  { name: 'dim',    dark: 0.55, explored: 0.55, memory: false },
+  { name: 'dark',   dark: 0.85, explored: 0.85, memory: false },
+  { name: 'memory', dark: 0.90, explored: 0.5,  memory: true  },
+] as const;
+let activeFogIndex = 0;
+export function getFog(): { name: string; dark: number; explored: number; memory: boolean } {
+  return FOG_CYCLE[activeFogIndex];
+}
+export function getFogName(): string { return FOG_CYCLE[activeFogIndex].name; }
+export function cycleFog(): string {
+  activeFogIndex = (activeFogIndex + 1) % FOG_CYCLE.length;
+  return FOG_CYCLE[activeFogIndex].name;
+}
+/** The player light's PEAK ALPHA, mirrored here for the fog.
+ *
+ *  It is authored in `render/lighting.ts` beside the rest of the light's
+ *  shape; the fog needs it to know how far to boost the light into a mask,
+ *  and importing the lighting module for one number would tie a compositing
+ *  pass to the geometry half.  `tests/lighting.spec.ts` pins the two
+ *  together so the mirror cannot drift. */
+export const PLAYER_LIGHT_PEAK = 0.34;
+
+export const FOG = {
+  /** The fog's own colour: BLACK.
+   *
+   *  The first attempt was a near-black blue (`4, 8, 18`) on the theory that
+   *  it would read as unlit space rather than as a wash — and it BRIGHTENED
+   *  the screen, because empty space in this game measures about 3 luminance
+   *  and that tint is 10.  Fog that lightens the dark parts of the frame is
+   *  worse than no fog.  Any colouring of the unlit world belongs to the
+   *  light, which is the thing that has a colour. */
+  COLOR: '0, 0, 0',
+  /** World units per texel of the EXPLORED memory.  48 makes a 6000-unit map
+   *  a 125x125 texture: small enough to stamp and blit every frame without
+   *  thinking about it, coarse enough that the remembered edge is soft. */
+  CELL: 48,
+  /** How much of the light's radius counts as EXPLORED as the player passes.
+   *  Under 1 because the rim of the light is where you can barely see. */
+  MEMORY_FRAC: 0.7,
+  /** A clear disc around the ship, in world units, whatever the light is
+   *  doing.  WITHOUT IT A NARROW BEAM FOGS THE PLAYER'S OWN SHIP — the beam
+   *  points away from it, so nothing lights the hull, and the ship
+   *  disappears into the dark it is holding the torch in. */
+  SELF_RADIUS: 70,
+  /** How far into that disc the clearing fades, as a fraction of it. */
+  SELF_FEATHER: 0.45,
+  /** The fog opens where the LIGHT is, and the light's own alpha peaks at
+   *  a third (PLAYER_LIGHT.PEAK) — so used raw it would only ever lift a
+   *  third of the fog, and dimming the light with the brightness cycle would
+   *  close the fog with it.  The mask is therefore BOOSTED by repeated
+   *  additive draws (each doubles the alpha) until its peak saturates; this
+   *  is the target it aims for and the cap on how many doublings it will
+   *  spend getting there. */
+  MASK_TARGET: 1.1,
+  MASK_MAX_DOUBLINGS: 5,
+} as const;
+
 /** DBG: how much of the MATERIAL's colour is in the light it passes on.
  *
  *  Light that goes through green glass comes out green, and a body lit by a
@@ -1613,11 +1692,17 @@ export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> 
 export const TRANSMIT_STRAIGHT_FRAC = 0.5;
 
 export const TINT_MIX_CYCLE: ReadonlyArray<{ name: string; mix: number }> = [
+  // SHIPS OFF (user call, after device testing).  It is physically the right
+  // model and it does not earn its keep: the materials' colours sit close to
+  // the light's — glass indigo, metal steel-blue, both against a sky-blue
+  // lamp — so what it buys is subtle, and the straight-through path costs a
+  // fill per translucent group to buy it.  The knob stays because the effect
+  // is real and worth another look on a map with more colourful terrain.
+  { name: 'off',  mix: 0    },
+  { name: '1/4',  mix: 0.25 },
   { name: '1/2',  mix: 0.5  },
   { name: '3/4',  mix: 0.75 },
   { name: 'full', mix: 1    },
-  { name: '1/4',  mix: 0.25 },
-  { name: 'off',  mix: 0    },
 ] as const;
 let activeTintMixIndex = 0;
 export function getTintMix(): number { return TINT_MIX_CYCLE[activeTintMixIndex].mix; }

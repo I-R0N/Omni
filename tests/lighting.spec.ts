@@ -1117,7 +1117,7 @@ test.describe('occluder collection', () => {
       const off = await sample(false);
       const on = await mix('full');
       const asLight = await mix('off');
-      for (let i = 0; i < 8 && e.renderer.getTintMix() !== '1/2'; i++) {
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'off'; i++) {
         e.renderer.cycleTintMix();
       }
       return { built: true, off, on, asLight, tint: pick._emitTint };
@@ -1651,8 +1651,11 @@ test.describe('occluder collection', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
 
+    // SHIPS OFF: real, subtle, and not free — see TINT_MIX_CYCLE.  The test
+    // drives the knob to both ends itself, so the default it asserts is only
+    // the default.
     const dflt = await engine(page, e => e.renderer.getTintMix());
-    expect(dflt).toBe('1/2');
+    expect(dflt).toBe('off');
 
     const r = await engine(page, async (e) => {
       const tiles = e.currentMap.entities.filter(
@@ -1739,7 +1742,7 @@ test.describe('occluder collection', () => {
         e.renderer.cycleTintMix();
         if (e.renderer.getTintMix() === firstName) break;
       }
-      for (let i = 0; i < 8 && e.renderer.getTintMix() !== '1/2'; i++) {
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'off'; i++) {
         e.renderer.cycleTintMix();
       }
       if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
@@ -1748,8 +1751,8 @@ test.describe('occluder collection', () => {
     });
 
     expect(r.built).toBe(true);
-    expect(r.back).toBe('1/2');
-    expect(r.cyc).toContain('off');            // the control case is reachable
+    expect(r.back).toBe('off');
+    expect(r.cyc).toContain('full');           // both ends are reachable
     expect(r.cyc.length).toBeGreaterThan(3);
 
     // OFF: the light that came through the tile is the LIGHT's own colour,
@@ -1769,6 +1772,104 @@ test.describe('occluder collection', () => {
     // make any — measured against open space at the same distance.
     expect(r.full[1]).toBeLessThan(r.full[3]);
     expect(r.none[1]).toBeLessThan(r.none[3]);
+    watch.assertClean();
+  });
+
+  test('fog of war: the light cuts it, and the memory remembers', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    // OFF by default: this changes how the whole game reads, so it is a
+    // design decision rather than a rendering one.
+    const dflt = await engine(page, e => e.renderer.getFog());
+    expect(dflt).toBe('off');
+
+    const r = await engine(page, async (e) => {
+      e.renderer.setLighting('unified');
+      let px = 0, py = 0;
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          e.player.position.x = px; e.player.position.y = py;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          e.player.health = e.player.maxHealth;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      // Mean luminance over a BOX of world points.  Point samples land on
+      // empty space and measure nothing, and screen-edge means are polluted
+      // by the HUD, which the fog deliberately does not touch.
+      const box = (cx: number, cy: number, half: number) => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        let sum = 0, n = 0;
+        for (let wy = cy - half; wy <= cy + half; wy += half / 3) {
+          for (let wx = cx - half; wx <= cx + half; wx += half / 3) {
+            const x = Math.round((W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr);
+            const y = Math.round((H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr);
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) continue;
+            const d = g.getImageData(x, y, 1, 1).data;
+            sum += (d[0] + d[1] + d[2]) / 3; n++;
+          }
+        }
+        return n > 0 ? sum / n : 0;
+      };
+      const set = async (name: string) => {
+        for (let i = 0; i < 8 && e.renderer.getFog() !== name; i++) e.renderer.cycleFog();
+        await frames(22);
+      };
+      // THE SAMPLE HAS TO MISS THE HUD, which the fog deliberately does not
+      // touch.  The viewport is 390 CSS wide, so at this zoom nothing beyond
+      // the light's radius is on screen to the SIDES — only above and below,
+      // and below is the loadout strip.  A patch measured there reads as "the
+      // fog barely works" when what it is measuring is the interface.
+      //
+      // So: drop the light to its smallest radius, and sample ABOVE the ship,
+      // between the top chips and the light.
+      for (let i = 0; i < 10 && e.renderer.getLightTier() !== 'minimal'; i++) {
+        e.renderer.cycleLightTier();
+      }
+      const away = () => box(0, -330, 70);
+      const home = () => box(0, 0, 55);
+      await set('off');
+      const offAway = away(), offHome = home();
+      await set('dark');
+      const darkAway = away(), darkHome = home();
+
+      // MEMORY: fly past a patch and look back at it.  A patch the ship has
+      // never been near, at the same distance, is the control.
+      await set('memory');
+      px = 0; py = -330; await frames(45);      // stand ON the patch: explored
+      px = 0; py = -700; await frames(45);      // fly past; it is behind us
+      const remembered = box(0, -330, 70);
+      const neverSeen = box(0, -1030, 70);      // the same distance, never visited
+      await set('off');
+      for (let i = 0; i < 10 && e.renderer.getLightTier() !== 'low'; i++) {
+        e.renderer.cycleLightTier();
+      }
+      return { offAway, offHome, darkAway, darkHome, remembered, neverSeen,
+               back: e.renderer.getFog(), tier: e.renderer.getLightTier() };
+    });
+
+    expect(r.back).toBe('off');
+    expect(r.tier).toBe('low');
+    // The scene has something to darken in the first place.
+    expect(r.offAway).toBeGreaterThan(2);
+
+    // TWO LAYERS: the far patch goes dark, and the ship's own surroundings do
+    // not — the light cuts the fog where it reaches.
+    expect(r.darkAway).toBeLessThan(r.offAway * 0.6);
+    expect(r.darkHome).toBeGreaterThan(r.offHome * 0.6);
+    // ...and the lit ship is brighter than the fogged distance, which is the
+    // whole effect in one comparison.
+    expect(r.darkHome).toBeGreaterThan(r.darkAway * 2);
+
+    // THREE LAYERS: somewhere the ship has BEEN is brighter than somewhere it
+    // has never been, at the same distance and neither of them lit now.
+    expect(r.remembered).toBeGreaterThan(r.neverSeen);
     watch.assertClean();
   });
 

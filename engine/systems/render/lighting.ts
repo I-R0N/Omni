@@ -40,6 +40,7 @@ import {
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
     getEmitFadeSec, getCausticFade, getFlashlightHalfDeg, FLASHLIGHT,
     getLightColorRgb, BUBBLE_CONSTANTS, getTintMix, TRANSMIT_STRAIGHT_FRAC,
+    PLAYER_LIGHT_PEAK,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -645,7 +646,10 @@ const PLAYER_LIGHT = {
      *  live value comes from `LIGHT_COLOR_CYCLE` (DBG "Light color"); this
      *  row is that cycle's first entry. */
     RGB: '125, 211, 252',
-    PEAK: 0.34,
+    /** Mirrored in constants as `PLAYER_LIGHT_PEAK` for the fog, which needs
+     *  to know how far to boost this into a mask.  The suite pins the two
+     *  equal. */
+    PEAK: PLAYER_LIGHT_PEAK,
     /** Where the falloff reaches zero, as a fraction of the light radius.
      *  1.0 exactly would put a hard rim at the radius; the gradient's own
      *  mid stop does the softening. */

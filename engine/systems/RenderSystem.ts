@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -24,6 +24,7 @@ import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadou
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
 import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, type Occluder, type EmitSlot } from './render/lighting';
+import { renderFogLayer, resetFogMemory } from './render/fog';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -194,6 +195,19 @@ export class RenderSystem {
   _emitSlots: EmitSlot[] = [];
   _emitSlotCount: number = 0;
   _emitSlotAtMs: number = 0;
+  /** FOG OF WAR surfaces (render/fog.ts).  All null until the fog is first
+   *  switched on, so `off` allocates nothing: the composited fog, the
+   *  boosted light MASK it is cut with, and — only for the three-layer
+   *  rung — the world-space EXPLORED memory, which is the renderer's one
+   *  piece of per-map persistent state and is reset on every map load. */
+  _fogCanvas: HTMLCanvasElement | null = null;
+  _fogCtx: CanvasRenderingContext2D | null = null;
+  _fogMaskCanvas: HTMLCanvasElement | null = null;
+  _fogMaskCtx: CanvasRenderingContext2D | null = null;
+  _fogMem: HTMLCanvasElement | null = null;
+  _fogMemCtx: CanvasRenderingContext2D | null = null;
+  /** Wall time the fog pass took last frame, for the perf recorder. */
+  lastFogMs: number = 0;
 
   /** DBG passthroughs for the lighting mode.  The state itself is module
    *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
@@ -225,6 +239,11 @@ export class RenderSystem {
   public getFlashlight(): string { return getFlashlightName(); }
   public cycleLightColor(): string { return cycleLightColor(); }
   public getLightColor(): string { return getLightColorName(); }
+  public cycleFog(): string { return cycleFog(); }
+  public getFog(): string { return getFogName(); }
+  /** Drop the explored memory — called on every map load, since the memory
+   *  is world space and world space means something else on the next map. */
+  public resetFog(): void { resetFogMemory(this); }
   public cycleTintMix(): string { return cycleTintMix(); }
   public getTintMix(): string { return getTintMixName(); }
   public cycleCausticFade(): string { return cycleCausticFade(); }
@@ -989,6 +1008,11 @@ export class RenderSystem {
     // screen-space and must not inherit the camera translation.  No-op at
     // LIGHTING_CYCLE 'legacy' (the default).
     renderLightLayer(this, ctx, width, height, playerPos, camera, player?.rotation);
+
+    // 5b''. FOG OF WAR, composed FROM the light layer above — so it must
+    // follow it, and still precede the HUD: the fog darkens the world, never
+    // the interface.
+    renderFogLayer(this, ctx, width, height, playerPos, camera);
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

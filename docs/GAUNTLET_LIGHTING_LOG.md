@@ -2656,3 +2656,98 @@ brighter than it was — it is added deliberately rather than left over.
 
 `npm run typecheck`, `npm run build`, `npm test` — **131 passed**, twice in
 a row including the previously flaky one.
+
+---
+
+## A5q — the tint ships OFF, and a fog of war the light cuts through
+
+Two changes: the colour-blend knob from A5p defaults to `off`, and there is
+now a fog pass composed from the light layer.
+
+### The tint mix defaults to off
+
+A5p's answer to "why can't I see it" was right about the mechanism and did
+not change the answer to "is it worth it". Measured, the effect is a few
+luminance levels: the materials that transmit are indigo glass, grey-blue
+plastic and steel-blue metal, all of which sit close to the lamp's own sky
+blue, so the blend has little distance to travel. What it costs is not
+nothing — at any mix above zero the straight-through path stops being a
+partial erase and becomes a full erase plus a gradient FILL per translucent
+group, which is real work in the pass that is already the frame's most
+expensive.
+
+So `TINT_MIX_CYCLE` is reordered with `off` first. Nothing is deleted: the
+whole ladder is still one DBG row away, and the test still drives both ends
+and asserts the shipped default is the default rather than the only value.
+This is the same shape as emitter shadows — built, measured, correct, and
+off, because a cost/benefit that lands this way is a default, not a bug.
+
+### Fog of war: `engine/systems/render/fog.ts`
+
+The request was three layers — dark, greyed, clear — with a two-layer
+fallback for maps where memory does not fit. Both are shipped, as tiers of
+one cycle: `off` / `dim` / `dark` (two-layer) / `memory` (three-layer).
+
+The construction is the point. The fog is not a second visibility model; it
+is **composed from the light canvas**, which means it is occlusion-aware for
+free — a corridor of shadow behind a tile stays fogged because the light
+pass already declined to light it, and every feature the light layer has
+(the flashlight cone, the beam width, the radius, refraction spill) shapes
+the fog with no code that knows about any of them.
+
+Four steps per frame, all on offscreen canvases, one blit out:
+
+1. **Boost the light into a mask.** The light layer peaks at
+   `PLAYER_LIGHT_PEAK` (0.34) and a mask has to reach ~1. Each additive
+   redraw of a canvas onto itself doubles its alpha, so the boost is
+   `ceil(log2(MASK_TARGET / (PEAK · brightness)))` doublings, clamped at
+   `MASK_MAX_DOUBLINGS` — three or four `drawImage`s of a screen-sized
+   canvas, not a per-pixel pass. Cheap, and it inherits the light's exact
+   shape including its falloff.
+2. **Fill the dark.** `FOG.COLOR` is `0, 0, 0`. It was `4, 8, 18` first,
+   which is ~10 luminance — brighter than the ~3 of empty space, so the
+   "fog" lightened the screen. Empty space in this game is nearly black
+   already; anything a fog is allowed to be must be darker than that.
+3. **Erase what is remembered** (`memory` only). A world-space explored
+   texture, one texel per `FOG.CELL` (48 world units), stamped with a disc
+   at the player each frame across all nine wrap offsets, and drawn back
+   scaled over the camera window at the same nine offsets. Torus-wrapped on
+   both ends, and reset in `GameEngine.loadMap` — a new map has never been
+   seen. Remembered ground erases only `MEMORY_FRAC` of the dark, which is
+   what makes it the middle layer rather than a second clear one.
+4. **Erase what is lit**, then a small feathered self-bubble at the hull so
+   the ship is never inside its own fog, then one `drawImage` to the main
+   canvas with `globalAlpha` and the composite operation both set
+   explicitly.
+
+Measured on GLASS_FIELD, differencing fog on against fog off at a fixed
+camera:
+
+| | away from the ship | at the ship |
+|---|---|---|
+| off | 8.73 | — |
+| dark | **1.13** | unchanged |
+| memory — remembered | 2.7 | |
+| memory — never seen | **0.0** | |
+
+Cost: `off` 0 ms, `dark` 0.3–0.5 ms p95, `memory` 0.5–0.7 ms p95, on
+`lastFogMs`, which every early return zeroes so a disabled pass cannot leave
+a stale number in the recorder.
+
+### The test that measured the interface
+
+The first version of the fog test sampled near the screen edge and read
+31.0 → 26.2 — "the fog barely works" — while a direct probe of the same
+build read 8.73 → 1.13. The sample box was landing on the bottom loadout
+strip, which the fog deliberately does not darken, so the patch was mostly
+HUD. The fix is in the test, not the fog: drop the light to its `minimal`
+tier so there is unlit world on screen, sample ABOVE the ship between the
+top chips and the light, and restore the tier afterwards.
+
+Also removed: a stray `expect(r.tier).toBe('low')` copy-pasted into the A5p
+tint test, whose returned object has no `tier` field — an assertion that
+could never have passed, and did not, on the first full-suite run.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **132 passed**.
