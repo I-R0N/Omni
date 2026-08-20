@@ -80,6 +80,8 @@ export class PerfRecorder {
   private maxRawLighting = 0;
   private worstFrameLighting = 0;
   private sumLights = 0;
+  private sumFog = 0;
+  private maxRawFog = 0;
   private maxEntities = 0;
   private maxEnemies = 0;
   private maxParticles = 0;
@@ -206,6 +208,17 @@ export class PerfRecorder {
     this.worstFrameMs = 0;
     this.worstFrameRender = 0;
     this.worstFrameSim = 0;
+    // The lighting accumulators were missing from this reset from the day
+    // they were added — the SECOND capture of a session inherited the first
+    // one's sums and reported a light average diluted or inflated by frames
+    // outside its own window.  Every capture-scoped accumulator added above
+    // must appear here; the fog pair arrives already registered.
+    this.sumLighting = 0;
+    this.maxRawLighting = 0;
+    this.worstFrameLighting = 0;
+    this.sumLights = 0;
+    this.sumFog = 0;
+    this.maxRawFog = 0;
     this.tierHist.fill(0);
     this.maxTier = 0;
     this.peakLoad = 0;
@@ -315,6 +328,7 @@ export class PerfRecorder {
     }
     if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
     if (perf.lightingMs > this.maxRawLighting) this.maxRawLighting = perf.lightingMs;
+    if (perf.fogMs > this.maxRawFog) this.maxRawFog = perf.fogMs;
     if (stampMs > this.maxStampMs) { this.maxStampMs = stampMs; this.maxStampCount = stampCount; }
     if (tintMs > this.maxTintMs) { this.maxTintMs = tintMs; this.maxTintMisses = tintMisses; }
     this.totalTintMisses += tintMisses;
@@ -340,6 +354,7 @@ export class PerfRecorder {
     this.sumAi += perf.aiMs;
     this.sumLighting += perf.lightingMs;
     this.sumLights += perf.lightingLights;
+    this.sumFog += perf.fogMs;
     const ti = loadTier < 0 ? 0 : loadTier >= this.tierHist.length ? this.tierHist.length - 1 : loadTier | 0;
     this.tierHist[ti]++;
     if (loadTier > this.maxTier) this.maxTier = loadTier;
@@ -403,7 +418,8 @@ export class PerfRecorder {
       // mean number composited per frame (the player's light plus whatever
       // emitters the tier's budget allowed), because the cost is per light
       // and a mean of 4 against a mean of 1 is most of the answer.
-      `light avg ${r2(this.sumLighting / n)}ms of render · peak ${r2(this.maxRawLighting)}ms · lights avg ${r2(this.sumLights / n)}`,
+      `light avg ${r2(this.sumLighting / n)}ms of render · peak ${r2(this.maxRawLighting)}ms · lights avg ${r2(this.sumLights / n)}`
+        + ` · fog avg ${r2(this.sumFog / n)}ms · peak ${r2(this.maxRawFog)}ms`,
       // Sim breakdown so a heavy capture shows WHERE the sim ms goes.  updPhys +
       // updLogic = sim; physics (incl. collisions/gravity) + AI + flow live in
       // updPhys, shardSys in updLogic.  gravity/localGrav are sub-slices of

@@ -635,6 +635,7 @@ export class GameEngine {
   private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfTileLighting  = new Float64Array(GameEngine.PERF_WINDOW);
   private perfLighting      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfFog           = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -4868,7 +4869,18 @@ export class GameEngine {
       // an A/B capture cannot be told apart from the run it is compared to.
       settings: `sim ${getActiveSimRateName()} · substep ${getActiveSubstepCapName()}`
         + ` · rscale ${getActiveRenderScaleName()} · hud ${getActiveHudRateName()}`
-        + ` · auto ${this.perfController.autoEnabled ? 'on' : 'off'}`,
+        + ` · auto ${this.perfController.autoEnabled ? 'on' : 'off'}`
+        // The lighting vocabulary, so a pasted capture says which
+        // configuration produced its light/fog columns without a follow-up
+        // question.  Report-time values: change settings mid-capture and the
+        // line describes the end state, not the whole window.
+        + ` · light ${getActiveLightingMode()}/${getActiveLightingTier().name}`
+        + ` · soft ${this.renderer.getShadowSoftness()}`
+        + ` · beam ${this.renderer.getFlashlight()}`
+        + ` · refr ${this.renderer.getRefraction() ? 'on' : 'off'}`
+        + ` · emis ${this.renderer.getEmissive() ? 'on' : 'off'}`
+        + ` · eshd ${this.renderer.getEmitShadows() ? this.renderer.getEmitShadowTier().name : 'off'}`
+        + ` · fog ${this.renderer.getFog()}`,
     }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 
@@ -5107,6 +5119,7 @@ export class GameEngine {
       this.perfNebula[this.perfRenderIdx]        = this.renderer.lastNebulaMs;
       this.perfTileLighting[this.perfRenderIdx] = this.renderer.lastTileLightingMs;
       this.perfLighting[this.perfRenderIdx]     = this.renderer.lastLightingMs;
+      this.perfFog[this.perfRenderIdx]          = this.renderer.lastFogMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
@@ -5172,6 +5185,7 @@ export class GameEngine {
           tileLightingCount: this.renderer.lastTileLightingCount,
           lightingMs:        GameEngine.ringAvg(this.perfLighting,     this.perfRenderFilled),
           lightingLights:    this.renderer.lastLightingLights,
+          fogMs:             GameEngine.ringAvg(this.perfFog,          this.perfRenderFilled),
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),

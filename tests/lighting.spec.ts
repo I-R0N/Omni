@@ -2355,6 +2355,56 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('the perf pipeline carries the light and fog slices', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    // WIRING, not speed: no millisecond thresholds (CI timing is noise, the
+    // repo's long stance) — only that the two timers reach EngineStats.perf
+    // when their passes run, and read exactly zero when they don't.  This is
+    // the seam a future rename would silently break: the renderer field can
+    // tick while the snapshot reports 0 forever, and every capture ever taken
+    // would say the feature is free.
+    const r = await engine(page, async (e) => {
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => { if (++i < n) requestAnimationFrame(t); else res(); };
+        requestAnimationFrame(t);
+      });
+      const set = async (name: string) => {
+        for (let i = 0; i < 8 && e.renderer.getFog() !== name; i++) e.renderer.cycleFog();
+        await frames(30);
+      };
+      const perf = () => (window as any).__omniStats.perf;
+
+      e.renderer.setLighting('unified');
+      await set('off');
+      const litOn = perf().lightingMs, fogOff = perf().fogMs;
+      await set('dark');
+      const fogOn = perf().fogMs;
+      await set('off');
+      e.renderer.setLighting('legacy');
+      await frames(70);                     // > PERF_WINDOW (60): the ring
+                                            // average has to fully drain
+      const litLegacy = perf().lightingMs, fogLegacy = perf().fogMs;
+      e.renderer.setLighting('unified');
+      return { litOn, fogOff, fogOn, litLegacy, fogLegacy,
+               back: e.renderer.getFog() };
+    });
+
+    expect(r.back).toBe('off');
+    // The unified layer's cost reaches the snapshot...
+    expect(r.litOn).toBeGreaterThan(0);
+    // ...the fog's does only while a fog rung is on...
+    expect(r.fogOff).toBe(0);
+    expect(r.fogOn).toBeGreaterThan(0);
+    // ...and under legacy both drain to zero — the ring is 45 frames of
+    // zeroes by now, so a stale timer would be caught here.
+    expect(r.litLegacy).toBe(0);
+    expect(r.fogLegacy).toBe(0);
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

@@ -3018,3 +3018,68 @@ asserts the shipped default is `false`.
 ### Gate
 
 `npm run typecheck`, `npm run build`, `npm test` — **136 passed**.
+
+---
+
+## A8 — the lighting perf pipeline is closed end to end
+
+Two gaps stood between "instrumented" and "monitorable", both now closed so
+an on-device capture can be pasted back and read without follow-up
+questions.
+
+### The fog timer reaches the recorder
+
+`lastFogMs` existed on the renderer but stopped there — a device capture
+would have shown the fog's cost buried in the render total. It now flows
+the same path as the light timer: a `perfFog` ring in the engine →
+`PerfSnapshot.fogMs` (ring-averaged, zero while the fog is off) → the DBG
+overlay (`·fog` row) → the Perf REC report, whose light line reads
+
+    light avg X ms of render · peak Y ms · lights avg Z · fog avg F ms · peak P ms
+
+The report's `set` line also carries the full lighting vocabulary now —
+`light unified/low · soft diffuse · beam beam · refr on · emis on ·
+eshd off · fog off` — so a pasted capture says which configuration
+produced its columns.
+
+### A real bug found on the way
+
+The four lighting accumulators (`sumLighting`, `maxRawLighting`,
+`worstFrameLighting`, `sumLights`) were missing from `PerfRecorder.reset()`
+from the day they were added: the SECOND capture of a session inherited the
+first one's sums and reported a light average diluted or inflated by frames
+outside its own window. Any session's first capture was correct; any later
+one was not. Fixed, with the fog pair registered in the same block.
+
+### The headless matrix has lighting scenes
+
+`perf/capture.mjs` now samples `lastLightingMs` / `lastFogMs` per frame and
+prints `lit p99 / lit max / fog p99` beside the render columns, and
+`perf/scenes.mjs` gains a three-rung ladder on GLASS_FIELD (the lighting's
+worst case — every tile is occluder + transmission + caustic + emitter at
+once), same map, same seed, so the deltas are the features' cost and
+nothing else:
+
+| scene | what it states | this container, lit p99 / fog p99 |
+|---|---|---|
+| `light-legacy` | the floor: layer off, columns must read 0 | 0.00 / 0.00 |
+| `light-shipped` | the shipped defaults, stated explicitly | 1.70 / 0.00 |
+| `light-max` | everything on: emit shadows, memory fog, radial, full tint | 0.60 / 1.40 |
+
+(Levels indicative — software raster; deltas are the evidence, and the
+shipped-vs-max light comparison mostly reflects `radial` skipping the beam
+mask passes.)
+
+### The wiring is pinned, the speed is not
+
+A new merge-gate test asserts the SEAM, deliberately without a millisecond
+threshold (CI timing is noise — the repo's long stance): `lightingMs`
+reaches `EngineStats.perf` and is non-zero under unified; `fogMs` is
+exactly 0 with fog off, non-zero at `dark`; and after 70 frames of legacy
+(> the 60-frame ring) both drain to exactly 0. This is the failure mode
+the test exists for: a renamed field would leave the renderer's timer
+ticking while every capture ever taken reports the feature as free.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **137 passed**.

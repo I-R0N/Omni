@@ -1791,6 +1791,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statRow(' ·tLit-N', perf.tileLightingCount)}
                   {statRow(' ·lit', fmtMs(perf.lightingMs))}
                   {statRow(' ·lit-N', perf.lightingLights)}
+                  {statRow(' ·fog', fmtMs(perf.fogMs))}
                 </>)}
               </>)}
     </div>

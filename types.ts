@@ -1363,6 +1363,11 @@ export interface PerfSnapshot {
   // interpreting lightingMs, exactly as tileLightingCount is for
   // tileLightingMs.
   lightingLights: number;
+  // renderFogLayer wall time, ring-averaged like lightingMs and likewise a
+  // SLICE OF RENDER.  Zero while the fog cycle is `off` (every early return
+  // in the pass zeroes the timer) — which is how the toggle proves the fog
+  // costs nothing when disabled.
+  fogMs: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
