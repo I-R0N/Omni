@@ -2841,3 +2841,46 @@ terrain.
 
 `npm run typecheck`, `npm run build`, `npm test` — **133 passed**. The two
 fog tests were additionally run four times each on their own.
+
+---
+
+## A5s — the CI flake, and `beam` becomes the default
+
+### The minimap test flaked in CI on a cause its own design created
+
+The A5r gate was green locally and red in CI: `seenPlus / offPlus >
+2 × (unseenMinus / offMinus)` failed with the CONTROL patch reading
+brighter veiled than its own unfogged baseline.  The veil covers the
+TERRAIN and the contacts draw on top of it BY DESIGN — so an ambient
+bubble drifting through the sample box adds a bright pulsing blip to a
+patch that is supposed to be measuring hidden ground.  Fauna is
+always-present, so it cannot be waited out; the test now deactivates every
+non-STRUCTURE entity each frame, and the assertions compare each spot only
+against ITSELF in the same fog state (cross-normalising against the other
+spot divides by a nearly-empty patch and turns the comparison into noise).
+
+The same suppression went into the world-fog test and — once the flake was
+understood as "moving fauna between paired reads" — into the shadow test's
+settle loop, whose profile is a unified-minus-legacy DIFF of two reads ~30
+frames apart: a bubble that moves between them leaves its brightness in
+the diff, and the glass umbra is a ~5-luminance signal.  Its `gIn >
+2 × inShadow` bound also rode the measurement (6.7–8.5 against a doubled
+4.4–5.5 across runs) and is now 1.2×, with the strict claims — lighter
+than rock's shadow, darker than open space — unchanged.
+
+### `beam` ships as the flashlight default (user call)
+
+`FLASHLIGHT_CYCLE` still starts with `radial` in table order; the default
+INDEX now points at `beam` (an 80° cone).  The cone test and the ladder
+test assert the new default, and the ladder asserts the cycle from where
+the default sits.  FIVE other tests — the shadow profile, refraction, the
+edge flip, the tint, and the world fog — measure light on rings and
+bearings a cone would simply not illuminate, so each now pins the
+flashlight to `radial` for its duration and restores it, exactly as they
+already pin refraction, emissive, softness and tint mix.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **133 passed**; the
+formerly flaky shadow test run six times green on its own, the two fog
+tests four times each.

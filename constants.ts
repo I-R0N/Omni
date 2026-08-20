@@ -1552,7 +1552,8 @@ export function cycleEmitShadowTier(): string {
  *  direction, which is what makes a beam sweeping past one read as the beam
  *  finding it.
  *
- *  `radial` is the current 360-degree glow and stays the default.  `off` is
+ *  `beam` (an 80-degree cone) is the DEFAULT (user call): the game reads as
+ *  flying a searchlight, and the radial glow is one click away.  `off` is
  *  a zero-width beam rather than a special case: the player's light draws
  *  nothing, so what is left on the layer is exactly the emitters — which
  *  makes it a useful thing to look at rather than a way to disable the
@@ -1770,7 +1771,8 @@ export const FLASHLIGHT = {
    *  its body deviated rather than radial. */
   CULL_MARGIN_DEG: 25,
 } as const;
-let activeFlashlightIndex = 0;
+let activeFlashlightIndex =
+  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'beam');
 export function getFlashlightHalfDeg(): number {
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
 }
