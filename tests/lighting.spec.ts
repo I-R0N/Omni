@@ -1468,6 +1468,12 @@ test.describe('occluder collection', () => {
         e.player.position.x = 0; e.player.position.y = 0;
         e.player.velocity.x = 0; e.player.velocity.y = 0;
         e.player.health = e.player.maxHealth;
+        // FAUNA OFF: the gains are unified-minus-legacy diffs of paired
+        // reads, and an ambient bubble drifting between them lands in the
+        // diff — the `off` bound is < 3 and a bubble body is ~18.
+        for (const o of e.currentMap.entities) {
+          if (o.type !== 'STRUCTURE') o.active = false;
+        }
       }, 8);
     });
 
@@ -2104,6 +2110,244 @@ test.describe('occluder collection', () => {
     expect(r.unseenMinus).toBeLessThan(r.offMinus * 0.5);
     // ...and the ship's own surroundings were never veiled at all.
     expect(r.homeAfter).toBeGreaterThan(r.offHome * 0.6);
+    watch.assertClean();
+  });
+
+  test('A4b: the legacy receivers are retired under unified, kept under legacy', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'PLASTIC_FIELD');
+    await parkInCluster(page);
+
+    // PLASTIC_FIELD because plastic-tile carries a `glow` block and renders
+    // on the material slow path, so under LEGACY the bloom demonstrably runs
+    // (lastTileLightingCount counts tiles the bloom spent >1us on).  Under
+    // UNIFIED the same parked frame must count ZERO — the point light owns
+    // "the near face is lit" now, and the bloom would be double-lighting.
+    const r = await engine(page, async (e) => {
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      const sample = async (mode: string) => {
+        e.renderer.setLighting(mode);
+        await frames(12);
+        // The counters are per-frame (reset at the top of render); a settled
+        // read after 12 frames is one frame's truth.
+        return { n: e.renderer.lastTileLightingCount as number,
+                 ms: e.renderer.lastTileLightingMs as number };
+      };
+      const legacy = await sample('legacy');
+      const unified = await sample('unified');
+      e.renderer.setLighting('unified');
+      return { legacy, unified };
+    });
+
+    // Parked inside the densest plastic cluster, the LEGACY bloom lights
+    // something...
+    expect(r.legacy.n).toBeGreaterThan(0);
+    // ...and under UNIFIED the same spot counts zero — not "less", zero,
+    // because the gate is a mode check, not a tuning.
+    expect(r.unified.n).toBe(0);
+    expect(r.unified.ms).toBe(0);
+    watch.assertClean();
+  });
+
+  test('A6: shots are world lights — budgeted, culled, and their own colour', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    const r = await engine(page, async (e) => {
+      // EMPTY DARK SCENE, radial light pinned: the shot's own light is the
+      // only thing that can brighten a patch outside the player's radius.
+      for (const t of e.currentMap.entities) {
+        if (t.type === 'STRUCTURE') t.active = false;
+      }
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      e.renderer.setLighting('unified');
+      const beam0 = e.renderer.getFlashlight();
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
+        e.renderer.cycleFlashlight();
+      }
+
+      // A HAND-PLACED PROJECTILE, parked well outside the player light's
+      // radius (tier `low` = 300) and re-pinned every frame — the sim ticks
+      // its lifetime but must not move or expire it mid-measurement.
+      const mkShot = (x: number, y: number, color: string) => ({
+        id: 'wl-test-' + x + ':' + y,
+        type: 'PROJECTILE', active: true,
+        position: { x, y }, velocity: { x: 0, y: 0 },
+        size: { x: 6, y: 6 }, rotation: 0, color,
+        damage: 0, ownerType: 'PLAYER', mass: 0.01,
+        health: 1, maxHealth: 1,
+      } as any);
+      const shot = mkShot(0, -600, '#ff2200');          // pure red, on screen
+      const farShot = mkShot(2500, 2500, '#ff2200');    // two screens away
+      // Spawned projectiles live in the map's entity list (WeaponSystem
+      // appends them there), so the hand-built ones go the same way.
+      e.currentMap.entities.push(shot, farShot);
+
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          for (const o of e.currentMap.entities) {
+            if (o.type !== 'STRUCTURE') o.active = false;
+          }
+          shot.active = true; shot.lifetime = 99;
+          shot.position.x = 0; shot.position.y = -600;
+          farShot.active = true; farShot.lifetime = 99;
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      const box = (cx: number, cy: number) => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        let rr = 0, gg = 0, bb = 0, n = 0;
+        for (let wy = cy - 25; wy <= cy + 25; wy += 12) {
+          for (let wx = cx - 25; wx <= cx + 25; wx += 12) {
+            const x = Math.round((W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr);
+            const y = Math.round((H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr);
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) continue;
+            const d = g.getImageData(x, y, 1, 1).data;
+            rr += d[0]; gg += d[1]; bb += d[2]; n++;
+          }
+        }
+        return n ? [rr / n, gg / n, bb / n] : [0, 0, 0];
+      };
+
+      await frames(15);
+      const dflt = e.renderer.getWorldLights();
+      const lit = box(0, -600);
+      const litCount = e.renderer.worldLightCount();
+      e.renderer.toggleWorldLights();
+      await frames(15);
+      const dark = box(0, -600);
+      const offCount = e.renderer.worldLightCount();
+      e.renderer.toggleWorldLights();
+      await frames(15);
+      const backCount = e.renderer.worldLightCount();
+
+      shot.active = false; farShot.active = false;
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== beam0; i++) {
+        e.renderer.cycleFlashlight();
+      }
+      return { dflt, lit, dark, litCount, offCount, backCount };
+    });
+
+    expect(r.dflt).toBe(true);                 // ships on
+    // THE CULL IS THE COUNT: the on-screen shot lights, the shot two
+    // screens away never enters the budget.
+    expect(r.litCount).toBe(1);
+    expect(r.offCount).toBe(0);                // the toggle is a true restore
+    expect(r.backCount).toBe(1);
+    // The shot's patch is BRIGHTER lit than dark, and the gain is RED —
+    // the light wears the projectile's own colour, not the lamp's blue.
+    const gainR = r.lit[0] - r.dark[0];
+    const gainB = r.lit[2] - r.dark[2];
+    expect(gainR).toBeGreaterThan(2);
+    expect(gainR).toBeGreaterThan(gainB + 1);
+    watch.assertClean();
+  });
+
+  test('A7: depth darkens the world through the fog, and the hub never does', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    const r = await engine(page, async (e) => {
+      e.renderer.setLighting('unified');
+      const beam0 = e.renderer.getFlashlight();
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
+        e.renderer.cycleFlashlight();
+      }
+      // A HAND-PLACED patch outside the light's radius, same construction as
+      // the fog test: the ambient can only be measured against world that is
+      // actually there.
+      const stock = e.currentMap.entities.filter(
+        (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
+      for (let i = 0; i < 9; i++) {
+        const t = stock[i];
+        t.active = true; t._occluderR = undefined;
+        t.position.x = ((i % 3) - 1) * 60;
+        t.position.y = -430 + (Math.floor(i / 3) - 1) * 60;
+      }
+      e.physics.initializeStaticGrid(e.currentMap.entities);
+      const frames = (n: number) => new Promise<void>(res => {
+        let i = 0;
+        const t = () => {
+          e.player.position.x = 0; e.player.position.y = 0;
+          e.player.velocity.x = 0; e.player.velocity.y = 0;
+          for (const o of e.currentMap.entities) {
+            if (o.type !== 'STRUCTURE') o.active = false;
+          }
+          if (++i < n) requestAnimationFrame(t); else res();
+        };
+        requestAnimationFrame(t);
+      });
+      const box = () => {
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const g = cv.getContext('2d')!;
+        const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
+        const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
+        let sum = 0, n = 0;
+        for (let wy = -500; wy <= -360; wy += 20) {
+          for (let wx = -70; wx <= 70; wx += 20) {
+            const x = Math.round((W / 2 + (wx - cam.position.x + shake.x) * cam.zoom) * dpr);
+            const y = Math.round((H / 2 + (wy - cam.position.y + shake.y) * cam.zoom) * dpr);
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) continue;
+            const d = g.getImageData(x, y, 1, 1).data;
+            sum += (d[0] + d[1] + d[2]) / 3; n++;
+          }
+        }
+        return n ? sum / n : 0;
+      };
+      // The tier stays at the shipped `low` — its radius is 300 and the
+      // patch sits 430 out, already beyond the light, and `low` is the tier
+      // whose ambientPerStage the feature actually ships with (the
+      // emergency tiers below it are authored zero, so dropping the tier
+      // here would measure the OFF branch and call it broken).
+      const dflt = e.renderer.getDepthAmbient();
+
+      // DEPTH is a renderer field stamped by the engine each frame; writing
+      // the ENGINE's stageIndex is the honest path — the stamp carries it.
+      const at = async (depth: number) => {
+        e.stageIndex = depth;
+        await frames(18);
+        return box();
+      };
+      const hub = await at(0);
+      const d2 = await at(2);
+      const d4 = await at(4);
+      const d9 = await at(9);         // capped at 4 — no darker than d4
+      e.renderer.toggleDepthAmbient();
+      const off9 = await at(9);       // toggled off: full brightness back
+      e.renderer.toggleDepthAmbient();
+      e.stageIndex = 0;
+      await frames(6);
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== beam0; i++) {
+        e.renderer.cycleFlashlight();
+      }
+      return { dflt, hub, d2, d4, d9, off9, back: e.renderer.getDepthAmbient() };
+    });
+
+    expect(r.dflt).toBe(true);
+    expect(r.back).toBe(true);
+    // The patch is visible at the surface...
+    expect(r.hub).toBeGreaterThan(5);
+    // ...and MONOTONE with depth: two stages down is darker, four darker
+    // still, and the ladder is capped at four — depth nine reads as four.
+    expect(r.d2).toBeLessThan(r.hub * 0.92);
+    expect(r.d4).toBeLessThan(r.d2 * 0.95);
+    expect(Math.abs(r.d9 - r.d4)).toBeLessThan(1.5);
+    // The toggle is a true restore, at any depth.
+    expect(r.off9).toBeGreaterThan(r.hub * 0.85);
     watch.assertClean();
   });
 

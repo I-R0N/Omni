@@ -35,6 +35,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
+    toggleWorldLights, toggleDepthAmbient,
     cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix, cycleFog,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
@@ -393,6 +394,20 @@ export class DebugControls {
    *  rather than when light reached them. */
   toggleEmissive() {
     toggleEmissive();
+  }
+
+  /** DBG (Visual): A6 world lights — shots and the snitch as first-class
+   *  lights on the unified layer, in their own colours, out of what is left
+   *  of the tier's maxLights budget.  Off restores the exact pre-A6 layer. */
+  toggleWorldLights() {
+    toggleWorldLights();
+  }
+
+  /** DBG (Visual): A7 depth ambient — each stage descended adds the light
+   *  tier's ambientPerStage of fog-dark (capped at 4 stages), folded into
+   *  the fog compositor.  The hub is depth 0 and never darkens. */
+  toggleDepthAmbient() {
+    toggleDepthAmbient();
   }
 
   /** DBG (Visual): how much of the light it receives a body re-emits.

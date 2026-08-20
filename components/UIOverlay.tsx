@@ -89,6 +89,8 @@ interface UIOverlayProps {
   onCycleRefractBrightness?: () => void;
   onCycleLightBrightness?: () => void;
   onToggleEmissive?: () => void;
+  onToggleWorldLights?: () => void;
+  onToggleDepthAmbient?: () => void;
   onCycleEmitBrightness?: () => void;
   onToggleEmitShadows?: () => void;
   onCycleEmitShadowTier?: () => void;
@@ -271,6 +273,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleRefractBrightness,
   onCycleLightBrightness,
   onToggleEmissive,
+  onToggleWorldLights,
+  onToggleDepthAmbient,
   onCycleEmitBrightness,
   onToggleEmitShadows,
   onCycleEmitShadowTier,
@@ -1531,6 +1535,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Emissive', onToggleEmissive,
                   stats.emissiveEnabled === true ? 'On' : 'Off',
                   'Do METAL and GLASS re-emit the light that falls on them? ON by default, after device testing. Every lit body of those materials becomes a SECOND light at its own position — half the light it received, uniform in every direction, falling off the way the player\'s does. It replaces the contact-driven glow those two materials used to carry, which lit up when something TOUCHED them rather than when light reached them, so a metal plate across the room stayed dead however brightly it was lit. Secondary lights cast no shadows of their own unless Emit shadow asks them to: each would need its own occluder collection, and the pool is shared and consumed per light, so N emitters cost N collections on the tightest budget in the system.')}
+                {ctrlRow('World lights', onToggleWorldLights,
+                  stats.worldLightsEnabled === true ? 'On' : 'Off',
+                  'A6: do the self-luminous movers — shots and the snitch — light the unified layer in their own colours? These are not emitters: an emitter\'s brightness is what the player\'s light put ON it, where a shot glows because it is on fire, so a bolt lights the walls it passes whether or not the flashlight is pointed there. They spend what is LEFT of the tier\'s maxLights after the player and the emitters (the tier\'s number stays the whole frame\'s light count), budgeted nearest-to-screen-centre, and a light whose disc misses the screen is culled before it costs anything. They cast no shadows — a shadow thrown by a bolt is unreadable at any speed, and each shadowed light is a fresh occluder collection. Off restores the exact pre-A6 layer.')}
+                {ctrlRow('Depth dark', onToggleDepthAmbient,
+                  stats.depthAmbientEnabled === true ? 'On' : 'Off',
+                  'A7: each stage DESCENDED adds the light tier\'s ambientPerStage of fog-darkness (capped at four stages), folded into the fog compositor — so it is cut by the player\'s light, respects shadows, and darkens the minimap\'s memory veil, all through the one mechanism. The hub is depth 0 and never darkens; darkness is a property of going down, not a global mood. When the Fog cycle is also on, whichever of the two wants the world darker wins, so a player already running dark fog only notices depth once it exceeds their setting.')}
                 {ctrlRow('Emit bright', onCycleEmitBrightness,
                   stats.emitBrightnessName ?? '1/2',
                   'How much of the light it receives a body re-emits, as a fraction. Only has an effect while Emissive is on. It SCALES the variant\'s own emits value against the 1/2 baseline those variants are authored at, so the default is exactly what the table says and a future material that emits less than metal still emits less than metal. Clamped at 1 in the geometry: a body cannot radiate more light than fell on it, which is the one physical claim this feature rests on.')}

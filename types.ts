@@ -1689,6 +1689,8 @@ export interface EngineStats {
   lightBrightnessName?: string;
   /** DBG: do metal and glass re-emit the light that falls on them? */
   emissiveEnabled?: boolean;
+  worldLightsEnabled?: boolean;
+  depthAmbientEnabled?: boolean;
   /** DBG: re-emitted fraction, as a label. */
   emitBrightnessName?: string;
   /** DBG: may the secondary lights cast shadows of their own? */

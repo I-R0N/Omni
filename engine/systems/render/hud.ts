@@ -26,11 +26,11 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial, getFog, FOG,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, FOG,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
-import { fogMemoryPeriodX, fogMemoryPeriodY } from './fog';
+import { fogMemoryPeriodX, fogMemoryPeriodY, fogEffectiveDark } from './fog';
 
 /**
  * Pre-render all STRUCTURE entities to an offscreen minimap canvas.
@@ -759,8 +759,10 @@ function renderMinimapFog(
     // writing blacks the whole thing out.
     const mem = r._fogMem;
     if (!r._fogActive || mem === null) return;
-    const cfg = getFog();
-    if (cfg.dark <= 0) return;
+    // The EFFECTIVE dark — the fog cycle or the A7 depth ambient, whichever
+    // is darker — so the map darkens with the descent the way the world does.
+    const dark = fogEffectiveDark(r);
+    if (dark <= 0) return;
     if (typeof document === 'undefined') return;
 
     if (r._minimapFogCanvas === null) {
@@ -780,7 +782,7 @@ function renderMinimapFog(
     vctx.clearRect(0, 0, res, res);
     // The SAME colour and the SAME darkness the world fog is using, so the
     // two rungs read as one setting rather than as two.
-    vctx.fillStyle = `rgba(${FOG.COLOR}, ${cfg.dark})`;
+    vctx.fillStyle = `rgba(${FOG.COLOR}, ${dark})`;
     vctx.fillRect(0, 0, res, res);
 
     const cell = FOG.CELL;

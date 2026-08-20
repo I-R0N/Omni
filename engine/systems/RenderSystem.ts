@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -23,7 +23,7 @@ import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
-import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, type Occluder, type EmitSlot } from './render/lighting';
+import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
 import { renderFogLayer, resetFogMemory } from './render/fog';
 
 /**
@@ -220,6 +220,10 @@ export class RenderSystem {
   _fogActive: boolean = false;
   /** Wall time the fog pass took last frame, for the perf recorder. */
   lastFogMs: number = 0;
+  /** A7 — the run's current DEPTH (GameEngine.stageIndex), stamped by the
+   *  engine before each draw.  The renderer never reads sim state directly;
+   *  this one number crosses on a field write. */
+  stageDepth: number = 0;
 
   /** DBG passthroughs for the lighting mode.  The state itself is module
    *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
@@ -241,6 +245,10 @@ export class RenderSystem {
   public getLightBrightness(): string { return getLightBrightnessName(); }
   public toggleEmissive(): boolean { return toggleEmissive(); }
   public getEmissive(): boolean { return getEmissiveEnabled(); }
+  public toggleWorldLights(): boolean { return toggleWorldLights(); }
+  public getWorldLights(): boolean { return getWorldLightsEnabled(); }
+  public toggleDepthAmbient(): boolean { return toggleDepthAmbient(); }
+  public getDepthAmbient(): boolean { return getDepthAmbientEnabled(); }
   public cycleEmitBrightness(): string { return cycleEmitBrightness(); }
   public getEmitBrightness(): string { return getEmitBrightnessName(); }
   public toggleEmitShadows(): boolean { return toggleEmitShadows(); }
@@ -263,6 +271,7 @@ export class RenderSystem {
   public causticStats(): { faces: number; weight: number } { return causticStats(); }
   public shadowStats(): { quads: number; area: number } { return shadowStats(); }
   public beamMasks(): number { return beamMaskCount(); }
+  public worldLightCount(): number { return lastWorldLightCount(); }
   /** The refraction fade's pure weight function, for the suite — see
    *  `transmissionWeight` in render/lighting.ts. */
   public transmissionWeight(incidenceRad: number, tirBand: number): number {
@@ -1019,7 +1028,8 @@ export class RenderSystem {
     // it never tints the HUD, and AFTER ctx.restore() because the layer is
     // screen-space and must not inherit the camera translation.  No-op at
     // LIGHTING_CYCLE 'legacy' (the default).
-    renderLightLayer(this, ctx, width, height, playerPos, camera, player?.rotation);
+    renderLightLayer(this, ctx, width, height, playerPos, camera, player?.rotation,
+                     entities);
 
     // 5b''. FOG OF WAR, composed FROM the light layer above — so it must
     // follow it, and still precede the HUD: the fog darkens the world, never
@@ -1345,8 +1355,14 @@ export class RenderSystem {
       // reaches this now: glass-tile used to bail out of the fast path on
       // `repelImpulse` — a CONTACT glow, which the unified light replaced —
       // so glass now stays cached while something is touching it.
+      // A4b: at 'unified' the slow path no longer paints the bloom (it is
+      // the point light's job), so bailing out of the fast path for it
+      // would buy a slower render of an identical picture — the tile stays
+      // cached.  This is where the A4b credit actually lands: near-player
+      // indestructible tiles stop re-rendering every frame.
       let inGlowRange = false;
-      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined && playerPos) {
+      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined && playerPos
+          && getActiveLightingMode() !== 'unified') {
           const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
           if (fpGlow !== undefined) {
               const fpdx = wrapDeltaX(entity.position.x, playerPos.x);

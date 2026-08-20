@@ -329,6 +329,12 @@ const App: React.FC = () => {
   const handleToggleEmissive = () => {
       if (engineRef.current) engineRef.current.dbg.toggleEmissive();
   };
+  const handleToggleWorldLights = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleWorldLights();
+  };
+  const handleToggleDepthAmbient = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleDepthAmbient();
+  };
 
   const handleCycleRefractBrightness = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRefractBrightness();
@@ -678,6 +684,8 @@ const App: React.FC = () => {
         onCycleRefractBrightness={handleCycleRefractBrightness}
         onCycleLightBrightness={handleCycleLightBrightness}
         onToggleEmissive={handleToggleEmissive}
+        onToggleWorldLights={handleToggleWorldLights}
+        onToggleDepthAmbient={handleToggleDepthAmbient}
         onCycleEmitBrightness={handleCycleEmitBrightness}
         onToggleEmitShadows={handleToggleEmitShadows}
         onCycleEmitShadowTier={handleCycleEmitShadowTier}

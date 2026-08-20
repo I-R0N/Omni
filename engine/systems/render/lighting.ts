@@ -40,7 +40,7 @@ import {
     getEmitBrightness, EMIT_BASELINE, getEmitShadowsEnabled, getEmitShadowTier,
     getEmitFadeSec, getCausticFade, getFlashlightHalfDeg, FLASHLIGHT,
     getLightColorRgb, BUBBLE_CONSTANTS, getTintMix, TRANSMIT_STRAIGHT_FRAC,
-    PLAYER_LIGHT_PEAK,
+    PLAYER_LIGHT_PEAK, WORLD_LIGHTS, getWorldLightsEnabled,
 } from '../../../constants';
 import { shiftX, shiftY } from './drawUtils';
 
@@ -2184,9 +2184,116 @@ export function ensureLightCanvas(r: RenderSystem, ctx: CanvasRenderingContext2D
  * than a re-render of the same thing by another route: nothing is allocated,
  * nothing is drawn, and `lastLightingMs` stays 0.
  */
+/** Scratch for the world-light pick, module scope (no per-frame alloc). */
+const _wlX = new Float64Array(64);
+const _wlY = new Float64Array(64);
+const _wlR = new Float64Array(64);
+const _wlA = new Float64Array(64);
+const _wlD = new Float64Array(64);
+const _wlC: (string | null)[] = new Array(64).fill(null);
+let _lastWorldLights = 0;
+export function lastWorldLightCount(): number { return _lastWorldLights; }
+
+/** A6 — WORLD LIGHTS: the self-luminous movers as first-class lights.
+ *
+ *  Shots and the snitch light the layer in their OWN colour.  They are not
+ *  emitters — an emitter's brightness is what the player's light put on it,
+ *  where a shot glows because it is on fire — so they take no `received`
+ *  factor, no beam gate, and they work outside the player light's radius.
+ *
+ *  CULLING is the stage's other half, and it happens BEFORE the budget: a
+ *  candidate whose light disc misses the layer rect costs one rectangle
+ *  test.  Survivors are budgeted NEAREST-TO-SCREEN-CENTRE first into what
+ *  is left of the tier's `maxLights` after the player and the emitters, so
+ *  the tier's number stays the whole frame's light count.
+ *
+ *  NO SHADOWS, deliberately — the same call the emitters make at their
+ *  default: these are the fastest-moving things in the game, a shadow from
+ *  a bolt is unreadable at any speed, and each shadowed light is a fresh
+ *  occluder collection.  If that ever changes it must go through the
+ *  emit-shadow scratch canvas path (A3 landmine: the occluder pool is
+ *  shared, so each light's set must be consumed before the next collect).
+ */
+function compositeWorldLights(
+    lctx: CanvasRenderingContext2D,
+    entities: GameEntity[],
+    lw: number, lh: number,
+    camX: number, camY: number, zoom: number,
+    shakeX: number, shakeY: number,
+    width: number, height: number, k: number,
+    budget: number,
+): number {
+    if (budget <= 0 || !getWorldLightsEnabled()) { _lastWorldLights = 0; return 0; }
+    const worldToPx = zoom * k;
+    const ccx = lw / 2, ccy = lh / 2;
+    let n = 0;
+    for (let i = 0; i < entities.length; i++) {
+        const e = entities[i];
+        if (!e.active) continue;
+        let radius = 0, alpha = 0;
+        if (e.type === EntityType.PROJECTILE) {
+            // Arc segments are decoration on a strike that already lit the
+            // frame; lighting every segment would turn one bolt into a rope
+            // of lights.
+            if (e.isLightningArc === true) continue;
+            radius = WORLD_LIGHTS.PROJECTILE_RADIUS
+                   * (e.isCharged === true ? WORLD_LIGHTS.CHARGED_MULT : 1);
+            alpha = WORLD_LIGHTS.PROJECTILE_ALPHA;
+        } else if (e.isSnitch === true) {
+            radius = WORLD_LIGHTS.SNITCH_RADIUS;
+            alpha = WORLD_LIGHTS.SNITCH_ALPHA;
+        } else {
+            continue;
+        }
+        const ex = (width / 2 + (shiftX(camX, e.position.x) - camX + shakeX) * zoom) * k;
+        const ey = (height / 2 + (shiftY(camY, e.position.y) - camY + shakeY) * zoom) * k;
+        const rPx = radius * worldToPx;
+        // THE CULL: the light's own disc against the layer rect.
+        if (ex + rPx < 0 || ex - rPx > lw || ey + rPx < 0 || ey - rPx > lh) continue;
+        if (n >= _wlX.length) break;
+        _wlX[n] = ex; _wlY[n] = ey; _wlR[n] = rPx; _wlA[n] = alpha;
+        _wlC[n] = e.color !== undefined ? normalizedTint(e.color) : null;
+        const ddx = ex - ccx, ddy = ey - ccy;
+        _wlD[n] = ddx * ddx + ddy * ddy;
+        n++;
+    }
+    if (n === 0) { _lastWorldLights = 0; return 0; }
+    // Budgeted nearest-to-centre: selection sort of the first `budget` —
+    // budget is single digits, n a few dozen, and this allocates nothing.
+    const take = Math.min(budget, n);
+    for (let a = 0; a < take; a++) {
+        let best = a;
+        for (let b = a + 1; b < n; b++) if (_wlD[b] < _wlD[best]) best = b;
+        if (best !== a) {
+            let t = _wlD[a]; _wlD[a] = _wlD[best]; _wlD[best] = t;
+            t = _wlX[a]; _wlX[a] = _wlX[best]; _wlX[best] = t;
+            t = _wlY[a]; _wlY[a] = _wlY[best]; _wlY[best] = t;
+            t = _wlR[a]; _wlR[a] = _wlR[best]; _wlR[best] = t;
+            t = _wlA[a]; _wlA[a] = _wlA[best]; _wlA[best] = t;
+            const c = _wlC[a]; _wlC[a] = _wlC[best]; _wlC[best] = c;
+        }
+    }
+    lctx.globalCompositeOperation = 'lighter';
+    for (let a = 0; a < take; a++) {
+        lctx.setTransform(1, 0, 0, 1, _wlX[a], _wlY[a]);
+        lctx.fillStyle = lightGradient(lctx, _wlR[a], _wlC[a]);
+        lctx.globalAlpha = _wlA[a];
+        lctx.fillRect(-_wlR[a], -_wlR[a], _wlR[a] * 2, _wlR[a] * 2);
+    }
+    lctx.globalCompositeOperation = 'source-over';
+    lctx.globalAlpha = 1;
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    _lastWorldLights = take;
+    return take;
+}
+
 export function renderLightLayer(
     r: RenderSystem, ctx: CanvasRenderingContext2D, width: number, height: number,
     playerPos?: Vector2, camera?: CameraState, playerRot?: number,
+    /** The frame's entity list, for the A6 world lights (shots, snitch).
+     *  Optional so older call sites stay valid; without it there are no
+     *  world lights, not an error. */
+    entities?: GameEntity[],
 ): void {
     const mode = getActiveLightingMode();
     if (mode === 'legacy') return;
@@ -2271,6 +2378,14 @@ export function renderLightLayer(
                 playerPos.x, playerPos.y, worldToPx,
                 wantEmitters ? tier.maxLights - 1 : 0, wantEmitters,
                 beamAim, beamHalf);
+            // A6 — WORLD LIGHTS, out of what is left of the tier's budget.
+            if (entities !== undefined) {
+                lights += compositeWorldLights(
+                    lctx, entities, lw, lh,
+                    camera.position.x, camera.position.y, camera.zoom,
+                    shake.x, shake.y, width, height, k,
+                    tier.maxLights - lights);
+            }
         }
     } else {
         r._lightOccluderCount = 0;

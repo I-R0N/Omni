@@ -30,9 +30,25 @@
 import type { RenderSystem } from '../RenderSystem';
 import { CameraState, Vector2 } from '../../../types';
 import { getFog, FOG, effectiveDpr, getActiveLightingTier, PLAYER_LIGHT_PEAK,
-         getLightBrightness } from '../../../constants';
+         getLightBrightness, getDepthAmbientEnabled, AMBIENT_DEPTH_CAP,
+       } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT } from '../../toroidal';
 import { shiftX, shiftY } from './drawUtils';
+
+/** A7 — the fog level DEPTH imposes, independent of the fog cycle: the
+ *  tier's `ambientPerStage` per descent, capped at AMBIENT_DEPTH_CAP stages.
+ *  Folded into the fog's dark fill as max(cycle, depth) — whichever wants
+ *  the world darker wins — so descending through a run darkens it even with
+ *  the fog cycle at `off`, and a player who already runs `dark` fog sees
+ *  depth take over only once it exceeds their setting.  The minimap veil
+ *  reads the same number, so map and world darken together. */
+export function fogEffectiveDark(r: RenderSystem): number {
+    const cycle = getFog().dark;
+    if (!getDepthAmbientEnabled()) return cycle;
+    const stages = Math.min(r.stageDepth, AMBIENT_DEPTH_CAP);
+    const depth = getActiveLightingTier().ambientPerStage * stages;
+    return depth > cycle ? depth : cycle;
+}
 
 /** The explored texture TILES with the map, and its period is the map's
  *  extent in cells — NOT the canvas width, which is that rounded UP.  On a
@@ -133,13 +149,14 @@ export function renderFogLayer(
     playerPos?: Vector2, camera?: CameraState,
 ): void {
     const cfg = getFog();
+    const dark = fogEffectiveDark(r);
     // Every early return ZEROES the timer.  Leaving the last live value in
     // it makes `off` report the cost of the last frame that drew, which is
     // exactly the reading someone would use to decide whether the fog is
     // affordable.
     const light = r._lightCanvas;
     const fw = r._lightW, fh = r._lightH;
-    if (cfg.dark <= 0 || !playerPos || !camera || light === null
+    if (dark <= 0 || !playerPos || !camera || light === null
         || fw <= 0 || fh <= 0 || !ensureCanvases(r, fw, fh)) {
         r.lastFogMs = 0;
         r._fogActive = false;
@@ -179,7 +196,7 @@ export function renderFogLayer(
     fctx.globalCompositeOperation = 'source-over';
     fctx.globalAlpha = 1;
     fctx.clearRect(0, 0, fw, fh);
-    fctx.fillStyle = `rgba(${FOG.COLOR}, ${cfg.dark})`;
+    fctx.fillStyle = `rgba(${FOG.COLOR}, ${dark})`;
     fctx.fillRect(0, 0, fw, fh);
 
     // ── 2. EXPLORED ──────────────────────────────────────────────────────
@@ -200,7 +217,7 @@ export function renderFogLayer(
         // Knock the fog down from `dark` to `explored` — a fraction of what
         // is there, so the two levels compose rather than replacing.
         fctx.globalCompositeOperation = 'destination-out';
-        fctx.globalAlpha = (cfg.dark - cfg.explored) / cfg.dark;
+        fctx.globalAlpha = (dark - Math.min(cfg.explored, dark)) / dark;
         const prevSmooth = fctx.imageSmoothingEnabled;
         fctx.imageSmoothingEnabled = true;   // the remembered edge is soft
         for (let ox = -1; ox <= 1; ox++) {

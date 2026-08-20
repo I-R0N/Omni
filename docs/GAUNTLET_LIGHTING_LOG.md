@@ -34,9 +34,9 @@ recorded rather than quietly dropped.
 - [x] **A5e** — Two tiers below Low; refraction prototype behind a DBG toggle
 - [x] **A5f** — Light brightness; softer shadows; brighter caustics; metal/glass emit
 - [x] **A5g** — Seven tiers; an emission knob; optional (costly) emitter shadows
-- [ ] **A4b** — Migrate the legacy receivers
-- [ ] **A6** — N lights with culling
-- [ ] **A7** — OPTIONAL: depth-scoped ambient darkness
+- [x] **A4b** — Migrate the legacy receivers
+- [x] **A6** — N lights with culling
+- [x] **A7** — Depth-scoped ambient darkness
 - [x] **B1** — Prove the static-query duplication
 - [x] **B2** — Unify onto one primitive
 - [x] **B3** — SKIPPED: precondition unmet (no call site exceeds r=120)
@@ -2884,3 +2884,109 @@ already pin refraction, emissive, softness and tint mix.
 `npm run typecheck`, `npm run build`, `npm test` — **133 passed**; the
 formerly flaky shadow test run six times green on its own, the two fog
 tests four times each.
+
+---
+
+## A4b + A6 + A7 — the ladder's last three rungs
+
+The precondition A4 left on A4b — "the operator confirming the unified look
+is at least as good" — was met sessions ago ("Lighting looks good"), and
+with the fog and world-light machinery in place the remaining stages are
+small.  All three land here, each behind its own toggle restoring the exact
+pre-stage picture.
+
+### A4b — the legacy receivers, retired under unified
+
+Model B (the repel-impulse glow) died at A5f.  What remained were Model A —
+`renderProximityBloom`, the near-face bloom on plastic / rock /
+indestructible — and Model C, the glass slow-path proximity tint
+(`PROX_RANGE` 120).  Both are stand-ins for a light the game did not have:
+"the face near the player is lit".  The point light says that by
+construction, so under `unified` both were double-lighting.
+
+Both are now gated on the lighting mode: they run under `legacy` (the true
+restore) and `debug` (which renders the world as legacy under the
+diagnostic fill) and not under `unified`.  Nothing is deleted — `legacy` is
+still byte-for-byte the old renderer.  The A0 finding stands: the credit is
+small (0.01 ms on UNIVERSE, 0.2 ms worst-case).  Where it actually lands is
+the fast path: the `inGlowRange` bail that forced near-player indestructible
+tiles onto the slow path every frame is also mode-gated, so those tiles now
+stay in the static cache under unified.
+
+One instrument fixed en route: `lastTileLightingCount` counted "bloom calls
+that took >1 µs", which reads zero wherever `performance.now()` is clamped
+to 100 µs — headless test contexts, the A0 story again.  It now counts
+PAINTS (`renderProximityBloom` returns whether it drew), which is also
+simply the truer number.
+
+### A6 — world lights: shots and the snitch, budgeted and culled
+
+The self-luminous movers are now first-class lights on the unified layer,
+in their own colours — a red bolt lights the corridor red as it passes.
+They are deliberately NOT emitters: an emitter's brightness is what the
+player's light put on it (`received × emits`, beam-gated), where a shot
+glows because it is on fire — no received factor, no beam gate, alive
+outside the player light's radius entirely.  `WORLD_LIGHTS` in constants
+carries the radii and alphas.
+
+The two halves of the stage's name:
+
+- **Budget** — they spend what is LEFT of the tier's `maxLights` after the
+  player and the emitters, nearest-to-screen-centre first, so the tier's
+  number stays the whole frame's light count.  In open space (where shots
+  fly) emitters are few and shots get the budget; deep in a lit glass field
+  they lose it.
+- **Culling** — a candidate whose light disc misses the layer rect is
+  dropped before any budget is spent: one rectangle test per off-screen
+  shot.
+
+No shadows, deliberately: a shadow thrown by a bolt is unreadable at any
+speed, and each shadowed light is a fresh occluder collection (the A3
+landmine — the pool is shared and must be consumed per light; the comment
+at the pass names the emit-shadow scratch-canvas path as the only legal
+route if this ever changes).  Lightning ARC segments are excluded — one
+bolt must not become a rope of lights.  DBG Visual ▸ "World lights";
+`renderer.worldLightCount()` instruments the pick.
+
+### A7 — depth-scoped ambient darkness
+
+Each descent (`GameEngine.stageIndex`) adds the tier's `ambientPerStage` of
+darkness, capped at `AMBIENT_DEPTH_CAP` (4) stages.  The hub is depth 0 and
+never darkens: darkness is a property of going DOWN, not a global mood.
+
+The mechanism is the fog compositor: `fogEffectiveDark` returns
+`max(fog cycle dark, depth ambient)` — whichever wants the world darker
+wins — and both the world fog and the minimap's memory veil read it.  So
+depth darkness is cut by the player's light, respects shadows, inherits the
+beam, and darkens the map, all through machinery that already existed; the
+implementation is one function, one renderer field (`stageDepth`, stamped
+by the engine before each draw — the renderer still never reads sim state),
+and a fold at two call sites.
+
+`ambientPerStage` was authored 0 at Low when ambient was expected to need
+its own pass; the fog compositor costs 0.3–0.5 ms, so Low now carries 0.08
+and only the emergency tiers below it stay zero.  DBG Visual ▸ "Depth
+dark", on by default — it changes nothing until the first descent.
+
+### Tests, and the flake class closed suite-wide
+
+Three new tests: A4b pins the bloom count at zero under unified and nonzero
+under legacy on a plastic cluster; A6 hand-places two projectiles and pins
+the count (on-screen shot lights, two-screens-away shot culled, toggle
+restores) and that the gain is RED — the shot's colour, not the lamp's;
+A7 pins monotone darkening over depth 0 → 2 → 4, the cap (depth 9 reads as
+depth 4), and the toggle restore.  The A7 test's first draft cycled the
+light tier down to keep its patch outside the radius — to `minimal`, whose
+`ambientPerStage` is zero, measuring the OFF branch and calling it broken.
+The shipped `low` radius already misses the patch, so the tier stays put.
+
+The full suite then flaked once more on the fauna-drift class A5s
+identified — the flashlight test's `off < 3` bound against a ~18-luminance
+bubble that drifted between the paired reads — and its pin now suppresses
+non-STRUCTURE entities like every other paired-read test.  That is every
+paired-read measurement in the suite now fenced.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **136 passed**; the
+three new tests three times green in a row on their own.

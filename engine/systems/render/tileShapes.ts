@@ -36,6 +36,7 @@ import {
     METAL_HEX_CELLS, NEBULA_CONSTANTS, REGEN_POP_CONSTANTS, PLASTIC_SHARD_AUTOMATA,
     getPlasticShardBaseShade, isPlasticAutomataBrighten, metalDensityBrightness,
     METAL_AGGREGATION_BRIGHT_CEIL, METAL_BRIGHT_TARGET, getActivePlasticGlowBrightness,
+    getActiveLightingMode,
 } from '../../../constants';
 import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
@@ -107,26 +108,36 @@ export function timedTileBloom(
     entity: GameEntity,
     playerPos: Vector2 | undefined,
 ): void {
+    // A4b: RETIRED under the unified light layer.  The bloom is a stand-in
+    // for a light the game did not have — "the face near the player is lit"
+    // — and the point light now says that by construction, so under
+    // 'unified' the bloom is double-lighting.  It still runs under 'legacy'
+    // (the true restore) and 'debug' (which renders the world as legacy
+    // under the diagnostic fill).
+    if (getActiveLightingMode() === 'unified') return;
     const t = performance.now();
-    renderProximityBloom(ctx, entity, playerPos);
-    const elapsed = performance.now() - t;
-    rs.lastTileLightingMs += elapsed;
-    if (elapsed > 0.001) rs.lastTileLightingCount++;
+    const painted = renderProximityBloom(ctx, entity, playerPos);
+    rs.lastTileLightingMs += performance.now() - t;
+    // Count PAINTS, not microseconds: the old >1us elapsed heuristic was
+    // blind wherever performance.now() is clamped to 100us (headless test
+    // contexts — the A0 instrument story), so the helper now reports
+    // whether it drew.
+    if (painted) rs.lastTileLightingCount++;
 }
 
 export function renderProximityBloom(
     ctx: CanvasRenderingContext2D,
     entity: GameEntity,
     playerPos: Vector2 | undefined,
-): void {
-    if (!playerPos || entity.shardVariant === undefined) return;
-    if (entity.hitFlash && entity.hitFlash > 0) return;
+): boolean {
+    if (!playerPos || entity.shardVariant === undefined) return false;
+    if (entity.hitFlash && entity.hitFlash > 0) return false;
     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-    if (glow === undefined) return;
+    if (glow === undefined) return false;
     const pdxWorld = wrapDeltaX(entity.position.x, playerPos.x);
     const pdyWorld = wrapDeltaY(entity.position.y, playerPos.y);
     const pdistSq = pdxWorld * pdxWorld + pdyWorld * pdyWorld;
-    if (pdistSq >= glow.range * glow.range) return;
+    if (pdistSq >= glow.range * glow.range) return false;
     const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
     // Plastic-tile glow is the only variant routed through here with a
     // DBG brightness multiplier; other glow-bearing tiles (rock /
@@ -215,6 +226,7 @@ export function renderProximityBloom(
         ctx.fill();
     }
     ctx.globalAlpha = 1.0;
+    return true;
 }
 
 /**
@@ -490,10 +502,16 @@ export function drawTileShape(
         // treatment as tiles on the same side of the map.  Squared
         // early-out skips the sqrt for tiles outside the prox range
         // (the vast majority on densely-tiled maps).
+        // A4b: RETIRED under the unified layer, like the bloom above — the
+        // point light brightening the near face is the same statement made
+        // properly, and this tint only ever ran on the slow path anyway
+        // (cached tiles blit their stamped colour).  `prox` stays 0 at
+        // 'unified' so the edge wears its far-away colour everywhere.
         const PROX_RANGE = 120;
         const PROX_RANGE_SQ = PROX_RANGE * PROX_RANGE;
-        const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
-        const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
+        const legacyLit = getActiveLightingMode() !== 'unified';
+        const pdx = legacyLit && playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
+        const pdy = legacyLit && playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
         const pdistSq = pdx * pdx + pdy * pdy;
         const prox = pdistSq >= PROX_RANGE_SQ
             ? 0

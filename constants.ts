@@ -1576,6 +1576,59 @@ export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> 
   { name: 'pin',    halfDeg: 6   },
   { name: 'off',    halfDeg: 0   },
 ] as const;
+/** A6 — WORLD LIGHTS: the self-luminous movers (shots, the snitch) as
+ *  first-class lights on the unified layer.
+ *
+ *  These are not EMITTERS.  An emitter is a surface the player's light fell
+ *  on, so its brightness is `received x emits` and a beam gates it; a shot
+ *  glows because it is on fire, whether or not anything else lights it — no
+ *  `received` factor, no beam gate, and it exists outside the player light's
+ *  radius entirely.  That is why they are their own small pass rather than
+ *  rows in the emitter merge.
+ *
+ *  BUDGET: they spend what is left of the tier's `maxLights` after the
+ *  player and the emitters have drawn — the tier's number stays the whole
+ *  frame's light count, shared rather than added to.  In open space (where
+ *  shots actually fly) the emitters are few, so shots get the budget; deep
+ *  in a lit glass field they lose it, nearest-to-screen-centre first.
+ *
+ *  CULLED by the light's own disc against the layer rect BEFORE any budget
+ *  is spent — a shot two screens away costs one rectangle test.
+ *
+ *  Radii in WORLD units; alphas are multipliers on the shared falloff
+ *  gradient (so the brightness cycle scales these for free). */
+export const WORLD_LIGHTS = {
+  PROJECTILE_RADIUS: 110,
+  /** A charged / plasma shell is a bigger fire. */
+  CHARGED_MULT: 1.8,
+  PROJECTILE_ALPHA: 0.55,
+  /** The snitch is a comet — the one persistent world light. */
+  SNITCH_RADIUS: 150,
+  SNITCH_ALPHA: 0.7,
+} as const;
+/** A7 — DEPTH-SCOPED AMBIENT DARKNESS.  Each descent (GameEngine.stageIndex)
+ *  adds the tier's `ambientPerStage` of fog-dark, capped at
+ *  AMBIENT_DEPTH_CAP stages — so the hub and the surface look exactly as
+ *  they always did and darkness is a property of DEPTH, not a global mood.
+ *  It rides the fog compositor: the ambient level is folded into the fog's
+ *  dark fill (whichever of the two is darker wins), so it is cut by the
+ *  player's light, respects shadows, and darkens the minimap's memory veil
+ *  — all for free, and `off` restores the exact pre-A7 picture. */
+export const AMBIENT_DEPTH_CAP = 4;
+let depthAmbientEnabled = true;
+export function toggleDepthAmbient(): boolean {
+  depthAmbientEnabled = !depthAmbientEnabled;
+  return depthAmbientEnabled;
+}
+export function getDepthAmbientEnabled(): boolean { return depthAmbientEnabled; }
+
+let worldLightsEnabled = true;
+export function toggleWorldLights(): boolean {
+  worldLightsEnabled = !worldLightsEnabled;
+  return worldLightsEnabled;
+}
+export function getWorldLightsEnabled(): boolean { return worldLightsEnabled; }
+
 /** FOG OF WAR — darkness the player's light cuts through.
  *
  *  The light layer already answers "what can I see": it is a lit shape with
@@ -2019,7 +2072,10 @@ export function cycleShadowSoftness(): string {
  *
  *  `ambientPerStage` is multiplied by min(stageIndex, 4) — ambient darkness
  *  is scoped to DEPTH, so the hub and the surface look exactly as they do
- *  today and darkness becomes a property of descending.  Zero at Low. */
+ *  today and darkness becomes a property of descending.  It was authored
+ *  zero at Low when ambient was expected to need its own pass; A7 rides the
+ *  fog compositor (0.3-0.5 ms measured), so Low now carries a modest value
+ *  and only the emergency tiers below it stay at zero. */
 export interface LightingTier {
   readonly name: string;
   readonly divisor: number;
@@ -2042,7 +2098,7 @@ export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
   { name: 'minimal', divisor: 7, maxLights: 1, maxOccluders: 4,  maxShardOccluders: 2,  maxRadius: 180, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'lowest', divisor: 5, maxLights: 2,  maxOccluders: 8,  maxShardOccluders: 3,  maxRadius: 220, penumbraK: 0,   ambientPerStage: 0    },
   { name: 'lower',  divisor: 4, maxLights: 3,  maxOccluders: 14, maxShardOccluders: 5,  maxRadius: 260, penumbraK: 0,   ambientPerStage: 0    },
-  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0.08 },
   { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxShardOccluders: 16, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
   { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxShardOccluders: 32, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
   { name: 'ultra',  divisor: 1, maxLights: 32, maxOccluders: 160, maxShardOccluders: 56, maxRadius: 650, penumbraK: 5.0, ambientPerStage: 0.14 },
