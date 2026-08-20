@@ -57,7 +57,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           follow-ups terrain / shake / knockback / deflect,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  185 tests.  All run at
+                          anti-flake rules).  186 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1682,13 +1682,26 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   the unused-but-intended axes: `reownType`/`reownId` (a PARRY — clears
   `hitEntityIds` so the redirected bolt can strike its new targets),
   `speedScale`, `spread`, `keepHoming`.
-  `tryShieldDeflect` was arc-only; it now runs for ANY entity with a live
-  pool, so the player's own bubble and the bosses' shields turn shots away
-  instead of swallowing them.  `PhysicsSystem.shieldReach` answers for both
-  kinds: an ARC keeps `arcShieldReach`, any other pool uses
-  `getCollisionR × SHIELD_CONSTANTS.COLLISION_MULTIPLIER` — the same figure
-  as the player's inflated collision shape and both rendered rings, so the
-  ricochet happens where the shield is drawn.  THE ARITHMETIC IS UNCHANGED:
+  Deflection was arc-only; ANY entity with a live pool now turns shots
+  away, so the player's own bubble and the bosses' shields ricochet instead
+  of swallowing.  The TWO SHIELD KINDS DEFLECT AT DIFFERENT PLACES, and
+  that is geometry rather than taste: an ARC ring stands OFF the hull
+  (`arcShieldReach`, 0.99×maxDim) so `tryShieldDeflect` must intercept it
+  BEFORE the body SAT or the bolt flies through the gap between ring and
+  hull; a NON-ARC pool's ring IS the shield-inflated collision shape, so it
+  deflects AT CONTACT, in `resolveCollision` immediately before the absorb
+  it replaces.  Do not "unify" these onto one pre-SAT radius test — that
+  was tried and shipped broken: `fillVertices` BOXES an entity with no
+  `polygonPoints`, and THE PLAYER HAS NONE, so its shield square reaches √2
+  further at the corners than the circle `shieldReach` describes.  Every
+  off-axis shot hit the square first and was absorbed by the body path
+  before the deflect could see it (measured: four absorbs per deflect), and
+  no circle can cover a square.  Reacting to the SAT contact instead makes
+  the property true BY CONSTRUCTION — the deflect runs at exactly the
+  moments the absorb would have.  One path per shield kind, so no pair is
+  charged twice, and a bolt already travelling outward relative to a
+  shielded target is neither deflected again nor absorbed.  THE ARITHMETIC
+  IS UNCHANGED:
   a deflected shot drains exactly the damage the absorb path would have
   absorbed, and a shot bigger than the pool still falls through to that path
   and lands its remainder — a legibility change, not a shield buff.  Four

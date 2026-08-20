@@ -1369,7 +1369,19 @@ export class PhysicsSystem {
       if (shielded.type === EntityType.PLAYER && proj.sparesPlayer) return false;
       if (proj.hitsEnemies && shielded.isRival) return false;
 
-      const reach = PhysicsSystem.shieldReach(shielded);
+      // ARC ONLY.  A ring that stands OFF the hull has to intercept before
+      // the body SAT, because the bolt would otherwise fly through the gap
+      // between ring and hull untouched.  A non-arc pool is the opposite
+      // case — its ring IS the (shield-inflated) collision shape — so it
+      // deflects at CONTACT instead, in `resolveCollision`; predicting that
+      // contact with a radius here cannot be made to agree, because SAT
+      // boxes an entity with no `polygonPoints` and a box's corners reach
+      // √2 past the circle the ring is drawn as.  See the contact block.
+      if (shielded.shieldArcHalfWidth === undefined) return false;
+
+      // The bolt touches the ring when its EDGE does, not when its centre
+      // crosses, so the test carries the projectile's own radius.
+      const reach = PhysicsSystem.shieldReach(shielded) + getCollisionR(proj);
       const dx = wrapDeltaX(shielded.position.x, proj.position.x);
       const dy = wrapDeltaY(shielded.position.y, proj.position.y);
       const distSq = dx * dx + dy * dy;
@@ -3120,6 +3132,51 @@ export class PhysicsSystem {
           if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
               && !target.systemsDisabled
               && PhysicsSystem.shieldCoversHit(target, proj)) {
+
+              // CONTACT DEFLECT — the non-arc half of "every live shield turns
+              // shots away".  A bubble pool's ring IS the shield-inflated
+              // collision shape, so the moment SAT reports contact the bolt is
+              // AT the shield: deflect it here rather than trying to predict
+              // the same contact with a radius up in `tryShieldDeflect`.  That
+              // prediction cannot be made to agree — an entity with no
+              // `polygonPoints` (the player) is SAT-boxed, and a box's corners
+              // reach √2 past the circle the ring is drawn as, so every
+              // off-axis shot hit the square before entering the circle and was
+              // absorbed instead (playtest: "no deflection from the base enemy
+              // blaster").  Reacting to the contact makes the property true by
+              // construction: this runs at exactly the moments the absorb
+              // below would have.
+              //
+              // The shield still pays exactly `projDmg`, and a shot bigger than
+              // the pool still falls through to the partial absorb.
+              if (target.shieldArcHalfWidth === undefined && projDmg <= target.shield!) {
+                  const sdx = wrapDeltaX(target.position.x, proj.position.x);
+                  const sdy = wrapDeltaY(target.position.y, proj.position.y);
+                  const sdist = Math.sqrt(sdx * sdx + sdy * sdy) || 1;
+                  const snx = sdx / sdist, sny = sdy / sdist;
+                  // A bolt already on its way OUT is one this shield just
+                  // turned away; it is not charged for a second time and it
+                  // does not reach the hull either.
+                  if (proj.velocity.x * snx + proj.velocity.y * sny >= 0) return;
+                  // Snap clear of wherever the contact actually happened —
+                  // measured from the bolt's own distance rather than the ring
+                  // radius, since the shape that just caught it may reach
+                  // further than the circle.
+                  const clear = sdist + getCollisionR(proj) + 2;
+                  PhysicsSystem.deflectProjectile(proj, snx, sny, {
+                      snapX: target.position.x + snx * clear,
+                      snapY: target.position.y + sny * clear,
+                  });
+                  target.shield! -= projDmg;
+                  markShieldDamaged(target);
+                  target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                  target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                  this.sfx?.(target.shield! <= 0 ? 'impact.shield.break' : 'impact.shield.deflect',
+                             proj.position.x, proj.position.y);
+                  if (onHit) onHit(proj.position, proj, target);
+                  return;
+              }
+
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               markShieldDamaged(target);

@@ -1448,3 +1448,62 @@ the option exists for whoever makes it.
 reverting it and watching the matching test fail: restoring the arc-only gate
 fails 1 and 5; dropping the EMP gate fails 3; dropping `sparesPlayer` fails 4;
 dropping the `v·n` guard fails 6.
+
+---
+
+## P5 — The deflect did not fire in play (playtest fix)
+
+> "I'm not getting any deflection from the base enemy blaster projectiles."
+
+Correct, and the suite said otherwise. Worth recording as a **testing**
+failure first and a geometry bug second.
+
+**What the tests proved.** Every case in `deflect.spec.ts` handed
+`checkAndResolveCollision` a pair it had built itself. That proves the deflect
+FUNCTION works. It proves nothing about the game reaching it — and the game
+mostly did not. Measured on a real SHOOTER_1 against a shielded player:
+**four absorbs to one deflect.**
+
+**The geometry.** The pre-SAT path tested the bolt against the shield's
+CIRCLE (`shieldReach`), then let SAT decide the body hit. Those two have to
+agree about where the shield is, and they do not: `fillVertices` falls back to
+a BOX for an entity with no `polygonPoints`, and **the player has none** — so
+its shield-inflated square reaches √2 further at the corners (25.5) than the
+circle the ring is drawn as (18). Any shot arriving off-axis hit the square
+first and was absorbed by the body path before the deflect could see it. The
+Bulwark hid this completely: its arc ring stands at 0.99·maxDim, far outside
+its hull, so the ring always wins. And the synthetic test pairs were all
+head-on — the one geometry the circle test got right.
+
+**The fix is structural, not a bigger radius.** Widening the circle by the
+projectile's radius helped (4:1 → about 7:1) but could never be right, because
+no circle covers a square. So the two shield kinds now deflect where each
+actually is:
+
+- **Arc** — keeps the pre-SAT ring interception. A ring that stands OFF the
+  hull *must* intercept early or the bolt flies through the gap between ring
+  and hull untouched.
+- **Non-arc** (player, boss bubbles) — deflects **at contact**, in
+  `resolveCollision`, immediately before the absorb it replaces. A bubble
+  pool's ring IS the shield-inflated collision shape, so a SAT contact means
+  the bolt is at the shield. Reacting to the contact instead of predicting it
+  makes "every live shield deflects" true *by construction*: it runs at
+  exactly the moments the absorb would have.
+
+One path per shield kind, so no pair can be charged twice. A bolt already
+travelling outward relative to a shielded target is now neither deflected
+again nor absorbed — it is one this shield already turned away.
+
+After: **zero absorbs** across repeated real-fight runs, all deflects.
+
+**The regression net that was missing** is the real deliverable here:
+`deflect.spec.ts` gains a test that spawns a REAL `SHOOTER_1` through the real
+wave path, parks it **off-axis on purpose**, runs the real loop, and asserts on
+the thing the two paths disagree about — every shot that reached the shield was
+turned away, none absorbed. The sound id is the observation point because it
+IS the distinction: `impact.shield.deflect` and `impact.shield.absorb` are
+emitted by those two paths and by nothing else.
+
+Verified non-vacuous the honest way: with the shipped 32a2d67 behaviour
+restored, the new test FAILS and all seven original tests still PASS — which
+is the whole lesson in one line.

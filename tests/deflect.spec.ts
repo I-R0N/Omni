@@ -30,7 +30,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats } from './helpers';
+import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
 
 /** SHIELD_CONSTANTS.COLLISION_MULTIPLIER — hard-coded, not imported
  *  (harness rule 7). It is the radius at which a non-arc shield turns a shot
@@ -262,6 +262,74 @@ test.describe('one deflection primitive, two callers', () => {
     expect(r.bounces, 'one bounce spent').toBe(r.before.bounces - 1);
     expect(r.outsideFace, 'snapped clear of the face it hit').toBe(true);
     expect(r.tileHp, 'a bounce is not a hit — the tile is unharmed').toBe(r.before.tileHp);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the real fight, not a synthetic pair', () => {
+  test('a REAL enemy blaster deflects off the player — every shot, off-axis', async ({ page }) => {
+    const watch = await boot(page);
+    await shieldedPlayer(page);
+
+    /*  THE TEST THAT WAS MISSING, and the reason a shipped "every shield
+     *  deflects" did not deflect in play (user report: "I'm not getting any
+     *  deflection from the base enemy blaster projectiles").
+     *
+     *  Every other test in this file hands `checkAndResolveCollision` a pair
+     *  it built itself, which proves the deflect FUNCTION works and proves
+     *  nothing about the game reaching it. It did not: the pre-SAT range test
+     *  compared the bolt against the shield's CIRCLE, while SAT boxes an
+     *  entity with no `polygonPoints` — and the player has none — so its
+     *  shield-inflated square reaches √2 further at the corners than the
+     *  circle the ring is drawn as. Shots arriving off-axis hit the square
+     *  first and were absorbed by the body path before the deflect could see
+     *  them; only near-axis shots deflected. The synthetic pairs were all
+     *  head-on, which is exactly the case that worked.
+     *
+     *  So this drives a REAL SHOOTER_1 through the REAL loop, parked OFF-AXIS
+     *  on purpose, and asserts on the outcome the two paths disagree about:
+     *  every shot that reached the shield was turned away, none absorbed.
+     *  The sound id is the observation point because it IS the distinction —
+     *  `impact.shield.deflect` and `impact.shield.absorb` are emitted by the
+     *  two paths and by nothing else. */
+    await engine(page, e => {
+      const w: any = window;
+      w.__shieldSfx = [];
+      const orig = e.physics.sfx;
+      e.physics.sfx = (id: string, x: number, y: number, o: any) => {
+        if (id.indexOf('impact.shield.') === 0) w.__shieldSfx.push(id);
+        return orig ? orig(id, x, y, o) : undefined;
+      };
+      // A pool deep enough that punch-through — which has its own test — can
+      // not fire inside this window, so an absorb here is the bug and not the
+      // boundary.
+      e.player.maxShield = 500;
+      e.player.shield = 500;
+      // Parked, and OFF-AXIS: a head-on approach is the one geometry the old
+      // circle test got right.
+      const en = e.waves.spawnAt('SHOOTER_1', {
+        x: e.player.position.x + 240, y: e.player.position.y + 90,
+      }, e.waveContext(), false);
+      en.maxSpeed = 0;   // this is about the shots, not about the AI
+    });
+
+    await waitForEngine(
+      page,
+      new Function('e', 'return (window.__shieldSfx || []).length >= 4') as any,
+      'four enemy shots to reach the shield',
+    );
+
+    const r = await engine(page, e => ({
+      events: (window as any).__shieldSfx.slice(),
+      health: e.player.health,
+      maxHealth: e.player.maxHealth,
+    }));
+
+    expect(r.events.filter((i: string) => i === 'impact.shield.absorb'),
+      'every shot that reached the shield was turned away, not eaten').toEqual([]);
+    expect(r.events.length, 'and they did reach it').toBeGreaterThanOrEqual(4);
+    expect(r.health, 'nothing got through to the hull').toBe(r.maxHealth);
 
     watch.assertClean();
   });
