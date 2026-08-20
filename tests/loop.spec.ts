@@ -15,7 +15,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats, waitForEngine, dockAtStation } from './helpers';
+import { boot, engine, stats, startRun, waitForStats, waitForEngine, dockAtStation, advanceSim } from './helpers';
 
 const STAGE_WAVE_COUNT = 6;
 
@@ -221,6 +221,30 @@ test.describe('the run', () => {
 
     await engine(page, e => e.dismissStageClear());
     await waitForStats(page, s => !s.stageClear, 'the screen to dismiss');
+
+    // ── 9b. THE FIGHT IS ACTUALLY OVER ───────────────────────────────────
+    // The rout wipes every enemy STANDING, but the capstone's escort was
+    // still QUEUED in the spawn stream and kept warping in after the kill
+    // (playtest: "the waves still continue after defeating a boss").  So the
+    // dead boss must also have cancelled its reinforcements, and the ladder
+    // must stay down: no pending spawns, no counted enemies arriving, no
+    // next wave — held across more than a full grace window of sim time.
+    const routed = await engine(page, e => ({
+      pendingSpawns: e.waves.spawnList.length - e.waves.nextSpawnIdx,
+      halted: e.waves.halted,
+    }));
+    expect(routed.pendingSpawns, 'the escort still queued died with its boss').toBe(0);
+    expect(routed.halted, 'and the ladder is down').toBe(true);
+    const waveAtKill = await engine(page, e => e.waveIndex);
+    await advanceSim(page, 6); // > WAVE_CONSTANTS.GRACE_PERIOD (4.5s)
+    const after = await engine(page, e => ({
+      idx: e.waveIndex,
+      state: e.waves.waveState,
+      liveCounted: e.waves.countLiveTracked(e.currentMap.entities),
+    }));
+    expect(after.idx, 'no next wave started').toBe(waveAtKill);
+    expect(after.state, 'the capstone wave completed rather than lingering').toBe('cleared');
+    expect(after.liveCounted, 'and nothing warped in after the rout').toBe(0);
 
     // ── 10. HOME ─────────────────────────────────────────────────────────
     const returnPortal = await engine(page, e => {

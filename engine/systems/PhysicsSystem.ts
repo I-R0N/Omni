@@ -1401,9 +1401,19 @@ export class PhysicsSystem {
       // what keeps a ricochet from being deflected again every step.
       const dist = Math.sqrt(distSq) || 1;
       const nx = dx / dist, ny = dy / dist;
+      // Same parry rule as the contact site: the PLAYER'S deflect re-owns
+      // the bolt (no player entity carries an arc today, but a future arc
+      // module must not silently lose the parry).  Enemy arcs keep the
+      // plain ricochet — the bolt keeps ITS owner, which for the Bulwark
+      // case (a player shot turned away) already leaves it live against
+      // other enemies.
       if (!PhysicsSystem.deflectProjectile(proj, nx, ny, {
           snapX: shielded.position.x + nx * (reach + 1),
           snapY: shielded.position.y + ny * (reach + 1),
+          ...(shielded.type === EntityType.PLAYER ? {
+              reownType: EntityType.PLAYER, reownId: 'player',
+              keepHoming: true,
+          } : {}),
       })) return false;
 
       shielded.shield! -= projDmg;
@@ -3163,9 +3173,29 @@ export class PhysicsSystem {
                   // radius, since the shape that just caught it may reach
                   // further than the circle.
                   const clear = sdist + getCollisionR(proj) + 2;
+                  // THE PLAYER'S DEFLECT IS A PARRY (user call): the turned
+                  // bolt is re-owned to the player, so instead of flying off
+                  // as a dud it stays live against the enemies that fired it
+                  // — it damages them, pays their kills, and a parried HOMING
+                  // missile keeps homing, which under player ownership means
+                  // the owner-aware homing pass now steers it at the nearest
+                  // enemy: the missile turns on its makers with no new
+                  // plumbing.  Re-owning also clears `hitEntityIds` (see
+                  // DeflectOptions), so the redirected shot may strike the
+                  // very targets it was refused before.  A player-owned bolt
+                  // cannot hit the player, so the re-home-into-the-shield
+                  // loop the default guards against cannot arise here.
+                  // ENEMY shields deliberately do NOT parry: a Warden that
+                  // re-owned your own cannon shell would turn your gun on
+                  // you, which is a design decision nobody has made.
+                  const parry = target.type === EntityType.PLAYER;
                   PhysicsSystem.deflectProjectile(proj, snx, sny, {
                       snapX: target.position.x + snx * clear,
                       snapY: target.position.y + sny * clear,
+                      ...(parry ? {
+                          reownType: EntityType.PLAYER, reownId: 'player',
+                          keepHoming: true,
+                      } : {}),
                   });
                   target.shield! -= projDmg;
                   markShieldDamaged(target);

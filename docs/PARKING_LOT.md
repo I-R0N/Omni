@@ -1307,6 +1307,43 @@ of a harness that outlives a session.
 
 ---
 
+## 5d aesthetic calls (R1–R5) — parked for a future look pass (2026-08-20)
+
+**Parked at the user's direction.**  The 5d gauntlet's ledger raised five
+aesthetic judgment calls for review (`docs/GAUNTLET_5D_LOG.md` § For user
+review); rather than adjudicate them one by one they are parked here as a
+bundle for a dedicated look pass.  Each is a taste call with the reasoning
+already written — none blocks anything, and none is a defect.
+
+1. **R1 — Stage-clear CONTINUE: emerald vs amber.**  Moved to the shared
+   emerald PRIMARY because amber on that screen is the descent rift's colour
+   and an amber button reads as "descend".  Counter-argument: the screen is
+   amber-themed throughout and the button tied it together.
+2. **R2 — Portal arrow green vs minimap blip violet/sky.**  The one contact
+   exempt from the G5 colour-faithfulness rule, documented as deliberate.
+   Two ways out if wanted: tint the arrow to match the rift, or keep the
+   legend green and distinguish outbound/return by SHAPE on the minimap.
+3. **R3 — Expanded minimap vs loadout strip overlap.**  The strip's
+   clearance assumes the COLLAPSED map width.  Left alone because every fix
+   (moving the strip when the map opens) is a bigger aesthetic change than
+   the problem — the map auto-collapses after five seconds and the strip
+   draws on top.
+4. **R4 — Where the player's hull readout lives.**  Top-left, with the
+   number changing colour by urgency band (emerald → amber → rose) — the one
+   place in the HUD where a colour change IS the information.  Moving it
+   (e.g. bottom-left by the minimap) is a one-line change if it reads wrong.
+5. **R5 — At 320px the longest station title ellipsizes.**  Every title fits
+   exactly at the 390px design target; 320 plus a six-figure balance is 29px
+   short and `truncate` degrades gracefully.  The alternatives all trade a
+   guarantee for it (wrapping headers can overflow outright on longer future
+   names).
+
+The full argument for each — with measurements and the before/after pairs —
+stays in the 5d ledger; this entry exists so the look pass has one place to
+start from.
+
+---
+
 ## Fully customisable control scheme (rebindable pad / key mapping)
 
 **Parked deliberately** (user call, alongside the `gamepad-left` scheme that

@@ -502,6 +502,10 @@ exists for the next person either way. Recorded rather than done quietly.
 
 *(Consolidated at U-final. Aesthetic judgment calls raised as they arise.)*
 
+> **PARKED (2026-08-20, user call):** R1–R5 moved to `docs/PARKING_LOT.md`
+> ("5d aesthetic calls") for a dedicated look pass rather than piecemeal
+> adjudication.  The full arguments below remain the reference text.
+
 **R1 — Stage-clear CONTINUE moved from amber to the shared emerald** (D3).
 The argument for changing it is that amber on that screen is the descent
 rift's colour, so an amber button reads as "descend" when it actually just
@@ -1507,3 +1511,79 @@ emitted by those two paths and by nothing else.
 Verified non-vacuous the honest way: with the shipped 32a2d67 behaviour
 restored, the new test FAILS and all seven original tests still PASS — which
 is the whole lesson in one line.
+
+---
+
+## P6 — The waves that "continued" were the dead boss's own escort
+
+> "U7 — The waves still continue after defeating a boss."
+
+Reproduced headlessly through the real ladder: kill the capstone, dismiss the
+stage-clear screen, and watch — the boss died with **7 escort spawns still
+queued**, and they kept warping in for the next twenty seconds (`liveCounted`
+climbing, `pendingSpawns` draining). The LADDER was in fact down — `halted`
+held and no wave 7 ever started — but the player cannot tell a queued escort
+from a new wave, and should not have to.
+
+The hole was the deliberate exception in `haltForBoss`: a capstone's escort is
+KEPT while the boss is alive, because that escort is the designed encounter.
+Right — until the boss dies. The rout (`payBossBounty`) wipes every enemy
+STANDING, but nothing cancelled the not-yet-spawned tail of the escort, so
+reinforcements streamed into a fight that was over.
+
+**Fix:** `WaveSystem.cancelPendingSpawns()` — ends the spawn stream — called
+at the rout, beside the `halted` flag. The capstone wave then completes the
+normal clear-the-field way the moment the routed field is empty. After the
+fix the same repro shows zero pending spawns, zero arrivals, wave `cleared`,
+and no next wave across four grace windows.
+
+**Pinned in `loop.spec.ts`** (new § 9b in the full-loop test): after the
+stage-clear dismiss, no pending spawns, ladder halted, and — held across more
+than a full grace window of sim time — no next wave, no counted arrivals, the
+capstone wave completed. Verified non-vacuous: with the one-line cancel
+removed, the new assertion fails on exactly the queued-escort count.
+
+---
+
+## P7 — The deflect is a PARRY: turned bolts stay live
+
+> "Deflect feels good but I don't want the projectiiles to become duds after
+> colliding with shields, let's make them active and make them able to
+> destroy enemies."
+
+The `reownType` seam built in P2 gets its first user. When the PLAYER'S
+shield deflects a hostile bolt, the bolt is **re-owned to the player**: it
+keeps flying, damages enemies, pays their kills (the `killedByPlayer`
+attribution comes free from ownership), and its already-hit set clears so it
+may strike the very shooter it was refused before — a head-on shot literally
+returns to sender.
+
+Two consequences fell out of existing machinery rather than being built:
+
+- **A parried homing missile turns on its makers.** The owner-aware homing
+  pass steers PLAYER-owned homing shots at the nearest enemy, so keeping
+  `homing` alive through the re-own (`keepHoming: true`) is the entire
+  implementation. The re-home-into-the-shield loop the default guards against
+  cannot arise — a player-owned bolt cannot hit the player at all.
+- **Enemy shields deliberately do NOT parry.** A Warden that re-owned your
+  cannon shell would turn your own gun on you — a design decision nobody has
+  made. Their deflect stays a plain ricochet, which for the Bulwark case
+  already leaves the turned player bolt live against other enemies.
+
+Tests: the "deflected missile stops homing" test was rewritten — its premise
+was the pre-parry world — as "a parried missile changes sides", and a new
+test drives a bolt off the shield into a frail enemy and asserts the kill,
+the attribution, the score, and the cleared hit set. The real-fight streamer
+got a hardening its own subject forced: parried bolts return to sender, so
+its shooter is now effectively immortal or it dies to its own fire two
+shots in and cuts the stream the test is counting. Parry gates verified
+non-vacuous: with the re-own disabled, both parry tests fail.
+
+---
+
+## P8 — R1–R5 parked
+
+The five aesthetic calls raised at U-final moved to `docs/PARKING_LOT.md`
+("5d aesthetic calls") as one bundle for a dedicated look pass (user call).
+The ledger section above stays as the reference text; a banner there points
+at the parking lot.

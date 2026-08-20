@@ -257,8 +257,12 @@ g.audio.play('boss.death');
         // The stage's ladder is FINISHED — no further wave starts in this
         // arena.  Whatever is still on the field stays (the player mops up),
         // but the arena stops feeding the fight so the choice between the
-        // two rifts is made in quiet.
+        // two rifts is made in quiet.  That includes the capstone's OWN
+        // escort still queued in the spawn stream: haltForBoss spared it
+        // while the boss was alive (it was the fight), but reinforcements
+        // must not keep warping in after the rout.
         g.waves.halted = true;
+        g.waves.cancelPendingSpawns();
         // NO DESCENT RIFT for now (user call — the descent flow is being
         // reworked).  The arena's own RETURN rift is untouched, so the way
         // out of a cleared stage is the way you came in.  Everything the

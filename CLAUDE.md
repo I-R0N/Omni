@@ -57,7 +57,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           follow-ups terrain / shake / knockback / deflect,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  186 tests.  All run at
+                          anti-flake rules).  187 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -424,7 +424,12 @@ any grace countdown (so the HUD stops advertising a wave that is not
 coming) and, for a boss warped in MID-wave, drops the ordinary spawns
 still queued behind it.  A capstone's own escort (`BossDef.companions`)
 is deliberately kept: that is the boss's designed encounter, not the
-ladder.  Nothing clears `halted` except `WaveSystem.init`, i.e. loading a
+ladder — but only while the boss LIVES.  Killing it cancels the escort
+still queued in the spawn stream (`WaveSystem.cancelPendingSpawns`, called
+at the rout in `payBossBounty`): the rout wipes every enemy standing, and
+reinforcements must not keep warping into a fight that is over — queued
+escort streaming in after the kill read as "the waves kept coming".
+Nothing clears `halted` except `WaveSystem.init`, i.e. loading a
 map — so it does not resume when the boss dies, and a fresh arena runs its
 own ladder.  This is deliberately blunt while the wave/boss relationship
 is redesigned.
@@ -1679,9 +1684,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   normal) and the bouncer's tile-face branch in `resolveCollision`
   (axis-aligned normal, for which the general mirror reduces to negating one
   component — so the fold changed no arithmetic).  `DeflectOptions` carries
-  the unused-but-intended axes: `reownType`/`reownId` (a PARRY — clears
-  `hitEntityIds` so the redirected bolt can strike its new targets),
-  `speedScale`, `spread`, `keepHoming`.
+  `reownType`/`reownId` (a PARRY — clears `hitEntityIds` so the redirected
+  bolt can strike its new targets), `speedScale`, `spread`, `keepHoming`.
+  THE PLAYER'S DEFLECT IS A PARRY (user call): both deflect sites re-own a
+  bolt turned by the PLAYER's shield to `PLAYER`/`'player'`, so it stays
+  live against enemies, pays their kills (attribution rides ownership), and
+  a parried HOMING missile keeps homing — under player ownership the
+  owner-aware homing pass steers it at the nearest enemy, so the missile
+  turns on its makers with no new plumbing.  ENEMY shields deliberately do
+  NOT parry (a boss re-owning your own cannon shell would turn your gun on
+  you); their deflect keeps the bolt's owner, which already leaves a turned
+  player bolt live against other enemies.
   Deflection was arc-only; ANY entity with a live pool now turns shots
   away, so the player's own bubble and the bosses' shields ricochet instead
   of swallowing.  The TWO SHIELD KINDS DEFLECT AT DIFFERENT PLACES, and
@@ -1709,9 +1722,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   EMP'd shield (`systemsDisabled`) declines, because it is offline for
   absorption too; a shot the target may not be hit by at all (own fire, an
   ally's `sparesPlayer` bolt, a rival's `hitsEnemies` shot at a rival) may
-  not bounce off it either; a deflected bolt STOPS HOMING by default, or an
-  enemy missile — which homes on the player with no range gate — would turn
-  straight back into the shield and grind the pool down in a loop; and a
+  not bounce off it either; a deflected bolt STOPS HOMING by default (the player's parry opts out
+  via `keepHoming`, safe exactly because a player-owned bolt cannot hit the
+  player), or an enemy missile — which homes on the player with no range
+  gate — would turn straight back into the shield and grind the pool down
+  in a loop; and a
   deflect that empties the pool plays `impact.shield.break` rather than
   `impact.shield.deflect`.  Uncovered arc bearings still fall through to the
   normal body hit.

@@ -94,6 +94,7 @@ function shootPlayer(page: any, o: {
       vx: proj.velocity.x,
       active: proj.active === true,
       homing: proj.homing === true,
+      owner: proj.ownerType,
       reach,
     };
   }, o);
@@ -173,19 +174,86 @@ test.describe('a live shield turns a shot away', () => {
     watch.assertClean();
   });
 
-  test('a deflected missile stops homing, so it cannot grind the shield down', async ({ page }) => {
+  test('a parried missile changes sides instead of going dumb', async ({ page }) => {
     const watch = await boot(page);
     await shieldedPlayer(page);
 
-    /*  Enemy homing missiles steer at the player with NO range gate.  A
-     *  deflected missile that kept steering would turn straight back into the
-     *  shield that just turned it away and drain the pool in a loop — a case
-     *  that could not arise while only ENEMY shields deflected, because enemy
-     *  missiles never home on enemies. */
+    /*  The player's deflect is a PARRY (user call): the bolt is re-owned to
+     *  the player, and a parried HOMING missile KEEPS homing — which under
+     *  player ownership means the owner-aware homing pass steers it at the
+     *  nearest enemy.  The re-home-into-the-shield loop the helper's default
+     *  guards against cannot arise, because a player-owned bolt cannot hit
+     *  the player at all. */
     const r = await shootPlayer(page, { damage: 8, homing: true });
 
     expect(r.vx, 'deflected').toBeGreaterThan(0);
-    expect(r.homing, 'and dumb from here on').toBe(false);
+    expect(r.owner, 'the bolt is the player’s now').toBe('PLAYER');
+    expect(r.homing, 'and it keeps homing — at enemies, per its new owner').toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('a parried bolt destroys enemies and pays the kill to the player', async ({ page }) => {
+    const watch = await boot(page);
+    await shieldedPlayer(page);
+
+    /*  "I don't want the projectiles to become duds."  The parry's point is
+     *  that the turned bolt stays LIVE: drive one off the player's shield,
+     *  then into a frail enemy, and the enemy dies a player kill — score
+     *  paid, attribution stamped — exactly as if the player had fired it. */
+    const r = await engine(page, e => {
+      const p = e.player;
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.maxShield = 50; p.shield = 50; p.systemsDisabled = false;
+      p.health = p.maxHealth;
+
+      // Just inside the shield ring — a bolt at the exact centre has no
+      // radial normal to deflect about, and the resolver rightly declines it.
+      const ringGap = Math.max(p.size.x, p.size.y) * 0.5 * 1.8 - 2;
+      const proj: any = {
+        id: 'parry_shot', type: 'PROJECTILE',
+        position: { x: p.position.x + ringGap, y: p.position.y },
+        velocity: { x: -14, y: 0 }, rotation: Math.PI,
+        size: { x: 6, y: 6 }, mass: 1, active: true, color: '#f00',
+        damage: 8, ownerType: 'ENEMY', ownerId: 'e1',
+        // The firing enemy's own id in the hit set — a real shot may carry
+        // this, and the parry must CLEAR it or the redirected bolt would
+        // refuse the very target it is now aimed at.
+        hitEntityIds: ['parry_victim'],
+      };
+      e.physics.checkAndResolveCollision(proj, p);
+      const afterParry = {
+        owner: proj.ownerType, ownerId: proj.ownerId,
+        hitIds: proj.hitEntityIds.length, active: proj.active === true,
+      };
+
+      // Now the parried bolt meets the enemy that fired it.
+      const victim: any = {
+        id: 'parry_victim', type: 'ENEMY', enemySubtype: 'SHOOTER_1',
+        position: { x: p.position.x + 60, y: p.position.y },
+        velocity: { x: 0, y: 0 }, rotation: 0,
+        size: { x: 24, y: 24 }, mass: 10, maxSpeed: 7,
+        active: true, color: '#f97316', health: 5, maxHealth: 5,
+      };
+      const scoreBefore = e.score;
+      e.physics.resolveCollision(proj, victim, { x: -4, y: 0 }, undefined, e.handleEntityDeath);
+      return {
+        afterParry,
+        victimDead: victim.active === false,
+        killedByPlayer: victim.killedByPlayer === true,
+        scored: e.score > scoreBefore,
+        playerHealth: p.health, playerMax: p.maxHealth,
+      };
+    });
+
+    expect(r.afterParry.owner, 'the shield parried it to the player').toBe('PLAYER');
+    expect(r.afterParry.ownerId).toBe('player');
+    expect(r.afterParry.hitIds, 'the already-hit set cleared with the re-own').toBe(0);
+    expect(r.afterParry.active, 'and the bolt is still live').toBe(true);
+    expect(r.victimDead, 'it kills the enemy that fired it').toBe(true);
+    expect(r.killedByPlayer, 'as the player’s kill').toBe(true);
+    expect(r.scored, 'which pays the player').toBe(true);
+    expect(r.playerHealth, 'and none of this hurt the player').toBe(r.playerMax);
 
     watch.assertClean();
   });
@@ -312,6 +380,10 @@ test.describe('the real fight, not a synthetic pair', () => {
         x: e.player.position.x + 240, y: e.player.position.y + 90,
       }, e.waveContext(), false);
       en.maxSpeed = 0;   // this is about the shots, not about the AI
+      // Effectively immortal: parried bolts RETURN TO SENDER now, and a
+      // shooter that dies to its own fire two shots in cuts the stream this
+      // test is counting.  The parry-kills claim has its own test.
+      en.health = 1e6; en.maxHealth = 1e6;
     });
 
     await waitForEngine(

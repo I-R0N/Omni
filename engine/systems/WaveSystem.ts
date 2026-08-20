@@ -509,6 +509,22 @@ export class WaveSystem {
     }
   }
 
+  /**
+   * THE BOSS IS DEAD — cancel whatever is still queued behind it.
+   *
+   * `haltForBoss` deliberately KEEPS a capstone's escort queue: while the
+   * boss is alive, that escort is the designed encounter.  The moment it
+   * dies the rout wipes every enemy STANDING (payBossBounty), but the
+   * not-yet-spawned tail of the escort was still streaming in afterwards —
+   * reinforcements warping into a fight that is over, which the player
+   * reads as "the waves kept coming after I killed the boss" (playtest,
+   * U7 follow-up).  Ending the stream here lets the wave complete the
+   * normal way the moment the routed field is clear.
+   */
+  public cancelPendingSpawns() {
+    this.nextSpawnIdx = this.spawnList.length;
+  }
+
   /** Tick down all active wave announcements and splice expired ones. */
   public tickAnnouncements(dt: number) {
     for (let i = this.announcements.length - 1; i >= 0; i--) {
