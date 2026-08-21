@@ -1997,17 +1997,20 @@ export const FLASHLIGHT = {
 let activeFlashlightIndex =
   FLASHLIGHT_CYCLE.findIndex(f => f.name === 'off');
 
-/** THE FLASHLIGHT TOOL (user call): the flashlight is EQUIPMENT.  Tapping
- *  the ship (or E / the pad's action button) in open space cycles the level;
- *  the Flashlight Kit module (`flashlight_kit`) is what grants the tool at
- *  all, the same everything-is-a-module pattern as the Shield core.  Levels
- *  are cone widths: `medium` is the 80-degree searchlight the lighting
- *  gauntlet shipped as its default, `high` the 150-degree flood — low beam
- *  and high beam.  `off` is the default: a light you switch on. */
-export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; halfDeg: number }> = [
-  { name: 'off',    halfDeg: 0  },
-  { name: 'medium', halfDeg: 40 },
-  { name: 'high',   halfDeg: 75 },
+/** THE LIGHT TOOL (user call): the ship's light is EQUIPMENT.  Tapping the
+ *  ship (or E / the pad's action button) in open space cycles the level; the
+ *  Light module (`flashlight_kit`) is what grants the tool at all, the same
+ *  everything-is-a-module pattern as the Shield core.  Both ON levels wear
+ *  the BEAM flashlight style (the 80-degree cone); what separates them is
+ *  the LIGHTING TIER (user call): `medium` runs the light system at the
+ *  'medium' rung and `high` at 'high' — longer reach, more occluders, soft
+ *  penumbra, the whole ladder step, applied through the tier override below
+ *  so every consumer of `getActiveLightingTier` agrees.  `off` is the
+ *  default: a light you switch on. */
+export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; halfDeg: number; tier?: string }> = [
+  { name: 'off',    halfDeg: 0 },
+  { name: 'medium', halfDeg: 40, tier: 'medium' },
+  { name: 'high',   halfDeg: 40, tier: 'high' },
 ] as const;
 export function getFlashlightHalfDeg(): number {
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
@@ -2334,7 +2337,21 @@ export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
 // the array above rather than being a literal, or inserting a tier silently
 // changes what ships.
 let activeLightingTierIndex = LIGHTING_TIERS.findIndex(t => t.name === 'low');
-export function getActiveLightingTier(): LightingTier { return LIGHTING_TIERS[activeLightingTierIndex]; }
+/** The LIGHT TOOL's tier, while the tool is ON (see FLASHLIGHT_TOOL_LEVELS)
+ *  — set per frame by GameEngine.draw, -1 when the tool is off.  While set
+ *  it wins over the DBG tier row for EVERY consumer, which is the point:
+ *  "high" on the tool means the whole light system steps up, not just the
+ *  player's cone.  The DBG row stays the raw dev override underneath,
+ *  exactly the flashlight-width arrangement. */
+let lightingTierOverrideIndex = -1;
+export function setLightingTierOverride(name: string | null): void {
+  lightingTierOverrideIndex = name === null
+    ? -1 : LIGHTING_TIERS.findIndex(t => t.name === name);
+}
+export function getActiveLightingTier(): LightingTier {
+  return LIGHTING_TIERS[lightingTierOverrideIndex >= 0
+    ? lightingTierOverrideIndex : activeLightingTierIndex];
+}
 export function cycleLightingTier(): LightingTier {
   activeLightingTierIndex = (activeLightingTierIndex + 1) % LIGHTING_TIERS.length;
   return LIGHTING_TIERS[activeLightingTierIndex];
@@ -4494,7 +4511,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
-  { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Flashlight Kit', desc: 'Hull-mounted searchlight — tap your ship to cycle it', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
+  { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),

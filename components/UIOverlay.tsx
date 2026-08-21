@@ -1530,8 +1530,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Grant the Shield core module (DBG). Needs to touch a hull module on the ship flower to function.')}
                 {ctrlRow('Overcharge', () => onGrantModule?.('overcharge'), 'Grant',
                   'Grant the Overcharge module (DBG). Needs to touch a gun on the weapon flower to function.')}
-                {ctrlRow('Flashlight Kit', () => onGrantModule?.('flashlight_kit'), 'Grant',
-                  'Grant the Flashlight Kit module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high.')}
+                {ctrlRow('Light', () => onGrantModule?.('flashlight_kit'), 'Grant',
+                  'Grant the Light module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high (the beam style at the medium / high lighting tiers).')}
                 {ctrlRow('Outfit all', onOutfitAll, 'Max',
                   'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).')}
                 {ctrlRow('Reset', onResetOutfit, 'Lean',

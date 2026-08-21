@@ -23,9 +23,11 @@
 import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
 
-/** FLASHLIGHT_TOOL_LEVELS half-degrees, hard-coded (harness rule 7). */
-const MEDIUM_HALF_DEG = 40;
-const HIGH_HALF_DEG = 75;
+/** FLASHLIGHT_TOOL_LEVELS, hard-coded (harness rule 7): both ON levels wear
+ *  the BEAM style (40-degree half-angle); what separates them is the
+ *  LIGHTING TIER — medium runs the light system at 'medium', high at 'high'
+ *  (user call). */
+const BEAM_HALF_DEG = 40;
 
 async function openSpace(page: any) {
   await startRun(page, 'GLASS_FIELD');
@@ -67,14 +69,27 @@ test.describe('the kit gates the tool', () => {
     const eq = await engine(page, e => e.flashlightEquipped);
     expect(eq, 'granted next to the Base Hull, the kit is active').toBe(true);
 
-    // Cycle through all three levels; the renderer override is written in
-    // draw(), so poll a frame behind each step.
+    // Cycle through all three levels; both overrides are written in draw(),
+    // so poll a frame behind each step.  MEDIUM and HIGH both wear the BEAM
+    // cone — what steps is the LIGHTING TIER, and it steps for the whole
+    // light system (getLightTier reads through the override).
+    const tier0 = await engine(page, e => e.renderer.getLightTier());
+    expect(tier0, 'the DBG tier ships low').toBe('low');
+
     await engine(page, e => e.cycleShipLight());
     await waitForEngine(page, e => e.renderer.playerLightToolHalfDeg === 40, 'the medium beam');
+    expect(await engine(page, e => e.renderer.getLightTier()),
+      'medium = the medium lighting tier').toBe('medium');
+
     await engine(page, e => e.cycleShipLight());
-    await waitForEngine(page, e => e.renderer.playerLightToolHalfDeg === 75, 'the high beam');
+    await waitForEngine(page, e => e.renderer.getLightTier() === 'high', 'the high tier');
+    expect(await engine(page, e => e.renderer.playerLightToolHalfDeg),
+      'still the beam style — the tier is what stepped').toBe(BEAM_HALF_DEG);
+
     await engine(page, e => e.cycleShipLight());
     await waitForEngine(page, e => e.renderer.playerLightToolHalfDeg === null, 'back to off');
+    expect(await engine(page, e => e.renderer.getLightTier()),
+      'and the tier falls back to the DBG global').toBe('low');
 
     const done = await engine(page, e => ({ level: e.flashlightLevel }));
     expect(done.level, 'the cycle closed').toBe(0);

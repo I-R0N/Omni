@@ -1666,3 +1666,27 @@ it). `docs/PARKING_LOT.md` carries the full plan and sequencing.
 `tests/flashlight.spec.ts` (5) + `tests/nebulaspin.spec.ts` (3), each gate
 verified non-vacuous: removing the kit gate fails the no-kit test; flipping
 the cross product fails both directional tests. 214 → 222.
+
+---
+
+## P12 — "Light", and the levels are lighting tiers
+
+Two corrections to P11 from the user's review (nebula `physical` spin
+approved as-is):
+
+- **The module is called "Light"** (catalog label + DBG grant row; the id
+  stays `flashlight_kit` — ids are internal and every reference already
+  points there).
+- **Medium and high were meant as LIGHTING TIERS, not cone widths.** Both ON
+  levels now wear the BEAM style (the 80° cone); what separates them is the
+  tier: medium runs the light system at the 'medium' rung, high at 'high' —
+  longer reach, bigger occluder budget, soft penumbra, the whole ladder step.
+  Implemented as `setLightingTierOverride`, written per frame in draw beside
+  the cone override, and read INSIDE `getActiveLightingTier` so every
+  consumer of the tier — occluder collection, canvas divisor, light budget —
+  agrees. The DBG tier row (default 'low') stays the raw dev override
+  underneath, exactly the flashlight-width arrangement.
+
+`flashlight.spec.ts` re-pinned: medium asserts tier 'medium' with the beam
+cone; high asserts the cone UNCHANGED and the tier stepped; off asserts the
+tier falls back to the DBG global's 'low'.

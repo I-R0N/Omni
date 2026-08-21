@@ -1820,15 +1820,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   the keyboard equivalent — so any new proximity-interactable must join
   `updateInteractables`' nearest-wins arbitration rather than adding a
   second handler; otherwise two affordances fight over one gesture.
-  The FLASHLIGHT TOOL is the gesture's FALLBACK (user call): with the
-  Flashlight Kit module installed (`flashlightEquipped`), a ship-tap /
-  E / pad-action in OPEN SPACE cycles the light off → medium → high
-  (`GameEngine.cycleShipLight`, levels in `FLASHLIGHT_TOOL_LEVELS`); a
-  dock or portal in range still wins.  The tool's cone overrides the DBG
-  flashlight global via `RenderSystem.playerLightToolHalfDeg` (set per
-  frame in draw; null = tool off → the global decides, and it now ships
-  'off' — a kit-less ship carries NO player beam).  Losing the kit
-  (adjacency-offline included) zeroes the level in `applyModuleEffects`.  The
+  The LIGHT TOOL is the gesture's FALLBACK (user call): with the
+  Light module installed (`flashlightEquipped`; catalog id
+  `flashlight_kit`), a ship-tap / E / pad-action in OPEN SPACE cycles the
+  light off → medium → high (`GameEngine.cycleShipLight`, levels in
+  `FLASHLIGHT_TOOL_LEVELS`).  BOTH on-levels wear the BEAM flashlight
+  style (the 80° cone); what separates them is the LIGHTING TIER (user
+  call): medium runs the light system at the 'medium' rung, high at
+  'high' — reach, occluder budget and penumbra all step, because the
+  tier override (`setLightingTierOverride`, set per frame in draw) wins
+  inside `getActiveLightingTier` for EVERY consumer.  A dock or portal
+  in range still wins the gesture.  The cone override is
+  `RenderSystem.playerLightToolHalfDeg`; null = tool off → the DBG
+  globals decide, and they ship flashlight 'off' / tier 'low' — a
+  module-less ship carries NO player beam, and the DBG rows stay the raw
+  dev overrides underneath.  Losing the module (adjacency-offline
+  included) zeroes the level in `applyModuleEffects`.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
   portal doesn't also fire a shot.  There is NO HUD dock/enter button —
