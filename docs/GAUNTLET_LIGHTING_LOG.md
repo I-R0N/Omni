@@ -3177,6 +3177,20 @@ Two mechanisms do, both now diagnosed:
    candidate fix, parked with the rest: QUANTISE the hex in the cache key
    so equilibration steps land on reusable buckets.
 
+### Addendum: a beam capture from an even deeper window
+
+A seventh capture (beam, 7 222 peak entities — the session's terminal
+state, sim cycled to 60 Hz) bounds the light column from above: **0.17 ms
+avg / 0.55 ms peak** with 6.09 halos.  So across every capture the light
+slice spans 0.09–0.20 avg by scene depth and beam width, never past
+0.55 ms in any single frame — while the frames around it reached 289 ms
+(render 111 + sim 172).  The same window put harder numbers on the two
+parked items: the tint storm sustained ~1 119 misses/s (120 642 over the
+capture, 497 new tints in one frame, 15 ms peak) — and note the render
+worst-frames of 111–123 ms are largely its DOWNSTREAM cost, since every
+evicted nebula-dust shard falls back to the slow tint-chain draw path;
+the sim wall reached 184 ms peak at ~6 k entities.
+
 ### Method note for future captures
 
 A slice timer (`light`, `fog`) is valid at any load — that is why the
