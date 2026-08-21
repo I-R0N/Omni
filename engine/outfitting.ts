@@ -72,7 +72,7 @@ export function applyModuleEffects(g: GameEngine) {
     computeActiveSlots(g, g.shipSlots, g.activeShip);
     computeActiveSlots(g, g.weaponSlots, g.activeWeapon);
     let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
-    let shieldCore = false, overcharge = false;
+    let shieldCore = false, overcharge = false, flashlight = false;
     // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
     // module's weight is a contribution to the SHIP's attribute, not an
     // effect the module has on acceleration — see SHIP_WEIGHT.
@@ -94,6 +94,7 @@ export function applyModuleEffects(g: GameEngine) {
             cool += e.cooldownFrac ?? 0;
             if (e.shieldCore) shieldCore = true;
             if (e.overcharge) overcharge = true;
+            if (e.flashlight) flashlight = true;
         }
     };
     fold(g.shipSlots, g.activeShip);
@@ -123,6 +124,12 @@ export function applyModuleEffects(g: GameEngine) {
     g.player.damageMult = 1 + dmg;
     g.player.cooldownMult = Math.max(COOLDOWN_FLOOR, 1 - cool);
     g.player.overchargeUnlocked = overcharge;
+    // Flashlight Kit: the ship-tap light tool exists only while the kit is
+    // installed and ACTIVE (touching a hull, like every utility).  Losing
+    // the kit also turns the light OFF — an uninstalled tool must not leave
+    // its beam burning.
+    if (!flashlight) g.flashlightLevel = 0;
+    g.flashlightEquipped = flashlight;
 }
 
 /** Push the gun + module state onto the player entity so WeaponSystem

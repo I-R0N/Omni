@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS} from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -754,9 +754,28 @@ export class PhysicsSystem {
           // Normalised radial (shard → player).
           const rx = dx * invDist;
           const ry = dy * invDist;
-          // Stable per-shard spin direction → varied vortices.
-          const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
-          const spinSign = (lastChar & 1) ? 1 : -1;
+          // Spin HANDEDNESS is a DBG cycle (Visual ▸ "Neb spin") while the
+          // proper rotational mechanics are parked (see PARKING_LOT):
+          //  - `physical` (default): the wake shear — the ship's velocity
+          //    crossed with the ship→shard vector — so a shard passed on the
+          //    STARBOARD side turns CLOCKWISE on screen and a port-side one
+          //    counter-clockwise (user report: the parity sign below gave a
+          //    starboard pass no consistent handedness at all).  `dx`/`dy`
+          //    here are shard→player, hence the sign arrangement.  A near-
+          //    still ship sheds no wake, so below WAKE_MIN_SPEED the parity
+          //    fallback keeps the idle cloud varied instead of frozen.
+          //  - `inverted`: the same cross product negated — the A/B case.
+          //  - `random`: the shipped id-parity "varied vortices".
+          const mode = getNebulaWakeSpinMode();
+          const vx = player.velocity.x, vy = player.velocity.y;
+          let spinSign: number;
+          if (mode === 'random' || vx * vx + vy * vy < 0.25) {
+              const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
+              spinSign = (lastChar & 1) ? 1 : -1;
+          } else {
+              spinSign = (vy * dx - vx * dy) >= 0 ? 1 : -1;
+              if (mode === 'inverted') spinSign = -spinSign;
+          }
           // Tangential swirl: perpendicular to the radial, signed per
           // shard.  perp(rx,ry) = (-ry, rx); flip by spinSign.
           const swirl = strength * fall * timeScale;

@@ -2357,7 +2357,9 @@ export function renderLightLayer(
             // what is left on the layer is exactly the emitters.  The aim is
             // `player.rotation` — the angle shots travel along — so the torch
             // points where the ship is looking and needs no second control.
-            const halfDeg = getFlashlightHalfDeg();
+            // The TOOL owns the cone while it is on; the DBG global is the
+            // dev override underneath (see FLASHLIGHT_TOOL_LEVELS).
+            const halfDeg = r.playerLightToolHalfDeg ?? getFlashlightHalfDeg();
             const beamOn = halfDeg < 180;
             const beamHalf = halfDeg * DEG2RAD;
             const beamAim = beamOn ? (playerRot ?? 0) : null;

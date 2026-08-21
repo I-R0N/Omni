@@ -53,11 +53,13 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
                           plus input / help / minimap / maps (step 5),
-                          viewports / healthbars (5d) and the play-test
-                          follow-ups terrain / shake / knockback / deflect,
+                          viewports / healthbars (5d), lighting (the
+                          PR #88 gauntlet) and the play-test follow-ups
+                          terrain / shake / knockback / deflect /
+                          flashlight / nebulaspin,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  187 tests.  All run at
+                          anti-flake rules).  222 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1776,6 +1778,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   collateral onto nearby enemies/structures + the normal death-explosion.
   Bombers killed before they touch the player never set the flag, so they pop
   harmlessly — the kill-early counter.
+- **Nebula wake spin has a HANDEDNESS cycle** (user report: a starboard
+  pass should turn a shard clockwise; the shipped id-parity sign gave a
+  pass no consistent handedness at all).  DBG ▸ Visual ▸ "Neb spin":
+  `physical` (default — the ship's velocity crossed with the ship→shard
+  offset, so starboard → clockwise in this y-down world), `inverted` (the
+  A/B), `random` (the old parity vortices).  Below a small speed floor the
+  parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
+  (angular momentum in the impulse solver, off-centre impact torque) are
+  parked for their own session — docs/PARKING_LOT.md.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
@@ -1808,7 +1819,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   own ship (tap/click, `INPUT_CONSTANTS.SHIP_SELECT_RADIUS`), plus E as
   the keyboard equivalent — so any new proximity-interactable must join
   `updateInteractables`' nearest-wins arbitration rather than adding a
-  second handler; otherwise two affordances fight over one gesture.  The
+  second handler; otherwise two affordances fight over one gesture.
+  The FLASHLIGHT TOOL is the gesture's FALLBACK (user call): with the
+  Flashlight Kit module installed (`flashlightEquipped`), a ship-tap /
+  E / pad-action in OPEN SPACE cycles the light off → medium → high
+  (`GameEngine.cycleShipLight`, levels in `FLASHLIGHT_TOOL_LEVELS`); a
+  dock or portal in range still wins.  The tool's cone overrides the DBG
+  flashlight global via `RenderSystem.playerLightToolHalfDeg` (set per
+  frame in draw; null = tool off → the global decides, and it now ships
+  'off' — a kit-less ship carries NO player beam).  Losing the kit
+  (adjacency-offline included) zeroes the level in `applyModuleEffects`.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
   portal doesn't also fire a shot.  There is NO HUD dock/enter button —

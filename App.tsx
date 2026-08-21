@@ -312,6 +312,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
   };
 
+  const handleCycleNebulaWakeSpin = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaWakeSpin();
+  };
+
   const handleCycleLighting = () => {
       if (engineRef.current) engineRef.current.dbg.cycleLighting();
   };
@@ -743,6 +747,7 @@ const App: React.FC = () => {
         onCycleTintMix={handleCycleTintMix}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
+        onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
         onToggleAdaptiveTriggers={handleToggleAdaptiveTriggers}

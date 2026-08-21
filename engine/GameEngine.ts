@@ -23,7 +23,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, getNebulaWakeSpinMode } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -687,6 +687,13 @@ export class GameEngine {
    *  `engine.dbg.<toggle>()`; the flags they write are still engine fields. */
   readonly dbg = new DebugControls(this);
 
+  /** Flashlight Kit tool state (user call): whether the kit module is
+   *  installed+active (folded by applyModuleEffects), and the tap-cycled
+   *  level (index into FLASHLIGHT_TOOL_LEVELS: 0 off / 1 medium / 2 high).
+   *  Run-scoped like the outfit it derives from. */
+  public flashlightEquipped: boolean = false;
+  public flashlightLevel: number = 0;
+
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B.
    *  The one debug row that stayed a method on the engine: the 5b trait
    *  suites call it straight off `window.__omniEngine`, which makes it
@@ -998,6 +1005,7 @@ export class GameEngine {
       fogName: getFogName(),
       shadowSoftnessName: getShadowSoftnessName(),
       rockPaletteName: getActiveRockPaletteName(),
+      nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
@@ -1753,6 +1761,7 @@ export class GameEngine {
       fogName: getFogName(),
       shadowSoftnessName: getShadowSoftnessName(),
       rockPaletteName: getActiveRockPaletteName(),
+      nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
@@ -3898,7 +3907,14 @@ export class GameEngine {
     const padInteract = this.input.consumeInteractPress();
 
     let selected = false;
-    if (station || portal) {
+    // The FLASHLIGHT TOOL rides the same gesture as the dock/portal, as the
+    // fallback: with the kit installed, a ship-tap (or E, or the pad's
+    // action button) in OPEN SPACE cycles the light.  Claiming the tap here
+    // means a tap on the ship no longer fires a stray shot at your own hull
+    // while the kit is aboard — which is the affordance the user asked for
+    // ("turned on and off by touching the player ship").  Without the kit,
+    // open-space behaviour is unchanged (the tap still shoots).
+    if (station || portal || this.flashlightEquipped) {
         const screen = this.renderer.worldToScreen(this.camera, this.player.position);
         if (screen) {
             selected = this.input.claimTapNear(
@@ -3912,6 +3928,7 @@ export class GameEngine {
     if (selected || (eDown && !this.dockKeyHeld)) {
         if (portal) this.enterPortal();
         else if (station) this.dockAtStation();
+        else this.cycleShipLight();
     }
     this.dockKeyHeld = eDown;
   }
@@ -4986,6 +5003,23 @@ export class GameEngine {
    *  so the shop UI can show the beat only while it is live. */
   /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
    *  the same `openPortal` abstraction the dragon and the rivals use. */
+  /** ── The FLASHLIGHT TOOL (user call) ────────────────────────────────
+   *  Cycle the ship's light: off → medium → high → off.  Reachable only
+   *  while the Flashlight Kit module is installed and active
+   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
+   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
+   *  FALLBACK when neither of those is in range — the arbitration in
+   *  updateInteractables stays nearest-wins, the light just claims the
+   *  gesture nothing else wanted. */
+  public cycleShipLight(): boolean {
+      if (!this.flashlightEquipped) return false;
+      this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
+      const name = FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].name;
+      this.pushPlayerMessage(`Light: ${name}`, name === 'off' ? '#94a3b8' : '#fde68a');
+      this.audio.play('ui.confirm');
+      return true;
+  }
+
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
       // THE LADDER STOPS HERE (user call).  One seam for both ways a boss
@@ -5457,6 +5491,14 @@ export class GameEngine {
       // A7 — hand the renderer the run's depth.  One field write per frame;
       // the fog folds it into its dark level (deeper = darker).
       this.renderer.stageDepth = this.stageIndex;
+      // The flashlight TOOL's cone, when it is ON: overrides the DBG
+      // flashlight global so the tap-cycle owns the light in play while the
+      // debug row stays a raw dev override underneath (tool off / no kit →
+      // null → the global decides, and it ships 'off').
+      this.renderer.playerLightToolHalfDeg =
+          (this.flashlightEquipped && this.flashlightLevel > 0)
+              ? FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].halfDeg
+              : null;
       this.renderer.render(
           this.frameEntities,
           this.camera,

@@ -236,6 +236,12 @@ export class RenderSystem {
    *  this one number crosses on a field write. */
   stageDepth: number = 0;
 
+  /** The flashlight TOOL's cone half-angle while the tool is ON, set per
+   *  frame by GameEngine.draw.  null → the tool is off (or no kit), and the
+   *  player light falls back to the DBG flashlight global — which ships
+   *  'off', so a kit-less ship carries no beam.  See FLASHLIGHT_TOOL_LEVELS. */
+  playerLightToolHalfDeg: number | null = null;
+
   /** DBG passthroughs for the lighting mode.  The state itself is module
    *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
    *  the harness and the tests can reach it off `engine.renderer` without

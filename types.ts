@@ -1749,6 +1749,7 @@ export interface EngineStats {
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */
   rockPaletteName?: string;
+  nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;

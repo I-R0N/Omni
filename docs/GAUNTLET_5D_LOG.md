@@ -1610,3 +1610,59 @@ it is flow-field timing — which is why the comment names the CI failure.
 Noted, not changed: tile bumps route environmental damage through the shield
 first, shard bumps bypass it. Both are commented as deliberate; whether they
 should agree is a design question for the shield/feel pass, not a test fix.
+
+---
+
+## P11 — The flashlight is equipment, and the wake gets a handedness
+
+Two pre-merge asks in one push.
+
+**The flashlight tool + kit** ("make the flashlight an in-game tool that can
+be turned on and off by touching the player ship … then add a kit item to
+make this a module"). The lighting gauntlet shipped the beam always-on;
+light is now EQUIPMENT:
+
+- `flashlight_kit` — the first `utility`-family module (requires hull
+  contact, like every ship system). Cost 9,000, weight 0.3, sold as a ship
+  module. DBG grant row beside Shield/Overcharge.
+- With the kit installed, the SELECT-YOUR-SHIP gesture (tap / E / pad
+  action) in open space cycles `off → medium → high`
+  (`FLASHLIGHT_TOOL_LEVELS`: 0° / 40° / 75° half-angles — low beam and high
+  beam). The gesture stays ONE arbitration: a dock or portal in range still
+  wins; the light claims only the tap nothing else wanted — which also means
+  a ship-tap with the kit aboard no longer fires a stray shot at your own
+  hull.
+- The tool overrides the DBG flashlight global
+  (`RenderSystem.playerLightToolHalfDeg`, written per frame beside
+  `stageDepth`); the global itself now ships **'off'**, so a kit-less ship
+  carries no player beam and the debug row survives as the raw dev override
+  underneath. Uninstalling the kit — adjacency-offline included — zeroes the
+  level in `applyModuleEffects`: a removed tool must not leave its beam
+  burning.
+- Two lighting-suite pins updated deliberately (the beam-default was a
+  documented user call, superseded by this one): the DBG default is 'off'
+  and the cycle order starts there.
+
+**The nebula wake handedness** ("shards on the starboard side should rotate
+clockwise — I think it is rotating counterclockwise"). The report was
+half-right in an interesting way: the swirl pass signed each shard's spin by
+its id's LAST-CHARACTER PARITY ("varied vortices"), so a pass had no
+consistent handedness at all — roughly half of any cloud turned against the
+wake. The sign is now the DBG cycle Visual ▸ "Neb spin":
+
+- `physical` (default): the wake shear — the ship's velocity crossed with
+  the ship→shard offset — so a starboard pass turns a shard clockwise on
+  screen and a port pass counter-clockwise. Below a small speed floor the
+  parity fallback keeps an idle cloud varied (a parked ship sheds no wake).
+- `inverted`: the same cross product negated — the A/B the report asked for.
+- `random`: the shipped parity behaviour, kept as the control.
+
+**Proper rotational mechanics parked**, as advised and agreed: moment of
+inertia + off-centre impact torque in the impulse solver is its own session
+(the per-pair solver is the engine's hottest and most delicate code — spin
+jitter at rest, the shard sleep gates, and a perf recapture all come with
+it). `docs/PARKING_LOT.md` carries the full plan and sequencing.
+
+`tests/flashlight.spec.ts` (5) + `tests/nebulaspin.spec.ts` (3), each gate
+verified non-vacuous: removing the kit gate fails the no-kit test; flipping
+the cross product fails both directional tests. 214 → 222.

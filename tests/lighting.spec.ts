@@ -800,6 +800,11 @@ test.describe('occluder collection', () => {
       }
       e.player.position.x = 0; e.player.position.y = 0;
       e.physics.initializeStaticGrid(e.currentMap.entities);
+      // There must BE a player light to measure — the DBG flashlight ships
+      // 'off' now (the tool era; see flashlight.spec.ts).
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
+        e.renderer.cycleFlashlight();
+      }
       e.renderer.setLighting('unified');
 
       const settle = () => new Promise<void>(res => {
@@ -852,6 +857,9 @@ test.describe('occluder collection', () => {
       const dimmest = await gainAt(() => { setBright('8%'); });
       const tierOnly = await gainAt(() => { setBright('100%'); setTier('lowest'); });
       setTier('low');
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'off'; i++) {
+        e.renderer.cycleFlashlight();
+      }
       return { full, dim, dimmest, tierOnly, names: e.renderer.getLightBrightness() };
     });
 
@@ -1339,6 +1347,11 @@ test.describe('occluder collection', () => {
       // The static grid is built at map load, so a tile MOVED afterwards is
       // still filed under its old cell and the radius walk never finds it.
       e.physics.initializeStaticGrid(e.currentMap.entities);
+      // There must BE a player light for a caustic to be cast from — the
+      // DBG flashlight ships 'off' now (the tool era; see flashlight.spec.ts).
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
+        e.renderer.cycleFlashlight();
+      }
       e.renderer.setLighting('unified');
       if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
       await new Promise<void>(res => {
@@ -1354,7 +1367,11 @@ test.describe('occluder collection', () => {
         };
         requestAnimationFrame(t);
       });
-      return { built: true, ...e.renderer.causticStats() };
+      const stats = e.renderer.causticStats();
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'off'; i++) {
+        e.renderer.cycleFlashlight();
+      }
+      return { built: true, ...stats };
     });
     expect(drew.built).toBe(true);
     expect(drew.faces).toBeGreaterThan(0);
@@ -1449,10 +1466,13 @@ test.describe('occluder collection', () => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
 
-    // Ships as `beam` (an 80-degree cone; user call) — the game reads as
-    // flying a searchlight, with the radial glow one click away.
+    // Ships as `off` now (user call, superseding the beam default): the
+    // flashlight became the KIT-gated ship-tap TOOL, so the DBG global —
+    // the raw dev override under it — carries no beam until cycled.  The
+    // cone geometry below is still driven through the DBG cycle, so set it
+    // to `beam` explicitly.
     const dflt = await engine(page, e => e.renderer.getFlashlight());
-    expect(dflt).toBe('beam');
+    expect(dflt).toBe('off');
 
     // Empty scene: a ring drawn through terrain measures shadows, and
     // emitters would add light the beam deliberately does not mask.  The pin
@@ -1592,13 +1612,13 @@ test.describe('occluder collection', () => {
       }
       return { first, seen, back: e.renderer.getFlashlight() };
     });
-    expect(beams.first).toBe('beam');         // the shipped default
-    expect(beams.back).toBe('beam');          // and the cycle closes
+    expect(beams.first).toBe('off');          // the shipped default (tool era)
+    expect(beams.back).toBe('off');           // and the cycle closes
     // The cycle starts wherever the default sits and wraps: widest to
     // narrowest is still the ORDER, 'half' is the headlight (everything
     // ahead, nothing behind) and 'pin' the pencil.
     expect(beams.seen).toEqual(
-      ['beam', 'narrow', 'tight', 'pin', 'off', 'radial', 'half', 'wide']);
+      ['off', 'radial', 'half', 'wide', 'beam', 'narrow', 'tight', 'pin']);
 
     const r = await engine(page, async (e) => {
       // Empty scene, emitters off: the colour is measured off the light
@@ -1608,6 +1628,12 @@ test.describe('occluder collection', () => {
       }
       e.physics.initializeStaticGrid(e.currentMap.entities);
       if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      // There must BE a player light to measure: the DBG flashlight ships
+      // 'off' now (the tool era — see flashlight.spec.ts), so cycle the
+      // radial glow on for the colour reads and restore afterwards.
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
+        e.renderer.cycleFlashlight();
+      }
       e.renderer.setLighting('unified');
       const frames = (n: number) => new Promise<void>(res => {
         let i = 0;
@@ -1649,6 +1675,9 @@ test.describe('occluder collection', () => {
         e.renderer.cycleLightColor();
       }
       if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'off'; i++) {
+        e.renderer.cycleFlashlight();
+      }
       return { ship, red, green, back: e.renderer.getLightColor() };
     });
 

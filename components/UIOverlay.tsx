@@ -108,6 +108,7 @@ interface UIOverlayProps {
   onCycleFog?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
+  onCycleNebulaWakeSpin?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
   onToggleAdaptiveTriggers?: () => void;
@@ -396,6 +397,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFog,
   onCycleShadowSoftness,
   onCycleRockPalette,
+  onCycleNebulaWakeSpin,
   onToggleRumble,
   onSetControlScheme,
   onToggleAdaptiveTriggers,
@@ -1528,6 +1530,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Grant the Shield core module (DBG). Needs to touch a hull module on the ship flower to function.')}
                 {ctrlRow('Overcharge', () => onGrantModule?.('overcharge'), 'Grant',
                   'Grant the Overcharge module (DBG). Needs to touch a gun on the weapon flower to function.')}
+                {ctrlRow('Flashlight Kit', () => onGrantModule?.('flashlight_kit'), 'Grant',
+                  'Grant the Flashlight Kit module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high.')}
                 {ctrlRow('Outfit all', onOutfitAll, 'Max',
                   'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).')}
                 {ctrlRow('Reset', onResetOutfit, 'Lean',
@@ -1690,6 +1694,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Rock palette', onCycleRockPalette,
                   stats.rockPaletteName ?? 'mixed',
                   'Rock body colour family. Mixed (default): mostly slate with rust and mineral running through it, so a field reads as ROCK with variation. Slate: the old single flat grey. Rust / mineral: the pure warm and cool families, kept for regional-identity work and for judging them side by side. Shades are rolled per instance AT SPAWN — reload the map to repaint a whole field.')}
+                {ctrlRow('Neb spin', onCycleNebulaWakeSpin,
+                  stats.nebulaWakeSpinName ?? 'physical',
+                  'Which way the player\'s wake spins a passing nebula shard. PHYSICAL: the wake shear — a shard passed on the STARBOARD side turns clockwise, port-side counter-clockwise. INVERTED: the same cross product negated (the A/B). RANDOM: the old per-shard id-parity vortices, with no consistent handedness. Proper rotational mechanics are parked for their own session.')}
                 {ctrlRow('Minimap mat', onCycleMinimapMaterial,
                   stats.minimapMaterialName ?? 'Flow',
                   'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.')}

@@ -32,7 +32,7 @@ import {
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
+    cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
     toggleWorldLights, toggleDepthAmbient,
@@ -338,6 +338,15 @@ export class DebugControls {
    *  on newly generated rock; reload the map to repaint a whole field. */
   cycleRockPalette() {
     cycleRockPalette();
+  }
+
+  /** DBG (Visual): which way the player's wake spins a passing nebula
+   *  shard — physical (starboard pass → clockwise, from the velocity×offset
+   *  cross product) / inverted / random (the old id-parity vortices).  The
+   *  A/B for the user's spin-direction report while proper rotational
+   *  mechanics stay parked. */
+  cycleNebulaWakeSpin() {
+    cycleNebulaWakeSpin();
   }
 
   /** DBG (Visual): cycle the unified tile lighting — legacy / debug /

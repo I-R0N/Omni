@@ -1708,12 +1708,17 @@ export function cycleEmitShadowTier(): string {
  *  direction, which is what makes a beam sweeping past one read as the beam
  *  finding it.
  *
- *  `beam` (an 80-degree cone) is the DEFAULT (user call): the game reads as
- *  flying a searchlight, and the radial glow is one click away.  `off` is
- *  a zero-width beam rather than a special case: the player's light draws
- *  nothing, so what is left on the layer is exactly the emitters — which
- *  makes it a useful thing to look at rather than a way to disable the
- *  feature (that is `Lighting: legacy`).
+ *  `off` is the DEFAULT now (user call, superseding the earlier
+ *  beam-default call): the flashlight became an in-game TOOL gated behind
+ *  the Flashlight Kit module, so a ship without the kit carries no player
+ *  light and this DBG cycle is the raw dev override underneath the tool.
+ *  While the tool is ON it overrides this global entirely
+ *  (`RenderSystem.playerLightToolHalfDeg`); while it is off — or the kit is
+ *  not installed — the renderer falls back here, so a dev can still force
+ *  any width from the debug menu.  `off` is a zero-width beam rather than a
+ *  special case: the player's light draws nothing, so what is left on the
+ *  layer is exactly the emitters — which makes it a useful thing to look at
+ *  rather than a way to disable the feature (that is `Lighting: legacy`).
  *
  *  Half-angles, so `wide` is a 120-degree beam. */
 export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> = [
@@ -1990,7 +1995,20 @@ export const FLASHLIGHT = {
   CULL_MARGIN_DEG: 25,
 } as const;
 let activeFlashlightIndex =
-  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'beam');
+  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'off');
+
+/** THE FLASHLIGHT TOOL (user call): the flashlight is EQUIPMENT.  Tapping
+ *  the ship (or E / the pad's action button) in open space cycles the level;
+ *  the Flashlight Kit module (`flashlight_kit`) is what grants the tool at
+ *  all, the same everything-is-a-module pattern as the Shield core.  Levels
+ *  are cone widths: `medium` is the 80-degree searchlight the lighting
+ *  gauntlet shipped as its default, `high` the 150-degree flood — low beam
+ *  and high beam.  `off` is the default: a light you switch on. */
+export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; halfDeg: number }> = [
+  { name: 'off',    halfDeg: 0  },
+  { name: 'medium', halfDeg: 40 },
+  { name: 'high',   halfDeg: 75 },
+] as const;
 export function getFlashlightHalfDeg(): number {
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
 }
@@ -2000,6 +2018,32 @@ export function getFlashlightName(): string {
 export function cycleFlashlight(): string {
   activeFlashlightIndex = (activeFlashlightIndex + 1) % FLASHLIGHT_CYCLE.length;
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+
+/** DBG: which way the player's wake spins a nebula shard it passes.
+ *
+ *  The swirl pass (`PhysicsSystem.applyNebulaPlayerPull`) used to sign each
+ *  shard's spin by its id's last-character parity — "varied vortices" — which
+ *  means a pass has NO consistent handedness: half the cloud rotates against
+ *  the wake (user report: a starboard-side shard should turn clockwise).
+ *  `physical` (the default) signs the spin by the wake shear — the cross
+ *  product of the ship's velocity with the ship→shard vector — so a shard
+ *  off the starboard bow turns clockwise on screen and a port-side one
+ *  counter-clockwise.  `inverted` is the same cross product negated, and
+ *  `random` is the shipped parity behaviour; all three are one DBG click
+ *  apart (Visual ▸ "Neb spin") so the two candidate handednesses can be
+ *  A/B'd in flight.  PROPER rotational mechanics (angular momentum in the
+ *  impulse solver, spin from off-centre hits) is parked for its own session
+ *  — see docs/PARKING_LOT.md. */
+export const NEBULA_WAKE_SPIN_CYCLE = ['physical', 'inverted', 'random'] as const;
+export type NebulaWakeSpinMode = typeof NEBULA_WAKE_SPIN_CYCLE[number];
+let activeNebulaWakeSpinIndex = 0;
+export function getNebulaWakeSpinMode(): NebulaWakeSpinMode {
+  return NEBULA_WAKE_SPIN_CYCLE[activeNebulaWakeSpinIndex];
+}
+export function cycleNebulaWakeSpin(): string {
+  activeNebulaWakeSpinIndex = (activeNebulaWakeSpinIndex + 1) % NEBULA_WAKE_SPIN_CYCLE.length;
+  return NEBULA_WAKE_SPIN_CYCLE[activeNebulaWakeSpinIndex];
 }
 
 /** DBG: how hard the CAUSTIC edges are — the two fades that keep a refracted
@@ -4313,7 +4357,7 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge';
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge' | 'utility';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
  *  Base values modified: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
@@ -4328,6 +4372,7 @@ export interface ModuleEffect {
   cooldownFrac?: number;    // autoloader
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
+  flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
 }
 
 export interface ModuleDef {
@@ -4414,6 +4459,7 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   gunnery:    ['gun'],
   autoloader: ['gun'],
   overcharge: ['gun'],
+  utility:    ['hull'],
 };
 
 /** Neighbour indices per hex slot in the 7-flower: 0 = center (touches
@@ -4448,6 +4494,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
+  { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Flashlight Kit', desc: 'Hull-mounted searchlight — tap your ship to cycle it', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),

@@ -1307,6 +1307,46 @@ of a harness that outlives a session.
 
 ---
 
+## Rotational mechanics for shards and asteroids (2026-08-21)
+
+**Raised in playtest** ("the nebula shards spin in the opposite direction
+than what they should"), and the user has explicit interest in building the
+real thing.  The interim fix shipped: the player-wake swirl's spin sign is
+now the DBG cycle Visual ▸ "Neb spin" — `physical` (wake shear: starboard
+pass → clockwise) / `inverted` / `random` (the old id-parity vortices) — so
+the handedness can be A/B'd in flight.  That is a SIGN policy, not physics.
+
+**What the real system is:** angular state as a first-class part of the
+impulse solver.
+
+- **Moment of inertia** per entity (from size/mass; a disc approximation is
+  fine) beside `mass`, with `Infinity` for statics mirroring the mass axis.
+- **Off-centre impacts apply torque**: `resolveCollision` /
+  `resolveAsteroidPair` compute the contact point already (MTV); the impulse
+  they apply should also change `rotationSpeed` by `r × J / I` on both
+  bodies, and the contact-point VELOCITY (linear + ω×r) should feed the
+  restitution instead of the centre velocity.
+- **Surface drag / wake torque** becomes an emergent case of the same
+  machinery instead of the hand-signed swirl kick.
+- **Spin → translation coupling** (a spinning shard grinding along a wall
+  walks sideways) is optional polish; decide when the base lands.
+
+**Why its own session** (CLAUDE.md §8 already warns): the per-pair solver is
+the hottest code in the engine and "delicate — merge / regen / neighbour-
+count all key off exact shard positions".  Adding angular terms changes
+resting-contact behaviour (spin jitter is the classic failure), interacts
+with the shard SLEEP system (`SHARD_SLEEP_CONSTANTS` gates on spin epsilon
+already), and needs the perf harness re-run (`perf/simbench.mjs`) since it
+adds work per contact pair.  Sequence: base I + impact torque on the
+player/enemy/shard paths → wake swirl re-derived → sleep/merge re-verified →
+perf capture.  Knobs should land beside `PHYSICS_CONSTANTS`.
+
+**Touch points:** `PhysicsSystem.resolveCollision` / `resolveAsteroidPair` /
+`applyNebulaPlayerPull` (which then loses its hand-signed kick), the shard
+sleep gates, `SHARD_VARIANTS` if per-material inertia is wanted.
+
+---
+
 ## 5d aesthetic calls (R1–R5) — parked for a future look pass (2026-08-20)
 
 **Parked at the user's direction.**  The 5d gauntlet's ledger raised five
