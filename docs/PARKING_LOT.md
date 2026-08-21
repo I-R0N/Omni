@@ -1212,3 +1212,31 @@ the compositor, the cap, the tier scaling and the tests all carry over.
 **Related knob already noted in the map-graph entry's open questions:**
 whether the regional material composition also drifts with depth — if it
 does, depth-darkness and depth-composition should read the same coordinate.
+
+---
+
+## Two device-quantified perf items for the next perf session (2026-08-21)
+
+Surfaced by the A9 device captures (`docs/GAUNTLET_LIGHTING_LOG.md`) while
+proving the lighting layer innocent — the light/fog columns read ≤ 0.38 ms
+in every degraded window, and these two owned the frames instead.  Both are
+pre-existing and PROGRESSIVE with entity count, which is why long sessions
+on debris-heavy maps degrade: 59 fps at ~2 k entities → ~37 fps at 4–5 k on
+a dpr-2 phone.
+
+- **The sim wall at ~5 k entities.**  physics + collisions reach ~55 ms per
+  frame at ~5.2 k entities on device (avg physics 2.60 ms, collisions
+  1.85 ms over the window).  This is the parked O(k²) shard-pair shape the
+  5c harness's `asteroid-6k` scene characterizes; the device numbers say it
+  is the binding constraint on real hardware, ahead of anything render-side.
+- **Density-tint cache thrash at ~4 k glass entities.**  The 256-entry tint
+  cache evicts before reuse: 228 misses/s sustained, one frame building 81
+  tints for 5 ms, render average roughly doubling in the window.  Candidate
+  fixes when picked up: size the cache to the live population, key it
+  coarser (fewer distinct tiers on screen), or build tints amortised like
+  the static-tile stamp budget.
+
+Also noted for the same session: the planned desktop-browser framerate
+investigation (user report, 2026-08-16) — the PerfRecorder now carries
+light/fog columns and a self-describing `set` line, so a desktop capture
+will attribute correctly out of the box.

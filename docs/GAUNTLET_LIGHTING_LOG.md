@@ -3083,3 +3083,73 @@ ticking while every capture ever taken reports the feature as free.
 ### Gate
 
 `npm run typecheck`, `npm run build`, `npm test` — **137 passed**.
+
+---
+
+## A9 — the device numbers: the budget is met with 5× headroom
+
+Five PerfRecorder captures from real hardware (440×756 @ dpr 2, Glass
+Field, difficulty 3 — the lighting's worst-case map), taken 2026-08-21 on
+the A8 build, one configuration per capture.  These are the numbers the
+whole gauntlet was provisionally quoting container deltas about; they
+supersede every container LEVEL in the entries above.
+
+### The lighting slice, per configuration
+
+| configuration | light avg | light peak | fog avg | fog peak | lights avg |
+|---|---|---|---|---|---|
+| legacy (layer off) | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
+| unified, shipped defaults | 0.09 | 0.35 | 0.00 | 0.00 | 5.97 |
+| + fog `dark` | 0.09 | 0.27 | 0.01 | 0.07 | 5.52 |
+| + fog `memory` | 0.13 | 0.38 | 0.01 | 0.05 | 5.59 |
+| + emit shadows `std` (fog off) | 0.09 | 0.23 | 0.00 | 0.00 | 5.05 |
+
+(ms, of the render pass.  `lights avg` counts every halo DRAWN, fading
+slots included — the choose budget at `low` is player + 3, and ~3 more
+mid-fade is the A5 anti-pop fade's steady state.)
+
+Readings:
+
+- **The A0 budget (2.0 ms) is met with ~5× headroom.**  The whole stack —
+  shadows, refraction, caustics, emission, the beam, the fog compositor —
+  never exceeded 0.38 ms in any frame of any capture, under 1% of a 60 Hz
+  frame.
+- **The unified layer replaced the legacy glow for net ≈ zero.**  Render
+  averaged 2.05 ms under unified against 2.19 ms under legacy in the two
+  comparable captures — A4b's deletion of the per-tile proximity bloom
+  paid for the new layer.
+- **Frame statistics under the shipped config are equal-or-better than
+  legacy**: 59 fps median both; 5%-low 48 vs 45; ≥55 fps 91% vs 88%.
+- **The two features shipped OFF on cost grounds measure FREE on
+  hardware.**  Emit shadows at `std` and the three-layer memory fog were
+  both container-expensive and both vanish on a phone GPU (the container's
+  software rasterizer pays per-pixel for what real compositors do in
+  hardware — its levels were never to be trusted, and now the same lesson
+  is measured).  Their defaults are now DESIGN calls, not perf calls: the
+  ledger for flipping either on is how the game should look, and the fog
+  additionally waits on the universe-map depth work (A7b).
+
+### What the captures actually caught (not lighting)
+
+The five FPS averages — 59, 59, 48, 36, 39 — track ENTITY COUNT, not
+toggles: the captures ran progressively deeper into one session (peak
+2 092 → 2 580 → 3 415 → 4 072 → 5 327 entities as the waves layered
+debris), and every worst frame in the three degraded captures is 24–57 ms
+of SIM with the light column at ≤ 0.30.  Two concrete pre-existing items,
+now quantified on device for the first time:
+
+- **The sim wall**: physics + collisions reach ~55 ms/frame at ~5.2 k
+  entities (the parked O(k²) shard-pair shape, `perf/README.md`).
+- **Tint-cache thrash**: at ~4 k glass entities the 256-entry density-tint
+  cache evicts before reuse — 228 misses/s sustained, one frame building
+  81 tints for 5 ms.
+
+Both belong to the planned desktop/perf session, and both were invisible
+until the light column existed to EXONERATE the lighting — a capture that
+only said "36 fps" would have read as the fog's fault.
+
+### Method note for future captures
+
+A slice timer (`light`, `fog`) is valid at any load — that is why the
+pipeline measures slices.  FPS rows are only comparable between captures
+taken at similar game states; captures 3–5 are not an FPS A/B against 1–2.
