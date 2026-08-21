@@ -3148,8 +3148,37 @@ Both belong to the planned desktop/perf session, and both were invisible
 until the light column existed to EXONERATE the lighting — a capture that
 only said "36 fps" would have read as the fog's fault.
 
+### A sixth capture: `radial`, and the tint storm it exposed
+
+A radial-flashlight capture from the deepest window of the session (5 586
+peak entities) put the last flashlight datum on the table: **radial costs
+about twice the beam in the light column — 0.20 ms avg / 0.40 ms peak,
+8.17 halos against the beam's ~5.5** — exactly the shape the beam cull
+predicts, and still ~5× under budget.
+
+The window itself ran at 25 fps, and neither number above owns any of it.
+Two mechanisms do, both now diagnosed:
+
+1. **The sim death spiral.**  Worst frames carry 117–126 ms of SIM at 5
+   substeps: a long frame pulls more substeps in, which lengthens the next
+   frame, until the substep cap is the only floor.  This is the ~5 k-entity
+   sim wall from the previous section at its terminal state.
+2. **The nebula-dust tint storm** — the diagnosis behind the "tint-cache
+   thrash" noted earlier, found by reading the code rather than guessing:
+   Glass Field has NO nebula terrain, yet the capture built 374 new sprite
+   tints in one frame (41 450 misses in 36 s).  The source is
+   `ENEMY_NEBULA_BURST` — every enemy death sprays cosmetic nebula dust
+   tinted to the enemy's body colour — and `NebulaSystem.equilibrateColors`
+   then drifts every shard's hue toward its neighbours continuously.  Every
+   hue step mints a NEW `(sprite, hex)` key against the 256-entry
+   tinted-sprite cache, and each miss builds a 128² canvas.  A heavy
+   late-run fight therefore feeds the cache an unbounded stream of
+   never-to-repeat keys — it cannot converge by construction.  Cheapest
+   candidate fix, parked with the rest: QUANTISE the hex in the cache key
+   so equilibration steps land on reusable buckets.
+
 ### Method note for future captures
 
 A slice timer (`light`, `fog`) is valid at any load — that is why the
 pipeline measures slices.  FPS rows are only comparable between captures
-taken at similar game states; captures 3–5 are not an FPS A/B against 1–2.
+taken at similar game states; captures 3–6 are not an FPS A/B against 1–2.

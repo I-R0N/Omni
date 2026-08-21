@@ -1229,12 +1229,20 @@ a dpr-2 phone.
   1.85 ms over the window).  This is the parked O(k²) shard-pair shape the
   5c harness's `asteroid-6k` scene characterizes; the device numbers say it
   is the binding constraint on real hardware, ahead of anything render-side.
-- **Density-tint cache thrash at ~4 k glass entities.**  The 256-entry tint
-  cache evicts before reuse: 228 misses/s sustained, one frame building 81
-  tints for 5 ms, render average roughly doubling in the window.  Candidate
-  fixes when picked up: size the cache to the live population, key it
-  coarser (fewer distinct tiers on screen), or build tints amortised like
-  the static-tile stamp budget.
+- **Tinted-sprite cache thrash — ROOT CAUSE FOUND (radial capture,
+  2026-08-21).**  Not population per se: `ENEMY_NEBULA_BURST` sprays
+  cosmetic nebula dust tinted to each dead enemy's colour, and
+  `NebulaSystem.equilibrateColors` drifts every shard hue toward its
+  neighbours continuously — so every hue step mints a NEW `(sprite, hex)`
+  key against the 256-entry `getTintedSprite` cache, each miss building a
+  128² canvas.  The key stream never repeats by construction; the cache
+  cannot converge.  Measured: 374 new tints in ONE frame, 41 450 misses in
+  36 s, 12 ms peak, during a heavy late-run fight on a map with NO nebula
+  terrain.  Candidate fixes, cheapest first: QUANTISE the hex in the cache
+  key so equilibration steps land on reusable buckets (visual granularity
+  cost is a few colour steps); skip equilibration for single-hex dust;
+  cap the dust population.  Quantising the key is likely a one-line fix
+  with a measurable win — verify with the PerfRecorder tint line.
 
 Also noted for the same session: the planned desktop-browser framerate
 investigation (user report, 2026-08-16) — the PerfRecorder now carries
