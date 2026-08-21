@@ -96,7 +96,12 @@ Two things worth knowing:
 | `nebulaspin.spec.ts` | 3 | **A starboard pass spins a nebula shard clockwise.** The wake swirl used to sign each shard's rotation by id parity, so a pass had no consistent handedness (user report). The sign is now the DBG cycle Visual ▸ "Neb spin": `physical` (default — the ship's velocity crossed with the ship→shard offset; starboard → clockwise in this y-down world), `inverted` (the A/B), `random` (the old parity vortices, kept as the control and pinned as parity-not-geometry). Driven through the real `applyNebulaPlayerPull`. Sign verified non-vacuous: flipping the cross product fails both directional tests. Proper rotational mechanics are parked (PARKING_LOT). |
 | `maps.spec.ts` | 4 | Map composition after `MAP_POPULATION` became the authority: per-variant population bands measured before and after the move, plus Seven Rings asserted exactly (its geometry is deterministic) and its ring ORDER by median radius. |
 
-**222 tests.** All but `viewports.spec.ts` run at **390×844** — the phone
+**222 tests.** CI runs them in two scopes (user call): every PR push gets the
+SMOKE — `boot.spec.ts` + `loop.spec.ts` — and the FULL suite runs at the merge
+seams (pushes to `main` / `claude/plan-completion`, PRs into `main`, the
+`full-tests` PR label, manual dispatch). Locally the same split applies: the
+touched suites per commit, the full run before a PR is called ready.
+ All but `viewports.spec.ts` run at **390×844** — the phone
 this game is played on, and the size every layout assertion is written
 against. `viewports.spec.ts` sets its own viewport per describe block and
 covers six sizes plus a mid-session resize (roadmap 5d). 390×844 remains the

@@ -1389,10 +1389,24 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     result, so `npm test` is one command from a clean clone — but it
     means the browser must be present: `npx playwright install chromium`
     once. See `tests/README.md` for the suite map and the harness rules.
-- **The same three gates run in CI on EVERY pull request, and they are the
-  LAST STEP BEFORE A MERGE** — `.github/workflows/pr-checks.yml`, job
-  `validate`, in this order: typecheck → build → install the Playwright
-  browser → test.  The browser download is CACHED, keyed on the resolved
+- **CI runs the gates in TWO SCOPES** (user call, 2026-08-21 — the full
+  suite costs ~12 minutes and was running on every push of every PR) —
+  `.github/workflows/pr-checks.yml`, job `validate`, in this order:
+  typecheck → build → install the Playwright browser → test:
+  - **SMOKE, on every PR push**: typecheck + build + the boot/loop canary
+    suites (~3 minutes end to end).  A type error, a broken bundle, or a
+    broken core loop still blocks every merge.
+  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
+    `claude/plan-completion` (immediately after a merge lands), on PRs
+    whose BASE is `main`, on any PR carrying the **`full-tests` label**
+    (the opt-in for pre-merge full validation), and on manual dispatch.
+  The check keeps ONE name (`typecheck · build · test`) in both scopes, so
+  branch protection points at one required check.  The honest trade: a
+  regression outside the smoke surfaces at the merge point rather than per
+  push — label the PR `full-tests` when it wants the whole net first.
+  LOCAL practice moves the same way: per-commit, run typecheck + build +
+  the suites the change touches; run the FULL suite before calling a PR
+  ready to merge (and after a base sync).  The browser download is CACHED, keyed on the resolved
   `@playwright/test` version plus the runner OS; on a cache hit the
   workflow installs only the apt system libraries (`install-deps`),
   because a restored browser with no libraries cannot launch.  A green
@@ -2511,10 +2525,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
-  a merge.**  Run the same three commands locally first (`npm run
-  typecheck`, `npm run build`, `npm test` — §7); merge only once the CI
-  run on the PR's CURRENT head is green.  Never merge past a pending or
-  failing `typecheck · build · test`.  The other two workflows still gate
+  a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
+  merge seams and on the `full-tests` label (§7).  Locally: typecheck +
+  build + the touched suites per commit, the FULL `npm test` before
+  calling a PR ready to merge.  Never merge past a pending or failing
+  `typecheck · build · test`.  The other two workflows still gate
   nothing — a preview build or a standalone release is not validation.
 
 ---
