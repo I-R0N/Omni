@@ -621,7 +621,32 @@ export class RenderSystem {
    * canvas.  Quality cost is minimal because the blit downscales
    * either way.
    */
+  /** Quantise a '#rrggbb' tint to 16 levels per channel (17-step buckets).
+   *
+   *  THE TINT STORM FIX (device captures, 2026-08-21): enemy deaths spray
+   *  nebula dust tinted to the enemy's colour, and equilibrateColors then
+   *  drifts every shard hue toward its neighbours CONTINUOUSLY — so with
+   *  exact keys the cache is fed a never-repeating key stream and cannot
+   *  converge (measured: 497 new 128² canvases in ONE frame, 120k misses
+   *  in a 108s capture, on a map with no nebula terrain).  Bucketing the
+   *  channels makes equilibration steps land on reusable entries; a
+   *  ~6.7%-per-channel step is invisible on a soft translucent cloud
+   *  sprite.  Anything that is not '#rrggbb' passes through untouched.
+   */
+  quantizeTintHex(hex: string): string {
+      if (hex.length !== 7 || hex.charCodeAt(0) !== 35) return hex;
+      const v = parseInt(hex.slice(1), 16);
+      if (Number.isNaN(v)) return hex;
+      const q = (c: number) => Math.min(255, Math.round(c / 17) * 17);
+      const r = q(v >> 16), g = q((v >> 8) & 0xff), b = q(v & 0xff);
+      return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+  }
+
   getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
+      // Quantised BEFORE the key is built, and the quantised value is also
+      // what gets painted — key and pixels must agree or two callers in one
+      // bucket would share a canvas painted for only one of them.
+      hex = this.quantizeTintHex(hex);
       const key = `${src}|${hex}`;
       const cached = this._tintedSprites.get(key);
       if (cached) {

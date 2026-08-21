@@ -2405,6 +2405,53 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
+  test('the tint cache buckets its keys — equilibration cannot storm it', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    // THE TINT STORM (device captures, A9b): enemy-death nebula dust
+    // equilibrates its hue continuously, so exact (sprite, hex) keys form a
+    // never-repeating stream and the 256-entry cache rebuilds a 128px
+    // canvas per shard per hue step — 497 in one measured frame.  The fix
+    // quantises the hex to 17-step buckets at BOTH key seams.  This pins
+    // the behaviour, not the speed: two hexes inside one bucket must share
+    // one canvas, and the second lookup must not count a miss.
+    const r = await engine(page, async (e) => {
+      const rs = e.renderer;
+      const src = e.player.sprite;
+      // Wait until the sprite is genuinely loaded — getTintedSprite
+      // returns null (without counting a miss) before that.
+      for (let i = 0; i < 120 && rs.getTintedSprite(src, '#969696') === null; i++) {
+        await new Promise(res => requestAnimationFrame(() => res(null)));
+      }
+      const a = rs.getTintedSprite(src, '#969696');   // 150 -> bucket 9
+      const missesAfterA = rs.lastTintMisses;
+      const b = rs.getTintedSprite(src, '#9b9b9b');   // 155 -> bucket 9
+      const missesAfterB = rs.lastTintMisses;
+      const c = rs.getTintedSprite(src, '#c8c8c8');   // 200 -> bucket 12
+      return {
+        loaded: a !== null,
+        sameBucketShares: a !== null && a === b,
+        secondCostNoMiss: missesAfterB === missesAfterA,
+        differentBucketDiffers: c !== a,
+        // The pure quantiser: format preserved, idempotent, and non-hex
+        // inputs pass through untouched.
+        q1: rs.quantizeTintHex('#a1b2c3'),
+        q2: rs.quantizeTintHex(rs.quantizeTintHex('#a1b2c3')),
+        passthrough: rs.quantizeTintHex('rgba(1,2,3,0.5)'),
+      };
+    });
+
+    expect(r.loaded).toBe(true);
+    expect(r.sameBucketShares).toBe(true);
+    expect(r.secondCostNoMiss).toBe(true);
+    expect(r.differentBucketDiffers).toBe(true);
+    expect(r.q1).toMatch(/^#[0-9a-f]{6}$/);
+    expect(r.q2).toBe(r.q1);
+    expect(r.passthrough).toBe('rgba(1,2,3,0.5)');
+    watch.assertClean();
+  });
+
   test('the radius-correct walk out-reports the fixed 3x3 walk at light radii', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');

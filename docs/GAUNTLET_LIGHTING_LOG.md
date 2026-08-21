@@ -3196,3 +3196,42 @@ the sim wall reached 184 ms peak at ~6 k entities.
 A slice timer (`light`, `fog`) is valid at any load — that is why the
 pipeline measures slices.  FPS rows are only comparable between captures
 taken at similar game states; captures 3–6 are not an FPS A/B against 1–2.
+
+---
+
+## A10 — the tint storm fixed: bucket the key
+
+The A9b diagnosis made the fix obvious, and it is as small as promised:
+`RenderSystem.quantizeTintHex` rounds a `#rrggbb` tint to 16 levels per
+channel (17-step buckets), and `getTintedSprite` quantises BEFORE building
+its key — with the quantised value also being what gets painted, since key
+and pixels must agree or two callers in one bucket would share a canvas
+painted for only one of them.  The one other place that constructs a store
+key — the nebula-shard fast path's cached `nebulaTintedKey` — applies the
+same quantisation, or the fast path would become a guaranteed miss against
+the bucketed store.
+
+Why this works: the storm was equilibration feeding the cache a
+never-repeating hue stream — every drift step a new key, 497 fresh 128²
+canvases in one measured frame.  Bucketed, a drifting hue crosses a
+handful of buckets instead of minting hundreds of keys, and the live
+working set (paths between a few anchor colours) fits a 256-entry LRU.
+A ~6.7%-per-channel step is invisible on a soft translucent cloud sprite;
+anything not `#rrggbb` passes through untouched.
+
+Pinned by a merge-gate test (behaviour, not milliseconds): two hexes
+inside one bucket share ONE canvas and the second lookup counts no miss;
+different buckets differ; the quantiser is idempotent, format-preserving,
+and passes non-hex strings through.  The definitive before/after is a
+device capture's tint line — the A9c numbers (1 119 misses/s, 15 ms peak)
+are the baseline to beat.
+
+Also this entry: the ~5 k sim wall's parking-lot item now carries the
+user's design direction — GRAVITY COLLAPSE, shrinking k with a mechanic
+(threshold-triggered rapid collapse of dense shard fields into tile
+knots, riding the existing merge/TILE_SNAP/mass-conservation pipeline)
+rather than only making k cheaper.
+
+### Gate
+
+`npm run typecheck`, `npm run build`, `npm test` — **138 passed**.

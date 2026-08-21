@@ -1226,11 +1226,34 @@ a dpr-2 phone.
 
 - **The sim wall at ~5 k entities.**  physics + collisions reach ~55 ms per
   frame at ~5.2 k entities on device (avg physics 2.60 ms, collisions
-  1.85 ms over the window).  This is the parked O(k²) shard-pair shape the
+  1.85 ms over the window; a later capture reached 184 ms peak at ~6 k and
+  the substep death spiral).  This is the parked O(k²) shard-pair shape the
   5c harness's `asteroid-6k` scene characterizes; the device numbers say it
   is the binding constraint on real hardware, ahead of anything render-side.
-- **Tinted-sprite cache thrash — ROOT CAUSE FOUND (radial capture,
-  2026-08-21).**  Not population per se: `ENEMY_NEBULA_BURST` sprays
+
+  **Design direction to investigate first (user, 2026-08-21): GRAVITY
+  COLLAPSE.**  Rather than only making k cheaper, SHRINK k with a
+  mechanic: when free shards in a large space exceed a count/density
+  threshold, rapidly collapse the cluster into a knot of TILES — a visible
+  gravitational infall (pull-in, then a condensation burst) rather than a
+  cleanup.  The pieces mostly exist: the merge broadphase already finds
+  dense clusters, `TILE_SNAP` already turns merged shards into hex tiles,
+  and `composeEntities`/`mergeCount` conserve mass — this would be a
+  faster, threshold-triggered, area-scoped version of the same pipeline
+  with a deliberate feel (LOCAL_MERGE_CONSTANTS is the existing
+  density-reads-merge-rate seam to build on).  Static tiles leave the
+  dynamic broadphase entirely, so every collapse directly buys back the
+  O(k²) term while READING as physics instead of as despawning.  Tuning
+  questions when picked up: the threshold (count vs local density), the
+  collapse speed (fast enough to matter, slow enough to watch), and
+  whether deep-space collapses should seed new minable clusters (ties into
+  the area-composition entry's regional identity).
+- **Tinted-sprite cache thrash — FIXED (same day): the cache now
+  quantises its hex key to 17-step buckets** (`RenderSystem.
+  quantizeTintHex`, applied at both key seams; pinned by the
+  lighting-suite tint-bucket test).  Kept here for the record of the
+  mechanism, since equilibrating hues defeating an exact-key cache is a
+  shape that could recur elsewhere:  Not population per se: `ENEMY_NEBULA_BURST` sprays
   cosmetic nebula dust tinted to each dead enemy's colour, and
   `NebulaSystem.equilibrateColors` drifts every shard hue toward its
   neighbours continuously — so every hue step mints a NEW `(sprite, hex)`
