@@ -49,6 +49,17 @@ async function collectSalvage(page: any, n: number) {
           // the second half leaves the drop live for the magnet to collect a
           // second time, paying twice.
           drop.active = false;
+          // ...and mirror the compaction sweep too: pull it back out of the
+          // activeDrops CACHE.  This loop runs synchronously inside one sim
+          // step, so the sweep never runs between iterations and the cache
+          // grows by one per spawn — and spawnSalvageDrop silently no-ops at
+          // MAX_ACTIVE_DROPS, which is exactly the 100 the penalty test
+          // spawns.  One stray drop already in the world (any enemy death
+          // sprays salvage) tips the last spawn over the cap and the balance
+          // comes up one drop short — a CI flake that took months to roll.
+          if (e.activeDrops[e.activeDrops.length - 1] === drop) {
+            e.activeDrops.pop();
+          }
         }
       }
       return { credits: e.credits, earned: e.runCreditsEarned };

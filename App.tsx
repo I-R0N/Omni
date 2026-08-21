@@ -295,6 +295,80 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
   };
 
+  const handleCycleLighting = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLighting();
+  };
+
+  const handleCycleLightingTier = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightingTier();
+  };
+
+  const handleToggleShardShadows = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardShadows();
+  };
+
+  const handleToggleRefraction = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleRefraction();
+  };
+
+  const handleCycleLightBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightBrightness();
+  };
+
+  const handleCycleEmitBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitBrightness();
+  };
+
+  const handleCycleTintMix = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleTintMix();
+  };
+
+  const handleCycleLightColor = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightColor();
+  };
+
+  const handleCycleFog = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFog();
+  };
+
+  const handleCycleFlashlight = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFlashlight();
+  };
+
+  const handleCycleCausticFade = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleCausticFade();
+  };
+
+  const handleCycleEmitFade = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitFade();
+  };
+
+  const handleCycleEmitShadowTier = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitShadowTier();
+  };
+
+  const handleToggleEmitShadows = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleEmitShadows();
+  };
+
+  const handleToggleEmissive = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleEmissive();
+  };
+  const handleToggleWorldLights = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleWorldLights();
+  };
+  const handleToggleDepthAmbient = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleDepthAmbient();
+  };
+
+  const handleCycleRefractBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleRefractBrightness();
+  };
+
+  const handleCycleShadowSoftness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleShadowSoftness();
+  };
+
   const handleToggleRumble = () => {
       if (engineRef.current) engineRef.current.dbg.toggleRumble();
   };
@@ -347,17 +421,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePlasticGlowBrightness();
   };
 
-  const handleCycleMetalGlowBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowBrightness();
-  };
 
-  const handleCycleGlassGlowColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleGlassGlowColor();
-  };
 
-  const handleCycleMetalGlowColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowColor();
-  };
 
   const handleCycleNebulaPalette = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaPalette();
@@ -640,6 +705,25 @@ const App: React.FC = () => {
         onToggleChevronMode={handleToggleChevronMode}
         onToggleJoystickDebug={handleToggleJoystickDebug}
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
+        onCycleLighting={handleCycleLighting}
+        onCycleLightingTier={handleCycleLightingTier}
+        onToggleShardShadows={handleToggleShardShadows}
+        onToggleRefraction={handleToggleRefraction}
+        onCycleRefractBrightness={handleCycleRefractBrightness}
+        onCycleLightBrightness={handleCycleLightBrightness}
+        onToggleEmissive={handleToggleEmissive}
+        onToggleWorldLights={handleToggleWorldLights}
+        onToggleDepthAmbient={handleToggleDepthAmbient}
+        onCycleEmitBrightness={handleCycleEmitBrightness}
+        onToggleEmitShadows={handleToggleEmitShadows}
+        onCycleEmitShadowTier={handleCycleEmitShadowTier}
+        onCycleEmitFade={handleCycleEmitFade}
+        onCycleCausticFade={handleCycleCausticFade}
+        onCycleFlashlight={handleCycleFlashlight}
+        onCycleFog={handleCycleFog}
+        onCycleLightColor={handleCycleLightColor}
+        onCycleTintMix={handleCycleTintMix}
+        onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
@@ -653,9 +737,6 @@ const App: React.FC = () => {
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticShardPalette={handleCyclePlasticShardPalette}
         onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
-        onCycleMetalGlowBrightness={handleCycleMetalGlowBrightness}
-        onCycleGlassGlowColor={handleCycleGlassGlowColor}
-        onCycleMetalGlowColor={handleCycleMetalGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}

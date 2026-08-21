@@ -292,23 +292,13 @@ export function cyclePlasticGlowBrightness(): number {
   return activePlasticGlowBrightnessIndex;
 }
 
-export function getActiveMetalGlowBrightness(): number {
-  return MATERIAL_GLOW_BRIGHTNESS_CYCLE[activeMetalGlowBrightnessIndex];
-}
-export function getActiveMetalGlowBrightnessName(): string {
-  return `${getActiveMetalGlowBrightness()}x`;
-}
-export function cycleMetalGlowBrightness(): number {
-  activeMetalGlowBrightnessIndex =
-    (activeMetalGlowBrightnessIndex + 1) % MATERIAL_GLOW_BRIGHTNESS_CYCLE.length;
-  return activeMetalGlowBrightnessIndex;
-}
 
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
 // The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
 // .glow.color (#a5f3fc); the cycle adds warm + diverse families so we
-// can A/B the look.  RenderSystem reads the active hex through
-// getActiveGlassGlowColor() (range + peakAlpha stay with the variant).
+// can A/B the look.  The glass GLOW itself is gone — the unified light
+// layer replaced it — so nothing reads this table for a tile's colour any
+// more; it survives for the `nebulaPalette` companion below.
 //
 // Each entry ALSO bundles a `nebulaPalette` — when the DBG 'Neb follows
 // glow' toggle is on, getActiveNebulaPalette() returns this companion
@@ -336,24 +326,12 @@ export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
   { name: 'white',   hex: '#f8fafc', nebulaPalette: { hueMin: 0,   hueRange: 360, saturation: 0,  lightness: 90 } },
 ] as const;
 
-let activeGlassGlowIndex = 8; // default 'sky' — covers glass-tile glow + glass dust
 
-export function getActiveGlassGlowColor(): string {
-  return GLASS_GLOW_COLORS[activeGlassGlowIndex].hex;
-}
-export function getActiveGlassGlowColorName(): string {
-  return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
-}
-export function cycleGlassGlowColor(): number {
-  activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
-  return activeGlassGlowIndex;
-}
 
 // ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
-// Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
-// the palette so the two tile glows can be A/B'd against a shared
-// vocabulary.  RenderSystem reads the live hex via
-// getActiveMetalGlowColor() in the metal-tile glow branch.
+// REMOVED with the metal-tile contact glow it tuned (the unified light
+// layer replaced that glow).  The note below is kept because the default it
+// argues about is still baked into SHARD_VARIANTS.
 //
 // DEFAULT CHANGED index 4 'magenta' → 0 'cyan' (material-palette-residual,
 // decision #30 → gauntlet step 5 G7).  Magenta was never chosen: it was the
@@ -363,18 +341,7 @@ export function cycleGlassGlowColor(): number {
 // got close.  Cyan is the same cold family as the body, and it is NOT the
 // glass glow's 'sky' (index 8), so the two tile glows still read apart:
 // glass glows a soft sky, metal an icy cyan.
-let activeMetalGlowIndex = 0; // 'cyan' — the cold family the metal body lives in
 
-export function getActiveMetalGlowColor(): string {
-  return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
-}
-export function getActiveMetalGlowColorName(): string {
-  return GLASS_GLOW_COLORS[activeMetalGlowIndex].name;
-}
-export function cycleMetalGlowColor(): number {
-  activeMetalGlowIndex = (activeMetalGlowIndex + 1) % GLASS_GLOW_COLORS.length;
-  return activeMetalGlowIndex;
-}
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
 // Independent cycle into the same GLASS_GLOW_COLORS list, governing
@@ -1374,6 +1341,803 @@ export function effectiveDpr(): number {
 export function cycleRenderScale(): number {
   activeRenderScaleIndex = (activeRenderScaleIndex + 1) % RENDER_SCALE_CYCLE.length;
   return RENDER_SCALE_CYCLE[activeRenderScaleIndex];
+}
+
+// ─── DBG: unified tile lighting ──────────────────────────────────────────────
+//
+// The mode toggle for the lighting gauntlet (docs/GAUNTLET_LIGHTING_LOG.md).
+//
+// Index 0 is `'legacy'`, and it is named for what it IS rather than "off":
+// Omni is not a game without lighting.  It ships THREE hand-rolled lighting
+// approximations that have drifted apart — the player-distance proximity
+// bloom on rock / plastic / indestructible tiles, the repel-impulse glow on
+// glass and metal, and the glass edge tint on its own hardcoded 120 range.
+// `'legacy'` is those three, unchanged, and it is the default: the unified
+// system has to earn its place against them, not be assumed to replace them.
+//
+//   legacy  — the three shipped models, untouched.  lightingMs reads 0.
+//   debug   — the light layer is built and blitted, but paints a flat grey.
+//             Proves the canvas, its sizing, the blit and the
+//             imageSmoothingEnabled restore, with no lighting maths in the
+//             way of reading the cost.
+//   unified — the real shadow-cast lighting.
+export const LIGHTING_CYCLE = ['legacy', 'debug', 'unified'] as const;
+export type LightingMode = typeof LIGHTING_CYCLE[number];
+/** SHIPPED DEFAULT: `unified` (user call, after device confirmation).
+ *
+ *  `legacy` was the default while the layer was being built, because a stage
+ *  that cannot be switched back off is not a stage.  That property has not
+ *  gone anywhere — `legacy` still allocates no canvas, draws nothing and
+ *  leaves `lightingMs` at 0, and `tests/lighting.spec.ts` pins exactly that.
+ *  It is simply no longer the thing you get without asking. */
+let activeLightingIndex = LIGHTING_CYCLE.indexOf('unified');
+export function getActiveLightingMode(): LightingMode { return LIGHTING_CYCLE[activeLightingIndex]; }
+export function cycleLightingMode(): LightingMode {
+  activeLightingIndex = (activeLightingIndex + 1) % LIGHTING_CYCLE.length;
+  return LIGHTING_CYCLE[activeLightingIndex];
+}
+/** Jump straight to a mode.  Exists for the harness and the tests, which
+ *  need to A/B two specific modes rather than walk the cycle. */
+export function setActiveLightingMode(m: LightingMode): void {
+  const i = LIGHTING_CYCLE.indexOf(m);
+  if (i >= 0) activeLightingIndex = i;
+}
+
+/** DBG: do MOBILE SHARDS cast shadows, as well as static tiles?
+ *
+ *  Its own switch rather than part of LIGHTING_CYCLE, because the question
+ *  it answers is independent of "is the unified model better than the three
+ *  legacy ones" and wants to be A/B'd on its own.  Only has any effect while
+ *  the mode is 'unified'.
+ *
+ *  ON by default: shards are the same shard family as tiles and roughly the
+ *  same size (measured radii 43.6 median against a tile's 22), so excluding
+ *  them makes debris read as transparent to a light that the rock it broke
+ *  off is not.  The reason to turn it off is cost, and the reason to keep
+ *  the switch is that cost is exactly what it is for. */
+let shardShadowsEnabled = true;
+export function getShardShadowsEnabled(): boolean { return shardShadowsEnabled; }
+export function toggleShardShadows(): boolean {
+  shardShadowsEnabled = !shardShadowsEnabled;
+  return shardShadowsEnabled;
+}
+
+/** DBG: REFRACTION through translucent bodies — a prototype, OFF by default.
+ *
+ *  The shipped translucency (`SHARD_VARIANTS[v].transmit`) sends light
+ *  STRAIGHT THROUGH glass at reduced brightness.  That is the right
+ *  first-order model for a parallel-faced pane — a slab offsets a ray
+ *  laterally but does not deviate it, and a regular hexagon has three pairs
+ *  of parallel faces — but it says nothing about a wedge-shaped shard, which
+ *  is a prism.
+ *
+ *  ON, the transmitted light is instead BENT: each exit face refracts by
+ *  Snell's law and emits an additive cone in the deviated direction, and the
+ *  straight-through path is withheld in full so the energy is MOVED rather
+ *  than added.  That makes the toggle a real A/B — off is a dim shadow, on
+ *  is a dark shadow with a bright band beside it — instead of stacking one
+ *  effect on the other and reading as "glass got brighter".
+ *
+ *  SHIPPED ON (user call, after device testing).  It was off while the open
+ *  question — is a caustic legible at all on a light layer rendered at a
+ *  third of screen resolution — was still open; the device answered yes at
+ *  the brightnesses the cycle now reaches, so the prototype is the default
+ *  and the toggle is what turns it off. */
+/** DBG: do METAL and GLASS RE-EMIT the light that falls on them?  SHIPPED ON
+ *  (user call, after device testing), and the sibling of the refraction
+ *  toggle.
+ *
+ *  ON, every lit body whose variant carries `emits` becomes a SECOND light
+ *  at its own position — dimmer by that fraction, uniform in every
+ *  direction, and falling off the same way the player's does.  It replaces
+ *  the legacy repel-impulse glow those two materials used to carry, which
+ *  lit up on CONTACT rather than on light, so a metal plate across the room
+ *  stayed dead no matter how brightly it was lit.
+ *
+ *  What it deliberately does NOT do is cast shadows of its own.  A second
+ *  light needs a second occluder collection, and the occluder pool is
+ *  shared and consumed per light (see `collectOccluders`) — so shadowing N
+ *  emitters costs N full collections, on a budget that is already the
+ *  tightest thing in this system.  The emitters are dim and small; the
+ *  place that shows is a halo bleeding slightly through a wall. */
+let emissiveEnabled = true;
+export function getEmissiveEnabled(): boolean { return emissiveEnabled; }
+export function toggleEmissive(): boolean {
+  emissiveEnabled = !emissiveEnabled;
+  return emissiveEnabled;
+}
+
+/** DBG: how much of the light it receives a body re-emits, as a fraction —
+ *  the emissive sibling of "Refr bright".
+ *
+ *  It SCALES the variant's own `emits` against the 1/2 baseline those
+ *  variants are authored at, so the default is exactly what the table says
+ *  and a future variant that emits less than metal still emits less than
+ *  metal.  Clamped at 1 in the geometry: a body cannot radiate more light
+ *  than fell on it, which is the one physical claim this whole feature
+ *  rests on. */
+export const EMIT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
+  { name: '1/2',  frac: 0.5   },
+  { name: '2/3',  frac: 0.667 },
+  { name: '3/4',  frac: 0.75  },
+  { name: '1/1',  frac: 1     },
+  { name: '1/3',  frac: 0.333 },
+  { name: '1/4',  frac: 0.25  },
+  { name: '1/6',  frac: 0.167 },
+  { name: '1/10', frac: 0.1   },
+] as const;
+/** The fraction `SHARD_VARIANTS[*].emits` is authored against, so the cycle's
+ *  default is a no-op rather than a re-tuning. */
+export const EMIT_BASELINE = 0.5;
+let activeEmitBrightnessIndex = 0;
+export function getEmitBrightness(): number {
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].frac;
+}
+export function getEmitBrightnessName(): string {
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].name;
+}
+export function cycleEmitBrightness(): string {
+  activeEmitBrightnessIndex =
+    (activeEmitBrightnessIndex + 1) % EMIT_BRIGHTNESS_CYCLE.length;
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].name;
+}
+
+/** DBG: may the SECONDARY lights cast shadows of their own?  Off by default,
+ *  and off for a reason that is about cost rather than correctness.
+ *
+ *  Each emitter that shadows needs its OWN occluder collection — the pool is
+ *  shared and consumed per light — and its own compositing pass, which
+ *  cannot simply be drawn onto the accumulated layer: `destination-out`
+ *  would erase the light already there, not just the emitter's share.  So
+ *  the shadowing path composites each emitter into a scratch canvas and
+ *  blits the result, which is the honest way to do it and several times the
+ *  cost of the flat halo.
+ *
+ *  A true TERTIARY bounce — emitters lighting other emitters — is NOT what
+ *  this does, and is a different problem: it needs the emitters resolved in
+ *  dependency order and re-lit, where this pass reads every emitter's
+ *  brightness from the player's falloff alone. */
+let emitShadowsEnabled = false;
+export function getEmitShadowsEnabled(): boolean { return emitShadowsEnabled; }
+export function toggleEmitShadows(): boolean {
+  emitShadowsEnabled = !emitShadowsEnabled;
+  return emitShadowsEnabled;
+}
+
+/** DBG: HOW MUCH shadowing the secondary lights get, when they get any.
+ *
+ *  A COST LADDER for the toggle above, in the same shape as `LIGHTING_TIERS`
+ *  is for the primary light and for the same reason: the cost of a shadowing
+ *  emitter is almost entirely its own occluder collection, so the two knobs
+ *  that matter — how MANY emitters shadow, and how much geometry each of
+ *  them sees — move together rather than one at a time.  Measured on the
+ *  metal showcase at A5g: +1.3 ms at Low (3 emitters), +5.6 at Medium (7),
+ *  +12.6 ms at High (15).  That is what a rung below the default is for.
+ *
+ *  Past `maxEmitters` an emitter still LIGHTS, flatly — the tier degrades
+ *  the treatment, never the count, so dropping a rung dims no part of the
+ *  scene.  Cycling from the default goes DOWN first: the question asked of
+ *  this ladder is "can the cheap end still be seen", not "how expensive can
+ *  it get". */
+export const EMIT_SHADOW_TIERS: ReadonlyArray<{
+  name: string; maxEmitters: number; maxOccluders: number;
+}> = [
+  { name: 'std',  maxEmitters: 4, maxOccluders: 12 },
+  { name: 'lite', maxEmitters: 2, maxOccluders: 8  },
+  { name: 'min',  maxEmitters: 1, maxOccluders: 6  },
+  { name: 'more', maxEmitters: 6, maxOccluders: 12 },
+  { name: 'max',  maxEmitters: 8, maxOccluders: 16 },
+] as const;
+let activeEmitShadowTierIndex = 0;
+export function getEmitShadowTier(): { name: string; maxEmitters: number; maxOccluders: number } {
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex];
+}
+export function getEmitShadowTierName(): string {
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
+}
+export function cycleEmitShadowTier(): string {
+  activeEmitShadowTierIndex =
+    (activeEmitShadowTierIndex + 1) % EMIT_SHADOW_TIERS.length;
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
+}
+
+/** DBG: the player's light as a DIRECTIONAL BEAM — a flashlight — instead of
+ *  a radial glow.
+ *
+ *  The beam points along `player.rotation`, which is the AIM angle (the same
+ *  one shots travel along), so the light goes where the ship is looking and
+ *  needs no second control.  Everything the player's light does is masked by
+ *  it — falloff, shadows and caustics alike — while the secondary emitters
+ *  are not: a lit metal plate is its own light and radiates in every
+ *  direction, which is what makes a beam sweeping past one read as the beam
+ *  finding it.
+ *
+ *  `beam` (an 80-degree cone) is the DEFAULT (user call): the game reads as
+ *  flying a searchlight, and the radial glow is one click away.  `off` is
+ *  a zero-width beam rather than a special case: the player's light draws
+ *  nothing, so what is left on the layer is exactly the emitters — which
+ *  makes it a useful thing to look at rather than a way to disable the
+ *  feature (that is `Lighting: legacy`).
+ *
+ *  Half-angles, so `wide` is a 120-degree beam. */
+export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> = [
+  { name: 'radial', halfDeg: 180 },
+  // A HALF-CIRCLE.  Not a torch — everything ahead of the ship, nothing
+  // behind it — which is the shape a headlight has and a useful middle
+  // ground between the glow and a beam.
+  { name: 'half',   halfDeg: 90  },
+  { name: 'wide',   halfDeg: 60  },
+  { name: 'beam',   halfDeg: 40  },
+  { name: 'narrow', halfDeg: 22  },
+  { name: 'tight',  halfDeg: 12  },
+  // A 12-degree pencil.  At this width the soft edge (EDGE_DEG, 12) is as
+  // wide as the beam itself, so it reads as a spot with no hard boundary at
+  // all rather than as a narrower version of `tight`.
+  { name: 'pin',    halfDeg: 6   },
+  { name: 'off',    halfDeg: 0   },
+] as const;
+/** A6 — WORLD LIGHTS: the self-luminous movers (shots, the snitch) as
+ *  first-class lights on the unified layer.
+ *
+ *  These are not EMITTERS.  An emitter is a surface the player's light fell
+ *  on, so its brightness is `received x emits` and a beam gates it; a shot
+ *  glows because it is on fire, whether or not anything else lights it — no
+ *  `received` factor, no beam gate, and it exists outside the player light's
+ *  radius entirely.  That is why they are their own small pass rather than
+ *  rows in the emitter merge.
+ *
+ *  BUDGET: they spend what is left of the tier's `maxLights` after the
+ *  player and the emitters have drawn — the tier's number stays the whole
+ *  frame's light count, shared rather than added to.  In open space (where
+ *  shots actually fly) the emitters are few, so shots get the budget; deep
+ *  in a lit glass field they lose it, nearest-to-screen-centre first.
+ *
+ *  CULLED by the light's own disc against the layer rect BEFORE any budget
+ *  is spent — a shot two screens away costs one rectangle test.
+ *
+ *  Radii in WORLD units; alphas are multipliers on the shared falloff
+ *  gradient (so the brightness cycle scales these for free). */
+export const WORLD_LIGHTS = {
+  PROJECTILE_RADIUS: 110,
+  /** A charged / plasma shell is a bigger fire. */
+  CHARGED_MULT: 1.8,
+  PROJECTILE_ALPHA: 0.55,
+  /** The snitch is a comet — the one persistent world light. */
+  SNITCH_RADIUS: 150,
+  SNITCH_ALPHA: 0.7,
+} as const;
+/** A7 — DEPTH-SCOPED AMBIENT DARKNESS.  Each descent (GameEngine.stageIndex)
+ *  adds the tier's `ambientPerStage` of fog-dark, capped at
+ *  AMBIENT_DEPTH_CAP stages — so the hub and the surface look exactly as
+ *  they always did and darkness is a property of DEPTH, not a global mood.
+ *  It rides the fog compositor: the ambient level is folded into the fog's
+ *  dark fill (whichever of the two is darker wins), so it is cut by the
+ *  player's light, respects shadows, and darkens the minimap's memory veil
+ *  — all for free, and `off` restores the exact pre-A7 picture.
+ *
+ *  SHIPS OFF (user call, 2026-08-20).  The descent "depth" it keys on is
+ *  not yet a real place: today's post-boss rifts bounce between arenas that
+ *  all hang off the one Overworld, `stageIndex` is a linear counter rather
+ *  than a position in a world, and nothing persists — leave a "deep" arena
+ *  through the overworld portal and return, and the darkness is gone.  The
+ *  mechanism is built and tested; it switches on when the universe map
+ *  structure gives depth an address (see docs/PARKING_LOT.md, "Depth-scoped
+ *  darkness belongs to the universe map structure"). */
+export const AMBIENT_DEPTH_CAP = 4;
+let depthAmbientEnabled = false;
+export function toggleDepthAmbient(): boolean {
+  depthAmbientEnabled = !depthAmbientEnabled;
+  return depthAmbientEnabled;
+}
+export function getDepthAmbientEnabled(): boolean { return depthAmbientEnabled; }
+
+let worldLightsEnabled = true;
+export function toggleWorldLights(): boolean {
+  worldLightsEnabled = !worldLightsEnabled;
+  return worldLightsEnabled;
+}
+export function getWorldLightsEnabled(): boolean { return worldLightsEnabled; }
+
+/** FOG OF WAR — darkness the player's light cuts through.
+ *
+ *  The light layer already answers "what can I see": it is a lit shape with
+ *  shadows cut out of it, so using it as the fog's MASK gives
+ *  occlusion-aware fog for free — a tile's shadow stays dark, and a beam
+ *  sweeping a room opens exactly what it illuminates.  Nothing about the
+ *  geometry is computed twice.
+ *
+ *  TWO LAYERS or THREE.  `dim` and `dark` are the two-layer version: lit or
+ *  not.  `memory` is the traditional three: never seen (darkest), seen
+ *  before but not lit now (dimmed), and lit (clear).  The third layer needs
+ *  a memory of where the player has been, which is a per-map texture that
+ *  has to be reset on every map load — cheap (one texel per
+ *  `FOG.CELL` world units, so a 6000-unit map is 125x125) but it is state,
+ *  and state is the reason it is a separate rung rather than the default.
+ *
+ *  OFF is the default: this changes how the whole game reads, and which maps
+ *  want it is a design question rather than a rendering one. */
+export const FOG_CYCLE: ReadonlyArray<{
+  name: string; dark: number; explored: number; memory: boolean;
+}> = [
+  { name: 'off',    dark: 0,    explored: 0,    memory: false },
+  { name: 'dim',    dark: 0.55, explored: 0.55, memory: false },
+  { name: 'dark',   dark: 0.85, explored: 0.85, memory: false },
+  { name: 'memory', dark: 0.90, explored: 0.5,  memory: true  },
+] as const;
+let activeFogIndex = 0;
+export function getFog(): { name: string; dark: number; explored: number; memory: boolean } {
+  return FOG_CYCLE[activeFogIndex];
+}
+export function getFogName(): string { return FOG_CYCLE[activeFogIndex].name; }
+export function cycleFog(): string {
+  activeFogIndex = (activeFogIndex + 1) % FOG_CYCLE.length;
+  return FOG_CYCLE[activeFogIndex].name;
+}
+/** The player light's PEAK ALPHA, mirrored here for the fog.
+ *
+ *  It is authored in `render/lighting.ts` beside the rest of the light's
+ *  shape; the fog needs it to know how far to boost the light into a mask,
+ *  and importing the lighting module for one number would tie a compositing
+ *  pass to the geometry half.  `tests/lighting.spec.ts` pins the two
+ *  together so the mirror cannot drift. */
+export const PLAYER_LIGHT_PEAK = 0.34;
+
+export const FOG = {
+  /** The fog's own colour: BLACK.
+   *
+   *  The first attempt was a near-black blue (`4, 8, 18`) on the theory that
+   *  it would read as unlit space rather than as a wash — and it BRIGHTENED
+   *  the screen, because empty space in this game measures about 3 luminance
+   *  and that tint is 10.  Fog that lightens the dark parts of the frame is
+   *  worse than no fog.  Any colouring of the unlit world belongs to the
+   *  light, which is the thing that has a colour. */
+  COLOR: '0, 0, 0',
+  /** World units per texel of the EXPLORED memory.  48 makes a 6000-unit map
+   *  a 125x125 texture: small enough to stamp and blit every frame without
+   *  thinking about it, coarse enough that the remembered edge is soft. */
+  CELL: 48,
+  /** How much of the light's radius counts as EXPLORED as the player passes.
+   *  Under 1 because the rim of the light is where you can barely see. */
+  MEMORY_FRAC: 0.7,
+  /** A clear disc around the ship, in world units, whatever the light is
+   *  doing.  WITHOUT IT A NARROW BEAM FOGS THE PLAYER'S OWN SHIP — the beam
+   *  points away from it, so nothing lights the hull, and the ship
+   *  disappears into the dark it is holding the torch in. */
+  SELF_RADIUS: 70,
+  /** How far into that disc the clearing fades, as a fraction of it. */
+  SELF_FEATHER: 0.45,
+  /** The fog opens where the LIGHT is, and the light's own alpha peaks at
+   *  a third (PLAYER_LIGHT.PEAK) — so used raw it would only ever lift a
+   *  third of the fog, and dimming the light with the brightness cycle would
+   *  close the fog with it.  The mask is therefore BOOSTED by repeated
+   *  additive draws (each doubles the alpha) until its peak saturates; this
+   *  is the target it aims for and the cap on how many doublings it will
+   *  spend getting there. */
+  MASK_TARGET: 1.1,
+  MASK_MAX_DOUBLINGS: 5,
+} as const;
+
+/** DBG: how much of the MATERIAL's colour is in the light it passes on.
+ *
+ *  Light that goes through green glass comes out green, and a body lit by a
+ *  red torch cannot re-emit blue — both of which the layer got wrong in
+ *  opposite directions.  Transmitted light carried the LIGHT's colour with no
+ *  trace of the material, and an emitter carried the MATERIAL's colour with
+ *  no trace of what lit it.
+ *
+ *  One knob, two applications, each monotone with today's behaviour at an
+ *  end of the range:
+ *
+ *   - EMISSION and the refracted caustic take a blend `lerp(light, material,
+ *     mix)`.  0 is the light's own colour, 1 is the body's (what A5i
+ *     shipped).
+ *   - STRAIGHT-THROUGH transmission is tinted by MULTIPLYING the light
+ *     already in the umbra by `lerp(white, material, mix)` — 0 changes
+ *     nothing (what shipped), 1 is the full product.  It has to be a
+ *     multiply because that light is not drawn by the shadow pass; it is
+ *     what the pass chose not to erase.
+ *
+ *  A true product everywhere would be the physical answer and it reads too
+ *  dark: two saturated colours multiply toward black, and a light that goes
+ *  black on contact with coloured glass looks broken rather than physical.
+ *  So the default is a half-blend, which is a look call and lives in a cycle
+ *  like every other look call here. */
+/** With REFRACTION on, how much of a body's transmitted light goes straight
+ *  through rather than into the deviated caustic.
+ *
+ *  A5e's refraction prototype MOVED all of it into the cone — "the energy is
+ *  moved, not added" — which is right for a wedge and wrong for a pane, and
+ *  it had a consequence nobody asked for: with refraction on (the shipped
+ *  default) there is no straight-through light at all, so there is nothing
+ *  for the material tint to colour and the umbra behind glass is simply
+ *  dark.  Splitting it is both closer to a real slab and the difference
+ *  between a feature you can see and one you cannot. */
+export const TRANSMIT_STRAIGHT_FRAC = 0.5;
+
+export const TINT_MIX_CYCLE: ReadonlyArray<{ name: string; mix: number }> = [
+  // SHIPS OFF (user call, after device testing).  It is physically the right
+  // model and it does not earn its keep: the materials' colours sit close to
+  // the light's — glass indigo, metal steel-blue, both against a sky-blue
+  // lamp — so what it buys is subtle, and the straight-through path costs a
+  // fill per translucent group to buy it.  The knob stays because the effect
+  // is real and worth another look on a map with more colourful terrain.
+  { name: 'off',  mix: 0    },
+  { name: '1/4',  mix: 0.25 },
+  { name: '1/2',  mix: 0.5  },
+  { name: '3/4',  mix: 0.75 },
+  { name: 'full', mix: 1    },
+] as const;
+let activeTintMixIndex = 0;
+export function getTintMix(): number { return TINT_MIX_CYCLE[activeTintMixIndex].mix; }
+export function getTintMixName(): string { return TINT_MIX_CYCLE[activeTintMixIndex].name; }
+export function cycleTintMix(): string {
+  activeTintMixIndex = (activeTintMixIndex + 1) % TINT_MIX_CYCLE.length;
+  return TINT_MIX_CYCLE[activeTintMixIndex].name;
+}
+
+/** DBG: what COLOUR the player's light is.
+ *
+ *  `ship` is the engine-glow blue the layer has always used — chosen so the
+ *  light reads as coming FROM the ship rather than as a new system
+ *  announcing itself — and stays the default.  The rest exist because a
+ *  flashlight is a piece of equipment, and equipment has a character: a warm
+ *  tungsten beam and a cold blue-white one light the same terrain into two
+ *  different games.
+ *
+ *  The colour reaches everything the player's light does, including the
+ *  REFRACTED cone, which is right: light that passes through glass keeps the
+ *  colour it arrived with.  The secondary emitters are unaffected — they
+ *  radiate the colour of the BODY, not of what lit it, which is the
+ *  approximation A5i settled on. */
+export const LIGHT_COLOR_CYCLE: ReadonlyArray<{ name: string; rgb: string }> = [
+  { name: 'ship',   rgb: '125, 211, 252' },   // sky-300, the shipped light
+  { name: 'white',  rgb: '245, 245, 245' },
+  { name: 'warm',   rgb: '255, 214, 150' },   // tungsten
+  { name: 'amber',  rgb: '255, 176,  80' },
+  { name: 'green',  rgb: '150, 255, 170' },
+  { name: 'violet', rgb: '198, 160, 255' },
+  { name: 'red',    rgb: '255, 120, 110' },
+] as const;
+let activeLightColorIndex = 0;
+export function getLightColorRgb(): string {
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].rgb;
+}
+export function getLightColorName(): string {
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].name;
+}
+export function cycleLightColor(): string {
+  activeLightColorIndex = (activeLightColorIndex + 1) % LIGHT_COLOR_CYCLE.length;
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].name;
+}
+
+/** Beam shaping, all of it a look call rather than physics.
+ *
+ *  SPILL is why the ship is not standing in a void: a real flashlight is held
+ *  by someone who can still see their own hands, and a hard cut at the cone's
+ *  edge reads as a rendering error rather than as a torch.  It is the
+ *  fraction of the light left OUTSIDE the beam.
+ *
+ *  EDGE_DEG is the angular width of the soft edge, graded over PASSES erases
+ *  — the same construction as the shadow penumbra, for the same reason: a
+ *  hard angular edge sweeping across terrain is exactly the kind of moving
+ *  hard line this whole gauntlet has been removing. */
+export const FLASHLIGHT = {
+  SPILL: 0.14,
+  EDGE_DEG: 12,
+  PASSES: 3,
+  /** Extra bearing margin on the occluder cull, in degrees.  A body outside
+   *  the beam cannot shadow into it (a shadow runs radially outward), so
+   *  those bodies are skipped entirely — which is where a narrow beam gets
+   *  cheaper than the radial light.  The margin covers the body's own
+   *  angular size, the penumbra, and the fact that a REFRACTED cone leaves
+   *  its body deviated rather than radial. */
+  CULL_MARGIN_DEG: 25,
+} as const;
+let activeFlashlightIndex =
+  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'beam');
+export function getFlashlightHalfDeg(): number {
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
+}
+export function getFlashlightName(): string {
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+export function cycleFlashlight(): string {
+  activeFlashlightIndex = (activeFlashlightIndex + 1) % FLASHLIGHT_CYCLE.length;
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+
+/** DBG: how hard the CAUSTIC edges are — the two fades that keep a refracted
+ *  cone from switching on and off.
+ *
+ *  Reported from the device as a click or flash on glass while drifting past
+ *  it slowly, and it is two separate cliffs behind one symptom:
+ *
+ *   - TOTAL INTERNAL REFLECTION is a step.  Past the critical angle a face
+ *     transmits nothing, so each face's cone appeared and vanished at FULL
+ *     length as the body turned relative to the light.  Real transmission
+ *     falls to zero AT that angle instead (Fresnel), so `tir` fades the cone
+ *     out over a band of the Snell discriminant, which is 0 exactly at the
+ *     critical angle.
+ *   - THE OCCLUDER CAP is a step.  In a dense field the pool sits saturated
+ *     — measured at 24 of 24 on the glass showcase — so bodies swap in and
+ *     out of it as the ship moves, and an entering body brought its whole
+ *     caustic at full strength.  `cap` fades a body's caustic out as it
+ *     approaches the eviction boundary, so nothing visible is ever evicted.
+ *
+ *  Both are expressed as fractions rather than as alphas because every cone
+ *  in a transmit group shares ONE compound path and therefore one fill: the
+ *  weight rides the cone's THROW instead, and since the fill is the light's
+ *  own falloff gradient, a shorter cone is a dimmer one.
+ *
+ *  'off' restores the cliffs exactly, which is the control case the fix was
+ *  measured against. */
+export const CAUSTIC_FADE_CYCLE: ReadonlyArray<{ name: string; tir: number; cap: number }> = [
+  // The two fades are tuned very differently ON PURPOSE, because only one of
+  // them has a measured benefit.  The TIR taper removes a cliff that was
+  // MEASURED — per-face transmission flipping from full to nothing in a
+  // single step of movement, now ramping over several.  The CAP fade is
+  // mechanically sound but its benefit could not be separated from the
+  // ordinary churn of 24 bodies moving, while its COST is measurable: at a
+  // quarter of the ranks it costs a third of the caustic's total throw.  So
+  // it ships light and is there to be turned up if the device disagrees.
+  { name: 'smooth', tir: 0.25, cap: 0.08 },
+  { name: 'soft',   tir: 0.45, cap: 0.20 },
+  { name: 'heavy',  tir: 0.60, cap: 0.35 },
+  { name: 'light',  tir: 0.12, cap: 0    },
+  { name: 'off',    tir: 0,    cap: 0    },
+] as const;
+let activeCausticFadeIndex = 0;
+export function getCausticFade(): { name: string; tir: number; cap: number } {
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex];
+}
+export function getCausticFadeName(): string {
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex].name;
+}
+export function cycleCausticFade(): string {
+  activeCausticFadeIndex = (activeCausticFadeIndex + 1) % CAUSTIC_FADE_CYCLE.length;
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex].name;
+}
+
+/** DBG: how long an emitter takes to FADE in or out, in seconds.
+ *
+ *  ADDED BECAUSE EMISSION FLASHED.  The set of emitters is chosen nearest-
+ *  first and capped by the tier, so as the ship moves, bodies cross into and
+ *  out of that budget — and a halo that is drawn at full strength on one
+ *  frame and not at all on the next reads as a strobe, which is worse than
+ *  no emission at all.  It is not a brightness problem: the alphas either
+ *  side of the swap are both correct, and the swap itself is what the eye
+ *  objects to.
+ *
+ *  So an emitter's alpha EASES toward its target and a body that leaves the
+ *  budget fades out rather than vanishing — which needs the emitter to
+ *  persist for a moment after it stops being chosen (see the emitter slots
+ *  in render/lighting.ts).  `off` is the old instantaneous behaviour, kept
+ *  as the control.
+ *
+ *  Time-based rather than per-frame, so the fade takes the same wall-clock
+ *  time whatever the frame rate. */
+export const EMIT_FADE_CYCLE: ReadonlyArray<{ name: string; sec: number }> = [
+  { name: 'smooth', sec: 0.25 },
+  { name: 'slow',   sec: 0.5  },
+  { name: 'languid',sec: 1    },
+  { name: 'fast',   sec: 0.12 },
+  { name: 'off',    sec: 0    },
+] as const;
+let activeEmitFadeIndex = 0;
+export function getEmitFadeSec(): number {
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].sec;
+}
+export function getEmitFadeName(): string {
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].name;
+}
+export function cycleEmitFade(): string {
+  activeEmitFadeIndex = (activeEmitFadeIndex + 1) % EMIT_FADE_CYCLE.length;
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].name;
+}
+
+let refractionEnabled = true;
+export function getRefractionEnabled(): boolean { return refractionEnabled; }
+export function toggleRefraction(): boolean {
+  refractionEnabled = !refractionEnabled;
+  return refractionEnabled;
+}
+
+/** DBG: how bright the refracted cone is, as a fraction of the light's OWN
+ *  peak — the tuning knob for the prototype above.
+ *
+ *  Named as fractions rather than decimals because that is the quantity the
+ *  rule is stated in: refracted light must be no more than HALF the source.
+ *  Every entry therefore sits at or below 1/2, and `REFRACT.MAX_BRIGHTNESS_FRAC`
+ *  in render/lighting.ts clamps on top of whatever this returns — so the rule
+ *  survives someone adding a row here, which is the point of having it in two
+ *  places.
+ *
+ *  A cycle rather than a number in a file, for the same reason as the shadow
+ *  softness beside it: it is a look call, and the look call belongs on the
+ *  device against real terrain.  Starts at the ceiling, so tuning only ever
+ *  goes down from the brightest the rule allows. */
+export const REFRACT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
+  { name: '1/2',  frac: 0.5   },
+  // ABOVE the old ceiling, on device feedback: the caustic measured as only
+  // marginally legible at Low (2.2 % of pixels changed), and a prototype you
+  // cannot see is one you cannot judge.  "No brighter than half the source"
+  // was the right instinct physically — refracted light is a redistribution
+  // of light that already lost some of itself passing through the body — but
+  // it is now the DEFAULT rather than a ceiling.  Cycling from the default
+  // goes UP first, because that is the direction the question was asked in.
+  { name: '2/3',  frac: 0.667 },
+  { name: '3/4',  frac: 0.75  },
+  { name: '1/1',  frac: 1     },
+  { name: '1/3',  frac: 0.333 },
+  { name: '1/4',  frac: 0.25  },
+  { name: '1/6',  frac: 0.167 },
+  { name: '1/10', frac: 0.1   },
+  { name: '1/16', frac: 0.0625 },
+] as const;
+let activeRefractBrightnessIndex = 0;
+export function getRefractBrightness(): number {
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].frac;
+}
+export function getRefractBrightnessName(): string {
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+export function cycleRefractBrightness(): string {
+  activeRefractBrightnessIndex =
+    (activeRefractBrightnessIndex + 1) % REFRACT_BRIGHTNESS_CYCLE.length;
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+
+/** DBG: how bright the player light is, as a multiplier on its own peak.
+ *
+ *  ADDED BECAUSE THE TIER CYCLE IS NOT THIS.  "Light tier" is a COST ladder
+ *  — canvas resolution, occluder cap, radius — and dropping to `lowest`
+ *  changes how much work the light does, not how bright it is.  Reported
+ *  from the device as "I'm at the lowest setting and it still feels very
+ *  bright", which is exactly right and exactly what that cycle does.
+ *
+ *  The ladder runs a long way down, because the complaint was not that the
+ *  light was slightly hot: the bottom rung is a twelfth of today's value,
+ *  which reads as a faint wash rather than a lamp.  100% is the current
+ *  shipped look and stays the default, so this changes nothing until it is
+ *  asked to. */
+export const LIGHT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: '100%', mult: 1    },
+  { name: '70%',  mult: 0.7  },
+  { name: '50%',  mult: 0.5  },
+  { name: '35%',  mult: 0.35 },
+  { name: '25%',  mult: 0.25 },
+  { name: '15%',  mult: 0.15 },
+  { name: '8%',   mult: 0.08 },
+] as const;
+let activeLightBrightnessIndex = 0;
+export function getLightBrightness(): number {
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].mult;
+}
+export function getLightBrightnessName(): string {
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
+}
+export function cycleLightBrightness(): string {
+  activeLightBrightnessIndex =
+    (activeLightBrightnessIndex + 1) % LIGHT_BRIGHTNESS_CYCLE.length;
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
+}
+
+/** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
+ *
+ *  A point light casts a perfectly hard shadow, which is what made the first
+ *  version read as a drawn line rather than as lighting.  Softness here is
+ *  an ANGLE (see PENUMBRA_DEG_PER_K in render/lighting.ts), so the soft band
+ *  widens with distance from the caster the way a real area light's does —
+ *  tight against the tile, spreading further out.  Cycling rather than a
+ *  toggle because this is a look call that wants to be made on the device,
+ *  against real terrain, not chosen from a number here.
+ *
+ *  'off' restores the hard shadow exactly, which is also the A5 penumbra
+ *  stage's control case. */
+export const SHADOW_SOFTNESS_CYCLE: ReadonlyArray<{ name: string; k: number }> = [
+  { name: 'soft',    k: 2.5 },
+  { name: 'softer',  k: 4.5 },
+  // Three rungs past 'softer', added on device feedback.  They are usable
+  // rather than decorative because the PASS COUNT scales with k (see
+  // SOFT_STEPS in render/lighting.ts): a 14-degree band graded over the
+  // three passes that suit 2.5 would read as three stripes, not as a soft
+  // edge, so the softest settings buy themselves more gradations.
+  { name: 'softest', k: 7   },
+  { name: 'diffuse', k: 10  },
+  { name: 'hazy',    k: 14  },
+  { name: 'off',     k: 0   },
+  { name: 'subtle',  k: 1.2 },
+] as const;
+/** SHIPPED DEFAULT: `diffuse` (user call, after device testing) — four rungs
+ *  softer than the 'soft' this shipped at, and paid for by the pass count
+ *  that scales with k, so the wider band is graded rather than striped.
+ *  Found by NAME, like the lighting tier's default, so inserting a rung
+ *  above it cannot silently change what ships. */
+let activeSoftnessIndex = SHADOW_SOFTNESS_CYCLE.findIndex(s => s.name === 'diffuse');
+export function getShadowSoftness(): number { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].k; }
+export function getShadowSoftnessName(): string { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name; }
+export function cycleShadowSoftness(): string {
+  activeSoftnessIndex = (activeSoftnessIndex + 1) % SHADOW_SOFTNESS_CYCLE.length;
+  return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name;
+}
+
+/** Per-tier lighting budget.
+ *
+ *  `divisor` is how many CSS pixels of screen one light-layer pixel covers.
+ *  It is never 1: a light layer is low-frequency by nature, so rendering it
+ *  at full resolution buys nothing but fill rate.  At the Low tier's 3, a
+ *  390x844 phone gets a 130x282 layer — 0.15 MB.
+ *
+ *  `maxOccluders` is load-bearing rather than defensive.  A 300-radius light
+ *  covers pi*300^2 = 283k square units; at HEX_AREA = 1257 that is up to ~225
+ *  hexes if the field were solid.  The cap takes the N NEAREST, because the
+ *  nearest occluders subtend the largest shadow angle — so truncation loses
+ *  the shadows least likely to be noticed, and the cost stays bounded by the
+ *  cap rather than by how dense the terrain happens to be.
+ *
+ *  `maxRadius` of 300 at Low is anchored on the legacy models' own
+ *  `glow.range` of 250, so a unified light reads at a scale players already
+ *  know rather than announcing itself as a new system.
+ *
+ *  `ambientPerStage` is multiplied by min(stageIndex, 4) — ambient darkness
+ *  is scoped to DEPTH, so the hub and the surface look exactly as they do
+ *  today and darkness becomes a property of descending.  It was authored
+ *  zero at Low when ambient was expected to need its own pass; A7 rides the
+ *  fog compositor (0.3-0.5 ms measured), so Low now carries a modest value
+ *  and only the emergency tiers below it stay at zero. */
+export interface LightingTier {
+  readonly name: string;
+  readonly divisor: number;
+  readonly maxLights: number;
+  readonly maxOccluders: number;
+  /** How many of `maxOccluders` mobile SHARDS may take while there is still
+   *  terrain to fill the rest.  Debris is nearer than terrain almost by
+   *  definition, so without a share cap a shatter hands the entire budget to
+   *  the fragments and the intact tiles stop casting.  Measured at 100 % of
+   *  the pool on the glass showcase under a shatter cadence before this
+   *  existed.  Shards still get the WHOLE pool on a map with no tiles. */
+  readonly maxShardOccluders: number;
+  readonly maxRadius: number;
+  /** Penumbra softness. 0 = hard shadows (Low pins this, so the penumbra
+   *  stage is a no-op on the worst target by construction). */
+  readonly penumbraK: number;
+  readonly ambientPerStage: number;
+}
+export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
+  { name: 'minimal', divisor: 7, maxLights: 1, maxOccluders: 4,  maxShardOccluders: 2,  maxRadius: 180, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'lowest', divisor: 5, maxLights: 2,  maxOccluders: 8,  maxShardOccluders: 3,  maxRadius: 220, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'lower',  divisor: 4, maxLights: 3,  maxOccluders: 14, maxShardOccluders: 5,  maxRadius: 260, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0.08 },
+  { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxShardOccluders: 16, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
+  { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxShardOccluders: 32, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
+  { name: 'ultra',  divisor: 1, maxLights: 32, maxOccluders: 160, maxShardOccluders: 56, maxRadius: 650, penumbraK: 5.0, ambientPerStage: 0.14 },
+] as const;
+// SEVEN RUNGS, and the ends are the interesting ones.  `minimal` renders
+// the light layer at a SEVENTH of screen resolution with a single light and
+// four occluders — the setting for a device that cannot afford `lowest`,
+// where the question is whether to have a light at all.  `ultra` runs the
+// layer at FULL screen resolution with 32 lights: not a play setting, but
+// the one that answers "what would this look like without the budget", and
+// the emissive prototype in particular is bounded by `maxLights`, so it has
+// nowhere to show itself below `medium`.
+//
+// TWO TIERS BELOW LOW, added when the worst-case cost stopped having
+// comfortable headroom (~1.7 ms p95 against a 2.0 ms budget that has never
+// been re-derived on a device).  Every knob that drives cost moves together
+// — a coarser light canvas, fewer occluders, a shorter radius — because the
+// point is a real step down in work, not a nudge.  `lowest` renders the
+// layer at a FIFTH of screen resolution and casts from 8 bodies; it is meant
+// to be the setting that keeps the light at all on a device that cannot
+// afford `low`, not a setting anyone would choose for looks.
+//
+// LOW REMAINS THE DEFAULT.  This index must track the position of 'low' in
+// the array above rather than being a literal, or inserting a tier silently
+// changes what ships.
+let activeLightingTierIndex = LIGHTING_TIERS.findIndex(t => t.name === 'low');
+export function getActiveLightingTier(): LightingTier { return LIGHTING_TIERS[activeLightingTierIndex]; }
+export function cycleLightingTier(): LightingTier {
+  activeLightingTierIndex = (activeLightingTierIndex + 1) % LIGHTING_TIERS.length;
+  return LIGHTING_TIERS[activeLightingTierIndex];
 }
 
 // ─── DBG: HUD (React) update rate ────────────────────────────────────────────
@@ -4541,6 +5305,14 @@ export const DISABLE = {
 // GameEngine.updateBubbles.  The AI feel (wander vs seek) lives in
 // AI_CONFIG.BUBBLE; this block is the engagement payload.
 export const BUBBLE_CONSTANTS = {
+  /** How much of the light falling on a bubble it RE-EMITS (unified light
+   *  layer, DBG "Emissive").  A bubble is a translucent membrane, so a beam
+   *  sweeping across one should light it up like a paper lantern — the same
+   *  treatment glass and nebula get, at a lower fraction because a bubble is
+   *  thin and mostly empty.  It emits WITHOUT occluding: a soft blob casting
+   *  a hard shadow volume would read wrong, and the emitter buffer exists
+   *  exactly for "lights but does not shadow". */
+  EMITS: 0.35,
   // Latch: when a provoked bubble touches the player it attaches and EMPs.
   CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
   LATCH_DURATION: 2.6,    // seconds the bubble clings before it tires + falls off
@@ -5533,6 +6305,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Re-emits half the light it receives (DBG "Emissive").  Glass is
+    // translucent and scatters what passes into it; a pane that simply
+    // absorbed every photon reaching it would read as slate.
+    emits: 0.5,
+    // Glass is drawn as a translucent panel, so a solid umbra behind it
+    // contradicts the art.  Roughly half the unified light layer's
+    // contribution passes through instead of being withheld — enough that
+    // a glass wall reads as glass rather than as rock, and not so much
+    // that its shadow stops registering as one.
+    transmit: 0.55,
     // Neighbour-count OPACITY automata (DBG "Tile shade"), BIPOLAR
     // around the neutral default: a half-surrounded tile (~3 of 6
     // neighbours) renders at the normal opacity — the MIDDLE of the
@@ -5568,6 +6350,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    // TRANSLUCENT, but the DULL end of it.  Plastic is the cloudy material of
+    // the three: it passes light and re-emits its own colour like glass does,
+    // at roughly half glass's strength, which is what "more opaque" means in
+    // the two numbers this system has.  Its colour is per INSTANCE (the
+    // plastic palettes), so a field of it emits in its own greens and pinks
+    // rather than in one authored tint.
+    transmit: 0.28,
+    emits: 0.25,
     // Soft light-green proximity glow — the tile FACE brightens as the
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
@@ -5612,6 +6402,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Re-emits half the light it receives (DBG "Emissive").  Metal is the
+    // specular case: it does not scatter light so much as throw it back,
+    // and a matte plate is the one thing it should never look like.
+    emits: 0.5,
     // Metal brightness is driven by densityTier (shard layers), NOT this
     // automata — see metalDensityBrightness.  The automata block is kept
     // only as the marker that makes recomputeMaterialNeighbors count a
@@ -5651,6 +6445,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    // Glass-like: the deep violet reads as a solid crystal, and a crystal
+    // that stopped every photon would be indistinguishable from rock.  A
+    // shade under glass on both counts, because it is the denser-looking
+    // material of the two.
+    transmit: 0.5,
+    emits: 0.45,
     // Deep-purple proximity lighting (fill-only radial bloom, no edge
     // stroke).  Reads as the "void" tile — the unbreakable face of
     // the map — distinct from glass's cyan and rock's orange.
@@ -5740,6 +6540,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-tile': {
     id: 'nebula-tile',
+    // Re-emits half the light it receives (DBG "Emissive"), in its OWN
+    // colour — a nebula is a glowing cloud, and the one material in the game
+    // whose colour is per-BODY rather than per-variant (`nebulaBlendedHex`,
+    // blended from its composition).  It is also the one emitter that is
+    // `passThrough`: it casts no shadow and never enters the occluder pool,
+    // so emission had to stop being a by-product of being a shadow caster
+    // (see the emitter buffer in render/lighting.ts).
+    emits: 0.5,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: {
@@ -5824,6 +6632,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-shard': {
     id: 'glass-shard',
     carrier: EntityType.STRUCTURE,
+    emits: 0.5,                               // as the tile it broke off
+    // Same translucency as the tile it broke off — see 'glass-tile'.
+    transmit: 0.55,
     spawn: GLASS_SHARD_SPAWN_SHAPE,
     regen: { kind: 'none' },
     merge: {
@@ -5863,6 +6674,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'plastic-shard': {
     id: 'plastic-shard',
+    // Same as the tile it broke off — see plastic-tile.
+    transmit: 0.28,
+    emits: 0.25,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
@@ -5970,6 +6784,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-shard': {
     id: 'metal-shard',
     carrier: EntityType.STRUCTURE,
+    emits: 0.5,                               // as the tile it broke off
     spawn: SHARD_SPAWN_SHAPE_METAL,
     regen: { kind: 'none' },
     merge: {
@@ -6043,6 +6858,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-shard': {
     id: 'nebula-shard',
+    // Same as the tile it broke off, and for the same reason: a shard of a
+    // glowing cloud is still glowing cloud.
+    emits: 0.5,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: { kind: 'merge-only' },              // tiles regrow only via transmutation

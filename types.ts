@@ -958,6 +958,19 @@ export interface GameEntity {
   // are "deformed", and their adjacent edges always draw regardless
   // of neighbour presence.
   originalCircumradiusSq?: number;
+  /** Cached SHADOW-CASTING radius — the largest circle centred on the
+   *  centroid that fits INSIDE `polygonPoints` (the inradius), not the
+   *  circumradius.  See render/lighting.ts for why.  Invalidated wherever
+   *  the polygon is mutated, alongside `_satCacheAxes`. */
+  _occluderR?: number;
+  /** Cached EMISSION TINT for the unified light layer: the body's own colour,
+   *  normalised to full value and quantised, as an `'r, g, b'` string ready
+   *  for a gradient stop.  `_emitTintKey` is the source colour it was built
+   *  from — nebula bodies blend theirs per-instance, so the cache has to
+   *  notice when it changes.  Built on first use and on change only; never
+   *  per frame. */
+  _emitTint?: string | null;
+  _emitTintKey?: string;
 
 
   // Composite asteroid — tracks every drop (including power-ups) stored
@@ -1328,6 +1341,33 @@ export interface PerfSnapshot {
   // past the range / no-glow early-returns).  Latest frame, not
   // averaged — context for interpreting tileLightingMs.
   tileLightingCount: number;
+  // ── Unified lighting (the shadow-cast light layer) ───────────────────
+  //
+  // Wall time (ms) of the whole unified-lighting pass this frame:
+  // occluder collection, wedge-path construction, the per-light
+  // composite onto the light canvas, and the single blit.  Ring-
+  // averaged like the timers above.
+  //
+  // Read this ALONGSIDE `tileLightingMs`, never instead of it.  The
+  // unified system is absorbing the three legacy hand-rolled models
+  // (proximity bloom, repel glow, glass edge tint), so its cost is only
+  // meaningful NET of theirs — as each legacy receiver migrates,
+  // `tileLightingMs` falls and this rises.  A gross reading of this
+  // field alone will overstate the cost of the change.
+  //
+  // Zero while LIGHTING_CYCLE is at 'legacy' (the default), which is
+  // how the toggle proves it costs nothing when off.
+  lightingMs: number;
+  // Number of lights composited this frame, after viewport culling and
+  // the per-tier cap.  Latest frame, not averaged — context for
+  // interpreting lightingMs, exactly as tileLightingCount is for
+  // tileLightingMs.
+  lightingLights: number;
+  // renderFogLayer wall time, ring-averaged like lightingMs and likewise a
+  // SLICE OF RENDER.  Zero while the fog cycle is `off` (every early return
+  // in the pass zeroes the timer) — which is how the toggle proves the fog
+  // costs nothing when disabled.
+  fogMs: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
@@ -1636,6 +1676,49 @@ export interface EngineStats {
    *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
    *  nothing. */
   minimapMaterialName?: string;
+  /** DBG label for LIGHTING_CYCLE — 'legacy' (the three shipped hand-rolled
+   *  models, and the default), 'debug' (flat grey layer, proves the blit) or
+   *  'unified' (the shadow-cast light). */
+  lightingModeName?: string;
+  /** DBG label for the active lighting tier — low (pinned for the phone) /
+   *  medium / high. */
+  lightingTierName?: string;
+  /** DBG: whether MOBILE SHARDS cast shadows too.  Only meaningful while
+   *  the lighting mode is 'unified'. */
+  shardShadowsEnabled?: boolean;
+  /** DBG: is the refraction prototype on? */
+  refractionEnabled?: boolean;
+  /** DBG: refracted-cone brightness, as a fraction of the light's peak. */
+  refractBrightnessName?: string;
+  /** DBG: player-light brightness multiplier, as a percentage label. */
+  lightBrightnessName?: string;
+  /** DBG: do metal and glass re-emit the light that falls on them? */
+  emissiveEnabled?: boolean;
+  worldLightsEnabled?: boolean;
+  depthAmbientEnabled?: boolean;
+  /** DBG: re-emitted fraction, as a label. */
+  emitBrightnessName?: string;
+  /** DBG: may the secondary lights cast shadows of their own? */
+  emitShadowsEnabled?: boolean;
+  /** DBG: emitter-shadow cost tier (how many emitters shadow, and how much
+   *  geometry each of them sees). */
+  emitShadowTierName?: string;
+  /** DBG: how long an emitter takes to fade in or out. */
+  emitFadeName?: string;
+  /** DBG: caustic edge softness — the TIR and occluder-cap fades. */
+  causticFadeName?: string;
+  /** DBG: the player's light as a directional beam — its width, or
+   *  'radial' / 'off'. */
+  flashlightName?: string;
+  /** DBG: the player light's colour. */
+  lightColorName?: string;
+  /** DBG: how much of the material's colour rides transmitted / re-emitted
+   *  light. */
+  tintMixName?: string;
+  /** DBG: fog of war — off / dim / dark / memory. */
+  fogName?: string;
+  /** DBG label for the shadow-edge softness cycle. */
+  shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */

@@ -167,6 +167,8 @@ const INIT_SCRIPT = `
     simMs:   new Float64Array(CAP),
     steps:   new Float64Array(CAP),
     renderMs: new Float64Array(CAP),
+    lightMs: new Float64Array(CAP),
+    fogMs:   new Float64Array(CAP),
     ents:    new Float64Array(CAP),
     heap:    new Float64Array(CAP),
     last: 0,
@@ -188,6 +190,10 @@ const INIT_SCRIPT = `
       cap.simMs[i] = e.lastFrameSimMs || 0;
       cap.steps[i] = e.lastFrameSteps || 0;
       cap.renderMs[i] = (e.renderer && e.renderer.lastRenderMs) || 0;
+      // Slices OF renderMs, not terms beside it — the lighting layer and the
+      // fog compositor.  Raw per-frame (same policy as the totals above).
+      cap.lightMs[i] = (e.renderer && e.renderer.lastLightingMs) || 0;
+      cap.fogMs[i] = (e.renderer && e.renderer.lastFogMs) || 0;
       cap.ents[i] = (e.perfCounts && e.perfCounts.totalEntities) || 0;
       cap.heap[i] = (performance.memory && performance.memory.usedJSHeapSize) || 0;
     }
@@ -421,7 +427,8 @@ async function runScene(browser, scene, seed) {
     const cut = (a) => Array.from(a.subarray(0, c.n));
     return {
       frameMs: cut(c.frameMs), simMs: cut(c.simMs), steps: cut(c.steps),
-      renderMs: cut(c.renderMs), ents: cut(c.ents), heap: cut(c.heap),
+      renderMs: cut(c.renderMs), lightMs: cut(c.lightMs), fogMs: cut(c.fogMs),
+      ents: cut(c.ents), heap: cut(c.heap),
     };
   });
 
@@ -450,6 +457,8 @@ async function runScene(browser, scene, seed) {
     simPerStep: summarize(perStep),
     steps: summarize(raw.steps),
     render: summarize(raw.renderMs),
+    light: summarize(raw.lightMs),
+    fog: summarize(raw.fogMs),
     alloc: alloc2,
     allocProfileKB: alloc.totalKB,
     allocProfileBytesPerFrame: Math.round((alloc.totalKB * 1024) / frames),
@@ -474,8 +483,9 @@ function printReport(results) {
   console.log(pad('scene', 20) + padL('ents', 6) + padL('stp', 5) +
     padL('sim/stp99', 10) + padL('sim p99', 9) + padL('sim max', 9) +
     padL('rnd p99', 9) + padL('rnd max', 9) +
+    padL('lit p99', 9) + padL('lit max', 9) + padL('fog p99', 9) +
     padL('heapB/f', 9) + padL('profB/f', 9) + padL('GC/s', 6) + padL('heapΔ', 7));
-  console.log('-'.repeat(112));
+  console.log('-'.repeat(139));
   for (const r of results) {
     const secs = Math.max(1e-3, (r.frame.mean * r.frames) / 1000);
     console.log(
@@ -483,6 +493,7 @@ function printReport(results) {
       padL(f2(r.simPerStep.p99), 10) +
       padL(f2(r.sim.p99), 9) + padL(f2(r.sim.max), 9) +
       padL(f2(r.render.p99), 9) + padL(f2(r.render.max), 9) +
+      padL(f2(r.light.p99), 9) + padL(f2(r.light.max), 9) + padL(f2(r.fog.p99), 9) +
       padL(Math.round(r.alloc.bytesPerFrame), 9) + padL(r.allocProfileBytesPerFrame, 9) +
       padL((r.alloc.gcEvents / secs).toFixed(1), 6) +
       padL((r.heapEndMB - r.heapStartMB).toFixed(1), 7),
