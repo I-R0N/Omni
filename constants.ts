@@ -2007,10 +2007,13 @@ let activeFlashlightIndex =
  *  penumbra, the whole ladder step, applied through the tier override below
  *  so every consumer of `getActiveLightingTier` agrees.  `off` is the
  *  default: a light you switch on. */
-export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; halfDeg: number; tier?: string }> = [
-  { name: 'off',    halfDeg: 0 },
-  { name: 'medium', halfDeg: 40, tier: 'medium' },
-  { name: 'high',   halfDeg: 40, tier: 'high' },
+export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; label: string; halfDeg: number; tier?: string }> = [
+  // `name` is the internal/debug vocabulary (it names the TIER the level
+  // runs); `label` is what the player reads over the ship — headlight
+  // words, because "medium/high" are debugging terms (user call).
+  { name: 'off',    label: 'Light off', halfDeg: 0 },
+  { name: 'medium', label: 'Low beam',  halfDeg: 40, tier: 'medium' },
+  { name: 'high',   label: 'High beam', halfDeg: 40, tier: 'high' },
 ] as const;
 export function getFlashlightHalfDeg(): number {
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;

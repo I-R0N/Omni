@@ -5014,8 +5014,8 @@ export class GameEngine {
   public cycleShipLight(): boolean {
       if (!this.flashlightEquipped) return false;
       this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
-      const name = FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].name;
-      this.pushPlayerMessage(`Light: ${name}`, name === 'off' ? '#94a3b8' : '#fde68a');
+      const lvl = FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel];
+      this.pushPlayerMessage(lvl.label, lvl.tier === undefined ? '#94a3b8' : '#fde68a');
       this.audio.play('ui.confirm');
       return true;
   }

@@ -1690,3 +1690,38 @@ approved as-is):
 `flashlight.spec.ts` re-pinned: medium asserts tier 'medium' with the beam
 cone; high asserts the cone UNCHANGED and the tier stepped; off asserts the
 tier falls back to the DBG global's 'low'.
+
+---
+
+## P13 — The light speaks headlight, not debug
+
+The over-ship message on a light cycle was `Light: off / medium / high` —
+the tier vocabulary, which is debugging language (user call). The levels now
+carry a player-facing `label` beside the internal `name`: **Light off / Low
+beam / High beam**. `name` keeps naming the TIER the level runs (that is
+what it is), and nothing but the message reads the label.
+
+---
+
+## P14 — The full suite moves to the merge seams
+
+> "set them up such that they only run at major branch merges instead of
+> after every commit. They currently take a significant amount of time."
+
+`pr-checks.yml` now runs in two scopes under ONE check name (so branch
+protection keeps pointing at `typecheck · build · test`):
+
+- **SMOKE, every PR push** — typecheck + build + `boot.spec.ts` +
+  `loop.spec.ts` (~3 minutes). The canary and the full-game loop: proves
+  the game boots and IS a game before a merge-point run proves the rest.
+- **FULL, at the seams** — the whole suite on pushes to `main` /
+  `claude/plan-completion` (right after a merge lands), on PRs based on
+  `main`, on the **`full-tests` label** (drop it on any PR to demand the
+  whole net before merging — `labeled` is a trigger, so it re-runs
+  immediately), and on `workflow_dispatch`.
+
+The honest trade is written into the workflow header: a regression outside
+the smoke now surfaces at the merge point rather than per push; the label is
+the escape hatch. Local practice moves the same way (CLAUDE.md §7/§9):
+touched suites per commit, the full run before a PR is called
+ready-to-merge or after a base sync.
