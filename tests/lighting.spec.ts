@@ -2017,17 +2017,23 @@ test.describe('occluder collection', () => {
       });
       e.renderer.setLighting('unified');
 
-      // THE COLLAPSED MINIMAP: 75px square at (MARGIN, H - SIZE - BOTTOM_MARGIN)
-      // in CSS px, showing ZOOM_RANGE world units to a side of centre.  Read in
-      // MINIMAP px offsets from its centre, so the sample follows the map and
-      // not the world.
-      const SIZE = 75, MARGIN = 20, BOTTOM = 14, ZOOM_RANGE = 1000;
+      // THE COLLAPSED MINIMAP, located by the game's OWN rect — the shared
+      // `computeMinimapRect` exposed on __omniHud, which the renderer, the
+      // tap handler and the joystick exclusion all read.  This test used to
+      // hard-code the corner geometry (MARGIN 20 / BOTTOM 14) and broke the
+      // day the 5d branch moved the map to the shared rect (MARGIN 10 /
+      // BOTTOM 8): the sample box slid off the map onto bright starfield and
+      // the fog veil read BRIGHTER than its unfogged baseline.  Locating
+      // geometry is not an asserted constant — the one screen corner has one
+      // authority, and this is a consumer of it.
+      const SIZE = 75, ZOOM_RANGE = 1000;
       const perUnit = (SIZE / 2) / ZOOM_RANGE;
       const box = (ox: number, oy: number, half: number) => {
         const cv = document.querySelector('canvas') as HTMLCanvasElement;
         const g = cv.getContext('2d')!;
         const dpr = cv.width / 390, H = cv.height / dpr;
-        const cx = MARGIN + SIZE / 2 + ox, cy = (H - SIZE - BOTTOM) + SIZE / 2 + oy;
+        const rect = (window as any).__omniHud.computeMinimapRect(H, false);
+        const cx = rect.x + rect.size / 2 + ox, cy = rect.y + rect.size / 2 + oy;
         let sum = 0, n = 0;
         for (let y = cy - half; y <= cy + half; y++) {
           for (let x = cx - half; x <= cx + half; x++) {
