@@ -206,7 +206,12 @@ export function drawNebulaEntity(
         let tinted: HTMLCanvasElement | null = null;
         if (entity.shardVariant === 'nebula-shard') {
             if (entity.nebulaTintedKey === undefined) {
-                entity.nebulaTintedKey = `${spriteSrc}|${tintHex}`;
+                // The SAME quantisation getTintedSprite applies — this is
+                // the only other site that constructs a store key, and an
+                // exact-hex key here would never match the quantised
+                // entries, turning the fast path into a guaranteed miss.
+                entity.nebulaTintedKey =
+                    `${spriteSrc}|${rs.quantizeTintHex(tintHex)}`;
             }
             tinted = rs._tintedSprites.get(entity.nebulaTintedKey) ?? null;
             if (!tinted) tinted = rs.getTintedSprite(spriteSrc, tintHex);

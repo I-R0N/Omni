@@ -4,6 +4,22 @@ Headless performance capture for the Omni engine. Not part of `npm test`
 (see DECISIONS D1 in `docs/GAUNTLET_5C_LOG.md`): these runs take minutes and
 are deliberately noise-prone, while `npm test` is a merge gate.
 
+## Lighting columns and scenes
+
+The frame table carries `lit p99 / lit max / fog p99` — the shadow-casting
+light layer and the fog compositor, both SLICES of the render column, not
+terms beside it.  Three scenes A/B the layer on GLASS_FIELD (its worst case —
+every tile is occluder + transmission + caustic + emitter at once):
+
+    node perf/capture.mjs --scene light-legacy    # layer off; lit/fog must read 0
+    node perf/capture.mjs --scene light-shipped   # the shipped defaults, stated explicitly
+    node perf/capture.mjs --scene light-max       # every lighting feature on at once
+
+As everywhere in this harness: the LEVELS are indicative (software raster),
+the DELTAS between the three are the evidence.  The in-game counterpart is
+the DBG Perf REC report's `light … · fog …` line, which is the tool for
+on-device numbers.
+
 ## Usage
 
     npx vite build                    # the harness serves dist/

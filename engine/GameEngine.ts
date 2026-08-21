@@ -23,7 +23,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, computeMinimapRect, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, markDamaged} from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -665,6 +665,8 @@ export class GameEngine {
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfTileLighting  = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLighting      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfFog           = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -976,6 +978,25 @@ export class GameEngine {
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
       minimapMaterialName: getActiveMinimapMaterialName(),
+      lightingModeName:  getActiveLightingMode(),
+      lightingTierName:  getActiveLightingTier().name,
+      shardShadowsEnabled: getShardShadowsEnabled(),
+      refractionEnabled: getRefractionEnabled(),
+      refractBrightnessName: getRefractBrightnessName(),
+      lightBrightnessName: getLightBrightnessName(),
+      emissiveEnabled: getEmissiveEnabled(),
+      worldLightsEnabled: getWorldLightsEnabled(),
+      depthAmbientEnabled: getDepthAmbientEnabled(),
+      emitBrightnessName: getEmitBrightnessName(),
+      emitShadowsEnabled: getEmitShadowsEnabled(),
+      emitShadowTierName: getEmitShadowTierName(),
+      emitFadeName: getEmitFadeName(),
+      causticFadeName: getCausticFadeName(),
+      flashlightName: getFlashlightName(),
+      lightColorName: getLightColorName(),
+      tintMixName: getTintMixName(),
+      fogName: getFogName(),
+      shadowSoftnessName: getShadowSoftnessName(),
       rockPaletteName: getActiveRockPaletteName(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -984,9 +1005,6 @@ export class GameEngine {
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticShardPaletteName: getActivePlasticShardPaletteName(),
       plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
-      metalGlowBrightnessName:   getActiveMetalGlowBrightnessName(),
-      glassGlowColorName: getActiveGlassGlowColorName(),
-      metalGlowColorName: getActiveMetalGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
@@ -1715,6 +1733,25 @@ export class GameEngine {
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
       minimapMaterialName: getActiveMinimapMaterialName(),
+      lightingModeName:  getActiveLightingMode(),
+      lightingTierName:  getActiveLightingTier().name,
+      shardShadowsEnabled: getShardShadowsEnabled(),
+      refractionEnabled: getRefractionEnabled(),
+      refractBrightnessName: getRefractBrightnessName(),
+      lightBrightnessName: getLightBrightnessName(),
+      emissiveEnabled: getEmissiveEnabled(),
+      worldLightsEnabled: getWorldLightsEnabled(),
+      depthAmbientEnabled: getDepthAmbientEnabled(),
+      emitBrightnessName: getEmitBrightnessName(),
+      emitShadowsEnabled: getEmitShadowsEnabled(),
+      emitShadowTierName: getEmitShadowTierName(),
+      emitFadeName: getEmitFadeName(),
+      causticFadeName: getCausticFadeName(),
+      flashlightName: getFlashlightName(),
+      lightColorName: getLightColorName(),
+      tintMixName: getTintMixName(),
+      fogName: getFogName(),
+      shadowSoftnessName: getShadowSoftnessName(),
       rockPaletteName: getActiveRockPaletteName(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -1723,9 +1760,6 @@ export class GameEngine {
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticShardPaletteName: getActivePlasticShardPaletteName(),
       plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
-      metalGlowBrightnessName:   getActiveMetalGlowBrightnessName(),
-      glassGlowColorName: getActiveGlassGlowColorName(),
-      metalGlowColorName: getActiveMetalGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
@@ -5221,7 +5255,18 @@ export class GameEngine {
       // an A/B capture cannot be told apart from the run it is compared to.
       settings: `sim ${getActiveSimRateName()} · substep ${getActiveSubstepCapName()}`
         + ` · rscale ${getActiveRenderScaleName()} · hud ${getActiveHudRateName()}`
-        + ` · auto ${this.perfController.autoEnabled ? 'on' : 'off'}`,
+        + ` · auto ${this.perfController.autoEnabled ? 'on' : 'off'}`
+        // The lighting vocabulary, so a pasted capture says which
+        // configuration produced its light/fog columns without a follow-up
+        // question.  Report-time values: change settings mid-capture and the
+        // line describes the end state, not the whole window.
+        + ` · light ${getActiveLightingMode()}/${getActiveLightingTier().name}`
+        + ` · soft ${this.renderer.getShadowSoftness()}`
+        + ` · beam ${this.renderer.getFlashlight()}`
+        + ` · refr ${this.renderer.getRefraction() ? 'on' : 'off'}`
+        + ` · emis ${this.renderer.getEmissive() ? 'on' : 'off'}`
+        + ` · eshd ${this.renderer.getEmitShadows() ? this.renderer.getEmitShadowTier().name : 'off'}`
+        + ` · fog ${this.renderer.getFog()}`,
     }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 
@@ -5337,6 +5382,11 @@ export class GameEngine {
           map.init();
       }
       this.currentMap = map;
+      // The fog's EXPLORED memory is world space, and world space means
+      // something different here — a memory kept across a load would draw the
+      // last map's explored shape onto this one.  The renderer owns no other
+      // per-map persistent state, which is why this is the only such call.
+      this.renderer.resetFog();
       // Pre-calculate spatial grid for static tiles to avoid overhead in main loop
       this.physics.initializeStaticGrid(map.entities);
       // Cache gravitational attractors once per map so applyGravity no
@@ -5404,6 +5454,9 @@ export class GameEngine {
       this.renderer.bossBarActive =
           !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
 
+      // A7 — hand the renderer the run's depth.  One field write per frame;
+      // the fog folds it into its dark level (deeper = darker).
+      this.renderer.stageDepth = this.stageIndex;
       this.renderer.render(
           this.frameEntities,
           this.camera,
@@ -5475,6 +5528,8 @@ export class GameEngine {
       this.perfRender[this.perfRenderIdx]        = this.renderer.lastRenderMs;
       this.perfNebula[this.perfRenderIdx]        = this.renderer.lastNebulaMs;
       this.perfTileLighting[this.perfRenderIdx] = this.renderer.lastTileLightingMs;
+      this.perfLighting[this.perfRenderIdx]     = this.renderer.lastLightingMs;
+      this.perfFog[this.perfRenderIdx]          = this.renderer.lastFogMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
@@ -5538,6 +5593,9 @@ export class GameEngine {
           nebulaSlow:     this.renderer.lastNebulaSlowCount,
           tileLightingMs:    GameEngine.ringAvg(this.perfTileLighting, this.perfRenderFilled),
           tileLightingCount: this.renderer.lastTileLightingCount,
+          lightingMs:        GameEngine.ringAvg(this.perfLighting,     this.perfRenderFilled),
+          lightingLights:    this.renderer.lastLightingLights,
+          fogMs:             GameEngine.ringAvg(this.perfFog,          this.perfRenderFilled),
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),

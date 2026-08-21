@@ -88,6 +88,25 @@ interface UIOverlayProps {
   onToggleDamageBars?: () => void;
   onToggleJoystickDebug?: () => void;
   onCycleMinimapMaterial?: () => void;
+  onCycleLighting?: () => void;
+  onCycleLightingTier?: () => void;
+  onToggleShardShadows?: () => void;
+  onToggleRefraction?: () => void;
+  onCycleRefractBrightness?: () => void;
+  onCycleLightBrightness?: () => void;
+  onToggleEmissive?: () => void;
+  onToggleWorldLights?: () => void;
+  onToggleDepthAmbient?: () => void;
+  onCycleEmitBrightness?: () => void;
+  onToggleEmitShadows?: () => void;
+  onCycleEmitShadowTier?: () => void;
+  onCycleEmitFade?: () => void;
+  onCycleCausticFade?: () => void;
+  onCycleFlashlight?: () => void;
+  onCycleLightColor?: () => void;
+  onCycleTintMix?: () => void;
+  onCycleFog?: () => void;
+  onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -101,9 +120,6 @@ interface UIOverlayProps {
   onCyclePlasticPalette?: () => void;
   onCyclePlasticShardPalette?: () => void;
   onCyclePlasticGlowBrightness?: () => void;
-  onCycleMetalGlowBrightness?: () => void;
-  onCycleGlassGlowColor?: () => void;
-  onCycleMetalGlowColor?: () => void;
   onCycleNebulaPalette?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
@@ -360,6 +376,25 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleDamageBars,
   onToggleJoystickDebug,
   onCycleMinimapMaterial,
+  onCycleLighting,
+  onCycleLightingTier,
+  onToggleShardShadows,
+  onToggleRefraction,
+  onCycleRefractBrightness,
+  onCycleLightBrightness,
+  onToggleEmissive,
+  onToggleWorldLights,
+  onToggleDepthAmbient,
+  onCycleEmitBrightness,
+  onToggleEmitShadows,
+  onCycleEmitShadowTier,
+  onCycleEmitFade,
+  onCycleCausticFade,
+  onCycleFlashlight,
+  onCycleLightColor,
+  onCycleTintMix,
+  onCycleFog,
+  onCycleShadowSoftness,
   onCycleRockPalette,
   onToggleRumble,
   onSetControlScheme,
@@ -373,9 +408,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticPalette,
   onCyclePlasticShardPalette,
   onCyclePlasticGlowBrightness,
-  onCycleMetalGlowBrightness,
-  onCycleGlassGlowColor,
-  onCycleMetalGlowColor,
   onCycleNebulaPalette,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
@@ -1661,6 +1693,63 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Minimap mat', onCycleMinimapMaterial,
                   stats.minimapMaterialName ?? 'Flow',
                   'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.')}
+                {ctrlRow('Lighting', onCycleLighting,
+                  stats.lightingModeName ?? 'legacy',
+                  'Unified tile lighting. LEGACY (default) is not "off" — it is the THREE hand-rolled models Omni ships: the player-distance proximity bloom on rock/plastic/indestructible, the repel-impulse glow on glass and metal, and the glass edge tint on its own 120 range. UNIFIED replaces all three with one shadow-casting point light at the ship: a radial falloff with a shadow wedge withheld behind every solid tile in range. Nebula is passThrough and deliberately casts NOTHING, which is why the effect reads strongly on the material showcase maps and faintly on Universe (two thirds of its static tiles are nebula). DEBUG paints a flat grey layer instead of a light — no lighting maths — so the canvas, the single blit and the smoothing restore can be checked on their own.')}
+                {ctrlRow('Light tier', onCycleLightingTier,
+                  stats.lightingTierName ?? 'low',
+                  'Lighting budget. LOW (default) is the 390x844 phone: the light layer renders at a third of screen resolution, 4 lights, 24 occluders each, radius 300, hard shadows. Medium/High halve the divisor and raise every cap. The occluder cap is load-bearing rather than defensive — a radius-300 light can cover ~225 hexes in solid terrain, and the cap takes the NEAREST, which subtend the largest shadow angle, so truncation degrades gracefully.')}
+                {ctrlRow('Light bright', onCycleLightBrightness,
+                  stats.lightBrightnessName ?? '100%',
+                  'How bright the player light is, 100% (default) down to 8%. This is NOT the Light tier row above: that one is a COST ladder — canvas resolution, occluder cap, radius — so dropping it to lowest changes how much work the light does and not how bright it looks. The ladder runs a long way down because the complaint it answers was not that the light was slightly hot.')}
+                {ctrlRow('Fog', onCycleFog,
+                  stats.fogName ?? 'off',
+                  'FOG OF WAR: darkness the player\'s light cuts through. The light layer is already the mask — a lit shape with shadows cut out of it — so the fog is composed FROM it and costs no geometry of its own: a tile\'s shadow stays dark, and a flashlight beam opens exactly the cone it lights. DIM and DARK are the two-layer version (lit or not). MEMORY is the traditional three layers — never seen, seen before but not lit now, and lit — which needs a per-map memory of where the ship has been (one texel per 48 world units, reset on every map load; it is the renderer\'s only piece of per-map persistent state, which is why it is its own rung rather than the default). A clear disc always surrounds the ship: a narrow beam points AWAY from it, so without that the hull sits in the dark it is holding the torch in. OFF is the default — this changes how the whole game reads, and which maps want it is a design question rather than a rendering one.')}
+                {ctrlRow('Flashlight', onCycleFlashlight,
+                  stats.flashlightName ?? 'radial',
+                  'The player\'s light as a directional BEAM instead of a radial glow. Points along the AIM — the same angle shots travel — so the torch goes where the ship is looking and there is no second control to fight over. Widths are the full cone: half 180° (a headlight — everything ahead, nothing behind), wide 120°, beam 80°, narrow 45°, tight 25°, pin 12° (at which point the soft edge is as wide as the beam, so it reads as a spot with no boundary at all). RADIAL (default) is the shipped 360° glow and costs nothing extra. OFF is a zero-width beam rather than a special case: the player\'s light draws nothing, so what is left on the layer is exactly the emitters (to turn the whole layer off, use Lighting: legacy). The beam masks everything the player\'s light does — falloff, shadows and caustics — but NOT the secondary emitters, because a lit metal plate is its own light and radiates in every direction; that is what makes sweeping the beam past one read as the beam finding it. A body outside the cone is also skipped entirely, since a shadow runs radially outward and cannot reach into the beam — which is what makes a narrow beam cheaper than the radial light rather than merely darker.')}
+                {ctrlRow('Light color', onCycleLightColor,
+                  stats.lightColorName ?? 'ship',
+                  'What COLOUR the player\'s light is. SHIP (default) is the engine-glow blue the layer has always used, chosen so the light reads as coming from the ship rather than as a new system announcing itself; white / warm / amber / green / violet / red are there because a flashlight is equipment and equipment has a character — a tungsten beam and a cold blue-white one light the same terrain into two different games. The colour reaches everything the player\'s light does, the REFRACTED cone included, which is right: light that passes through glass keeps the colour it arrived with. The secondary emitters are deliberately unaffected — they radiate the colour of the BODY, not of what lit it.')}
+                {ctrlRow('Tint mix', onCycleTintMix,
+                  stats.tintMixName ?? 'off',
+                  'How much of the MATERIAL\'s colour rides the light it passes on. Light through green glass comes out green, and a body lit by a red torch cannot re-emit blue — the layer got both wrong in opposite directions: transmitted light carried the LIGHT\'s colour with no trace of the material, and an emitter carried the MATERIAL\'s with no trace of what lit it. One knob, two applications. Emission and the refracted caustic take a blend between the two colours (0 = the light\'s, 1 = the body\'s). Straight-through transmission is tinted by MULTIPLYING the umbra by the material colour, because that light is not drawn by the shadow pass — it is what the pass chose not to erase — so it can only be coloured after the fact; 0 changes nothing there. A true product everywhere is the physical answer and it reads too dark (two saturated colours multiply toward black), so a half blend is as far as it goes. SHIPS OFF: the effect is real but subtle, because the materials\' colours sit close to the light\'s (glass indigo, metal steel-blue, both against a sky-blue lamp), and the straight-through path costs a fill per translucent group to buy it.')}
+                {ctrlRow('Emissive', onToggleEmissive,
+                  stats.emissiveEnabled === true ? 'On' : 'Off',
+                  'Do METAL and GLASS re-emit the light that falls on them? ON by default, after device testing. Every lit body of those materials becomes a SECOND light at its own position — half the light it received, uniform in every direction, falling off the way the player\'s does. It replaces the contact-driven glow those two materials used to carry, which lit up when something TOUCHED them rather than when light reached them, so a metal plate across the room stayed dead however brightly it was lit. Secondary lights cast no shadows of their own unless Emit shadow asks them to: each would need its own occluder collection, and the pool is shared and consumed per light, so N emitters cost N collections on the tightest budget in the system.')}
+                {ctrlRow('World lights', onToggleWorldLights,
+                  stats.worldLightsEnabled === true ? 'On' : 'Off',
+                  'A6: do the self-luminous movers — shots and the snitch — light the unified layer in their own colours? These are not emitters: an emitter\'s brightness is what the player\'s light put ON it, where a shot glows because it is on fire, so a bolt lights the walls it passes whether or not the flashlight is pointed there. They spend what is LEFT of the tier\'s maxLights after the player and the emitters (the tier\'s number stays the whole frame\'s light count), budgeted nearest-to-screen-centre, and a light whose disc misses the screen is culled before it costs anything. They cast no shadows — a shadow thrown by a bolt is unreadable at any speed, and each shadowed light is a fresh occluder collection. Off restores the exact pre-A6 layer.')}
+                {ctrlRow('Depth dark', onToggleDepthAmbient,
+                  stats.depthAmbientEnabled === true ? 'On' : 'Off',
+                  'A7: each stage DESCENDED adds the light tier\'s ambientPerStage of fog-darkness (capped at four stages), folded into the fog compositor — so it is cut by the player\'s light, respects shadows, and darkens the minimap\'s memory veil, all through the one mechanism. The hub is depth 0 and never darkens; darkness is a property of going down, not a global mood. When the Fog cycle is also on, whichever of the two wants the world darker wins, so a player already running dark fog only notices depth once it exceeds their setting.')}
+                {ctrlRow('Emit bright', onCycleEmitBrightness,
+                  stats.emitBrightnessName ?? '1/2',
+                  'How much of the light it receives a body re-emits, as a fraction. Only has an effect while Emissive is on. It SCALES the variant\'s own emits value against the 1/2 baseline those variants are authored at, so the default is exactly what the table says and a future material that emits less than metal still emits less than metal. Clamped at 1 in the geometry: a body cannot radiate more light than fell on it, which is the one physical claim this feature rests on.')}
+                {ctrlRow('Emit fade', onCycleEmitFade,
+                  stats.emitFadeName ?? 'smooth',
+                  'How long an emitter takes to FADE in or out. Only has an effect while Emissive is on. Emission FLASHED without this, and not because of its brightness: the emitter set is chosen nearest-first and capped by the tier, so a body crossing that budget was drawn at full strength on one frame and not at all on the next. Both frames were individually right; the swap is what reads as a strobe, and near-equal distances reorder constantly as the ship moves. So a halo now eases toward its alpha and OUTLIVES its selection — a body that drops out of the budget fades where it stood rather than vanishing, and a destroyed tile\'s halo fades out too. Off is the old instantaneous behaviour, kept as the control.')}
+                {ctrlRow('Emit shadow', onToggleEmitShadows,
+                  stats.emitShadowsEnabled === true ? 'On' : 'Off',
+                  'May the SECONDARY lights cast shadows of their own? Off by default, and off for cost rather than correctness. Each shadowing emitter needs its OWN occluder collection — the pool is shared and consumed per light — and its own compositing surface, because destination-out drawn onto the accumulated layer would erase the light already there rather than only the emitter\'s share. So each one composites into a scratch canvas and blits its own box back. Note this is not a TERTIARY bounce: emitters do not light other emitters, since every emitter reads its brightness from the player light\'s falloff alone.')}
+                {ctrlRow('Emit shd tier', onCycleEmitShadowTier,
+                  stats.emitShadowTierName ?? 'std',
+                  'How much shadowing the SECONDARY lights get, when Emit shadow is on — a cost ladder, not a look knob. Each rung moves the two things that drive the cost together: how many emitters shadow at all, and how much geometry each of those sees. Std (default) is 4 emitters at 12 occluders; lite and min step down to 2 and 1 for the cheap end; more and max go up to 6 and 8. Past the count an emitter still LIGHTS, flatly — the tier degrades the treatment and never the count, so a cheaper rung dims no part of the scene.')}
+                {ctrlRow('Shadow soft', onCycleShadowSoftness,
+                  stats.shadowSoftnessName ?? 'diffuse',
+                  'Shadow-edge softness. A point light casts a perfectly HARD shadow, which is what made the first version read as a drawn line rather than as lighting. Softness here is an ANGLE, so the soft band WIDENS with distance from the caster the way a real area light\'s does — tight against the tile, spreading further out — rather than being a uniform blur. DIFFUSE is the default (k=10, four rungs softer than the soft this shipped at); off is the hard-edged original, kept as the control. The PASS COUNT scales with k — a wide band graded over the three passes that suit a narrow one would read as stripes — so the softest rungs cost the most, up to six passes per light.')}
+                {ctrlRow('Shard shadows', onToggleShardShadows,
+                  stats.shardShadowsEnabled === false ? 'Off' : 'On',
+                  'Do MOBILE SHARDS cast shadows too, or only static tiles? Only has an effect while Lighting is unified. On by default: a shard is the same shard family as the tile it broke off and about twice its radius (measured 43.6 median against a tile\'s 22), so leaving them out makes debris read as transparent to a light that solid rock is not. Nebula shards are excluded either way — same soft cloud as a nebula tile. Shards are drawn from the DYNAMIC grid, so this is a second spatial query per light; turn it off to see what that costs.')}
+                {ctrlRow('Refraction', onToggleRefraction,
+                  stats.refractionEnabled === true ? 'On' : 'Off',
+                  'ON by default, after device testing. Off: glass passes light STRAIGHT THROUGH at reduced brightness, which is right for a parallel-faced pane — a slab offsets a ray sideways but does not bend it, and a regular hexagon has three pairs of parallel faces. On (default): each exit face refracts by Snell\'s law and throws an additive cone along the DEVIATED direction, scaled by the Refr bright fraction and never above the source\'s own peak, while the straight-through path is withheld in full — so the light is moved rather than added and the toggle is a real A/B. Only the exit face is refracted (a real ray bends twice, and for parallel faces the two cancel), so this over-states the bend for a tile and is about right for a wedge-shaped shard. Past the critical angle nothing is transmitted at all. The question it existed to answer — whether a caustic is legible on a light layer rendered at a third of screen resolution — was answered on the device, which is why it now ships on.')}
+                {ctrlRow('Caustic fade', onCycleCausticFade,
+                  stats.causticFadeName ?? 'smooth',
+                  'How hard the CAUSTIC edges are. Only has an effect while Refraction is on. Two separate cliffs sit behind one symptom — glass clicking as you drift slowly past it. TOTAL INTERNAL REFLECTION is a step: past the critical angle a face transmits nothing, so its cone used to appear and vanish at full length as the body turned. THE OCCLUDER CAP is a step: in a dense field the pool sits saturated (measured 24 of 24 on the glass showcase), so bodies swap in and out of it as you move and an entering body brought its whole caustic at once. Both now fade the cone\'s THROW rather than its alpha — every cone in a transmit group shares one fill, and since that fill is the light\'s own falloff gradient, a shorter cone is a dimmer one. Off restores both cliffs, and is the control the fix was measured against.')}
+                {ctrlRow('Refr bright', onCycleRefractBrightness,
+                  stats.refractBrightnessName ?? '1/2',
+                  'How bright the REFRACTED cone is, as a fraction of the light\'s own peak. Only has an effect while Refraction is on. Named as fractions because that is the quantity the rule is stated in — refracted light is a redistribution of light that already lost some of itself passing through the body, so it can never out-shine the source, and the geometry clamps at 1/1 regardless of what is selected here. Starts at 1/2 — half the source, which was the original ceiling — and cycles UP first, because a caustic that cannot be seen cannot be judged.')}
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}
@@ -1682,18 +1771,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('P glow', onCyclePlasticGlowBrightness,
                   stats.plasticGlowBrightnessName ?? '1x',
                   'Cycle the plastic-tile proximity-glow brightness multiplier (1×–5×). Multiplies the variant peakAlpha so the green bloom lights up from farther away and reads brighter near contact. Plastic-shards are unaffected.')}
-                {ctrlRow('M glow', onCycleMetalGlowBrightness,
-                  stats.metalGlowBrightnessName ?? '1x',
-                  'Cycle the metal-tile proximity-glow brightness multiplier (1×–5×). Multiplies the variant peakAlpha so the fuchsia repel-glow lights up from farther away and reads brighter near contact.')}
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
-                {ctrlRow('Glass', onCycleGlassGlowColor,
-                  stats.glassGlowColorName ?? 'sky',
-                  'Cycle the glass-tile proximity glow ONLY through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Glass shatter dust + main background nebula clusters now live on the Nebula cycle. Default sky.')}
-                {ctrlRow('M color', onCycleMetalGlowColor,
-                  stats.metalGlowColorName ?? 'magenta',
-                  'Cycle the metal-tile proximity glow through the same 11-entry colour list as Glass (independent index). Default magenta — closest match to the legacy fuchsia. Range + peakAlpha stay with the variant; the M glow brightness multiplier is independent.')}
                 {ctrlRow('Nebula', onCycleNebulaPalette,
                   stats.nebulaPaletteName ?? 'sky',
                   'Cycle the glass-side nebula palette through the same 11-entry list. Governs glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition). Main background nebula tiles + shards, BG puffs, and NebulaSystem colour drift all stay on the legacy default palette and are NOT affected. Rock-side dust (rock tile original + regenerated + shards) is fixed at white. Default sky.')}
@@ -1891,6 +1971,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statRow(' ·neb fast/slow', `${perf.nebulaFast}/${perf.nebulaSlow}`)}
                   {statRow(' ·tLit', fmtMs(perf.tileLightingMs))}
                   {statRow(' ·tLit-N', perf.tileLightingCount)}
+                  {statRow(' ·lit', fmtMs(perf.lightingMs))}
+                  {statRow(' ·lit-N', perf.lightingLights)}
+                  {statRow(' ·fog', fmtMs(perf.fogMs))}
                 </>)}
               </>)}
     </div>

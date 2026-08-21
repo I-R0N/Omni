@@ -1388,3 +1388,106 @@ answer to "can I put fire on the right bumper" is a new scheme.
 scheme, with the axis model still chosen from the current list. That covers
 the common ask ("move fire off the trigger") without answering (3), and it
 needs only (1) and (2).
+
+---
+
+## Depth-scoped darkness belongs to the universe map structure (2026-08-20)
+
+**The mechanism is BUILT, TESTED, and SHIPPED OFF** (`constants.ts`
+`depthAmbientEnabled = false`; DBG ▸ Debug Menu ▸ "Depth dark" turns it on).
+A7 of the lighting gauntlet added depth-scoped ambient darkness: each descent
+adds the light tier's `ambientPerStage` of fog-dark (capped at
+`AMBIENT_DEPTH_CAP` = 4 stages), folded into the fog compositor's dark fill
+as `max(fogSetting, depth)` — so it is cut by the player's light, respects
+shadows, and darkens the minimap's memory veil through the one mechanism.
+`tests/lighting.spec.ts` ("A7: depth darkens the world…") pins the monotone
+ladder, the cap, and the toggle restore.
+
+**Why it ships off (user call):** the "depth" it keys on is not yet a real
+place.
+
+- **Today's post-boss rifts have no depth in them.**  A descent rift just
+  travels the player from one arena to another — every arena hangs off the
+  one Overworld, and the "descent target" is a RANDOM interchangeable
+  descriptor.  `stageIndex` is a linear counter that says how many amber
+  rifts a run has entered, not where the player IS.
+- **No persistence.**  Travel "down" a layer, leave through the arena's
+  overworld return portal, then re-enter the same arena: `stageIndex` was
+  zeroed at the hub, so the darkness is gone.  A darkness that evaporates on
+  a round trip reads as a bug, not as depth.
+- In other words the SUB-LAYER PORTAL SYSTEM hasn't been established; the
+  portals just bounce between maps on the primary overworld layer.
+
+**Where it should land:** the planned universe-map work — see "Area
+composition — material combinations + a real map graph" (its Shape 4, the
+node/edge graph) and "Portal persistence — stages that stay cleared".  Once a
+node has a stable identity and a real DEPTH coordinate that survives
+travelling away and back, the darkness becomes a property of the node
+(read `depth` off the node the player is in, instead of off the linear
+`stageIndex`) and the default flips on.  That is a one-line source change
+(`fogEffectiveDark` in `engine/systems/render/fog.ts` reads
+`r.stageDepth`, stamped from the engine each frame — re-point the stamp) —
+the compositor, the cap, the tier scaling and the tests all carry over.
+
+**Related knob already noted in the map-graph entry's open questions:**
+whether the regional material composition also drifts with depth — if it
+does, depth-darkness and depth-composition should read the same coordinate.
+
+---
+
+## Two device-quantified perf items for the next perf session (2026-08-21)
+
+Surfaced by the A9 device captures (`docs/GAUNTLET_LIGHTING_LOG.md`) while
+proving the lighting layer innocent — the light/fog columns read ≤ 0.38 ms
+in every degraded window, and these two owned the frames instead.  Both are
+pre-existing and PROGRESSIVE with entity count, which is why long sessions
+on debris-heavy maps degrade: 59 fps at ~2 k entities → ~37 fps at 4–5 k on
+a dpr-2 phone.
+
+- **The sim wall at ~5 k entities.**  physics + collisions reach ~55 ms per
+  frame at ~5.2 k entities on device (avg physics 2.60 ms, collisions
+  1.85 ms over the window; a later capture reached 184 ms peak at ~6 k and
+  the substep death spiral).  This is the parked O(k²) shard-pair shape the
+  5c harness's `asteroid-6k` scene characterizes; the device numbers say it
+  is the binding constraint on real hardware, ahead of anything render-side.
+
+  **Design direction to investigate first (user, 2026-08-21): GRAVITY
+  COLLAPSE.**  Rather than only making k cheaper, SHRINK k with a
+  mechanic: when free shards in a large space exceed a count/density
+  threshold, rapidly collapse the cluster into a knot of TILES — a visible
+  gravitational infall (pull-in, then a condensation burst) rather than a
+  cleanup.  The pieces mostly exist: the merge broadphase already finds
+  dense clusters, `TILE_SNAP` already turns merged shards into hex tiles,
+  and `composeEntities`/`mergeCount` conserve mass — this would be a
+  faster, threshold-triggered, area-scoped version of the same pipeline
+  with a deliberate feel (LOCAL_MERGE_CONSTANTS is the existing
+  density-reads-merge-rate seam to build on).  Static tiles leave the
+  dynamic broadphase entirely, so every collapse directly buys back the
+  O(k²) term while READING as physics instead of as despawning.  Tuning
+  questions when picked up: the threshold (count vs local density), the
+  collapse speed (fast enough to matter, slow enough to watch), and
+  whether deep-space collapses should seed new minable clusters (ties into
+  the area-composition entry's regional identity).
+- **Tinted-sprite cache thrash — FIXED (same day): the cache now
+  quantises its hex key to 17-step buckets** (`RenderSystem.
+  quantizeTintHex`, applied at both key seams; pinned by the
+  lighting-suite tint-bucket test).  Kept here for the record of the
+  mechanism, since equilibrating hues defeating an exact-key cache is a
+  shape that could recur elsewhere:  Not population per se: `ENEMY_NEBULA_BURST` sprays
+  cosmetic nebula dust tinted to each dead enemy's colour, and
+  `NebulaSystem.equilibrateColors` drifts every shard hue toward its
+  neighbours continuously — so every hue step mints a NEW `(sprite, hex)`
+  key against the 256-entry `getTintedSprite` cache, each miss building a
+  128² canvas.  The key stream never repeats by construction; the cache
+  cannot converge.  Measured: 374 new tints in ONE frame, 41 450 misses in
+  36 s, 12 ms peak, during a heavy late-run fight on a map with NO nebula
+  terrain.  Candidate fixes, cheapest first: QUANTISE the hex in the cache
+  key so equilibration steps land on reusable buckets (visual granularity
+  cost is a few colour steps); skip equilibration for single-hex dust;
+  cap the dust population.  Quantising the key is likely a one-line fix
+  with a measurable win — verify with the PerfRecorder tint line.
+
+Also noted for the same session: the planned desktop-browser framerate
+investigation (user report, 2026-08-16) — the PerfRecorder now carries
+light/fog columns and a self-describing `set` line, so a desktop capture
+will attribute correctly out of the box.

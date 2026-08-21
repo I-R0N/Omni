@@ -29,11 +29,14 @@ import {
     NEBULA_CONSTANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS,
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
-    cycleMetalGlowBrightness, cycleGlassGlowColor, cycleMetalGlowColor,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette,
+    cycleMinimapMaterial, cycleRockPalette, cycleLightingMode, cycleLightingTier,
+    toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
+    cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
+    toggleWorldLights, toggleDepthAmbient,
+    cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix, cycleFog,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -337,6 +340,169 @@ export class DebugControls {
     cycleRockPalette();
   }
 
+  /** DBG (Visual): cycle the unified tile lighting — legacy / debug /
+   *  unified.  Index 0 is 'legacy' and it is named for what it IS rather
+   *  than "off": Omni ships THREE hand-rolled lighting models (the
+   *  proximity bloom, the repel glow, the glass edge tint) and legacy is
+   *  those three, unchanged.  The unified system has to be judged against
+   *  them, which is what this control is for.  'debug' paints a flat grey
+   *  layer — no lighting maths — so the canvas, the blit and the
+   *  smoothing restore can be checked without the light in the way. */
+  cycleLighting() {
+    cycleLightingMode();
+  }
+
+  /** DBG (Visual): cycle the lighting TIER — low / medium / high.  Low is
+   *  pinned as the default because it is the 390x844 phone's budget: a
+   *  divisor-3 layer, 4 lights, 24 occluders, radius 300, hard shadows. */
+  cycleLightingTier() {
+    cycleLightingTier();
+  }
+
+  /** DBG (Visual): do MOBILE SHARDS cast shadows as well as static tiles?
+   *  Only has an effect while Lighting is 'unified'.  On by default —
+   *  shards are the same family as tiles and about twice their radius, so
+   *  excluding them makes debris read as transparent to a light the rock it
+   *  broke off is not.  Off is the cost comparison. */
+  toggleShardShadows() {
+    toggleShardShadows();
+  }
+
+  /** DBG (Visual): REFRACTION through translucent bodies — a prototype.
+   *  Off by default.  On, glass stops passing light straight through and
+   *  instead bends it: each exit face refracts by Snell's law and throws an
+   *  additive cone in the deviated direction, capped at half the source
+   *  light's brightness.  The straight-through path is withheld in full, so
+   *  the toggle is a real A/B rather than one effect stacked on the other. */
+  toggleRefraction() {
+    toggleRefraction();
+  }
+
+  /** DBG (Visual): how bright the refracted cone is, as a fraction of the
+   *  light's own peak — 1/2 down to 1/10.  Only has an effect while
+   *  Refraction is on.  Capped at 1/2 in the geometry regardless of what
+   *  this returns: refracted light is a redistribution of light that already
+   *  lost some of itself passing through the body, so it can never out-shine
+   *  the source. */
+  cycleRefractBrightness() {
+    cycleRefractBrightness();
+  }
+
+  /** DBG (Visual): how bright the player light is, 100% down to 8%.  This
+   *  is NOT the "Light tier" row — that one is a COST ladder (canvas
+   *  resolution, occluder cap, radius) and changes how much work the light
+   *  does, not how bright it looks. */
+  cycleLightBrightness() {
+    cycleLightBrightness();
+  }
+
+  /** DBG (Visual): do METAL and GLASS re-emit the light that falls on them?
+   *  ON by default (user call, after device testing).  On, each lit body of those materials becomes a second,
+   *  dimmer light at its own position — replacing the contact-driven glow
+   *  those materials used to carry, which lit up when something touched them
+   *  rather than when light reached them. */
+  toggleEmissive() {
+    toggleEmissive();
+  }
+
+  /** DBG (Visual): A6 world lights — shots and the snitch as first-class
+   *  lights on the unified layer, in their own colours, out of what is left
+   *  of the tier's maxLights budget.  Off restores the exact pre-A6 layer. */
+  toggleWorldLights() {
+    toggleWorldLights();
+  }
+
+  /** DBG (Visual): A7 depth ambient — each stage descended adds the light
+   *  tier's ambientPerStage of fog-dark (capped at 4 stages), folded into
+   *  the fog compositor.  The hub is depth 0 and never darkens. */
+  toggleDepthAmbient() {
+    toggleDepthAmbient();
+  }
+
+  /** DBG (Visual): how much of the light it receives a body re-emits.
+   *  Scales the variant's own `emits` against the 1/2 baseline it is
+   *  authored at, so the default is a no-op.  Clamped at 1 in the geometry —
+   *  a body cannot radiate more light than fell on it. */
+  cycleEmitBrightness() {
+    cycleEmitBrightness();
+  }
+
+  /** DBG (Visual): may the SECONDARY lights cast shadows of their own?  Off
+   *  by default and expensive on: each shadowing emitter needs its own
+   *  occluder collection and its own compositing surface, because
+   *  destination-out on the shared layer would erase light that is not its
+   *  own. */
+  toggleEmitShadows() {
+    toggleEmitShadows();
+  }
+
+  /** DBG (Visual): HOW MUCH shadowing the secondary lights get, when the row
+   *  above turns them on — a cost ladder, not a look knob.  The rungs move
+   *  the emitter COUNT and that emitter's own occluder cap together, because
+   *  a shadowing emitter costs almost exactly one occluder collection.  Past
+   *  the count an emitter still lights, flatly, so a cheaper rung dims
+   *  nothing. */
+  cycleEmitShadowTier() {
+    cycleEmitShadowTier();
+  }
+
+  /** DBG (Visual): how long an emitter takes to fade in or out.  Emission
+   *  flashed without it: the emitter set is capped by the tier, so a body
+   *  crossing that budget was drawn at full strength one frame and not at
+   *  all the next.  'off' is the old instantaneous behaviour. */
+  cycleEmitFade() {
+    cycleEmitFade();
+  }
+
+  /** DBG (Visual): the player's light as a directional BEAM instead of a
+   *  radial glow.  Points along the aim, masks everything the player's light
+   *  draws (falloff, shadows, caustics) but not the secondary emitters — a
+   *  lit plate is its own light.  'radial' is the shipped glow; 'off' is a
+   *  zero-width beam, which leaves the emitters alone on the layer. */
+  cycleFlashlight() {
+    cycleFlashlight();
+  }
+
+  /** DBG (Visual): what colour the player's light is.  Reaches everything
+   *  the player's light does, refracted cones included — light that passes
+   *  through glass keeps the colour it arrived with.  The emitters are
+   *  unaffected: they radiate the colour of the BODY, not of what lit it. */
+  cycleLightColor() {
+    cycleLightColor();
+  }
+
+  /** DBG (Visual): FOG OF WAR — darkness the player's light cuts through.
+   *  Off / dim / dark are two-layer (lit or not); `memory` is the
+   *  traditional three, adding "seen before but not lit now", which needs a
+   *  per-map memory of where the ship has been. */
+  cycleFog() {
+    cycleFog();
+  }
+
+  /** DBG (Visual): how much of the MATERIAL's colour rides the light it
+   *  passes on — transmitted light, the refracted caustic, and what a body
+   *  re-emits.  'off' is what shipped before: transmitted light kept the
+   *  light's colour with no trace of the material, and an emitter kept the
+   *  material's with no trace of what lit it. */
+  cycleTintMix() {
+    cycleTintMix();
+  }
+
+  /** DBG (Visual): how hard the CAUSTIC edges are.  Two cliffs behind one
+   *  reported symptom (glass clicking as you drift past it): total internal
+   *  reflection switching a face's cone off at full length, and the occluder
+   *  cap evicting a body's whole caustic at once.  'off' restores both. */
+  cycleCausticFade() {
+    cycleCausticFade();
+  }
+
+  /** DBG (Visual): shadow-edge softness — soft / softer / off / subtle.
+   *  Softness is an ANGLE, so the band widens with distance from the caster
+   *  rather than being a uniform blur.  'off' is the hard-shadow control. */
+  cycleShadowSoftness() {
+    cycleShadowSoftness();
+  }
+
   /** DBG (Visual): gamepad force feedback on/off.  Separate from the
    *  screen-shake toggle on purpose — the camera lurching and the hand
    *  buzzing are different preferences, and only one of them is felt by a
@@ -443,37 +609,8 @@ export class DebugControls {
     cyclePlasticGlowBrightness();
   }
 
-  /**
-   * Cycle the metal-tile proximity-glow brightness multiplier
-   * (MATERIAL_GLOW_BRIGHTNESS_CYCLE, 1× … 5×).  RenderSystem reads
-   * the multiplier live each frame inside the metal-tile glow draw.
-   */
-  cycleMetalGlowBrightness() {
-    cycleMetalGlowBrightness();
-  }
 
-  /**
-   * Cycle the DBG glass palette through GLASS_GLOW_COLORS.  Governs
-   * the glass-tile proximity glow ONLY (RenderSystem reads the hex
-   * live per draw).  Glass-shatter dust + main background nebula
-   * clusters live on the Nebula cycle (see cycleNebulaPalette).
-   * Default 'sky'.  No entity re-roll needed — the glow is read live.
-   */
-  cycleGlassGlowColor() {
-    cycleGlassGlowColor();
-  }
 
-  /**
-   * Cycle the DBG metal-glow palette through the same 11-entry list
-   * Glass uses (GLASS_GLOW_COLORS).  RenderSystem reads the active
-   * hex via getActiveMetalGlowColor() in the metal-tile glow render
-   * branch — range + peakAlpha stay with the variant.  Default
-   * 'magenta' (closest to the legacy fuchsia baked into the
-   * variant config).
-   */
-  cycleMetalGlowColor() {
-    cycleMetalGlowColor();
-  }
 
   /**
    * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Now
