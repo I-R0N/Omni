@@ -84,6 +84,10 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
  * optional callbacks so the subsystem stays self-contained.
  */
 export class WeaponSystem {
+  /** SFX sink for enemy fire.  Set once by GameEngine; the system itself
+   *  stays free of audio state (same shape as PhysicsSystem.sfx). */
+  public onEnemyFire: ((id: string, x: number, y: number) => void) | null = null;
+
   constructor(private projectiles: ProjectileSystem) {}
 
   /**
@@ -107,6 +111,10 @@ export class WeaponSystem {
      *  so shaking the camera on every shot would be unplayable, but the hand
      *  should still feel each one. */
     onRumble?: (amount: number, kind?: RumbleKind) => void,
+    /** Fired once per shot actually spawned, for SFX.  Symmetrical with
+     *  `onShake` — WeaponSystem stays free of audio state; the caller
+     *  maps the weapon type onto an SFX_INVENTORY id. */
+    onFire?: (weapon: WeaponType, isCharged: boolean, subShotIndex: number) => void,
   ): boolean {
     // Weaponless flight (no gun mounted) is a legal outfit — nothing to
     // fire.  The weight system pays this back as an acceleration boost.
@@ -160,6 +168,7 @@ export class WeaponSystem {
     }
 
     this.projectiles.spawn(entities, player, target, config, EntityType.PLAYER);
+    onFire?.(config.type, isCharged, 0);
     return true;
   }
 
@@ -172,7 +181,8 @@ export class WeaponSystem {
     entities: GameEntity[],
     player: GameEntity,
     dt: number,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onFire?: (weapon: WeaponType, isCharged: boolean, subShotIndex: number) => void,
   ) {
     if (player.weaponCooldown && player.weaponCooldown > 0) {
       player.weaponCooldown -= dt;
@@ -194,6 +204,10 @@ export class WeaponSystem {
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;
     this.projectiles.spawn(entities, player, { x: targetX, y: targetY }, config, EntityType.PLAYER);
+    // Sub-shot index counts UP as the queue drains, so the caller can step
+    // the pitch and make a burst read as a rising triplet.
+    onFire?.(config.type, player.burstCharged === true,
+             (config.burstCount ?? 1) - player.burstQueue);
     if (onShake && config.type === WeaponType.BURST) onShake(3);
 
     // Clear the charged flag once the burst fully drains so the next
@@ -273,6 +287,20 @@ export class WeaponSystem {
         if (fx) { shot.appliesEffect = fx; shot.color = CORROSION.COLOR; }
       }
       this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
+      // Enemy-fire audio (SFX_INVENTORY §4.2), voiced apart from the
+      // player's family so incoming and outgoing are tellable by ear.
+      // The variant picks the voice: the Bulwark's fan sounds ONCE per
+      // volley rather than per pellet, since that is one gesture visually
+      // too.
+      if (this.onEnemyFire) {
+        const id = enemy.isBoss ? 'enemy.shot.boss'
+          : shot.homing ? 'enemy.shot.missile'
+          : fx ? 'enemy.shot.acid'
+          : (arch.burst && (enemy.burstQueue === undefined || enemy.burstQueue >= arch.burst.size))
+            ? 'enemy.shot.fan'
+          : 'enemy.shot.basic';
+        this.onEnemyFire(id, enemy.position.x, enemy.position.y);
+      }
 
       // Cadence: archetypes with a `burst` fire `size` shots `gap` apart then
       // reload for the weapon's full `cooldown`; everyone else fires one shot

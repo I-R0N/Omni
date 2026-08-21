@@ -30,6 +30,10 @@ import { nextId } from '../systems/IdAllocator';
 /** Per-sim-step snitch tick: lifecycle, flow-field steering, comet-tail
  *  emission, and the catch check.  Called from updateGameLogic after the
  *  wave tick so waveState is fresh. */
+/** Range at which the snitch's shimmer loop becomes audible (world units).
+ *  Audio-only, and read at exactly one call site (SFX_INVENTORY §7.1). */
+const SNITCH_NEAR_RANGE = 1200;
+
 export function updateSnitch(g: GameEngine, dt: number) {
   if (!g.currentMap) return;
   g.snitchTime += dt;
@@ -60,6 +64,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
         && !g.player.isExploding
         && playerDistSq < SNITCH_CONSTANTS.PANIC_RADIUS * SNITCH_CONSTANTS.PANIC_RADIUS;
     if (panic || g.snitchAiTimer <= 0) {
+      g.audio.play('snitch.dart', { x: s.position.x, y: s.position.y });
       g.snitchAiState = 'dart';
       g.snitchAiTimer = SNITCH_CONSTANTS.DART_DURATION_MIN
           + Math.random() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
@@ -83,6 +88,12 @@ export function updateSnitch(g: GameEngine, dt: number) {
   // Speed eases toward the state target — near-instant on the way up
   // (the burst), visibly slower on the way back down (the catch window
   // opens gradually as the dart bleeds off).
+  // Proximity shimmer — the carrot.  Rides the distance this pass has
+  // already computed, so it costs one comparison.
+  g.audio.loop('snitch.near',
+               playerDistSq < SNITCH_NEAR_RANGE * SNITCH_NEAR_RANGE,
+               { x: s.position.x, y: s.position.y });
+
   const darting = g.snitchAiState === 'dart';
   // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×
   // cruise per wave, capped; coast is a fixed fraction of it.  Read live
@@ -223,6 +234,7 @@ function spawnSnitch(g: GameEngine) {
 /** Snitch caught: big gold payout + burst, then end the wave through
  *  the shared cleared path (no early-clear bonus stacks on top). */
 function catchSnitch(g: GameEngine, s: GameEntity) {
+g.audio.play('snitch.catch');
   s.active = false;
   g.snitch = null;
   g.snitchCatchCount++; // the NEXT snitch spawns faster — catching ramps speed, not waves

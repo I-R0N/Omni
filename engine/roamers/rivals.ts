@@ -172,6 +172,7 @@ export function updateRivals(g: GameEngine, dt: number) {
                 wrapPosition(portal);
                 inst.portal = portal;
                 g.openPortal(portal, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
+                g.audio.play('rival.warp.out', { x: portal.x, y: portal.y });
             }
         } else if (inst.state === 'leave' && inst.portal) {
             const cr = R.PORTAL_CONSUME_RADIUS;
@@ -223,6 +224,7 @@ export function spawnRival(g: GameEngine, forced?: RivalDisposition) {
         ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
         fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
     });
+    g.audio.play('rival.warp.in', { x: ship.position.x, y: ship.position.y });
 }
 
 /** Rival weapon: a blaster bolt that may damage the wave enemies (hitsEnemies)

@@ -1759,6 +1759,59 @@ k. After N waves, spawn a portal to a new map.
     stay untouched. Tier 6 of the parking-lot harness entry is
     thereby consumed; tiers 3–5 remain parked.
 
+52. **Step 5 SHIPPED (PR #84) + two side items; sweep review
+    (2026-08-14).** Step 5 (Pair C + polish + CI) is DONE —
+    ledger `docs/GAUNTLET_PAIRC_POLISH_LOG.md`. Highlights
+    verified: `pr-checks.yml` runs the three gates on every PR
+    (decision #51 consumed); gamepad + onscreen joystick landed
+    with the controller INTERACT wired into the ship-select
+    `selected` flag (the #44 hole closed); menu help; the
+    MINIMAP FLOW VERDICT — streamlines SHIPPED as the default
+    over shard dots (three-way DBG cycle Flow/Dots/Off kept as
+    the honest control), nebula removed per #43; portal
+    indicators resolved; palette defaults + MAP_POPULATION
+    authority landed. Side items in the same sweep:
+    a. **PR #86** — a react-reconciliation-cost investigation
+       that DECLINED to act after measurement (the suspected
+       32 ms React cost did not reproduce; stop-condition
+       honoured). The right outcome, logged as precedent:
+       measure-first also means stopping.
+    b. **User WAV takes are landing directly** (e.g. 35e5e7f,
+       shard-hit a/b/c on the integration branch): sound
+       CONTENT and sound CODE are already flowing on separate
+       tracks — the SFX branch built the pipeline for exactly
+       this (filename-discovered .wav takes replacing synth
+       drafts per cue, asset guard, audition mode).
+
+53. **Pair B SFX system SHIPPED (PR #79, 2026-08-16) —
+    Phase 3 is COMPLETE.** The collaborator-finished SFX
+    system merged: WebAudio engine with a per-cue synth draft
+    for every id in the ~130-cue `docs/SFX_INVENTORY.md`,
+    recorded `.wav` takes auto-discovered from
+    `public/assets/sfx/` (an SFX manifest mirroring the
+    nebula-manifest pattern), asset guards (silent/broken
+    files can never beat a working draft), a WAV-only
+    audition mode, and explosion variety. Ledger:
+    `docs/GAUNTLET_PAIR_B_LOG.md`.
+    a. **The AUDIO_PLAN §2a standalone-build fork is
+       RESOLVED**: audio is deliberately excluded from
+       single-file inlining — the standalone falls back to
+       synth drafts (still has sound, stays ~5.5 MB), with an
+       in-code warning against "fixing" it.
+    b. **Honest-state discipline**: loop-driven cues
+       (thrust, charge) REFUSE recorded samples at discovery
+       and surface them in the pause menu — a sample
+       registered against an id nothing plays is the third
+       documented instance of "looks like success" being
+       worse than an error.
+    c. **Content state: 4 of ~130 cues recorded.** Sound
+       production continues as asset-only PRs (binary adds,
+       guard-validated, CI-checked) in parallel with 5d and
+       step 6; the COMPLETE soundscape must land before the
+       step-7 final playtest. The merge itself cleaned up the
+       stray takes previously uploaded to the integration
+       branch.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;

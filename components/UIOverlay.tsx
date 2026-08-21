@@ -78,6 +78,11 @@ interface UIOverlayProps {
   onToggleShardLod?: () => void;
   onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
+  // Audio settings (Phase 3 Pair B).  Deliberately the ONLY UI surface
+  // this pass adds — Pair A owns the overlay's structural work.
+  onSetVolume?: (v: number) => void;
+  onToggleMute?: () => void;
+  onToggleDrafts?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
   onToggleJoystickDebug?: () => void;
@@ -262,6 +267,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardLod,
   onToggleMergeRate,
   onToggleScreenShake,
+  onSetVolume,
+  onToggleMute,
+  onToggleDrafts,
   onToggleTileOutlines,
   onToggleChevronMode,
   onToggleJoystickDebug,
@@ -2537,6 +2545,108 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
               )}
             </div>
+            {/* Audio — master volume + mute.  One row by design: Pair A is
+                developing the overlay's structural UI in parallel, so this
+                pass keeps its footprint to a single settings strip. */}
+            <div className="mx-auto w-full max-w-xs flex items-center gap-3 px-3 py-2
+                            bg-slate-900/70 border border-slate-700/60 rounded-lg">
+              <button
+                onClick={onToggleMute}
+                aria-label={stats.audio?.muted ? 'Unmute' : 'Mute'}
+                className="pointer-events-auto cursor-pointer shrink-0 w-9 h-9 rounded-md
+                           bg-slate-800/80 border border-slate-600/60 text-base
+                           hover:bg-slate-700/80 active:bg-slate-600/80"
+              >
+                {stats.audio?.muted ? '🔇' : '🔊'}
+              </button>
+              <input
+                type="range" min={0} max={100} step={1}
+                value={Math.round((stats.audio?.volume ?? 0.7) * 100)}
+                onChange={e => onSetVolume?.(Number(e.target.value) / 100)}
+                aria-label="Master volume"
+                className="pointer-events-auto cursor-pointer flex-1 accent-sky-400
+                           disabled:opacity-40"
+                disabled={stats.audio?.muted === true}
+              />
+              <span className="shrink-0 w-10 text-right text-slate-400 text-[11px] tabular-nums">
+                {stats.audio?.muted ? '—' : `${Math.round((stats.audio?.volume ?? 0.7) * 100)}%`}
+              </span>
+            </div>
+
+            {/* Recorded-take audition.  Turning the synth DRAFTS off is the
+                only way to judge real assets honestly: with a draft under
+                every id, a sound that is still synthetic is indistinguishable
+                from one that landed, and the coverage count says how much of
+                the game goes quiet when they are off. */}
+            <div className="mx-auto w-full max-w-xs flex items-center gap-3 px-3 py-2
+                            bg-slate-900/70 border border-slate-700/60 rounded-lg">
+              <button
+                onClick={onToggleDrafts}
+                aria-label={stats.audio?.drafts ? 'Turn synth drafts off' : 'Turn synth drafts on'}
+                className={`pointer-events-auto cursor-pointer shrink-0 px-2 h-9 rounded-md text-[11px]
+                            font-semibold border ${stats.audio?.drafts
+                              ? 'bg-slate-800/80 border-slate-600/60 text-slate-200'
+                              : 'bg-emerald-900/60 border-emerald-500/50 text-emerald-200'}`}
+              >
+                {stats.audio?.drafts ? 'Drafts ON' : 'WAV only'}
+              </button>
+              <span className="flex-1 text-[11px] leading-tight text-slate-400">
+                {stats.audio?.drafts
+                  ? 'Synth drafts fill every sound with no .wav yet.'
+                  : 'Only recorded .wav files sound. Everything else is silent.'}
+              </span>
+              <span className="shrink-0 text-right text-slate-300 text-[11px] tabular-nums">
+                {stats.audio?.sampled ?? 0}/{stats.audio?.total ?? 0}
+              </span>
+            </div>
+
+            {/* A filename that matches no sound id is invisible otherwise —
+                it looks exactly like an id nobody has recorded yet. */}
+            {stats.audio && stats.audio.unmatched.length > 0 && (
+              <div className="mx-auto w-full max-w-xs px-3 py-2 rounded-lg
+                              bg-amber-950/40 border border-amber-500/40
+                              text-[11px] leading-relaxed text-amber-200/90">
+                {stats.audio.unmatched.length} file(s) in /assets/sfx/ match no sound id:{' '}
+                <span className="font-mono">{stats.audio.unmatched.slice(0, 4).join(', ')}</span>
+                {stats.audio.unmatched.length > 4 ? ' …' : ''}
+              </div>
+            )}
+
+            {/* A file named after a LOOP id is matched but unusable — loops
+                have no sampled path yet.  Silence here would read as "my
+                recording isn't working" with no way to find out why. */}
+            {stats.audio && stats.audio.loopFiles.length > 0 && (
+              <div className="mx-auto w-full max-w-xs px-3 py-2 rounded-lg
+                              bg-amber-950/40 border border-amber-500/40
+                              text-[11px] leading-relaxed text-amber-200/90">
+                Sustained sounds can't use .wav yet, so these are ignored:{' '}
+                <span className="font-mono">{stats.audio.loopFiles.slice(0, 3).join(', ')}</span>
+                {stats.audio.loopFiles.length > 3 ? ' …' : ''}
+              </div>
+            )}
+
+            {/* Audio diagnostics.  Only shown when audio is NOT audible, so
+                it costs nothing in the normal case — but on a phone there is
+                no console, and "no sound" has four very different causes that
+                are otherwise indistinguishable from the outside. */}
+            {stats.audio && !stats.audio.audible && !stats.audio.muted && (
+              <div className="mx-auto w-full max-w-xs px-3 py-2 rounded-lg
+                              bg-amber-950/40 border border-amber-500/40
+                              text-[11px] leading-relaxed text-amber-200/90">
+                {stats.audio.state === null ? (
+                  <>Audio not started yet — tap anywhere to enable it.</>
+                ) : stats.audio.state === 'running' ? (
+                  <>Audio is running.</>
+                ) : (
+                  <>Audio is <span className="font-bold">{stats.audio.state}</span> — tap
+                    anywhere to resume it.</>
+                )}
+                <div className="mt-1 text-amber-200/70">
+                  On iPhone, also check the <span className="font-bold">side ring/silent
+                  switch</span> — it silences web audio even at full volume.
+                </div>
+              </div>
+            )}
 
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}

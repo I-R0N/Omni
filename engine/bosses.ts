@@ -92,6 +92,9 @@ export function updateBosses(g: GameEngine, dt: number) {
  *  CLEARED (a phase can drop a shield or stop escorts), so a phase is a full
  *  description of the boss's current state rather than a patch. */
 function applyBossPhase(g: GameEngine, boss: GameEntity, def: BossDef, index: number) {
+// A phase change must interrupt the fight's rhythm — index 0 is the
+// spawn stamp, so only real transitions sound.
+if (index > 0) g.audio.play('boss.phase', { x: boss.position.x, y: boss.position.y });
     const phase = def.phases[index];
     const first = boss.bossPhase === undefined || boss.bossPhase < 0;
     boss.bossPhase = index;
@@ -167,6 +170,7 @@ function applyBossPhase(g: GameEngine, boss: GameEntity, def: BossDef, index: nu
  * shards like any other enemy.
  */
 export function payBossBounty(g: GameEngine, boss: GameEntity) {
+g.audio.play('boss.death');
     g.bossesKilled++;
     g.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
     // Stack the discount fraction (capped) and refresh the window.
