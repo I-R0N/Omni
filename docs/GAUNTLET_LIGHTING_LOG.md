@@ -3222,9 +3222,26 @@ anything not `#rrggbb` passes through untouched.
 Pinned by a merge-gate test (behaviour, not milliseconds): two hexes
 inside one bucket share ONE canvas and the second lookup counts no miss;
 different buckets differ; the quantiser is idempotent, format-preserving,
-and passes non-hex strings through.  The definitive before/after is a
-device capture's tint line — the A9c numbers (1 119 misses/s, 15 ms peak)
-are the baseline to beat.
+and passes non-hex strings through.
+
+### Verified on device (same day)
+
+A 201 s capture on the fixed build — Glass Field, diff 3, waves 1→5 plus
+a death, peak 4 028 entities, the storm's own conditions:
+
+| | before (A9 captures, ≥4 k entities) | after |
+|---|---|---|
+| tint miss rate | 228–1 119 /s | **7.8 /s** |
+| worst single frame's new tints | 497 (15 ms) | **2 (1 ms)** |
+| render worst-frames | 60–111 ms | **2–8 ms** |
+| FPS avg at this depth | 36–48 | **57** (84% ≥ 55) |
+
+The downstream claim held too: the deep-run render collapse WAS the
+storm's evicted-dust slow-path draws, and it went with it.  What used to
+read as "the game degrades by wave 5" was, at ≤4 k entities, mostly this
+one cache.  The sim wall proper remains for the gravity-collapse item —
+this capture peaked at 4 028 entities and its sim stayed ≤29 ms; the
+5 k+ regime is the part still unbought.  Light: 0.09 / 0.28, unchanged.
 
 Also this entry: the ~5 k sim wall's parking-lot item now carries the
 user's design direction — GRAVITY COLLAPSE, shrinking k with a mechanic
