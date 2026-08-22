@@ -52,10 +52,32 @@ that *produced* the result being reported.
 
 ---
 
-## ⚠️ MERGE DEFERRED — the seam waits for PRs #88 and #89
+## ✅ MERGE DEFERRAL — RESOLVED (rebased onto the new base)
 
-**Decision: merge this branch LAST, after the two large in-flight PRs land.**
-Operator's call, and the measurement below is why.
+**Decision at the time: merge this branch LAST, after the two large in-flight
+PRs land.** That was the operator's call, and it was correct — the numbers
+below turned out to *understate* the case.
+
+**Outcome.** PRs #88 and #89 both merged; the base moved `96efa03 → 00f2f7d`;
+this branch merged the new base cleanly (`a7e1256`, following the repo's own
+`rebase-to-new-base` merge convention). The seam still emits **byte-identical
+JavaScript** — re-verified on the new base at 857,660 bytes, identical MD5.
+
+**The prediction was 4 new interface members. The actual count was 15:**
+
+`damageTriggeredBars`, `bossBarActive`, `stageDepth`,
+`playerLightToolHalfDeg`, `getShadowSoftness`, `getFlashlight`,
+`getRefraction`, `getEmissive`, `getEmitShadows`, `getEmitShadowTier`,
+`getFog`, `resetFog`, `lastLightingMs`, `lastLightingLights`, `lastFogMs`
+
+**Every one is debug state or a perf counter. Not one is anything a renderer
+swap cares about, and the draw path (groups 1 and 2) did not change at all.**
+So the seam's cost is now measured twice rather than argued: 19 of the
+original 28 members were group 3, and **15 of 15 additions were too**. Had
+the seam merged first, that is 15 build breakages landing on two unrelated
+PRs instead of one adaptation landing here.
+
+The original measurement follows, unedited.
 
 ### What was measured
 
@@ -642,9 +664,36 @@ At ~24.8 misses/s × ~2.4 ms that is **≈1.2 ms/frame** — about half of
 to be cheaper. Against 71 ms sim spikes it is noise, which does not change
 this section's conclusion.
 
+> **UPDATE — the lever was taken, and it mattered far more than this
+> estimated.** The lighting branch shipped exactly the P16 fix
+> (`d0232d4`, "A10: fix the tint storm — quantise the tinted-sprite cache
+> key": `quantizeTintHex` rounds each channel to 17-step buckets before the
+> key is built, and paints the quantised value so key and pixels agree).
+> Device verification (`2a8e93f`) measured **miss rate 1,119/s → 7.8/s** and
+> **render worst-frames 60–111 ms → 2–8 ms**.
+>
+> Two things follow. The ~1.2 ms/frame estimate above was **an order of
+> magnitude low** for the lighting-era workload — under lighting the tint
+> storm was a genuine render-side bottleneck, not noise. And the fix landing
+> is what put render back to single-digit milliseconds, which is the state
+> the verdict's conclusion depends on.
+
 *(Single scene, single session. The margin is an order of magnitude, so the
 conclusion is robust — but a second capture on a different map would cost
 minutes and remove the last doubt.)*
+
+> **PROVENANCE CAVEAT, added at the rebase.** This capture was taken on a
+> build that **predates the lighting work** (PR #88). Lighting adds real
+> render cost, and its own device captures found render worst-frames of
+> **60–111 ms** from the tint storm before `d0232d4` fixed it — far above the
+> 6–7 ms measured here. The fix restored render to **2–8 ms**, so the
+> sim-bound conclusion still holds on the current base.
+>
+> But the honest statement is narrower than "Omni is not render-bound": it is
+> **"Omni was sim-bound when measured, and lighting's render cost has since
+> been brought back under control."** If this question is ever reopened, take
+> a fresh capture on a lighting-enabled build rather than citing these
+> numbers.
 
 ### 5. The recommendation
 
