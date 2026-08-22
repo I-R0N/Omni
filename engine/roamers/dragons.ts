@@ -229,6 +229,12 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         mass: v.mass,
         contactDamage: v.contactDamage,
         enemyShape: 'dragon',
+        // A PRIORITY target the player tracks rather than reacts to, so it
+        // opts out of the damage-triggered bar (5d U5) and keeps a persistent
+        // one.  Capstone bosses deliberately do NOT: they have the dedicated
+        // HUD bar, and a second readout under the hull would be the same
+        // redundancy U5 removed from the player.
+        alwaysShowHealthBar: true,
         phasesTerrain: true,          // glides through terrain, eats it
         thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
         consume: v.consume ? { ...v.consume } : undefined,

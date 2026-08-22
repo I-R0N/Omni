@@ -486,8 +486,16 @@ export function drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity
             ctx.stroke();
             ctx.restore();
         } else {
+            // A full bubble now DEFLECTS, so the ring has to be drawn where the
+            // deflection happens — `PhysicsSystem.shieldReach`, i.e. the bounding
+            // radius times the shared COLLISION_MULTIPLIER, which is also where
+            // the player's own shield ring and inflated collision shape sit.
+            // Derived from `size` rather than the hit-punched `r` because physics
+            // does not punch; the shared constant is what keeps the two honest.
+            const rs = Math.max(entity.size.x, entity.size.y) * 0.5
+                     * SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
             ctx.beginPath();
-            ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
+            ctx.arc(0, 0, rs, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac + flash})`;
             ctx.lineWidth = 2.5;
             ctx.stroke();

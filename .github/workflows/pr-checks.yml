@@ -1,19 +1,36 @@
 name: PR checks
 
-# The merge gate.  CLAUDE.md §7 names three local validation commands —
-# `npm run typecheck`, `npm run build`, `npm test` — and this workflow is the
-# same three, run on every PR so nothing merges without them being green.
-# Deliberately secret-free so it also runs on fork PRs (unlike pr-preview).
+# The merge gate, in TWO SCOPES (user call, 2026-08-21: the full suite costs
+# ~12 minutes and was running on every push of every PR).
+#
+#   SMOKE — every PR push: typecheck + build + the boot/loop canary suites.
+#           A bundle that will not boot, a type error, or a broken core loop
+#           still fails in ~3 minutes; nothing merges without this green.
+#   FULL  — the entire Playwright suite, at the MAJOR SEAMS only:
+#           pushes to `main` and `claude/plan-completion` (i.e. immediately
+#           after a merge lands), PRs whose BASE is `main` (the
+#           plan-completion → main promotion), any PR carrying the
+#           `full-tests` label (the opt-in for pre-merge full validation),
+#           and manual dispatch.
+#
+# The check NAME stays `typecheck · build · test` in both scopes, so branch
+# protection keeps pointing at one required check.  The honest trade: a
+# regression OUTSIDE the smoke now surfaces at the merge point rather than
+# per push — the `full-tests` label is the escape hatch when a PR wants the
+# whole net before merging.  Deliberately secret-free so it also runs on
+# fork PRs (unlike pr-preview).
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `labeled` so dropping `full-tests` onto a PR re-runs at full scope.
+    types: [opened, synchronize, reopened, labeled]
   # Also guard the long-lived branches themselves, so a bad merge is visible
   # immediately rather than at the next PR opened against them.  `main` is the
   # default branch; `claude/plan-completion` is the integration branch the
   # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md).
   push:
     branches: [main, claude/plan-completion]
+  workflow_dispatch:
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -73,18 +90,64 @@ jobs:
       # against, so the two paths differ: on a hit install only the system
       # deps, on a miss do the full download.  Guarding one `--with-deps` step
       # on the cache would yield a cached browser that cannot launch.
+      # Both install steps carry their OWN short timeout, and it is not
+      # belt-and-braces: they shell out to apt, and a runner whose mirror is
+      # unreachable does not fail — it RETRIES, quietly, forever.  Seen on
+      # 2026-08-18, where `install-deps` sat on an unreachable
+      # azure.archive.ubuntu.com for 44 minutes, ate the job's whole 45-minute
+      # budget, and reported as `cancelled` (which is how GitHub renders a
+      # timed-out job) with typecheck, build and test never having run at all.
+      # A cancellation with no failing step is a genuinely hard thing to read
+      # backwards.  Six minutes is ~10x either step's normal cost, so this can
+      # only fire on a hang — and when it does, it fails FAST, names the step
+      # that broke, and leaves the 45 minutes for the suite it was sized for.
+      # ...and neither step is allowed to BE the verdict.  These prepare the
+      # browser; the three gates are typecheck, build and test, and a prepare
+      # step that cannot reach a mirror has not told us anything about the
+      # diff.  On 2026-08-18 the outage above ran for over an hour and turned
+      # the merge gate red twice without a single test having executed, which
+      # is a gate reporting on the weather.
+      #
+      # This cannot hide a real problem, which is the whole reason it is safe:
+      # if the libraries genuinely are missing, Chromium fails to launch and
+      # `npm test` says so in as many words — a far clearer signal than a
+      # timed-out apt call — and the suite still has to pass either way.
       - name: Install Playwright browser
         if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 6
+        continue-on-error: true
         run: npx playwright install --with-deps chromium
 
       - name: Install Playwright system dependencies
         if: steps.pw-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 6
+        continue-on-error: true
         run: npx playwright install-deps chromium
 
-      # Gate 3 — the smoke suites.  playwright.config.ts's webServer builds and
-      # previews `dist/` itself, so this needs no separate serve step.
-      - name: Test
-        run: npm test
+      # Which scope this run is (see the header): FULL at the merge seams,
+      # SMOKE on ordinary PR pushes.  The smoke set is the harness canary
+      # (boot — bundle parsed, engine constructed, handles live, console
+      # clean) plus the full-game loop (dock, outfit, portal, boss, home) —
+      # the two suites that prove the game IS a game before a merge-point
+      # run proves everything else.
+      - name: Decide test scope
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ] \
+             || [ "${{ github.base_ref }}" = "main" ] \
+             || [ "${{ contains(github.event.pull_request.labels.*.name, 'full-tests') }}" = "true" ]; then
+            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "label=full suite" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=tests/boot.spec.ts tests/loop.spec.ts" >> "$GITHUB_OUTPUT"
+            echo "label=smoke (boot + loop)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Gate 3 — Playwright at the decided scope.  playwright.config.ts's
+      # webServer builds and previews `dist/` itself, so this needs no
+      # separate serve step.
+      - name: Test (${{ steps.scope.outputs.label }})
+        run: npx playwright test ${{ steps.scope.outputs.args }}
 
       - name: Upload Playwright report
         if: failure()

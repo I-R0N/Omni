@@ -384,6 +384,19 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
+  /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
+   *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
+   *  while it is positive and fades over the last `FADE_DURATION`.  A
+   *  SEPARATE timer from `hitFlash` on purpose: `hitFlash` is a ~0.1–0.3s
+   *  whiten-and-punch, and a bar that lived that long would strobe rather
+   *  than inform.  Purely presentational — nothing reads it but the
+   *  renderer. */
+  healthBarTimer?: number;
+  /** Opt OUT of the damage trigger and keep a persistent bar.  For priority
+   *  targets a player is meant to be tracking rather than reacting to (the
+   *  dragon mini-boss).  Capstone bosses do not need it — they have the
+   *  dedicated HUD bar. */
+  alwaysShowHealthBar?: boolean;
   shield?: number;
   maxShield?: number;
   shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
@@ -958,6 +971,19 @@ export interface GameEntity {
   // are "deformed", and their adjacent edges always draw regardless
   // of neighbour presence.
   originalCircumradiusSq?: number;
+  /** Cached SHADOW-CASTING radius — the largest circle centred on the
+   *  centroid that fits INSIDE `polygonPoints` (the inradius), not the
+   *  circumradius.  See render/lighting.ts for why.  Invalidated wherever
+   *  the polygon is mutated, alongside `_satCacheAxes`. */
+  _occluderR?: number;
+  /** Cached EMISSION TINT for the unified light layer: the body's own colour,
+   *  normalised to full value and quantised, as an `'r, g, b'` string ready
+   *  for a gradient stop.  `_emitTintKey` is the source colour it was built
+   *  from — nebula bodies blend theirs per-instance, so the cache has to
+   *  notice when it changes.  Built on first use and on change only; never
+   *  per frame. */
+  _emitTint?: string | null;
+  _emitTintKey?: string;
 
 
   // Composite asteroid — tracks every drop (including power-ups) stored
@@ -1328,6 +1354,33 @@ export interface PerfSnapshot {
   // past the range / no-glow early-returns).  Latest frame, not
   // averaged — context for interpreting tileLightingMs.
   tileLightingCount: number;
+  // ── Unified lighting (the shadow-cast light layer) ───────────────────
+  //
+  // Wall time (ms) of the whole unified-lighting pass this frame:
+  // occluder collection, wedge-path construction, the per-light
+  // composite onto the light canvas, and the single blit.  Ring-
+  // averaged like the timers above.
+  //
+  // Read this ALONGSIDE `tileLightingMs`, never instead of it.  The
+  // unified system is absorbing the three legacy hand-rolled models
+  // (proximity bloom, repel glow, glass edge tint), so its cost is only
+  // meaningful NET of theirs — as each legacy receiver migrates,
+  // `tileLightingMs` falls and this rises.  A gross reading of this
+  // field alone will overstate the cost of the change.
+  //
+  // Zero while LIGHTING_CYCLE is at 'legacy' (the default), which is
+  // how the toggle proves it costs nothing when off.
+  lightingMs: number;
+  // Number of lights composited this frame, after viewport culling and
+  // the per-tier cap.  Latest frame, not averaged — context for
+  // interpreting lightingMs, exactly as tileLightingCount is for
+  // tileLightingMs.
+  lightingLights: number;
+  // renderFogLayer wall time, ring-averaged like lightingMs and likewise a
+  // SLICE OF RENDER.  Zero while the fog cycle is `off` (every early return
+  // in the pass zeroes the timer) — which is how the toggle proves the fog
+  // costs nothing when disabled.
+  fogMs: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
@@ -1421,6 +1474,15 @@ export interface EngineStats {
    *  flash window + remaining-window fraction for fade. */
   salvageFlash?: { amount: number; fraction: number };
   /** Effective player stats for the player menu (pause screen). */
+  /** The player's live hull + shield pools, pushed EVERY frame (gauntlet 5d,
+   *  U5).  `playerStats` beside it is richer but is built only while a menu
+   *  is open, and the in-game HUD needs these four numbers during play: the
+   *  player's floating world-space bar was removed in U5, so this is now the
+   *  canonical readout for the player's own condition. */
+  vitals?: {
+    health: number; maxHealth: number;
+    shield: number; maxShield: number;
+  };
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
@@ -1632,14 +1694,62 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  /** DBG: enemy health bars appear on damage and fade (true, default) vs
+   *  always drawn (false, the pre-5d behaviour).  See RenderSystem
+   *  `damageTriggeredBars`. */
+  damageTriggeredBars?: boolean;
   /** DBG minimap MATERIAL mode name (decision #43, G5): 'Flow' / 'Dots' /
    *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
    *  nothing. */
   minimapMaterialName?: string;
+  /** DBG label for LIGHTING_CYCLE — 'legacy' (the three shipped hand-rolled
+   *  models, and the default), 'debug' (flat grey layer, proves the blit) or
+   *  'unified' (the shadow-cast light). */
+  lightingModeName?: string;
+  /** DBG label for the active lighting tier — low (pinned for the phone) /
+   *  medium / high. */
+  lightingTierName?: string;
+  /** DBG: whether MOBILE SHARDS cast shadows too.  Only meaningful while
+   *  the lighting mode is 'unified'. */
+  shardShadowsEnabled?: boolean;
+  /** DBG: is the refraction prototype on? */
+  refractionEnabled?: boolean;
+  /** DBG: refracted-cone brightness, as a fraction of the light's peak. */
+  refractBrightnessName?: string;
+  /** DBG: player-light brightness multiplier, as a percentage label. */
+  lightBrightnessName?: string;
+  /** DBG: do metal and glass re-emit the light that falls on them? */
+  emissiveEnabled?: boolean;
+  worldLightsEnabled?: boolean;
+  depthAmbientEnabled?: boolean;
+  /** DBG: re-emitted fraction, as a label. */
+  emitBrightnessName?: string;
+  /** DBG: may the secondary lights cast shadows of their own? */
+  emitShadowsEnabled?: boolean;
+  /** DBG: emitter-shadow cost tier (how many emitters shadow, and how much
+   *  geometry each of them sees). */
+  emitShadowTierName?: string;
+  /** DBG: how long an emitter takes to fade in or out. */
+  emitFadeName?: string;
+  /** DBG: caustic edge softness — the TIR and occluder-cap fades. */
+  causticFadeName?: string;
+  /** DBG: the player's light as a directional beam — its width, or
+   *  'radial' / 'off'. */
+  flashlightName?: string;
+  /** DBG: the player light's colour. */
+  lightColorName?: string;
+  /** DBG: how much of the material's colour rides transmitted / re-emitted
+   *  light. */
+  tintMixName?: string;
+  /** DBG: fog of war — off / dim / dark / memory. */
+  fogName?: string;
+  /** DBG label for the shadow-edge softness cycle. */
+  shadowSoftnessName?: string;
   /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */
   rockPaletteName?: string;
+  nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;
@@ -1849,6 +1959,9 @@ export interface EngineStats {
     /** Files named after a LOOP id — matched, but loops cannot take a
      *  recording yet, so they are refused rather than silently ignored. */
     loopFiles: string[];
+    /** Context→speaker latency readout (base + output), ms; null until the
+     *  context exists.  ~30-45ms = wired/speaker, 150-250ms = Bluetooth. */
+    latencyMs: number | null;
   };
 }
 
@@ -1913,7 +2026,13 @@ export type ControlScheme =
   /** Controller with the LEFT TRIGGER as an analogue throttle; the left
    *  stick steers only.  Its own scheme rather than a toggle because it
    *  changes what a stick deflection MEANS. */
-  | 'gamepad-thrust';
+  | 'gamepad-thrust'
+  /** ONE-STICK controller (user call): the LEFT stick — or the left D-pad —
+   *  supplies heading, aim AND throttle together, and the gun moves to the
+   *  bottom face button.  The right stick is unused, so a pad that has only
+   *  a left stick plays it in full.  Distinct from `gamepad-thrust`, where
+   *  the throttle is a trigger and the stick's magnitude is discarded. */
+  | 'gamepad-left';
 
 export interface PlayerHUDMessage {
   id: string;

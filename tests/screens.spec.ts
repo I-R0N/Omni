@@ -224,6 +224,95 @@ test.describe('death screen', () => {
   });
 });
 
+test.describe('a boss ends the ladder', () => {
+  /*  User call: waves used to keep arriving while a boss was on the field,
+   *  and to resume once it died. A boss fight with a wave landing on top of
+   *  it is two encounters at once.
+   *
+   *  What is pinned here is the RULE, not the current numbers: the ladder
+   *  stops the moment a boss appears, and nothing about the boss dying
+   *  restarts it. Both halves matter — the second is the one that only shows
+   *  up a grace period after the fight, which is exactly when nobody is
+   *  watching for it. */
+
+  async function arenaWithWaves(page: any) {
+    await startRun(page);
+    await engine(page, e => e.transitionToMap('arena_universe'));
+    await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
+    await waitForStats(page, s => s.wavesEnabled !== false, 'the ladder running');
+  }
+
+  test('a boss warping in stops the ladder, and killing it does not restart it', async ({ page }) => {
+    const watch = await boot(page);
+    await arenaWithWaves(page);
+
+    const before = await engine(page, e => ({
+      halted: !!e.waves.halted,
+      waveIndex: e.waveIndex,
+    }));
+    expect(before.halted, 'the ladder runs normally before the boss').toBe(false);
+
+    await engine(page, e => e.debugSpawnBoss('BOSS_WARDEN'));
+    await waitForStats(page, s => !!s.boss, 'the boss to warp in');
+
+    const during = await engine(page, e => ({
+      halted: !!e.waves.halted,
+      grace: e.waves.waveGraceTimer ?? 0,
+      waveIndex: e.waveIndex,
+    }));
+    expect(during.halted, 'the ladder stops the moment the boss appears').toBe(true);
+    // No countdown left advertising a wave that is not coming.
+    expect(during.grace).toBe(0);
+    expect(during.waveIndex, 'and it stops where it was, it does not jump')
+      .toBe(before.waveIndex);
+
+    // Kill it through the real death path, then dismiss the stage-clear
+    // screen so the arena is running again — this is the moment the ladder
+    // used to pick back up.
+    await engine(page, e => {
+      const boss = e.currentMap.entities.find((x: any) => x.isBoss && x.active);
+      boss.killedByPlayer = true;
+      e.handleEntityDeath(boss);
+    });
+    await waitForStats(page, s => !!s.stageClear, 'the stage-clear screen');
+    await engine(page, e => e.dismissStageClear());
+    await waitForStats(page, s => !s.stageClear, 'the screen to dismiss');
+
+    // Give the arena real time — longer than a grace period — with the sim
+    // running, which is what makes this a test of the resume and not of the
+    // freeze.
+    const after0 = await engine(page, e => e.waveIndex);
+    await page.waitForTimeout(2500);
+    const after = await engine(page, e => ({
+      halted: !!e.waves.halted,
+      waveIndex: e.waveIndex,
+      state: e.waveState,
+    }));
+    expect(after.halted, 'still halted after the boss is dead').toBe(true);
+    expect(after.waveIndex, 'and no new wave started').toBe(after0);
+
+    watch.assertClean();
+  });
+
+  test('the ladder comes back on a fresh arena, not on the cleared one', async ({ page }) => {
+    const watch = await boot(page);
+    await arenaWithWaves(page);
+    await engine(page, e => e.debugSpawnBoss('BOSS_WARDEN'));
+    await waitForStats(page, s => !!s.boss, 'the boss');
+    expect(await engine(page, e => !!e.waves.halted)).toBe(true);
+
+    // Loading a map is the deliberate way to get a fresh ladder — `init`
+    // clears the halt, and nothing else does. Without this the halt would be
+    // a one-way door for the rest of the run.
+    await engine(page, e => e.transitionToMap('arena_ring'));
+    await waitForStats(page, s => s.currentMapType === 'RING', 'a fresh arena');
+    expect(await engine(page, e => !!e.waves.halted),
+      'a new arena runs its own ladder').toBe(false);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('stage-clear screen', () => {
   /** Warp a capstone in on an ARENA (the hub runs no waves, so a DBG boss
    *  there has no ladder to descend from) and kill it. */
@@ -279,7 +368,7 @@ test.describe('stage-clear screen', () => {
     watch.assertClean();
   });
 
-  test('halts the arena ladder and opens a descent rift', async ({ page }) => {
+  test('halts the arena ladder; the descent rift is switched off for now', async ({ page }) => {
     const watch = await boot(page);
     await clearAStage(page);
     await waitForStats(page, s => !!s.stageClear, 'the stage-clear screen');
@@ -291,12 +380,16 @@ test.describe('stage-clear screen', () => {
       stageIndex: e.stageIndex,
     }));
 
-    // The ladder STOPS — no further wave starts here, so the choice between
-    // the two rifts is made in quiet.
+    // The ladder STOPS — no further wave starts here.
     expect(world.halted).toBe(true);
-    // Both rifts are in the world; the choice is made by flying to one, which
-    // is why the screen offers no travel buttons.
-    expect(world.descentRifts).toBe(1);
+    /*  NO DESCENT RIFT (user call — the descent flow is being reworked).
+     *  This assertion is INVERTED rather than deleted, because "no rift
+     *  appears" is now the behaviour, and an absent assertion would let one
+     *  come back silently.  Everything BEHIND the descent is untouched and
+     *  still covered by the next test: `transitionToMap(id, {descend:true})`
+     *  still steps the depth and the wave offset.  The arena's own RETURN
+     *  rift is what the player leaves by. */
+    expect(world.descentRifts).toBe(0);
     expect(world.returnRifts).toBeGreaterThanOrEqual(1);
     expect(world.stageIndex).toBe(0);
 

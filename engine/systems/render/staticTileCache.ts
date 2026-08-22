@@ -285,13 +285,12 @@ export function prepareStaticTileCacheForFrame(r: RenderSystem, playerPos: Vecto
         if (!isStaticTileCacheable(r, entity)) continue;
         // Reproduce the fast-path acceptance check used in renderEntities
         // so a tile that's about to take the slow path gets erased now,
-        // before the canvas blit paints its stale base.  Glass tiles
-        // also brighten on contact via repelImpulse — same gate as the
-        // existing fast-path branch.
+        // before the canvas blit paints its stale base.  Glass no longer
+        // needs the contact-glow exemption it used to carry here: that glow
+        // is gone, so a glass tile now STAYS cached while something is
+        // touching it instead of dropping to the slow path.
         let inGlowRange = false;
-        if (entity.shardVariant === 'glass-tile') {
-            inGlowRange = (entity.repelImpulse ?? 0) > 0;
-        } else if (playerPos && entity.shardVariant !== undefined) {
+        if (playerPos && entity.shardVariant !== undefined) {
             const g = SHARD_VARIANTS[entity.shardVariant].glow;
             if (g !== undefined) {
                 const fpdx = wrapDeltaX(entity.position.x, playerPos.x);

@@ -8,8 +8,8 @@
  *
  *   · nebula is gone from BOTH halves of the map (the pre-rendered terrain
  *     layer and the per-frame buffer);
- *   · the material mode decides whether shards reach the buffer at all, so
- *     the shipped default is not paying for dots nobody draws;
+ *   · the material mode decides whether shards reach the buffer at all, so a
+ *     mode that draws no dots is not paying to collect them either;
  *   · drops stay excluded, as they always were;
  *   · the streamline geometry cache rebuilds when the seed lattice moves and
  *     NOT when the camera merely pans — which is the whole reason a per-frame
@@ -40,14 +40,32 @@ function bufferByKind(page: any) {
   });
 }
 
-/** Step the DBG cycle until the named mode is active (max one full lap). */
+/** Step the DBG cycle until the named mode is active (max one full lap).
+ *
+ *  The whole lap used to run INSIDE one `engine()` call, comparing against
+ *  `window.__omniStats` between clicks — but that payload is only republished
+ *  once a frame, so every comparison after the first read a stale name and the
+ *  lap overshot. It happened to work only while the wanted mode was already
+ *  the shipped default, i.e. while the loop did nothing. It stopped working
+ *  the moment the default moved (Flow → Dots).
+ *
+ *  One click per step, then WAIT for the published mode to change: drive the
+ *  mechanism, poll for the result, never sleep (harness rules 1 and 6). */
 async function setMaterial(page: any, name: 'Flow' | 'Dots' | 'Off') {
-  await engine(page, (e, want: string) => {
-    for (let i = 0; i < 4 && (window as any).__omniStats?.minimapMaterialName !== want; i++) {
-      e.dbg.cycleMinimapMaterial();
-    }
-  }, name);
-  await waitForStats(page, s => s.minimapMaterialName !== undefined, 'the material mode');
+  for (let i = 0; i < 4; i++) {
+    const current = (await stats(page)).minimapMaterialName;
+    if (current === name) return;
+    await engine(page, e => e.dbg.cycleMinimapMaterial());
+    // The predicate is SERIALISED into the page, so it cannot close over
+    // `current` — the name would be undefined on the other side. Inline the
+    // value, the way healthbars.spec.ts does.
+    await waitForStats(
+      page,
+      new Function('s', `return s.minimapMaterialName !== ${JSON.stringify(current)};`) as (s: any) => boolean,
+      `the material mode to leave ${current}`,
+    );
+  }
+  throw new Error(`material mode never reached ${name}`);
 }
 
 test.describe('off-screen indicators — portals', () => {
@@ -111,10 +129,16 @@ test.describe('off-screen indicators — portals', () => {
 });
 
 test.describe('minimap — material layer', () => {
-  test('ships with the flow layer as the default', async ({ page }) => {
+  /*  The default MOVED from Flow to Dots (user call).  This assertion is
+   *  rewritten rather than deleted because what it pins is still the thing
+   *  that matters — which of the three modes a player who never opens the
+   *  debug menu actually gets — and it is exactly the kind of default that
+   *  drifts silently.  Flow is one step of the cycle away and is still
+   *  covered by the mode tests below. */
+  test('ships with the dot layer as the default', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-    expect((await stats(page)).minimapMaterialName).toBe('Flow');
+    expect((await stats(page)).minimapMaterialName).toBe('Dots');
     watch.assertClean();
   });
 
@@ -166,8 +190,9 @@ test.describe('minimap — material layer', () => {
     const withDots = await bufferByKind(page);
     expect(withDots.shard ?? 0).toBeGreaterThan(100);
 
-    // In the shipped default they are not collected at all — the cost of the
-    // old layer was the per-frame push, not just the fill.
+    // In FLOW mode they are not collected at all — the cost of the dot layer
+    // is the per-frame push, not just the fill, which is what makes the mode
+    // a real choice rather than a different way of drawing the same buffer.
     await setMaterial(page, 'Flow');
     await page.waitForTimeout(300);
     expect((await bufferByKind(page)).shard ?? 0).toBe(0);

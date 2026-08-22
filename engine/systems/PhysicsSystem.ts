@@ -1,12 +1,38 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 import { CellBuckets } from './CellBuckets';
+
+/**
+ * How a projectile should come off a surface — see
+ * `PhysicsSystem.deflectProjectile`.  Everything is optional: with no options
+ * at all a deflection is a plain mirror that keeps the shot's owner, which is
+ * what both shipped callers want.
+ */
+export interface DeflectOptions {
+    /** Where to put the bolt after the reflection, in the CALLER'S frame
+     *  (see the toroidal note on `deflectProjectile`).  Omit either axis to
+     *  leave it where it is. */
+    snapX?: number;
+    snapY?: number;
+    /** Scale the outgoing speed.  1 (the default) is a perfect mirror. */
+    speedScale?: number;
+    /** Random angular scatter in radians, applied as ±spread/2 — for a
+     *  surface that shouldn't return fire along a clean optical path. */
+    spread?: number;
+    /** Re-own the bolt: a PARRY rather than a ricochet.  Clears the
+     *  already-hit set so the redirected shot can strike its new targets. */
+    reownType?: EntityType;
+    reownId?: string;
+    /** Keep a homing bolt steering.  Default is to CLEAR homing — see the
+     *  re-home loop noted on `deflectProjectile`. */
+    keepHoming?: boolean;
+}
 
 // Number of spatial-grid cells along each axis of the toroidal map.  The
 // broadphase identifies a cell by the dense index `cx * SPATIAL_ROWS + cy`,
@@ -353,7 +379,7 @@ export class PhysicsSystem {
     dt: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     const t0 = performance.now();
@@ -452,9 +478,13 @@ export class PhysicsSystem {
         }
       }
 
-      // Visuals: Tick down flash timer
+      // Visuals: Tick down flash timer, and the longer health-bar window
+      // that rides the same events (5d U5).
       if (entity.hitFlash && entity.hitFlash > 0) {
           entity.hitFlash -= dt;
+      }
+      if (entity.healthBarTimer !== undefined && entity.healthBarTimer > 0) {
+          entity.healthBarTimer -= dt;
       }
       // Nebula shatter cooldown — strikers (PLAYER/ENEMY) that just broke
       // a nebula can't break another until this expires.
@@ -724,9 +754,28 @@ export class PhysicsSystem {
           // Normalised radial (shard → player).
           const rx = dx * invDist;
           const ry = dy * invDist;
-          // Stable per-shard spin direction → varied vortices.
-          const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
-          const spinSign = (lastChar & 1) ? 1 : -1;
+          // Spin HANDEDNESS is a DBG cycle (Visual ▸ "Neb spin") while the
+          // proper rotational mechanics are parked (see PARKING_LOT):
+          //  - `physical` (default): the wake shear — the ship's velocity
+          //    crossed with the ship→shard vector — so a shard passed on the
+          //    STARBOARD side turns CLOCKWISE on screen and a port-side one
+          //    counter-clockwise (user report: the parity sign below gave a
+          //    starboard pass no consistent handedness at all).  `dx`/`dy`
+          //    here are shard→player, hence the sign arrangement.  A near-
+          //    still ship sheds no wake, so below WAKE_MIN_SPEED the parity
+          //    fallback keeps the idle cloud varied instead of frozen.
+          //  - `inverted`: the same cross product negated — the A/B case.
+          //  - `random`: the shipped id-parity "varied vortices".
+          const mode = getNebulaWakeSpinMode();
+          const vx = player.velocity.x, vy = player.velocity.y;
+          let spinSign: number;
+          if (mode === 'random' || vx * vx + vy * vy < 0.25) {
+              const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
+              spinSign = (lastChar & 1) ? 1 : -1;
+          } else {
+              spinSign = (vy * dx - vx * dy) >= 0 ? 1 : -1;
+              if (mode === 'inverted') spinSign = -spinSign;
+          }
           // Tangential swirl: perpendicular to the radial, signed per
           // shard.  perp(rx,ry) = (-ry, rx); flip by spinSign.
           const swirl = strength * fall * timeScale;
@@ -830,7 +879,7 @@ export class PhysicsSystem {
     timeScale: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     // 1. Reset ONLY the Dynamic Grid (Static Grid is persistent).  beginPass
@@ -990,13 +1039,25 @@ export class PhysicsSystem {
                                 a.velocity.x += dx * inv * accel;
                                 a.velocity.y += dy * inv * accel;
                             }
-                            // Scanner reads its own accumulator for fade fx.
+                            // ── `repelImpulse` CARRIES TWO MEANINGS ──────────
+                            // One field name, two different accumulators, and
+                            // the difference is the gate below.  Read both
+                            // before changing either.
+                            //
+                            // (1) On the SCANNER `a` — the body moving through
+                            // the field.  Accumulates from ANY repellable body,
+                            // mobile shards included, and drives that body's OWN
+                            // fade effects.  Ungated.
                             a.repelImpulse = (a.repelImpulse ?? 0) + accel;
-                            // The tile's glow tracks ONLY the player / enemies,
-                            // not the many mobile shards drifting through its
-                            // field — otherwise ambient shard contact keeps the
-                            // glow lit constantly.  Lighting up to the player's
-                            // repel field is the primary intent.
+                            // (2) On the TILE `b` — the emitter of the field,
+                            // whose glow this drives (the "Model B" repel glow
+                            // on glass + metal).  Accumulates ONLY from the
+                            // player and enemies, NOT from the many mobile
+                            // shards drifting through — ambient shard contact
+                            // would keep the glow lit constantly.  Lighting up
+                            // to the player's repel field is the primary intent;
+                            // enemy emission is deliberate and shipped, so any
+                            // refactor that loses it is a regression.
                             if (a.type === EntityType.PLAYER || a.type === EntityType.ENEMY) {
                                 b.repelImpulse = (b.repelImpulse ?? 0) + accel;
                             }
@@ -1153,6 +1214,92 @@ export class PhysicsSystem {
   public sfx: ((id: string, x: number, y: number,
                 opts?: { gain?: number; pitch?: number }) => void) | null = null;
 
+  /**
+   * Reflect a projectile off a surface — the ONE deflection primitive.
+   *
+   * Three places in this engine bounce a bolt off something: a shield ring, a
+   * bouncer round off a tile face, and (eventually) a parry or a mirror
+   * hazard.  They differ only in WHERE the normal comes from and what happens
+   * to ownership afterwards, so the mirror itself lives here and the caller
+   * decides when it fires.
+   *
+   * `nx`/`ny` must be a UNIT normal pointing OUT of the surface.  Returns false
+   * — changing nothing — when the bolt is not travelling into that surface
+   * (`v·n >= 0`), which is what stops a just-deflected shot from being
+   * deflected again by the same surface on the following step.  A projectile
+   * with no velocity therefore also declines: it is not entering anything.
+   *
+   * TOROIDAL NOTE: positions are written in the CALLER'S frame.  The
+   * broadphase shifts one body into the other's frame across a seam and
+   * re-wraps afterwards, so this must not wrap on its own — doing so would
+   * undo that shift mid-pair.
+   */
+  public static deflectProjectile(
+      proj: GameEntity, nx: number, ny: number, opts?: DeflectOptions,
+  ): boolean {
+      const vx = proj.velocity?.x ?? 0;
+      const vy = proj.velocity?.y ?? 0;
+      const vdotn = vx * nx + vy * ny;
+      if (vdotn >= 0) return false;
+
+      // v' = v − 2(v·n)n.  For an axis-aligned normal this reduces to negating
+      // one component, which is exactly what the bouncer's tile path did by
+      // hand before it was folded onto this.
+      let rx = vx - 2 * vdotn * nx;
+      let ry = vy - 2 * vdotn * ny;
+
+      const scale = opts?.speedScale;
+      if (scale !== undefined && scale !== 1) { rx *= scale; ry *= scale; }
+
+      const spread = opts?.spread;
+      if (spread !== undefined && spread > 0) {
+          const ang = (Math.random() - 0.5) * spread;
+          const c = Math.cos(ang), sn = Math.sin(ang);
+          const tx = rx * c - ry * sn;
+          ry = rx * sn + ry * c;
+          rx = tx;
+      }
+
+      proj.velocity.x = rx;
+      proj.velocity.y = ry;
+      proj.rotation = Math.atan2(ry, rx);
+
+      if (opts?.snapX !== undefined) proj.position.x = opts.snapX;
+      if (opts?.snapY !== undefined) proj.position.y = opts.snapY;
+
+      // A deflected bolt is a DUMB ricochet unless the caller says otherwise.
+      // A homing shot that keeps steering turns straight back into whatever
+      // just turned it away and grinds the shield down in a loop — a real case
+      // now that the PLAYER'S shield deflects, since enemy missiles home on
+      // the player with no range gate.
+      if (opts?.keepHoming !== true && proj.homing) {
+          proj.homing = false;
+          proj.targetEntityId = undefined;
+      }
+
+      // Re-owning is a PARRY rather than a ricochet: the bolt becomes the
+      // deflector's, so the already-hit set has to clear or it would refuse
+      // the very targets it is now aimed at.
+      if (opts?.reownType !== undefined) {
+          proj.ownerType = opts.reownType;
+          proj.ownerId = opts.reownId;
+          if (proj.hitEntityIds) proj.hitEntityIds.length = 0;
+      }
+      return true;
+  }
+
+  /** Radius at which a shield turns a shot away.
+   *
+   *  An ARC shield uses its own ring (which the Bulwark's render matches); any
+   *  other pool uses the shield's physical standoff — the same
+   *  `COLLISION_MULTIPLIER` the player's inflated collision shape and its
+   *  rendered hit ring already use, so the ricochet happens exactly where the
+   *  player sees the bubble. */
+  public static shieldReach(e: GameEntity): number {
+      if (e.shieldArcHalfWidth !== undefined) return PhysicsSystem.arcShieldReach(e);
+      return getCollisionR(e) * SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+  }
+
   public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
       const half = target.shieldArcHalfWidth;
       if (half === undefined) return true; // full bubble
@@ -1198,39 +1345,74 @@ export class PhysicsSystem {
   }
 
   /** World-unit radius of an arc shield's interception ring (matches the
-   *  rendered ring).  Used by the broadphase reach + tryArcShieldIntercept. */
+   *  rendered ring).  The arc branch of `shieldReach`. */
   public static arcShieldReach(e: GameEntity): number {
       return Math.max(e.size.x, e.size.y) * SHIELD_CONSTANTS.ARC_REACH_FACTOR;
   }
 
   /**
-   * Directional arc-shield interception (Bulwark).  When an incoming hostile
-   * projectile crosses the shield ring within the covered sector, the shield
-   * DEFLECTS it off the ring surface (reflects its velocity about the radial
-   * normal) and drains by the shot's damage — so the bolt ricochets away
-   * (readable, and a hazard to other enemies) instead of vanishing, while the
-   * shield still wears down.  Returns true if the pair was handled (caller
-   * skips the body SAT).  Returns false — letting the shot proceed to the
-   * hull — when:
-   *   - the pair isn't projectile-vs-arc-shield,
-   *   - the shot is outside the ring or on an UNCOVERED bearing (flank the gap),
+   * Shield interception — EVERY live shield, not just the Bulwark's arc.
+   *
+   * When an incoming hostile projectile crosses the shield ring, the shield
+   * DEFLECTS it off that surface and drains by the shot's damage — so the bolt
+   * ricochets away (readable, and a hazard to whatever it can still hit)
+   * instead of vanishing, while the shield still wears down.  This was
+   * arc-only; the player's own bubble and the bosses' pools now go through the
+   * same path, because "my shield ate that" and "my shield turned that away"
+   * are the same event and were reading as two different ones.
+   *
+   * THE ARITHMETIC IS UNCHANGED by that generalization: a deflected shot drains
+   * exactly the `damage` the SAT absorb path would have absorbed, and a shot
+   * bigger than the remaining pool still falls through to that path.  What
+   * changes is what the bolt does afterwards.
+   *
+   * Returns true if the pair was handled (caller skips the body SAT).  Returns
+   * false — letting the shot proceed to the hull — when:
+   *   - the pair isn't projectile-vs-shielded-entity,
+   *   - the shield is empty, has no capacity, or is EMP'd offline,
+   *   - the shot is one this target may not be hit by at all (own fire, an
+   *     ally's shot passing through the player, a rival's shot at a rival),
+   *   - the shot is outside the ring or, for an ARC, on an UNCOVERED bearing,
    *   - the shot's damage exceeds the remaining shield (it punches through; the
    *     body-SAT path drains the remaining shield and lands the remainder).
    */
-  private tryArcShieldIntercept(
+  private tryShieldDeflect(
       a: GameEntity,
       b: GameEntity,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): boolean {
       let proj: GameEntity, shielded: GameEntity;
-      if (a.type === EntityType.PROJECTILE && b.shieldArcHalfWidth !== undefined) { proj = a; shielded = b; }
-      else if (b.type === EntityType.PROJECTILE && a.shieldArcHalfWidth !== undefined) { proj = b; shielded = a; }
+      if (a.type === EntityType.PROJECTILE && b.type !== EntityType.PROJECTILE) { proj = a; shielded = b; }
+      else if (b.type === EntityType.PROJECTILE && a.type !== EntityType.PROJECTILE) { proj = b; shielded = a; }
       else return false;
-      if ((shielded.shield ?? 0) <= 0) return false;
+      if ((shielded.shield ?? 0) <= 0 || (shielded.maxShield ?? 0) <= 0) return false;
+      // An EMP'd shield is OFFLINE — it neither absorbs nor recharges, so it
+      // cannot deflect either.  The SAT absorb path has always checked this;
+      // the arc path did not, which only stopped being a live hole once the
+      // player — the one entity the bubble's latch EMPs — started deflecting.
+      if (shielded.systemsDisabled) return false;
       // Don't let the shield deflect its owner's own fire (same-team projectile).
       if (proj.ownerType === shielded.type) return false;
+      // These two mirror the SAT path's filters.  A shot that may not hit this
+      // target must not bounce off it either — an ally rival's fire passes
+      // THROUGH the player, so ricocheting it off the player's shield would
+      // invent a collision the damage path has always declined.
+      if (shielded.type === EntityType.PLAYER && proj.sparesPlayer) return false;
+      if (proj.hitsEnemies && shielded.isRival) return false;
 
-      const reach = PhysicsSystem.arcShieldReach(shielded);
+      // ARC ONLY.  A ring that stands OFF the hull has to intercept before
+      // the body SAT, because the bolt would otherwise fly through the gap
+      // between ring and hull untouched.  A non-arc pool is the opposite
+      // case — its ring IS the (shield-inflated) collision shape — so it
+      // deflects at CONTACT instead, in `resolveCollision`; predicting that
+      // contact with a radius here cannot be made to agree, because SAT
+      // boxes an entity with no `polygonPoints` and a box's corners reach
+      // √2 past the circle the ring is drawn as.  See the contact block.
+      if (shielded.shieldArcHalfWidth === undefined) return false;
+
+      // The bolt touches the ring when its EDGE does, not when its centre
+      // crosses, so the test carries the projectile's own radius.
+      const reach = PhysicsSystem.shieldReach(shielded) + getCollisionR(proj);
       const dx = wrapDeltaX(shielded.position.x, proj.position.x);
       const dy = wrapDeltaY(shielded.position.y, proj.position.y);
       const distSq = dx * dx + dy * dy;
@@ -1243,29 +1425,39 @@ export class PhysicsSystem {
       const projDmg = proj.damage || 1;
       if (projDmg > shielded.shield!) return false;
 
-      // Radial normal at the impact (outward from the shield centre).  Only
-      // deflect shots actually travelling INTO the shield; an outward-moving
-      // bolt (already deflected) falls through harmlessly.
+      // Radial normal at the impact (outward from the shield centre), and a
+      // snap to the ring surface so the bolt rides outward and can't
+      // re-trigger / SAT the hull on the next step.  The shared helper
+      // declines an outward-moving bolt — one already deflected — which is
+      // what keeps a ricochet from being deflected again every step.
       const dist = Math.sqrt(distSq) || 1;
       const nx = dx / dist, ny = dy / dist;
-      const vdotn = proj.velocity.x * nx + proj.velocity.y * ny;
-      if (vdotn >= 0) return false;
-
-      // Reflect velocity about the normal: v' = v − 2(v·n)n, then snap the bolt
-      // to the ring surface so it rides outward and can't re-trigger / SAT the
-      // hull on the next step.
-      proj.velocity.x -= 2 * vdotn * nx;
-      proj.velocity.y -= 2 * vdotn * ny;
-      proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
-      proj.position.x = shielded.position.x + nx * (reach + 1);
-      proj.position.y = shielded.position.y + ny * (reach + 1);
+      // Same parry rule as the contact site: the PLAYER'S deflect re-owns
+      // the bolt (no player entity carries an arc today, but a future arc
+      // module must not silently lose the parry).  Enemy arcs keep the
+      // plain ricochet — the bolt keeps ITS owner, which for the Bulwark
+      // case (a player shot turned away) already leaves it live against
+      // other enemies.
+      if (!PhysicsSystem.deflectProjectile(proj, nx, ny, {
+          snapX: shielded.position.x + nx * (reach + 1),
+          snapY: shielded.position.y + ny * (reach + 1),
+          ...(shielded.type === EntityType.PLAYER ? {
+              reownType: EntityType.PLAYER, reownId: 'player',
+              keepHoming: true,
+          } : {}),
+      })) return false;
 
       shielded.shield! -= projDmg;
+      markShieldDamaged(shielded);
       shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
       shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
       // A ricochet, not a landing: the deflect voice RISES in pitch, which
-      // is the information the player needs.
-      this.sfx?.('impact.shield.deflect', proj.position.x, proj.position.y);
+      // is the information the player needs.  A hit that empties the pool
+      // still gets the louder COLLAPSE cue instead — "that was the last of
+      // it" is the one thing more urgent than "that bounced", and the SAT
+      // absorb path has always said it.
+      this.sfx?.(shielded.shield! <= 0 ? 'impact.shield.break' : 'impact.shield.deflect',
+                 proj.position.x, proj.position.y);
       if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
       return true;
   }
@@ -1475,6 +1667,7 @@ export class PhysicsSystem {
       // static-tile world-canvas stamp (which baked the old polygon
       // outline).  Both caches re-populate lazily on next use.
       tile._satCacheAxes = undefined;
+      tile._occluderR = undefined;   // the shadow radius is derived from the polygon
       if (tile._staticCached === true) tile._staticCached = false;
 
       // Damage cracks are no longer appended here.  Rock / metal tiles
@@ -1484,106 +1677,177 @@ export class PhysicsSystem {
       // HP drops rather than spawning fresh random segments per hit.
   }
 
-  // Returns true if world-space point (x, y) with radius r is clear of all
-  // static tiles — used for safe spawn-point validation.
-  /** Visit every active static tile whose centre is within `r` (toroidal) of
-   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
-   *  Used by the dragon to devour tiles in its path (Stage 6). */
-  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
-      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
-      const rSq = r * r;
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  const tdx = wrapDeltaX(t.position.x, x);
-                  const tdy = wrapDeltaY(t.position.y, y);
-                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
-              }
-          }
-      }
-  }
+  // ── THE STATIC-GEOMETRY QUERY LAYER ─────────────────────────────────
+  //
+  // Five callers used to walk the static grid with five near-identical
+  // copies of the same loop.  They differed in three ways and agreed on
+  // everything else, so gauntlet B2 collapsed them onto ONE walk plus five
+  // thin wrappers that supply the differences:
+  //
+  //   - SPAN     how many cells out to look.  Four of the five hardcoded a
+  //              3x3 neighbourhood, which covers a radius of at most
+  //              SPATIAL_GRID_SIZE (120).  Every one of those callers
+  //              queries well under 120 (measured max: 78.4, the dragon's
+  //              head reach), so the fixed span is preserved for them and
+  //              costs nothing.  The lighting pass queries at 300-500,
+  //              where a 3x3 walk silently under-reports by 28-45%, and it
+  //              passes a span derived from the radius instead.
+  //   - FILTER   a toroidal radius test, or none at all (the shard-to-tile
+  //              bond pass wants every tile in the block and applies its
+  //              own contact test).  `rSq < 0` means "no filter".
+  //   - VISITOR  collect-everything, or stop at the first hit.  Returning
+  //              `false` from the visitor stops the walk.
+  //
+  // The probe is WRAPPED, which was the one substantive disagreement
+  // between the old copies and is a FIX rather than a tidy-up.  See
+  // `forEachStaticCells` for why.
 
-  public isPositionClear(x: number, y: number, r: number): boolean {
-      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
-      const rSq = r * r;
-
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const key = cellKeyFromCell(cx + dx, cy + dy);
-              const cell = this.staticGrid.get(key);
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  // Toroidal distance — a candidate tile near the seam can
-                  // still be within `r` of the test point on the short way.
-                  const tdx = wrapDeltaX(t.position.x, x);
-                  const tdy = wrapDeltaY(t.position.y, y);
-                  if (tdx * tdx + tdy * tdy < rSq) return false;
-              }
-          }
-      }
-      return true;
-  }
-
-  // Returns true if an active static tile's centre lies within `radius` of
-  // world-space point (x, y), ignoring the tile whose id matches `ignoreId`
-  // (so a tile can probe for its own neighbours without finding itself).
-  // Used by RenderSystem to suppress outline strokes on edges that are
-  // cleanly butted against a neighbour tile.  Wraps the probe coordinates
-  // so callers probing across the toroidal seam still find neighbours on
-  // the opposite side.
-  public hasStaticTileNear(x: number, y: number, radius: number, ignoreId?: string): boolean {
+  /** The one static-grid walk.  See the block comment above for what the
+   *  parameters mean; `rSq < 0` disables the distance filter, and a visitor
+   *  returning `false` stops the walk.
+   *
+   *  WHY THE PROBE IS WRAPPED.  Two of the five old copies wrapped their
+   *  probe coordinates and two did not, and the difference was not
+   *  cosmetic — it was a latent correctness bug that fires on any map whose
+   *  dimensions are not a multiple of SPATIAL_GRID_SIZE.
+   *
+   *  `SPATIAL_COLS = ceil(MAP_WIDTH / 120)`, so such a map has a RAGGED
+   *  last column and `floor((x + MAP_WIDTH) / 120)` is NOT
+   *  `floor(x / 120) + SPATIAL_COLS`.  `wrapCellX` therefore lands an
+   *  un-wrapped probe on a DIFFERENT cell than the wrapped one, and the
+   *  block around it is off by one cell.  Measured: on Universe (16000,
+   *  i.e. 133.33 cells) the two disagree on the cell index for 66.7% of
+   *  positions, and a seam sweep found `isPositionClear` reporting a
+   *  position CLEAR that is actually BLOCKED.  Rare (~1 in 33 000 queries)
+   *  because the callers' radii are small against a 120 cell, but real, and
+   *  in the unsafe direction.  Universe and Pocket are affected; the maps
+   *  sized at a multiple of 120 never were.
+   *
+   *  This matters because `wrapDeltaX` applies a SINGLE correction step, so
+   *  it too is only correct for inputs already inside the canonical box.
+   *  Wrapping once, here, makes the whole layer correct for any caller. */
+  private forEachStaticCells(
+      x: number, y: number, span: number, rSq: number,
+      visit: (t: GameEntity) => boolean | void,
+      dynamic: boolean = false,
+  ): void {
       const wx = wrapX(x);
       const wy = wrapY(y);
       const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
       const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
-      const rSq = radius * radius;
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+      // Clamp to half the grid extent: past that the wrapped cell indices
+      // repeat and a cell would emit its tiles to the visitor twice.  At the
+      // clamp the walk already covers the whole torus, so nothing is lost.
+      // No shipped map is small enough for this to bite a span of 1.
+      const spanX = Math.min(span, (SPATIAL_COLS - 1) >> 1);
+      const spanY = Math.min(span, (SPATIAL_ROWS - 1) >> 1);
+      const filter = rSq >= 0;
+      for (let dx = -spanX; dx <= spanX; dx++) {
+          for (let dy = -spanY; dy <= spanY; dy++) {
+              const key = cellKeyFromCell(cx + dx, cy + dy);
+              // ONE walk, two grids.  They are keyed on the same dense cell
+              // index and expose the same `get(idx)`, so the only difference
+              // is which one is asked — see the note on forEachDynamicInRadius
+              // for why the dynamic grid is safe to read from the render pass.
+              const cell = dynamic ? this.dynamicGrid.get(key) : this.staticGrid.get(key);
               if (!cell) continue;
               for (let i = 0; i < cell.length; i++) {
                   const t = cell[i];
                   if (!t.active) continue;
-                  if (ignoreId !== undefined && t.id === ignoreId) continue;
-                  const tdx = wrapDeltaX(t.position.x, wx);
-                  const tdy = wrapDeltaY(t.position.y, wy);
-                  if (tdx * tdx + tdy * tdy < rSq) return true;
+                  if (filter) {
+                      const tdx = wrapDeltaX(t.position.x, wx);
+                      const tdy = wrapDeltaY(t.position.y, wy);
+                      if (tdx * tdx + tdy * tdy >= rSq) continue;
+                  }
+                  if (visit(t) === false) return;
               }
           }
       }
-      return false;
+  }
+
+  // Hoisted probe state + visitor for the two BOOLEAN wrappers.  A closure
+  // built inside the wrapper would be constructed on every call, and
+  // `hasStaticTileNear` runs ~9x per frame off the material-tile render
+  // path — a per-frame allocation is exactly what the refill-idiom rule
+  // exists to prevent.  A class-field arrow is allocated once per system.
+  private _probeIgnoreId: string | undefined = undefined;
+  private _probeHit = false;
+  private readonly _probeVisit = (t: GameEntity): boolean => {
+      if (this._probeIgnoreId !== undefined && t.id === this._probeIgnoreId) return true;
+      this._probeHit = true;
+      return false;   // stop the walk — these probes only need existence
+  };
+
+  /** Visit every active static tile whose centre is within `r` (toroidal) of
+   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
+   *  Used by the dragon to devour tiles in its path (Stage 6).
+   *
+   *  Keeps the historic 3x3 span.  Its only caller queries at most 78.4,
+   *  which a 3x3 block fully covers, so this is behaviour-preserving —
+   *  widening it would hand the dragon more terrain per pass and change
+   *  pacing (gauntlet B3, deliberately not taken). */
+  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
+      this.forEachStaticCells(x, y, 1, r * r, cb);
+  }
+
+  /** Visit every active static tile within `r` — the RADIUS-CORRECT walk,
+   *  whose cell span is derived from the radius rather than fixed at 3x3.
+   *  This is the one the lighting pass uses, where radii of 300-500 make
+   *  the fixed span under-report by 28-45%. */
+  public forEachStaticInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
+      this.forEachStaticCells(x, y, Math.ceil(r / SPATIAL_GRID_SIZE), r * r, cb);
+  }
+
+  /** Visit every active DYNAMIC entity within `r` (toroidal) of (x,y).
+   *
+   *  Same walk as `forEachStaticInRadius`, over the other grid.  Used by the
+   *  lighting pass so mobile shards cast shadows like tiles do.
+   *
+   *  WHY THE DYNAMIC GRID IS SAFE TO READ HERE.  It is rebuilt from scratch
+   *  at the top of every collision substep and the render pass runs after
+   *  the sim has drained the accumulator, so at draw time it holds the last
+   *  substep's contents — which is exactly the state being drawn.  It is NOT
+   *  safe to read mid-substep, and nothing does.
+   *
+   *  The grid holds more than shards (player, enemies, projectiles) and
+   *  already excludes collectible drops, particles and fading nebula.
+   *  Callers filter for what they want; this layer does not know about
+   *  lighting. */
+  public forEachDynamicInRadius(x: number, y: number, r: number, cb: (t: GameEntity) => void): void {
+      this.forEachStaticCells(x, y, Math.ceil(r / SPATIAL_GRID_SIZE), r * r, cb, true);
+  }
+
+  /** True if world-space point (x, y) with radius `r` is clear of all static
+   *  tiles — safe spawn-point validation. */
+  public isPositionClear(x: number, y: number, r: number): boolean {
+      this._probeIgnoreId = undefined;
+      this._probeHit = false;
+      this.forEachStaticCells(x, y, 1, r * r, this._probeVisit);
+      return !this._probeHit;
+  }
+
+  /** True if an active static tile's centre lies within `radius` of (x, y),
+   *  ignoring the tile whose id matches `ignoreId` (so a tile can probe for
+   *  its own neighbours without finding itself).  Used by RenderSystem to
+   *  suppress outline strokes on edges cleanly butted against a neighbour. */
+  public hasStaticTileNear(x: number, y: number, radius: number, ignoreId?: string): boolean {
+      this._probeIgnoreId = ignoreId;
+      this._probeHit = false;
+      this.forEachStaticCells(x, y, 1, radius * radius, this._probeVisit);
+      this._probeIgnoreId = undefined;
+      return this._probeHit;
   }
 
   /**
    * Iterate every active static tile in the 3x3 spatial cells around
-   * (x, y) and invoke `cb` for each.  Used by ShardSystem's plastic-
-   * shard ↔ tile bond formation pass to find candidate tile partners
-   * — the merge broadphase only walks the dynamic candidates set, so
-   * static tiles need this side-channel.  Callbacks return early if
-   * they want to break out of the inner loop.
+   * (x, y) — NO radius filter.  Used by ShardSystem's plastic-shard to
+   * tile bond formation, which applies its own contact test inside the
+   * callback, so narrowing this to a radius here would duplicate that
+   * test with a radius this layer cannot know.  Callbacks return early
+   * (undefined) to skip a tile; they never stop the walk.
    */
   public forEachStaticTileNear(x: number, y: number, cb: (tile: GameEntity) => void): void {
-      const cx = Math.floor(wrapX(x) / SPATIAL_GRID_SIZE);
-      const cy = Math.floor(wrapY(y) / SPATIAL_GRID_SIZE);
-      for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
-              if (!cell) continue;
-              for (let i = 0; i < cell.length; i++) {
-                  const t = cell[i];
-                  if (!t.active) continue;
-                  cb(t);
-              }
-          }
-      }
+      this.forEachStaticCells(x, y, 1, -1, cb);
   }
 
   /**
@@ -1798,7 +2062,7 @@ export class PhysicsSystem {
       shards: GameEntity[],
       onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
       onDeath?: (entity: GameEntity) => void,
-      onShake?: (amount: number) => void,
+      onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): void {
       for (let i = 0; i < shards.length; i++) {
@@ -1843,6 +2107,89 @@ export class PhysicsSystem {
    * there (DropSystem.spawnGlassShards for glass-tile, ShardSystem
    * .shatter tier chain for glass-shard).
    */
+  /**
+   * A structure killed by a COLLISION, routed through the SAME death
+   * pipeline a projectile kill takes.
+   *
+   * This exists because it was not always so: the two asteroid-impact kill
+   * sites below used to set `health = 0; active = false` and remove the tile
+   * from the static grid WITHOUT calling `onDeath`, so
+   * `GameEngine.handleEntityDeath` never ran — no shatter, no debris, no
+   * salvage roll, no sound.  A tile shot with a projectile broke; the same
+   * tile crushed by a rock simply blinked out of existence.  (The PLAYER's
+   * own crash path always did call it, which is what made the asymmetry easy
+   * to miss: crashing into a tile yourself looked right.)
+   *
+   * The two stamps are what make the shatter read as an IMPACT rather than a
+   * spontaneous crumble, and they are the same two the projectile path sets:
+   * `lastImpactVelocity` gives the fragments a direction to scatter along,
+   * and `lastImpactDamage` scales how many pieces and how fine
+   * (ShardSystem.shatterAsteroidStyle / DropSystem.spawnGlassShards read it
+   * as 1..5 → few-and-large .. many-and-small).
+   *
+   * ORDER MATTERS: the static grid entry has to go before `onDeath`, because
+   * the death fan-out spawns mobile shards where the tile was and they would
+   * otherwise collide with the corpse of their own parent.
+   */
+  private killStructureByImpact(
+      structure: GameEntity,
+      impactor: GameEntity,
+      impactDamage: number,
+      byPlayer: boolean,
+      onDeath?: (entity: GameEntity) => void,
+  ) {
+      structure.health = 0;
+      if (impactor.velocity) {
+          structure.lastImpactVelocity = { x: impactor.velocity.x, y: impactor.velocity.y };
+      }
+      structure.lastImpactDamage = impactDamage;
+      // Player-attributed kills score (handleEntityDeath reads this stamp);
+      // a tile crushed by a drifting rock is nobody's kill.
+      if (byPlayer) structure.killedByPlayer = true;
+      structure.active = false;
+      if (structure.mass === Infinity) {
+          this.removeStaticEntity(structure);
+      }
+      if (onDeath) onDeath(structure);
+  }
+
+  /**
+   * IMPACT STRENGTH — one number for the camera and the ear.
+   *
+   * `self`'s own velocity STEP along the collision normal: the quantity the
+   * impulse solver applies a few lines later, mirrored here including the
+   * mass-bias exponent, so nothing downstream is modelling the collision a
+   * second time.  A STATIC `other` contributes `effInv = 0`, so `self` takes
+   * the whole step — a wall is the hardest hit there is.
+   *
+   * Read by the screen shake (`SHAKE.IMPACT_*`) and by the crash voices
+   * (`AUDIO_CONSTANTS.IMPACT_*`, docs/SFX_INVENTORY.md §4.4), which is the
+   * point: how hard a hit reads to the eye and to the ear is one decision.
+   */
+  public static impactStrength(self: GameEntity, other: GameEntity, velAlongNormal: number): number {
+      const k = COLLISION_CONFIG.MASS_BIAS_EXPONENT;
+      const effSelf  = Math.pow(self.mass  === Infinity ? 0 : 1 / self.mass,  k);
+      const effOther = Math.pow(other.mass === Infinity ? 0 : 1 / other.mass, k);
+      const denom = effSelf + effOther;
+      if (denom <= 0) return 0;
+      return (1 + COLLISION_CONFIG.ELASTICITY) * Math.abs(velAlongNormal) * (effSelf / denom);
+  }
+
+  /** The `{gain, pitch}` a crash voice plays at, from that same strength.
+   *  `floor` and `span` are the row's own (docs/SFX_INVENTORY.md §4.4) — the
+   *  span is the dv at which it reaches full gain, which differs per row
+   *  because the rows are gated at different speeds and reach different
+   *  strengths.  Pass the IMPACTOR's mass for pitch; `Infinity` (a static
+   *  tile) keeps the fixed voice the row already had. */
+  private static impactVoice(dv: number, impactorMass: number, floor: number, span: number): { gain: number; pitch?: number } {
+      const A = AUDIO_CONSTANTS;
+      const gain = Math.max(floor, Math.min(1, dv / span));
+      if (impactorMass === Infinity) return { gain };
+      const pitch = Math.max(A.IMPACT_PITCH_MIN, Math.min(A.IMPACT_PITCH_MAX,
+          Math.pow(A.IMPACT_PITCH_REF_MASS / Math.max(0.01, impactorMass), A.IMPACT_PITCH_EXP)));
+      return { gain, pitch };
+  }
+
   private tryPassthroughShatter(
       a: GameEntity,
       b: GameEntity,
@@ -1939,7 +2286,7 @@ export class PhysicsSystem {
       shards: GameEntity[],
       onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
       onDeath?: (entity: GameEntity) => void,
-      onShake?: (amount: number) => void,
+      onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): void {
       for (let i = 0; i < shards.length; i++) {
@@ -1977,7 +2324,7 @@ export class PhysicsSystem {
       shards: GameEntity[],
       onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
       onDeath?: (entity: GameEntity) => void,
-      onShake?: (amount: number) => void,
+      onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
       onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
   ): void {
       for (let i = 0; i < shards.length; i++) {
@@ -2221,7 +2568,7 @@ export class PhysicsSystem {
     b: GameEntity,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       // Non-nebula shards (metal / rock / glass) never collide with nebula.
@@ -2256,11 +2603,16 @@ export class PhysicsSystem {
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
-      // Extend reach to the arc-shield ring (Bulwark) so an incoming shot is
-      // considered out to the visible ring — tryArcShieldIntercept then absorbs
-      // a covered shot there instead of letting it tunnel to the hull.
-      if ((a.shield ?? 0) > 0 && a.shieldArcHalfWidth !== undefined) rA = Math.max(rA, PhysicsSystem.arcShieldReach(a));
-      if ((b.shield ?? 0) > 0 && b.shieldArcHalfWidth !== undefined) rB = Math.max(rB, PhysicsSystem.arcShieldReach(b));
+      // Extend reach to the SHIELD ring so an incoming shot is considered out
+      // to where the shield actually turns it away — tryShieldDeflect then
+      // handles it there instead of letting it tunnel to the hull.  Gated to
+      // pairs that contain a projectile: a shield is not a bigger body, and
+      // inflating the radius for body pairs would only buy extra SAT work that
+      // `fillVertices` (player-only inflation) would then decline anyway.
+      if (a.type === EntityType.PROJECTILE || b.type === EntityType.PROJECTILE) {
+          if ((a.shield ?? 0) > 0 && (a.maxShield ?? 0) > 0) rA = Math.max(rA, PhysicsSystem.shieldReach(a));
+          if ((b.shield ?? 0) > 0 && (b.maxShield ?? 0) > 0) rB = Math.max(rB, PhysicsSystem.shieldReach(b));
+      }
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;
@@ -2291,10 +2643,11 @@ export class PhysicsSystem {
           b.position.y += offsetY;
       }
 
-      // Arc-shield interception: a covered enemy shot is absorbed at the ring
-      // (before SAT), so it visibly stops at the shield instead of reaching the
-      // hull.  Open-side shots fall through to the normal SAT body hit.
-      if (this.tryArcShieldIntercept(a, b, onHit)) {
+      // Shield interception: a hostile shot is DEFLECTED at the ring (before
+      // SAT), so it visibly glances off the shield instead of reaching the
+      // hull.  Uncovered arc bearings and punch-through shots fall through to
+      // the normal SAT body hit, which drains the pool the old way.
+      if (this.tryShieldDeflect(a, b, onHit)) {
           if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
           return;
       }
@@ -2580,7 +2933,7 @@ export class PhysicsSystem {
     mtv: Vector2,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void,
+    onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
@@ -2832,6 +3185,13 @@ export class PhysicsSystem {
                   // Pick the entry axis: the one with the SMALLER reverse-unwind
                   // time was crossed last, so that's the face we're reflecting off.
                   // Snap the projectile position to just outside that face + ε.
+                  //
+                  // The face normal then goes through the SHARED deflection
+                  // helper — the same one the shield ring uses.  For an
+                  // axis-aligned normal its mirror reduces to negating one
+                  // component, which is exactly the arithmetic this branch used
+                  // to do by hand.  `keepHoming` because a tile bounce is the
+                  // bouncer working as designed, not a shot being turned away.
                   if (tX <= tY) {
                       const nx = vx > 0 ? -1 : 1;
                       contactX = target.position.x + nx * tileHX;
@@ -2839,8 +3199,10 @@ export class PhysicsSystem {
                           target.position.y - tileHY,
                           Math.min(target.position.y + tileHY, proj.position.y)
                       );
-                      proj.velocity.x = -vx;
-                      proj.position.x = target.position.x + nx * (tileHX + hxEff + 0.5);
+                      PhysicsSystem.deflectProjectile(proj, nx, 0, {
+                          snapX: target.position.x + nx * (tileHX + hxEff + 0.5),
+                          keepHoming: true,
+                      });
                   } else {
                       const ny = vy > 0 ? -1 : 1;
                       contactY = target.position.y + ny * tileHY;
@@ -2848,10 +3210,11 @@ export class PhysicsSystem {
                           target.position.x - tileHX,
                           Math.min(target.position.x + tileHX, proj.position.x)
                       );
-                      proj.velocity.y = -vy;
-                      proj.position.y = target.position.y + ny * (tileHY + hyEff + 0.5);
+                      PhysicsSystem.deflectProjectile(proj, 0, ny, {
+                          snapY: target.position.y + ny * (tileHY + hyEff + 0.5),
+                          keepHoming: true,
+                      });
                   }
-                  proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
 
                   // Decrement remaining-bounces counter (set on bouncer
                   // projectiles via WeaponConfig.bounceCount).  Counter is
@@ -2882,8 +3245,74 @@ export class PhysicsSystem {
           if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
               && !target.systemsDisabled
               && PhysicsSystem.shieldCoversHit(target, proj)) {
+
+              // CONTACT DEFLECT — the non-arc half of "every live shield turns
+              // shots away".  A bubble pool's ring IS the shield-inflated
+              // collision shape, so the moment SAT reports contact the bolt is
+              // AT the shield: deflect it here rather than trying to predict
+              // the same contact with a radius up in `tryShieldDeflect`.  That
+              // prediction cannot be made to agree — an entity with no
+              // `polygonPoints` (the player) is SAT-boxed, and a box's corners
+              // reach √2 past the circle the ring is drawn as, so every
+              // off-axis shot hit the square before entering the circle and was
+              // absorbed instead (playtest: "no deflection from the base enemy
+              // blaster").  Reacting to the contact makes the property true by
+              // construction: this runs at exactly the moments the absorb
+              // below would have.
+              //
+              // The shield still pays exactly `projDmg`, and a shot bigger than
+              // the pool still falls through to the partial absorb.
+              if (target.shieldArcHalfWidth === undefined && projDmg <= target.shield!) {
+                  const sdx = wrapDeltaX(target.position.x, proj.position.x);
+                  const sdy = wrapDeltaY(target.position.y, proj.position.y);
+                  const sdist = Math.sqrt(sdx * sdx + sdy * sdy) || 1;
+                  const snx = sdx / sdist, sny = sdy / sdist;
+                  // A bolt already on its way OUT is one this shield just
+                  // turned away; it is not charged for a second time and it
+                  // does not reach the hull either.
+                  if (proj.velocity.x * snx + proj.velocity.y * sny >= 0) return;
+                  // Snap clear of wherever the contact actually happened —
+                  // measured from the bolt's own distance rather than the ring
+                  // radius, since the shape that just caught it may reach
+                  // further than the circle.
+                  const clear = sdist + getCollisionR(proj) + 2;
+                  // THE PLAYER'S DEFLECT IS A PARRY (user call): the turned
+                  // bolt is re-owned to the player, so instead of flying off
+                  // as a dud it stays live against the enemies that fired it
+                  // — it damages them, pays their kills, and a parried HOMING
+                  // missile keeps homing, which under player ownership means
+                  // the owner-aware homing pass now steers it at the nearest
+                  // enemy: the missile turns on its makers with no new
+                  // plumbing.  Re-owning also clears `hitEntityIds` (see
+                  // DeflectOptions), so the redirected shot may strike the
+                  // very targets it was refused before.  A player-owned bolt
+                  // cannot hit the player, so the re-home-into-the-shield
+                  // loop the default guards against cannot arise here.
+                  // ENEMY shields deliberately do NOT parry: a Warden that
+                  // re-owned your own cannon shell would turn your gun on
+                  // you, which is a design decision nobody has made.
+                  const parry = target.type === EntityType.PLAYER;
+                  PhysicsSystem.deflectProjectile(proj, snx, sny, {
+                      snapX: target.position.x + snx * clear,
+                      snapY: target.position.y + sny * clear,
+                      ...(parry ? {
+                          reownType: EntityType.PLAYER, reownId: 'player',
+                          keepHoming: true,
+                      } : {}),
+                  });
+                  target.shield! -= projDmg;
+                  markShieldDamaged(target);
+                  target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                  target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                  this.sfx?.(target.shield! <= 0 ? 'impact.shield.break' : 'impact.shield.deflect',
+                             proj.position.x, proj.position.y);
+                  if (onHit) onHit(proj.position, proj, target);
+                  return;
+              }
+
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
+              markShieldDamaged(target);
               projDmg -= absorbed;
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
@@ -2985,11 +3414,21 @@ export class PhysicsSystem {
                   // off its line nor hold it in permanent hit-stun.  Absent →
                   // unchanged behaviour for every rank-and-file enemy.
                   const poise = target.poise;
-                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG * (poise ? poise.knockScale : 1);
+                  // MOMENTUM in, velocity out — mass matters here exactly as
+                  // it does for the shard push below and for the screen shake.
+                  // Capped in the target's OWN top speed so a hit can never
+                  // shove a body faster than it can fly under its own power.
+                  const kickCap = HIT_FEEDBACK.KICK_MAX_SPEED_FRAC
+                      * Math.max(target.maxSpeed ?? 0, HIT_FEEDBACK.KICK_SPEED_FLOOR);
+                  const kickMass = target.mass === Infinity ? Infinity : Math.max(0.01, target.mass);
+                  const kick = Math.min(
+                      projDmg * HIT_FEEDBACK.KICK_IMPULSE_PER_DMG / kickMass,
+                      kickCap,
+                  ) * (poise ? poise.knockScale : 1);
                   target.velocity.x += (proj.velocity.x / vmag) * kick;
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
                   if (!poise || projDmg >= poise.stunDamage) target.hitStun = HIT_FEEDBACK.STUN_SEC;
-                  target.hitFlash = 0.18; // bigger flash + scale-punch on impact
+                  markDamaged(target, 0.18); // bigger flash + scale-punch on impact
                   // Scale-punch magnitude ∝ damage / maxHealth, so a chip on a
                   // tanky beast barely flinches and a heavy hit on a frail enemy snaps.
                   target.hitReact = hitReactStrength(projDmg, target.maxHealth ?? target.health);
@@ -3011,14 +3450,25 @@ export class PhysicsSystem {
                   // projectile's intrinsic damage (so a slug felt even through
                   // the shield).
                   const impactDmg = proj.damage || 1;
+                  // Along the SHOT's travel direction — a bolt to the flank
+                  // should throw the camera sideways, not shiver it.  The
+                  // magnitude stays damage-driven: a projectile's momentum is
+                  // negligible against the hull, so what the player feels is
+                  // the hit, not the shove.
+                  const pv = proj.velocity;
+                  const pvm = pv ? Math.hypot(pv.x, pv.y) : 0;
                   onShake(Math.min(HIT_FEEDBACK.PLAYER_SHAKE_MAX,
-                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG));
+                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG),
+                      pvm > 0 ? { dirX: pv!.x / pvm, dirY: pv!.y / pvm } : undefined);
                   if (proj.velocity && !target.isExploding) {
                       const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
-                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
+                      // Same impulse rule, so a laden hull is shoved less —
+                      // normalised to leave the lean ship exactly as it was.
+                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_IMPULSE_PER_DMG
+                          / Math.max(1, target.mass);
                       target.velocity.x += (proj.velocity.x / vmag) * kick;
                       target.velocity.y += (proj.velocity.y / vmag) * kick;
-                      target.hitFlash = Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012));
+                      markDamaged(target, Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012)));
                   }
               } else {
                   onShake(COLLISION_CONFIG.SHAKE.MICRO);
@@ -3101,11 +3551,12 @@ export class PhysicsSystem {
                       if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                           const absorbed = Math.min(target.shield!, bite);
                           target.shield! -= absorbed;
+                          markShieldDamaged(target);
                           bite -= absorbed;
                           target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                           target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                       }
-                      if (bite > 0) { target.health -= bite; target.hitFlash = 0.2; }
+                      if (bite > 0) { target.health -= bite; markDamaged(target, 0.2); }
                       if (onShake) onShake(COLLISION_CONFIG.SHAKE.MICRO);
                       if (target.health <= 0 && onDeath) onDeath(target);
                   }
@@ -3120,6 +3571,7 @@ export class PhysicsSystem {
                   if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
+                      markShieldDamaged(target);
                       ramDmg -= absorbed;
                       target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                       target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
@@ -3127,7 +3579,7 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(target.position, ramBase, target);
                   if (ramDmg > 0) {
                       target.health -= ramDmg;
-                      target.hitFlash = 0.2;
+                      markDamaged(target, 0.2);
                   }
                   if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
                   if (target.health <= 0 && onDeath) {
@@ -3183,15 +3635,31 @@ export class PhysicsSystem {
 
       if (velAlongNormal > 0) return; // Moving away
 
-      // Detect High Impact for Shake
+      // Detect High Impact for Shake.
+      //
+      // Driven by the PLAYER'S OWN velocity step, not by closing speed: the
+      // same quantity the impulse solver below is about to apply, so the
+      // camera agrees with the physics instead of modelling it a second time.
+      // Speed alone had no mass in it, which is why a chip and a wall shook
+      // identically — see COLLISION_CONFIG.SHAKE.IMPACT_DV_MIN.
       const isPlayerCollision = (a.type === EntityType.PLAYER || b.type === EntityType.PLAYER);
       if (isPlayerCollision && onShake) {
-          const impactSpeed = Math.abs(velAlongNormal);
-          const other = a.type === EntityType.PLAYER ? b : a;
+          const playerIsA = a.type === EntityType.PLAYER;
+          const player = playerIsA ? a : b;
+          const other  = playerIsA ? b : a;
           const isHardTarget = other.type === EntityType.ENEMY || other.type === EntityType.STRUCTURE;
-          
-          if (impactSpeed > 2.0 && isHardTarget) {
-              onShake(Math.min(impactSpeed, COLLISION_CONFIG.SHAKE.HEAVY) * COLLISION_CONFIG.SHAKE.CAP_MULTIPLIER);
+          if (isHardTarget) {
+              const S = COLLISION_CONFIG.SHAKE;
+              const dv = PhysicsSystem.impactStrength(player, other, velAlongNormal);
+              if (dv > S.IMPACT_DV_MIN) {
+                  // DIRECTION is the way the player is about to be shoved:
+                  // the impulse acts along +n on b and -n on a.
+                  const sign = playerIsA ? -1 : 1;
+                  onShake(
+                      Math.min(dv * S.IMPACT_DV_SCALE, S.IMPACT_MAX),
+                      { dirX: nx * sign, dirY: ny * sign },
+                  );
+              }
           }
       }
       // Shield contact flash — any collision lights up the shield ring
@@ -3204,7 +3672,13 @@ export class PhysicsSystem {
           // crash, and gated on a real impact so drifting contact is silent.
           const other = a.type === EntityType.PLAYER ? b : a;
           if (other.type === EntityType.ENEMY && Math.abs(velAlongNormal) > 2.0) {
-              this.sfx?.('crash.player.enemy', player.position.x, player.position.y);
+              // Voiced by the same strength the camera reads, so a gnat
+              // glances off the hull and a Bastion stops you dead.  This row
+              // used to pass nothing at all.
+              this.sfx?.('crash.player.enemy', player.position.x, player.position.y,
+                  PhysicsSystem.impactVoice(
+                      PhysicsSystem.impactStrength(player, other, velAlongNormal),
+                      other.mass, AUDIO_CONSTANTS.IMPACT_FLOOR_ENEMY, AUDIO_CONSTANTS.IMPACT_SPAN_ENEMY));
           }
       }
 
@@ -3239,21 +3713,25 @@ export class PhysicsSystem {
           // and hard shard contact sound like masonry.
           if (structure.mass !== Infinity) {
               if (impactSpeed > STRUCTURE_CONSTANTS.SHARD_CONTACT_SPEED) {
-                  const span = Math.max(1, STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 2);
-                  // Smaller shards knock higher; bigger ones thud.  Size is
-                  // the perceptual cue here, not mass.
-                  const size = Math.max(6, structure.size.x);
-                  this.sfx?.('crash.player.shard', player.position.x, player.position.y, {
-                      gain: Math.max(0.25, Math.min(1, impactSpeed / span)),
-                      pitch: Math.max(0.7, Math.min(1.6, Math.sqrt(38 / size))),
-                  });
+                  // Gain and pitch from the shared impact strength: a light
+                  // shard is quieter AND higher than a heavy one at the same
+                  // closing speed, where before both came from raw speed and
+                  // the shard's on-screen SIZE.  The speed GATE above is
+                  // untouched — whether a contact is heard at all stays a
+                  // contact question.
+                  this.sfx?.('crash.player.shard', player.position.x, player.position.y,
+                      PhysicsSystem.impactVoice(
+                          PhysicsSystem.impactStrength(player, structure, velAlongNormal),
+                          structure.mass, AUDIO_CONSTANTS.IMPACT_FLOOR_SHARD, AUDIO_CONSTANTS.IMPACT_SPAN_SHARD));
               }
           } else if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
-              // Grinding, not explosive — and scaled by how hard you hit,
-              // so a graze and a full-speed wall are different sounds.
-              this.sfx?.('crash.player.tile', player.position.x, player.position.y, {
-                  gain: Math.min(1, impactSpeed / (STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD * 3)),
-              });
+              // Grinding, not explosive — and scaled by how hard you hit.  A
+              // static tile takes the whole velocity step, which makes this
+              // curve identical to the impactSpeed/12 it has always used.
+              this.sfx?.('crash.player.tile', player.position.x, player.position.y,
+                  PhysicsSystem.impactVoice(
+                      PhysicsSystem.impactStrength(player, structure, velAlongNormal),
+                      Infinity, AUDIO_CONSTANTS.IMPACT_FLOOR_TILE, AUDIO_CONSTANTS.IMPACT_SPAN_TILE));
           }
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
@@ -3296,14 +3774,12 @@ export class PhysicsSystem {
               PhysicsSystem.maybeRockEarlyBreak(structure);
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               if (structure.health <= 0) {
-                  structure.health = 0;
-                  structure.active = false;
-                  // Crash kills are player-attributed for scoring.
-                  structure.killedByPlayer = true;
-                  if (structure.mass === Infinity) {
-                      this.removeStaticEntity(structure);
-                  }
-                  if (onDeath) onDeath(structure);
+                  // Same helper as the two asteroid sites, so all three
+                  // collision kills break identically; only the attribution
+                  // differs (a crash IS the player's kill, and scores).
+                  const over = impactSpeed / STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD - 1;
+                  const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
+                  this.killStructureByImpact(structure, player, impactDamage, true, onDeath);
               }
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
@@ -3316,13 +3792,14 @@ export class PhysicsSystem {
               if ((player.shield ?? 0) > 0) {
                   const absorbed = Math.min(player.shield!, envDmg);
                   player.shield! -= absorbed;
+                  markShieldDamaged(player);
                   envDmg -= absorbed;
                   player.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                   player.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
               }
               if (envDmg > 0) {
                   player.health -= envDmg;
-                  player.hitFlash = 0.1;
+                  markDamaged(player, 0.1);
               }
           }
       }
@@ -3376,11 +3853,13 @@ export class PhysicsSystem {
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
-                      structure.health = 0;
-                      structure.active = false;
-                      if (structure.mass === Infinity) {
-                          this.removeStaticEntity(structure);
-                      }
+                      // How HARD it was hit decides how finely it breaks: a
+                      // bare-threshold nudge leaves a few big chunks, a slam
+                      // several times over the threshold powders it.  Mapped
+                      // onto the 1..5 the shatter tables already speak.
+                      const over = momentum / STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM - 1;
+                      const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
+                      this.killStructureByImpact(structure, asteroid, impactDamage, false, onDeath);
                   }
                   return;
               }
@@ -3409,11 +3888,11 @@ export class PhysicsSystem {
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
-                      structure.health = 0;
-                      structure.active = false;
-                      if (structure.mass === Infinity) {
-                          this.removeStaticEntity(structure);
-                      }
+                      // Pressure is the SLOW kill — a tile ground down by
+                      // repeated sub-threshold nudges rather than smashed —
+                      // so it takes the gentlest break the tables offer: a
+                      // few large chunks, drifting rather than sprayed.
+                      this.killStructureByImpact(structure, asteroid, 1, false, onDeath);
                   }
                   return;
               }
@@ -3433,7 +3912,7 @@ export class PhysicsSystem {
           if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
               player.health -= envDmg;
-              player.hitFlash = 0.1;
+              markDamaged(player, 0.1);
           }
       }
       
