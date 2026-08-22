@@ -1,55 +1,41 @@
 /**
- * THE RENDERER SEAM.
+ * THE RENDERER SEAM — what a renderer SWAP must provide, and nothing else.
  *
- * The interface `GameEngine` needs from a renderer — nothing more. Extracted
- * (gauntlet WebGPU, stage 3) so the engine depends on a CONTRACT rather than
- * on the concrete `RenderSystem` class, which is the prerequisite for any
- * renderer swap: WebGPU, WebGL2, a headless stub for tests, or none at all.
+ * Extracted during the WebGPU feasibility spike (docs/GAUNTLET_WEBGPU_LOG.md)
+ * so the engine's draw path depends on a CONTRACT rather than on the concrete
+ * `RenderSystem` class. That is the prerequisite for any renderer swap —
+ * WebGPU, WebGL2, a headless stub for tests, or none at all.
  *
- * This file deliberately contains **no behaviour**. It is a description of
- * the coupling that already exists, written down. `RenderSystem` implements
- * it unchanged, and `GameEngine.renderer` is typed by it.
+ * This file contains **no behaviour**. It is the coupling that already exists,
+ * written down. `RenderSystem` implements it unchanged.
  *
- * ── WHAT IS IN HERE, AND WHY IT IS THE SHAPE IT IS ────────────────────────
- * Three groups, and the split is the interesting part of the extraction:
+ * ── NINE MEMBERS, AND WHY IT IS EXACTLY THESE ────────────────────────────
+ *   1. LIFECYCLE + FRAME (7) — `setContext`, the per-map builders, `render`,
+ *      and `worldToScreen`. The genuine renderer API.
+ *   2. WIRING (2) — `setPhysics` / `setFlowField`, which hand the renderer
+ *      live references to two SIM systems so the debug overlays can draw
+ *      them. A real coupling from the renderer back into the simulation; a
+ *      second implementation must accept both even if it ignores them.
  *
- *   1. LIFECYCLE + FRAME — `setContext`, the per-map builders, and `render`.
- *      The genuine renderer API. Any implementation must provide these.
+ * ── WHAT IS DELIBERATELY *NOT* HERE ──────────────────────────────────────
+ * Debug flags and perf counters live in `RendererDiagnostics.ts`, and the
+ * split is a measurement rather than a preference. At extraction this seam
+ * was 28 members, **19 of them diagnostics**. While the WebGPU branch waited
+ * on two unrelated PRs, lighting and 5d-UI work added **15 more, 15 of 15
+ * diagnostics** — and the nine members below did not change at all.
  *
- *   2. WIRING — `setPhysics` / `setFlowField`. These hand the renderer live
- *      references to two SIM systems so the debug overlays can draw them.
- *      They are a real coupling from the renderer back into the simulation,
- *      and a second implementation must accept them even if it ignores them.
+ * Combined, this file was something lighting and HUD work had to keep
+ * editing, where forgetting to broke the build. Split, it states the swap
+ * contract and stays still. `GameEngine.renderer` is typed
+ * `Renderer & RendererDiagnostics`, so nothing about access changes; only
+ * which file grows.
  *
- *   3. DEBUG FLAGS + PERF COUNTERS — mutable public fields, written by
- *      `DebugControls` and read by `GameEngine.buildPerfSnapshot()`.
- *
- * Group 3 is the one worth flagging for any future renderer work, and it is
- * MEASURABLY the problem with this file. These are FIELDS, not methods, so
- * the interface must expose them as mutable properties, and a second renderer
- * has to carry every counter even where it is meaningless to it (a GPU
- * renderer has no "tint cache miss", and `lastRenderMs` measures CPU-side
- * call issuing — precisely the measure a GPU renderer moves work *out* of;
- * see the log's Stage 1 notes).
- *
- * HOW FAST IT GROWS, measured rather than guessed. At extraction the seam was
- * 28 members, 19 of them group 3. While this branch waited on two unrelated
- * PRs, the lighting and 5d-UI work added FIFTEEN more — 4 predicted, 15
- * actual — every one of them debug state or a perf counter, none of them
- * anything a renderer swap cares about. The draw path (groups 1 and 2) did
- * not change at all.
- *
- * That is the whole argument for NARROWING this interface to groups 1 and 2
- * and letting debug flags and perf counters be reached through the concrete
- * class: the seam would then cover exactly the part a swap replaces, and stop
- * being edited by work that has nothing to do with rendering architecture.
- * See the MERGE DEFERRED section of docs/GAUNTLET_WEBGPU_LOG.md. It is left
- * as-is here because this pass is a REBASE, not a redesign — the decision is
- * the operator's, and this file is the evidence for it.
+ * **If you are adding a debug flag or a perf counter, it does not belong in
+ * this file.**
  */
 import type {
   GameEntity, Vector2, MapType, CameraState, DamageText, PlayerHUDMessage,
-  WaveAnnouncement, TrailShape, JoystickHUDState, FireButtonHUDState,
+  WaveAnnouncement, JoystickHUDState, FireButtonHUDState,
 } from '../../types';
 import type { FlowOverlayState } from './RenderSystem';
 import type { PhysicsSystem } from './PhysicsSystem';
@@ -83,62 +69,12 @@ export interface Renderer {
   ): void;
 
   /**
-   * World → screen for a single point, or null when off-screen. Used by the
-   * engine for the interact prompt, so it is engine-facing API rather than an
-   * internal helper.
+   * World → screen for a single point, or null when off-screen. Engine-facing
+   * API rather than an internal helper — the interact prompt uses it.
    */
   worldToScreen(camera: CameraState, pos: Vector2): Vector2 | null;
 
   // ── 2. Wiring back into the sim (for debug overlays) ─────────────────────
   setPhysics(p: PhysicsSystem): void;
   setFlowField(f: FlowFieldGrid): void;
-
-  // ── 3. Debug flags (written by DebugControls) ────────────────────────────
-  /* `debugMode` itself is deliberately NOT here: it is set through
-     `setDebugMode` and never read from outside the renderer, so putting the
-     field in the seam would describe a coupling that does not exist. */
-  setDebugMode(v: boolean): void;
-  setTrailShape(s: TrailShape): void;
-  tileOutlinesEnabled: boolean;
-  shardLodEnabled: boolean;
-  plasticAutomataEnabled: boolean;
-  materialAutomataEnabled: boolean;
-  chevronsOffscreenOnly: boolean;
-
-  // ── 3a. Lighting + HUD state added since the seam was written ───────────
-  /* These arrived with the lighting (PR #88) and 5d UI (PR #89) work while
-     this branch waited. They are here because `GameEngine` and
-     `DebugControls` read them directly off the renderer — see the MERGE
-     DEFERRED section of docs/GAUNTLET_WEBGPU_LOG.md, where the rate at which
-     this group grows is the argument for narrowing the seam. */
-  damageTriggeredBars: boolean;
-  bossBarActive: boolean;
-  stageDepth: number;
-  playerLightToolHalfDeg: number | null;
-  getShadowSoftness(): string;
-  getFlashlight(): string;
-  getRefraction(): boolean;
-  getEmissive(): boolean;
-  getEmitShadows(): boolean;
-  getEmitShadowTier(): { name: string; maxEmitters: number; maxOccluders: number };
-  getFog(): string;
-  resetFog(): void;
-
-  // ── 3b. Perf counters (read by buildPerfSnapshot / the DBG panel) ────────
-  /** CPU-side call-issuing time for the last frame — NOT rasterization. */
-  lastRenderMs: number;
-  lastNebulaMs: number;
-  lastNebulaVisible: number;
-  lastNebulaFastCount: number;
-  lastNebulaSlowCount: number;
-  lastTileLightingMs: number;
-  lastTileLightingCount: number;
-  lastStampMs: number;
-  lastStampCount: number;
-  lastTintMs: number;
-  lastTintMisses: number;
-  lastLodShardCount: number;
-  lastLightingMs: number;
-  lastLightingLights: number;
-  lastFogMs: number;
 }

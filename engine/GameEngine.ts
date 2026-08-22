@@ -4,6 +4,7 @@ import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import type { Renderer } from './systems/Renderer';
+import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
@@ -86,8 +87,13 @@ export class GameEngine {
   physics: PhysicsSystem;
   /* Typed by the SEAM, not the class (gauntlet WebGPU stage 3): the engine
      depends on what a renderer must provide, and `new RenderSystem()` below
-     is the concrete choice. Canvas2D remains the only implementation. */
-  renderer: Renderer;
+     is the concrete choice. Canvas2D remains the only implementation.
+
+     `Renderer` is the SWAP CONTRACT (nine members, stable);
+     `RendererDiagnostics` is the debug/perf surface that grows with the
+     renderer and is not part of that contract. Split because 15 of the last
+     15 additions were diagnostics — see engine/systems/Renderer.ts. */
+  renderer: Renderer & RendererDiagnostics;
   private ai: AISystem;
   private particles: ParticleSystem;
   trails: TrailSystem;
