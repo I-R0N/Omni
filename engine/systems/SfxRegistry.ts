@@ -12,6 +12,72 @@ const SHARD_RANGE = {
   far:  AUDIO_CONSTANTS.SHARD_FAR_RADIUS,
 } as const;
 
+/** Cached per AudioContext: the live one and the OfflineAudioContext the
+ *  headless smokes render into want different sample rates, and the buffer
+ *  is otherwise rebuilt every time the snitch comes back into earshot. */
+const coinBuffers = new WeakMap<BaseAudioContext, AudioBuffer>();
+
+/** A seamless loop of loose coins settling — the snitch's presence bed.
+ *
+ *  Each grain is a struck-metal transient: three INHARMONIC partials (the
+ *  ratios below are near a small bell's, which is what stops it reading as a
+ *  musical note) under a fast exponential decay. Pitch, level and decay are
+ *  all randomised per grain, and gaps between grains are drawn from an
+ *  exponential distribution so the trickle is irregular rather than metric —
+ *  a fixed gap would read as a machine, which is the failure the tone had.
+ *
+ *  A grain running past the end WRAPS to the front, so the buffer is
+ *  loop-continuous by construction and needs no crossfade.
+ *
+ *  Deliberately kept off the fatiguing band: fundamentals top out under
+ *  1 kHz and the caller lowpasses the result. Coins are bright because they
+ *  are TRANSIENT, not because they are high — a sustained sound at this
+ *  pitch is exactly what was just removed. */
+function coinBuffer(ctx: BaseAudioContext): AudioBuffer {
+  const cached = coinBuffers.get(ctx);
+  if (cached) return cached;
+
+  const SEC = 4;
+  const sr = ctx.sampleRate;
+  const buf = ctx.createBuffer(1, Math.floor(SEC * sr), sr);
+  const d = buf.getChannelData(0);
+  const n = d.length;
+
+  const PARTIALS = [1, 2.41, 4.07];       // inharmonic — metal, not a note
+  const GAINS    = [1, 0.42, 0.18];
+  const MEAN_GAP = 0.085;                 // s between grains, on average
+
+  let t = 0;
+  while (t < SEC) {
+    const f0 = 430 + Math.random() * 520;               // 430–950 Hz
+    const decay = 0.022 + Math.random() * 0.055;        // 22–77 ms
+    const amp = (0.35 + Math.random() * 0.65) * 0.5;
+    const len = Math.min(Math.floor(decay * 5 * sr), n);
+    const start = Math.floor(t * sr);
+    for (let i = 0; i < len; i++) {
+      const s = i / sr;
+      const env = Math.exp(-s / decay);
+      let v = 0;
+      for (let p = 0; p < PARTIALS.length; p++) {
+        v += GAINS[p] * Math.sin(2 * Math.PI * f0 * PARTIALS[p] * s);
+      }
+      // Wrap, so the last grains of the buffer ring on into its first
+      // samples and the seam is inaudible.
+      d[(start + i) % n] += v * env * amp;
+    }
+    // Exponential gaps: bunches and lulls, the way spilled change behaves.
+    t += -Math.log(1 - Math.random()) * MEAN_GAP;
+  }
+
+  // Normalise so the def's own gain is the only volume control that matters.
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+  if (peak > 0) for (let i = 0; i < n; i++) d[i] /= peak;
+
+  coinBuffers.set(ctx, buf);
+  return buf;
+}
+
 /**
  * SfxRegistry — the procedural draft of every sound in
  * `docs/SFX_INVENTORY.md`, keyed by that document's stable ids.
@@ -128,8 +194,22 @@ function registerWeapons(a: AudioSystem) {
   // A capacitor whine whose pitch TRACKS player.chargeProgress, so the
   // player can charge without watching their own ship — which is the
   // whole point of a hold-to-charge mechanic.
+  //
+  // IT IS THE WIND-UP THAT IS LOUD, NOT THE HOLD (user call).  The charge
+  // can be held indefinitely, and this used to sit at full level for as
+  // long as the player kept the trigger down — a sustained tone with no end
+  // condition, which is the shape every whine complaint in this game has
+  // had.  The level now SWELLS across the wind-up, peaks just before the
+  // shot arms, and collapses to a bare presence for the hold.  Nothing is
+  // lost: the ramp still reads as charging, `weapon.charge.ready` still
+  // rings the instant it arms, and what remains under a held charge is a
+  // reminder rather than an announcement.
+  //
+  // Shaped on the PARAMETER, not on a timer, because progress is what the
+  // caller already tracks — at full charge `p` simply stays at 1, so "held"
+  // needs no separate state to detect.
   a.registerLoop('weapon.charge.loop', {
-    tier: 1, gain: 0.28,
+    tier: 1, gain: 0.24,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0 } = s;
       const osc = ctx.createOscillator();
@@ -138,17 +218,31 @@ function registerWeapons(a: AudioSystem) {
       osc.type = 'sine';
       partial.type = 'sawtooth';
       const f = (p: number) => 140 + (900 - 140) * p;
+      /** Level over the charge. Rises to full at PEAK, then falls to HOLD by
+       *  the time the shot is armed. */
+      const PEAK = 0.88, HOLD = 0.10;
+      const level = (p: number) => (
+        p < PEAK
+          ? 0.28 + (1 - 0.28) * (p / PEAK)
+          : 1 + (HOLD - 1) * Math.min(1, (p - PEAK) / (1 - PEAK))
+      );
       osc.frequency.setValueAtTime(f(s.param), t0);
       partial.frequency.setValueAtTime(f(s.param) * 2, t0);
       mix.gain.value = 0.4;
+      const swell = ctx.createGain();
+      swell.gain.setValueAtTime(level(s.param), t0);
       const sub = ctx.createGain();
       sub.gain.value = 0.18;
-      osc.connect(mix); partial.connect(sub); sub.connect(mix); mix.connect(dest);
+      osc.connect(mix); partial.connect(sub); sub.connect(mix);
+      mix.connect(swell); swell.connect(dest);
       osc.start(t0); partial.start(t0);
       return {
         set: (p, now) => {
           osc.frequency.setTargetAtTime(f(p), now, 0.04);
           partial.frequency.setTargetAtTime(f(p) * 2, now, 0.04);
+          // Slower than the pitch: the drop into the hold should read as a
+          // settle, not as the sound being cut off.
+          swell.gain.setTargetAtTime(level(p), now, 0.10);
         },
         stop: now => {
           try { osc.stop(now + 0.05); partial.stop(now + 0.05); } catch { /* already stopped */ }
@@ -616,45 +710,87 @@ function registerWorld(a: AudioSystem) {
   // changing only volume reads as a fader, while changing timbre too
   // reads as an engine working harder.
   //
-  // Still deliberately BLAND: it plays for an entire session, so the
-  // design constraint is tolerability, not character (SFX_INVENTORY §6).
+  // AN ION DRIVE IN VACUUM, NOT A BURN (user call).  The previous cut was
+  // a rocket: a noise rush opening from 90 Hz to 850 Hz with a loud idle
+  // floor, so a coasting ship still sounded like it was combusting.  This
+  // ship has infinite fuel, modest acceleration and a low top speed in deep
+  // space — nothing about that is a roar.
+  //
+  // So the balance INVERTS.  The tonal field is the sound and the noise is
+  // seasoning, where before the noise was the sound:
+  //
+  //   · TWO detuned sines a fifth apart (34 / 51 Hz at rest) carry it. They
+  //     beat slowly against each other, which is what makes it read as a
+  //     field rather than as an exhaust, and they LIFT in pitch with
+  //     throttle — the ship is straining, not burning harder.
+  //   · The noise bed stays nearly shut: a much darker sweep, at a fraction
+  //     of the old level. Present enough to feel like matter is moving.
+  //   · A faint coil shimmer fades in only over the top half of the
+  //     throttle, so approaching full power adds detail rather than volume.
+  //     Below half throttle it is silent.
+  //
+  // Idle is a THIRD of the old floor, so coasting is nearly silent — which
+  // is the point: in vacuum, not thrusting should sound like not thrusting.
+  // Smoothing is longer to match an engine that cannot change quickly.
   a.registerLoop('move.thrust', {
-    tier: 2, gain: 0.22,
+    tier: 2, gain: 0.17,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0, param } = s;
-      // Idle is a LOW rumble, not a quiet version of full throttle — the
-      // cutoff floor is what keeps a coasting ship from sounding like it
-      // is still burning.
-      const IDLE_GAIN = 0.38;          // fraction of full at zero throttle
-      const CUT_IDLE = 90, CUT_FULL = 850;   // Hz
-      const SMOOTH = 0.22;             // s; long enough that taps don't pump
+      const IDLE_GAIN = 0.13;          // fraction of full at zero throttle
+      const CUT_IDLE = 55, CUT_FULL = 320;   // Hz — dark at both ends
+      const SMOOTH = 0.34;             // s; a heavy ship changes slowly
       const level  = (p: number) => IDLE_GAIN + (1 - IDLE_GAIN) * p;
       const cutoff = (p: number) => CUT_IDLE + (CUT_FULL - CUT_IDLE) * p;
+      // The field's pitch lift. Small — a big interval would read as revs.
+      const fLow  = (p: number) => 34 + 12 * p;
+      const fHigh = (p: number) => 51 + 19 * p;
+      // Shimmer: silent below half throttle, then eased in.
+      const shimmer = (p: number) => Math.max(0, (p - 0.5) / 0.5) ** 2 * 0.08;
 
       const src = ctx.createBufferSource();
       src.buffer = s.noise; src.loop = true;
       const filt = ctx.createBiquadFilter();
       filt.type = 'lowpass'; filt.Q.value = 0.7;
       filt.frequency.setValueAtTime(cutoff(param), t0);
-      // Sub bed: a constant low sine so the idle has body even with the
-      // noise almost closed off.
-      const bed = ctx.createOscillator();
-      bed.type = 'sine'; bed.frequency.value = 36;
-      const bedGain = ctx.createGain(); bedGain.gain.value = 0.3;
-      // One throttle-driven gain over BOTH layers.
+      const noiseGain = ctx.createGain(); noiseGain.gain.value = 0.22;
+
+      const lo = ctx.createOscillator(); lo.type = 'sine';
+      lo.frequency.setValueAtTime(fLow(param), t0);
+      const hi = ctx.createOscillator(); hi.type = 'sine';
+      hi.frequency.setValueAtTime(fHigh(param), t0);
+      const loG = ctx.createGain(); loG.gain.value = 0.42;
+      const hiG = ctx.createGain(); hiG.gain.value = 0.20;
+
+      const coil = ctx.createOscillator(); coil.type = 'triangle';
+      coil.frequency.setValueAtTime(fHigh(param) * 4, t0);
+      const coilG = ctx.createGain();
+      coilG.gain.setValueAtTime(shimmer(param), t0);
+
+      // One throttle-driven gain over every layer.
       const swell = ctx.createGain();
       swell.gain.setValueAtTime(level(param), t0);
 
-      src.connect(filt); filt.connect(swell);
-      bed.connect(bedGain); bedGain.connect(swell);
+      src.connect(filt); filt.connect(noiseGain); noiseGain.connect(swell);
+      lo.connect(loG); loG.connect(swell);
+      hi.connect(hiG); hiG.connect(swell);
+      coil.connect(coilG); coilG.connect(swell);
       swell.connect(dest);
-      src.start(t0); bed.start(t0);
+      src.start(t0); lo.start(t0); hi.start(t0); coil.start(t0);
       return {
         set: (p, now) => {
           swell.gain.setTargetAtTime(level(p), now, SMOOTH);
           filt.frequency.setTargetAtTime(cutoff(p), now, SMOOTH);
+          lo.frequency.setTargetAtTime(fLow(p), now, SMOOTH);
+          hi.frequency.setTargetAtTime(fHigh(p), now, SMOOTH);
+          coil.frequency.setTargetAtTime(fHigh(p) * 4, now, SMOOTH);
+          coilG.gain.setTargetAtTime(shimmer(p), now, SMOOTH);
         },
-        stop: now => { try { src.stop(now + 0.05); bed.stop(now + 0.05); } catch { /* already stopped */ } },
+        stop: now => {
+          try {
+            src.stop(now + 0.05); lo.stop(now + 0.05);
+            hi.stop(now + 0.05); coil.stop(now + 0.05);
+          } catch { /* already stopped */ }
+        },
       };
     },
   });
@@ -975,25 +1111,52 @@ function registerPortalsAndWaves(a: AudioSystem) {
 // ── 8.1 Roamers ─────────────────────────────────────────────────────────────
 
 function registerRoamers(a: AudioSystem) {
-  // High, delicate, wandering — alive and slightly out of reach.  Pure
-  // carrot.
-  // Lowered out of the fatiguing band along with everything else that is
-  // HELD.  It is still the brightest sustained sound in the game — it is a
-  // carrot and should glitter — but a 3 kHz sine held indefinitely is the
-  // exact shape of complaint the portal and the materials produced.
+  // TREASURE, not a siren (user call).  This was a 1050 Hz sine warbling on
+  // an LFO, and it was the whine the playtest kept noticing: a held tone is
+  // the one shape that cannot stop drawing attention to itself, and lowering
+  // it out of the fatiguing band only made it a lower whine.
+  //
+  // The replacement is a TEXTURE rather than a tone — loose coins settling
+  // into a pile, chain links gathering.  Sparse metallic transients say
+  // "money nearby" without ever holding a pitch, so there is nothing to
+  // fatigue against; it can idle for minutes the way the tone could not.
+  //
+  // Rendered as a looping BUFFER of scattered grains rather than live
+  // oscillators.  A grain is an event, and scheduling events inside a loop
+  // voice would need a timer this interface deliberately does not have —
+  // baking them into a buffer puts the randomness at generation time and
+  // costs one BufferSource to play.  Grains WRAP past the buffer end into
+  // its start, so the loop is seamless with no crossfade.
   a.registerLoop('snitch.near', {
-    tier: 2, gain: 0.16, positional: true,
+    tier: 2, gain: 0.15, positional: true,
+    near: AUDIO_CONSTANTS.SNITCH_NEAR_RADIUS,
+    far:  AUDIO_CONSTANTS.SNITCH_FAR_RADIUS,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0 } = s;
-      const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 1050;
-      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.25;
-      const lfoGain = ctx.createGain(); lfoGain.gain.value = 160;
-      lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
-      const g = ctx.createGain(); g.gain.value = 0.3;
-      osc.connect(g); g.connect(dest);
-      osc.start(t0); lfo.start(t0);
+      const buf = coinBuffer(ctx);
+
+      // TWO copies at co-prime-ish rates, so the composite does not repeat
+      // on the buffer's own period — one 4-second loop of sparse clinks is
+      // short enough to notice.  The slower copy also reads as bigger coins.
+      const mk = (rate: number, gain: number, offset: number) => {
+        const src = ctx.createBufferSource();
+        src.buffer = buf; src.loop = true; src.playbackRate.value = rate;
+        const g = ctx.createGain(); g.gain.value = gain;
+        src.connect(g); g.connect(lp);
+        src.start(t0, offset);
+        return src;
+      };
+      // Takes the fizz off the transients without dulling the metal.
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 2200; lp.Q.value = 0.6;
+      lp.connect(dest);
+
+      const a1 = mk(1.0, 0.5, 0);
+      const a2 = mk(0.79, 0.32, buf.duration * 0.37);
       return {
-        stop: now => { try { osc.stop(now + 0.12); lfo.stop(now + 0.12); } catch { /* already stopped */ } },
+        stop: now => {
+          try { a1.stop(now + 0.12); a2.stop(now + 0.12); } catch { /* already stopped */ }
+        },
       };
     },
   });
