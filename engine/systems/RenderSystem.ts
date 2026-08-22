@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial} from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import { BackgroundManager } from './BackgroundManager';
@@ -24,6 +24,8 @@ import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
+import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
+import { renderFogLayer, resetFogMemory } from './render/fog';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -69,6 +71,17 @@ export class RenderSystem implements Renderer {
   // entities.  Wired through GameEngine.toggleChevronMode, surfaced in the DBG
   // Visual section ("Chevrons": Offscreen / All).  Default = offscreen-only.
   public chevronsOffscreenOnly: boolean = true;
+  /** DBG toggle (Visual ▸ "HP bars") — when true (default), an enemy's
+   *  world-space health bar appears only while recently damaged and fades
+   *  out; when false, every enemy carries one every frame, which is the
+   *  pre-5d behaviour and the A/B for judging the change (gauntlet 5d, U5). */
+  public damageTriggeredBars: boolean = true;
+  /** Is the DOM's boss capstone bar on screen?  Read by the off-screen
+   *  indicator rect, which reserves the band the bar occupies so an arrow at
+   *  a near-vertical bearing does not draw under it.  A BOOLEAN of engine
+   *  state, deliberately — the canvas layer must not start measuring React's
+   *  layout, but "is a capstone alive" is something the sim already knows. */
+  public bossBarActive: boolean = false;
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -138,6 +151,158 @@ export class RenderSystem implements Renderer {
   // Count of tiles that actually drew a bloom this frame.  Context for
   // interpreting lastTileLightingMs.
   public lastTileLightingCount: number = 0;
+  // Wall time (ms) of the unified-lighting pass this frame — occluder
+  // collection, wedge-path construction, the per-light composite and the
+  // blit.  Reset at the start of render() beside lastTileLightingMs, and
+  // stays 0 while LIGHTING_CYCLE is at 'legacy'.  Read NET of
+  // lastTileLightingMs: the unified system absorbs the legacy models, so
+  // the gross figure overstates the cost of the change.
+  public lastLightingMs: number = 0;
+  // Lights composited this frame, after viewport culling and the tier cap.
+  public lastLightingLights: number = 0;
+
+  // ── The unified-lighting layer ──────────────────────────────────────
+  // Offscreen canvas the per-light passes composite into, blitted to the
+  // main canvas in ONE drawImage.  Mirrors the _staticTileCanvas fields
+  // above rather than inventing a second offscreen-canvas pattern; the
+  // code that drives it lives in render/lighting.ts as free functions
+  // over `r: RenderSystem`, same as staticTileCache.ts.
+  //
+  // Sized in CSS pixels over the active tier's divisor — never 1, because
+  // a light layer is low-frequency by nature.  At the Low tier's 3 a
+  // 390x844 phone gets 130x282 = 0.15 MB.
+  _lightCanvas: HTMLCanvasElement | null = null;
+  _lightCtx: CanvasRenderingContext2D | null = null;
+  _lightW: number = 0;
+  _lightH: number = 0;
+  _lightScale: number = 1;   // light-layer px per CSS px (= 1 / divisor)
+  // This frame's occluder set for the player light, nearest-first.  Held on
+  // the renderer (not module scope) so a test can read it off
+  // `window.__omniEngine.renderer` without a second debug handle.  Read
+  // `_lightOccluderCount`, not `.length`: the buffer is index-filled and the
+  // tier cap may be below the collected count.
+  _lightOccluders: Occluder[] = [];
+  /** Scratch surface + occluder buffer for a SHADOWING secondary light (DBG
+   *  "Emit shadows").  Both stay null/empty until that toggle is used: an
+   *  emitter's shadows cannot be drawn onto the accumulated light layer,
+   *  because `destination-out` there would erase the light already present
+   *  rather than only the emitter's share, so it needs its own surface — and
+   *  its own occluder array, because the shared pool is consumed per light. */
+  _emitCanvas: HTMLCanvasElement | null = null;
+  _emitCtx: CanvasRenderingContext2D | null = null;
+  _emitOccluders: Occluder[] = [];
+  _lightOccluderCount: number = 0;
+  /** This frame's PASSTHROUGH EMITTERS — bodies that re-emit light but cast
+   *  no shadow, so they never enter the occluder pool (nebula).  A second
+   *  output of the same grid walk, kept nearest-first; empty while emission
+   *  is off.  See the emitter-buffer note in render/lighting.ts for why they
+   *  cannot simply join the occluders. */
+  _lightEmitters: Occluder[] = [];
+  _lightEmitterCount: number = 0;
+  /** PERSISTENT emitter halos, so emission fades instead of flashing when a
+   *  body crosses the tier's emitter budget.  Live slots are `[0,
+   *  _emitSlotCount)`; `_emitSlotAtMs` is the last tick's clock, since the
+   *  fade is wall-clock rather than per-frame.  See `EmitSlot` in
+   *  render/lighting.ts. */
+  _emitSlots: EmitSlot[] = [];
+  _emitSlotCount: number = 0;
+  _emitSlotAtMs: number = 0;
+  /** FOG OF WAR surfaces (render/fog.ts).  All null until the fog is first
+   *  switched on, so `off` allocates nothing: the composited fog, the
+   *  boosted light MASK it is cut with, and the world-space EXPLORED
+   *  memory, which is the renderer's one piece of per-map persistent state
+   *  and is reset on every map load.  The memory is kept at EVERY fog rung
+   *  above `off`, not only at the three-layer one: the WORLD fog uses it
+   *  only there, but the MINIMAP uses it at all of them. */
+  _fogCanvas: HTMLCanvasElement | null = null;
+  _fogCtx: CanvasRenderingContext2D | null = null;
+  _fogMaskCanvas: HTMLCanvasElement | null = null;
+  _fogMaskCtx: CanvasRenderingContext2D | null = null;
+  _fogMem: HTMLCanvasElement | null = null;
+  _fogMemCtx: CanvasRenderingContext2D | null = null;
+  /** Veil the minimap paints over unexplored ground — sized to whichever
+   *  minimap is up, so it is rebuilt only when the map is expanded or
+   *  collapsed. */
+  _minimapFogCanvas: HTMLCanvasElement | null = null;
+  _minimapFogCtx: CanvasRenderingContext2D | null = null;
+  /** Did the fog pass actually DRAW this frame?  Not the same question as
+   *  "is the fog switched on": the fog is composed from the light layer, so
+   *  it is a no-op under legacy lighting, and a minimap that fogged itself
+   *  anyway would black out a map whose memory nothing is stamping. */
+  _fogActive: boolean = false;
+  /** Wall time the fog pass took last frame, for the perf recorder. */
+  lastFogMs: number = 0;
+  /** A7 — the run's current DEPTH (GameEngine.stageIndex), stamped by the
+   *  engine before each draw.  The renderer never reads sim state directly;
+   *  this one number crosses on a field write. */
+  stageDepth: number = 0;
+
+  /** The flashlight TOOL's cone half-angle while the tool is ON, set per
+   *  frame by GameEngine.draw.  null → the tool is off (or no kit), and the
+   *  player light falls back to the DBG flashlight global — which ships
+   *  'off', so a kit-less ship carries no beam.  See FLASHLIGHT_TOOL_LEVELS. */
+  playerLightToolHalfDeg: number | null = null;
+
+  /** DBG passthroughs for the lighting mode.  The state itself is module
+   *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
+   *  the harness and the tests can reach it off `engine.renderer` without
+   *  the mode having to be plumbed through EngineStats first.  The pause-menu
+   *  DBG row lands with A4, when there is something to look at. */
+  public cycleLighting(): string { return cycleLightingMode(); }
+  public setLighting(m: LightingMode): void { setActiveLightingMode(m); }
+  public getLighting(): LightingMode { return getActiveLightingMode(); }
+  public cycleLightTier(): string { return cycleLightingTier().name; }
+  public getLightTier(): string { return getActiveLightingTier().name; }
+  public toggleShardShadows(): boolean { return toggleShardShadows(); }
+  public getShardShadows(): boolean { return getShardShadowsEnabled(); }
+  public toggleRefraction(): boolean { return toggleRefraction(); }
+  public getRefraction(): boolean { return getRefractionEnabled(); }
+  public cycleRefractBrightness(): string { return cycleRefractBrightness(); }
+  public getRefractBrightness(): string { return getRefractBrightnessName(); }
+  public cycleLightBrightness(): string { return cycleLightBrightness(); }
+  public getLightBrightness(): string { return getLightBrightnessName(); }
+  public toggleEmissive(): boolean { return toggleEmissive(); }
+  public getEmissive(): boolean { return getEmissiveEnabled(); }
+  public toggleWorldLights(): boolean { return toggleWorldLights(); }
+  public getWorldLights(): boolean { return getWorldLightsEnabled(); }
+  public toggleDepthAmbient(): boolean { return toggleDepthAmbient(); }
+  public getDepthAmbient(): boolean { return getDepthAmbientEnabled(); }
+  public cycleEmitBrightness(): string { return cycleEmitBrightness(); }
+  public getEmitBrightness(): string { return getEmitBrightnessName(); }
+  public toggleEmitShadows(): boolean { return toggleEmitShadows(); }
+  public getEmitShadows(): boolean { return getEmitShadowsEnabled(); }
+  public cycleEmitFade(): string { return cycleEmitFade(); }
+  public getEmitFade(): string { return getEmitFadeName(); }
+  public cycleFlashlight(): string { return cycleFlashlight(); }
+  public getFlashlight(): string { return getFlashlightName(); }
+  public cycleLightColor(): string { return cycleLightColor(); }
+  public getLightColor(): string { return getLightColorName(); }
+  public cycleFog(): string { return cycleFog(); }
+  public getFog(): string { return getFogName(); }
+  /** Drop the explored memory — called on every map load, since the memory
+   *  is world space and world space means something else on the next map. */
+  public resetFog(): void { resetFogMemory(this); }
+  public cycleTintMix(): string { return cycleTintMix(); }
+  public getTintMix(): string { return getTintMixName(); }
+  public cycleCausticFade(): string { return cycleCausticFade(); }
+  public getCausticFade(): string { return getCausticFadeName(); }
+  public causticStats(): { faces: number; weight: number } { return causticStats(); }
+  public shadowStats(): { quads: number; area: number } { return shadowStats(); }
+  public beamMasks(): number { return beamMaskCount(); }
+  public worldLightCount(): number { return lastWorldLightCount(); }
+  /** The refraction fade's pure weight function, for the suite — see
+   *  `transmissionWeight` in render/lighting.ts. */
+  public transmissionWeight(incidenceRad: number, tirBand: number): number {
+    return transmissionWeight(incidenceRad, tirBand);
+  }
+  public cycleEmitShadowTier(): string { return cycleEmitShadowTier(); }
+  /** The live emitter-shadow tier ROW, not just its name — the suites read
+   *  the caps off it, so the ladder is pinned where it is authored. */
+  public getEmitShadowTier(): { name: string; maxEmitters: number; maxOccluders: number } {
+    return getEmitShadowTier();
+  }
+  public cycleShadowSoftness(): string { return cycleShadowSoftness(); }
+  public getShadowSoftness(): string { return getShadowSoftnessName(); }
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
@@ -474,7 +639,32 @@ export class RenderSystem implements Renderer {
    * canvas.  Quality cost is minimal because the blit downscales
    * either way.
    */
+  /** Quantise a '#rrggbb' tint to 16 levels per channel (17-step buckets).
+   *
+   *  THE TINT STORM FIX (device captures, 2026-08-21): enemy deaths spray
+   *  nebula dust tinted to the enemy's colour, and equilibrateColors then
+   *  drifts every shard hue toward its neighbours CONTINUOUSLY — so with
+   *  exact keys the cache is fed a never-repeating key stream and cannot
+   *  converge (measured: 497 new 128² canvases in ONE frame, 120k misses
+   *  in a 108s capture, on a map with no nebula terrain).  Bucketing the
+   *  channels makes equilibration steps land on reusable entries; a
+   *  ~6.7%-per-channel step is invisible on a soft translucent cloud
+   *  sprite.  Anything that is not '#rrggbb' passes through untouched.
+   */
+  quantizeTintHex(hex: string): string {
+      if (hex.length !== 7 || hex.charCodeAt(0) !== 35) return hex;
+      const v = parseInt(hex.slice(1), 16);
+      if (Number.isNaN(v)) return hex;
+      const q = (c: number) => Math.min(255, Math.round(c / 17) * 17);
+      const r = q(v >> 16), g = q((v >> 8) & 0xff), b = q(v & 0xff);
+      return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+  }
+
   getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
+      // Quantised BEFORE the key is built, and the quantised value is also
+      // what gets painted — key and pixels must agree or two callers in one
+      // bucket would share a canvas painted for only one of them.
+      hex = this.quantizeTintHex(hex);
       const key = `${src}|${hex}`;
       const cached = this._tintedSprites.get(key);
       if (cached) {
@@ -785,6 +975,10 @@ export class RenderSystem implements Renderer {
     // indestructible path, asteroid/shard branch's rock-tile path).
     this.lastTileLightingMs = 0;
     this.lastTileLightingCount = 0;
+    // Unified-lighting accumulator — populated by the lighting pass when
+    // LIGHTING_CYCLE is off 'legacy'; stays 0 otherwise.
+    this.lastLightingMs = 0;
+    this.lastLightingLights = 0;
     this.lastLodShardCount = 0;
 
     // Sort indicators once for the frame — NEAREST FIRST, so the per-type
@@ -871,9 +1065,23 @@ export class RenderSystem implements Renderer {
 
     ctx.restore();
 
+    // 5b'. THE LIGHT LAYER (Screen Space).
+    //
+    // After the entity pass so it lights what was drawn, before the HUD so
+    // it never tints the HUD, and AFTER ctx.restore() because the layer is
+    // screen-space and must not inherit the camera translation.  No-op at
+    // LIGHTING_CYCLE 'legacy' (the default).
+    renderLightLayer(this, ctx, width, height, playerPos, camera, player?.rotation,
+                     entities);
+
+    // 5b''. FOG OF WAR, composed FROM the light layer above — so it must
+    // follow it, and still precede the HUD: the fog darkens the world, never
+    // the interface.
+    renderFogLayer(this, ctx, width, height, playerPos, camera);
+
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {
-        renderWaveAnnouncements(ctx, waveAnnouncements, width, height);
+        renderWaveAnnouncements(ctx, waveAnnouncements, width, height, minimapExpanded);
     }
 
     // 6. Render POI Indicators (Screen Space)
@@ -900,11 +1108,11 @@ export class RenderSystem implements Renderer {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             const y = px.y + 46;
-            ctx.font = 'bold 11px monospace';
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.font = `bold ${UI_CONSTANTS.HUD.TEXT.BODY}px monospace`;
+            ctx.lineWidth = UI_CONSTANTS.HUD.OUTLINE_WIDTH;
+            ctx.strokeStyle = UI_CONSTANTS.HUD.OUTLINE;
             ctx.strokeText(player.interactPrompt, px.x, y);
-            ctx.fillStyle = '#e2e8f0';
+            ctx.fillStyle = UI_CONSTANTS.HUD.TEXT_COLOR;
             ctx.fillText(player.interactPrompt, px.x, y);
             ctx.restore();
         }
@@ -1185,22 +1393,24 @@ export class RenderSystem implements Renderer {
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
             || entity.shardVariant === 'indestructible-tile');
-      // Skip the fast path while the player is inside this tile's
-      // variant glow range so the slow path's layer 2b can paint.
-      // Glass-tile reads `repelImpulse` (any nearby repellable body
-      // ramps the glow); indestructible-tile keeps player-distance
-      // because it has no repel field.
+      // Skip the fast path while the player is inside this tile's variant
+      // glow range so the slow path can paint it.  Only INDESTRUCTIBLE-tile
+      // reaches this now: glass-tile used to bail out of the fast path on
+      // `repelImpulse` — a CONTACT glow, which the unified light replaced —
+      // so glass now stays cached while something is touching it.
+      // A4b: at 'unified' the slow path no longer paints the bloom (it is
+      // the point light's job), so bailing out of the fast path for it
+      // would buy a slower render of an identical picture — the tile stays
+      // cached.  This is where the A4b credit actually lands: near-player
+      // indestructible tiles stop re-rendering every frame.
       let inGlowRange = false;
-      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined) {
-          if (entity.shardVariant === 'glass-tile') {
-              inGlowRange = (entity.repelImpulse ?? 0) > 0;
-          } else if (playerPos) {
-              const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
-              if (fpGlow !== undefined) {
-                  const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
-                  const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
-                  inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
-              }
+      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined && playerPos
+          && getActiveLightingMode() !== 'unified') {
+          const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
+          if (fpGlow !== undefined) {
+              const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+              const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+              inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
           }
       }
       if (isGlassFamilyStaticTile
@@ -1337,7 +1547,7 @@ export class RenderSystem implements Renderer {
                   if (entity.type === EntityType.INTERACTABLE && entity.name) {
                       ctx.rotate(-entity.rotation);
                       ctx.fillStyle = '#ffffff';
-                      ctx.font = '12px monospace';
+                      ctx.font = `${UI_CONSTANTS.HUD.TEXT.ROW}px monospace`;
                       ctx.textAlign = 'center';
                       ctx.shadowColor = 'black';
                       ctx.shadowBlur = 4;
@@ -1504,19 +1714,68 @@ export class RenderSystem implements Renderer {
     });
   }
 
+  /**
+   * The world-space health bar — a HIT REACTION, not a permanent label
+   * (gauntlet 5d, U5; the parked "damage-triggered health / shield bars"
+   * item).
+   *
+   * Three rules, and each of them removes something that used to be on screen
+   * all the time:
+   *
+   *  1. **A bar appears when the entity takes damage and fades out again.**
+   *     Every enemy used to carry one every frame, at full health and on
+   *     one-shot trash alike, which read as "tracked HUD" for entities the
+   *     player has no reason to track.  `healthBarTimer` is stamped by
+   *     `markDamaged` at every damage path and ticked by PhysicsSystem, so
+   *     the bars on screen are exactly the fights in progress.
+   *  2. **The PLAYER's bar is BACK, and is the one permanent bar** (user
+   *     call, reversing the U5 removal).  U5 argued it was the HUD chip's
+   *     number twice; in play it is not, because the two answer at different
+   *     costs — the bar is where the eye already is (on the ship, mid-fight)
+   *     and the chip is where the exact figure is.  So both ship: the bar
+   *     under the hull for the glance, the chip for the reading.  It is
+   *     ALWAYS on rather than damage-triggered — your own condition is the
+   *     one thing you never want to have to provoke into view — and it shows
+   *     whichever pools are live, hull always and the shield strip only once
+   *     a Shield core is installed.
+   *  3. **The SHIELD bar is no longer player-only.**  Shields are
+   *     entity-agnostic now (the Bulwark, boss phases), so any shielded
+   *     entity gets the strip on a shield hit.
+   *
+   * `alwaysShowHealthBar` opts a priority target back into a persistent bar.
+   * Capstone bosses deliberately do NOT set it: they have the dedicated HUD
+   * bar, and a second readout under the hull is the redundancy rule 2 removes.
+   *
+   * Net effect on cost is a REDUCTION — most entities draw no bar on most
+   * frames — against one timer decrement per entity.
+   */
   private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
-      // Only render for Player and Enemies
-      if ((entity.type !== EntityType.PLAYER && entity.type !== EntityType.ENEMY) || entity.maxHealth <= 0) return;
+      // The PLAYER's own bar (rule 2) — always on, wider than an enemy's, and
+      // drawn from the same geometry so the two read as one family.
+      if (entity.type === EntityType.PLAYER) {
+          if (entity.isExploding || entity.maxHealth <= 0) return;
+          this.renderPlayerVitalsBar(ctx, entity, rx, ry);
+          return;
+      }
+      if (entity.type !== EntityType.ENEMY || entity.maxHealth <= 0) return;
       // Bubbles (ambient fauna) carry no health bar — keep them reading as
       // neutral blobs, not tracked combatants.
       if (entity.enemyShape === 'bubble') return;
 
-      const { PLAYER_WIDTH, PLAYER_HEIGHT, ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
+      // Damage-triggered visibility.  `alwaysShowHealthBar` and the DBG
+      // toggle are the two ways back to a permanent bar.
+      let alpha = 1;
+      if (!entity.alwaysShowHealthBar && this.damageTriggeredBars) {
+          const t = entity.healthBarTimer ?? 0;
+          if (t <= 0) return;
+          const { FADE_DURATION } = UI_CONSTANTS.HEALTH_BAR;
+          if (t < FADE_DURATION) alpha = t / FADE_DURATION;
+      }
 
-      const isPlayer = entity.type === EntityType.PLAYER;
+      const { ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
 
-      const width = isPlayer ? PLAYER_WIDTH : ENEMY_WIDTH;
-      const height = isPlayer ? PLAYER_HEIGHT : ENEMY_HEIGHT;
+      const width = ENEMY_WIDTH;
+      const height = ENEMY_HEIGHT;
 
       // Calculate offset based on visual size approx
       const visualRadius = Math.max(entity.size.x, entity.size.y) * OFFSET_MODIFIER;
@@ -1524,22 +1783,27 @@ export class RenderSystem implements Renderer {
 
       const x = rx - width / 2;
       const y = ry + yOffset;
-      
+
       const healthPct = Math.max(0, Math.min(1, entity.health / entity.maxHealth));
+
+      const prevAlpha = ctx.globalAlpha;
+      if (alpha < 1) ctx.globalAlpha = prevAlpha * alpha;
 
       // Background
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, width, height);
 
-      // Fill Color — player + normal enemy bars are red; rival bars take the
+      // Fill Color — normal enemy bars are red; rival bars take the
       // disposition team colour (red hostile / green ally / amber neutral) so the
       // bar doubles as the at-a-glance intent cue (replacing the removed ring).
       ctx.fillStyle = entity.isRival ? (entity.color || '#ef4444') : '#ef4444';
 
       ctx.fillRect(x, y, width * healthPct, height);
 
-      // Shield bar — thin blue bar below health bar (player only)
-      if (isPlayer && entity.maxShield && entity.maxShield > 0) {
+      // Shield strip — for ANY shielded entity now, not just the player
+      // (rule 3): shields are entity-agnostic, so the Bulwark's arc and a
+      // boss phase's bubble both read here.
+      if (entity.maxShield && entity.maxShield > 0) {
           const shieldY = y + height + 1;
           const shieldHeight = height - 1;
           const shieldPct = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
@@ -1547,6 +1811,51 @@ export class RenderSystem implements Renderer {
           ctx.fillRect(x, shieldY, width, shieldHeight);
           ctx.fillStyle = SHIELD_COLOR;
           ctx.fillRect(x, shieldY, width * shieldPct, shieldHeight);
+      }
+
+      ctx.globalAlpha = prevAlpha;
+  }
+
+  /**
+   * The player's own hull / shield bar, under the ship.
+   *
+   * Deliberately NOT the enemy path with a different width: it is a
+   * different KIND of readout.  An enemy bar is a hit reaction that appears
+   * and fades; this one is always on, because the player's condition is the
+   * one thing they must never have to provoke into view.  It also carries
+   * the same urgency colours as the HUD chip (emerald → amber → rose), so a
+   * glance at the ship and a glance at the corner say the same thing.
+   *
+   * The SHIELD strip is drawn only when a Shield core is installed
+   * (`maxShield` is 0 on the lean start), which is what "whichever is
+   * active" means here — an empty strip would be a permanent reminder of a
+   * module the player has not bought.
+   */
+  private renderPlayerVitalsBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
+      const { PLAYER_WIDTH, PLAYER_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
+      const width = PLAYER_WIDTH;
+      const height = PLAYER_HEIGHT;
+      const yOffset = Math.max(entity.size.x, entity.size.y) * OFFSET_MODIFIER + OFFSET_BASE;
+      const x = rx - width / 2;
+      const y = ry + yOffset;
+
+      const hp = Math.max(0, Math.min(1, entity.health / entity.maxHealth));
+      // Same three bands the DOM vitals chip uses.  One rule, two surfaces.
+      const hull = hp > 0.5 ? '#34d399' : hp > 0.25 ? '#fbbf24' : '#f43f5e';
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = hull;
+      ctx.fillRect(x, y, width * hp, height);
+
+      if (entity.maxShield && entity.maxShield > 0) {
+          const sh = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
+          const sy = y + height + 1;
+          const shh = Math.max(2, height - 2);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+          ctx.fillRect(x, sy, width, shh);
+          ctx.fillStyle = SHIELD_COLOR;
+          ctx.fillRect(x, sy, width * sh, shh);
       }
   }
 

@@ -128,6 +128,63 @@ export const SCENES = [
     },
   },
 
+  // ── Lighting A/B (the shadow-casting light layer + the fog compositor) ──
+  //
+  // Three rungs of one ladder on the SAME map with the SAME seed, so the
+  // deltas between them are the features' cost and nothing else.  GLASS_FIELD
+  // because it is the worst case the lighting has: every tile is translucent
+  // (occluder + transmission + caustic + emitter all at once), where rock
+  // would exercise only the shadow half.  Read the `lit p99` / `fog p99`
+  // columns — both are slices OF render, so the render column moves with them.
+
+  {
+    id: 'light-legacy',
+    map: 'GLASS_FIELD',
+    windowSec: DEFAULT_WINDOW_SEC,
+    notes: 'The lighting A/B floor: unified layer OFF (legacy renderer). lit/fog columns must read 0; the render column is the baseline the two scenes below are read against.',
+    setup: (e) => {
+      e.startGame();
+      e.renderer.setLighting('legacy');
+    },
+  },
+
+  {
+    id: 'light-shipped',
+    map: 'GLASS_FIELD',
+    windowSec: DEFAULT_WINDOW_SEC,
+    notes: 'The SHIPPED lighting configuration, stated explicitly so a default change does not silently move this scene: unified, tier low, diffuse shadows, refraction + emission on, beam flashlight, emit shadows / tint mix / fog / depth all off.',
+    setup: (e) => {
+      e.startGame();
+      e.renderer.setLighting('unified');
+      for (let i = 0; i < 10 && e.renderer.getLightTier() !== 'low'; i++) e.renderer.cycleLightTier();
+      for (let i = 0; i < 12 && e.renderer.getShadowSoftness() !== 'diffuse'; i++) e.renderer.cycleShadowSoftness();
+      if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      if (e.renderer.getEmitShadows()) e.renderer.toggleEmitShadows();
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'beam'; i++) e.renderer.cycleFlashlight();
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'off'; i++) e.renderer.cycleTintMix();
+      for (let i = 0; i < 8 && e.renderer.getFog() !== 'off'; i++) e.renderer.cycleFog();
+    },
+  },
+
+  {
+    id: 'light-max',
+    map: 'GLASS_FIELD',
+    windowSec: DEFAULT_WINDOW_SEC,
+    notes: 'Everything the lighting can spend at once: shipped config plus emit shadows, three-layer memory fog, radial light (no beam cull), full tint mix — the ceiling a settings screen could reach, not a shipped state.',
+    setup: (e) => {
+      e.startGame();
+      e.renderer.setLighting('unified');
+      for (let i = 0; i < 10 && e.renderer.getLightTier() !== 'low'; i++) e.renderer.cycleLightTier();
+      if (!e.renderer.getRefraction()) e.renderer.toggleRefraction();
+      if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
+      if (!e.renderer.getEmitShadows()) e.renderer.toggleEmitShadows();
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) e.renderer.cycleFlashlight();
+      for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'full'; i++) e.renderer.cycleTintMix();
+      for (let i = 0; i < 8 && e.renderer.getFog() !== 'memory'; i++) e.renderer.cycleFog();
+    },
+  },
+
   {
     id: 'soak',
     map: 'UNIVERSE',

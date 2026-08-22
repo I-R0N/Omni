@@ -24,17 +24,28 @@
  *   3. DEBUG FLAGS + PERF COUNTERS — mutable public fields, written by
  *      `DebugControls` and read by `GameEngine.buildPerfSnapshot()`.
  *
- * Group 3 is the one worth flagging for any future renderer work. These are
- * FIELDS, not methods, so the interface has to expose them as mutable
- * properties, and a second renderer must carry all thirteen counters even
- * where they are meaningless to it (a GPU renderer has no "tint cache miss",
- * and `lastRenderMs` measures CPU-side call issuing — which is precisely the
- * measure a GPU renderer moves work *out* of; see the log's Stage 1 notes).
- * They are part of the contract only because `PerfSnapshot` and the DBG panel
- * read them directly. Narrowing that — a `RendererStats` object the engine
- * asks for once per frame — is the obvious next refactor, and is deliberately
- * NOT done here: stage 3's gate is a byte-identical game, and reshaping the
- * perf plumbing would fail it.
+ * Group 3 is the one worth flagging for any future renderer work, and it is
+ * MEASURABLY the problem with this file. These are FIELDS, not methods, so
+ * the interface must expose them as mutable properties, and a second renderer
+ * has to carry every counter even where it is meaningless to it (a GPU
+ * renderer has no "tint cache miss", and `lastRenderMs` measures CPU-side
+ * call issuing — precisely the measure a GPU renderer moves work *out* of;
+ * see the log's Stage 1 notes).
+ *
+ * HOW FAST IT GROWS, measured rather than guessed. At extraction the seam was
+ * 28 members, 19 of them group 3. While this branch waited on two unrelated
+ * PRs, the lighting and 5d-UI work added FIFTEEN more — 4 predicted, 15
+ * actual — every one of them debug state or a perf counter, none of them
+ * anything a renderer swap cares about. The draw path (groups 1 and 2) did
+ * not change at all.
+ *
+ * That is the whole argument for NARROWING this interface to groups 1 and 2
+ * and letting debug flags and perf counters be reached through the concrete
+ * class: the seam would then cover exactly the part a swap replaces, and stop
+ * being edited by work that has nothing to do with rendering architecture.
+ * See the MERGE DEFERRED section of docs/GAUNTLET_WEBGPU_LOG.md. It is left
+ * as-is here because this pass is a REBASE, not a redesign — the decision is
+ * the operator's, and this file is the evidence for it.
  */
 import type {
   GameEntity, Vector2, MapType, CameraState, DamageText, PlayerHUDMessage,
@@ -94,6 +105,25 @@ export interface Renderer {
   materialAutomataEnabled: boolean;
   chevronsOffscreenOnly: boolean;
 
+  // ── 3a. Lighting + HUD state added since the seam was written ───────────
+  /* These arrived with the lighting (PR #88) and 5d UI (PR #89) work while
+     this branch waited. They are here because `GameEngine` and
+     `DebugControls` read them directly off the renderer — see the MERGE
+     DEFERRED section of docs/GAUNTLET_WEBGPU_LOG.md, where the rate at which
+     this group grows is the argument for narrowing the seam. */
+  damageTriggeredBars: boolean;
+  bossBarActive: boolean;
+  stageDepth: number;
+  playerLightToolHalfDeg: number | null;
+  getShadowSoftness(): string;
+  getFlashlight(): string;
+  getRefraction(): boolean;
+  getEmissive(): boolean;
+  getEmitShadows(): boolean;
+  getEmitShadowTier(): { name: string; maxEmitters: number; maxOccluders: number };
+  getFog(): string;
+  resetFog(): void;
+
   // ── 3b. Perf counters (read by buildPerfSnapshot / the DBG panel) ────────
   /** CPU-side call-issuing time for the last frame — NOT rasterization. */
   lastRenderMs: number;
@@ -108,4 +138,7 @@ export interface Renderer {
   lastTintMs: number;
   lastTintMisses: number;
   lastLodShardCount: number;
+  lastLightingMs: number;
+  lastLightingLights: number;
+  lastFogMs: number;
 }

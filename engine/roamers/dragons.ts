@@ -39,6 +39,7 @@ export interface DragonInstance {
   missileTimer: number;                  // countdown to the next homing missile
   portal?: { x: number; y: number };     // exit-portal centre (leave state only)
   headThrough?: boolean;                  // head has crossed the exit portal
+  roaredOnProvoke?: boolean;              // provoke roar fired (sticky edge)
 }
 
 export function updateDragons(g: GameEngine, dt: number) {
@@ -134,7 +135,7 @@ export function updateDragons(g: GameEngine, dt: number) {
             }
             // Fully through (or the safety timer expired) → gone.
             if ((inst.headThrough && remaining === 0) || inst.stateTimer <= 0) {
-                despawnDragon(inst);
+                despawnDragon(g, inst);
                 g.dragons.splice(n, 1);
                 continue;
             }
@@ -146,6 +147,13 @@ export function updateDragons(g: GameEngine, dt: number) {
             for (let i = 0; i < inst.body.length; i++) {
                 if ((inst.body[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
             }
+        }
+
+        // The fight just started — a shorter, angrier roar, once per
+        // dragon (the flag is sticky, so the edge fires exactly once).
+        if (d.provoked && !inst.roaredOnProvoke) {
+            inst.roaredOnProvoke = true;
+            g.audio.play('dragon.provoked', { x: d.position.x, y: d.position.y });
         }
 
         // ── Head attacks: ONLY once provoked — spit gnats + lob missiles ──
@@ -200,6 +208,9 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
     const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };
     wrapPosition(pos);
     openDragonPortal(g, pos);
+    // The roar rides on TOP of the rift the portal already sounds — a
+    // dragon arriving should make the player look up.
+    g.audio.play('dragon.arrive', { x: pos.x, y: pos.y });
 
     const v = ENEMY_VARIANTS[EnemySubtype.DRAGON];
     const d: GameEntity = {
@@ -218,6 +229,12 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         mass: v.mass,
         contactDamage: v.contactDamage,
         enemyShape: 'dragon',
+        // A PRIORITY target the player tracks rather than reacts to, so it
+        // opts out of the damage-triggered bar (5d U5) and keeps a persistent
+        // one.  Capstone bosses deliberately do NOT: they have the dedicated
+        // HUD bar, and a second readout under the hull would be the same
+        // redundancy U5 removed from the player.
+        alwaysShowHealthBar: true,
         phasesTerrain: true,          // glides through terrain, eats it
         thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
         consume: v.consume ? { ...v.consume } : undefined,
@@ -386,6 +403,8 @@ function tileToShardVariant(v: GameEntity['shardVariant']): GameEntity['shardVar
 
 /** Dragon killed: big payoff + score + collapse the rift + scatter the body. */
 export function dragonDeath(g: GameEngine, inst: DragonInstance) {
+g.audio.play('destroy.dragon',
+             { x: inst.head.position.x, y: inst.head.position.y });
     const d = inst.head;
     // Payout doubles per kill this run: 3000, 6000, 12000, …
     g.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, g.dragonsKilled), d.position);
@@ -403,7 +422,9 @@ export function dragonDeath(g: GameEngine, inst: DragonInstance) {
 
 /** Despawn a dragon (left via portal — no payoff).  The body leaves with it.
  *  Caller removes it from `g.dragons`. */
-function despawnDragon(inst: DragonInstance) {
+function despawnDragon(g: GameEngine, inst: DragonInstance) {
+    g.audio.play('dragon.leave',
+                 { x: inst.head.position.x, y: inst.head.position.y });
     inst.head.active = false;
     for (let i = 0; i < inst.body.length; i++) inst.body[i].active = false;
 }

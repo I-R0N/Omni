@@ -1467,6 +1467,120 @@ test.describe('rumble — force feedback rides the screen shake', () => {
  * tests pin the SHAPE (which bytes move, and to what) so a corrected offset
  * changes one table and one expectation rather than being unrecoverable.
  */
+test.describe('left-stick scheme — one thumb flies and aims', () => {
+  /*  User call: a scheme where the LEFT stick (and the left D-pad) carries
+   *  heading, aim AND throttle together, with the gun on the bottom face
+   *  button and the action button unchanged.  What separates it from the two
+   *  pad schemes either side of it is worth pinning, because each pair is
+   *  one flag apart:
+   *
+   *    `gamepad`        left stick = thrust only, RIGHT stick aims
+   *    `gamepad-left`   left stick = thrust AND aim, right stick ignored
+   *    `gamepad-thrust` a TRIGGER is the thrust, the stick's magnitude is
+   *                     discarded, either stick may steer
+   */
+
+  test('the left stick supplies heading, aim and throttle at once', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e: any, arg: any) => {
+      const read = (scheme: string, snap: any) => {
+        e.setControlScheme(scheme);
+        e.input.applyPadSnapshot(snap, true);
+        const v = e.input.getMovementVector();
+        const aim = e.input.getMousePosition();
+        return {
+          move: { x: +v.x.toFixed(4), y: +v.y.toFixed(4) },
+          aimX: Math.sign(+(aim.x - window.innerWidth / 2).toFixed(2)),
+          aimY: Math.sign(+(aim.y - window.innerHeight / 2).toFixed(2)),
+        };
+      };
+      return {
+        half:  read('gamepad-left', arg.halfLeft),
+        full:  read('gamepad-left', arg.fullLeft),
+        dpad:  read('gamepad-left', arg.dpadRight),
+        // The RIGHT stick must not steer the aim here: one thumb owns it.
+        rightOnly: read('gamepad-left', arg.rightStickOnly),
+      };
+    }, {
+      halfLeft: pad({ lx: 0.5 }),
+      fullLeft: pad({ lx: 1 }),
+      dpadRight: pad({ down: [15] }),     // D-pad right
+      rightStickOnly: pad({ rx: 1 }),
+    });
+
+    // THROTTLE is the stick's own magnitude, exactly as under `gamepad` —
+    // this scheme changes what the stick AIMS, not how it flies.
+    expect(Math.hypot(r.half.move.x, r.half.move.y), 'half deflection = part throttle')
+      .toBeGreaterThan(0.3);
+    expect(Math.hypot(r.half.move.x, r.half.move.y))
+      .toBeLessThan(Math.hypot(r.full.move.x, r.full.move.y) - 0.2);
+
+    // AIM follows the same stick: pushed +x, the synthetic pointer sits to
+    // the RIGHT of screen centre, which is how the hull's rotation and every
+    // shot's target are derived.
+    expect(r.full.aimX, 'the ship points where it flies').toBe(1);
+    expect(r.full.aimY).toBe(0);
+
+    // The D-PAD rides along: a unit vector at full throttle, aiming in its
+    // own direction.
+    expect(r.dpad.move.x, 'd-pad right flies right').toBeCloseTo(1, 3);
+    expect(r.dpad.aimX, 'and aims right').toBe(1);
+
+    // The right stick is ignored — no thrust and, crucially, no aim, so the
+    // two thumbs cannot fight over the reticle.
+    expect(Math.hypot(r.rightOnly.move.x, r.rightOnly.move.y), 'right stick does not fly')
+      .toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the gun is the bottom face button, and the action button is unchanged', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, (e: any, arg: any) => {
+      const fireCount = (scheme: string, snap: any) => {
+        e.setControlScheme(scheme);
+        // Release first: the fire edge is a press, so a snapshot that starts
+        // held would be swallowed as "already down".
+        e.input.applyPadSnapshot(arg.idle, true);
+        e.input.getDeviceFireEvents();
+        e.input.applyPadSnapshot(snap, true);
+        return e.input.getDeviceFireEvents().length;
+      };
+      const interactCount = (scheme: string, snap: any) => {
+        e.setControlScheme(scheme);
+        e.input.applyPadSnapshot(arg.idle, true);
+        e.input.consumeInteractPress();
+        e.input.applyPadSnapshot(snap, true);
+        return e.input.consumeInteractPress() ? 1 : 0;
+      };
+      return {
+        faceFires:      fireCount('gamepad-left', arg.face),
+        triggerSilent:  fireCount('gamepad-left', arg.trigger),
+        // The control it is contrasted with: under plain `gamepad` the right
+        // trigger IS the gun.
+        plainTrigger:   fireCount('gamepad', arg.trigger),
+        interact:       interactCount('gamepad-left', arg.square),
+      };
+    }, {
+      idle: pad(),
+      face: pad({ down: [0] }),                 // bottom face button
+      trigger: pad({ analog: { 7: 1 } }),       // R2 fully pulled
+      square: pad({ down: [2] }),               // left face button
+    });
+
+    expect(r.faceFires, 'the bottom face button shoots').toBe(1);
+    expect(r.triggerSilent, 'the right trigger does not').toBe(0);
+    expect(r.plainTrigger, 'whereas under plain `gamepad` it does').toBe(1);
+    expect(r.interact, 'the left face button is still the action button').toBe(1);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('trigger thrust — the stick steers, the trigger throttles', () => {
   test('the stick supplies DIRECTION and the trigger supplies magnitude', async ({ page }) => {
     const watch = await boot(page);

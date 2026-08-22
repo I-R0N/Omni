@@ -2,9 +2,11 @@
 import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
-import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName } from './constants';
+import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
+         computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
+import { fitFontPx } from './engine/systems/render/hud';
 import { installMenuNav, pickNext } from './components/menuNav';
 
 const App: React.FC = () => {
@@ -59,6 +61,17 @@ const App: React.FC = () => {
     // test vector, so a suite can pin them without hardware.  Nothing in the
     // game reads this.
     (window as any).__omniHid = { crc32, buildTriggerData, buildRumbleData, buildOutputReport };
+
+    // Debug handle #5 (gauntlet 5d, U4) — the canvas HUD's LAYOUT functions,
+    // exposed for the same reason as __omniHid and on the same terms: they are
+    // pure, and they are wrong in a way nothing reports.  A banner that clips
+    // off both edges at 320px, a minimap rect that disagrees with the tap
+    // handler that catches its expand tap, a loadout strip that leaves the
+    // viewport — none of those throw, none of them log, and none of them are
+    // visible at the one viewport the suites used to run at.  Exposing the
+    // three functions lets the viewport matrix pin them at every width without
+    // sampling pixels off a starfield.  Nothing in the game reads this.
+    (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect };
     // Debug handle #4: the menu driver's geometric step rule, so a suite can
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.
@@ -250,12 +263,41 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.toggleScreenShake();
   };
 
+  // Audio settings.  The slider is a live user gesture, so it doubles as
+  // an unlock trigger on the rare path where the AudioContext is still
+  // locked when the pause menu opens.
+  const handleSetVolume = (v: number) => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.setVolume(v);
+  };
+
+  const handleToggleMute = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.toggleMute();
+  };
+
+  // Synth drafts on/off — the audition switch for recorded takes.
+  const handleToggleDrafts = () => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.draftsEnabled = !e.audio.draftsEnabled;
+  };
+
   const handleToggleTileOutlines = () => {
       if (engineRef.current) engineRef.current.dbg.toggleTileOutlines();
   };
 
   const handleToggleChevronMode = () => {
       if (engineRef.current) engineRef.current.dbg.toggleChevronMode();
+  };
+
+  const handleToggleDamageBars = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleDamageTriggeredBars();
   };
 
   const handleToggleJoystickDebug = () => {
@@ -268,6 +310,84 @@ const App: React.FC = () => {
 
   const handleCycleRockPalette = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
+  };
+
+  const handleCycleNebulaWakeSpin = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaWakeSpin();
+  };
+
+  const handleCycleLighting = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLighting();
+  };
+
+  const handleCycleLightingTier = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightingTier();
+  };
+
+  const handleToggleShardShadows = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardShadows();
+  };
+
+  const handleToggleRefraction = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleRefraction();
+  };
+
+  const handleCycleLightBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightBrightness();
+  };
+
+  const handleCycleEmitBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitBrightness();
+  };
+
+  const handleCycleTintMix = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleTintMix();
+  };
+
+  const handleCycleLightColor = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLightColor();
+  };
+
+  const handleCycleFog = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFog();
+  };
+
+  const handleCycleFlashlight = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFlashlight();
+  };
+
+  const handleCycleCausticFade = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleCausticFade();
+  };
+
+  const handleCycleEmitFade = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitFade();
+  };
+
+  const handleCycleEmitShadowTier = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleEmitShadowTier();
+  };
+
+  const handleToggleEmitShadows = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleEmitShadows();
+  };
+
+  const handleToggleEmissive = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleEmissive();
+  };
+  const handleToggleWorldLights = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleWorldLights();
+  };
+  const handleToggleDepthAmbient = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleDepthAmbient();
+  };
+
+  const handleCycleRefractBrightness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleRefractBrightness();
+  };
+
+  const handleCycleShadowSoftness = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleShadowSoftness();
   };
 
   const handleToggleRumble = () => {
@@ -322,17 +442,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePlasticGlowBrightness();
   };
 
-  const handleCycleMetalGlowBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowBrightness();
-  };
 
-  const handleCycleGlassGlowColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleGlassGlowColor();
-  };
 
-  const handleCycleMetalGlowColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMetalGlowColor();
-  };
 
   const handleCycleNebulaPalette = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaPalette();
@@ -608,11 +719,35 @@ const App: React.FC = () => {
         onToggleShardLod={handleToggleShardLod}
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
+        onSetVolume={handleSetVolume}
+        onToggleMute={handleToggleMute}
+            onToggleDrafts={handleToggleDrafts}
         onToggleTileOutlines={handleToggleTileOutlines}
         onToggleChevronMode={handleToggleChevronMode}
+        onToggleDamageBars={handleToggleDamageBars}
         onToggleJoystickDebug={handleToggleJoystickDebug}
         onCycleMinimapMaterial={handleCycleMinimapMaterial}
+        onCycleLighting={handleCycleLighting}
+        onCycleLightingTier={handleCycleLightingTier}
+        onToggleShardShadows={handleToggleShardShadows}
+        onToggleRefraction={handleToggleRefraction}
+        onCycleRefractBrightness={handleCycleRefractBrightness}
+        onCycleLightBrightness={handleCycleLightBrightness}
+        onToggleEmissive={handleToggleEmissive}
+        onToggleWorldLights={handleToggleWorldLights}
+        onToggleDepthAmbient={handleToggleDepthAmbient}
+        onCycleEmitBrightness={handleCycleEmitBrightness}
+        onToggleEmitShadows={handleToggleEmitShadows}
+        onCycleEmitShadowTier={handleCycleEmitShadowTier}
+        onCycleEmitFade={handleCycleEmitFade}
+        onCycleCausticFade={handleCycleCausticFade}
+        onCycleFlashlight={handleCycleFlashlight}
+        onCycleFog={handleCycleFog}
+        onCycleLightColor={handleCycleLightColor}
+        onCycleTintMix={handleCycleTintMix}
+        onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
+        onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
         onToggleAdaptiveTriggers={handleToggleAdaptiveTriggers}
@@ -625,9 +760,6 @@ const App: React.FC = () => {
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticShardPalette={handleCyclePlasticShardPalette}
         onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
-        onCycleMetalGlowBrightness={handleCycleMetalGlowBrightness}
-        onCycleGlassGlowColor={handleCycleGlassGlowColor}
-        onCycleMetalGlowColor={handleCycleMetalGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}

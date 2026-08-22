@@ -18,7 +18,7 @@
  *    - `timedTileBloom` + `renderProximityBloom` — the variant `glow` layer
  *      and its perf bracket.
  *    - `drawMetalDebugOutline` — the DBG lattice outline for metal.
- *    - `plasticAutomataHex`, `shardMergeFadeAlpha`, `repelGlowIntensity` —
+ *    - `plasticAutomataHex`, `shardMergeFadeAlpha` —
  *      module-scope colour / alpha maths with no other reader.
  *
  *  What did NOT travel: `materialAutomataAlpha` (the glass fast path and
@@ -35,9 +35,8 @@ import {
     ASSETS, SHARD_VARIANTS, SHARD_LOD_CONSTANTS, MATERIAL_DAMAGE_CRACKS,
     METAL_HEX_CELLS, NEBULA_CONSTANTS, REGEN_POP_CONSTANTS, PLASTIC_SHARD_AUTOMATA,
     getPlasticShardBaseShade, isPlasticAutomataBrighten, metalDensityBrightness,
-    METAL_AGGREGATION_BRIGHT_CEIL, METAL_BRIGHT_TARGET,
-    getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness,
-    getActiveMetalGlowBrightness,
+    METAL_AGGREGATION_BRIGHT_CEIL, METAL_BRIGHT_TARGET, getActivePlasticGlowBrightness,
+    getActiveLightingMode,
 } from '../../../constants';
 import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
@@ -81,16 +80,6 @@ function shardMergeFadeAlpha(entity: GameEntity): number {
     return Math.max(0, Math.min(1, t / dur));
 }
 
-// Map a per-substep `repelImpulse` accumulator to a 0..N glow intensity
-// scalar.  Reference: glass-tile.repel.strength = 0.04 → a single body
-// at a tile's centre yields ~0.04 per substep, normalising to 1.0.  Not
-// clamped: metal's higher repel.strength (0.06) produces ~1.5 here, and
-// multi-body scenarios push higher still.  Callers are expected to clamp
-// the FINAL alpha (peakAlpha × intensity) so metal naturally reads
-// brighter than glass when the input is identical.
-function repelGlowIntensity(impulse: number): number {
-    return impulse / 0.04;
-}
 
 // Proximity "bloom" glow for static tiles with a `glow` config —
 // the warm-white tile-lighting on metal / plastic / rock /
@@ -119,26 +108,36 @@ export function timedTileBloom(
     entity: GameEntity,
     playerPos: Vector2 | undefined,
 ): void {
+    // A4b: RETIRED under the unified light layer.  The bloom is a stand-in
+    // for a light the game did not have — "the face near the player is lit"
+    // — and the point light now says that by construction, so under
+    // 'unified' the bloom is double-lighting.  It still runs under 'legacy'
+    // (the true restore) and 'debug' (which renders the world as legacy
+    // under the diagnostic fill).
+    if (getActiveLightingMode() === 'unified') return;
     const t = performance.now();
-    renderProximityBloom(ctx, entity, playerPos);
-    const elapsed = performance.now() - t;
-    rs.lastTileLightingMs += elapsed;
-    if (elapsed > 0.001) rs.lastTileLightingCount++;
+    const painted = renderProximityBloom(ctx, entity, playerPos);
+    rs.lastTileLightingMs += performance.now() - t;
+    // Count PAINTS, not microseconds: the old >1us elapsed heuristic was
+    // blind wherever performance.now() is clamped to 100us (headless test
+    // contexts — the A0 instrument story), so the helper now reports
+    // whether it drew.
+    if (painted) rs.lastTileLightingCount++;
 }
 
 export function renderProximityBloom(
     ctx: CanvasRenderingContext2D,
     entity: GameEntity,
     playerPos: Vector2 | undefined,
-): void {
-    if (!playerPos || entity.shardVariant === undefined) return;
-    if (entity.hitFlash && entity.hitFlash > 0) return;
+): boolean {
+    if (!playerPos || entity.shardVariant === undefined) return false;
+    if (entity.hitFlash && entity.hitFlash > 0) return false;
     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-    if (glow === undefined) return;
+    if (glow === undefined) return false;
     const pdxWorld = wrapDeltaX(entity.position.x, playerPos.x);
     const pdyWorld = wrapDeltaY(entity.position.y, playerPos.y);
     const pdistSq = pdxWorld * pdxWorld + pdyWorld * pdyWorld;
-    if (pdistSq >= glow.range * glow.range) return;
+    if (pdistSq >= glow.range * glow.range) return false;
     const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
     // Plastic-tile glow is the only variant routed through here with a
     // DBG brightness multiplier; other glow-bearing tiles (rock /
@@ -227,6 +226,7 @@ export function renderProximityBloom(
         ctx.fill();
     }
     ctx.globalAlpha = 1.0;
+    return true;
 }
 
 /**
@@ -502,10 +502,16 @@ export function drawTileShape(
         // treatment as tiles on the same side of the map.  Squared
         // early-out skips the sqrt for tiles outside the prox range
         // (the vast majority on densely-tiled maps).
+        // A4b: RETIRED under the unified layer, like the bloom above — the
+        // point light brightening the near face is the same statement made
+        // properly, and this tint only ever ran on the slow path anyway
+        // (cached tiles blit their stamped colour).  `prox` stays 0 at
+        // 'unified' so the edge wears its far-away colour everywhere.
         const PROX_RANGE = 120;
         const PROX_RANGE_SQ = PROX_RANGE * PROX_RANGE;
-        const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
-        const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
+        const legacyLit = getActiveLightingMode() !== 'unified';
+        const pdx = legacyLit && playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
+        const pdy = legacyLit && playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
         const pdistSq = pdx * pdx + pdy * pdy;
         const prox = pdistSq >= PROX_RANGE_SQ
             ? 0
@@ -539,33 +545,14 @@ export function drawTileShape(
             ctx.fill();
         }
 
-        // Layer 2b — glass-tile proximity glow.  Intensity is
-        // driven by the per-substep `repelImpulse` accumulator
-        // PhysicsSystem writes into the tile, so the glow
-        // ramps up for ANY repellable body (player, enemy,
-        // mobile shards), not only the player.  Fill + thick
-        // stroke so the halo reads as a clear "lit edge" —
-        // fill alone washes the hex out but doesn't beacon.
-        // Indestructible-tile keeps the warm-white radial
-        // bloom drawn after the cracks below.
-        if (!isFlash && entity.shardVariant === 'glass-tile') {
-            const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-            const impulse = entity.repelImpulse ?? 0;
-            if (glow !== undefined && impulse > 0) {
-                // Glow colour is DBG-cyclable (warm yellow A/Bs)
-                // through getActiveGlassGlowColor; range +
-                // peakAlpha stay with the SHARD_VARIANTS entry.
-                const glowColor = getActiveGlassGlowColor();
-                const intensityG = repelGlowIntensity(impulse);
-                ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG * autoAlpha);
-                ctx.fillStyle = glowColor;
-                ctx.fill();
-                ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG) * autoAlpha);
-                ctx.strokeStyle = glowColor;
-                ctx.lineWidth = 3.0;
-                ctx.stroke();
-            }
-        }
+        // Layer 2b — GONE.  Glass used to light up from a per-substep
+        // `repelImpulse` accumulator, i.e. on CONTACT: a pane lit up when
+        // something touched it, and a pane across the room stayed dead no
+        // matter how brightly it was lit.  The unified light layer answers
+        // the question that glow was standing in for, and answers it the
+        // right way round — glass is lit by light, and re-emits it when the
+        // DBG "Emissive" toggle is on.  Indestructible-tile keeps its own
+        // warm-white radial bloom, drawn after the cracks below.
 
         // Layer 3 — edge stroke (proximity-tinted)
         ctx.globalAlpha = Math.min(1, autoAlpha);
@@ -742,32 +729,11 @@ export function drawTileShape(
             // takes the repel-driven layer 2b path below instead
             // — same accumulator-driven mechanism as glass-tile,
             // tuned visually heavier via metal's higher
-            // repel.strength feeding repelGlowIntensity().
             if (entity.shardVariant === 'plastic-tile') {
                 timedTileBloom(rs, ctx, entity, playerPos);
-            } else if (entity.shardVariant === 'metal-tile' && !isFlash) {
-                const glow = SHARD_VARIANTS['metal-tile'].glow;
-                const impulse = entity.repelImpulse ?? 0;
-                if (glow !== undefined && impulse > 0) {
-                    const intensityM = repelGlowIntensity(impulse);
-                    const bright = getActiveMetalGlowBrightness();
-                    // Live colour from the DBG metal-glow cycle.
-                    // Range + peakAlpha stay with the variant.
-                    const glowColor = getActiveMetalGlowColor();
-                    buildPath();
-                    ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM * bright);
-                    ctx.fillStyle = glowColor;
-                    ctx.fill();
-                    // Thinner outline than glass (1.5 vs 3.0)
-                    // — metal reads as a precise mechanical
-                    // edge rather than glass's diffuse halo.
-                    ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM * bright));
-                    ctx.strokeStyle = glowColor;
-                    ctx.lineWidth = 1.5;
-                    ctx.stroke();
-                    ctx.globalAlpha = 1.0;
-                }
             }
+            // metal-tile's contact glow is GONE for the same reason glass's
+            // is — see the note where layer 2b used to be.
         }
 
     } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {

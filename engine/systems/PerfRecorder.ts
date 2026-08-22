@@ -34,6 +34,14 @@ export interface PerfReportContext {
    *  which settings produced it cannot be compared to another one.  Two
    *  captures in this gauntlet were ambiguous for exactly that reason. */
   settings: string;
+  /** AudioContext base+output latency in ms at report time, null before
+   *  the unlock gesture (playtest: "sounds feel slightly delayed" — the
+   *  engine side is measured at 3-5ms dispatch + ~3ms draft onset, so this
+   *  device number is where any felt delay lives: ~30-45ms is a
+   *  wired/speaker route, 150-250ms means Bluetooth).  Report-time, not
+   *  per-frame: the route is quasi-static, and what matters to a session
+   *  recorded to answer "why is sound late" is the route it ENDED on. */
+  audioLatencyMs: number | null;
 }
 
 /** Cyclable scene labels so each capture is self-describing on the paste. */
@@ -72,6 +80,16 @@ export class PerfRecorder {
   private sumLocalGravity = 0; // player↔asteroid local gravity
   private sumFlowField = 0;    // FlowFieldGrid rebuild/flush
   private sumAi = 0;           // AISystem.update
+  // THE LIGHT LAYER, broken out of render.  It is inside `renderMs` like
+  // everything else the renderer does, which is exactly why a capture could
+  // not answer "is the lighting what costs me" — the question the layer was
+  // added under, and the first question asked of it from a device.
+  private sumLighting = 0;
+  private maxRawLighting = 0;
+  private worstFrameLighting = 0;
+  private sumLights = 0;
+  private sumFog = 0;
+  private maxRawFog = 0;
   private maxEntities = 0;
   private maxEnemies = 0;
   private maxParticles = 0;
@@ -100,7 +118,9 @@ export class PerfRecorder {
   // attributes it: render, sim, how many substeps the accumulator drained,
   // and the live entity/particle counts at that moment.  Reading it:
   //   frame ~= render + sim          -> our compute, and it says which half
-  //   frame >> render + sim          -> GC pause or a browser/OS stall
+  //   frame >> render + sim          -> idle (vsync wait) if the frame time is
+  //                                     at the display interval; a GC pause or
+  //                                     browser/OS stall only if it is above it
   //   substeps high + sim high       -> substep bunching after a long frame
   //   particles/entities spiking     -> a spawn burst (death, wave, boss)
   // Insertion is a linear scan over a 6-slot array on a new maximum only —
@@ -196,6 +216,17 @@ export class PerfRecorder {
     this.worstFrameMs = 0;
     this.worstFrameRender = 0;
     this.worstFrameSim = 0;
+    // The lighting accumulators were missing from this reset from the day
+    // they were added — the SECOND capture of a session inherited the first
+    // one's sums and reported a light average diluted or inflated by frames
+    // outside its own window.  Every capture-scoped accumulator added above
+    // must appear here; the fog pair arrives already registered.
+    this.sumLighting = 0;
+    this.maxRawLighting = 0;
+    this.worstFrameLighting = 0;
+    this.sumLights = 0;
+    this.sumFog = 0;
+    this.maxRawFog = 0;
     this.tierHist.fill(0);
     this.maxTier = 0;
     this.peakLoad = 0;
@@ -304,6 +335,8 @@ export class PerfRecorder {
       );
     }
     if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
+    if (perf.lightingMs > this.maxRawLighting) this.maxRawLighting = perf.lightingMs;
+    if (perf.fogMs > this.maxRawFog) this.maxRawFog = perf.fogMs;
     if (stampMs > this.maxStampMs) { this.maxStampMs = stampMs; this.maxStampCount = stampCount; }
     if (tintMs > this.maxTintMs) { this.maxTintMs = tintMs; this.maxTintMisses = tintMisses; }
     this.totalTintMisses += tintMisses;
@@ -312,6 +345,7 @@ export class PerfRecorder {
       this.worstFrameMs = frameMs;
       this.worstFrameRender = rawRenderMs;
       this.worstFrameSim = rawSimMs;
+      this.worstFrameLighting = perf.lightingMs;
     }
     this.sumUi += uiMs;
     this.sumRender += perf.renderMs;
@@ -326,6 +360,9 @@ export class PerfRecorder {
     this.sumLocalGravity += perf.localGravityMs;
     this.sumFlowField += perf.flowFieldMs;
     this.sumAi += perf.aiMs;
+    this.sumLighting += perf.lightingMs;
+    this.sumLights += perf.lightingLights;
+    this.sumFog += perf.fogMs;
     const ti = loadTier < 0 ? 0 : loadTier >= this.tierHist.length ? this.tierHist.length - 1 : loadTier | 0;
     this.tierHist[ti]++;
     if (loadTier > this.maxTier) this.maxTier = loadTier;
@@ -379,11 +416,19 @@ export class PerfRecorder {
 
     const lines = [
       `### PERF ${ctx.buildTag} · ${this.sceneTag} · ${ctx.mapName} · diff ${ctx.difficulty}`,
-      `viewport ${ctx.viewportW}×${ctx.viewportH} dpr${ctx.dpr} zoom${r2(ctx.zoom)} · ${r1(durSec)}s · ${n} frames${this.full ? ' (capped)' : ''}`,
+      `viewport ${ctx.viewportW}×${ctx.viewportH} dpr${ctx.dpr} zoom${r2(ctx.zoom)} · ${r1(durSec)}s · ${n} frames${this.full ? ' (capped)' : ''}`
+        + ` · audio out ${ctx.audioLatencyMs === null ? '—' : `~${ctx.audioLatencyMs}ms${ctx.audioLatencyMs >= 120 ? ' (Bluetooth?)' : ''}`}`,
       `set   ${ctx.settings}`,
       `FPS   avg ${fpsR(avgFps)} · median ${fpsR(toFps(medianFrame))} · 5%-low ${fpsR(toFps(p95Frame))} · 1%-low ${fpsR(toFps(p99Frame))} · min ${fpsR(toFps(maxFrame))} · max ${fpsR(toFps(minFrame))} · ≥55: ${Math.round((ge55 / n) * 100)}% · ≥30: ${Math.round((ge30 / n) * 100)}%`,
       `frame avg ${r1(sumFrame / n)}ms · median ${r1(medianFrame)}ms · p95 ${r1(p95Frame)}ms · p99 ${r1(p99Frame)}ms`,
       `cost  render avg ${r2(this.sumRender / n)}ms · sim avg ${r2(this.sumSim / n)}ms · collisions avg ${r2(this.sumCollisions / n)}ms · ui avg ${r2(this.sumUi / n)}ms`,
+      // Lighting is a SLICE OF RENDER, not a term beside it — printed on its
+      // own line so nobody adds it to the render figure.  `lights` is the
+      // mean number composited per frame (the player's light plus whatever
+      // emitters the tier's budget allowed), because the cost is per light
+      // and a mean of 4 against a mean of 1 is most of the answer.
+      `light avg ${r2(this.sumLighting / n)}ms of render · peak ${r2(this.maxRawLighting)}ms · lights avg ${r2(this.sumLights / n)}`
+        + ` · fog avg ${r2(this.sumFog / n)}ms · peak ${r2(this.maxRawFog)}ms`,
       // Sim breakdown so a heavy capture shows WHERE the sim ms goes.  updPhys +
       // updLogic = sim; physics (incl. collisions/gravity) + AI + flow live in
       // updPhys, shardSys in updLogic.  gravity/localGrav are sub-slices of
@@ -392,7 +437,7 @@ export class PerfRecorder {
       // Spike attribution (raw per-frame): the worst frame's render/sim split
       // + the independent raw peaks.  worst frame ≈ render+sim → our compute;
       // worst frame ≫ render+sim → an external gap (GC / browser stall).
-      `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)} · peak tilestamp ${r2(this.maxStampMs)}ms (${this.maxStampCount} tiles)`,
+      `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} (light ${r2(this.worstFrameLighting)}) · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)} · peak tilestamp ${r2(this.maxStampMs)}ms (${this.maxStampCount} tiles)`,
       // State the number and the threshold; let the reader draw the
       // conclusion.  The first version of this line asserted "THRASHING"
       // unconditionally — i.e. it printed a verdict regardless of the data,
@@ -423,8 +468,11 @@ export class PerfRecorder {
         );
       }
       lines.push(
-        `      (ui = the React hand-off · OTHER = frame − render − sim − ui:` +
-        ` GC pause, compositing or an OS stall, i.e. NOT our JS)`,
+        `      (ui = the React hand-off · OTHER = frame − render − sim − ui —` +
+        ` MOSTLY IDLE at a locked frame rate: the frame clock is wall time` +
+        ` between rAF callbacks, so a 16.7ms frame with 5ms of our JS carries` +
+        ` ~11ms of vsync wait here.  It means a stall only when the FRAME time` +
+        ` is itself well above the display's interval)`,
         `      (event = nearest marked transition within 2s, blank beyond that)`,
       );
     }

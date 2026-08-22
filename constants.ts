@@ -292,23 +292,13 @@ export function cyclePlasticGlowBrightness(): number {
   return activePlasticGlowBrightnessIndex;
 }
 
-export function getActiveMetalGlowBrightness(): number {
-  return MATERIAL_GLOW_BRIGHTNESS_CYCLE[activeMetalGlowBrightnessIndex];
-}
-export function getActiveMetalGlowBrightnessName(): string {
-  return `${getActiveMetalGlowBrightness()}x`;
-}
-export function cycleMetalGlowBrightness(): number {
-  activeMetalGlowBrightnessIndex =
-    (activeMetalGlowBrightnessIndex + 1) % MATERIAL_GLOW_BRIGHTNESS_CYCLE.length;
-  return activeMetalGlowBrightnessIndex;
-}
 
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
 // The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
 // .glow.color (#a5f3fc); the cycle adds warm + diverse families so we
-// can A/B the look.  RenderSystem reads the active hex through
-// getActiveGlassGlowColor() (range + peakAlpha stay with the variant).
+// can A/B the look.  The glass GLOW itself is gone — the unified light
+// layer replaced it — so nothing reads this table for a tile's colour any
+// more; it survives for the `nebulaPalette` companion below.
 //
 // Each entry ALSO bundles a `nebulaPalette` — when the DBG 'Neb follows
 // glow' toggle is on, getActiveNebulaPalette() returns this companion
@@ -336,24 +326,12 @@ export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
   { name: 'white',   hex: '#f8fafc', nebulaPalette: { hueMin: 0,   hueRange: 360, saturation: 0,  lightness: 90 } },
 ] as const;
 
-let activeGlassGlowIndex = 8; // default 'sky' — covers glass-tile glow + glass dust
 
-export function getActiveGlassGlowColor(): string {
-  return GLASS_GLOW_COLORS[activeGlassGlowIndex].hex;
-}
-export function getActiveGlassGlowColorName(): string {
-  return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
-}
-export function cycleGlassGlowColor(): number {
-  activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
-  return activeGlassGlowIndex;
-}
 
 // ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
-// Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
-// the palette so the two tile glows can be A/B'd against a shared
-// vocabulary.  RenderSystem reads the live hex via
-// getActiveMetalGlowColor() in the metal-tile glow branch.
+// REMOVED with the metal-tile contact glow it tuned (the unified light
+// layer replaced that glow).  The note below is kept because the default it
+// argues about is still baked into SHARD_VARIANTS.
 //
 // DEFAULT CHANGED index 4 'magenta' → 0 'cyan' (material-palette-residual,
 // decision #30 → gauntlet step 5 G7).  Magenta was never chosen: it was the
@@ -363,18 +341,7 @@ export function cycleGlassGlowColor(): number {
 // got close.  Cyan is the same cold family as the body, and it is NOT the
 // glass glow's 'sky' (index 8), so the two tile glows still read apart:
 // glass glows a soft sky, metal an icy cyan.
-let activeMetalGlowIndex = 0; // 'cyan' — the cold family the metal body lives in
 
-export function getActiveMetalGlowColor(): string {
-  return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
-}
-export function getActiveMetalGlowColorName(): string {
-  return GLASS_GLOW_COLORS[activeMetalGlowIndex].name;
-}
-export function cycleMetalGlowColor(): number {
-  activeMetalGlowIndex = (activeMetalGlowIndex + 1) % GLASS_GLOW_COLORS.length;
-  return activeMetalGlowIndex;
-}
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
 // Independent cycle into the same GLASS_GLOW_COLORS list, governing
@@ -838,7 +805,56 @@ export const COLLISION_CONFIG = {
     MICRO: 1, // Projectile hit
     MEDIUM: 10, // Enemy collision
     HEAVY: 20, // High speed crash
-    CAP_MULTIPLIER: 1.5 // Multiplier for velocity-based shake
+    CAP_MULTIPLIER: 1.5, // Multiplier for velocity-based shake
+
+    /* ── BODY IMPACTS: shake follows the player's own velocity STEP ──────
+     *
+     * The player-collision shake used to be `min(impactSpeed, HEAVY) *
+     * CAP_MULTIPLIER` — SPEED ALONE, with no mass anywhere in it.  Every
+     * other part of the collision code weighs mass: the crash gate is
+     * `mass * impactSpeed > ASTEROID_CRASH_MOMENTUM`, and the impulse solver
+     * splits by (bias-compressed) inverse mass.  Shake was the exception, so
+     * a 15px chip and a static wall shook the camera identically at the same
+     * closing speed, and the chip pinned the cap (user report: "very small
+     * shards moving at high enough speeds ... feels overpowered").
+     *
+     * The honest quantity is the one the solver is about to apply anyway:
+     * how much the PLAYER'S OWN velocity changes along the normal.
+     *
+     *     dv = (1 + ELASTICITY) * |v_n| * effInv_player
+     *                                   / (effInv_player + effInv_other)
+     *
+     * It is the sim's own velocity step, so it agrees with the physics by
+     * construction — bias exponent included — and it carries both masses
+     * without a second model to keep in sync.  Three consequences fall out
+     * rather than being written:
+     *
+     *   · A static tile has effInv = 0, so dv = (1+e)|v_n|: a wall is the
+     *     hardest possible hit, and with SCALE 1.0 / MAX 30 the wall curve
+     *     is IDENTICAL to the old one.  Nothing about crashing changed.
+     *   · A light body attenuates by the true mass ratio.  At |v_n| = 20:
+     *     wall 30 (was 30), 40px metal shard 12.3, 40px rock 10.5, 15px
+     *     glass chip 3.9, 8px chip 2.3 — under DV_MIN, so it is silent.
+     *   · A HEAVIER SHIP shrugs off hits, because player mass scales with
+     *     ship weight (SHIP_WEIGHT).  Free, and it ties the camera to the
+     *     outfitting system.
+     *
+     * DV_MIN is the old `impactSpeed > 2.0` threshold expressed in the new
+     * units: for a wall dv = 1.5 * v_n, so 3.0 is exactly v_n > 2. */
+    IMPACT_DV_MIN: 3.0,    // below this the hit is not felt at all
+    IMPACT_DV_SCALE: 1.0,  // shake per unit of player velocity change
+    IMPACT_MAX: 30,        // = the old min(speed, HEAVY) * CAP_MULTIPLIER cap
+
+    /* ── DIRECTION ──────────────────────────────────────────────────────
+     * A directional shake is a decaying OSCILLATION along the impact axis,
+     * not white noise: the camera lurches the way the ship was actually
+     * shoved and rings back.  `DIR_JITTER` keeps a little isotropic noise on
+     * top so it does not read as a mechanical slide, and `DIR_FREQ_HZ` is
+     * the ring rate over the SHAKE_DECAY window (~3 cycles at 0.3 s).
+     * Shakes with no meaningful direction — explosions, warp-ins, wave
+     * banners — pass none and keep the old isotropic jitter. */
+    DIR_FREQ_HZ: 11,
+    DIR_JITTER: 0.35,
   }
 };
 
@@ -856,7 +872,20 @@ export const UI_CONSTANTS = {
     PLAYER_WIDTH: 44, PLAYER_HEIGHT: 5,
     ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,
     OFFSET_MODIFIER: 0.85, // Multiplier of entity size
-    OFFSET_BASE: 10 // Pixel padding
+    OFFSET_BASE: 10, // Pixel padding
+    /** DAMAGE-TRIGGERED VISIBILITY (gauntlet 5d, U5 — parking-lot item).
+     *
+     *  A bar is a HIT REACTION, not a permanent label.  Every enemy used to
+     *  carry one every frame, at full health and on one-shot trash alike,
+     *  which read as "tracked HUD" for entities the player has no reason to
+     *  track.  Now a bar appears when the entity takes damage and fades out
+     *  again, so the bars on screen are exactly the fights in progress.
+     *
+     *  SHOW_DURATION is long enough to read a bar after a hit lands and
+     *  still be there for the follow-up shot; FADE_DURATION is the tail of
+     *  it, so the bar dissolves rather than blinking out. */
+    SHOW_DURATION: 2.2,
+    FADE_DURATION: 0.7,
   },
   // Off-screen indicators.  Arrows ride the SCREEN EDGE (an inset viewport
   // rect) rather than a fixed centre ring, and their SIZE carries distance:
@@ -871,6 +900,43 @@ export const UI_CONSTANTS = {
   // "it's coming for you" signal.
   INDICATORS: {
     EDGE_INSET: 26,          // px in from the viewport edge the arrows ride
+    /** HUD SAFE BANDS (user call).  The arrows ride an inset viewport rect,
+     *  and that rect used to be SYMMETRIC — so an arrow at a near-vertical
+     *  bearing parked itself exactly under the top chip stack or behind the
+     *  loadout strip / minimap, which is where a contact directly ahead or
+     *  directly behind the ship always is.  The one bearing you most need
+     *  the arrow for was the one it hid on.
+     *
+     *  These reserve the two bands the HUD actually occupies, so the rect is
+     *  asymmetric: the top edge drops below the readout chips, the bottom
+     *  edge lifts above the loadout strip.  They are DELIBERATELY constants
+     *  rather than a measurement of the live DOM — the alternative is the
+     *  canvas layer reading React's layout every frame, and the bands only
+     *  change when the HUD is redesigned. */
+    /*  MEASURED, not guessed: at the 390x844 design target the top stack
+     *  (vitals chip on the left; score / salvage / wave chips on the right)
+     *  bottoms out at y=118 with the HUD's 8px padding, and the bottom
+     *  furniture (minimap at 75px, loadout slots at 48px, both on an 8px
+     *  baseline) tops out at y=H-83.  These are those numbers less the
+     *  EDGE_INSET the rect already carries. */
+    /*  Each band is the measured widget height PLUS ~SIZE_NEAR, because an
+     *  arrow is CENTRED on the rect edge: a rect that merely reaches the
+     *  bottom of the chips leaves the top half of every arrow tangent to
+     *  them. */
+    TOP_INSET: 40,           // px reserved for the top readout row
+    BOSS_BAR_INSET: 62,      // ...plus this while a capstone bar is up
+    BOTTOM_INSET: 74,        // px reserved for the loadout strip + minimap
+    /*  Below this width the readout row can no longer fit on one line and
+     *  WRAPS, so the band it occupies grows with it (measured: 50px -> 84px
+     *  at 320).  A width threshold rather than a DOM measurement, for the
+     *  same reason the rest of this block is one. */
+    NARROW_WIDTH: 372,
+    WRAP_INSET: 36,
+    /** Never let the two bands close up on a short window — a landscape
+     *  phone is ~390px tall and would otherwise be left with no rect at
+     *  all.  Below this the bands give way and the arrows ride a thin
+     *  centre band instead of vanishing. */
+    MIN_BAND: 90,
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5, // Max arrows for POIs
     // Enemy chevrons are range-unlimited (maps are big and live wave
@@ -907,7 +973,56 @@ export const UI_CONSTANTS = {
       AGGRO:   '#ef4444',    // blink colour for a provoked rival / bubble
       OTHER:   '#94a3b8',    // slate-400 — any POI without a type of its own
     },
-  }
+  },
+
+  /**
+   * The CANVAS HUD's own vocabulary (gauntlet 5d, U3 — audit findings
+   * E3/E4).
+   *
+   * The DOM overlay names its type scale and its greys in
+   * `components/UIOverlay.tsx`; the canvas layer had neither, so its sizes
+   * were picked independently per draw site (8 / 9 / 11 / 14 px) and its
+   * greys were hardcoded hex at the point of use (`#475569`, `#64748b`,
+   * `#cbd5e1`, `#e2e8f0`, `#22d3ee`, `#fde047`, `#fca5a5`).  These are the
+   * same slate family the DOM uses, stated once.
+   *
+   * NOTE ON THE COLOUR LEGEND: `INDICATORS.COLORS` above is THE type-colour
+   * palette — what a contact IS, wherever it is drawn (edge arrow, minimap
+   * blip).  This block is the CHROME palette — text, rules and affordances,
+   * which carry no type meaning.  The two never overlap, and nothing in the
+   * canvas layer should introduce a third.
+   */
+  HUD: {
+    /** Type scale, mirroring the DOM's four named steps.  Canvas HUD text is
+     *  monospace by house style — that is a world-vs-chrome distinction and
+     *  is deliberate — but the SIZES are now the same set. */
+    TEXT: {
+      MICRO: 9,   // indicator labels, slot numbers, the empty-slot tag
+      BODY:  11,  // player messages, the interaction prompt
+      ROW:   12,  // loadout weapon names at full slot width
+      LOUD:  14,  // floating damage / points text
+    },
+    /** Chrome greys, brightest to dimmest.  `TEXT` is body copy on glass,
+     *  `MUTED` is a secondary readout, `DIM` is a disabled or empty state,
+     *  `RULE` is a hairline or dashed outline. */
+    TEXT_COLOR:  '#e2e8f0',   // slate-200
+    MUTED_COLOR: '#cbd5e1',   // slate-300
+    DIM_COLOR:   '#64748b',   // slate-500
+    RULE_COLOR:  '#475569',   // slate-600
+    /** Fill behind an inactive HUD widget (the resting loadout slot) — the
+     *  same slate-800 the DOM's panels use. */
+    PANEL_FILL:  '#1e293b',   // slate-800
+    /** The outline every string on the canvas wears so it survives arbitrary
+     *  bright terrain underneath.  One width, one alpha. */
+    OUTLINE: 'rgba(0,0,0,0.85)',
+    OUTLINE_WIDTH: 3,
+    /** ACCENTS.  Cyan is the HUD's "supporting information" colour (banner
+     *  subtext); the charge pair is the ship's charge ring read back on the
+     *  fire button, so the two must stay identical. */
+    ACCENT_COLOR: '#22d3ee',   // cyan-400
+    CHARGE_FULL:  '#fde047',   // yellow-300 — charge complete
+    CHARGE_PART:  '#fca5a5',   // red-300 — charge winding up
+  },
 };
 
 // 2-slot loadout HUD (pivot 1b — replaced the 8-cell ammo strip).  Two wide
@@ -919,17 +1034,25 @@ export const LOADOUT_HUD_CONSTANTS = {
   SLOT_H:        48,
   SLOT_GAP:      8,
   SLOT_RADIUS:   5,
-  BOTTOM_MARGIN: 14,
+  // Hugs the bottom edge (user call: "collapse the hud elements more to the
+  // top and bottom of the screen").  This is also the minimap's bottom
+  // offset — computeMinimapRect reads it — so the two bottom widgets sit on
+  // one baseline by construction rather than by two matching numbers.
+  BOTTOM_MARGIN: 8,
 };
 
 export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
-  MARGIN: 20,          // Distance from screen edge
+  MARGIN: 10,          // Distance from screen edge (hugs the corner — user call)
   ZOOM_RANGE: 1000,    // World units radius shown in small (zoomed-in) minimap
   RANGE: 8000,         // World units radius shown in expanded (overview) map
-  BG_COLOR: 'rgba(15, 23, 42, 0.85)',
-  BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
+  // More transparent than a DOM panel on purpose (user call): the map sits
+  // ON the world and the world should read through it.  The blips and the
+  // static terrain layer draw at full strength on top, so legibility comes
+  // from the marks rather than from hiding what is behind them.
+  BG_COLOR: 'rgba(15, 23, 42, 0.55)',
+  BORDER_COLOR: 'rgba(56, 189, 248, 0.30)',
   PLAYER_DOT_COLOR: '#ffffff',
   VIEWPORT_COLOR: 'rgba(56, 189, 248, 0.25)',
   VIEWPORT_BORDER_COLOR: 'rgba(56, 189, 248, 0.8)',
@@ -1376,19 +1499,895 @@ export function cycleRenderScale(): number {
   return RENDER_SCALE_CYCLE[activeRenderScaleIndex];
 }
 
+// ─── DBG: unified tile lighting ──────────────────────────────────────────────
+//
+// The mode toggle for the lighting gauntlet (docs/GAUNTLET_LIGHTING_LOG.md).
+//
+// Index 0 is `'legacy'`, and it is named for what it IS rather than "off":
+// Omni is not a game without lighting.  It ships THREE hand-rolled lighting
+// approximations that have drifted apart — the player-distance proximity
+// bloom on rock / plastic / indestructible tiles, the repel-impulse glow on
+// glass and metal, and the glass edge tint on its own hardcoded 120 range.
+// `'legacy'` is those three, unchanged, and it is the default: the unified
+// system has to earn its place against them, not be assumed to replace them.
+//
+//   legacy  — the three shipped models, untouched.  lightingMs reads 0.
+//   debug   — the light layer is built and blitted, but paints a flat grey.
+//             Proves the canvas, its sizing, the blit and the
+//             imageSmoothingEnabled restore, with no lighting maths in the
+//             way of reading the cost.
+//   unified — the real shadow-cast lighting.
+export const LIGHTING_CYCLE = ['legacy', 'debug', 'unified'] as const;
+export type LightingMode = typeof LIGHTING_CYCLE[number];
+/** SHIPPED DEFAULT: `unified` (user call, after device confirmation).
+ *
+ *  `legacy` was the default while the layer was being built, because a stage
+ *  that cannot be switched back off is not a stage.  That property has not
+ *  gone anywhere — `legacy` still allocates no canvas, draws nothing and
+ *  leaves `lightingMs` at 0, and `tests/lighting.spec.ts` pins exactly that.
+ *  It is simply no longer the thing you get without asking. */
+let activeLightingIndex = LIGHTING_CYCLE.indexOf('unified');
+export function getActiveLightingMode(): LightingMode { return LIGHTING_CYCLE[activeLightingIndex]; }
+export function cycleLightingMode(): LightingMode {
+  activeLightingIndex = (activeLightingIndex + 1) % LIGHTING_CYCLE.length;
+  return LIGHTING_CYCLE[activeLightingIndex];
+}
+/** Jump straight to a mode.  Exists for the harness and the tests, which
+ *  need to A/B two specific modes rather than walk the cycle. */
+export function setActiveLightingMode(m: LightingMode): void {
+  const i = LIGHTING_CYCLE.indexOf(m);
+  if (i >= 0) activeLightingIndex = i;
+}
+
+/** DBG: do MOBILE SHARDS cast shadows, as well as static tiles?
+ *
+ *  Its own switch rather than part of LIGHTING_CYCLE, because the question
+ *  it answers is independent of "is the unified model better than the three
+ *  legacy ones" and wants to be A/B'd on its own.  Only has any effect while
+ *  the mode is 'unified'.
+ *
+ *  ON by default: shards are the same shard family as tiles and roughly the
+ *  same size (measured radii 43.6 median against a tile's 22), so excluding
+ *  them makes debris read as transparent to a light that the rock it broke
+ *  off is not.  The reason to turn it off is cost, and the reason to keep
+ *  the switch is that cost is exactly what it is for. */
+let shardShadowsEnabled = true;
+export function getShardShadowsEnabled(): boolean { return shardShadowsEnabled; }
+export function toggleShardShadows(): boolean {
+  shardShadowsEnabled = !shardShadowsEnabled;
+  return shardShadowsEnabled;
+}
+
+/** DBG: REFRACTION through translucent bodies — a prototype, OFF by default.
+ *
+ *  The shipped translucency (`SHARD_VARIANTS[v].transmit`) sends light
+ *  STRAIGHT THROUGH glass at reduced brightness.  That is the right
+ *  first-order model for a parallel-faced pane — a slab offsets a ray
+ *  laterally but does not deviate it, and a regular hexagon has three pairs
+ *  of parallel faces — but it says nothing about a wedge-shaped shard, which
+ *  is a prism.
+ *
+ *  ON, the transmitted light is instead BENT: each exit face refracts by
+ *  Snell's law and emits an additive cone in the deviated direction, and the
+ *  straight-through path is withheld in full so the energy is MOVED rather
+ *  than added.  That makes the toggle a real A/B — off is a dim shadow, on
+ *  is a dark shadow with a bright band beside it — instead of stacking one
+ *  effect on the other and reading as "glass got brighter".
+ *
+ *  SHIPPED ON (user call, after device testing).  It was off while the open
+ *  question — is a caustic legible at all on a light layer rendered at a
+ *  third of screen resolution — was still open; the device answered yes at
+ *  the brightnesses the cycle now reaches, so the prototype is the default
+ *  and the toggle is what turns it off. */
+/** DBG: do METAL and GLASS RE-EMIT the light that falls on them?  SHIPPED ON
+ *  (user call, after device testing), and the sibling of the refraction
+ *  toggle.
+ *
+ *  ON, every lit body whose variant carries `emits` becomes a SECOND light
+ *  at its own position — dimmer by that fraction, uniform in every
+ *  direction, and falling off the same way the player's does.  It replaces
+ *  the legacy repel-impulse glow those two materials used to carry, which
+ *  lit up on CONTACT rather than on light, so a metal plate across the room
+ *  stayed dead no matter how brightly it was lit.
+ *
+ *  What it deliberately does NOT do is cast shadows of its own.  A second
+ *  light needs a second occluder collection, and the occluder pool is
+ *  shared and consumed per light (see `collectOccluders`) — so shadowing N
+ *  emitters costs N full collections, on a budget that is already the
+ *  tightest thing in this system.  The emitters are dim and small; the
+ *  place that shows is a halo bleeding slightly through a wall. */
+let emissiveEnabled = true;
+export function getEmissiveEnabled(): boolean { return emissiveEnabled; }
+export function toggleEmissive(): boolean {
+  emissiveEnabled = !emissiveEnabled;
+  return emissiveEnabled;
+}
+
+/** DBG: how much of the light it receives a body re-emits, as a fraction —
+ *  the emissive sibling of "Refr bright".
+ *
+ *  It SCALES the variant's own `emits` against the 1/2 baseline those
+ *  variants are authored at, so the default is exactly what the table says
+ *  and a future variant that emits less than metal still emits less than
+ *  metal.  Clamped at 1 in the geometry: a body cannot radiate more light
+ *  than fell on it, which is the one physical claim this whole feature
+ *  rests on. */
+export const EMIT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
+  { name: '1/2',  frac: 0.5   },
+  { name: '2/3',  frac: 0.667 },
+  { name: '3/4',  frac: 0.75  },
+  { name: '1/1',  frac: 1     },
+  { name: '1/3',  frac: 0.333 },
+  { name: '1/4',  frac: 0.25  },
+  { name: '1/6',  frac: 0.167 },
+  { name: '1/10', frac: 0.1   },
+] as const;
+/** The fraction `SHARD_VARIANTS[*].emits` is authored against, so the cycle's
+ *  default is a no-op rather than a re-tuning. */
+export const EMIT_BASELINE = 0.5;
+let activeEmitBrightnessIndex = 0;
+export function getEmitBrightness(): number {
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].frac;
+}
+export function getEmitBrightnessName(): string {
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].name;
+}
+export function cycleEmitBrightness(): string {
+  activeEmitBrightnessIndex =
+    (activeEmitBrightnessIndex + 1) % EMIT_BRIGHTNESS_CYCLE.length;
+  return EMIT_BRIGHTNESS_CYCLE[activeEmitBrightnessIndex].name;
+}
+
+/** DBG: may the SECONDARY lights cast shadows of their own?  Off by default,
+ *  and off for a reason that is about cost rather than correctness.
+ *
+ *  Each emitter that shadows needs its OWN occluder collection — the pool is
+ *  shared and consumed per light — and its own compositing pass, which
+ *  cannot simply be drawn onto the accumulated layer: `destination-out`
+ *  would erase the light already there, not just the emitter's share.  So
+ *  the shadowing path composites each emitter into a scratch canvas and
+ *  blits the result, which is the honest way to do it and several times the
+ *  cost of the flat halo.
+ *
+ *  A true TERTIARY bounce — emitters lighting other emitters — is NOT what
+ *  this does, and is a different problem: it needs the emitters resolved in
+ *  dependency order and re-lit, where this pass reads every emitter's
+ *  brightness from the player's falloff alone. */
+let emitShadowsEnabled = false;
+export function getEmitShadowsEnabled(): boolean { return emitShadowsEnabled; }
+export function toggleEmitShadows(): boolean {
+  emitShadowsEnabled = !emitShadowsEnabled;
+  return emitShadowsEnabled;
+}
+
+/** DBG: HOW MUCH shadowing the secondary lights get, when they get any.
+ *
+ *  A COST LADDER for the toggle above, in the same shape as `LIGHTING_TIERS`
+ *  is for the primary light and for the same reason: the cost of a shadowing
+ *  emitter is almost entirely its own occluder collection, so the two knobs
+ *  that matter — how MANY emitters shadow, and how much geometry each of
+ *  them sees — move together rather than one at a time.  Measured on the
+ *  metal showcase at A5g: +1.3 ms at Low (3 emitters), +5.6 at Medium (7),
+ *  +12.6 ms at High (15).  That is what a rung below the default is for.
+ *
+ *  Past `maxEmitters` an emitter still LIGHTS, flatly — the tier degrades
+ *  the treatment, never the count, so dropping a rung dims no part of the
+ *  scene.  Cycling from the default goes DOWN first: the question asked of
+ *  this ladder is "can the cheap end still be seen", not "how expensive can
+ *  it get". */
+export const EMIT_SHADOW_TIERS: ReadonlyArray<{
+  name: string; maxEmitters: number; maxOccluders: number;
+}> = [
+  { name: 'std',  maxEmitters: 4, maxOccluders: 12 },
+  { name: 'lite', maxEmitters: 2, maxOccluders: 8  },
+  { name: 'min',  maxEmitters: 1, maxOccluders: 6  },
+  { name: 'more', maxEmitters: 6, maxOccluders: 12 },
+  { name: 'max',  maxEmitters: 8, maxOccluders: 16 },
+] as const;
+let activeEmitShadowTierIndex = 0;
+export function getEmitShadowTier(): { name: string; maxEmitters: number; maxOccluders: number } {
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex];
+}
+export function getEmitShadowTierName(): string {
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
+}
+export function cycleEmitShadowTier(): string {
+  activeEmitShadowTierIndex =
+    (activeEmitShadowTierIndex + 1) % EMIT_SHADOW_TIERS.length;
+  return EMIT_SHADOW_TIERS[activeEmitShadowTierIndex].name;
+}
+
+/** DBG: the player's light as a DIRECTIONAL BEAM — a flashlight — instead of
+ *  a radial glow.
+ *
+ *  The beam points along `player.rotation`, which is the AIM angle (the same
+ *  one shots travel along), so the light goes where the ship is looking and
+ *  needs no second control.  Everything the player's light does is masked by
+ *  it — falloff, shadows and caustics alike — while the secondary emitters
+ *  are not: a lit metal plate is its own light and radiates in every
+ *  direction, which is what makes a beam sweeping past one read as the beam
+ *  finding it.
+ *
+ *  `off` is the DEFAULT now (user call, superseding the earlier
+ *  beam-default call): the flashlight became an in-game TOOL gated behind
+ *  the Flashlight Kit module, so a ship without the kit carries no player
+ *  light and this DBG cycle is the raw dev override underneath the tool.
+ *  While the tool is ON it overrides this global entirely
+ *  (`RenderSystem.playerLightToolHalfDeg`); while it is off — or the kit is
+ *  not installed — the renderer falls back here, so a dev can still force
+ *  any width from the debug menu.  `off` is a zero-width beam rather than a
+ *  special case: the player's light draws nothing, so what is left on the
+ *  layer is exactly the emitters — which makes it a useful thing to look at
+ *  rather than a way to disable the feature (that is `Lighting: legacy`).
+ *
+ *  Half-angles, so `wide` is a 120-degree beam. */
+export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> = [
+  { name: 'radial', halfDeg: 180 },
+  // A HALF-CIRCLE.  Not a torch — everything ahead of the ship, nothing
+  // behind it — which is the shape a headlight has and a useful middle
+  // ground between the glow and a beam.
+  { name: 'half',   halfDeg: 90  },
+  { name: 'wide',   halfDeg: 60  },
+  { name: 'beam',   halfDeg: 40  },
+  { name: 'narrow', halfDeg: 22  },
+  { name: 'tight',  halfDeg: 12  },
+  // A 12-degree pencil.  At this width the soft edge (EDGE_DEG, 12) is as
+  // wide as the beam itself, so it reads as a spot with no hard boundary at
+  // all rather than as a narrower version of `tight`.
+  { name: 'pin',    halfDeg: 6   },
+  { name: 'off',    halfDeg: 0   },
+] as const;
+/** A6 — WORLD LIGHTS: the self-luminous movers (shots, the snitch) as
+ *  first-class lights on the unified layer.
+ *
+ *  These are not EMITTERS.  An emitter is a surface the player's light fell
+ *  on, so its brightness is `received x emits` and a beam gates it; a shot
+ *  glows because it is on fire, whether or not anything else lights it — no
+ *  `received` factor, no beam gate, and it exists outside the player light's
+ *  radius entirely.  That is why they are their own small pass rather than
+ *  rows in the emitter merge.
+ *
+ *  BUDGET: they spend what is left of the tier's `maxLights` after the
+ *  player and the emitters have drawn — the tier's number stays the whole
+ *  frame's light count, shared rather than added to.  In open space (where
+ *  shots actually fly) the emitters are few, so shots get the budget; deep
+ *  in a lit glass field they lose it, nearest-to-screen-centre first.
+ *
+ *  CULLED by the light's own disc against the layer rect BEFORE any budget
+ *  is spent — a shot two screens away costs one rectangle test.
+ *
+ *  Radii in WORLD units; alphas are multipliers on the shared falloff
+ *  gradient (so the brightness cycle scales these for free). */
+export const WORLD_LIGHTS = {
+  PROJECTILE_RADIUS: 110,
+  /** A charged / plasma shell is a bigger fire. */
+  CHARGED_MULT: 1.8,
+  PROJECTILE_ALPHA: 0.55,
+  /** The snitch is a comet — the one persistent world light. */
+  SNITCH_RADIUS: 150,
+  SNITCH_ALPHA: 0.7,
+} as const;
+/** A7 — DEPTH-SCOPED AMBIENT DARKNESS.  Each descent (GameEngine.stageIndex)
+ *  adds the tier's `ambientPerStage` of fog-dark, capped at
+ *  AMBIENT_DEPTH_CAP stages — so the hub and the surface look exactly as
+ *  they always did and darkness is a property of DEPTH, not a global mood.
+ *  It rides the fog compositor: the ambient level is folded into the fog's
+ *  dark fill (whichever of the two is darker wins), so it is cut by the
+ *  player's light, respects shadows, and darkens the minimap's memory veil
+ *  — all for free, and `off` restores the exact pre-A7 picture.
+ *
+ *  SHIPS OFF (user call, 2026-08-20).  The descent "depth" it keys on is
+ *  not yet a real place: today's post-boss rifts bounce between arenas that
+ *  all hang off the one Overworld, `stageIndex` is a linear counter rather
+ *  than a position in a world, and nothing persists — leave a "deep" arena
+ *  through the overworld portal and return, and the darkness is gone.  The
+ *  mechanism is built and tested; it switches on when the universe map
+ *  structure gives depth an address (see docs/PARKING_LOT.md, "Depth-scoped
+ *  darkness belongs to the universe map structure"). */
+export const AMBIENT_DEPTH_CAP = 4;
+let depthAmbientEnabled = false;
+export function toggleDepthAmbient(): boolean {
+  depthAmbientEnabled = !depthAmbientEnabled;
+  return depthAmbientEnabled;
+}
+export function getDepthAmbientEnabled(): boolean { return depthAmbientEnabled; }
+
+let worldLightsEnabled = true;
+export function toggleWorldLights(): boolean {
+  worldLightsEnabled = !worldLightsEnabled;
+  return worldLightsEnabled;
+}
+export function getWorldLightsEnabled(): boolean { return worldLightsEnabled; }
+
+/** FOG OF WAR — darkness the player's light cuts through.
+ *
+ *  The light layer already answers "what can I see": it is a lit shape with
+ *  shadows cut out of it, so using it as the fog's MASK gives
+ *  occlusion-aware fog for free — a tile's shadow stays dark, and a beam
+ *  sweeping a room opens exactly what it illuminates.  Nothing about the
+ *  geometry is computed twice.
+ *
+ *  TWO LAYERS or THREE.  `dim` and `dark` are the two-layer version: lit or
+ *  not.  `memory` is the traditional three: never seen (darkest), seen
+ *  before but not lit now (dimmed), and lit (clear).  The third layer needs
+ *  a memory of where the player has been, which is a per-map texture that
+ *  has to be reset on every map load — cheap (one texel per
+ *  `FOG.CELL` world units, so a 6000-unit map is 125x125) but it is state,
+ *  and state is the reason it is a separate rung rather than the default.
+ *
+ *  OFF is the default: this changes how the whole game reads, and which maps
+ *  want it is a design question rather than a rendering one. */
+export const FOG_CYCLE: ReadonlyArray<{
+  name: string; dark: number; explored: number; memory: boolean;
+}> = [
+  { name: 'off',    dark: 0,    explored: 0,    memory: false },
+  { name: 'dim',    dark: 0.55, explored: 0.55, memory: false },
+  { name: 'dark',   dark: 0.85, explored: 0.85, memory: false },
+  { name: 'memory', dark: 0.90, explored: 0.5,  memory: true  },
+] as const;
+let activeFogIndex = 0;
+export function getFog(): { name: string; dark: number; explored: number; memory: boolean } {
+  return FOG_CYCLE[activeFogIndex];
+}
+export function getFogName(): string { return FOG_CYCLE[activeFogIndex].name; }
+export function cycleFog(): string {
+  activeFogIndex = (activeFogIndex + 1) % FOG_CYCLE.length;
+  return FOG_CYCLE[activeFogIndex].name;
+}
+/** The player light's PEAK ALPHA, mirrored here for the fog.
+ *
+ *  It is authored in `render/lighting.ts` beside the rest of the light's
+ *  shape; the fog needs it to know how far to boost the light into a mask,
+ *  and importing the lighting module for one number would tie a compositing
+ *  pass to the geometry half.  `tests/lighting.spec.ts` pins the two
+ *  together so the mirror cannot drift. */
+export const PLAYER_LIGHT_PEAK = 0.34;
+
+export const FOG = {
+  /** The fog's own colour: BLACK.
+   *
+   *  The first attempt was a near-black blue (`4, 8, 18`) on the theory that
+   *  it would read as unlit space rather than as a wash — and it BRIGHTENED
+   *  the screen, because empty space in this game measures about 3 luminance
+   *  and that tint is 10.  Fog that lightens the dark parts of the frame is
+   *  worse than no fog.  Any colouring of the unlit world belongs to the
+   *  light, which is the thing that has a colour. */
+  COLOR: '0, 0, 0',
+  /** World units per texel of the EXPLORED memory.  48 makes a 6000-unit map
+   *  a 125x125 texture: small enough to stamp and blit every frame without
+   *  thinking about it, coarse enough that the remembered edge is soft. */
+  CELL: 48,
+  /** How much of the light's radius counts as EXPLORED as the player passes.
+   *  Under 1 because the rim of the light is where you can barely see. */
+  MEMORY_FRAC: 0.7,
+  /** A clear disc around the ship, in world units, whatever the light is
+   *  doing.  WITHOUT IT A NARROW BEAM FOGS THE PLAYER'S OWN SHIP — the beam
+   *  points away from it, so nothing lights the hull, and the ship
+   *  disappears into the dark it is holding the torch in. */
+  SELF_RADIUS: 70,
+  /** How far into that disc the clearing fades, as a fraction of it. */
+  SELF_FEATHER: 0.45,
+  /** The fog opens where the LIGHT is, and the light's own alpha peaks at
+   *  a third (PLAYER_LIGHT.PEAK) — so used raw it would only ever lift a
+   *  third of the fog, and dimming the light with the brightness cycle would
+   *  close the fog with it.  The mask is therefore BOOSTED by repeated
+   *  additive draws (each doubles the alpha) until its peak saturates; this
+   *  is the target it aims for and the cap on how many doublings it will
+   *  spend getting there. */
+  MASK_TARGET: 1.1,
+  MASK_MAX_DOUBLINGS: 5,
+} as const;
+
+/** DBG: how much of the MATERIAL's colour is in the light it passes on.
+ *
+ *  Light that goes through green glass comes out green, and a body lit by a
+ *  red torch cannot re-emit blue — both of which the layer got wrong in
+ *  opposite directions.  Transmitted light carried the LIGHT's colour with no
+ *  trace of the material, and an emitter carried the MATERIAL's colour with
+ *  no trace of what lit it.
+ *
+ *  One knob, two applications, each monotone with today's behaviour at an
+ *  end of the range:
+ *
+ *   - EMISSION and the refracted caustic take a blend `lerp(light, material,
+ *     mix)`.  0 is the light's own colour, 1 is the body's (what A5i
+ *     shipped).
+ *   - STRAIGHT-THROUGH transmission is tinted by MULTIPLYING the light
+ *     already in the umbra by `lerp(white, material, mix)` — 0 changes
+ *     nothing (what shipped), 1 is the full product.  It has to be a
+ *     multiply because that light is not drawn by the shadow pass; it is
+ *     what the pass chose not to erase.
+ *
+ *  A true product everywhere would be the physical answer and it reads too
+ *  dark: two saturated colours multiply toward black, and a light that goes
+ *  black on contact with coloured glass looks broken rather than physical.
+ *  So the default is a half-blend, which is a look call and lives in a cycle
+ *  like every other look call here. */
+/** With REFRACTION on, how much of a body's transmitted light goes straight
+ *  through rather than into the deviated caustic.
+ *
+ *  A5e's refraction prototype MOVED all of it into the cone — "the energy is
+ *  moved, not added" — which is right for a wedge and wrong for a pane, and
+ *  it had a consequence nobody asked for: with refraction on (the shipped
+ *  default) there is no straight-through light at all, so there is nothing
+ *  for the material tint to colour and the umbra behind glass is simply
+ *  dark.  Splitting it is both closer to a real slab and the difference
+ *  between a feature you can see and one you cannot. */
+export const TRANSMIT_STRAIGHT_FRAC = 0.5;
+
+export const TINT_MIX_CYCLE: ReadonlyArray<{ name: string; mix: number }> = [
+  // SHIPS OFF (user call, after device testing).  It is physically the right
+  // model and it does not earn its keep: the materials' colours sit close to
+  // the light's — glass indigo, metal steel-blue, both against a sky-blue
+  // lamp — so what it buys is subtle, and the straight-through path costs a
+  // fill per translucent group to buy it.  The knob stays because the effect
+  // is real and worth another look on a map with more colourful terrain.
+  { name: 'off',  mix: 0    },
+  { name: '1/4',  mix: 0.25 },
+  { name: '1/2',  mix: 0.5  },
+  { name: '3/4',  mix: 0.75 },
+  { name: 'full', mix: 1    },
+] as const;
+let activeTintMixIndex = 0;
+export function getTintMix(): number { return TINT_MIX_CYCLE[activeTintMixIndex].mix; }
+export function getTintMixName(): string { return TINT_MIX_CYCLE[activeTintMixIndex].name; }
+export function cycleTintMix(): string {
+  activeTintMixIndex = (activeTintMixIndex + 1) % TINT_MIX_CYCLE.length;
+  return TINT_MIX_CYCLE[activeTintMixIndex].name;
+}
+
+/** DBG: what COLOUR the player's light is.
+ *
+ *  `ship` is the engine-glow blue the layer has always used — chosen so the
+ *  light reads as coming FROM the ship rather than as a new system
+ *  announcing itself — and stays the default.  The rest exist because a
+ *  flashlight is a piece of equipment, and equipment has a character: a warm
+ *  tungsten beam and a cold blue-white one light the same terrain into two
+ *  different games.
+ *
+ *  The colour reaches everything the player's light does, including the
+ *  REFRACTED cone, which is right: light that passes through glass keeps the
+ *  colour it arrived with.  The secondary emitters are unaffected — they
+ *  radiate the colour of the BODY, not of what lit it, which is the
+ *  approximation A5i settled on. */
+export const LIGHT_COLOR_CYCLE: ReadonlyArray<{ name: string; rgb: string }> = [
+  { name: 'ship',   rgb: '125, 211, 252' },   // sky-300, the shipped light
+  { name: 'white',  rgb: '245, 245, 245' },
+  { name: 'warm',   rgb: '255, 214, 150' },   // tungsten
+  { name: 'amber',  rgb: '255, 176,  80' },
+  { name: 'green',  rgb: '150, 255, 170' },
+  { name: 'violet', rgb: '198, 160, 255' },
+  { name: 'red',    rgb: '255, 120, 110' },
+] as const;
+let activeLightColorIndex = 0;
+export function getLightColorRgb(): string {
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].rgb;
+}
+export function getLightColorName(): string {
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].name;
+}
+export function cycleLightColor(): string {
+  activeLightColorIndex = (activeLightColorIndex + 1) % LIGHT_COLOR_CYCLE.length;
+  return LIGHT_COLOR_CYCLE[activeLightColorIndex].name;
+}
+
+/** Beam shaping, all of it a look call rather than physics.
+ *
+ *  SPILL is why the ship is not standing in a void: a real flashlight is held
+ *  by someone who can still see their own hands, and a hard cut at the cone's
+ *  edge reads as a rendering error rather than as a torch.  It is the
+ *  fraction of the light left OUTSIDE the beam.
+ *
+ *  EDGE_DEG is the angular width of the soft edge, graded over PASSES erases
+ *  — the same construction as the shadow penumbra, for the same reason: a
+ *  hard angular edge sweeping across terrain is exactly the kind of moving
+ *  hard line this whole gauntlet has been removing. */
+export const FLASHLIGHT = {
+  SPILL: 0.14,
+  EDGE_DEG: 12,
+  PASSES: 3,
+  /** Extra bearing margin on the occluder cull, in degrees.  A body outside
+   *  the beam cannot shadow into it (a shadow runs radially outward), so
+   *  those bodies are skipped entirely — which is where a narrow beam gets
+   *  cheaper than the radial light.  The margin covers the body's own
+   *  angular size, the penumbra, and the fact that a REFRACTED cone leaves
+   *  its body deviated rather than radial. */
+  CULL_MARGIN_DEG: 25,
+} as const;
+let activeFlashlightIndex =
+  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'off');
+
+/** THE LIGHT TOOL (user call): the ship's light is EQUIPMENT.  Tapping the
+ *  ship (or E / the pad's action button) in open space cycles the level; the
+ *  Light module (`flashlight_kit`) is what grants the tool at all, the same
+ *  everything-is-a-module pattern as the Shield core.  Both ON levels wear
+ *  the BEAM flashlight style (the 80-degree cone); what separates them is
+ *  the LIGHTING TIER (user call): `medium` runs the light system at the
+ *  'medium' rung and `high` at 'high' — longer reach, more occluders, soft
+ *  penumbra, the whole ladder step, applied through the tier override below
+ *  so every consumer of `getActiveLightingTier` agrees.  `off` is the
+ *  default: a light you switch on. */
+export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; label: string; halfDeg: number; tier?: string }> = [
+  // `name` is the internal/debug vocabulary (it names the TIER the level
+  // runs); `label` is what the player reads over the ship — headlight
+  // words, because "medium/high" are debugging terms (user call).
+  { name: 'off',    label: 'Light off', halfDeg: 0 },
+  { name: 'medium', label: 'Low beam',  halfDeg: 40, tier: 'medium' },
+  { name: 'high',   label: 'High beam', halfDeg: 40, tier: 'high' },
+] as const;
+export function getFlashlightHalfDeg(): number {
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
+}
+export function getFlashlightName(): string {
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+export function cycleFlashlight(): string {
+  activeFlashlightIndex = (activeFlashlightIndex + 1) % FLASHLIGHT_CYCLE.length;
+  return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+
+/** DBG: which way the player's wake spins a nebula shard it passes.
+ *
+ *  The swirl pass (`PhysicsSystem.applyNebulaPlayerPull`) used to sign each
+ *  shard's spin by its id's last-character parity — "varied vortices" — which
+ *  means a pass has NO consistent handedness: half the cloud rotates against
+ *  the wake (user report: a starboard-side shard should turn clockwise).
+ *  `physical` (the default) signs the spin by the wake shear — the cross
+ *  product of the ship's velocity with the ship→shard vector — so a shard
+ *  off the starboard bow turns clockwise on screen and a port-side one
+ *  counter-clockwise.  `inverted` is the same cross product negated, and
+ *  `random` is the shipped parity behaviour; all three are one DBG click
+ *  apart (Visual ▸ "Neb spin") so the two candidate handednesses can be
+ *  A/B'd in flight.  PROPER rotational mechanics (angular momentum in the
+ *  impulse solver, spin from off-centre hits) is parked for its own session
+ *  — see docs/PARKING_LOT.md. */
+export const NEBULA_WAKE_SPIN_CYCLE = ['physical', 'inverted', 'random'] as const;
+export type NebulaWakeSpinMode = typeof NEBULA_WAKE_SPIN_CYCLE[number];
+let activeNebulaWakeSpinIndex = 0;
+export function getNebulaWakeSpinMode(): NebulaWakeSpinMode {
+  return NEBULA_WAKE_SPIN_CYCLE[activeNebulaWakeSpinIndex];
+}
+export function cycleNebulaWakeSpin(): string {
+  activeNebulaWakeSpinIndex = (activeNebulaWakeSpinIndex + 1) % NEBULA_WAKE_SPIN_CYCLE.length;
+  return NEBULA_WAKE_SPIN_CYCLE[activeNebulaWakeSpinIndex];
+}
+
+/** DBG: how hard the CAUSTIC edges are — the two fades that keep a refracted
+ *  cone from switching on and off.
+ *
+ *  Reported from the device as a click or flash on glass while drifting past
+ *  it slowly, and it is two separate cliffs behind one symptom:
+ *
+ *   - TOTAL INTERNAL REFLECTION is a step.  Past the critical angle a face
+ *     transmits nothing, so each face's cone appeared and vanished at FULL
+ *     length as the body turned relative to the light.  Real transmission
+ *     falls to zero AT that angle instead (Fresnel), so `tir` fades the cone
+ *     out over a band of the Snell discriminant, which is 0 exactly at the
+ *     critical angle.
+ *   - THE OCCLUDER CAP is a step.  In a dense field the pool sits saturated
+ *     — measured at 24 of 24 on the glass showcase — so bodies swap in and
+ *     out of it as the ship moves, and an entering body brought its whole
+ *     caustic at full strength.  `cap` fades a body's caustic out as it
+ *     approaches the eviction boundary, so nothing visible is ever evicted.
+ *
+ *  Both are expressed as fractions rather than as alphas because every cone
+ *  in a transmit group shares ONE compound path and therefore one fill: the
+ *  weight rides the cone's THROW instead, and since the fill is the light's
+ *  own falloff gradient, a shorter cone is a dimmer one.
+ *
+ *  'off' restores the cliffs exactly, which is the control case the fix was
+ *  measured against. */
+export const CAUSTIC_FADE_CYCLE: ReadonlyArray<{ name: string; tir: number; cap: number }> = [
+  // The two fades are tuned very differently ON PURPOSE, because only one of
+  // them has a measured benefit.  The TIR taper removes a cliff that was
+  // MEASURED — per-face transmission flipping from full to nothing in a
+  // single step of movement, now ramping over several.  The CAP fade is
+  // mechanically sound but its benefit could not be separated from the
+  // ordinary churn of 24 bodies moving, while its COST is measurable: at a
+  // quarter of the ranks it costs a third of the caustic's total throw.  So
+  // it ships light and is there to be turned up if the device disagrees.
+  { name: 'smooth', tir: 0.25, cap: 0.08 },
+  { name: 'soft',   tir: 0.45, cap: 0.20 },
+  { name: 'heavy',  tir: 0.60, cap: 0.35 },
+  { name: 'light',  tir: 0.12, cap: 0    },
+  { name: 'off',    tir: 0,    cap: 0    },
+] as const;
+let activeCausticFadeIndex = 0;
+export function getCausticFade(): { name: string; tir: number; cap: number } {
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex];
+}
+export function getCausticFadeName(): string {
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex].name;
+}
+export function cycleCausticFade(): string {
+  activeCausticFadeIndex = (activeCausticFadeIndex + 1) % CAUSTIC_FADE_CYCLE.length;
+  return CAUSTIC_FADE_CYCLE[activeCausticFadeIndex].name;
+}
+
+/** DBG: how long an emitter takes to FADE in or out, in seconds.
+ *
+ *  ADDED BECAUSE EMISSION FLASHED.  The set of emitters is chosen nearest-
+ *  first and capped by the tier, so as the ship moves, bodies cross into and
+ *  out of that budget — and a halo that is drawn at full strength on one
+ *  frame and not at all on the next reads as a strobe, which is worse than
+ *  no emission at all.  It is not a brightness problem: the alphas either
+ *  side of the swap are both correct, and the swap itself is what the eye
+ *  objects to.
+ *
+ *  So an emitter's alpha EASES toward its target and a body that leaves the
+ *  budget fades out rather than vanishing — which needs the emitter to
+ *  persist for a moment after it stops being chosen (see the emitter slots
+ *  in render/lighting.ts).  `off` is the old instantaneous behaviour, kept
+ *  as the control.
+ *
+ *  Time-based rather than per-frame, so the fade takes the same wall-clock
+ *  time whatever the frame rate. */
+export const EMIT_FADE_CYCLE: ReadonlyArray<{ name: string; sec: number }> = [
+  { name: 'smooth', sec: 0.25 },
+  { name: 'slow',   sec: 0.5  },
+  { name: 'languid',sec: 1    },
+  { name: 'fast',   sec: 0.12 },
+  { name: 'off',    sec: 0    },
+] as const;
+let activeEmitFadeIndex = 0;
+export function getEmitFadeSec(): number {
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].sec;
+}
+export function getEmitFadeName(): string {
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].name;
+}
+export function cycleEmitFade(): string {
+  activeEmitFadeIndex = (activeEmitFadeIndex + 1) % EMIT_FADE_CYCLE.length;
+  return EMIT_FADE_CYCLE[activeEmitFadeIndex].name;
+}
+
+let refractionEnabled = true;
+export function getRefractionEnabled(): boolean { return refractionEnabled; }
+export function toggleRefraction(): boolean {
+  refractionEnabled = !refractionEnabled;
+  return refractionEnabled;
+}
+
+/** DBG: how bright the refracted cone is, as a fraction of the light's OWN
+ *  peak — the tuning knob for the prototype above.
+ *
+ *  Named as fractions rather than decimals because that is the quantity the
+ *  rule is stated in: refracted light must be no more than HALF the source.
+ *  Every entry therefore sits at or below 1/2, and `REFRACT.MAX_BRIGHTNESS_FRAC`
+ *  in render/lighting.ts clamps on top of whatever this returns — so the rule
+ *  survives someone adding a row here, which is the point of having it in two
+ *  places.
+ *
+ *  A cycle rather than a number in a file, for the same reason as the shadow
+ *  softness beside it: it is a look call, and the look call belongs on the
+ *  device against real terrain.  Starts at the ceiling, so tuning only ever
+ *  goes down from the brightest the rule allows. */
+export const REFRACT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; frac: number }> = [
+  { name: '1/2',  frac: 0.5   },
+  // ABOVE the old ceiling, on device feedback: the caustic measured as only
+  // marginally legible at Low (2.2 % of pixels changed), and a prototype you
+  // cannot see is one you cannot judge.  "No brighter than half the source"
+  // was the right instinct physically — refracted light is a redistribution
+  // of light that already lost some of itself passing through the body — but
+  // it is now the DEFAULT rather than a ceiling.  Cycling from the default
+  // goes UP first, because that is the direction the question was asked in.
+  { name: '2/3',  frac: 0.667 },
+  { name: '3/4',  frac: 0.75  },
+  { name: '1/1',  frac: 1     },
+  { name: '1/3',  frac: 0.333 },
+  { name: '1/4',  frac: 0.25  },
+  { name: '1/6',  frac: 0.167 },
+  { name: '1/10', frac: 0.1   },
+  { name: '1/16', frac: 0.0625 },
+] as const;
+let activeRefractBrightnessIndex = 0;
+export function getRefractBrightness(): number {
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].frac;
+}
+export function getRefractBrightnessName(): string {
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+export function cycleRefractBrightness(): string {
+  activeRefractBrightnessIndex =
+    (activeRefractBrightnessIndex + 1) % REFRACT_BRIGHTNESS_CYCLE.length;
+  return REFRACT_BRIGHTNESS_CYCLE[activeRefractBrightnessIndex].name;
+}
+
+/** DBG: how bright the player light is, as a multiplier on its own peak.
+ *
+ *  ADDED BECAUSE THE TIER CYCLE IS NOT THIS.  "Light tier" is a COST ladder
+ *  — canvas resolution, occluder cap, radius — and dropping to `lowest`
+ *  changes how much work the light does, not how bright it is.  Reported
+ *  from the device as "I'm at the lowest setting and it still feels very
+ *  bright", which is exactly right and exactly what that cycle does.
+ *
+ *  The ladder runs a long way down, because the complaint was not that the
+ *  light was slightly hot: the bottom rung is a twelfth of today's value,
+ *  which reads as a faint wash rather than a lamp.  100% is the current
+ *  shipped look and stays the default, so this changes nothing until it is
+ *  asked to. */
+export const LIGHT_BRIGHTNESS_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: '100%', mult: 1    },
+  { name: '70%',  mult: 0.7  },
+  { name: '50%',  mult: 0.5  },
+  { name: '35%',  mult: 0.35 },
+  { name: '25%',  mult: 0.25 },
+  { name: '15%',  mult: 0.15 },
+  { name: '8%',   mult: 0.08 },
+] as const;
+let activeLightBrightnessIndex = 0;
+export function getLightBrightness(): number {
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].mult;
+}
+export function getLightBrightnessName(): string {
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
+}
+export function cycleLightBrightness(): string {
+  activeLightBrightnessIndex =
+    (activeLightBrightnessIndex + 1) % LIGHT_BRIGHTNESS_CYCLE.length;
+  return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
+}
+
+/** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
+ *
+ *  A point light casts a perfectly hard shadow, which is what made the first
+ *  version read as a drawn line rather than as lighting.  Softness here is
+ *  an ANGLE (see PENUMBRA_DEG_PER_K in render/lighting.ts), so the soft band
+ *  widens with distance from the caster the way a real area light's does —
+ *  tight against the tile, spreading further out.  Cycling rather than a
+ *  toggle because this is a look call that wants to be made on the device,
+ *  against real terrain, not chosen from a number here.
+ *
+ *  'off' restores the hard shadow exactly, which is also the A5 penumbra
+ *  stage's control case. */
+export const SHADOW_SOFTNESS_CYCLE: ReadonlyArray<{ name: string; k: number }> = [
+  { name: 'soft',    k: 2.5 },
+  { name: 'softer',  k: 4.5 },
+  // Three rungs past 'softer', added on device feedback.  They are usable
+  // rather than decorative because the PASS COUNT scales with k (see
+  // SOFT_STEPS in render/lighting.ts): a 14-degree band graded over the
+  // three passes that suit 2.5 would read as three stripes, not as a soft
+  // edge, so the softest settings buy themselves more gradations.
+  { name: 'softest', k: 7   },
+  { name: 'diffuse', k: 10  },
+  { name: 'hazy',    k: 14  },
+  { name: 'off',     k: 0   },
+  { name: 'subtle',  k: 1.2 },
+] as const;
+/** SHIPPED DEFAULT: `diffuse` (user call, after device testing) — four rungs
+ *  softer than the 'soft' this shipped at, and paid for by the pass count
+ *  that scales with k, so the wider band is graded rather than striped.
+ *  Found by NAME, like the lighting tier's default, so inserting a rung
+ *  above it cannot silently change what ships. */
+let activeSoftnessIndex = SHADOW_SOFTNESS_CYCLE.findIndex(s => s.name === 'diffuse');
+export function getShadowSoftness(): number { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].k; }
+export function getShadowSoftnessName(): string { return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name; }
+export function cycleShadowSoftness(): string {
+  activeSoftnessIndex = (activeSoftnessIndex + 1) % SHADOW_SOFTNESS_CYCLE.length;
+  return SHADOW_SOFTNESS_CYCLE[activeSoftnessIndex].name;
+}
+
+/** Per-tier lighting budget.
+ *
+ *  `divisor` is how many CSS pixels of screen one light-layer pixel covers.
+ *  It is never 1: a light layer is low-frequency by nature, so rendering it
+ *  at full resolution buys nothing but fill rate.  At the Low tier's 3, a
+ *  390x844 phone gets a 130x282 layer — 0.15 MB.
+ *
+ *  `maxOccluders` is load-bearing rather than defensive.  A 300-radius light
+ *  covers pi*300^2 = 283k square units; at HEX_AREA = 1257 that is up to ~225
+ *  hexes if the field were solid.  The cap takes the N NEAREST, because the
+ *  nearest occluders subtend the largest shadow angle — so truncation loses
+ *  the shadows least likely to be noticed, and the cost stays bounded by the
+ *  cap rather than by how dense the terrain happens to be.
+ *
+ *  `maxRadius` of 300 at Low is anchored on the legacy models' own
+ *  `glow.range` of 250, so a unified light reads at a scale players already
+ *  know rather than announcing itself as a new system.
+ *
+ *  `ambientPerStage` is multiplied by min(stageIndex, 4) — ambient darkness
+ *  is scoped to DEPTH, so the hub and the surface look exactly as they do
+ *  today and darkness becomes a property of descending.  It was authored
+ *  zero at Low when ambient was expected to need its own pass; A7 rides the
+ *  fog compositor (0.3-0.5 ms measured), so Low now carries a modest value
+ *  and only the emergency tiers below it stay at zero. */
+export interface LightingTier {
+  readonly name: string;
+  readonly divisor: number;
+  readonly maxLights: number;
+  readonly maxOccluders: number;
+  /** How many of `maxOccluders` mobile SHARDS may take while there is still
+   *  terrain to fill the rest.  Debris is nearer than terrain almost by
+   *  definition, so without a share cap a shatter hands the entire budget to
+   *  the fragments and the intact tiles stop casting.  Measured at 100 % of
+   *  the pool on the glass showcase under a shatter cadence before this
+   *  existed.  Shards still get the WHOLE pool on a map with no tiles. */
+  readonly maxShardOccluders: number;
+  readonly maxRadius: number;
+  /** Penumbra softness. 0 = hard shadows (Low pins this, so the penumbra
+   *  stage is a no-op on the worst target by construction). */
+  readonly penumbraK: number;
+  readonly ambientPerStage: number;
+}
+export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
+  { name: 'minimal', divisor: 7, maxLights: 1, maxOccluders: 4,  maxShardOccluders: 2,  maxRadius: 180, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'lowest', divisor: 5, maxLights: 2,  maxOccluders: 8,  maxShardOccluders: 3,  maxRadius: 220, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'lower',  divisor: 4, maxLights: 3,  maxOccluders: 14, maxShardOccluders: 5,  maxRadius: 260, penumbraK: 0,   ambientPerStage: 0    },
+  { name: 'low',    divisor: 3, maxLights: 4,  maxOccluders: 24, maxShardOccluders: 8,  maxRadius: 300, penumbraK: 0,   ambientPerStage: 0.08 },
+  { name: 'medium', divisor: 2, maxLights: 8,  maxOccluders: 48, maxShardOccluders: 16, maxRadius: 400, penumbraK: 2.5, ambientPerStage: 0.10 },
+  { name: 'high',   divisor: 2, maxLights: 16, maxOccluders: 96, maxShardOccluders: 32, maxRadius: 500, penumbraK: 4.0, ambientPerStage: 0.12 },
+  { name: 'ultra',  divisor: 1, maxLights: 32, maxOccluders: 160, maxShardOccluders: 56, maxRadius: 650, penumbraK: 5.0, ambientPerStage: 0.14 },
+] as const;
+// SEVEN RUNGS, and the ends are the interesting ones.  `minimal` renders
+// the light layer at a SEVENTH of screen resolution with a single light and
+// four occluders — the setting for a device that cannot afford `lowest`,
+// where the question is whether to have a light at all.  `ultra` runs the
+// layer at FULL screen resolution with 32 lights: not a play setting, but
+// the one that answers "what would this look like without the budget", and
+// the emissive prototype in particular is bounded by `maxLights`, so it has
+// nowhere to show itself below `medium`.
+//
+// TWO TIERS BELOW LOW, added when the worst-case cost stopped having
+// comfortable headroom (~1.7 ms p95 against a 2.0 ms budget that has never
+// been re-derived on a device).  Every knob that drives cost moves together
+// — a coarser light canvas, fewer occluders, a shorter radius — because the
+// point is a real step down in work, not a nudge.  `lowest` renders the
+// layer at a FIFTH of screen resolution and casts from 8 bodies; it is meant
+// to be the setting that keeps the light at all on a device that cannot
+// afford `low`, not a setting anyone would choose for looks.
+//
+// LOW REMAINS THE DEFAULT.  This index must track the position of 'low' in
+// the array above rather than being a literal, or inserting a tier silently
+// changes what ships.
+let activeLightingTierIndex = LIGHTING_TIERS.findIndex(t => t.name === 'low');
+/** The LIGHT TOOL's tier, while the tool is ON (see FLASHLIGHT_TOOL_LEVELS)
+ *  — set per frame by GameEngine.draw, -1 when the tool is off.  While set
+ *  it wins over the DBG tier row for EVERY consumer, which is the point:
+ *  "high" on the tool means the whole light system steps up, not just the
+ *  player's cone.  The DBG row stays the raw dev override underneath,
+ *  exactly the flashlight-width arrangement. */
+let lightingTierOverrideIndex = -1;
+export function setLightingTierOverride(name: string | null): void {
+  lightingTierOverrideIndex = name === null
+    ? -1 : LIGHTING_TIERS.findIndex(t => t.name === name);
+}
+export function getActiveLightingTier(): LightingTier {
+  return LIGHTING_TIERS[lightingTierOverrideIndex >= 0
+    ? lightingTierOverrideIndex : activeLightingTierIndex];
+}
+export function cycleLightingTier(): LightingTier {
+  activeLightingTierIndex = (activeLightingTierIndex + 1) % LIGHTING_TIERS.length;
+  return LIGHTING_TIERS[activeLightingTierIndex];
+}
+
 // ─── DBG: HUD (React) update rate ────────────────────────────────────────────
 //
 // `GameEngine.onStatsUpdate` is a React setState, and it fires EVERY FRAME.
-// The reconciliation it triggers walks the whole (unmemoized, ~2100-line)
-// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer ever
-// saw it.  A hardware capture (2026-08-09, Ring World, iPhone) showed 35 ms
-// frames carrying only 1 ms render + 2 ms sim — ~32 ms unaccounted — which is
-// what made this worth a knob.
+// The reconciliation it triggers walks the whole (unmemoized, ~2500-line)
+// UIOverlay tree and is neither `draw()` nor the sim, so no engine timer saw
+// it — until one was built for it.
+//
+// THE ORIGINAL JUSTIFICATION FOR THIS KNOB WAS WRONG.  It read: a hardware
+// capture (2026-08-09, Ring World, iPhone) showed 35 ms frames carrying only
+// 1 ms render + 2 ms sim, ~32 ms unaccounted, and that residual was
+// attributed here.  It is not this.  Measured with a React `<Profiler>`,
+// reconciliation costs **0.1 ms median / 0.2 ms p95 in play** and 0.3 / 0.5 ms
+// with the heaviest overlay up — three orders of magnitude off the number
+// that motivated the knob.  Cutting React out of the frame entirely moves
+// frame time ~2 %.  The 32 ms residual is real but lives somewhere else;
+// `renderMs` times CPU-side canvas call issuing, not the rasterization those
+// calls queue.  See docs/GAUNTLET_REACT_LOG.md.
+//
+// So this knob is a LEFTOVER, kept because it is harmless and occasionally
+// handy for A/B work — NOT a tuning lever, and not evidence that the HUD is
+// expensive.  Its ceiling is ~0.05 ms in play.  Do not cite it, or the
+// capture above, as a reason to go optimizing the React layer; that case was
+// investigated in full and declined on evidence.
 //
 // The HUD is text chips and bars; it does not need 60 Hz.  Everything that
 // must stay frame-perfect is canvas-drawn (minimap, loadout strip, wave
 // banners, damage text) and is unaffected by this.  60 is index 0 and stays
-// the default, so the shipping path is unchanged until someone chooses.
+// the default — now on the measurement above rather than on caution.
 export const HUD_RATE_CYCLE: ReadonlyArray<number> = [60, 30, 15] as const;
 let activeHudRateIndex = 0;
 export function getActiveHudRate(): number { return HUD_RATE_CYCLE[activeHudRateIndex]; }
@@ -2082,6 +3081,12 @@ export const STRUCTURE_CONSTANTS = {
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
   CRASH_VELOCITY_THRESHOLD: 4, // Player speed needed to break through
+  // AUDIO ONLY (no gameplay effect): the relative speed above which player
+  // contact with a MOBILE SHARD makes a sound.  Far below the break
+  // threshold above, because a loose rock knocking off the hull is an
+  // audible event long before it is a destructive one — gating shard
+  // contact at the break speed made ordinary bumping silent.  PROVISIONAL.
+  SHARD_CONTACT_SPEED: 1.2,
   // Fraction of velocity the player KEEPS per breakable-tile crash-
   // through.  At 0.5 a 3-tile plow retained ~12 % of entry speed and
   // read as bouncing off the cluster; 0.65 retains ~27 % and reads as
@@ -2699,6 +3704,165 @@ export const ENEMY_CONSTANTS = {
 // death burst.  Purely cosmetic — the puffs drift, fade in, and feed the
 // normal nebula merge/condense system like any other nebula-shard.  The
 // burst is gated by MAX_COUNT > 0; set it to 0 to disable.
+// ── Explosion variety (Phase 3 Pair B, roadmap step (b)) ─────────────────────
+// Per-class death FX on the EXISTING ParticleSystem.  Before this table every
+// enemy died the same way, tinted by `entity.color` — so a gnat, a tank and a
+// bomber were the same event at three sizes.  A profile differentiates the
+// four things the eye actually reads: SHAPE (ring scale + how many rings),
+// COUNT/SPEED/SIZE of debris, PALETTE (an accent colour mixed into the debris,
+// so a class reads by hue and not only by tint), and SCALE (shake).
+//
+// PARTICLE BUDGET.  `debris + spark + accent` is the profile's total particle
+// spend, and the whole table is calibrated against the PR #69 trimmed budgets:
+// the previous single burst spent 15–18 particles, and STANDARD still spends
+// 16.  Where a profile spends more (HEAVY, KAMIKAZE, BOSS) it is on a rarer
+// death; where a death happens in BULK (SWARM) it spends less than before.
+// The MAX_PARTICLES cap is the backstop either way, exactly as it was.
+//
+// `sfx` is the profile's SFX_INVENTORY id, carried HERE rather than resolved
+// separately, so the differentiated visual and its sound are chosen by one
+// lookup and cannot drift apart.
+//
+// PROVISIONAL: every number reasoned about, not measured on the user's
+// hardware (see docs/GAUNTLET_PAIR_B_LOG.md, FOR-USER-REVIEW).
+export interface ExplosionProfile {
+  /** Main ring radius as a multiple of the entity's diameter.  0 = no ring. */
+  ringScale: number;
+  ringLifetime: number;
+  /** Inner white core-flash ring.  0 = none (the "no hot core" classes). */
+  coreScale: number;
+  coreLifetime: number;
+  /** Accent colour blended into the burst alongside the entity's own colour;
+   *  undefined = pure body colour. */
+  accent?: string;
+  accentCount: number;
+  debrisCount: number;
+  debrisSpeedMin: number; debrisSpeedMax: number;
+  debrisSizeMin: number;  debrisSizeMax: number;
+  debrisLifeMin: number;  debrisLifeMax: number;
+  /** Hot spark layer (white).  0 = none. */
+  sparkCount: number;
+  sparkSpeedMin: number; sparkSpeedMax: number;
+  /** Screen punch.  Added to the tier scaling where the class uses it. */
+  shake: number;
+  /** SFX_INVENTORY id fired with this burst. */
+  sfx: string;
+}
+
+export const EXPLOSION_PROFILES = {
+  // A gnat POPS.  Deliberately the cheapest profile in the table: dozens die
+  // in one step, so it spends 7 particles and no shake at all.
+  SWARM: {
+    ringScale: 1.6, ringLifetime: 0.2, coreScale: 0, coreLifetime: 0,
+    accentCount: 0,
+    debrisCount: 5, debrisSpeedMin: 3, debrisSpeedMax: 10,
+    debrisSizeMin: 1.5, debrisSizeMax: 3, debrisLifeMin: 0.18, debrisLifeMax: 0.4,
+    sparkCount: 2, sparkSpeedMin: 6, sparkSpeedMax: 14,
+    shake: 0, sfx: 'destroy.enemy.small',
+  },
+  // The workhorse kill — the shape everything else is read against.
+  STANDARD: {
+    ringScale: 2.4, ringLifetime: 0.34, coreScale: 1.3, coreLifetime: 0.22,
+    accentCount: 0,
+    debrisCount: 11, debrisSpeedMin: 4, debrisSpeedMax: 16,
+    debrisSizeMin: 2, debrisSizeMax: 4.5, debrisLifeMin: 0.3, debrisLifeMax: 0.7,
+    sparkCount: 5, sparkSpeedMin: 7, sparkSpeedMax: 20,
+    shake: 2.5, sfx: 'destroy.enemy.standard',
+  },
+  // Structural failure: BIGGER but SLOWER, with amber embers that outlive the
+  // flash.  Slow heavy debris is what makes a tank's death read as mass.
+  HEAVY: {
+    ringScale: 3.1, ringLifetime: 0.5, coreScale: 1.6, coreLifetime: 0.3,
+    accent: '#fbbf24', accentCount: 6,
+    debrisCount: 12, debrisSpeedMin: 2.5, debrisSpeedMax: 11,
+    debrisSizeMin: 3, debrisSizeMax: 6.5, debrisLifeMin: 0.5, debrisLifeMax: 1.1,
+    sparkCount: 4, sparkSpeedMin: 5, sparkSpeedMax: 14,
+    shake: 5, sfx: 'destroy.enemy.heavy',
+  },
+  // A real bomb: fastest debris in the table, hot orange core, heavy punch.
+  KAMIKAZE: {
+    ringScale: 3.6, ringLifetime: 0.42, coreScale: 2.0, coreLifetime: 0.26,
+    accent: '#fb923c', accentCount: 8,
+    debrisCount: 14, debrisSpeedMin: 8, debrisSpeedMax: 26,
+    debrisSizeMin: 2, debrisSizeMax: 5, debrisLifeMin: 0.25, debrisLifeMax: 0.6,
+    sparkCount: 7, sparkSpeedMin: 12, sparkSpeedMax: 30,
+    shake: 8, sfx: 'destroy.enemy.kamikaze',
+  },
+  // A membrane bursting, not a hull exploding: NO hot core, no shake, slow
+  // fat droplets that fall apart rather than fly.  The one death in the game
+  // that should not look like combustion.
+  BUBBLE: {
+    ringScale: 2.0, ringLifetime: 0.45, coreScale: 0, coreLifetime: 0,
+    accent: '#a5f3fc', accentCount: 7,
+    debrisCount: 10, debrisSpeedMin: 1.5, debrisSpeedMax: 6,
+    debrisSizeMin: 3, debrisSizeMax: 7, debrisLifeMin: 0.5, debrisLifeMax: 1.0,
+    sparkCount: 0, sparkSpeedMin: 0, sparkSpeedMax: 0,
+    shake: 0, sfx: 'destroy.enemy.bubble',
+  },
+  // A player-pattern ship dying, seen from outside: the player's own cyan
+  // energy signature rather than an enemy's.
+  RIVAL: {
+    ringScale: 2.6, ringLifetime: 0.4, coreScale: 1.5, coreLifetime: 0.26,
+    accent: '#38bdf8', accentCount: 6,
+    debrisCount: 11, debrisSpeedMin: 4, debrisSpeedMax: 15,
+    debrisSizeMin: 2, debrisSizeMax: 4.5, debrisLifeMin: 0.35, debrisLifeMax: 0.75,
+    sparkCount: 5, sparkSpeedMin: 8, sparkSpeedMax: 20,
+    shake: 3, sfx: 'destroy.rival',
+  },
+  // The run ending.  The biggest ring in the table and the longest-lived
+  // debris, because the player is looking straight at it.
+  PLAYER: {
+    ringScale: 3.4, ringLifetime: 0.6, coreScale: 1.8, coreLifetime: 0.32,
+    accent: '#ffffff', accentCount: 6,
+    debrisCount: 14, debrisSpeedMin: 4, debrisSpeedMax: 14,
+    debrisSizeMin: 2, debrisSizeMax: 4.5, debrisLifeMin: 0.5, debrisLifeMax: 1.2,
+    sparkCount: 6, sparkSpeedMin: 6, sparkSpeedMax: 16,
+    shake: 6, sfx: 'destroy.player',
+  },
+  // A boss dies in ITS PHASE COLOUR (the caller passes the phase tint as the
+  // body colour), so the last thing you see is the state you beat.  The
+  // payout beat in payBossBounty layers on top of this.
+  BOSS: {
+    ringScale: 4.2, ringLifetime: 0.7, coreScale: 2.2, coreLifetime: 0.36,
+    accent: '#ffffff', accentCount: 10,
+    debrisCount: 18, debrisSpeedMin: 5, debrisSpeedMax: 22,
+    debrisSizeMin: 3, debrisSizeMax: 7, debrisLifeMin: 0.5, debrisLifeMax: 1.3,
+    sparkCount: 8, sparkSpeedMin: 10, sparkSpeedMax: 26,
+    shake: 9, sfx: 'boss.death',
+  },
+  // ── Materials ──
+  // Glass SHATTERS: fast, small, bright, with a white sparkle layer.  The
+  // most kinetic material break.
+  GLASS: {
+    ringScale: 0, ringLifetime: 0, coreScale: 0, coreLifetime: 0,
+    accent: '#e0f2fe', accentCount: 4,
+    debrisCount: 6, debrisSpeedMin: 5, debrisSpeedMax: 14,
+    debrisSizeMin: 1, debrisSizeMax: 2.2, debrisLifeMin: 0.2, debrisLifeMax: 0.5,
+    sparkCount: 0, sparkSpeedMin: 0, sparkSpeedMax: 0,
+    shake: 0, sfx: '',
+  },
+  // Rock CRUMBLES: slow, fat, dull, no sparkle.  The inverse of glass on
+  // every axis, which is what makes the two tellable apart at a glance.
+  ROCK: {
+    ringScale: 0, ringLifetime: 0, coreScale: 0, coreLifetime: 0,
+    accent: '#64748b', accentCount: 3,
+    debrisCount: 6, debrisSpeedMin: 1.5, debrisSpeedMax: 5,
+    debrisSizeMin: 2, debrisSizeMax: 4, debrisLifeMin: 0.35, debrisLifeMax: 0.8,
+    sparkCount: 0, sparkSpeedMin: 0, sparkSpeedMax: 0,
+    shake: 0, sfx: '',
+  },
+  // Metal FAILS: grey chips plus hot orange sparks, the only material break
+  // with a spark layer — it is the only one that reads as stressed steel.
+  METAL: {
+    ringScale: 0, ringLifetime: 0, coreScale: 0, coreLifetime: 0,
+    accent: '#fb923c', accentCount: 5,
+    debrisCount: 6, debrisSpeedMin: 3, debrisSpeedMax: 9,
+    debrisSizeMin: 1.5, debrisSizeMax: 3.2, debrisLifeMin: 0.3, debrisLifeMax: 0.7,
+    sparkCount: 3, sparkSpeedMin: 8, sparkSpeedMax: 18,
+    shake: 0, sfx: '',
+  },
+} as const satisfies Record<string, ExplosionProfile>;
+
 export const ENEMY_NEBULA_BURST = {
   MIN_COUNT: 2,
   MAX_COUNT: 4,
@@ -2715,17 +3879,73 @@ export const ENEMY_NEBULA_BURST = {
 // kick is purely KICK_PER_DMG × applied (post-armor) damage, so heavy hits
 // shove hard and chip hits on armor barely nudge.
 export const HIT_FEEDBACK = {
-  KICK_PER_DMG: 1.0,  // knockback velocity per point of applied damage (uncapped)
+  /* ── KNOCKBACK IS AN IMPULSE, NOT A VELOCITY (user call) ──────────────
+   *
+   * This used to be `KICK_PER_DMG: 1.0` applied as `dv = damage * 1.0` —
+   * a velocity step with NO MASS IN IT, so one Plasma Cannon hit added
+   * dv = 18 to a mass-4 gnat and to a mass-500 dragon alike, and dv = 18 is
+   * several times any enemy's own top speed.  That is what launched NPCs off
+   * screen on every hit, and it is why they behaved unlike shards: the shard
+   * push right below is `projSpeed * 0.20 / max(1, mass/10)` — mass-aware,
+   * landing in the 0.7 .. 3.2 range.  (The dragon's ENEMY_VARIANTS row even
+   * says "heavy: barely shoved", documenting an intent the code did not
+   * implement.)
+   *
+   * Momentum in, velocity out — the same move the screen shake made:
+   *
+   *     dv = damage * KICK_IMPULSE_PER_DMG / mass
+   *
+   * At the shipped weapon damages that lands NPCs in the shard range, and
+   * orders them by weight the way everything else in the collision code
+   * does.  dv from one Cannon hit (18 dmg): gnat 9.0, Charger 4.5, Drone
+   * 3.6, Tank 2.0, Turret 0.7, Warden 0.26, Dragon 0.07 (was 18 for every
+   * one of them).
+   *
+   * The cap is expressed in the TARGET'S OWN top speed rather than as an
+   * absolute, so it means the same thing across a roster whose speeds vary
+   * 4x: a hit can never shove a body faster than it can fly under its own
+   * power.  The floor keeps a bolted-down emplacement (maxSpeed 0: Turret,
+   * Nest) flinching rather than being immovable. */
+  KICK_IMPULSE_PER_DMG: 2.0,   // momentum per point of applied damage
+  KICK_MAX_SPEED_FRAC: 0.9,    // never shove past this fraction of own maxSpeed
+  KICK_SPEED_FLOOR: 3.0,       // ...but a maxSpeed-0 body still flinches
   STUN_SEC: 0.12,     // stagger: no AI force AND no speed-clamp while > 0
   // Player-hit response scales with the incoming shot's intrinsic damage so a
   // heavy slug (Tank, 16) lands like a wallop and a chip pellet (Drone, 5)
   // barely registers — both shake and a directional knockback.  Uses the
   // projectile's own damage (not the post-shield/armor value) so a heavy hit
   // jolts even when the shield eats it.
-  PLAYER_SHAKE_BASE: 4,        // floor shake on any player hit
-  PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
-  PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
-  PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
+  /* A SHOT MUST NOT RIVAL A COLLISION (user call).
+   *
+   * These numbers predate the impact model and were on their own scale, so
+   * they landed far up the body-impact range: a 5-damage Drone PELLET
+   * produced 10.0 — as much as a 40px rock hitting the hull at speed 20 —
+   * and a 16-damage slug produced 23.2, nearly a full-tilt wall crash (30).
+   * Being shot by a pea-shooter outweighed flying into terrain.
+   *
+   * A projectile's actual momentum against the hull is negligible (mass 1 at
+   * speed 16 against a 100-mass ship is dv = 0.16, an order of magnitude
+   * under `SHAKE.IMPACT_DV_MIN`), so this shake is deliberately a LEGIBILITY
+   * signal — "you got hurt" — rather than a physical one, and damage is the
+   * right input for it.  What it needed was a place in the same scale:
+   *
+   *   pellet (5 dmg)  -> 4.0   below a wall crash at the break threshold (6)
+   *   Charger (7)     -> 5.0
+   *   slug (16)       -> 9.5
+   *   Bastion (18)    -> 10.5  about a 40px rock at speed 20 (10.5)
+   *   cap             -> 11    under a wall crash at speed 8 (12)
+   *
+   * So the heaviest shell in the game feels like a real rock hitting you,
+   * a pellet feels like less than a scrape, and nothing fired can approach
+   * ramming terrain.  Direction is unchanged: the shot's travel axis. */
+  PLAYER_SHAKE_BASE: 1.5,      // floor shake on any player hit
+  PLAYER_SHAKE_PER_DMG: 0.5,   // + this per point of shot damage
+  PLAYER_SHAKE_MAX: 11,        // cap — under a moderate crash, never near HEAVY
+  /* The player's own shove is the same rule, normalised so the LEAN ship is
+   * unchanged: 12 / PHYSICS_CONSTANTS.PLAYER_MASS (100) = the old 0.12 per
+   * damage point.  Only a laden hull differs, and it differs the way the
+   * screen shake already does — more ship, less shove. */
+  PLAYER_KICK_IMPULSE_PER_DMG: 12,
   // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
   // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
   // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
@@ -3157,7 +4377,7 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge';
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge' | 'utility';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
  *  Base values modified: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
@@ -3172,6 +4392,7 @@ export interface ModuleEffect {
   cooldownFrac?: number;    // autoloader
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
+  flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
 }
 
 export interface ModuleDef {
@@ -3258,6 +4479,7 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   gunnery:    ['gun'],
   autoloader: ['gun'],
   overcharge: ['gun'],
+  utility:    ['hull'],
 };
 
 /** Neighbour indices per hex slot in the 7-flower: 0 = center (touches
@@ -3292,6 +4514,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
+  { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
@@ -3357,6 +4580,108 @@ export const TIMED_WAVE_CONFIG = {
   // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
   TIER_SET_LENGTH: 3,
 };
+
+// ── Audio ─────────────────────────────────────────────────────────────────────
+// Mixer + voice-budget tuning for AudioSystem.  WHAT plays and with what
+// per-sound parameters lives in docs/SFX_INVENTORY.md (and, in code, in the
+// SfxRegistry defs); this block is only the global machinery.
+//
+// The three voice ceilings are the anti-mass-death budget: a single sim step
+// in this engine can kill 40 enemies (snitch board-clear) or shatter a merged
+// rock parent into 200 fragments.  Tier 3 stops being admitted first, then
+// tier 2; tier 1 (the sounds the player acts on) always plays.  Together with
+// the per-id retrigger COLLAPSE (which bumps the live voice's gain instead of
+// stacking a new one), a bulk event reads as one HEAVIER sound rather than as
+// hundreds of thin ones — the same "cosmetic output, safe to drop" reasoning
+// as enforceCap for particles, applied to a budget the ear rather than the
+// frame time enforces.
+//
+// PROVISIONAL: every number here was reasoned about, not measured on the
+// user's hardware (gauntlet log, FOR-USER-REVIEW).
+export const AUDIO_CONSTANTS = {
+    /** A decoded sample peaking below this is treated as a BROKEN export and
+     *  discarded in favour of the synth draft.  `play()` multiplies by the
+     *  def's mix gain (~0.3) and then by distance attenuation, so anything
+     *  under this cannot be heard in play whatever it was meant to be — the
+     *  file has not made the sound quieter, it has removed it.  ~-26 dBFS. */
+    SAMPLE_MIN_PEAK: 0.05,
+
+  /** IMPACT VOICING — the ear reads the same dial as the camera
+   *  (docs/SFX_INVENTORY.md §4.4).  A body collision produces two pieces of
+   *  feedback, and they used to be computed from two unrelated scales with
+   *  no mass in either.  Both now come from `I` — the struck body's own
+   *  velocity step normalised by `COLLISION_CONFIG.SHAKE.IMPACT_MAX`, i.e.
+   *  literally `shake / 30`.
+   *
+   *  The TILE span is load-bearing rather than taste: dividing dv by 18
+   *  reproduces the shipped `impactSpeed / 12` curve exactly, so the wall
+   *  crash is bit-for-bit unchanged and only lighter impactors get quieter —
+   *  the same isolating claim the shake change makes.  The trade it buys is
+   *  that above its span a row is already at full gain, so the camera can
+   *  still separate a hard crash from a catastrophic one and the ear cannot.
+   *
+   *  PITCH is taken from MASS, not size, because mass is already the term
+   *  inside `I` — so the two cues cannot disagree, and a 40px metal shard
+   *  knocks lower than a same-size rock, which it should, since it also
+   *  shakes harder. */
+  /** The dv at which a row reaches FULL gain.  Per row, not global: the tile
+   *  crash is gated at closing speed 4 and can reach dv 30, while the shard
+   *  row is gated at 1.2 and tops out around dv 7 — normalising both by the
+   *  same span pinned every shard contact to its floor, i.e. a voice with no
+   *  dynamics at all.  Each row now uses the range it can actually reach, so
+   *  "harder is louder" holds WITHIN a row; the absolute level ordering
+   *  BETWEEN rows stays where the mix levels put it.
+   *
+   *  TILE is 18 because that is the parity number: it reproduces the shipped
+   *  `impactSpeed / 12` curve exactly (a static body takes the whole step, so
+   *  dv = 1.5 v). */
+  IMPACT_SPAN_TILE: 18,
+  IMPACT_SPAN_SHARD: 6,
+  IMPACT_SPAN_ENEMY: 12,
+  IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
+  IMPACT_PITCH_EXP: 0.25,
+  IMPACT_PITCH_MIN: 0.70,
+  IMPACT_PITCH_MAX: 1.60,
+  /** Per-row gain floors (docs/SFX_INVENTORY.md §4.4).  A floor is what stops
+   *  a voice fading to nothing: the tile crash has none because it is gated
+   *  hard enough that a quiet one is meaningful, while the light-contact rows
+   *  keep a presence. */
+  IMPACT_FLOOR_TILE: 0,
+  IMPACT_FLOOR_SHARD: 0.25,
+  IMPACT_FLOOR_ENEMY: 0.30,
+
+  DEFAULT_VOLUME: 0.7,     // master gain at boot; in-memory only (no persistence)
+  MAX_VOICES: 24,          // hard ceiling across all tiers
+  MAX_VOICES_TIER2: 20,    // tier-2 triggers stop being admitted here
+  MAX_VOICES_TIER3: 14,    // tier-3 (material chatter) stops first
+  COLLAPSE_BUMP: 1.22,     // gain multiplier per collapsed retrigger
+  COLLAPSE_BUMP_CAP: 2.2,  // saturation, so 40 collapses ≠ 40× loud
+  VOICE_RELEASE_PAD: 0.03, // slack added to a voice's tracked lifetime (s)
+  LOOP_RAMP: 0.09,         // loop fade in/out time constant (s)
+  NOISE_BUFFER_SEC: 2,     // shared white-noise buffer length
+  // Positional model.  Distances are world units, measured torus-wrapped.
+  NEAR_RADIUS: 420,        // full volume inside this
+  FAR_RADIUS: 2600,        // inaudible beyond this (linear between)
+  // AMBIENT shard chatter — shards colliding, merging and snapping with
+  // each other somewhere the player is not.  At the normal radius a dense
+  // field chatters constantly from events the player has nothing to do
+  // with, so these carry only in CLOSE PROXIMITY.  The same material
+  // destroyed BY the player (killedByPlayer: shot, rammed, chained,
+  // splashed) is played at the normal radius instead — proximity is the
+  // rule for ambient events, not for the player's own.
+  SHARD_NEAR_RADIUS: 240,
+  SHARD_FAR_RADIUS: 850,
+  // POI presence loops.  Both swell with proximity rather than switching
+  // on at the interaction range — the loop starts from the NEAREST POI at
+  // any distance and the attenuation does the work, so walking toward a
+  // station or a rift is an audible approach.  The station carries further
+  // because it is a much larger object.
+  PORTAL_NEAR_RADIUS: 300,
+  PORTAL_FAR_RADIUS: 1600,
+  STATION_NEAR_RADIUS: 420,
+  STATION_FAR_RADIUS: 2200,
+  PAN_WIDTH: 900,          // world units mapping to full L/R pan
+} as const;
 
 // ── Snitch ───────────────────────────────────────────────────────────────────
 // A golden-comet snitch rides the asteroid flow field with a burst/coast AI
@@ -3486,6 +4811,7 @@ export const CONTROL_SCHEMES: ReadonlyArray<{
   { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
   { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
   { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'Either trigger throttles · either stick steers + aims' },
+  { id: 'gamepad-left',   label: 'Controller (left stick)',      blurb: 'Left stick / D-pad flies + aims · bottom face button shoots' },
 ] as const;
 
 export function controlSchemeDef(id: ControlScheme) {
@@ -3514,6 +4840,16 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
    *  stick's magnitude is thrust, here it is discarded — and two answers to
    *  that cannot be live at once. */
   triggerThrust?: boolean;
+  /** Does the MOVE stick also write the aim — the ship aiming where it flies?
+   *  True for both pad schemes that give up the right stick: under
+   *  `gamepad-thrust` because a minimal pad may not have one, and under
+   *  `gamepad-left` because the user asked for the left stick to carry
+   *  direction and thrust together.  When set, the right stick is ignored
+   *  rather than allowed to fight for the pointer. */
+  stickAims?: boolean;
+  /** Is the gun the bottom FACE button rather than the right trigger?  Set
+   *  wherever the triggers are doing something else or may not exist. */
+  fireFace?: boolean;
 }> = {
   touch:            { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true,  pointerAims: true },
   'joystick-left':  { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'left'  },
@@ -3522,7 +4858,11 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
   gamepad:          { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
   // Same as `gamepad` in every touch respect — the trigger changes what the
   // LEFT STICK means, not what a finger means, so touch stays exactly alive.
-  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true },
+  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true, stickAims: true, fireFace: true },
+  // Same again: the LEFT stick carries heading, aim and throttle together and
+  // the gun sits on the bottom face button, which changes nothing a finger
+  // does.
+  'gamepad-left':   { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, stickAims: true, fireFace: true },
 };
 
 // ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────
@@ -3530,15 +4870,18 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
 // candidates can be judged against each other in motion rather than argued
 // about:
 //   'flow'  — streamlines sampled from the asteroid flow field: where material
-//             MOVES, instead of ten thousand dots saying where it is.  DEFAULT.
-//   'dots'  — the status quo ante: one dot per mobile shard.
+//             MOVES, instead of ten thousand dots saying where it is.
+//   'dots'  — one dot per mobile shard.  DEFAULT (user call): in play the
+//             question the map is asked is "what is out there", and a dot
+//             answers it directly where a streamline answers a question about
+//             the field.  Flow stays one step of the cycle away.
 //   'off'   — neither.  The control, and the honest answer if the streamlines
 //             fail to read at 75px.
 // Static TILES are unaffected — they come from the pre-rendered static layer,
 // which is the minimap's actual terrain reading.
 export const MINIMAP_MATERIAL_MODES = ['flow', 'dots', 'off'] as const;
 export type MinimapMaterialMode = typeof MINIMAP_MATERIAL_MODES[number];
-let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('flow');
+let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('dots');
 export function getActiveMinimapMaterial(): MinimapMaterialMode {
   return MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
 }
@@ -3874,6 +5217,80 @@ export const DROP_PULL = {
  * Returns the per-slot x positions so the renderer and the tap hit-test
  * (GameEngine fire-event routing) share one geometry source.
  */
+/**
+ * The minimap's screen rect — ONE definition of the bottom-left corner
+ * (gauntlet 5d, U3; audit findings E1/E2).
+ *
+ * Four places computed this independently: the renderer that draws it, the
+ * fire-event handler that catches the expand tap, the joystick exclusion zone
+ * that must refuse it, and the wave banner that has to clear it.  The banner
+ * got it WRONG — it reserved `MINIMAP_CONSTANTS.SIZE` (75px, the COLLAPSED
+ * height) unconditionally, so with the map open the banner drew inside the
+ * 280px expanded one.  Two of the other three used `MARGIN` for the left
+ * offset and `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN` for the bottom, which is
+ * why "one corner, three margins" was a finding rather than a nitpick.
+ *
+ * Every caller now asks here, and the EXPANDED flag is a parameter rather
+ * than an assumption.
+ */
+export function computeMinimapRect(screenHeight: number, expanded: boolean): {
+  x: number; y: number; size: number;
+} {
+  const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
+  const size = expanded ? EXPANDED_SIZE : SIZE;
+  return {
+    x: MARGIN,
+    y: screenHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
+    size,
+  };
+}
+
+/**
+ * The OFF-SCREEN INDICATOR rect — the inset viewport rect the edge arrows
+ * ride (user call: "the chevrons hide behind the HUD").
+ *
+ * It used to be a symmetric inset of `EDGE_INSET` on all four sides, derived
+ * inline from the screen half-extents.  That put the top edge of the rect at
+ * y=26 — underneath the readout chip stack — and the bottom edge under the
+ * loadout strip and the minimap.  An arrow at a near-vertical bearing
+ * therefore drew BEHIND the HUD, and a near-vertical bearing is exactly
+ * "directly ahead of you" and "directly behind you".
+ *
+ * So the rect is asymmetric now: the two HUD bands are reserved, and the
+ * arrows ride the largest rect that clears them.  Pure and exported for the
+ * same reason `computeMinimapRect` is (5d U4): it is wrong in a way nothing
+ * reports — an arrow under a chip throws no error and logs nothing.
+ */
+export function computeIndicatorRect(
+  screenWidth: number,
+  screenHeight: number,
+  bossBar: boolean = false,
+): { left: number; right: number; top: number; bottom: number } {
+  const {
+    EDGE_INSET, TOP_INSET, BOSS_BAR_INSET, BOTTOM_INSET, MIN_BAND,
+    NARROW_WIDTH, WRAP_INSET,
+  } = UI_CONSTANTS.INDICATORS;
+  const left  = Math.min(EDGE_INSET, Math.max(0, screenWidth  * 0.5 - 8));
+  const right = screenWidth - left;
+  // The boss bar is the one part of the top band that comes and goes, and it
+  // is the tallest.  Reserving its height permanently would cost every
+  // ordinary fight ~60px of play area for a widget that is not on screen, so
+  // the band grows while it is up instead — and likewise narrows back when
+  // the readout row is wide enough not to wrap.
+  let top     = EDGE_INSET + TOP_INSET
+              + (bossBar ? BOSS_BAR_INSET : 0)
+              + (screenWidth < NARROW_WIDTH ? WRAP_INSET : 0);
+  let bottom  = screenHeight - EDGE_INSET - BOTTOM_INSET;
+  // A short window (a landscape phone) would otherwise have the two bands
+  // meet or cross.  The bands give way rather than the arrows vanishing.
+  if (bottom - top < MIN_BAND) {
+    const mid = screenHeight * 0.5;
+    top    = Math.max(0, mid - MIN_BAND * 0.5);
+    bottom = Math.min(screenHeight, mid + MIN_BAND * 0.5);
+  }
+  return { left, right, top, bottom };
+}
+
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {
   startY: number;
   slotW: number;
@@ -3960,6 +5377,45 @@ export function enemyDamageMult(waveIndex: number): number {
 export function hitReactStrength(damage: number, maxHealth: number): number {
   if (!(damage > 0) || !(maxHealth > 0)) return 0;
   return Math.min(1, damage / maxHealth);
+}
+
+/**
+ * Stamp the two VISUAL hit timers together (gauntlet 5d, U5).
+ *
+ * `hitFlash` is the ~0.1–0.3s whiten-and-scale-punch each damage site already
+ * set for itself; `healthBarTimer` is the much longer window the world-space
+ * health bar is visible for.  They are separate fields — a bar that lived as
+ * long as a flash would strobe rather than inform — but they are stamped by
+ * the same event, so folding them into one call is what stops the two from
+ * drifting apart as damage paths are added.  Each site keeps its OWN flash
+ * duration, because those were tuned per impact type.
+ *
+ * Purely presentational: nothing in the sim reads either field, so this is
+ * safe to call from any damage path without touching behaviour.  Takes a
+ * loosely-typed entity so `constants.ts` stays free of a `types.ts` import.
+ */
+export function markDamaged(
+  entity: { hitFlash?: number; healthBarTimer?: number },
+  flash: number,
+) {
+  entity.hitFlash = flash;
+  entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
+}
+
+/**
+ * Arm the bar window for a hit the SHIELD ate (gauntlet 5d, U5).
+ *
+ * A shot fully absorbed by a shield costs no health, so it never reached
+ * `markDamaged` — and the bar is where the shield STRIP lives, so without
+ * this a player could never watch a shield drain: the readout would only
+ * appear once the shield had already failed and the hull was taking hits.
+ * That is precisely backwards, and it is what the U5 suite caught.
+ *
+ * No `hitFlash`: the hull did not take the hit, and the shield has its own
+ * `shieldHitFlash`. Only the bar's visibility window is armed.
+ */
+export function markShieldDamaged(entity: { healthBarTimer?: number }) {
+  entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
 }
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────
@@ -4303,6 +5759,14 @@ export const DISABLE = {
 // GameEngine.updateBubbles.  The AI feel (wander vs seek) lives in
 // AI_CONFIG.BUBBLE; this block is the engagement payload.
 export const BUBBLE_CONSTANTS = {
+  /** How much of the light falling on a bubble it RE-EMITS (unified light
+   *  layer, DBG "Emissive").  A bubble is a translucent membrane, so a beam
+   *  sweeping across one should light it up like a paper lantern — the same
+   *  treatment glass and nebula get, at a lower fraction because a bubble is
+   *  thin and mostly empty.  It emits WITHOUT occluding: a soft blob casting
+   *  a hard shadow volume would read wrong, and the emitter buffer exists
+   *  exactly for "lights but does not shadow". */
+  EMITS: 0.35,
   // Latch: when a provoked bubble touches the player it attaches and EMPs.
   CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
   LATCH_DURATION: 2.6,    // seconds the bubble clings before it tires + falls off
@@ -5295,6 +6759,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Re-emits half the light it receives (DBG "Emissive").  Glass is
+    // translucent and scatters what passes into it; a pane that simply
+    // absorbed every photon reaching it would read as slate.
+    emits: 0.5,
+    // Glass is drawn as a translucent panel, so a solid umbra behind it
+    // contradicts the art.  Roughly half the unified light layer's
+    // contribution passes through instead of being withheld — enough that
+    // a glass wall reads as glass rather than as rock, and not so much
+    // that its shadow stops registering as one.
+    transmit: 0.55,
     // Neighbour-count OPACITY automata (DBG "Tile shade"), BIPOLAR
     // around the neutral default: a half-surrounded tile (~3 of 6
     // neighbours) renders at the normal opacity — the MIDDLE of the
@@ -5330,6 +6804,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    // TRANSLUCENT, but the DULL end of it.  Plastic is the cloudy material of
+    // the three: it passes light and re-emits its own colour like glass does,
+    // at roughly half glass's strength, which is what "more opaque" means in
+    // the two numbers this system has.  Its colour is per INSTANCE (the
+    // plastic palettes), so a field of it emits in its own greens and pinks
+    // rather than in one authored tint.
+    transmit: 0.28,
+    emits: 0.25,
     // Soft light-green proximity glow — the tile FACE brightens as the
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
@@ -5374,6 +6856,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Re-emits half the light it receives (DBG "Emissive").  Metal is the
+    // specular case: it does not scatter light so much as throw it back,
+    // and a matte plate is the one thing it should never look like.
+    emits: 0.5,
     // Metal brightness is driven by densityTier (shard layers), NOT this
     // automata — see metalDensityBrightness.  The automata block is kept
     // only as the marker that makes recomputeMaterialNeighbors count a
@@ -5413,6 +6899,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    // Glass-like: the deep violet reads as a solid crystal, and a crystal
+    // that stopped every photon would be indistinguishable from rock.  A
+    // shade under glass on both counts, because it is the denser-looking
+    // material of the two.
+    transmit: 0.5,
+    emits: 0.45,
     // Deep-purple proximity lighting (fill-only radial bloom, no edge
     // stroke).  Reads as the "void" tile — the unbreakable face of
     // the map — distinct from glass's cyan and rock's orange.
@@ -5502,6 +6994,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-tile': {
     id: 'nebula-tile',
+    // Re-emits half the light it receives (DBG "Emissive"), in its OWN
+    // colour — a nebula is a glowing cloud, and the one material in the game
+    // whose colour is per-BODY rather than per-variant (`nebulaBlendedHex`,
+    // blended from its composition).  It is also the one emitter that is
+    // `passThrough`: it casts no shadow and never enters the occluder pool,
+    // so emission had to stop being a by-product of being a shadow caster
+    // (see the emitter buffer in render/lighting.ts).
+    emits: 0.5,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: {
@@ -5586,6 +7086,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-shard': {
     id: 'glass-shard',
     carrier: EntityType.STRUCTURE,
+    emits: 0.5,                               // as the tile it broke off
+    // Same translucency as the tile it broke off — see 'glass-tile'.
+    transmit: 0.55,
     spawn: GLASS_SHARD_SPAWN_SHAPE,
     regen: { kind: 'none' },
     merge: {
@@ -5625,6 +7128,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'plastic-shard': {
     id: 'plastic-shard',
+    // Same as the tile it broke off — see plastic-tile.
+    transmit: 0.28,
+    emits: 0.25,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
@@ -5732,6 +7238,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-shard': {
     id: 'metal-shard',
     carrier: EntityType.STRUCTURE,
+    emits: 0.5,                               // as the tile it broke off
     spawn: SHARD_SPAWN_SHAPE_METAL,
     regen: { kind: 'none' },
     merge: {
@@ -5805,6 +7312,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-shard': {
     id: 'nebula-shard',
+    // Same as the tile it broke off, and for the same reason: a shard of a
+    // glowing cloud is still glowing cloud.
+    emits: 0.5,
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: { kind: 'merge-only' },              // tiles regrow only via transmutation
