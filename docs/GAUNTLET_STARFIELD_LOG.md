@@ -1028,6 +1028,70 @@ produces the density it names to within 1%. A step that silently clamped at MAX
 would still cycle and still show its label — the exact failure the seeded sky
 was introduced to make visible.
 
+## Base catch-up 3 — PR #87 (the WebGPU seam), and what "green" now means
+
+The base moved 92 commits: the WebGPU feasibility spike landed alongside the
+lighting and 5d-UI work.
+
+**A true commit-by-commit rebase was attempted and abandoned**, which is worth
+recording because the request was for one. 15 commits replayed onto a base that
+had moved 92: **14 of the 15 touch `CLAUDE.md` and 20 touch `GameEngine.ts`**,
+so the replay demands ~14 documentation merges against intermediate states that
+will never be checked out, and only the final state is verifiable. It reached a
+260-line `CLAUDE.md` conflict on the fourth commit. Abandoned in favour of one
+resolution pass over the same final tree; the original commits are preserved at
+`backup/starfield-pre-rebase`.
+
+Two conflicts, both the shape this repo always produces:
+
+- **`engine/GameEngine.ts`** — the shared constants import. Resolved as a 3-way
+  merge on the NAME LIST, not a union: a union resurrects the six glow-cycle
+  names the base deliberately deleted. +24 from lighting, −6.
+- **`CLAUDE.md`** — both sides added §8 bullets against the same anchor. Kept
+  both; took the base's rewritten off-screen-indicator bullet after diffing to
+  confirm this branch's only change to it was an accidental line-rewrap.
+
+**One integration change.** `invalidateBackground` had no home in the new
+`Renderer & RendererDiagnostics` split. It went to `RendererDiagnostics` by that
+file's own rule — its only callers are the four DBG star cycles, and a second
+renderer may stub it (the cost being that those knobs do nothing there, the same
+trade every member of that interface makes).
+
+### A resolver bug worth not repeating
+
+The first conflict resolver rebuilt `GameEngine.ts` from the index's **stage-2
+("ours") blob**, replacing the import line. That silently discarded every hunk
+git had already auto-merged from the other side — the file was complete,
+plausible, and behaved as though PR #87 had never touched it. Typecheck caught
+it (five errors naming APIs the base had added). **A conflict resolver must edit
+the marked region of the WORKING file**, never rebuild the file from one stage.
+
+### The merge gate is now TWO SCOPES, and a PR only gets the smoke
+
+Discovered by reading the job log rather than the green tick: CI on this PR ran
+**5 tests in 29 seconds**, not the full suite. That is the 2026-08-21 user call
+that arrived with the base — smoke (typecheck + build + boot/loop) on every PR
+push, the FULL suite only on pushes to `main`/`claude/plan-completion`, PRs based
+on `main`, manual dispatch, or a PR labelled `full-tests`.
+
+So **a green check on this PR is not evidence about the other 232 tests**, and an
+earlier claim in this session that CI would independently confirm a flake was
+wrong. `full-tests` is the label to add before this one merges, given it now
+carries a renderer-seam refactor underneath it.
+
+### The one failing test is the container, not the branch
+
+| tree | result | the failure |
+|---|---|---|
+| pristine base `33e6bd2` | 221 passed, 1 failed | `lighting.spec.ts` — occluder fade |
+| merged tree `4a235d0` | 236 passed, 1 failed | `shake.spec.ts` — shake direction |
+
+The base fails one too, and a DIFFERENT one. Both are base-owned timing-sensitive
+tests, neither touches the star field, and **both pass in isolation** — measured,
+not assumed. This container rasterizes canvas in software (`perf/README.md`), so
+a full 13-minute suite yields about one timing flake and which test draws it
+varies. The branch passes everything it owns; it adds 15 tests (222 → 237).
+
 ## Merge with `claude/plan-completion` (PR #84 landed)
 
 PR #84 (Pair C — input/polish) merged into the base while this branch was open,
