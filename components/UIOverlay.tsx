@@ -2979,6 +2979,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </span>
             </div>
 
+            {/* Output-latency READOUT (playtest: "sounds feel slightly
+                delayed").  The engine side is measured tight — tap → play()
+                is 3-5ms and every reactive draft is audible within ~3ms — so
+                when sound feels late, this device number is where the time
+                goes: ~30-45ms is a wired/speaker path, 150-250ms means a
+                Bluetooth route, which no code path can shorten. */}
+            {stats.audio?.latencyMs != null && (
+              <div className={`mx-auto w-full max-w-xs text-center ${T_MICRO} text-slate-500 tabular-nums`}>
+                audio output latency ~{stats.audio.latencyMs}ms
+                {stats.audio.latencyMs >= 120 ? ' (Bluetooth?)' : ''}
+              </div>
+            )}
+
             {/* A filename that matches no sound id is invisible otherwise —
                 it looks exactly like an id nobody has recorded yet. */}
             {stats.audio && stats.audio.unmatched.length > 0 && (

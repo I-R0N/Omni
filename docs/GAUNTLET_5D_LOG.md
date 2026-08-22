@@ -1725,3 +1725,41 @@ the smoke now surfaces at the merge point rather than per push; the label is
 the escape hatch. Local practice moves the same way (CLAUDE.md §7/§9):
 touched suites per commit, the full run before a PR is called
 ready-to-merge or after a base sync.
+
+---
+
+## P15 — "Sounds feel slightly delayed": measured, and the app side is tight
+
+Investigated end-to-end before the merge. Three measurements, all through
+the real build:
+
+1. **Draft onset** (offline render of all 98 registered ids, time until the
+   waveform reaches 50% of its own peak): every reactive combat sound —
+   weapon fire, impacts, crashes, destroys — is there within **~3ms**. The
+   slow tail (dock chord 552ms, repair 382ms, boss-phase sting 202ms) is
+   deliberately staged jingles, not reactions.
+2. **Dispatch** (real CDP input through the live loop): pointerdown →
+   `play()` call is **3–5ms**, eight taps out of eight, at a 16.7ms median
+   frame.
+3. **Pipeline**: the context is default-latency ('interactive'), voices
+   start at `ctx.currentTime`, attacks are 1–4ms, there is no compressor or
+   scheduling offset anywhere in the chain. Retrigger windows are all well
+   under their triggers' real cadences (blaster 40ms vs a 143ms fire rate).
+
+So the time is going to one or both of the two things OUTSIDE the app:
+
+- **Device output latency** — `baseLatency + outputLatency`, ~40ms on the
+  probe browser; iPhone speaker similar; **Bluetooth adds 150–250ms** and no
+  code path can shorten it. Now surfaced as a READOUT in the pause menu's
+  audio section (`EngineStats.audio.latencyMs`), so the number can be read
+  on the exact device that feels late — it labels ≥120ms as likely
+  Bluetooth.
+- **The touch tap fires on RELEASE** (G13, deliberate: until the finger
+  lifts, a tap and a drag are the same gesture). The shot — and therefore
+  its sound, which is faithful to the shot — happens a finger-lift after
+  the contact the ear expects. The fire button and the pad trigger fire on
+  press and do not carry this.
+
+No engine change recommended; the readout is the deliverable. If the number
+on-device reads ~40ms and it still feels late on the SPEAKER, the next lever
+is the G13 tap-on-release call, which is a feel decision, not a bug.

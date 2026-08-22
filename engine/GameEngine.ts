@@ -1829,6 +1829,7 @@ export class GameEngine {
         sampled: this.audio.sampledIds.length, total: this.audio.allIds.length,
         unmatched: this.audio.unmatchedFiles,
         loopFiles: this.audio.loopSampleFilenames,
+        latencyMs: this.audio.latencyMs,
       },
     });
     // Cost of SCHEDULING the React update — not of performing it.  The

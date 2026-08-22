@@ -1951,6 +1951,9 @@ export interface EngineStats {
     /** Files named after a LOOP id — matched, but loops cannot take a
      *  recording yet, so they are refused rather than silently ignored. */
     loopFiles: string[];
+    /** Context→speaker latency readout (base + output), ms; null until the
+     *  context exists.  ~30-45ms = wired/speaker, 150-250ms = Bluetooth. */
+    latencyMs: number | null;
   };
 }
 

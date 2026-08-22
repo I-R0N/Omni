@@ -482,6 +482,20 @@ export class AudioSystem {
    *  'suspended' or 'interrupted' indefinitely. */
   public get audible(): boolean { return this.ctx !== null && this.ctx.state === 'running'; }
 
+  /** Total context→speaker latency in ms (baseLatency + outputLatency),
+   *  null before unlock or where the browser hides it.  A READOUT, not a
+   *  knob: everything this engine does is start-at-currentTime with 1-4ms
+   *  attacks (measured: tap → play() 3-5ms end to end), so if sound feels
+   *  late on a device, THIS number is where the time is going — ~30-45ms is
+   *  a wired/speaker path, 150-250ms means Bluetooth. */
+  public get latencyMs(): number | null {
+    if (!this.ctx) return null;
+    const base = this.ctx.baseLatency ?? 0;
+    const out = (this.ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0;
+    const ms = Math.round((base + out) * 1000);
+    return ms > 0 ? ms : null;
+  }
+
   // ── Mixer ─────────────────────────────────────────────────────────────────
 
   public get volume(): number { return this._volume; }
