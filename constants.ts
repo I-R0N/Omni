@@ -4940,16 +4940,25 @@ export const AUDIO_CONSTANTS = {
   PORTAL_FAR_RADIUS: 1600,
   STATION_NEAR_RADIUS: 420,
   STATION_FAR_RADIUS: 2200,
-  // The snitch, and the reason it needs its OWN pair rather than the
-  // default 420/2600: the caller gated the loop at 1200 units while the
-  // default far radius was 2600, so across the whole range it could be
-  // heard the attenuation never fell below 0.64 — it snapped on at
-  // two-thirds volume and stayed there.  That is why it read as
-  // non-positional despite being flagged positional and panning correctly.
-  // A tight near radius and a far radius the caller does NOT cut inside
-  // give the same swelling approach the POI beds have.
-  SNITCH_NEAR_RADIUS: 220,
+  // The snitch, whose whole job is to be FOUND — distance and bearing are
+  // the information, and the sound is only the carrier.
+  //
+  // It needs its own radii rather than the default 420/2600 because the
+  // caller used to gate the loop at 1200 units while the default far
+  // radius was 2600: across the entire range it could be heard the
+  // attenuation never fell below 0.64, so it snapped on at two-thirds
+  // volume and stayed there.  That is why it read as non-positional
+  // despite being flagged positional and panning correctly.
+  //
+  // NEAR is deliberately tiny — full volume only when practically on top
+  // of it — and the CURVE is what does the real work: a linear fade is
+  // still at half amplitude halfway out, about 6 dB down, which the ear
+  // reads as "close but quieter" rather than "far".  Raising it to a power
+  // makes the same crossing a dramatic one.  At 500 units of 1500 the
+  // linear model gives 0.70; this gives 0.41.
+  SNITCH_NEAR_RADIUS: 90,
   SNITCH_FAR_RADIUS: 1500,
+  SNITCH_DISTANCE_CURVE: 2.5,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 } as const;
 

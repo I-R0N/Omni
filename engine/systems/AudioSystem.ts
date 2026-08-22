@@ -135,6 +135,18 @@ export interface SfxLoopDef {
   positional?: boolean;
   near?: number;
   far?: number;
+  /** Exponent applied to the linear distance attenuation, for loops whose
+   *  POINT is the distance rather than the sound.
+   *
+   *  The shared model fades amplitude linearly from `near` to `far`, which
+   *  is a weak cue: halfway out it is still at half amplitude, about 6 dB
+   *  down, and a sound only 6 dB quieter reads as "right here, slightly
+   *  softer" rather than as "far away". Raising it to a power bends that
+   *  toward how loudness actually falls off with distance, so the same
+   *  travel across the same radius becomes a much stronger cue.
+   *
+   *  1 (default) keeps the linear behaviour every other loop has. */
+  curve?: number;
   start: (s: SynthCtx) => LoopVoice;
 }
 
@@ -733,7 +745,8 @@ export class AudioSystem {
         const d = Math.sqrt(dx * dx + dy * dy);
         live.panner.pan.setTargetAtTime(
           Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH)), now, 0.08);
-        live.gain.gain.setTargetAtTime(def.gain * this.attenuation(d, def.near, def.far), now, 0.08);
+        live.gain.gain.setTargetAtTime(
+          def.gain * this.attenuation(d, def.near, def.far, def.curve), now, 0.08);
       }
       return;
     }
@@ -744,7 +757,7 @@ export class AudioSystem {
     if (def.positional && opts?.x !== undefined && opts?.y !== undefined) {
       const dx = wrapDeltaX(this.lx, opts.x);
       const dy = wrapDeltaY(this.ly, opts.y);
-      g *= this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far);
+      g *= this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far, def.curve);
       panner = this.ctx.createStereoPanner();
       panner.pan.value = Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH));
     }
@@ -848,12 +861,16 @@ export class AudioSystem {
   }
 
   /** Distance attenuation: full inside `near`, linear to zero at `far`. */
-  private attenuation(d: number, near?: number, far?: number): number {
+  private attenuation(d: number, near?: number, far?: number, curve?: number): number {
     const n = near ?? AUDIO_CONSTANTS.NEAR_RADIUS;
     const f = far ?? AUDIO_CONSTANTS.FAR_RADIUS;
     if (d <= n) return 1;
     if (d >= f) return 0;
-    return 1 - (d - n) / (f - n);
+    const linear = 1 - (d - n) / (f - n);
+    // The exponent only bends the curve BETWEEN the radii — both endpoints
+    // are fixed points of `x ** c`, so an out-of-earshot check is unaffected
+    // and a loop still goes fully silent at exactly `far`.
+    return curve && curve !== 1 ? Math.pow(linear, curve) : linear;
   }
 
   /** In-place compaction of retired end times (mutate, don't allocate). */

@@ -118,10 +118,17 @@ distance and pan both go through the wrap helpers, no exceptions.
 "whine" reported in playtest was a LOOP or a bulk-fired chip, never a
 single event. A tone that is pleasant once becomes intolerable held. So
 every `L` row here is low — the portal at 55 Hz, the station at ~300 Hz
-broadband, the engine at 36 Hz — and a headless smoke renders each loop
+broadband, the engine at 34/51 Hz — and a headless smoke renders each loop
 through an `OfflineAudioContext` and asserts none of them sits in the
-whine band. The snitch is the brightest of them by design and is still
-capped well below where the complaints came from.
+whine band.
+
+Being low is necessary and **not sufficient**, which the snitch proved
+twice. At 1050 Hz it was the reported whine; the fix that merely lowered
+it was still a held tone, and a held tone demands attention at any pitch.
+What finally worked was making it stop: a full-depth tremolo that returns
+to silence between swells. **For a sustained sound, the duty cycle matters
+as much as the frequency** — prefer something that goes quiet on its own
+over something merely dark.
 
 **Ambient events are NEAR-FIELD; the player's own are not.** A dense shard
 field generates constant shard-on-shard collisions, merges and snaps. At
@@ -140,6 +147,15 @@ player↔shard contact is covered separately by `crash.player.shard`
 (and by `crash.player.tile` for the static-tile case), both full-range
 because the player is a party to them — the near-field rule is about
 physics the player is *not* part of.
+
+**Distance can be made the POINT rather than a side effect.** The shared
+model fades amplitude linearly between the two radii, which is a weak cue:
+halfway out it is still at half amplitude, about 6 dB down, and the ear
+reads that as "close, slightly quieter" rather than "far away". A loop
+whose job is to be *found* can set `curve`, an exponent applied to that
+linear fade, so crossing the radius is dramatic instead of gentle. Today
+only `snitch.near` uses it (2.5). Both radii stay fixed points, so an
+out-of-earshot check is unaffected.
 
 Any row may override its radii; the caller may override them again. The
 precedence is caller → row → global default.
@@ -516,7 +532,7 @@ All `flat` — these fire with the sim frozen and a full-screen UI up.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `snitch.near` | `updateSnitch`, ALWAYS ON with the snitch's live position; the far radius decides audibility | 2 | **L** | **TREASURE, not a siren.** Loose coins settling into a pile, chain links gathering — sparse metallic transients that say "money nearby" without ever holding a pitch. The previous cut was a 1050 Hz sine on an LFO and was the whine playtest kept noticing: a held tone cannot stop drawing attention to itself, and lowering it only made it a lower whine. A texture has nothing to fatigue against, so it can idle for minutes. Rendered as a looping BUFFER of scattered grains — a grain is an EVENT, and scheduling events needs a timer the loop interface deliberately lacks, so the randomness is baked in at generation and costs one `BufferSource` to play. Grains wrap past the buffer end into its start, so the loop is seamless with no crossfade. | 4 s grain buffer, two copies at rates 1.0 / 0.79; grains = 3 inharmonic partials (1, 2.41, 4.07) on 430–950 Hz fundamentals, 22–77 ms exponential decay, exponentially-distributed gaps (mean 85 ms); LP 2.2 kHz | per-grain pitch, level, decay and spacing | 1 (singleton) | 0.15 | world, near 220 / far 1500 |
+| `snitch.near` | `updateSnitch`, ALWAYS ON with the snitch's live position; the far radius decides audibility | 2 | **L** | **A DISTANT BEACON, and the DISTANCE is the sound.** Its job is to be FOUND, so how far and which bearing is the information and the sound is only the carrier. Two cuts failed here first, for opposite reasons: a held 1050 Hz sine was a whine (a continuous tone cannot stop demanding attention), and a buffer of metallic coin grains fixed the whine but was busy and literal — a lot of sound to carry one bit. What is left is the simplest thing that can carry a bearing: a soft two-note shimmer swelling on a slow FULL-DEPTH tremolo, so it is silent about as often as it sounds and never sits on one level. Quiet enough to sit under the field. | 396 Hz + 594 Hz sines (a fifth) at 1 : 0.38, tremolo 0.32 Hz sweeping 0 → 0.72 (voice peaks ~0.95) | continuous swell | 1 (singleton) | 0.085 | world, near 90 / far 1500, **curve 2.5** |
 | `snitch.dart` | `updateSnitch` burst/panic dart begins | 2 | 240 | A quick whipping *swish* — it just bolted. | noise BP 2 k→5 kHz sweep; 2→220 | pitch ±10% | 2, ≥180 ms | 0.30 | world |
 | `snitch.catch` | `GameEngine.catchSnitch` | 1 | 1500 | The best sound in the game. A crystalline capture chime blooming into a bright rising cascade as the board clears and salvage sprays. | 1568 Hz strike 1→200; cascade 784/1047/1319/1568/2093 Hz 80 ms apart; shimmer bed 200→1400 | none | 1 (singleton, ducks tier 2/3) | 0.95 | flat |
 | `dragon.arrive` | `GameEngine.spawnDragon` / `openDragonPortal` | 1 | 1600 | A distant, enormous roar through a tearing rift. Should make the player look up. | 60→110 Hz growl with formant sweep 100→1200; rift noise 200→1000 | none | 1 (singleton) | 0.72 | world |

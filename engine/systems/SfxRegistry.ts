@@ -12,72 +12,6 @@ const SHARD_RANGE = {
   far:  AUDIO_CONSTANTS.SHARD_FAR_RADIUS,
 } as const;
 
-/** Cached per AudioContext: the live one and the OfflineAudioContext the
- *  headless smokes render into want different sample rates, and the buffer
- *  is otherwise rebuilt every time the snitch comes back into earshot. */
-const coinBuffers = new WeakMap<BaseAudioContext, AudioBuffer>();
-
-/** A seamless loop of loose coins settling — the snitch's presence bed.
- *
- *  Each grain is a struck-metal transient: three INHARMONIC partials (the
- *  ratios below are near a small bell's, which is what stops it reading as a
- *  musical note) under a fast exponential decay. Pitch, level and decay are
- *  all randomised per grain, and gaps between grains are drawn from an
- *  exponential distribution so the trickle is irregular rather than metric —
- *  a fixed gap would read as a machine, which is the failure the tone had.
- *
- *  A grain running past the end WRAPS to the front, so the buffer is
- *  loop-continuous by construction and needs no crossfade.
- *
- *  Deliberately kept off the fatiguing band: fundamentals top out under
- *  1 kHz and the caller lowpasses the result. Coins are bright because they
- *  are TRANSIENT, not because they are high — a sustained sound at this
- *  pitch is exactly what was just removed. */
-function coinBuffer(ctx: BaseAudioContext): AudioBuffer {
-  const cached = coinBuffers.get(ctx);
-  if (cached) return cached;
-
-  const SEC = 4;
-  const sr = ctx.sampleRate;
-  const buf = ctx.createBuffer(1, Math.floor(SEC * sr), sr);
-  const d = buf.getChannelData(0);
-  const n = d.length;
-
-  const PARTIALS = [1, 2.41, 4.07];       // inharmonic — metal, not a note
-  const GAINS    = [1, 0.42, 0.18];
-  const MEAN_GAP = 0.085;                 // s between grains, on average
-
-  let t = 0;
-  while (t < SEC) {
-    const f0 = 430 + Math.random() * 520;               // 430–950 Hz
-    const decay = 0.022 + Math.random() * 0.055;        // 22–77 ms
-    const amp = (0.35 + Math.random() * 0.65) * 0.5;
-    const len = Math.min(Math.floor(decay * 5 * sr), n);
-    const start = Math.floor(t * sr);
-    for (let i = 0; i < len; i++) {
-      const s = i / sr;
-      const env = Math.exp(-s / decay);
-      let v = 0;
-      for (let p = 0; p < PARTIALS.length; p++) {
-        v += GAINS[p] * Math.sin(2 * Math.PI * f0 * PARTIALS[p] * s);
-      }
-      // Wrap, so the last grains of the buffer ring on into its first
-      // samples and the seam is inaudible.
-      d[(start + i) % n] += v * env * amp;
-    }
-    // Exponential gaps: bunches and lulls, the way spilled change behaves.
-    t += -Math.log(1 - Math.random()) * MEAN_GAP;
-  }
-
-  // Normalise so the def's own gain is the only volume control that matters.
-  let peak = 0;
-  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
-  if (peak > 0) for (let i = 0; i < n; i++) d[i] /= peak;
-
-  coinBuffers.set(ctx, buf);
-  return buf;
-}
-
 /**
  * SfxRegistry — the procedural draft of every sound in
  * `docs/SFX_INVENTORY.md`, keyed by that document's stable ids.
@@ -1111,51 +1045,52 @@ function registerPortalsAndWaves(a: AudioSystem) {
 // ── 8.1 Roamers ─────────────────────────────────────────────────────────────
 
 function registerRoamers(a: AudioSystem) {
-  // TREASURE, not a siren (user call).  This was a 1050 Hz sine warbling on
-  // an LFO, and it was the whine the playtest kept noticing: a held tone is
-  // the one shape that cannot stop drawing attention to itself, and lowering
-  // it out of the fatiguing band only made it a lower whine.
+  // A DISTANT BEACON, and the DISTANCE is the sound (user call).
   //
-  // The replacement is a TEXTURE rather than a tone — loose coins settling
-  // into a pile, chain links gathering.  Sparse metallic transients say
-  // "money nearby" without ever holding a pitch, so there is nothing to
-  // fatigue against; it can idle for minutes the way the tone could not.
+  // Two cuts failed here for opposite reasons.  A held 1050 Hz sine was a
+  // whine: a continuous tone cannot stop demanding attention.  A buffer of
+  // metallic coin grains fixed the whine and was busy and literal — a lot
+  // of sound to carry one bit of information.
   //
-  // Rendered as a looping BUFFER of scattered grains rather than live
-  // oscillators.  A grain is an event, and scheduling events inside a loop
-  // voice would need a timer this interface deliberately does not have —
-  // baking them into a buffer puts the randomness at generation time and
-  // costs one BufferSource to play.  Grains WRAP past the buffer end into
-  // its start, so the loop is seamless with no crossfade.
+  // What the sound actually has to say is HOW FAR AWAY and IN WHICH
+  // DIRECTION, so everything else is subtracted.  What is left is the
+  // simplest thing that can carry a bearing: a soft two-note shimmer that
+  // swells and fades on a slow tremolo, so it is silent about as often as
+  // it sounds and never sits on one level.  Quiet enough to sit under the
+  // field, and steeply attenuated (`curve`) so crossing the radius is
+  // dramatic rather than a gentle fade — a linear fade left it at half
+  // amplitude halfway out, which is only ~6 dB and reads as "close".
   a.registerLoop('snitch.near', {
-    tier: 2, gain: 0.15, positional: true,
+    tier: 2, gain: 0.085, positional: true,
     near: AUDIO_CONSTANTS.SNITCH_NEAR_RADIUS,
     far:  AUDIO_CONSTANTS.SNITCH_FAR_RADIUS,
+    curve: AUDIO_CONSTANTS.SNITCH_DISTANCE_CURVE,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0 } = s;
-      const buf = coinBuffer(ctx);
+      // A fifth apart: enough to read as a chime rather than a test tone,
+      // and low enough to stay well clear of the fatiguing band.
+      const lo = ctx.createOscillator(); lo.type = 'sine'; lo.frequency.value = 396;
+      const hi = ctx.createOscillator(); hi.type = 'sine'; hi.frequency.value = 594;
+      const hiG = ctx.createGain(); hiG.gain.value = 0.38;
 
-      // TWO copies at co-prime-ish rates, so the composite does not repeat
-      // on the buffer's own period — one 4-second loop of sparse clinks is
-      // short enough to notice.  The slower copy also reads as bigger coins.
-      const mk = (rate: number, gain: number, offset: number) => {
-        const src = ctx.createBufferSource();
-        src.buffer = buf; src.loop = true; src.playbackRate.value = rate;
-        const g = ctx.createGain(); g.gain.value = gain;
-        src.connect(g); g.connect(lp);
-        src.start(t0, offset);
-        return src;
-      };
-      // Takes the fizz off the transients without dulling the metal.
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 2200; lp.Q.value = 0.6;
-      lp.connect(dest);
+      // Slow tremolo, full depth: the swell goes to silence between pulses,
+      // which is what keeps a sustained sound from becoming a held one.
+      // Base and depth are equal so it sweeps 0 → 2×base, and both are set
+      // to 0.36 rather than 0.5 so the two summed oscillators (1 + 0.38)
+      // peak at ~0.99 instead of 1.38 — the voice hands the mixer a
+      // normalised signal, like every other loop here.
+      const swell = ctx.createGain(); swell.gain.value = 0.36;
+      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.32;
+      const lfoDepth = ctx.createGain(); lfoDepth.gain.value = 0.36;
+      lfo.connect(lfoDepth); lfoDepth.connect(swell.gain);
 
-      const a1 = mk(1.0, 0.5, 0);
-      const a2 = mk(0.79, 0.32, buf.duration * 0.37);
+      lo.connect(swell); hi.connect(hiG); hiG.connect(swell);
+      swell.connect(dest);
+      lo.start(t0); hi.start(t0); lfo.start(t0);
       return {
         stop: now => {
-          try { a1.stop(now + 0.12); a2.stop(now + 0.12); } catch { /* already stopped */ }
+          try { lo.stop(now + 0.12); hi.stop(now + 0.12); lfo.stop(now + 0.12); }
+          catch { /* already stopped */ }
         },
       };
     },
