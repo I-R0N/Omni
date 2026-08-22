@@ -384,6 +384,19 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
+  /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
+   *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
+   *  while it is positive and fades over the last `FADE_DURATION`.  A
+   *  SEPARATE timer from `hitFlash` on purpose: `hitFlash` is a ~0.1–0.3s
+   *  whiten-and-punch, and a bar that lived that long would strobe rather
+   *  than inform.  Purely presentational — nothing reads it but the
+   *  renderer. */
+  healthBarTimer?: number;
+  /** Opt OUT of the damage trigger and keep a persistent bar.  For priority
+   *  targets a player is meant to be tracking rather than reacting to (the
+   *  dragon mini-boss).  Capstone bosses do not need it — they have the
+   *  dedicated HUD bar. */
+  alwaysShowHealthBar?: boolean;
   shield?: number;
   maxShield?: number;
   shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
@@ -1461,6 +1474,15 @@ export interface EngineStats {
    *  flash window + remaining-window fraction for fade. */
   salvageFlash?: { amount: number; fraction: number };
   /** Effective player stats for the player menu (pause screen). */
+  /** The player's live hull + shield pools, pushed EVERY frame (gauntlet 5d,
+   *  U5).  `playerStats` beside it is richer but is built only while a menu
+   *  is open, and the in-game HUD needs these four numbers during play: the
+   *  player's floating world-space bar was removed in U5, so this is now the
+   *  canonical readout for the player's own condition. */
+  vitals?: {
+    health: number; maxHealth: number;
+    shield: number; maxShield: number;
+  };
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
@@ -1672,6 +1694,10 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  /** DBG: enemy health bars appear on damage and fade (true, default) vs
+   *  always drawn (false, the pre-5d behaviour).  See RenderSystem
+   *  `damageTriggeredBars`. */
+  damageTriggeredBars?: boolean;
   /** DBG minimap MATERIAL mode name (decision #43, G5): 'Flow' / 'Dots' /
    *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
    *  nothing. */
@@ -1723,6 +1749,7 @@ export interface EngineStats {
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */
   rockPaletteName?: string;
+  nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;
@@ -1924,6 +1951,9 @@ export interface EngineStats {
     /** Files named after a LOOP id — matched, but loops cannot take a
      *  recording yet, so they are refused rather than silently ignored. */
     loopFiles: string[];
+    /** Context→speaker latency readout (base + output), ms; null until the
+     *  context exists.  ~30-45ms = wired/speaker, 150-250ms = Bluetooth. */
+    latencyMs: number | null;
   };
 }
 
@@ -1988,7 +2018,13 @@ export type ControlScheme =
   /** Controller with the LEFT TRIGGER as an analogue throttle; the left
    *  stick steers only.  Its own scheme rather than a toggle because it
    *  changes what a stick deflection MEANS. */
-  | 'gamepad-thrust';
+  | 'gamepad-thrust'
+  /** ONE-STICK controller (user call): the LEFT stick — or the left D-pad —
+   *  supplies heading, aim AND throttle together, and the gun moves to the
+   *  bottom face button.  The right stick is unused, so a pad that has only
+   *  a left stick plays it in full.  Distinct from `gamepad-thrust`, where
+   *  the throttle is a trigger and the stick's magnitude is discarded. */
+  | 'gamepad-left';
 
 export interface PlayerHUDMessage {
   id: string;

@@ -805,7 +805,56 @@ export const COLLISION_CONFIG = {
     MICRO: 1, // Projectile hit
     MEDIUM: 10, // Enemy collision
     HEAVY: 20, // High speed crash
-    CAP_MULTIPLIER: 1.5 // Multiplier for velocity-based shake
+    CAP_MULTIPLIER: 1.5, // Multiplier for velocity-based shake
+
+    /* ── BODY IMPACTS: shake follows the player's own velocity STEP ──────
+     *
+     * The player-collision shake used to be `min(impactSpeed, HEAVY) *
+     * CAP_MULTIPLIER` — SPEED ALONE, with no mass anywhere in it.  Every
+     * other part of the collision code weighs mass: the crash gate is
+     * `mass * impactSpeed > ASTEROID_CRASH_MOMENTUM`, and the impulse solver
+     * splits by (bias-compressed) inverse mass.  Shake was the exception, so
+     * a 15px chip and a static wall shook the camera identically at the same
+     * closing speed, and the chip pinned the cap (user report: "very small
+     * shards moving at high enough speeds ... feels overpowered").
+     *
+     * The honest quantity is the one the solver is about to apply anyway:
+     * how much the PLAYER'S OWN velocity changes along the normal.
+     *
+     *     dv = (1 + ELASTICITY) * |v_n| * effInv_player
+     *                                   / (effInv_player + effInv_other)
+     *
+     * It is the sim's own velocity step, so it agrees with the physics by
+     * construction — bias exponent included — and it carries both masses
+     * without a second model to keep in sync.  Three consequences fall out
+     * rather than being written:
+     *
+     *   · A static tile has effInv = 0, so dv = (1+e)|v_n|: a wall is the
+     *     hardest possible hit, and with SCALE 1.0 / MAX 30 the wall curve
+     *     is IDENTICAL to the old one.  Nothing about crashing changed.
+     *   · A light body attenuates by the true mass ratio.  At |v_n| = 20:
+     *     wall 30 (was 30), 40px metal shard 12.3, 40px rock 10.5, 15px
+     *     glass chip 3.9, 8px chip 2.3 — under DV_MIN, so it is silent.
+     *   · A HEAVIER SHIP shrugs off hits, because player mass scales with
+     *     ship weight (SHIP_WEIGHT).  Free, and it ties the camera to the
+     *     outfitting system.
+     *
+     * DV_MIN is the old `impactSpeed > 2.0` threshold expressed in the new
+     * units: for a wall dv = 1.5 * v_n, so 3.0 is exactly v_n > 2. */
+    IMPACT_DV_MIN: 3.0,    // below this the hit is not felt at all
+    IMPACT_DV_SCALE: 1.0,  // shake per unit of player velocity change
+    IMPACT_MAX: 30,        // = the old min(speed, HEAVY) * CAP_MULTIPLIER cap
+
+    /* ── DIRECTION ──────────────────────────────────────────────────────
+     * A directional shake is a decaying OSCILLATION along the impact axis,
+     * not white noise: the camera lurches the way the ship was actually
+     * shoved and rings back.  `DIR_JITTER` keeps a little isotropic noise on
+     * top so it does not read as a mechanical slide, and `DIR_FREQ_HZ` is
+     * the ring rate over the SHAKE_DECAY window (~3 cycles at 0.3 s).
+     * Shakes with no meaningful direction — explosions, warp-ins, wave
+     * banners — pass none and keep the old isotropic jitter. */
+    DIR_FREQ_HZ: 11,
+    DIR_JITTER: 0.35,
   }
 };
 
@@ -823,7 +872,20 @@ export const UI_CONSTANTS = {
     PLAYER_WIDTH: 44, PLAYER_HEIGHT: 5,
     ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,
     OFFSET_MODIFIER: 0.85, // Multiplier of entity size
-    OFFSET_BASE: 10 // Pixel padding
+    OFFSET_BASE: 10, // Pixel padding
+    /** DAMAGE-TRIGGERED VISIBILITY (gauntlet 5d, U5 — parking-lot item).
+     *
+     *  A bar is a HIT REACTION, not a permanent label.  Every enemy used to
+     *  carry one every frame, at full health and on one-shot trash alike,
+     *  which read as "tracked HUD" for entities the player has no reason to
+     *  track.  Now a bar appears when the entity takes damage and fades out
+     *  again, so the bars on screen are exactly the fights in progress.
+     *
+     *  SHOW_DURATION is long enough to read a bar after a hit lands and
+     *  still be there for the follow-up shot; FADE_DURATION is the tail of
+     *  it, so the bar dissolves rather than blinking out. */
+    SHOW_DURATION: 2.2,
+    FADE_DURATION: 0.7,
   },
   // Off-screen indicators.  Arrows ride the SCREEN EDGE (an inset viewport
   // rect) rather than a fixed centre ring, and their SIZE carries distance:
@@ -838,6 +900,43 @@ export const UI_CONSTANTS = {
   // "it's coming for you" signal.
   INDICATORS: {
     EDGE_INSET: 26,          // px in from the viewport edge the arrows ride
+    /** HUD SAFE BANDS (user call).  The arrows ride an inset viewport rect,
+     *  and that rect used to be SYMMETRIC — so an arrow at a near-vertical
+     *  bearing parked itself exactly under the top chip stack or behind the
+     *  loadout strip / minimap, which is where a contact directly ahead or
+     *  directly behind the ship always is.  The one bearing you most need
+     *  the arrow for was the one it hid on.
+     *
+     *  These reserve the two bands the HUD actually occupies, so the rect is
+     *  asymmetric: the top edge drops below the readout chips, the bottom
+     *  edge lifts above the loadout strip.  They are DELIBERATELY constants
+     *  rather than a measurement of the live DOM — the alternative is the
+     *  canvas layer reading React's layout every frame, and the bands only
+     *  change when the HUD is redesigned. */
+    /*  MEASURED, not guessed: at the 390x844 design target the top stack
+     *  (vitals chip on the left; score / salvage / wave chips on the right)
+     *  bottoms out at y=118 with the HUD's 8px padding, and the bottom
+     *  furniture (minimap at 75px, loadout slots at 48px, both on an 8px
+     *  baseline) tops out at y=H-83.  These are those numbers less the
+     *  EDGE_INSET the rect already carries. */
+    /*  Each band is the measured widget height PLUS ~SIZE_NEAR, because an
+     *  arrow is CENTRED on the rect edge: a rect that merely reaches the
+     *  bottom of the chips leaves the top half of every arrow tangent to
+     *  them. */
+    TOP_INSET: 40,           // px reserved for the top readout row
+    BOSS_BAR_INSET: 62,      // ...plus this while a capstone bar is up
+    BOTTOM_INSET: 74,        // px reserved for the loadout strip + minimap
+    /*  Below this width the readout row can no longer fit on one line and
+     *  WRAPS, so the band it occupies grows with it (measured: 50px -> 84px
+     *  at 320).  A width threshold rather than a DOM measurement, for the
+     *  same reason the rest of this block is one. */
+    NARROW_WIDTH: 372,
+    WRAP_INSET: 36,
+    /** Never let the two bands close up on a short window — a landscape
+     *  phone is ~390px tall and would otherwise be left with no rect at
+     *  all.  Below this the bands give way and the arrows ride a thin
+     *  centre band instead of vanishing. */
+    MIN_BAND: 90,
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5, // Max arrows for POIs
     // Enemy chevrons are range-unlimited (maps are big and live wave
@@ -874,7 +973,56 @@ export const UI_CONSTANTS = {
       AGGRO:   '#ef4444',    // blink colour for a provoked rival / bubble
       OTHER:   '#94a3b8',    // slate-400 — any POI without a type of its own
     },
-  }
+  },
+
+  /**
+   * The CANVAS HUD's own vocabulary (gauntlet 5d, U3 — audit findings
+   * E3/E4).
+   *
+   * The DOM overlay names its type scale and its greys in
+   * `components/UIOverlay.tsx`; the canvas layer had neither, so its sizes
+   * were picked independently per draw site (8 / 9 / 11 / 14 px) and its
+   * greys were hardcoded hex at the point of use (`#475569`, `#64748b`,
+   * `#cbd5e1`, `#e2e8f0`, `#22d3ee`, `#fde047`, `#fca5a5`).  These are the
+   * same slate family the DOM uses, stated once.
+   *
+   * NOTE ON THE COLOUR LEGEND: `INDICATORS.COLORS` above is THE type-colour
+   * palette — what a contact IS, wherever it is drawn (edge arrow, minimap
+   * blip).  This block is the CHROME palette — text, rules and affordances,
+   * which carry no type meaning.  The two never overlap, and nothing in the
+   * canvas layer should introduce a third.
+   */
+  HUD: {
+    /** Type scale, mirroring the DOM's four named steps.  Canvas HUD text is
+     *  monospace by house style — that is a world-vs-chrome distinction and
+     *  is deliberate — but the SIZES are now the same set. */
+    TEXT: {
+      MICRO: 9,   // indicator labels, slot numbers, the empty-slot tag
+      BODY:  11,  // player messages, the interaction prompt
+      ROW:   12,  // loadout weapon names at full slot width
+      LOUD:  14,  // floating damage / points text
+    },
+    /** Chrome greys, brightest to dimmest.  `TEXT` is body copy on glass,
+     *  `MUTED` is a secondary readout, `DIM` is a disabled or empty state,
+     *  `RULE` is a hairline or dashed outline. */
+    TEXT_COLOR:  '#e2e8f0',   // slate-200
+    MUTED_COLOR: '#cbd5e1',   // slate-300
+    DIM_COLOR:   '#64748b',   // slate-500
+    RULE_COLOR:  '#475569',   // slate-600
+    /** Fill behind an inactive HUD widget (the resting loadout slot) — the
+     *  same slate-800 the DOM's panels use. */
+    PANEL_FILL:  '#1e293b',   // slate-800
+    /** The outline every string on the canvas wears so it survives arbitrary
+     *  bright terrain underneath.  One width, one alpha. */
+    OUTLINE: 'rgba(0,0,0,0.85)',
+    OUTLINE_WIDTH: 3,
+    /** ACCENTS.  Cyan is the HUD's "supporting information" colour (banner
+     *  subtext); the charge pair is the ship's charge ring read back on the
+     *  fire button, so the two must stay identical. */
+    ACCENT_COLOR: '#22d3ee',   // cyan-400
+    CHARGE_FULL:  '#fde047',   // yellow-300 — charge complete
+    CHARGE_PART:  '#fca5a5',   // red-300 — charge winding up
+  },
 };
 
 // 2-slot loadout HUD (pivot 1b — replaced the 8-cell ammo strip).  Two wide
@@ -886,17 +1034,25 @@ export const LOADOUT_HUD_CONSTANTS = {
   SLOT_H:        48,
   SLOT_GAP:      8,
   SLOT_RADIUS:   5,
-  BOTTOM_MARGIN: 14,
+  // Hugs the bottom edge (user call: "collapse the hud elements more to the
+  // top and bottom of the screen").  This is also the minimap's bottom
+  // offset — computeMinimapRect reads it — so the two bottom widgets sit on
+  // one baseline by construction rather than by two matching numbers.
+  BOTTOM_MARGIN: 8,
 };
 
 export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
-  MARGIN: 20,          // Distance from screen edge
+  MARGIN: 10,          // Distance from screen edge (hugs the corner — user call)
   ZOOM_RANGE: 1000,    // World units radius shown in small (zoomed-in) minimap
   RANGE: 8000,         // World units radius shown in expanded (overview) map
-  BG_COLOR: 'rgba(15, 23, 42, 0.85)',
-  BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
+  // More transparent than a DOM panel on purpose (user call): the map sits
+  // ON the world and the world should read through it.  The blips and the
+  // static terrain layer draw at full strength on top, so legibility comes
+  // from the marks rather than from hiding what is behind them.
+  BG_COLOR: 'rgba(15, 23, 42, 0.55)',
+  BORDER_COLOR: 'rgba(56, 189, 248, 0.30)',
   PLAYER_DOT_COLOR: '#ffffff',
   VIEWPORT_COLOR: 'rgba(56, 189, 248, 0.25)',
   VIEWPORT_BORDER_COLOR: 'rgba(56, 189, 248, 0.8)',
@@ -1552,12 +1708,17 @@ export function cycleEmitShadowTier(): string {
  *  direction, which is what makes a beam sweeping past one read as the beam
  *  finding it.
  *
- *  `beam` (an 80-degree cone) is the DEFAULT (user call): the game reads as
- *  flying a searchlight, and the radial glow is one click away.  `off` is
- *  a zero-width beam rather than a special case: the player's light draws
- *  nothing, so what is left on the layer is exactly the emitters — which
- *  makes it a useful thing to look at rather than a way to disable the
- *  feature (that is `Lighting: legacy`).
+ *  `off` is the DEFAULT now (user call, superseding the earlier
+ *  beam-default call): the flashlight became an in-game TOOL gated behind
+ *  the Flashlight Kit module, so a ship without the kit carries no player
+ *  light and this DBG cycle is the raw dev override underneath the tool.
+ *  While the tool is ON it overrides this global entirely
+ *  (`RenderSystem.playerLightToolHalfDeg`); while it is off — or the kit is
+ *  not installed — the renderer falls back here, so a dev can still force
+ *  any width from the debug menu.  `off` is a zero-width beam rather than a
+ *  special case: the player's light draws nothing, so what is left on the
+ *  layer is exactly the emitters — which makes it a useful thing to look at
+ *  rather than a way to disable the feature (that is `Lighting: legacy`).
  *
  *  Half-angles, so `wide` is a 120-degree beam. */
 export const FLASHLIGHT_CYCLE: ReadonlyArray<{ name: string; halfDeg: number }> = [
@@ -1834,7 +1995,26 @@ export const FLASHLIGHT = {
   CULL_MARGIN_DEG: 25,
 } as const;
 let activeFlashlightIndex =
-  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'beam');
+  FLASHLIGHT_CYCLE.findIndex(f => f.name === 'off');
+
+/** THE LIGHT TOOL (user call): the ship's light is EQUIPMENT.  Tapping the
+ *  ship (or E / the pad's action button) in open space cycles the level; the
+ *  Light module (`flashlight_kit`) is what grants the tool at all, the same
+ *  everything-is-a-module pattern as the Shield core.  Both ON levels wear
+ *  the BEAM flashlight style (the 80-degree cone); what separates them is
+ *  the LIGHTING TIER (user call): `medium` runs the light system at the
+ *  'medium' rung and `high` at 'high' — longer reach, more occluders, soft
+ *  penumbra, the whole ladder step, applied through the tier override below
+ *  so every consumer of `getActiveLightingTier` agrees.  `off` is the
+ *  default: a light you switch on. */
+export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; label: string; halfDeg: number; tier?: string }> = [
+  // `name` is the internal/debug vocabulary (it names the TIER the level
+  // runs); `label` is what the player reads over the ship — headlight
+  // words, because "medium/high" are debugging terms (user call).
+  { name: 'off',    label: 'Light off', halfDeg: 0 },
+  { name: 'medium', label: 'Low beam',  halfDeg: 40, tier: 'medium' },
+  { name: 'high',   label: 'High beam', halfDeg: 40, tier: 'high' },
+] as const;
 export function getFlashlightHalfDeg(): number {
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].halfDeg;
 }
@@ -1844,6 +2024,32 @@ export function getFlashlightName(): string {
 export function cycleFlashlight(): string {
   activeFlashlightIndex = (activeFlashlightIndex + 1) % FLASHLIGHT_CYCLE.length;
   return FLASHLIGHT_CYCLE[activeFlashlightIndex].name;
+}
+
+/** DBG: which way the player's wake spins a nebula shard it passes.
+ *
+ *  The swirl pass (`PhysicsSystem.applyNebulaPlayerPull`) used to sign each
+ *  shard's spin by its id's last-character parity — "varied vortices" — which
+ *  means a pass has NO consistent handedness: half the cloud rotates against
+ *  the wake (user report: a starboard-side shard should turn clockwise).
+ *  `physical` (the default) signs the spin by the wake shear — the cross
+ *  product of the ship's velocity with the ship→shard vector — so a shard
+ *  off the starboard bow turns clockwise on screen and a port-side one
+ *  counter-clockwise.  `inverted` is the same cross product negated, and
+ *  `random` is the shipped parity behaviour; all three are one DBG click
+ *  apart (Visual ▸ "Neb spin") so the two candidate handednesses can be
+ *  A/B'd in flight.  PROPER rotational mechanics (angular momentum in the
+ *  impulse solver, spin from off-centre hits) is parked for its own session
+ *  — see docs/PARKING_LOT.md. */
+export const NEBULA_WAKE_SPIN_CYCLE = ['physical', 'inverted', 'random'] as const;
+export type NebulaWakeSpinMode = typeof NEBULA_WAKE_SPIN_CYCLE[number];
+let activeNebulaWakeSpinIndex = 0;
+export function getNebulaWakeSpinMode(): NebulaWakeSpinMode {
+  return NEBULA_WAKE_SPIN_CYCLE[activeNebulaWakeSpinIndex];
+}
+export function cycleNebulaWakeSpin(): string {
+  activeNebulaWakeSpinIndex = (activeNebulaWakeSpinIndex + 1) % NEBULA_WAKE_SPIN_CYCLE.length;
+  return NEBULA_WAKE_SPIN_CYCLE[activeNebulaWakeSpinIndex];
 }
 
 /** DBG: how hard the CAUSTIC edges are — the two fades that keep a refracted
@@ -2134,7 +2340,21 @@ export const LIGHTING_TIERS: ReadonlyArray<LightingTier> = [
 // the array above rather than being a literal, or inserting a tier silently
 // changes what ships.
 let activeLightingTierIndex = LIGHTING_TIERS.findIndex(t => t.name === 'low');
-export function getActiveLightingTier(): LightingTier { return LIGHTING_TIERS[activeLightingTierIndex]; }
+/** The LIGHT TOOL's tier, while the tool is ON (see FLASHLIGHT_TOOL_LEVELS)
+ *  — set per frame by GameEngine.draw, -1 when the tool is off.  While set
+ *  it wins over the DBG tier row for EVERY consumer, which is the point:
+ *  "high" on the tool means the whole light system steps up, not just the
+ *  player's cone.  The DBG row stays the raw dev override underneath,
+ *  exactly the flashlight-width arrangement. */
+let lightingTierOverrideIndex = -1;
+export function setLightingTierOverride(name: string | null): void {
+  lightingTierOverrideIndex = name === null
+    ? -1 : LIGHTING_TIERS.findIndex(t => t.name === name);
+}
+export function getActiveLightingTier(): LightingTier {
+  return LIGHTING_TIERS[lightingTierOverrideIndex >= 0
+    ? lightingTierOverrideIndex : activeLightingTierIndex];
+}
 export function cycleLightingTier(): LightingTier {
   activeLightingTierIndex = (activeLightingTierIndex + 1) % LIGHTING_TIERS.length;
   return LIGHTING_TIERS[activeLightingTierIndex];
@@ -3659,17 +3879,73 @@ export const ENEMY_NEBULA_BURST = {
 // kick is purely KICK_PER_DMG × applied (post-armor) damage, so heavy hits
 // shove hard and chip hits on armor barely nudge.
 export const HIT_FEEDBACK = {
-  KICK_PER_DMG: 1.0,  // knockback velocity per point of applied damage (uncapped)
+  /* ── KNOCKBACK IS AN IMPULSE, NOT A VELOCITY (user call) ──────────────
+   *
+   * This used to be `KICK_PER_DMG: 1.0` applied as `dv = damage * 1.0` —
+   * a velocity step with NO MASS IN IT, so one Plasma Cannon hit added
+   * dv = 18 to a mass-4 gnat and to a mass-500 dragon alike, and dv = 18 is
+   * several times any enemy's own top speed.  That is what launched NPCs off
+   * screen on every hit, and it is why they behaved unlike shards: the shard
+   * push right below is `projSpeed * 0.20 / max(1, mass/10)` — mass-aware,
+   * landing in the 0.7 .. 3.2 range.  (The dragon's ENEMY_VARIANTS row even
+   * says "heavy: barely shoved", documenting an intent the code did not
+   * implement.)
+   *
+   * Momentum in, velocity out — the same move the screen shake made:
+   *
+   *     dv = damage * KICK_IMPULSE_PER_DMG / mass
+   *
+   * At the shipped weapon damages that lands NPCs in the shard range, and
+   * orders them by weight the way everything else in the collision code
+   * does.  dv from one Cannon hit (18 dmg): gnat 9.0, Charger 4.5, Drone
+   * 3.6, Tank 2.0, Turret 0.7, Warden 0.26, Dragon 0.07 (was 18 for every
+   * one of them).
+   *
+   * The cap is expressed in the TARGET'S OWN top speed rather than as an
+   * absolute, so it means the same thing across a roster whose speeds vary
+   * 4x: a hit can never shove a body faster than it can fly under its own
+   * power.  The floor keeps a bolted-down emplacement (maxSpeed 0: Turret,
+   * Nest) flinching rather than being immovable. */
+  KICK_IMPULSE_PER_DMG: 2.0,   // momentum per point of applied damage
+  KICK_MAX_SPEED_FRAC: 0.9,    // never shove past this fraction of own maxSpeed
+  KICK_SPEED_FLOOR: 3.0,       // ...but a maxSpeed-0 body still flinches
   STUN_SEC: 0.12,     // stagger: no AI force AND no speed-clamp while > 0
   // Player-hit response scales with the incoming shot's intrinsic damage so a
   // heavy slug (Tank, 16) lands like a wallop and a chip pellet (Drone, 5)
   // barely registers — both shake and a directional knockback.  Uses the
   // projectile's own damage (not the post-shield/armor value) so a heavy hit
   // jolts even when the shield eats it.
-  PLAYER_SHAKE_BASE: 4,        // floor shake on any player hit
-  PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
-  PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
-  PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
+  /* A SHOT MUST NOT RIVAL A COLLISION (user call).
+   *
+   * These numbers predate the impact model and were on their own scale, so
+   * they landed far up the body-impact range: a 5-damage Drone PELLET
+   * produced 10.0 — as much as a 40px rock hitting the hull at speed 20 —
+   * and a 16-damage slug produced 23.2, nearly a full-tilt wall crash (30).
+   * Being shot by a pea-shooter outweighed flying into terrain.
+   *
+   * A projectile's actual momentum against the hull is negligible (mass 1 at
+   * speed 16 against a 100-mass ship is dv = 0.16, an order of magnitude
+   * under `SHAKE.IMPACT_DV_MIN`), so this shake is deliberately a LEGIBILITY
+   * signal — "you got hurt" — rather than a physical one, and damage is the
+   * right input for it.  What it needed was a place in the same scale:
+   *
+   *   pellet (5 dmg)  -> 4.0   below a wall crash at the break threshold (6)
+   *   Charger (7)     -> 5.0
+   *   slug (16)       -> 9.5
+   *   Bastion (18)    -> 10.5  about a 40px rock at speed 20 (10.5)
+   *   cap             -> 11    under a wall crash at speed 8 (12)
+   *
+   * So the heaviest shell in the game feels like a real rock hitting you,
+   * a pellet feels like less than a scrape, and nothing fired can approach
+   * ramming terrain.  Direction is unchanged: the shot's travel axis. */
+  PLAYER_SHAKE_BASE: 1.5,      // floor shake on any player hit
+  PLAYER_SHAKE_PER_DMG: 0.5,   // + this per point of shot damage
+  PLAYER_SHAKE_MAX: 11,        // cap — under a moderate crash, never near HEAVY
+  /* The player's own shove is the same rule, normalised so the LEAN ship is
+   * unchanged: 12 / PHYSICS_CONSTANTS.PLAYER_MASS (100) = the old 0.12 per
+   * damage point.  Only a laden hull differs, and it differs the way the
+   * screen shake already does — more ship, less shove. */
+  PLAYER_KICK_IMPULSE_PER_DMG: 12,
   // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
   // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
   // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
@@ -4101,7 +4377,7 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge';
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge' | 'utility';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
  *  Base values modified: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
@@ -4116,6 +4392,7 @@ export interface ModuleEffect {
   cooldownFrac?: number;    // autoloader
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
+  flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
 }
 
 export interface ModuleDef {
@@ -4202,6 +4479,7 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   gunnery:    ['gun'],
   autoloader: ['gun'],
   overcharge: ['gun'],
+  utility:    ['hull'],
 };
 
 /** Neighbour indices per hex slot in the 7-flower: 0 = center (touches
@@ -4236,6 +4514,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
+  { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
@@ -4326,6 +4605,50 @@ export const AUDIO_CONSTANTS = {
      *  under this cannot be heard in play whatever it was meant to be — the
      *  file has not made the sound quieter, it has removed it.  ~-26 dBFS. */
     SAMPLE_MIN_PEAK: 0.05,
+
+  /** IMPACT VOICING — the ear reads the same dial as the camera
+   *  (docs/SFX_INVENTORY.md §4.4).  A body collision produces two pieces of
+   *  feedback, and they used to be computed from two unrelated scales with
+   *  no mass in either.  Both now come from `I` — the struck body's own
+   *  velocity step normalised by `COLLISION_CONFIG.SHAKE.IMPACT_MAX`, i.e.
+   *  literally `shake / 30`.
+   *
+   *  The TILE span is load-bearing rather than taste: dividing dv by 18
+   *  reproduces the shipped `impactSpeed / 12` curve exactly, so the wall
+   *  crash is bit-for-bit unchanged and only lighter impactors get quieter —
+   *  the same isolating claim the shake change makes.  The trade it buys is
+   *  that above its span a row is already at full gain, so the camera can
+   *  still separate a hard crash from a catastrophic one and the ear cannot.
+   *
+   *  PITCH is taken from MASS, not size, because mass is already the term
+   *  inside `I` — so the two cues cannot disagree, and a 40px metal shard
+   *  knocks lower than a same-size rock, which it should, since it also
+   *  shakes harder. */
+  /** The dv at which a row reaches FULL gain.  Per row, not global: the tile
+   *  crash is gated at closing speed 4 and can reach dv 30, while the shard
+   *  row is gated at 1.2 and tops out around dv 7 — normalising both by the
+   *  same span pinned every shard contact to its floor, i.e. a voice with no
+   *  dynamics at all.  Each row now uses the range it can actually reach, so
+   *  "harder is louder" holds WITHIN a row; the absolute level ordering
+   *  BETWEEN rows stays where the mix levels put it.
+   *
+   *  TILE is 18 because that is the parity number: it reproduces the shipped
+   *  `impactSpeed / 12` curve exactly (a static body takes the whole step, so
+   *  dv = 1.5 v). */
+  IMPACT_SPAN_TILE: 18,
+  IMPACT_SPAN_SHARD: 6,
+  IMPACT_SPAN_ENEMY: 12,
+  IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
+  IMPACT_PITCH_EXP: 0.25,
+  IMPACT_PITCH_MIN: 0.70,
+  IMPACT_PITCH_MAX: 1.60,
+  /** Per-row gain floors (docs/SFX_INVENTORY.md §4.4).  A floor is what stops
+   *  a voice fading to nothing: the tile crash has none because it is gated
+   *  hard enough that a quiet one is meaningful, while the light-contact rows
+   *  keep a presence. */
+  IMPACT_FLOOR_TILE: 0,
+  IMPACT_FLOOR_SHARD: 0.25,
+  IMPACT_FLOOR_ENEMY: 0.30,
 
   DEFAULT_VOLUME: 0.7,     // master gain at boot; in-memory only (no persistence)
   MAX_VOICES: 24,          // hard ceiling across all tiers
@@ -4488,6 +4811,7 @@ export const CONTROL_SCHEMES: ReadonlyArray<{
   { id: 'keyboard',       label: 'Keyboard',         blurb: 'WASD + mouse · touch still works' },
   { id: 'gamepad',        label: 'Controller',       blurb: 'Gamepad · touch still works' },
   { id: 'gamepad-thrust', label: 'Controller (trigger thrust)', blurb: 'Either trigger throttles · either stick steers + aims' },
+  { id: 'gamepad-left',   label: 'Controller (left stick)',      blurb: 'Left stick / D-pad flies + aims · bottom face button shoots' },
 ] as const;
 
 export function controlSchemeDef(id: ControlScheme) {
@@ -4516,6 +4840,16 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
    *  stick's magnitude is thrust, here it is discarded — and two answers to
    *  that cannot be live at once. */
   triggerThrust?: boolean;
+  /** Does the MOVE stick also write the aim — the ship aiming where it flies?
+   *  True for both pad schemes that give up the right stick: under
+   *  `gamepad-thrust` because a minimal pad may not have one, and under
+   *  `gamepad-left` because the user asked for the left stick to carry
+   *  direction and thrust together.  When set, the right stick is ignored
+   *  rather than allowed to fight for the pointer. */
+  stickAims?: boolean;
+  /** Is the gun the bottom FACE button rather than the right trigger?  Set
+   *  wherever the triggers are doing something else or may not exist. */
+  fireFace?: boolean;
 }> = {
   touch:            { joystick: false, fireButton: false, mouseDragMoves: true,  touchDragMoves: true,  tapFires: true,  pointerAims: true },
   'joystick-left':  { joystick: true,  fireButton: true,  mouseDragMoves: false, touchDragMoves: false, tapFires: false, pointerAims: false, stickSide: 'left'  },
@@ -4524,7 +4858,11 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
   gamepad:          { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true },
   // Same as `gamepad` in every touch respect — the trigger changes what the
   // LEFT STICK means, not what a finger means, so touch stays exactly alive.
-  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true },
+  'gamepad-thrust': { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, triggerThrust: true, stickAims: true, fireFace: true },
+  // Same again: the LEFT stick carries heading, aim and throttle together and
+  // the gun sits on the bottom face button, which changes nothing a finger
+  // does.
+  'gamepad-left':   { joystick: false, fireButton: false, mouseDragMoves: false, touchDragMoves: true,  tapFires: true,  pointerAims: true, stickAims: true, fireFace: true },
 };
 
 // ── Minimap material layer (decision #43, gauntlet step 5 G5) ────────────────
@@ -4532,15 +4870,18 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
 // candidates can be judged against each other in motion rather than argued
 // about:
 //   'flow'  — streamlines sampled from the asteroid flow field: where material
-//             MOVES, instead of ten thousand dots saying where it is.  DEFAULT.
-//   'dots'  — the status quo ante: one dot per mobile shard.
+//             MOVES, instead of ten thousand dots saying where it is.
+//   'dots'  — one dot per mobile shard.  DEFAULT (user call): in play the
+//             question the map is asked is "what is out there", and a dot
+//             answers it directly where a streamline answers a question about
+//             the field.  Flow stays one step of the cycle away.
 //   'off'   — neither.  The control, and the honest answer if the streamlines
 //             fail to read at 75px.
 // Static TILES are unaffected — they come from the pre-rendered static layer,
 // which is the minimap's actual terrain reading.
 export const MINIMAP_MATERIAL_MODES = ['flow', 'dots', 'off'] as const;
 export type MinimapMaterialMode = typeof MINIMAP_MATERIAL_MODES[number];
-let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('flow');
+let activeMinimapMaterialIndex = MINIMAP_MATERIAL_MODES.indexOf('dots');
 export function getActiveMinimapMaterial(): MinimapMaterialMode {
   return MINIMAP_MATERIAL_MODES[activeMinimapMaterialIndex];
 }
@@ -4876,6 +5217,80 @@ export const DROP_PULL = {
  * Returns the per-slot x positions so the renderer and the tap hit-test
  * (GameEngine fire-event routing) share one geometry source.
  */
+/**
+ * The minimap's screen rect — ONE definition of the bottom-left corner
+ * (gauntlet 5d, U3; audit findings E1/E2).
+ *
+ * Four places computed this independently: the renderer that draws it, the
+ * fire-event handler that catches the expand tap, the joystick exclusion zone
+ * that must refuse it, and the wave banner that has to clear it.  The banner
+ * got it WRONG — it reserved `MINIMAP_CONSTANTS.SIZE` (75px, the COLLAPSED
+ * height) unconditionally, so with the map open the banner drew inside the
+ * 280px expanded one.  Two of the other three used `MARGIN` for the left
+ * offset and `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN` for the bottom, which is
+ * why "one corner, three margins" was a finding rather than a nitpick.
+ *
+ * Every caller now asks here, and the EXPANDED flag is a parameter rather
+ * than an assumption.
+ */
+export function computeMinimapRect(screenHeight: number, expanded: boolean): {
+  x: number; y: number; size: number;
+} {
+  const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
+  const size = expanded ? EXPANDED_SIZE : SIZE;
+  return {
+    x: MARGIN,
+    y: screenHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
+    size,
+  };
+}
+
+/**
+ * The OFF-SCREEN INDICATOR rect — the inset viewport rect the edge arrows
+ * ride (user call: "the chevrons hide behind the HUD").
+ *
+ * It used to be a symmetric inset of `EDGE_INSET` on all four sides, derived
+ * inline from the screen half-extents.  That put the top edge of the rect at
+ * y=26 — underneath the readout chip stack — and the bottom edge under the
+ * loadout strip and the minimap.  An arrow at a near-vertical bearing
+ * therefore drew BEHIND the HUD, and a near-vertical bearing is exactly
+ * "directly ahead of you" and "directly behind you".
+ *
+ * So the rect is asymmetric now: the two HUD bands are reserved, and the
+ * arrows ride the largest rect that clears them.  Pure and exported for the
+ * same reason `computeMinimapRect` is (5d U4): it is wrong in a way nothing
+ * reports — an arrow under a chip throws no error and logs nothing.
+ */
+export function computeIndicatorRect(
+  screenWidth: number,
+  screenHeight: number,
+  bossBar: boolean = false,
+): { left: number; right: number; top: number; bottom: number } {
+  const {
+    EDGE_INSET, TOP_INSET, BOSS_BAR_INSET, BOTTOM_INSET, MIN_BAND,
+    NARROW_WIDTH, WRAP_INSET,
+  } = UI_CONSTANTS.INDICATORS;
+  const left  = Math.min(EDGE_INSET, Math.max(0, screenWidth  * 0.5 - 8));
+  const right = screenWidth - left;
+  // The boss bar is the one part of the top band that comes and goes, and it
+  // is the tallest.  Reserving its height permanently would cost every
+  // ordinary fight ~60px of play area for a widget that is not on screen, so
+  // the band grows while it is up instead — and likewise narrows back when
+  // the readout row is wide enough not to wrap.
+  let top     = EDGE_INSET + TOP_INSET
+              + (bossBar ? BOSS_BAR_INSET : 0)
+              + (screenWidth < NARROW_WIDTH ? WRAP_INSET : 0);
+  let bottom  = screenHeight - EDGE_INSET - BOTTOM_INSET;
+  // A short window (a landscape phone) would otherwise have the two bands
+  // meet or cross.  The bands give way rather than the arrows vanishing.
+  if (bottom - top < MIN_BAND) {
+    const mid = screenHeight * 0.5;
+    top    = Math.max(0, mid - MIN_BAND * 0.5);
+    bottom = Math.min(screenHeight, mid + MIN_BAND * 0.5);
+  }
+  return { left, right, top, bottom };
+}
+
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {
   startY: number;
   slotW: number;
@@ -4962,6 +5377,45 @@ export function enemyDamageMult(waveIndex: number): number {
 export function hitReactStrength(damage: number, maxHealth: number): number {
   if (!(damage > 0) || !(maxHealth > 0)) return 0;
   return Math.min(1, damage / maxHealth);
+}
+
+/**
+ * Stamp the two VISUAL hit timers together (gauntlet 5d, U5).
+ *
+ * `hitFlash` is the ~0.1–0.3s whiten-and-scale-punch each damage site already
+ * set for itself; `healthBarTimer` is the much longer window the world-space
+ * health bar is visible for.  They are separate fields — a bar that lived as
+ * long as a flash would strobe rather than inform — but they are stamped by
+ * the same event, so folding them into one call is what stops the two from
+ * drifting apart as damage paths are added.  Each site keeps its OWN flash
+ * duration, because those were tuned per impact type.
+ *
+ * Purely presentational: nothing in the sim reads either field, so this is
+ * safe to call from any damage path without touching behaviour.  Takes a
+ * loosely-typed entity so `constants.ts` stays free of a `types.ts` import.
+ */
+export function markDamaged(
+  entity: { hitFlash?: number; healthBarTimer?: number },
+  flash: number,
+) {
+  entity.hitFlash = flash;
+  entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
+}
+
+/**
+ * Arm the bar window for a hit the SHIELD ate (gauntlet 5d, U5).
+ *
+ * A shot fully absorbed by a shield costs no health, so it never reached
+ * `markDamaged` — and the bar is where the shield STRIP lives, so without
+ * this a player could never watch a shield drain: the readout would only
+ * appear once the shield had already failed and the hull was taking hits.
+ * That is precisely backwards, and it is what the U5 suite caught.
+ *
+ * No `hitFlash`: the hull did not take the hit, and the shield has its own
+ * `shieldHitFlash`. Only the bar's visibility window is armed.
+ */
+export function markShieldDamaged(entity: { healthBarTimer?: number }) {
+  entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
 }
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────

@@ -43,7 +43,9 @@ vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
                           (no lint script)
-playwright.config.ts      Test harness: one 390×844 project, a webServer
+playwright.config.ts      Test harness: one 390×844 project (the DESIGN
+                          TARGET; viewports.spec.ts overrides it per
+                          describe block), a webServer
                           that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
@@ -51,9 +53,16 @@ scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
                           plus input / help / minimap / maps (step 5),
+                          viewports / healthbars (5d), lighting (the
+                          PR #88 gauntlet) and the play-test follow-ups
+                          terrain / shake / knockback / deflect /
+                          flashlight / nebulaspin,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  111 tests
+                          anti-flake rules).  222 tests.  All run at
+                          390×844 EXCEPT viewports.spec.ts, which sets
+                          its own and covers six sizes plus a
+                          mid-session resize
 
 components/
   menuNav.ts              GAMEPAD MENU NAVIGATION (G15) — the D-pad
@@ -220,6 +229,9 @@ engine/
                           COUNTED enemy is dead (clear-the-field;
                           `countsTowardWave !== false`); the clock just
                           grades the speed bonus.  Survivors carry over.
+                          `haltForBoss()` ENDS the ladder when a boss
+                          reaches the field and nothing but a map load
+                          restarts it (see §3)
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
@@ -391,14 +403,38 @@ at FULL value (the snitch board-clear, minus the half-value scale), so
 the escort explodes, pays its kill points and sprays its salvage rather
 than being left to mop up after the fight is over — NEUTRAL third
 parties (`thirdParty`: bubbles, dragons) and RIVALS are spared, since
-they are not the boss's forces.  It also HALTS
-the arena's ladder (`WaveSystem.halted`) — no further wave starts there,
-so the choice between the two rifts is made in quiet.  It opens a DESCENT
-rift beside the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
-`PORTAL_CONSTANTS.DESCENT_COLOR`).  `dismissStageClear()` resumes the
-cleared arena; the CHOICE is then made IN THE WORLD by flying to a rift,
-which is why the screen offers no travel buttons: down the amber rift to
-stage N+1, or back through the arena's return rift to the hub.
+they are not the boss's forces.  The arena's ladder is already HALTED by
+then — see the paragraph below: it stops when the boss APPEARS, not when
+it dies.  `dismissStageClear()` resumes the cleared arena, and the way out
+is the arena's own return rift.
+
+**THE DESCENT RIFT IS SWITCHED OFF** (user call, pending a rework of the
+descent flow).  `openDescentPortal` still exists in `engine/bosses.ts`,
+verbatim and uncalled; `GameEntity.isDescent`, the amber
+`PORTAL_CONSTANTS.DESCENT_COLOR` and the whole
+`transitionToMap(id, {descend:true})` path — depth, `waveOffset`, the
+stage stride — are untouched and still tested.  What was removed is the
+one CALL that put a rift in the world.  So a cleared stage currently ends
+by flying home rather than deeper.
+
+**A BOSS ENDS THE LADDER** (user call).  Waves used to keep arriving while
+a boss was on the field and to resume after it died; a boss fight with a
+wave landing on top of it is two encounters at once.  `handleBossSpawn` —
+the ONE seam both the capstone wave's own spawn and the DBG warp-in pass
+through — calls `WaveSystem.haltForBoss()`, which sets `halted`, zeroes
+any grace countdown (so the HUD stops advertising a wave that is not
+coming) and, for a boss warped in MID-wave, drops the ordinary spawns
+still queued behind it.  A capstone's own escort (`BossDef.companions`)
+is deliberately kept: that is the boss's designed encounter, not the
+ladder — but only while the boss LIVES.  Killing it cancels the escort
+still queued in the spawn stream (`WaveSystem.cancelPendingSpawns`, called
+at the rout in `payBossBounty`): the rout wipes every enemy standing, and
+reinforcements must not keep warping into a fight that is over — queued
+escort streaming in after the kill read as "the waves kept coming".
+Nothing clears `halted` except `WaveSystem.init`, i.e. loading a
+map — so it does not resume when the boss dies, and a fresh arena runs its
+own ladder.  This is deliberately blunt while the wave/boss relationship
+is redesigned.
 `GameEngine.stageIndex` is 0-based DEPTH — incremented by
 `transitionToMap(id, {descend:true})`, zeroed on arrival at the HUB (the
 hub is the surface), and reset per run.  It drives
@@ -654,7 +690,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ship, since on those schemes steering belongs to the keys or the stick and
   a click should only shoot.  `CONTROL_SCHEME_RULES` is the one table every
   read goes through (`joystick` / `fireButton` / `mouseDragMoves` /
-  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide`), so a scheme's
+  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide` /
+  `triggerThrust` / `stickAims` / `fireFace`), so a scheme's
   behaviour is a lookup rather than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
   it survives `restartGame()` and every map load.
   `INPUT_CONSTANTS.FIRE_BUTTON` carries the button's geometry.
@@ -1108,7 +1145,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   inventory + catalog; inventory items carry `sellValue`/`scrapValue`)
   drives the station UI: two hex flowers, the
   inventory tile grid, pointer-based DRAG-AND-DROP (touch + mouse; a
-  <8px press falls through to tap-select), and the shop.  The PAUSE menu
+  <8px press falls through to tap-select), and the shop.
+  **The DOCKED screen is TABBED with a STICKY HEADER** (user call): it was
+  one long column with the balance at the top and the shop at the bottom,
+  so buying meant scrolling up to read the money and back down to spend
+  it.  The header never scrolls and carries the things every job on the
+  screen spends — `◈` balance, `⬢` cargo used/capacity, UNDOCK, and a
+  CONTEXTUAL repair button that appears only while there is damage to pay
+  for.  Under it, three tabs (`stationTab`, falling back to the first
+  offered when a station lacks the service): SHOP (catalog grids; a
+  purchase needs a free cargo tile, so the buttons disable and say so when
+  cargo is full), OUTFIT (the flowers + inventory + detail strip) and SHIP
+  (hull repair detail + `renderShipStatus()`).  Repair is a header action
+  rather than a fourth tab because four tabs do not clear the 40px tap
+  floor at 320px.  The panel is TOP-aligned, not `my-auto` like the other
+  overlays — a centred block puts a sticky header in the middle of the
+  screen.  The PAUSE menu
   hosts the same widgets as a CARGO panel: READ-ONLY flowers (tap to
   inspect; no drag source / drop target — outfitting stays drydock-only)
   + the fully live inventory honeycomb (drag-reorder + tap → a detail
@@ -1337,10 +1389,24 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     result, so `npm test` is one command from a clean clone — but it
     means the browser must be present: `npx playwright install chromium`
     once. See `tests/README.md` for the suite map and the harness rules.
-- **The same three gates run in CI on EVERY pull request, and they are the
-  LAST STEP BEFORE A MERGE** — `.github/workflows/pr-checks.yml`, job
-  `validate`, in this order: typecheck → build → install the Playwright
-  browser → test.  The browser download is CACHED, keyed on the resolved
+- **CI runs the gates in TWO SCOPES** (user call, 2026-08-21 — the full
+  suite costs ~12 minutes and was running on every push of every PR) —
+  `.github/workflows/pr-checks.yml`, job `validate`, in this order:
+  typecheck → build → install the Playwright browser → test:
+  - **SMOKE, on every PR push**: typecheck + build + the boot/loop canary
+    suites (~3 minutes end to end).  A type error, a broken bundle, or a
+    broken core loop still blocks every merge.
+  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
+    `claude/plan-completion` (immediately after a merge lands), on PRs
+    whose BASE is `main`, on any PR carrying the **`full-tests` label**
+    (the opt-in for pre-merge full validation), and on manual dispatch.
+  The check keeps ONE name (`typecheck · build · test`) in both scopes, so
+  branch protection points at one required check.  The honest trade: a
+  regression outside the smoke surfaces at the merge point rather than per
+  push — label the PR `full-tests` when it wants the whole net first.
+  LOCAL practice moves the same way: per-commit, run typecheck + build +
+  the suites the change touches; run the FULL suite before calling a PR
+  ready to merge (and after a base sync).  The browser download is CACHED, keyed on the resolved
   `@playwright/test` version plus the runner OS; on a cache hit the
   workflow installs only the apt system libraries (`install-deps`),
   because a restored browser with no libraries cannot launch.  A green
@@ -1559,6 +1625,21 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   map-load bake (`materialNeighborCount`); `densityCachedTint` must
   be invalidated at every site that mutates its inputs. Master DBG
   `Tile shade` toggle gates both compute and render.
+- **EVERY structure death goes through `onDeath` — including collision
+  kills.**  `PhysicsSystem.killStructureByImpact` is the one path for a
+  tile/shard killed by a COLLISION (player crash, asteroid crash, asteroid
+  pressure): it stamps `lastImpactVelocity` + `lastImpactDamage`, drops the
+  static-grid entry, and calls `onDeath` so `handleEntityDeath` fans out
+  exactly as it does for a projectile kill.  The two asteroid sites used to
+  set `health = 0; active = false` WITHOUT the callback, so a tile crushed
+  by a drifting rock simply vanished — no shatter, no debris, no sound —
+  while the same tile shot broke normally (the player's own crash path did
+  call it, which is what made the asymmetry easy to miss).  The two stamps
+  are what make a shatter read as an impact: velocity gives the fragments a
+  direction, and damage (mapped 1..5 from how far over the threshold the
+  hit was) scales how many pieces and how fine.  `killedByPlayer` is passed
+  separately and only the player's crash sets it — ambient destruction
+  scores nothing.
 - **Death routing.** `PhysicsSystem` raises an on-death callback
   that `GameEngine.handleEntityDeath` dispatches: explosions for
   player/enemy, variant-driven shatter + regen-queue via
@@ -1568,6 +1649,35 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).
+- **A world-space health bar is a HIT REACTION, not a label** (gauntlet 5d,
+  U5).  `renderHealthBar` draws an enemy's bar only while
+  `GameEntity.healthBarTimer > 0`, fading over the last
+  `UI_CONSTANTS.HEALTH_BAR.FADE_DURATION` — so the bars on screen are exactly
+  the fights in progress rather than a label on every entity.  The timer is
+  stamped by `markDamaged(entity, flash)` (health) and `markShieldDamaged`
+  (a hit the SHIELD ate — without which the strip could only appear once the
+  shield had already failed) at every damage path, and ticked beside
+  `hitFlash` in PhysicsSystem.  It is a SEPARATE field from `hitFlash` on
+  purpose: that is a ~0.1–0.3s whiten-and-punch, and a bar living that long
+  would strobe rather than inform.  Three consequences worth knowing:
+  the shield strip draws for ANY shielded entity, not just the player;
+  `GameEntity.alwaysShowHealthBar` opts a priority target back into a
+  permanent bar (the dragon takes it, capstone bosses deliberately do NOT —
+  they have the dedicated HUD bar); and the PLAYER is the standing
+  EXCEPTION — see below.  DBG ▸ Visual ▸ "HP bars" restores the always-on
+  behaviour as the A/B.
+- **The PLAYER gets BOTH readouts, and they are different questions**
+  (user call, reversing U5's removal).  `renderPlayerVitalsBar` draws a
+  permanent hull bar under the ship — never damage-triggered, because your
+  own condition is the one thing you must not have to provoke into view —
+  with the shield strip under it only once `maxShield > 0` (an empty strip
+  is a permanent advert for a module you have not bought).  The HUD's
+  top-left chip stays, fed by `EngineStats.vitals` EVERY frame (unlike
+  `playerStats`, which is menu-only).  U5 removed the bar as "the same
+  number twice"; it is not — the bar is where the eye already is and the
+  chip is where the exact figure is.  Both read `player.health`, and both
+  wear the SAME three urgency bands (emerald > 50% / amber > 25% / rose),
+  which is the property that keeps them from reading as two opinions.
 - **Shield absorption is generalized.** The PhysicsSystem projectile-
   damage path (and the GameEngine shockwave-AoE path) absorb into
   `shield` for ANY entity with `shield`/`maxShield` > 0 — not just the
@@ -1576,15 +1686,66 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   A DIRECTIONAL arc shield (`shieldArcHalfWidth` set) only absorbs hits
   whose bearing falls in the covered sector — gated by the shot's TRAVEL
   direction, not its position, so a fast bolt that overshoots can't tunnel
-  past (`PhysicsSystem.shieldCoversHit`, toroidal).  A covered hostile shot
-  is DEFLECTED off the ring (`tryArcShieldIntercept`, broadphase reach
-  extended via `arcShieldReach`): its velocity reflects about the radial
-  normal and the shield drains by the shot's damage, so the bolt ricochets
-  away (and can hit other enemies) while the shield still wears down.
-  Open-side shots — and shots bigger than the remaining shield — fall
-  through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
+  past (`PhysicsSystem.shieldCoversHit`, toroidal).  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
+- **EVERY live shield DEFLECTS, and there is ONE deflection primitive.**
+  `PhysicsSystem.deflectProjectile(proj, nx, ny, opts?)` owns the mirror
+  (`v' = v − 2(v·n)n`), the rotation, the optional snap, and the rule that
+  a bolt already travelling outward (`v·n >= 0`) is NEVER deflected again —
+  which is what stops a ricochet re-triggering every step.  It takes a UNIT
+  OUTWARD normal and writes positions in the CALLER'S frame (the broadphase
+  shifts across a seam and re-wraps, so the helper must not wrap on its
+  own).  Both reflection sites go through it: `tryShieldDeflect` (radial
+  normal) and the bouncer's tile-face branch in `resolveCollision`
+  (axis-aligned normal, for which the general mirror reduces to negating one
+  component — so the fold changed no arithmetic).  `DeflectOptions` carries
+  `reownType`/`reownId` (a PARRY — clears `hitEntityIds` so the redirected
+  bolt can strike its new targets), `speedScale`, `spread`, `keepHoming`.
+  THE PLAYER'S DEFLECT IS A PARRY (user call): both deflect sites re-own a
+  bolt turned by the PLAYER's shield to `PLAYER`/`'player'`, so it stays
+  live against enemies, pays their kills (attribution rides ownership), and
+  a parried HOMING missile keeps homing — under player ownership the
+  owner-aware homing pass steers it at the nearest enemy, so the missile
+  turns on its makers with no new plumbing.  ENEMY shields deliberately do
+  NOT parry (a boss re-owning your own cannon shell would turn your gun on
+  you); their deflect keeps the bolt's owner, which already leaves a turned
+  player bolt live against other enemies.
+  Deflection was arc-only; ANY entity with a live pool now turns shots
+  away, so the player's own bubble and the bosses' shields ricochet instead
+  of swallowing.  The TWO SHIELD KINDS DEFLECT AT DIFFERENT PLACES, and
+  that is geometry rather than taste: an ARC ring stands OFF the hull
+  (`arcShieldReach`, 0.99×maxDim) so `tryShieldDeflect` must intercept it
+  BEFORE the body SAT or the bolt flies through the gap between ring and
+  hull; a NON-ARC pool's ring IS the shield-inflated collision shape, so it
+  deflects AT CONTACT, in `resolveCollision` immediately before the absorb
+  it replaces.  Do not "unify" these onto one pre-SAT radius test — that
+  was tried and shipped broken: `fillVertices` BOXES an entity with no
+  `polygonPoints`, and THE PLAYER HAS NONE, so its shield square reaches √2
+  further at the corners than the circle `shieldReach` describes.  Every
+  off-axis shot hit the square first and was absorbed by the body path
+  before the deflect could see it (measured: four absorbs per deflect), and
+  no circle can cover a square.  Reacting to the SAT contact instead makes
+  the property true BY CONSTRUCTION — the deflect runs at exactly the
+  moments the absorb would have.  One path per shield kind, so no pair is
+  charged twice, and a bolt already travelling outward relative to a
+  shielded target is neither deflected again nor absorbed.  THE ARITHMETIC
+  IS UNCHANGED:
+  a deflected shot drains exactly the damage the absorb path would have
+  absorbed, and a shot bigger than the pool still falls through to that path
+  and lands its remainder — a legibility change, not a shield buff.  Four
+  rules go with it, all of them consequences rather than choices: an
+  EMP'd shield (`systemsDisabled`) declines, because it is offline for
+  absorption too; a shot the target may not be hit by at all (own fire, an
+  ally's `sparesPlayer` bolt, a rival's `hitsEnemies` shot at a rival) may
+  not bounce off it either; a deflected bolt STOPS HOMING by default (the player's parry opts out
+  via `keepHoming`, safe exactly because a player-owned bolt cannot hit the
+  player), or an enemy missile — which homes on the player with no range
+  gate — would turn straight back into the shield and grind the pool down
+  in a loop; and a
+  deflect that empties the pool plays `impact.shield.break` rather than
+  `impact.shield.deflect`.  Uncovered arc bearings still fall through to the
+  normal body hit.
 - **Stage-3 reusable mechanics (all three now wired by the Stage-5 BUBBLE).**
   Three build-once primitives for the exotic enemies:
   (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
@@ -1631,6 +1792,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   collateral onto nearby enemies/structures + the normal death-explosion.
   Bombers killed before they touch the player never set the flag, so they pop
   harmlessly — the kill-early counter.
+- **Nebula wake spin has a HANDEDNESS cycle** (user report: a starboard
+  pass should turn a shard clockwise; the shipped id-parity sign gave a
+  pass no consistent handedness at all).  DBG ▸ Visual ▸ "Neb spin":
+  `physical` (default — the ship's velocity crossed with the ship→shard
+  offset, so starboard → clockwise in this y-down world), `inverted` (the
+  A/B), `random` (the old parity vortices).  Below a small speed floor the
+  parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
+  (angular momentum in the impulse solver, off-centre impact torque) are
+  parked for their own session — docs/PARKING_LOT.md.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
@@ -1663,7 +1833,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   own ship (tap/click, `INPUT_CONSTANTS.SHIP_SELECT_RADIUS`), plus E as
   the keyboard equivalent — so any new proximity-interactable must join
   `updateInteractables`' nearest-wins arbitration rather than adding a
-  second handler; otherwise two affordances fight over one gesture.  The
+  second handler; otherwise two affordances fight over one gesture.
+  The LIGHT TOOL is the gesture's FALLBACK (user call): with the
+  Light module installed (`flashlightEquipped`; catalog id
+  `flashlight_kit`), a ship-tap / E / pad-action in OPEN SPACE cycles the
+  light off → medium → high (`GameEngine.cycleShipLight`, levels in
+  `FLASHLIGHT_TOOL_LEVELS`).  BOTH on-levels wear the BEAM flashlight
+  style (the 80° cone); what separates them is the LIGHTING TIER (user
+  call): medium runs the light system at the 'medium' rung, high at
+  'high' — reach, occluder budget and penumbra all step, because the
+  tier override (`setLightingTierOverride`, set per frame in draw) wins
+  inside `getActiveLightingTier` for EVERY consumer.  A dock or portal
+  in range still wins the gesture.  The cone override is
+  `RenderSystem.playerLightToolHalfDeg`; null = tool off → the DBG
+  globals decide, and they ship flashlight 'off' / tier 'low' — a
+  module-less ship carries NO player beam, and the DBG rows stay the raw
+  dev overrides underneath.  Losing the module (adjacency-offline
+  included) zeroes the level in `applyModuleEffects`.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
   portal doesn't also fire a shot.  There is NO HUD dock/enter button —
@@ -1794,6 +1980,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   POI of their kind at ANY distance so volume swells on approach, and
   `AudioSystem.loop` treats an out-of-earshot positional loop as OFF so a
   far POI holds no oscillators.
+- **A hit's LOUDNESS and its SHAKE come from one number.**
+  `PhysicsSystem.impactStrength(self, other, velAlongNormal)` is the struck
+  body's own velocity step (see the shake note above); the camera reads it
+  through `COLLISION_CONFIG.SHAKE.IMPACT_*` and the `crash.*` voices read it
+  through `AUDIO_CONSTANTS.IMPACT_*` (`impactVoice`), so how hard a hit reads
+  to the eye and to the ear cannot drift apart.  GAIN is `clamp(dv / SPAN,
+  FLOOR, 1)` with the span and floor PER ROW, because the rows do not cover
+  the same range — the tile crash is gated at closing speed 4 and reaches
+  dv 30, the shard row is gated at 1.2 and tops out near 7, and one global
+  span pinned every shard contact to its floor.  The TILE span (18) is
+  load-bearing: it reproduces the shipped `impactSpeed / 12` curve exactly,
+  so the wall crash is unchanged and only lighter impactors get quieter.
+  PITCH comes from the impactor's MASS, not its on-screen size, because mass
+  is already the term inside the strength — so a 40px metal shard knocks
+  lower AND louder than a same-size rock.  `docs/SFX_INVENTORY.md` §4.4 is
+  the spec; the numbers there are worked, not estimated.
 - **Player contact is split by WHAT was hit, at two different speeds.**
   `crash.player.tile` (static wall) fires above
   `STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD`; `crash.player.shard`
@@ -1812,8 +2014,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   the NORMAL radius, keyed off the `killedByPlayer` stamp that already
   exists for scoring (set by the projectile / crash / lightning / AoE
   paths) — so a shard you shot from range is still yours to hear.  Direct
-  player↔shard contact is covered by `crash.player.tile` at full range,
-  because mobile shards are `STRUCTURE`s.  Radii resolve caller → def →
+  player↔shard contact is covered by `crash.player.shard` (and
+  `crash.player.tile` for the static case), both at full range: the
+  near-field rule is about physics the player is not part of.  Radii resolve caller → def →
   global default (`SfxDef.near`/`.far`, `play(id, {near, far})`).
 - **The engine loop IDLES; it does not switch on and off.**
   `move.thrust` runs continuously while the player is alive and THROTTLE
@@ -1834,9 +2037,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   leave the game permanently silent — and `visibilitychange` re-unlocks on
   tab return.  `audio.audible` (context exists AND running) is the honest
   "can this be heard" check; `unlocked` alone is not.
-- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
+- **`window.__omniEngine` / `window.__omniStats` / `window.__omniHud` are
+  debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so the headless
+  `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's PURE
+  layout functions — `fitFontPx`, `computeMinimapRect`,
+  `computeLoadoutHUDLayout`, `computeIndicatorRect` — on exactly the
+  `__omniHid` rationale: they are
+  pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
+  320px, a minimap rect disagreeing with the tap handler that catches its
+  expand tap, a loadout strip off the viewport, an edge arrow drawn under
+  the chip stack: none throw, none log, and
+  none are visible at the one viewport the suites used to run at.  The
+  alternative was sampling pixels off a starfield.  NOTHING in the game reads them — they exist so the headless
   Playwright suites in `tests/` can drive the real engine in a real browser
   (§7; the "without a test runner being added" rationale is superseded —
   roadmap 5b adopted one, and these handles are what it drives).  Two
@@ -1907,6 +2120,26 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   because rotation is derived from the pointer and a shot's target IS a
   pointer position; there is deliberately no second aim channel (step 5
   G2).  Four rules go with it:
+  - **BODY-IMPACT SHAKE IS THE PLAYER'S OWN VELOCITY STEP** (user call).  It
+    used to be `min(impactSpeed, HEAVY) × CAP_MULTIPLIER` — SPEED ALONE, no
+    mass — while every other part of the collision code weighs mass (the
+    crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`; the impulse
+    solver splits by bias-compressed inverse mass).  So a 15px chip shook the
+    camera exactly as hard as a static wall at the same closing speed.  The
+    magnitude is now `(1 + ELASTICITY) × |v_n| × effInv_player /
+    (effInv_player + effInv_other)` — the step the solver is about to apply,
+    so it agrees with the physics by construction rather than modelling it
+    twice.  Three things fall out rather than being written: a STATIC body
+    has `effInv = 0` so the wall curve is IDENTICAL to the old one (the
+    change is isolated to light bodies); a light body attenuates by the true
+    mass ratio (at |v_n| = 20: wall 30, 40px metal 12.3, 15px glass 3.9, 8px
+    chip silent under `IMPACT_DV_MIN`); and a HEAVIER SHIP shrugs hits off,
+    because `player.mass` scales with ship weight.  Shake also carries a
+    DIRECTION now (`handleScreenShake(amount, {dirX, dirY, rumble})`): a
+    decaying oscillation along the impact axis instead of white noise, with
+    `DIR_JITTER` of isotropic noise on top.  Callers with no meaningful axis
+    — explosions, warp-ins, reward beats — pass a bare number and keep the
+    old isotropic jitter.
   - **RUMBLE rides the screen shake.**  `GameEngine.handleScreenShake(amount)`
     is the funnel every impact in the game already goes through with
     magnitudes tuned against each other, so `InputSystem.rumble(amount)` hangs
@@ -2040,6 +2273,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     they can be spent, so no press fires later out of context.
   - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
     which must exceed `SHIP_SELECT_RADIUS` — see §5.
+  - **`gamepad-left` is the ONE-THUMB scheme** (user call).  The LEFT stick —
+    or the left D-PAD, which has always written the same movement vector —
+    carries heading, aim AND throttle together: the deflection's direction
+    steers and aims, its magnitude is the throttle, which is the ordinary
+    `gamepad` meaning of that stick, so only the AIM moves.  The right stick
+    is then IGNORED rather than left to fight for the pointer (two channels
+    writing one reticle is a fight the player feels as it snapping between
+    their thumbs), and the gun moves to the bottom FACE button with the left
+    face button still the action button.  Shares the `stickAims` and
+    `fireFace` rules with `gamepad-thrust`; what separates the two is that
+    this one KEEPS the stick's magnitude as the throttle where trigger-thrust
+    discards it.  Both leave the triggers slack (`usesFaceFire()` gates the
+    weapon profile off): a clutch on a control that fires nothing is just a
+    stiff trigger.
   - **`gamepad-thrust` is the MINIMAL-PAD scheme** (G15/G16): a TRIGGER
     supplies thrust magnitude and a STICK supplies direction.  Which trigger
     and which stick is deliberately not specified — EITHER stick steers (and
@@ -2087,10 +2334,57 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     mouse press: a control that only appears once pressed cannot be found,
     and in that scheme it is the only way to shoot.
 
+- **TWO canvas palettes, and they are different KINDS of thing** (gauntlet
+  5d, U3).  `UI_CONSTANTS.INDICATORS.COLORS` is the **TYPE LEGEND** — what a
+  contact IS, wherever it is drawn (edge arrow, minimap blip): red enemy /
+  indigo station / green portal / yellow rival / purple bubble / slate other,
+  with a boss in the shared enemy red and its SIZE and ring doing the
+  distinguishing.  `UI_CONSTANTS.HUD` is the **CHROME palette** — the four
+  named type sizes (MICRO 9 / BODY 11 / ROW 12 / LOUD 14, mirroring the DOM's
+  scale), the greys (`TEXT_COLOR` / `MUTED_COLOR` / `DIM_COLOR` /
+  `RULE_COLOR` / `PANEL_FILL`), the one text outline every canvas string
+  wears, and the accents (`ACCENT_COLOR` for banner subtext, the
+  `CHARGE_FULL` / `CHARGE_PART` pair the ship's ring and the fire button must
+  share).  Chrome carries no type meaning, so it must never read the legend
+  and the legend must never be used for text — nothing in the canvas layer
+  may introduce a third palette.  TWO DOCUMENTED EXEMPTIONS from the legend,
+  both deliberate: a PORTAL blip carries the rift's own violet/sky (so an
+  outbound rift and a return rift are tellable apart) while its ARROW is the
+  legend's green, and the SNITCH has its own gold.  Canvas HUD text stays
+  MONOSPACE against the DOM's sans — a world-vs-chrome distinction, not drift.
+- **The HUD hugs the top and bottom edges, and reads THROUGH** (user call).
+  The DOM overlay's root padding is `p-2` (the full-screen overlays carry
+  their own `p-4`, so this only tightens the in-game HUD), and the two
+  canvas widgets share one 8px baseline via
+  `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN` with `MINIMAP_CONSTANTS.MARGIN` at
+  10.  Transparency is the same rule everywhere: the FILL is what goes
+  translucent (`HUD_CHIP` at `bg-slate-900/35`, the minimap ground at 0.55,
+  a resting loadout slot at 0.32) while the MARKS — text, strokes, pips,
+  blips — stay at full strength.  Legibility comes from the marks, not from
+  hiding the map, which is the same argument `OVERLAY_SCRIM` makes for its
+  deliberately tiny blur.
+- **ONE screen corner, one rect.**  `computeMinimapRect(height, expanded)`
+  (beside `computeLoadoutHUDLayout` in `constants.ts`) is the single
+  definition of the minimap's bottom-left rect, read by the renderer, the
+  fire-event handler that catches the expand tap, the joystick exclusion
+  zone, and the wave banner that has to clear it.  The banner is why this
+  exists: it reserved `MINIMAP_CONSTANTS.SIZE` (the COLLAPSED 75px)
+  unconditionally, so with the map open it drew inside the 280px expanded
+  one.  `minimapExpanded` is a banner PARAMETER now, never an assumption.
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
-  INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
-  edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE
+  INSET VIEWPORT RECT (`computeIndicatorRect`) — the screen
+  edge, not the old fixed 120px centre ring.  That rect is ASYMMETRIC
+  (user call): the top and bottom edges clear the HUD's two bands
+  (`INDICATORS.TOP_INSET`, plus `BOSS_BAR_INSET` while a capstone bar is up
+  and `WRAP_INSET` below `NARROW_WIDTH` where the readout row wraps to two
+  lines; `BOTTOM_INSET` for the loadout strip + minimap), because a symmetric
+  inset put every near-vertical bearing — which is "directly ahead" and
+  "directly behind" — underneath the chip stack.  Each band is the MEASURED
+  widget height plus ~`SIZE_NEAR`, since an arrow is centred on the rect
+  edge.  `RenderSystem.bossBarActive` is the one input from the sim (a
+  boolean, set in `GameEngine.draw`); the canvas layer must never start
+  measuring React's layout.  DISTANCE is carried by SIZE
   (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
   ordinary enemies no longer print a distance number: a dozen little
   "1234m" strings were most of the old clutter, and the glyph already says
@@ -2118,7 +2412,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
 
 - **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
-  object.**  Three rules, all decided in step 5 G5 (user directive,
+  object.**  (The shipped material default is DOTS, not flow — user call;
+  flow is one step of the DBG cycle away.  Screen shake likewise ships ON.)  Three rules, all decided in step 5 G5 (user directive,
   decision #43):
   1. **Nebula is off it entirely.**  Nebula tiles are skipped by
      `buildMinimapStaticLayer` and nebula shards never enter the
@@ -2156,6 +2451,37 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   font size, so it's ONE `measureText`, not a binary search in a draw path.
   Any new canvas string built from authored/variable content should go
   through it rather than hardcoding a px size.
+- **The DOM overlay has ONE NAMED CLASS VOCABULARY** (gauntlet 5d, U2), at
+  module scope in `components/UIOverlay.tsx` alongside `OVERLAY_SCRIM` and
+  `PANEL_OPAQUE`, which set the pattern: when more than one surface has to
+  look like the same thing, the class string becomes a constant so the
+  surfaces cannot drift apart.  Type scale `T_MICRO`/`T_NOTE`/`T_BODY`/
+  `T_ROW` — named for what each step is FOR rather than how big it is,
+  because "10px or 11px?" is the question that produced the drift.  Then
+  `PANEL` / `PANEL_ROW` / `panelAccent()` (an accent panel keeps the neutral
+  body and swaps only the BORDER), `HEADING` / `SCREEN_TITLE` /
+  `OUTCOME_TITLE`, `BTN_PRIMARY` / `BTN_SECONDARY` / `BTN_COMPACT`,
+  `CHIP_BASE` / `CHIP_OFF`, `HUD_CHIP`, `SECTION_TOGGLE`, and `TAP` (the
+  40px tap floor).  A constant is the DEFAULT and a call site that departs
+  from it says why in a comment; there are three such departures today
+  (START is the indigo `rounded-full` HERO rather than the shared emerald
+  PRIMARY, and the debug menu takes a smaller 22–24px floor because a
+  developer surface of ~90 diagnostic rows trades reach for density).
+- **The top HUD bar is a COLUMN of two things, and the second is ONE ROW.**
+  The boss capstone bar and the readout chips live in one flex column
+  (`data-testid="hud-top"`) so the layout engine owns the band they share —
+  as an `absolute` block beside a separate stack, the boss health bar landed
+  exactly on top of the Salvage chip.  Under it the readouts (hull · score ·
+  salvage · wave) run along the edge in ONE WRAPPING ROW rather than a
+  right-hand stack (user call): they are peers, and stacking them drove the
+  HUD band down the screen — which is also the band the chevrons' top safe
+  inset has to clear.  Two consequences: the row is WIDTH-BOUND at 390px, so
+  the chips are terse by necessity (`W1 · 6 · 12s`, and the vitals chip
+  carries no word label — the bar under each number is the label, and the
+  pause menu keeps the spelled-out version); and the pause button lives
+  OUTSIDE the wrapping band with `shrink-0`, because an unshrinkable middle
+  pushes the last item off the screen, which is how the pause button left the
+  viewport at 320px.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
   `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
   `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
@@ -2199,10 +2525,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
-  a merge.**  Run the same three commands locally first (`npm run
-  typecheck`, `npm run build`, `npm test` — §7); merge only once the CI
-  run on the PR's CURRENT head is green.  Never merge past a pending or
-  failing `typecheck · build · test`.  The other two workflows still gate
+  a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
+  merge seams and on the `full-tests` label (§7).  Locally: typecheck +
+  build + the touched suites per commit, the FULL `npm test` before
+  calling a PR ready to merge.  Never merge past a pending or failing
+  `typecheck · build · test`.  The other two workflows still gate
   nothing — a preview build or a standalone release is not validation.
 
 ---

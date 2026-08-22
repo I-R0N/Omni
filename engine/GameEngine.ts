@@ -23,7 +23,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -346,9 +346,18 @@ export class GameEngine {
   // Screen Shake State
   shakeTimer: number = 0;
   shakeIntensity: number = 0;
+  /** Impact axis for the current shake, normalised; (0,0) = no direction, so
+   *  the camera falls back to the isotropic jitter.  See handleScreenShake. */
+  shakeDirX: number = 0;
+  shakeDirY: number = 0;
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
-  screenShakeEnabled: boolean = false;
+  // ON by default (user call).  Shake is the game's primary impact feedback —
+  // what a crash, a detonation and a boss landing all read through — and it
+  // shipped OFF, so the default build had no camera reaction to any of them.
+  // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
+  // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
+  screenShakeEnabled: boolean = true;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
   // When `asteroidFlowEnabled` is false, the per-asteroid / per-drop
@@ -678,6 +687,13 @@ export class GameEngine {
    *  `engine.dbg.<toggle>()`; the flags they write are still engine fields. */
   readonly dbg = new DebugControls(this);
 
+  /** Flashlight Kit tool state (user call): whether the kit module is
+   *  installed+active (folded by applyModuleEffects), and the tap-cycled
+   *  level (index into FLASHLIGHT_TOOL_LEVELS: 0 off / 1 medium / 2 high).
+   *  Run-scoped like the outfit it derives from. */
+  public flashlightEquipped: boolean = false;
+  public flashlightLevel: number = 0;
+
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B.
    *  The one debug row that stayed a method on the engine: the 5b trait
    *  suites call it straight off `window.__omniEngine`, which makes it
@@ -924,6 +940,12 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
+      vitals: {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: Math.round(this.player.maxHealth),
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: Math.round(this.player.maxShield ?? 0),
+      },
       playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -961,6 +983,7 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      damageTriggeredBars: this.renderer.damageTriggeredBars,
       minimapMaterialName: getActiveMinimapMaterialName(),
       lightingModeName:  getActiveLightingMode(),
       lightingTierName:  getActiveLightingTier().name,
@@ -982,6 +1005,7 @@ export class GameEngine {
       fogName: getFogName(),
       shadowSoftnessName: getShadowSoftnessName(),
       rockPaletteName: getActiveRockPaletteName(),
+      nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
@@ -1547,14 +1571,8 @@ export class GameEngine {
   private tickJoystick(frameTime: number) {
     this.input.tickJoystick(frameTime);
 
-    const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
-    const size = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
-    this.input.setStickExclusion(
-      MARGIN,
-      window.innerHeight - size - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN,
-      size,
-      size,
-    );
+    const mm = computeMinimapRect(window.innerHeight, this.minimapExpanded);
+    this.input.setStickExclusion(mm.x, mm.y, mm.size, mm.size);
   }
 
   private loop = (time: number) => {
@@ -1670,6 +1688,12 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
+      vitals: {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: Math.round(this.player.maxHealth),
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: Math.round(this.player.maxShield ?? 0),
+      },
       playerStats: menuOpen ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -1715,6 +1739,7 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      damageTriggeredBars: this.renderer.damageTriggeredBars,
       minimapMaterialName: getActiveMinimapMaterialName(),
       lightingModeName:  getActiveLightingMode(),
       lightingTierName:  getActiveLightingTier().name,
@@ -1736,6 +1761,7 @@ export class GameEngine {
       fogName: getFogName(),
       shadowSoftnessName: getShadowSoftnessName(),
       rockPaletteName: getActiveRockPaletteName(),
+      nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
@@ -1803,6 +1829,7 @@ export class GameEngine {
         sampled: this.audio.sampledIds.length, total: this.audio.allIds.length,
         unmatched: this.audio.unmatchedFiles,
         loopFiles: this.audio.loopSampleFilenames,
+        latencyMs: this.audio.latencyMs,
       },
     });
     // Cost of SCHEDULING the React update — not of performing it.  The
@@ -2133,7 +2160,11 @@ export class GameEngine {
       this.input.rumble(amount, kind);
   }
 
-  handleScreenShake = (amount: number, rumbleKind: RumbleKind = 'impact') => {
+  handleScreenShake = (
+      amount: number,
+      opts?: { dirX?: number; dirY?: number; rumble?: RumbleKind },
+  ) => {
+      const rumbleKind: RumbleKind = opts?.rumble ?? 'impact';
       // Force feedback rides this call — every impact in the game already
       // funnels through it with magnitudes tuned against each other, so the
       // hand feels what the camera feels.  Deliberately ABOVE the
@@ -2146,6 +2177,14 @@ export class GameEngine {
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
           this.shakeIntensity = amount;
           this.shakeTimer = CAMERA_CONSTANTS.SHAKE_DECAY;
+          // A DIRECTION is optional: an impact has one (the axis the ship was
+          // shoved along), an explosion or a warp-in does not.  Stored
+          // normalised; (0,0) means "no direction" and keeps the isotropic
+          // jitter, so every existing caller is unchanged.
+          const dx = opts?.dirX, dy = opts?.dirY;
+          const dm = dx !== undefined && dy !== undefined ? Math.hypot(dx, dy) : 0;
+          this.shakeDirX = dm > 0 ? dx! / dm : 0;
+          this.shakeDirY = dm > 0 ? dy! / dm : 0;
       }
   }
 
@@ -2882,6 +2921,18 @@ export class GameEngine {
         if (this.shakeTimer <= 0) {
             this.camera.shakeOffset.x = 0;
             this.camera.shakeOffset.y = 0;
+        } else if (this.shakeDirX !== 0 || this.shakeDirY !== 0) {
+            // DIRECTIONAL: lurch along the impact axis and ring back, rather
+            // than shiver.  cos() starts at 1, so the first frame is the
+            // hardest push and it is along the direction the ship was shoved
+            // — the camera moves with the hit instead of vibrating about it.
+            const S = COLLISION_CONFIG.SHAKE;
+            const elapsed = CAMERA_CONSTANTS.SHAKE_DECAY - this.shakeTimer;
+            const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
+            const along = mag * osc;
+            const jitter = mag * S.DIR_JITTER;
+            this.camera.shakeOffset.x = this.shakeDirX * along + (Math.random() - 0.5) * jitter;
+            this.camera.shakeOffset.y = this.shakeDirY * along + (Math.random() - 0.5) * jitter;
         } else {
             this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
             this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;
@@ -3201,10 +3252,8 @@ export class GameEngine {
 
     const fireEvents = this.input.getFireEvents();
     fireEvents.forEach(evt => {
-        const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
-        const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
-        const mapX = MARGIN;
-        const mapY = window.innerHeight - currentSize - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN;
+        const { x: mapX, y: mapY, size: currentSize } =
+            computeMinimapRect(window.innerHeight, this.minimapExpanded);
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
@@ -3291,6 +3340,10 @@ export class GameEngine {
       // Under trigger-thrust the RIGHT trigger is a throttle too, so a weapon
       // profile on it would be describing a control the player is not using.
       thrustScheme ? THRUST_TRIGGER(this.playerSpeedFraction())
+      // ...and where the gun has moved to a FACE button (`gamepad-left`) the
+      // trigger is not the gun either, so it goes slack rather than
+      // resisting for a control that fires nothing.
+      : this.input.usesFaceFire() ? TRIGGER_OFF
       : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
       : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
       : WEAPON_TRIGGERS[this.player.currentWeapon]);
@@ -3855,7 +3908,14 @@ export class GameEngine {
     const padInteract = this.input.consumeInteractPress();
 
     let selected = false;
-    if (station || portal) {
+    // The FLASHLIGHT TOOL rides the same gesture as the dock/portal, as the
+    // fallback: with the kit installed, a ship-tap (or E, or the pad's
+    // action button) in OPEN SPACE cycles the light.  Claiming the tap here
+    // means a tap on the ship no longer fires a stray shot at your own hull
+    // while the kit is aboard — which is the affordance the user asked for
+    // ("turned on and off by touching the player ship").  Without the kit,
+    // open-space behaviour is unchanged (the tap still shoots).
+    if (station || portal || this.flashlightEquipped) {
         const screen = this.renderer.worldToScreen(this.camera, this.player.position);
         if (screen) {
             selected = this.input.claimTapNear(
@@ -3869,6 +3929,7 @@ export class GameEngine {
     if (selected || (eDown && !this.dockKeyHeld)) {
         if (portal) this.enterPortal();
         else if (station) this.dockAtStation();
+        else this.cycleShipLight();
     }
     this.dockKeyHeld = eDown;
   }
@@ -4774,7 +4835,7 @@ export class GameEngine {
               // plate — it never travels as a projectile, which is exactly why
               // Lightning is a §7 answer to a directional defence.
               noteTraitDamage(target, dmg);
-              target.hitFlash = 0.15;
+              markDamaged(target, 0.15);
               target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
               this.spawnDamageText(target.position, dmg, target);
 
@@ -4943,8 +5004,31 @@ export class GameEngine {
    *  so the shop UI can show the beat only while it is live. */
   /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
    *  the same `openPortal` abstraction the dragon and the rivals use. */
+  /** ── The FLASHLIGHT TOOL (user call) ────────────────────────────────
+   *  Cycle the ship's light: off → medium → high → off.  Reachable only
+   *  while the Flashlight Kit module is installed and active
+   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
+   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
+   *  FALLBACK when neither of those is in range — the arbitration in
+   *  updateInteractables stays nearest-wins, the light just claims the
+   *  gesture nothing else wanted. */
+  public cycleShipLight(): boolean {
+      if (!this.flashlightEquipped) return false;
+      this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
+      const lvl = FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel];
+      this.pushPlayerMessage(lvl.label, lvl.tier === undefined ? '#94a3b8' : '#fde68a');
+      this.audio.play('ui.confirm');
+      return true;
+  }
+
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
+      // THE LADDER STOPS HERE (user call).  One seam for both ways a boss
+      // reaches the field — the capstone wave's own spawn and the debug
+      // menu's warp-in — so neither can leave the ladder running underneath
+      // the fight.  It does not resume when the boss dies; see
+      // WaveSystem.haltForBoss.
+      this.waves.haltForBoss();
       this.audio.play('boss.intro');
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
@@ -5199,6 +5283,7 @@ export class GameEngine {
       // ratio is recoverable from the `set` line's rscale entry.
       dpr: Math.round(effectiveDpr() * 10) / 10,
       zoom: this.camera.zoom || 1,
+      audioLatencyMs: this.audio.latencyMs,
       mapName: this.currentMap?.name || '—',
       difficulty: this.difficultyLevel,
       buildTag: '5c-perf',
@@ -5398,9 +5483,27 @@ export class GameEngine {
   private draw() {
       if (!this.currentMap) return;
 
+      // The DOM's capstone bar occupies the top of the screen while a boss is
+      // alive; the off-screen indicator rect reserves that band so an arrow
+      // pointing straight up does not draw underneath it.  One boolean, set
+      // where the frame is drawn rather than read out of the DOM.
+      this.renderer.bossBarActive =
+          !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+
       // A7 — hand the renderer the run's depth.  One field write per frame;
       // the fog folds it into its dark level (deeper = darker).
       this.renderer.stageDepth = this.stageIndex;
+      // The Light TOOL, when it is ON: the cone override gives it the BEAM
+      // style, and the TIER override steps the whole light system to the
+      // level's rung ('medium'/'high') — both over the DBG globals, which
+      // stay the raw dev overrides underneath (tool off / no kit → null →
+      // the globals decide; the flashlight global ships 'off', the tier
+      // 'low').
+      const lightOn = this.flashlightEquipped && this.flashlightLevel > 0;
+      this.renderer.playerLightToolHalfDeg =
+          lightOn ? FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].halfDeg : null;
+      setLightingTierOverride(
+          lightOn ? (FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].tier ?? null) : null);
       this.renderer.render(
           this.frameEntities,
           this.camera,

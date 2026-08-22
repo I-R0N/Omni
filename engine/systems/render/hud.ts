@@ -26,7 +26,8 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial, FOG,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, computeMinimapRect, computeIndicatorRect,
+    FOG,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -86,7 +87,7 @@ export function buildMinimapStaticLayer(r: RenderSystem, entities: GameEntity[],
 }
 
 export function renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {
-    ctx.font = 'bold 14px monospace';
+    ctx.font = `bold ${UI_CONSTANTS.HUD.TEXT.LOUD}px monospace`;
     ctx.textAlign = 'center';
 
     const camX = camera.position.x;
@@ -127,20 +128,27 @@ export function renderIndicators(
     if (!Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.y)) return;
 
     const {
-        EDGE_INSET, TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
+        TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
         MAX_VISIBLE_BUBBLE, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
         SIZE_NEAR, SIZE_FAR, NEAR_DIST, FAR_DIST, BOSS_SCALE, AGGRO_BLINK_HZ,
         COLORS,
     } = UI_CONSTANTS.INDICATORS;
+    const H = UI_CONSTANTS.HUD;
 
     if (targets.length === 0) return;
 
     const cx = width / 2;
     const cy = height / 2;
-    // Half-extents of the inset viewport rect the arrows ride.  Clamped so a
-    // very small window can't invert the rect.
-    const hx = Math.max(8, cx - EDGE_INSET);
-    const hy = Math.max(8, cy - EDGE_INSET);
+    // The inset viewport rect the arrows ride.  ASYMMETRIC (user call): the
+    // top and bottom edges clear the HUD bands, because a symmetric rect put
+    // every near-vertical bearing — directly ahead, directly behind — under
+    // the chip stack or behind the loadout strip.  See computeIndicatorRect.
+    const rect = computeIndicatorRect(width, height, r.bossBarActive);
+    // The RAY still starts at screen centre (that is where the ship is, and
+    // the bearing has to be from the ship).  Only the anchor is clamped, for
+    // the degenerate case of a rect that does not contain the centre.
+    const ax = Math.min(Math.max(cx, rect.left + 1), rect.right - 1);
+    const ay = Math.min(Math.max(cy, rect.top + 1), rect.bottom - 1);
     // One blink phase for the whole frame — every hunting contact pulses in
     // sync, which reads as a single alarm rather than N flickers.
     const blink = 0.55 + 0.45 * Math.sin(performance.now() * 0.001 * AGGRO_BLINK_HZ * Math.PI * 2);
@@ -217,14 +225,15 @@ export function renderIndicators(
         const dist = Math.sqrt(item.distSq);
 
         // Ride the SCREEN EDGE: intersect the bearing ray with the inset
-        // viewport rect (whichever axis it leaves first wins).
+        // viewport rect (whichever side it leaves first wins).  The rect is
+        // asymmetric about the anchor now, so each axis takes the distance to
+        // the side the ray is actually heading for rather than a half-extent.
         const ca = Math.cos(angle), sa = Math.sin(angle);
-        const tEdge = Math.min(
-            ca !== 0 ? hx / Math.abs(ca) : Infinity,
-            sa !== 0 ? hy / Math.abs(sa) : Infinity,
-        );
-        const ix = cx + ca * tEdge;
-        const iy = cy + sa * tEdge;
+        const tX = ca > 0 ? (rect.right - ax) / ca : ca < 0 ? (rect.left - ax) / ca : Infinity;
+        const tY = sa > 0 ? (rect.bottom - ay) / sa : sa < 0 ? (rect.top - ay) / sa : Infinity;
+        const tEdge = Math.max(0, Math.min(tX, tY));
+        const ix = ax + ca * tEdge;
+        const iy = ay + sa * tEdge;
 
         // SIZE carries distance: near contacts grow, far ones shrink to a
         // small tick.  This is what replaces the per-enemy distance number.
@@ -297,23 +306,23 @@ export function renderIndicators(
              // away from whichever horizontal edge the arrow is nearest.
              const lx = -ca * (size + 12);
              let ly = -sa * (size + 12);
-             const lineStep = iy > cy ? -11 : 11;
+             const lineStep = iy > (rect.top + rect.bottom) * 0.5 ? -11 : 11;
              if (portalName) {
                  // Arrows at similar bearings crowd the same stretch of edge,
                  // so labels are outlined to stay readable when they overlap.
                  const label = portalName.toUpperCase();
-                 ctx.font = 'bold 9px monospace';
-                 ctx.lineWidth = 3;
-                 ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                 ctx.font = `bold ${H.TEXT.MICRO}px monospace`;
+                 ctx.lineWidth = H.OUTLINE_WIDTH;
+                 ctx.strokeStyle = H.OUTLINE;
                  ctx.strokeText(label, lx, ly);
                  ctx.fillStyle = color;
                  ctx.fillText(label, lx, ly);
                  ly += lineStep;
              }
              if (showDist) {
-                 ctx.font = '9px monospace';
-                 ctx.lineWidth = 3;
-                 ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                 ctx.font = `${H.TEXT.MICRO}px monospace`;
+                 ctx.lineWidth = H.OUTLINE_WIDTH;
+                 ctx.strokeStyle = H.OUTLINE;
                  ctx.strokeText(`${Math.round(dist)}m`, lx, ly);
                  ctx.fillStyle = 'rgba(255,255,255,0.75)';
                  ctx.fillText(`${Math.round(dist)}m`, lx, ly);
@@ -333,7 +342,7 @@ export function renderPlayerMessages(
     const cx       = width / 2;
     const baseY    = height / 2 - 48; // above the player sprite
     const lineH    = 20;
-    const fontSize = 11;
+    const fontSize = UI_CONSTANTS.HUD.TEXT.BODY;
 
     ctx.save();
     ctx.font = `bold ${fontSize}px monospace`;
@@ -459,7 +468,8 @@ export function renderFireButton(
     // direction as the ship's ring.
     if (state.charge > 0) {
         ctx.globalAlpha = 0.95;
-        ctx.strokeStyle = state.charge >= 1 ? '#fde047' : '#fca5a5';
+        ctx.strokeStyle = state.charge >= 1
+            ? UI_CONSTANTS.HUD.CHARGE_FULL : UI_CONSTANTS.HUD.CHARGE_PART;
         ctx.lineWidth = 3.5;
         ctx.beginPath();
         ctx.arc(state.x, state.y, state.radius + 4, -Math.PI / 2,
@@ -477,6 +487,7 @@ export function renderLoadoutHUD(
     height: number
 ) {
     const { SLOT_H, SLOT_RADIUS: RADIUS } = LOADOUT_HUD_CONSTANTS;
+    const H = UI_CONSTANTS.HUD;
     const { startY, slotW, slotXs } = computeLoadoutHUDLayout(width, height);
     const activeWeapon = player.currentWeapon ?? WeaponType.BLASTER;
     const equipped = player.equippedWeapons ?? [WeaponType.BLASTER, null];
@@ -493,15 +504,15 @@ export function renderLoadoutHUD(
         if (wType === null) {
             // Empty slot — dim dashed placeholder ("fill me at the Drydock").
             ctx.globalAlpha = 0.35;
-            ctx.strokeStyle = '#475569';
+            ctx.strokeStyle = H.RULE_COLOR;
             ctx.lineWidth   = 1;
             ctx.setLineDash([5, 4]);
             ctx.beginPath();
             roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
             ctx.stroke();
             ctx.setLineDash([]);
-            ctx.font        = `bold 9px monospace`;
-            ctx.fillStyle   = '#64748b';
+            ctx.font        = `bold ${H.TEXT.MICRO}px monospace`;
+            ctx.fillStyle   = H.DIM_COLOR;
             ctx.fillText('EMPTY', x + slotW / 2, y + SLOT_H / 2);
             continue;
         }
@@ -509,14 +520,18 @@ export function renderLoadoutHUD(
         const wCfg   = WEAPONS[wType];
         const active = wType === activeWeapon;
 
-        ctx.globalAlpha = active ? 0.92 : 0.6;
-        ctx.fillStyle   = active ? wCfg.color : '#1e293b';
+        // The FILL is the transparent half of the widget (user call: HUD
+        // elements read through to the world).  The stroke, pip and label
+        // below stay at full strength — a slot is legible because its MARKS
+        // are opaque, not because its panel is.
+        ctx.globalAlpha = active ? 0.62 : 0.32;
+        ctx.fillStyle   = active ? wCfg.color : H.PANEL_FILL;
         ctx.beginPath();
         roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
         ctx.fill();
 
-        ctx.globalAlpha = active ? 1.0 : 0.5;
-        ctx.strokeStyle = active ? wCfg.color : '#475569';
+        ctx.globalAlpha = active ? 1.0 : 0.45;
+        ctx.strokeStyle = active ? wCfg.color : H.RULE_COLOR;
         ctx.lineWidth   = active ? 2 : 1;
         ctx.beginPath();
         roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
@@ -528,15 +543,15 @@ export function renderLoadoutHUD(
         ctx.beginPath();
         ctx.arc(x + slotW / 2, y + 11, 4, 0, Math.PI * 2);
         ctx.fill();
-        ctx.font        = `bold 8px monospace`;
+        ctx.font        = `bold ${H.TEXT.MICRO}px monospace`;
         ctx.globalAlpha = 0.55;
-        ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';
+        ctx.fillStyle   = active ? '#ffffff' : H.DIM_COLOR;
         ctx.fillText(String(i + 1), x + 8, y + 11);
 
         // Full weapon name (slots are wide enough post-1b)
-        ctx.font        = `bold ${Math.max(9, Math.min(12, slotW * 0.115))}px monospace`;
+        ctx.font        = `bold ${Math.max(H.TEXT.MICRO, Math.min(H.TEXT.ROW, slotW * 0.115))}px monospace`;
         ctx.globalAlpha = active ? 1.0 : 0.65;
-        ctx.fillStyle   = active ? '#ffffff' : '#cbd5e1';
+        ctx.fillStyle   = active ? '#ffffff' : H.MUTED_COLOR;
         ctx.fillText(wCfg.name.toUpperCase(), x + slotW / 2, y + SLOT_H - 16);
     }
 
@@ -820,10 +835,9 @@ export function renderMinimap(
     // twice at the edges, which reads as a duplicated minimap.
     const staticRange = r._minimapStaticRange || Infinity;
     const range = Math.min(expanded ? RANGE : ZOOM_RANGE, staticRange);
-    const currentSize = expanded ? EXPANDED_SIZE : SIZE;
-
-    const mapX = MARGIN;
-    const mapY = screenHeight - currentSize - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN;
+    // ONE definition of this rect, shared with the fire-event handler, the
+    // joystick exclusion zone and the wave banner (5d U3, finding E2).
+    const { x: mapX, y: mapY, size: currentSize } = computeMinimapRect(screenHeight, expanded);
 
     ctx.save();
 
@@ -1102,11 +1116,22 @@ export function fitFontPx(
     return Math.max(minPx, Math.floor(basePx * (maxWidth / w)));
 }
 
+/**
+ * The wave banner.
+ *
+ * `minimapExpanded` is a PARAMETER rather than an assumption (5d U3, audit
+ * finding E1).  The banner sits above the minimap, and it used to reserve
+ * `MINIMAP_CONSTANTS.SIZE` — the 75px COLLAPSED height — unconditionally, so
+ * with the map open (280px) the banner drew inside it.  It now asks
+ * `computeMinimapRect` for the rect actually on screen, which is the same
+ * call the renderer, the tap handler and the joystick exclusion make.
+ */
 export function renderWaveAnnouncements(
     ctx: CanvasRenderingContext2D,
     announcements: WaveAnnouncement[],
     width: number,
-    height: number
+    height: number,
+    minimapExpanded: boolean = false,
 ) {
     const { FADEIN, HOLD, FADEOUT } = WAVE_ANNOUNCE_CONSTANTS;
     const totalLife = FADEIN + HOLD + FADEOUT;
@@ -1132,8 +1157,15 @@ export function renderWaveAnnouncements(
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
 
-        // Position above the minimap: bottom edge minus minimap area minus comfortable gap
-        const baseY = height - MINIMAP_CONSTANTS.MARGIN - MINIMAP_CONSTANTS.SIZE - 30;
+        // Sit clear of the minimap that is ACTUALLY on screen, plus a
+        // comfortable gap.  Clamped so a very short window (landscape phone,
+        // where an expanded minimap is most of the height) keeps the banner on
+        // screen rather than pushing it off the top.
+        const mm = computeMinimapRect(height, minimapExpanded);
+        const baseY = Math.max(
+            WAVE_ANNOUNCE_CONSTANTS.TEXT_PX * 0.9,
+            mm.y - 30,
+        );
 
         // Banner text is authored content (boss names, reward labels) whose
         // length is not known here, and the game is played on a 390px-wide
@@ -1155,7 +1187,7 @@ export function renderWaveAnnouncements(
             const subPx = fitFontPx(ctx, a.subtext, safe,
                 WAVE_ANNOUNCE_CONSTANTS.SUBTEXT_PX, WAVE_ANNOUNCE_CONSTANTS.SUBTEXT_MIN_PX);
             ctx.font = `bold ${subPx}px monospace`;
-            ctx.fillStyle = '#22d3ee';
+            ctx.fillStyle = UI_CONSTANTS.HUD.ACCENT_COLOR;
             ctx.fillText(a.subtext, width / 2, baseY);
         }
 

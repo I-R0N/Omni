@@ -7,6 +7,16 @@ Add entries freely; revisit during planning.
 
 ## Controller schemes — refinement pass (parked 2026-08-15)
 
+> **Now THREE pad schemes, not two** (2026-08-19): `gamepad-left` joined
+> `gamepad` and `gamepad-thrust`, and it is as untuned as the other two.  It
+> shares `stickAims` + `fireFace` with `gamepad-thrust`; what separates them is
+> that it KEEPS the stick's magnitude as the throttle where trigger-thrust
+> discards it.  Both leave the triggers slack (`usesFaceFire()` gates the weapon
+> profile off), so the adaptive-trigger questions below apply to plain `gamepad`
+> only.  A fourth axis to feel out: is one-thumb flying actually playable, or
+> does aim-where-you-fly cost too much when something is behind you?
+
+
 Both pad schemes are SHIPPED AND UNTUNED. The wire format is settled
 (`zones`, confirmed on hardware) and the plumbing is covered by tests, but
 every judgement call below was made without a pad in hand and none of it has
@@ -74,7 +84,20 @@ be reconsidered together.
 
 ---
 
-## Minimal Bluetooth control style — one stick, two buttons (2026-08-15)
+## Minimal Bluetooth control style — one stick, two buttons (2026-08-15) — PARTLY SUPERSEDED
+
+> **`gamepad-left` (2026-08-19) took most of the premise.**  The hard half of
+> this entry — one stick doing heading, aim AND throttle together, with the gun
+> moved to a face button — is shipped and testable: the left stick (or the left
+> D-pad) writes the movement vector, its DIRECTION also writes the synthetic
+> pointer so the ship aims where it flies, its MAGNITUDE stays the throttle, and
+> the right stick is ignored rather than left to fight for the reticle.
+>
+> What survives here is the genuinely two-button case: weapon cycling on a hold
+> (the shoot/charge precedent), PAUSE with no Options button (still the one real
+> gap), and stick-based MENU NAV, since `menuNav` assumes a D-pad.  The reason
+> to keep it parked is unchanged — nobody has one of these pads to test with.
+
 
 A sixth control scheme for the smallest pads: **one analogue stick and two
 buttons**, nothing else. The stick does aiming, flying AND acceleration
@@ -240,7 +263,19 @@ drop-loop and tile-gradient fixes already landed.
 
 ---
 
-## Exotic Enemy Types + AI Taxonomy / Wave-Accounting Refactors
+## Exotic Enemy Types + AI Taxonomy / Wave-Accounting Refactors — DONE
+
+> **RESOLVED (Stages 0–7, PR #67).**  Everything here shipped, in the exact
+> sequence this entry proposed.  Both structural gates: the AI
+> behavior-dispatch table (`ENEMY_BEHAVIOR` -> `moveStrategies`) replaced the
+> two-routine `ENEMY_ROLE` branch, and wave accounting gained
+> `countsTowardWave`.  All three reusable mechanics: provoked-on-hit,
+> generalized consume-and-grow (`updateConsumers`, `consume` PERF_TASKS
+> entry), attach + `'disable'`.  All four enemies: turret -> swarm+nest ->
+> bubble -> dragon.  What is still open is BALANCE, which has its own entry
+> ("Exotic-enemy roster (Stages 0-7)") — kept below for the design
+> rationale only.
+
 
 **Context:** Wishlist of more "alien/foreign" enemies with richer behavior variety:
 aggro-on-hit-only soft-body bubbles (wander, eat shards, grow, multiply, stick to
@@ -303,7 +338,29 @@ spawn/despawn-with-VFX event, not off-map traversal. All new neighbor scans must
 
 ---
 
-## Damage-triggered health / shield bars (remove always-on bars)
+## Damage-triggered health / shield bars (remove always-on bars) — DONE
+
+> **SHIPPED (gauntlet 5d, U5) — with ONE prescription REVERSED.**  The system
+> landed as designed: `healthBarTimer` + `markDamaged`/`markShieldDamaged`
+> stamped at every damage path, `renderHealthBar` gated on the timer with a
+> fade, the shield strip generalized to any shielded entity,
+> `alwaysShowHealthBar` for priority targets (the dragon takes it; capstone
+> bosses deliberately do not), and DBG ▸ Visual ▸ "HP bars" as the A/B.
+>
+> **Reversed by user call (U6): the player KEEPS a floating bar.**  This entry
+> argued the player's world-space bar was redundant with the HUD readout and
+> should be dropped.  In play it is not — the bar is where the eye already is,
+> the chip is where the exact figure is, and they wear the same three urgency
+> bands so they cannot read as two opinions.  `renderPlayerVitalsBar` draws it
+> permanently (never damage-triggered: your own condition is the one thing you
+> must not have to provoke into view), with the shield strip appearing only
+> once `maxShield > 0`.  See CLAUDE.md §8.
+>
+> One gap this entry did not anticipate, caught by U5's own suite: a hit fully
+> absorbed by a SHIELD armed no bar, so the strip could only appear once the
+> shield had already failed — backwards for a readout whose job is to be
+> watched draining.  Hence `markShieldDamaged` as a separate stamp.
+
 
 **Context:** Every player and enemy currently draws a persistent floating
 health bar (and the player a shield bar) every frame via
@@ -421,6 +478,14 @@ implicitly fine since they're 1-HP). This generalizes that idea to everyone.
 `components/UIOverlay.tsx` (weapon menu + Drydock/Unlocks panels);
 `GameEngine.purchaseUnlock` + the `EngineStats.shop` / `.unlocks` payloads.
 Note: #1 is a gameplay-economy change (playtest it); #2/#3 are UI-only.
+
+---
+
+## Swarm gnat + Bubble — feel / tuning pass
+
+> **Heading restored 2026-08-19.**  This entry had lost its `##` heading and
+> was rendering INSIDE the superseded ammo entry above — a live tuning
+> checklist filed under a SUPERSEDED banner.  Nothing about it is superseded.
 
 **Context:** A fast iteration session reshaped the SWARM gnat default and built
 out the BUBBLE into a full ambient third-party creature. The feel is broadly
@@ -784,7 +849,22 @@ at range.  Touch points: a lean engine-managed roamer like
 `RivalInstance` (AISystem skip-flag pattern), `STATION_VARIANTS`,
 `GameEngine.openPortal`.
 
-### Salvage death penalty
+### Salvage death penalty — INTERIM SHIPPED
+
+> **An interim penalty is LIVE** (user call): raising the death summary charges
+> `min(balance, max(DEATH_PENALTY_FRACTION x balance, DEATH_PENALTY_MIN))` of
+> UNSPENT credits — 25% or a 12,500 floor, whichever is HIGHER, clamped to what
+> the player holds, charged ONCE on the transition into `deathPending`.  It
+> taxes hoarding, not investment: money already spent on modules is untouched.
+> The run summary reports it as a per-life ledger (earned since the last death,
+> lost to the wreck, held after).
+>
+> That settles "a flat percentage tax" from the options below.  Still open: the
+> corpse-run recoverable drop and the uninsured-cargo variant (which pairs
+> naturally with the hex cargo model), and the severity number itself — both
+> belong to the tuning pass above, since the penalty and the repair cost must
+> not invert incentives.
+
 
 Death currently costs the run, but salvage carries no risk once
 collected.  Options to make dying expensive without a full roguelike
@@ -837,7 +917,16 @@ hub with wave maps as excursions, and where does state live
 meaning of every price in the economy, so re-run the tuning numbers with
 persistence in view.
 
-### Pause-menu stat legibility — per-module effect attribution
+### Pause-menu stat legibility — per-module effect attribution — DONE
+
+> **SHIPPED (Phase 3 Pair A).**  Both candidate shapes landed, not one:
+> `EngineStats.outfitting.statLines` carries the full derived-stat set with
+> PER-MODULE attribution, built by `GameEngine.statBreakdown()` from the same
+> slot walk `applyModuleEffects` folds — so the UI renders and never
+> recomputes, and the panel cannot disagree with the sim.  Rows expand to
+> their contributors; tapping a hex highlights every stat it feeds.  Shared
+> verbatim by the pause menu and the docked station via `renderShipStatus()`.
+
 
 (Note: ship modules already function with the free Base Hull — it is the
 family-`hull` adjacency root on the center hex, touching all six ring
@@ -855,7 +944,24 @@ breakdown on `EngineStats.outfitting`; `UIOverlay` pause Ship Status +
 
 ---
 
-## Portal off-screen indicators behave unlike every other indicator (2026-08-05)
+## Portal off-screen indicators behave unlike every other indicator (2026-08-05) — RESOLVED
+
+> **RESOLVED (step 5, G6 — decision #46b): option 2, plus a third change.**
+> The arrow is now suppressed once the rift is on screen (the world-space tag
+> takes over), and it no longer prints a DISTANCE readout — both halves of the
+> old redundancy are gone, and there are now NO exemptions from the
+> offscreen-only rule.  The RANGE GATE was deliberately KEPT: a portal is a
+> fixed landmark, so the two rules together bracket the case the arrow is
+> actually good for — close enough to matter, not yet visible.  Long-range
+> discovery moved to the minimap, where `PORTAL_BLIP` draws the rift as an
+> ANOMALY (spinning colour-filled diamond + radar ping) that clamps to the
+> border instead of being culled.
+>
+> The one divergence this entry named that SURVIVES is R2 in the 5d ledger: a
+> portal's ARROW is the legend's green while its BLIP carries the rift's own
+> violet/sky, so an outbound and a return rift are tellable apart on the map.
+> Documented as a deliberate exemption in CLAUDE.md §8.
+
 
 **Context:** raised in playtest during the Phase 3 Pair A session, after the
 off-screen indicators were reworked (edge-anchored, size-coded, typed by
@@ -1058,7 +1164,21 @@ node ids; and destroyed terrain does not persist across re-entry.
 
 ---
 
-## Automated test suite — investigate a real harness (2026-08-08)
+## Automated test suite — investigate a real harness (2026-08-08) — PARTLY ADOPTED
+
+> **STANCE DECIDED; TIERS 1, 2 and 6 SHIPPED (roadmap 5b, decision #46a).**
+> The "explicitly NOT decided" question at the bottom of this entry is
+> answered: the project adopted a harness when it went public and gained a
+> collaborator with no session history.  What exists now — `tests/` as repo
+> artifacts driving the real engine in a real browser (tier 1), `npm run
+> typecheck` (tier 2), and `.github/workflows/pr-checks.yml` running
+> typecheck -> build -> Playwright on every PR as the merge gate (tier 6).
+>
+> **Still parked, deliberately:** tier 3 (Vitest over the pure layer), tier 4
+> (headless Node sim tests) and tier 5 (visual regression — still the
+> flakiest and most maintenance-hungry, still last).  Read the tier list below
+> as three remaining items, not six.
+
 
 **Raised as a merge risk during the Phase 3 Pair A gauntlet.**  The project
 has, by design, no test runner and no lint step (CLAUDE.md §7: "Don't invent
@@ -1117,7 +1237,23 @@ harness that nobody runs is worse than none.
 
 ---
 
-## Viewport coverage — test more than 390×844 (2026-08-08)
+## Viewport coverage — test more than 390×844 (2026-08-08) — DONE
+
+> **SHIPPED (gauntlet 5d, U4).**  `tests/viewports.spec.ts` — 44 tests over
+> exactly the six viewports tabled below (320×568 / 390×844 / 430×932 /
+> 768×1024 / 1024×768 / 1440×900), plus the mid-session resize this entry
+> called "cheaper than it sounds": portrait -> landscape -> desktop -> 320 ->
+> back, watching a planted probe keep drifting at every stop.  The
+> scroll-width and 40px tap-target checks generalized directly, as predicted.
+> Canvas-pixel assertions stayed pinned to one viewport; visual regression
+> stays parked (tier 5 below).
+>
+> `window.__omniHud` was added for it, exposing the pure canvas-HUD layout
+> functions (`fitFontPx`, `computeMinimapRect`, `computeLoadoutHUDLayout`,
+> `computeIndicatorRect`) on the `__omniHid` rationale — they are pure, and
+> they are wrong in a way nothing reports.  Its stated dependency (the
+> test-harness entry) cleared first, as sequenced.
+
 
 **Raised as a merge risk during the Phase 3 Pair A gauntlet.**  Every UI
 assertion written in that session ran at a single viewport: **390×844**, the
@@ -1168,6 +1304,130 @@ stay pinned to one viewport.
 
 **Depends on** the test-suite entry above: this is only worth building on top
 of a harness that outlives a session.
+
+---
+
+## Rotational mechanics for shards and asteroids (2026-08-21)
+
+**Raised in playtest** ("the nebula shards spin in the opposite direction
+than what they should"), and the user has explicit interest in building the
+real thing.  The interim fix shipped: the player-wake swirl's spin sign is
+now the DBG cycle Visual ▸ "Neb spin" — `physical` (wake shear: starboard
+pass → clockwise) / `inverted` / `random` (the old id-parity vortices) — so
+the handedness can be A/B'd in flight.  That is a SIGN policy, not physics.
+
+**What the real system is:** angular state as a first-class part of the
+impulse solver.
+
+- **Moment of inertia** per entity (from size/mass; a disc approximation is
+  fine) beside `mass`, with `Infinity` for statics mirroring the mass axis.
+- **Off-centre impacts apply torque**: `resolveCollision` /
+  `resolveAsteroidPair` compute the contact point already (MTV); the impulse
+  they apply should also change `rotationSpeed` by `r × J / I` on both
+  bodies, and the contact-point VELOCITY (linear + ω×r) should feed the
+  restitution instead of the centre velocity.
+- **Surface drag / wake torque** becomes an emergent case of the same
+  machinery instead of the hand-signed swirl kick.
+- **Spin → translation coupling** (a spinning shard grinding along a wall
+  walks sideways) is optional polish; decide when the base lands.
+
+**Why its own session** (CLAUDE.md §8 already warns): the per-pair solver is
+the hottest code in the engine and "delicate — merge / regen / neighbour-
+count all key off exact shard positions".  Adding angular terms changes
+resting-contact behaviour (spin jitter is the classic failure), interacts
+with the shard SLEEP system (`SHARD_SLEEP_CONSTANTS` gates on spin epsilon
+already), and needs the perf harness re-run (`perf/simbench.mjs`) since it
+adds work per contact pair.  Sequence: base I + impact torque on the
+player/enemy/shard paths → wake swirl re-derived → sleep/merge re-verified →
+perf capture.  Knobs should land beside `PHYSICS_CONSTANTS`.
+
+**Touch points:** `PhysicsSystem.resolveCollision` / `resolveAsteroidPair` /
+`applyNebulaPlayerPull` (which then loses its hand-signed kick), the shard
+sleep gates, `SHARD_VARIANTS` if per-material inertia is wanted.
+
+---
+
+## 5d aesthetic calls (R1–R5) — parked for a future look pass (2026-08-20)
+
+**Parked at the user's direction.**  The 5d gauntlet's ledger raised five
+aesthetic judgment calls for review (`docs/GAUNTLET_5D_LOG.md` § For user
+review); rather than adjudicate them one by one they are parked here as a
+bundle for a dedicated look pass.  Each is a taste call with the reasoning
+already written — none blocks anything, and none is a defect.
+
+1. **R1 — Stage-clear CONTINUE: emerald vs amber.**  Moved to the shared
+   emerald PRIMARY because amber on that screen is the descent rift's colour
+   and an amber button reads as "descend".  Counter-argument: the screen is
+   amber-themed throughout and the button tied it together.
+2. **R2 — Portal arrow green vs minimap blip violet/sky.**  The one contact
+   exempt from the G5 colour-faithfulness rule, documented as deliberate.
+   Two ways out if wanted: tint the arrow to match the rift, or keep the
+   legend green and distinguish outbound/return by SHAPE on the minimap.
+3. **R3 — Expanded minimap vs loadout strip overlap.**  The strip's
+   clearance assumes the COLLAPSED map width.  Left alone because every fix
+   (moving the strip when the map opens) is a bigger aesthetic change than
+   the problem — the map auto-collapses after five seconds and the strip
+   draws on top.
+4. **R4 — Where the player's hull readout lives.**  Top-left, with the
+   number changing colour by urgency band (emerald → amber → rose) — the one
+   place in the HUD where a colour change IS the information.  Moving it
+   (e.g. bottom-left by the minimap) is a one-line change if it reads wrong.
+5. **R5 — At 320px the longest station title ellipsizes.**  Every title fits
+   exactly at the 390px design target; 320 plus a six-figure balance is 29px
+   short and `truncate` degrades gracefully.  The alternatives all trade a
+   guarantee for it (wrapping headers can overflow outright on longer future
+   names).
+
+The full argument for each — with measurements and the before/after pairs —
+stays in the 5d ledger; this entry exists so the look pass has one place to
+start from.
+
+---
+
+## Fully customisable control scheme (rebindable pad / key mapping)
+
+**Parked deliberately** (user call, alongside the `gamepad-left` scheme that
+prompted it): the schemes have grown to seven, and each new one is a row in
+`CONTROL_SCHEMES` plus a row in `CONTROL_SCHEME_RULES` plus a branch or two in
+`InputSystem`. That is cheap for the first few and stops being cheap when the
+answer to "can I put fire on the right bumper" is a new scheme.
+
+**What exists already, and is most of the substrate:**
+
+- `INPUT_CONSTANTS.GAMEPAD.BUTTONS` is already a table of *action → button
+  indices* (`FIRE`, `FIRE_FACE`, `INTERACT`, `CYCLE_WEAPON`, `PAUSE`, `DPAD`,
+  `THROTTLE`, plus the menu-nav group). A rebind is a write to that table, not
+  new plumbing — the poll reads it through `padGroupValue` / `padGroupEdge`,
+  which already accept a GROUP of indices rather than one button.
+- `CONTROL_SCHEME_RULES` is the one table every "what does this scheme do"
+  read goes through, so a custom scheme is a rules row with user-supplied
+  values rather than a new code path.
+- The three input devices already converge on one set of outputs (movement
+  vector, synthetic pointer, fire queues), so nothing downstream of
+  `InputSystem` would need to know a binding had moved.
+
+**What is genuinely missing:**
+
+1. **Persistence.** The game keeps no state across reloads by design
+   (difficulty and control scheme are in-memory preferences). A rebind that
+   does not survive a reload is worse than no rebind, so this needs the first
+   real answer to "where does user configuration live" — which is a decision
+   with scope well beyond controls.
+2. **A binding UI**, including the "press the button you want" capture mode,
+   conflict detection, and a reset-to-default. On a 390px screen that is a
+   screen of its own, not a section of the pause menu.
+3. **The axis question.** Buttons rebind cleanly; AXES do not. What the left
+   stick MEANS differs per scheme (thrust magnitude under `gamepad`, discarded
+   under `gamepad-thrust`, heading+aim+throttle under `gamepad-left`), and
+   those are semantics rather than bindings. A custom scheme needs to expose
+   that choice as a small set of named behaviours — which is what the scheme
+   list already is, so the honest design may be "custom BUTTONS on top of a
+   chosen axis model" rather than a blank slate.
+
+**Cheapest path when it comes up:** buttons only, on top of an existing
+scheme, with the axis model still chosen from the current list. That covers
+the common ask ("move fire off the trigger") without answering (3), and it
+needs only (1) and (2).
 
 ---
 
