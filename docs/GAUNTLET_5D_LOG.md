@@ -1763,3 +1763,13 @@ So the time is going to one or both of the two things OUTSIDE the app:
 No engine change recommended; the readout is the deliverable. If the number
 on-device reads ~40ms and it still feels late on the SPEAKER, the next lever
 is the G13 tap-on-release call, which is a feel decision, not a bug.
+
+### P15b — the readout rides the PerfRecorder capture
+
+The pause-menu spot cannot be read while the sound is happening (user
+call), so the same number now travels with a recorded session:
+`PerfReportContext.audioLatencyMs`, printed in the capture header —
+`audio out ~42ms`, flagged `(Bluetooth?)` at ≥120ms. Report-time rather
+than per-frame: the route is quasi-static, and a session recorded to
+answer "why is sound late" wants the route it ended on. The pause-menu
+line stays as the at-a-glance copy.

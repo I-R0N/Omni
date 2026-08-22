@@ -34,6 +34,14 @@ export interface PerfReportContext {
    *  which settings produced it cannot be compared to another one.  Two
    *  captures in this gauntlet were ambiguous for exactly that reason. */
   settings: string;
+  /** AudioContext base+output latency in ms at report time, null before
+   *  the unlock gesture (playtest: "sounds feel slightly delayed" — the
+   *  engine side is measured at 3-5ms dispatch + ~3ms draft onset, so this
+   *  device number is where any felt delay lives: ~30-45ms is a
+   *  wired/speaker route, 150-250ms means Bluetooth).  Report-time, not
+   *  per-frame: the route is quasi-static, and what matters to a session
+   *  recorded to answer "why is sound late" is the route it ENDED on. */
+  audioLatencyMs: number | null;
 }
 
 /** Cyclable scene labels so each capture is self-describing on the paste. */
@@ -408,7 +416,8 @@ export class PerfRecorder {
 
     const lines = [
       `### PERF ${ctx.buildTag} · ${this.sceneTag} · ${ctx.mapName} · diff ${ctx.difficulty}`,
-      `viewport ${ctx.viewportW}×${ctx.viewportH} dpr${ctx.dpr} zoom${r2(ctx.zoom)} · ${r1(durSec)}s · ${n} frames${this.full ? ' (capped)' : ''}`,
+      `viewport ${ctx.viewportW}×${ctx.viewportH} dpr${ctx.dpr} zoom${r2(ctx.zoom)} · ${r1(durSec)}s · ${n} frames${this.full ? ' (capped)' : ''}`
+        + ` · audio out ${ctx.audioLatencyMs === null ? '—' : `~${ctx.audioLatencyMs}ms${ctx.audioLatencyMs >= 120 ? ' (Bluetooth?)' : ''}`}`,
       `set   ${ctx.settings}`,
       `FPS   avg ${fpsR(avgFps)} · median ${fpsR(toFps(medianFrame))} · 5%-low ${fpsR(toFps(p95Frame))} · 1%-low ${fpsR(toFps(p99Frame))} · min ${fpsR(toFps(maxFrame))} · max ${fpsR(toFps(minFrame))} · ≥55: ${Math.round((ge55 / n) * 100)}% · ≥30: ${Math.round((ge30 / n) * 100)}%`,
       `frame avg ${r1(sumFrame / n)}ms · median ${r1(medianFrame)}ms · p95 ${r1(p95Frame)}ms · p99 ${r1(p99Frame)}ms`,

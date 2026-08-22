@@ -5283,6 +5283,7 @@ export class GameEngine {
       // ratio is recoverable from the `set` line's rscale entry.
       dpr: Math.round(effectiveDpr() * 10) / 10,
       zoom: this.camera.zoom || 1,
+      audioLatencyMs: this.audio.latencyMs,
       mapName: this.currentMap?.name || '—',
       difficulty: this.difficultyLevel,
       buildTag: '5c-perf',
