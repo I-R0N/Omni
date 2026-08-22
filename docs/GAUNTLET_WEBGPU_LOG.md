@@ -79,6 +79,34 @@ PRs instead of one adaptation landing here.
 
 The original measurement follows, unedited.
 
+### The seam was NARROWED in response (operator's call)
+
+The growth rate above was the argument, so the interface was split by what it
+is *for*:
+
+| File | Members | Grows? |
+|---|---|---|
+| `engine/systems/Renderer.ts` | **9** — the draw path (7) + the two sim-wiring calls | **No.** This is the swap contract |
+| `engine/systems/RendererDiagnostics.ts` | **34** — debug flags, perf counters, lighting/fog readouts | Yes, and that is its job |
+
+`GameEngine.renderer` is typed `Renderer & RendererDiagnostics`, so **every
+call site is unchanged and the split is type-only** — re-verified
+byte-identical against the base (857,664 bytes, identical MD5, once the build
+timestamp *and* the embedded git SHA are normalised; the latter is 6 bytes of
+build banner and caught this check out once).
+
+What this buys, concretely: **a debug flag or perf counter added by lighting
+or HUD work no longer touches the swap contract.** It lands in the
+diagnostics file, which is labelled as the churn surface. `Renderer.ts` now
+says in its header that if you are adding a counter, it does not belong
+there.
+
+And it tells a second renderer the truth: implement the nine, **stub the
+thirty-four**. Several are meaningless off the Canvas2D path anyway — there
+is no "tint cache miss" on a GPU renderer, and `lastRenderMs` measures
+CPU-side call *issuing*, which is exactly the work a GPU renderer moves off
+the CPU.
+
 ### What was measured
 
 The seam was trial-merged into both open PRs against the shared base
