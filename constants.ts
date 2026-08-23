@@ -4900,8 +4900,33 @@ export const AUDIO_CONSTANTS = {
   IMPACT_SPAN_ENEMY: 12,
   IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
   IMPACT_PITCH_EXP: 0.25,
-  IMPACT_PITCH_MIN: 0.70,
-  IMPACT_PITCH_MAX: 1.60,
+  /** The clamps are set to the MEASURED extremes of everything that actually
+   *  reaches a mass-pitched row, so the curve can reach its own ends.
+   *
+   *  At 0.70/1.60 they were binding on **20.9%** of hits — a fifth of every
+   *  impact in the game played at one of exactly two pitches, with no
+   *  dynamics at all. Worst were the smallest glass shards (all pinned to the
+   *  top) and the heaviest rock (all pinned to the bottom), i.e. precisely the
+   *  extremes the cue exists to distinguish. At 0.46/2.50 it is **0.4%**.
+   *
+   *  THREE rows consume this (PhysicsSystem.impactVoice) and the bounds come
+   *  from their real populations:
+   *    · `crash.player.shard` — glass 0.69–8.2, plastic 4.9–10.3, metal 19.4,
+   *      rock 7.2–460.7 → wants 0.483 … 2.450
+   *    · `crash.player.enemy` — SWARM mass 4 → 1.581, DRAGON mass 500 → 0.473
+   *    · `crash.player.tile`  — passes Infinity, so it is unpitched by design
+   *
+   *  NEBULA shards are deliberately NOT a consumer despite a 0.01 sentinel
+   *  mass that would demand a clamp of 7.07: player↔nebula-shard hard
+   *  collision is default OFF (they pass through and swirl), so that row never
+   *  fires for them. If that toggle is ever turned on by default, this comment
+   *  is the thing that breaks.
+   *
+   *  Heavier still is possible — rock merges past 460 over a long run — and
+   *  that is what a floor is FOR. The bound is "every population can reach its
+   *  own ends", not "nothing is ever clamped". */
+  IMPACT_PITCH_MIN: 0.46,
+  IMPACT_PITCH_MAX: 2.50,
   /** Per-row gain floors (docs/SFX_INVENTORY.md §4.4).  A floor is what stops
    *  a voice fading to nothing: the tile crash has none because it is gated
    *  hard enough that a quiet one is meaningful, while the light-contact rows

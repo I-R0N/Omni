@@ -309,8 +309,25 @@ a catastrophic one and the ear cannot. Accepted deliberately — the only
 way to recover it on the tile row is to re-tune the wall, which costs the
 parity above.
 
-**Pitch.** `pitch = clamp((25 / m) ^ 0.25, 0.70, 1.60)` — from MASS, not
+**Pitch.** `pitch = clamp((25 / m) ^ 0.25, 0.46, 2.50)` — from MASS, not
 from size.
+
+**The clamps are sized to the MEASURED populations**, so every material can
+reach its own ends. At the original 0.70/1.60 they bound **21.5%** of all
+hits: a fifth of every impact played at one of exactly two pitches with no
+dynamics, and the pinned ones were the smallest glass shards (all at the top)
+and the heaviest rock (all at the bottom) — precisely the extremes the cue
+exists to distinguish. At 0.46/2.50 it is **0.0%**. The bounds come from
+`crash.player.shard` (glass 0.69–8.2, plastic 4.9–10.3, metal 19.4, rock
+7.2–460.7 → 0.483…2.450) and `crash.player.enemy` (DRAGON mass 500 → 0.473,
+SWARM mass 4 → 1.581); `crash.player.tile` passes `Infinity` and is unpitched
+by design. NEBULA shards are not a consumer despite a 0.01 sentinel mass that
+would demand a clamp of 7.07 — player↔nebula hard collision is default off, so
+that row never fires for them.
+
+Measured at the new ends, the dominant frequency stays well clear of the whine
+band even with jitter stacked on top: the shard row runs 129 Hz at the floor
+and 1043 Hz at the ceiling, the enemy row 98 Hz and 696 Hz.
 
 Gain says how hard, pitch says how big, and because mass is already the
 term inside `I` the two cues cannot disagree with each other or with the
