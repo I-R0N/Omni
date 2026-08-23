@@ -4962,6 +4962,62 @@ export const AUDIO_CONSTANTS = {
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 } as const;
 
+// ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────
+//
+// A single frame can kill 40 enemies or shatter 200 shards, and the shipped
+// answer is to COLLAPSE simultaneous triggers of one id into a single louder
+// voice (AUDIO_CONSTANTS.COLLAPSE_BUMP) so bulk reads as HEAVIER rather than
+// as forty thin copies or one forty-times-louder one.
+//
+// That is a judgement, not a fact, and it was never A/B-able — so this cycle
+// exists to hear the alternatives instead of arguing about them.  Three
+// scales move together, because relaxing one alone changes nothing: the
+// share of in-window triggers that still get a voice, the per-id POLYPHONY
+// cap, and the global tier CEILINGS.  Let more through without raising the
+// caps and the extras are simply dropped a step later.
+//
+//   Merge  — shipped.  One heavier voice per burst.
+//   Some   — half the window, double the voices.  A burst of 40 lands as
+//            roughly 20 distinct hits instead of 1.
+//   All    — no collapse at all: every trigger that arrives gets a voice,
+//            subject only to a much-raised ceiling.  This is the honest
+//            "what does 40-at-once actually sound like" test, and it is
+//            expected to be ugly — that is the evidence.
+//
+// DELIBERATELY A DBG CYCLE AND NOT A SETTING.  `All` can put dozens of
+// voices in one frame; it is a listening tool, not a supported mix.
+export interface CollapseMode {
+  name: string;
+  /** Fraction of the triggers arriving INSIDE the retrigger window that
+   *  still get their own voice.  0 = none (the shipped merge), 1 = all.
+   *
+   *  A fraction rather than a window scale, because a mass-death frame
+   *  fires every trigger at the same context time: the gap between them is
+   *  exactly zero, so no window is small enough to let a second one
+   *  through.  Counting them is the only thing that can subdivide a burst,
+   *  and a first version that scaled the window measured 1 voice from 40
+   *  triggers in BOTH of its modes. */
+  pass: number;
+  /** Multiplies each id's polyphony cap. */
+  poly: number;
+  /** Multiplies the global + per-tier voice ceilings. */
+  ceiling: number;
+  /** Whether a collapsed retrigger still bumps the live voice's gain. */
+  bump: boolean;
+}
+export const COLLAPSE_MODES: ReadonlyArray<CollapseMode> = [
+  { name: 'Merge', pass: 0,   poly: 1, ceiling: 1, bump: true  },
+  { name: 'Some',  pass: 0.5, poly: 3, ceiling: 3, bump: true  },
+  { name: 'All',   pass: 1,   poly: 8, ceiling: 6, bump: false },
+] as const;
+let activeCollapseIndex = 0;
+export function getActiveCollapseMode(): CollapseMode { return COLLAPSE_MODES[activeCollapseIndex]; }
+export function getActiveCollapseModeName(): string { return COLLAPSE_MODES[activeCollapseIndex].name; }
+export function cycleCollapseMode(): CollapseMode {
+  activeCollapseIndex = (activeCollapseIndex + 1) % COLLAPSE_MODES.length;
+  return COLLAPSE_MODES[activeCollapseIndex];
+}
+
 // ── Snitch ───────────────────────────────────────────────────────────────────
 // A golden-comet snitch rides the asteroid flow field with a burst/coast AI
 // and PERSISTS across waves — one keeps flying until the player catches it.

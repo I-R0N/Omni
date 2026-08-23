@@ -535,6 +535,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleStarParallax();
   };
 
+  const handleCycleCollapseMode = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleCollapseMode();
+  };
+
 
   const handleApplyCorrosion = () => {
       if (engineRef.current) engineRef.current.debugApplyCorrosion();
@@ -800,6 +804,7 @@ const App: React.FC = () => {
         onCycleStarSize={handleCycleStarSize}
         onCycleStarBands={handleCycleStarBands}
         onCycleStarParallax={handleCycleStarParallax}
+        onCycleCollapseMode={handleCycleCollapseMode}
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}

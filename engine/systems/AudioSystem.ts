@@ -1,5 +1,5 @@
 import SFX_MANIFEST from 'virtual:sfx-manifest';
-import { AUDIO_CONSTANTS } from '../../constants';
+import { AUDIO_CONSTANTS, getActiveCollapseMode } from '../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
@@ -168,6 +168,10 @@ interface IdState {
   lastGain: GainNode | null;
   /** Accumulated collapse bump on `lastGain`, capped. */
   lastBump: number;
+  /** Triggers seen inside the CURRENT retrigger window, counted so the DBG
+   *  collapse mode can let a fraction of them through.  Reset when a window
+   *  lapses, i.e. when a genuinely new burst starts. */
+  winCount: number;
 }
 
 interface LiveLoop {
@@ -570,8 +574,27 @@ export class AudioSystem {
 
     // 1. Retrigger window.  Inside it, either bump the live voice (so a
     //    bulk event reads as one heavier hit) or drop outright.
+    // DBG collapse mode decides how much of a burst survives as real voices.
+    //
+    // It counts triggers rather than scaling the WINDOW, and that is the
+    // whole trick: a mass-death frame fires every trigger at the SAME
+    // context time, so the gap between them is exactly zero and no amount of
+    // shrinking a window lets a second one through. Letting every Nth
+    // in-window trigger past is the only thing that can subdivide a burst.
+    // (Measured: a window-scaling version produced 1 voice from 40 triggers
+    // in both its modes, i.e. a knob that did nothing.)
+    const cm = getActiveCollapseMode();
+    let through = false;
     if (now - st.lastAt < def.minInterval) {
-      if (def.collapse && st.lastGain) {
+      st.winCount++;
+      // pass 0 → nothing through (shipped); 1 → everything; 0.5 → every 2nd.
+      const stride = cm.pass > 0 ? Math.max(1, Math.round(1 / cm.pass)) : 0;
+      through = stride > 0 && st.winCount % stride === 0;
+    } else {
+      st.winCount = 0;
+    }
+    if (now - st.lastAt < def.minInterval && !through) {
+      if (def.collapse && cm.bump && st.lastGain) {
         // Each collapsed trigger multiplies the live voice up, saturating
         // at CAP — so ten simultaneous breaks are audibly bigger than one
         // but forty are not ten times louder than ten.
@@ -591,17 +614,19 @@ export class AudioSystem {
 
     // 2. Per-id polyphony.  Prune retired voices first (lazy — no timers).
     this.prune(st.ends, now);
-    if (st.ends.length >= def.poly) { this.counts.dropped++; return; }
+    if (st.ends.length >= def.poly * cm.poly) { this.counts.dropped++; return; }
 
     // 3. Global ceiling, thinned by tier.  Tier 1 always plays.
     this.pruneGlobal(now);
     if (def.tier > 1) {
-      const cap = def.tier === 3
+      const cap = (def.tier === 3
         ? AUDIO_CONSTANTS.MAX_VOICES_TIER3
-        : AUDIO_CONSTANTS.MAX_VOICES_TIER2;
+        : AUDIO_CONSTANTS.MAX_VOICES_TIER2) * cm.ceiling;
       if (this.globalEnds.length >= cap) { this.counts.dropped++; return; }
     }
-    if (this.globalEnds.length >= AUDIO_CONSTANTS.MAX_VOICES) { this.counts.dropped++; return; }
+    if (this.globalEnds.length >= AUDIO_CONSTANTS.MAX_VOICES * cm.ceiling) {
+      this.counts.dropped++; return;
+    }
 
     // 4. Static per-voice gain: mix level × caller trim × distance.
     let g = def.gain * (opts?.gain ?? 1);
@@ -856,7 +881,7 @@ export class AudioSystem {
 
   private stateFor(id: string): IdState {
     let st = this.ids.get(id);
-    if (!st) { st = { lastAt: -1e9, ends: [], lastGain: null, lastBump: 1 }; this.ids.set(id, st); }
+    if (!st) { st = { lastAt: -1e9, ends: [], lastGain: null, lastBump: 1, winCount: 0 }; this.ids.set(id, st); }
     return st;
   }
 

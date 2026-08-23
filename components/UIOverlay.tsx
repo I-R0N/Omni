@@ -146,6 +146,7 @@ interface UIOverlayProps {
   onCycleStarSize?: () => void;
   onCycleStarBands?: () => void;
   onCycleStarParallax?: () => void;
+  onCycleCollapseMode?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -439,6 +440,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleStarSize,
   onCycleStarBands,
   onCycleStarParallax,
+  onCycleCollapseMode,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -1680,6 +1682,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Parallax DEPTH LAYERS (240 / 120 / 480 / 60). The star budget is split evenly across them, so this changes how finely depth is quantised, not how many stars there are — more layers means a smoother near-to-far gradient as the camera moves. Frozen at 60 for as long as a layer was a full-viewport canvas (60 of those cost 80–316 MB); a layer is now five numbers, so 240 costs ~10 KB. Regenerates the field immediately.')}
                 {ctrlRow('Parallax', onCycleStarParallax, stats.starParallaxName ?? 'Auto',
                   'PARALLAX SPREAD — how much faster the nearest depth layer scrolls than the farthest. AUTO (default) DERIVES it from this map\u0027s density, inversely: sparse skies are NEAR skies and separate more as you move, so 90 density gives 8x spread and 729 gives 1x. Independent of Star depth: the span is set here, so adding LAYERS cuts the same range more finely rather than deepening it — which is why more layers reads as LESS separation, not more. The curve is quadratic, so near layers spread wide and far layers bunch together, the way real distance behaves.')}
+                {ctrlRow('Sound burst', onCycleCollapseMode, stats.collapseModeName ?? 'Merge',
+                  'How a BURST of the same sound is folded into voices — a single frame can kill 40 enemies or shatter 200 shards. MERGE (shipped): simultaneous triggers of one id collapse into ONE voice whose gain is bumped, so bulk reads as heavier rather than as forty thin copies. SOME: half the retrigger window and double the voices, so a burst of 40 lands as roughly 20 distinct hits. ALL: no collapse at all — every trigger gets a voice, under a much-raised ceiling. This is the honest \u201cwhat does 40-at-once sound like\u201d test and is expected to be ugly; that is the evidence. Three gates move together (window, polyphony, tier ceilings) because loosening one alone just moves the drop a step later.')}
                 {ctrlRow('Trail', onCycleTrailShape,
                   stats.trailShape === TrailShape.SQUARE ? 'Square'
                     : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'

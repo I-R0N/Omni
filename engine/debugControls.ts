@@ -38,7 +38,7 @@ import {
     toggleWorldLights, toggleDepthAmbient,
     cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix, cycleFog,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
-    cycleStarDensity, cycleStarSize, cycleStarBands,
+    cycleStarDensity, cycleStarSize, cycleStarBands, cycleCollapseMode,
     cycleStarParallax,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -768,6 +768,20 @@ export class DebugControls {
   cycleStarParallax() {
     cycleStarParallax();
     this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the VOICE COLLAPSE mode (Merge / Some / All).
+   *
+   *  The shipped answer to a 40-kill frame is to fold simultaneous triggers
+   *  of one id into ONE louder voice, so bulk reads as heavier rather than as
+   *  forty thin copies.  That is a judgement and was never A/B-able; this
+   *  makes the alternatives audible.
+   *
+   *  Note it scales three gates together (window, polyphony, ceilings) —
+   *  loosening the window alone would just move the drop one step later, so a
+   *  cycle that only did that would sound identical and read as broken. */
+  cycleCollapseMode() {
+    cycleCollapseMode();
   }
 
 
