@@ -143,7 +143,13 @@ function registerWeapons(a: AudioSystem) {
   // caller already tracks — at full charge `p` simply stays at 1, so "held"
   // needs no separate state to detect.
   a.registerLoop('weapon.charge.loop', {
-    tier: 1, gain: 0.24,
+    // 0.28 -> 0.24 -> 0.10 across two rounds of "still too loud" (user).  The
+    // envelope shaping below fixed the HOLD; this is the LEAD-UP, which the
+    // shaping deliberately leaves at full level and which is therefore
+    // governed by this number alone.  Now the quietest tier-1 sound in the
+    // game, which is right for one that plays UNDER everything else for as
+    // long as the player keeps the trigger down.
+    tier: 1, gain: 0.10,
     start: (s: SynthCtx): LoopVoice => {
       const { ctx, dest, t0 } = s;
       const osc = ctx.createOscillator();
