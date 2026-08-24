@@ -1919,8 +1919,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pins a filename for the exceptional case.  The draft stays as the
   FALLBACK, so a missing or
   undecodable file degrades to a different sound rather than to silence,
-  and the standalone build — whose inliner carries images, not audio —
-  stays fully audible on the drafts.  Files are fetched and DECODED ONCE
+  and the standalone build stays fully audible on the drafts.  That build
+  BAKES the recorded takes in as a filename→data-URI table
+  (`window.__omniSfxInline`), which the loader checks before fetching: a
+  single HTML file cannot fetch anything, so recordings were unreachable
+  there and WAV-only mode was silence rather than an A/B.  Everything after
+  the byte source is shared, so a baked take takes the same decode,
+  silent-file rejection and round-robin as a served one.  Files are fetched and DECODED ONCE
   at unlock, never on first trigger: a `decodeAudioData` inside the frame
   a collision lands in is the one way this path could cost frames.  Pitch
   rides `playbackRate`, so the call site's existing `{gain, pitch}`

@@ -418,7 +418,15 @@ export class AudioSystem {
       names.forEach((name, i) => {
         jobs.push((async () => {
           try {
-            const res = await fetch(`${SFX_ASSET_DIR}${name}`);
+            // The STANDALONE build has no files to fetch — it is one HTML
+            // document — so it bakes the takes in as data URIs and leaves
+            // them here.  Checking the table first is the whole of the
+            // single-file audio path: everything below is unchanged, so a
+            // baked take goes through the same decode, the same silent-file
+            // rejection and the same round-robin as a fetched one.
+            const inlined = (globalThis as { __omniSfxInline?: Record<string, string> })
+              .__omniSfxInline?.[name];
+            const res = await fetch(inlined ?? `${SFX_ASSET_DIR}${name}`);
             if (!res.ok) return;                       // missing → synth draft
             const bytes = await res.arrayBuffer();
             const buf = await this.ctx!.decodeAudioData(bytes);

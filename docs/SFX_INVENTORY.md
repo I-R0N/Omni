@@ -17,6 +17,11 @@ This document has two jobs and one rule.
   engine. Draft sounds are **procedural** (WebAudio oscillators / noise /
   filters / envelopes) — there are no audio asset files, so
   `scripts/inline-build.mjs` and the standalone build are untouched.
+  **Recorded takes ARE now baked into the standalone**, as a filename →
+  data-URI table the loader checks before fetching — the single file cannot
+  fetch anything, so without it the recordings were unreachable there and
+  WAV-only mode was silence rather than an A/B. Cost is the audio's size plus
+  a third for base64 (0.97 MB → 6.91 MB total at 66 takes).
 - **The rule — ids are stable.** Replacing a draft with a real asset is a
   registry change keyed by the same id, never a change at the trigger
   site. If a row's id changes, every consumer changes with it, so don't.
