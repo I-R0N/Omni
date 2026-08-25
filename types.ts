@@ -384,6 +384,12 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
+  /** BANKING ROLL (player only today).  Signed roll angle in radians, eased
+   *  toward the lateral component of the thrust input each step
+   *  (`GameEngine.tickPlayerRoll`, tuning in `PLAYER_ROLL_CONSTANTS`).
+   *  Purely presentational — RenderSystem foreshortens the hull across its
+   *  wing line by cos(roll); physics/collision never read it. */
+  visualRoll?: number;
   /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
    *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
    *  while it is positive and fades over the last `FADE_DURATION`.  A

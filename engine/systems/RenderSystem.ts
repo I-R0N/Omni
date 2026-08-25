@@ -1469,11 +1469,33 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       );
       const cosR = Math.cos(rotation);
       const sinR = Math.sin(rotation);
+      // Local 2×2 (canvas [[a,c],[b,d]] layout) — plain rotation for
+      // everything…
+      let l11 = cosR, l21 = sinR, l12 = -sinR, l22 = cosR;
+      // …except a BANKING player (GameEngine.tickPlayerRoll): foreshorten
+      // the hull across its wing line by cos(roll), the top-down projection
+      // of a flat ship rolling.  The squash must sit BETWEEN the facing
+      // rotation and the art-alignment offset — it is the SHIP that rolls,
+      // not the sprite art's axes — so the matrix is composed as
+      // R(facing) × scale(1, cos roll) × R(art offset) rather than folded
+      // into one angle.  One entity per frame, so the extra trig is free;
+      // level flight (visualRoll snapped to 0) keeps the plain path.
+      if (entity.type === EntityType.PLAYER && entity.visualRoll) {
+          const squash = Math.cos(entity.visualRoll);
+          const ch = Math.cos(entity.rotation);
+          const sh = Math.sin(entity.rotation);
+          const co = Math.cos(SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET);
+          const so = Math.sin(SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET);
+          l11 = ch * co - sh * squash * so;
+          l21 = sh * co + ch * squash * so;
+          l12 = -ch * so - sh * squash * co;
+          l22 = -sh * so + ch * squash * co;
+      }
       ctx.setTransform(
-        camA * cosR + camC * sinR,
-        camB * cosR + camD * sinR,
-        -camA * sinR + camC * cosR,
-        -camB * sinR + camD * cosR,
+        camA * l11 + camC * l21,
+        camB * l11 + camD * l21,
+        camA * l12 + camC * l22,
+        camB * l12 + camD * l22,
         camA * rx + camC * ry + camE,
         camB * rx + camD * ry + camF,
       );
@@ -1601,6 +1623,21 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // catch-all.  render/dropShapes.ts.
             drawDropShape(ctx, entity, nowSec, playerPos);
           }
+      }
+
+      // A banked player leaves the squashed matrix behind before the ring
+      // draws below: the shield ring is the PHYSICAL collision radius and
+      // the charge ring is HUD — neither rolls with the hull, and their
+      // `rotate(-rot)` bookkeeping assumes the plain rotation matrix.
+      if (entity.type === EntityType.PLAYER && entity.visualRoll) {
+          ctx.setTransform(
+            camA * cosR + camC * sinR,
+            camB * cosR + camD * sinR,
+            -camA * sinR + camC * cosR,
+            -camB * sinR + camD * cosR,
+            camA * rx + camC * ry + camE,
+            camB * rx + camD * ry + camF,
+          );
       }
 
       // Shield hit ring — visible only on contact; radius matches physical collision

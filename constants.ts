@@ -2959,6 +2959,21 @@ export const PLAYER_TRAIL_CONSTANTS = {
   COLOR: '125, 211, 252',// RGB triplet (brighter cyan)
 };
 
+// BANKING ROLL — the player ship rolls into lateral acceleration.  The
+// signal is the thrust input's component PERPENDICULAR to the facing (aim)
+// axis, so strafing across the nose banks the hull while thrusting straight
+// along it flies level.  The renderer foreshortens the sprite across its
+// wing line by cos(roll) — the top-down projection of a flat ship rolling —
+// so MAX_ANGLE is authored as a real bank angle, not a scale factor.
+export const PLAYER_ROLL_CONSTANTS = {
+  MAX_ANGLE: 0.85,     // Radians (~49°) at full lateral thrust — cos ≈ 0.66 squash
+  RESPONSE_RATE: 9,    // Per-second ease INTO a deeper bank (snappy on input)
+  RETURN_RATE: 4.5,    // Per-second ease back toward level (gentler settle)
+  // Below this angle with no lateral input the roll snaps to 0, so the
+  // renderer's straight-flight path stays the plain rotation matrix.
+  REST_EPSILON: 0.01,
+};
+
 export const SHOOTING_STAR_CONSTANTS = {
   MIN_TIMER: 300,
   MAX_TIMER: 700,

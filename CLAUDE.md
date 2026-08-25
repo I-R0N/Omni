@@ -56,10 +56,10 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d), lighting (the
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
-                          flashlight / nebulaspin,
+                          flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  222 tests.  All run at
+                          anti-flake rules).  226 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -712,6 +712,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
+- `PLAYER_ROLL_CONSTANTS` — the BANKING ROLL: the player ship rolls into
+  lateral acceleration.  `GameEngine.tickPlayerRoll` eases
+  `player.visualRoll` toward the thrust input's component perpendicular
+  to the FACING (aim) axis — full sideways thrust is a full bank
+  (`MAX_ANGLE`), thrust along the nose or coasting settles back to a
+  literal 0 (asymmetric rates: attack outruns release).  Purely
+  presentational: RenderSystem foreshortens the hull across its wing
+  line by cos(roll), composed as R(facing) × scale(1, cos roll) ×
+  R(art offset) inside the player's single setTransform — the squash
+  sits BETWEEN the facing rotation and the art-alignment offset because
+  it is the ship that rolls, not the sprite art's axes.  Physics,
+  collision and aim never read it.  Works on every input device for
+  free, since the signal is the shared movement vector.
+  `tests/roll.spec.ts` pins signal + easing.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy
