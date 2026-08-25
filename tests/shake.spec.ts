@@ -207,26 +207,51 @@ test.describe('shake direction follows the impact vector', () => {
     expect(r.dirX, 'the axis is the impact direction').toBeCloseTo(-1, 5);
     expect(r.dirY, 'and has no cross component on a head-on hit').toBeCloseTo(0, 5);
 
-    /*  And the camera actually MOVES along it.  Sampled over a burst of live
-     *  frames rather than at one instant: the displacement is a decaying
+    /*  And the camera actually MOVES along it.  The displacement is a decaying
      *  OSCILLATION, so its sign flips several times across the window and any
      *  single sample would be a phase lottery.  What is phase-independent —
      *  and what "directional" means — is that the excursion along the axis
      *  dwarfs the off-axis jitter, and that it swings to the shove side at
-     *  some point rather than only away from it. */
-    const samples: { x: number; y: number }[] = [];
-    await impact(page, null, 20);
-    for (let i = 0; i < 12; i++) {
-      samples.push(await engine(page, e => ({
-        x: e.camera.shakeOffset.x, y: e.camera.shakeOffset.y,
-      })));
-    }
-    const maxAbsX = Math.max(...samples.map(s => Math.abs(s.x)));
-    const maxAbsY = Math.max(...samples.map(s => Math.abs(s.y)));
-    expect(maxAbsX, 'the camera moved at all').toBeGreaterThan(0);
-    expect(maxAbsX, 'displacement is along the impact axis, not across it')
-      .toBeGreaterThan(maxAbsY * 2);
-    expect(Math.min(...samples.map(s => s.x)), 'it swings the way the ship was shoved')
+     *  some point rather than only away from it.
+     *
+     *  Sampled IN-PAGE, every rendered frame, inside the SAME evaluate that
+     *  arms the impact (harness habit 2: sample peaks, not instants).  The
+     *  first draft polled 12 separate evaluate round-trips instead, and on a
+     *  slow CI runner the oscillation decayed between round-trips faster
+     *  than they landed — the peaks went unobserved and the axis-dominance
+     *  ratio below lost the phase lottery (seen once on the PR #90 run;
+     *  passed 5/5 locally on the same commit).  Per-frame capture observes
+     *  every excursion the renderer would draw, whatever the runner speed. */
+    const peaks = await engine(page, e => {
+      const p = e.player;
+      p.velocity.x = 0; p.velocity.y = 0;
+      e.shakeIntensity = 0; e.shakeTimer = 0;
+      e.shakeDirX = 0; e.shakeDirY = 0;
+      const body = {
+        id: 'shake_probe_dir', type: 'STRUCTURE', shardVariant: 'rock-shard',
+        position: { x: p.position.x + p.size.x * 0.5 + 12, y: p.position.y },
+        velocity: { x: -20, y: 0 }, rotation: 0,
+        size: { x: 30, y: 30 }, mass: Infinity,
+        active: true, color: '#888', health: 9999, maxHealth: 9999,
+      };
+      e.physics.resolveCollision(body, p, { x: -4, y: 0 }, undefined, undefined, e.handleScreenShake);
+      return new Promise<{ maxAbsX: number; maxAbsY: number; minX: number }>(resolve => {
+        let maxAbsX = 0, maxAbsY = 0, minX = 0, frames = 0;
+        const tick = () => {
+          const s = e.camera.shakeOffset;
+          maxAbsX = Math.max(maxAbsX, Math.abs(s.x));
+          maxAbsY = Math.max(maxAbsY, Math.abs(s.y));
+          minX = Math.min(minX, s.x);
+          if (++frames < 60) requestAnimationFrame(tick);
+          else resolve({ maxAbsX, maxAbsY, minX });
+        };
+        requestAnimationFrame(tick);
+      });
+    });
+    expect(peaks.maxAbsX, 'the camera moved at all').toBeGreaterThan(0);
+    expect(peaks.maxAbsX, 'displacement is along the impact axis, not across it')
+      .toBeGreaterThan(peaks.maxAbsY * 2);
+    expect(peaks.minX, 'it swings the way the ship was shoved')
       .toBeLessThan(0);
 
     watch.assertClean();
