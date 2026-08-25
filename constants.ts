@@ -2959,18 +2959,35 @@ export const PLAYER_TRAIL_CONSTANTS = {
   COLOR: '125, 211, 252',// RGB triplet (brighter cyan)
 };
 
-// BANKING ROLL — the player ship rolls into lateral acceleration.  The
-// signal is the thrust input's component PERPENDICULAR to the facing (aim)
-// axis, so strafing across the nose banks the hull while thrusting straight
-// along it flies level.  The renderer foreshortens the sprite across its
-// wing line by cos(roll) — the top-down projection of a flat ship rolling —
-// so MAX_ANGLE is authored as a real bank angle, not a scale factor.
+// BANKING ROLL — the player ship rolls into changing acceleration.  TWO
+// terms feed the bank, because one alone almost never fires in real play
+// (user report: "not noticing the roll" — under the touch / joystick /
+// gamepad schemes the ship AIMS WHERE IT FLIES, so thrust is always along
+// the nose and a lateral-thrust-only signal is zero by construction):
+//   1. STRAFE — the thrust input's component perpendicular to the facing
+//      axis.  Fires when flying across a held aim (keyboard + mouse).
+//   2. TURN — the rate the nose is SWINGING, scaled by throttle: carving a
+//      turn under thrust is changing the acceleration's direction, and it
+//      is the term every aim-locked scheme actually exercises.  Coasting
+//      nose-swings stay level — no thrust, no acceleration change.
+// The renderer foreshortens the sprite across its wing line by cos(roll) —
+// the top-down projection of a flat ship rolling — so MAX_ANGLE is
+// authored as a real bank angle, not a scale factor.
 export const PLAYER_ROLL_CONSTANTS = {
-  MAX_ANGLE: 0.85,     // Radians (~49°) at full lateral thrust — cos ≈ 0.66 squash
+  MAX_ANGLE: 0.85,     // Radians (~49°) at full signal — cos ≈ 0.66 squash
   RESPONSE_RATE: 9,    // Per-second ease INTO a deeper bank (snappy on input)
   RETURN_RATE: 4.5,    // Per-second ease back toward level (gentler settle)
-  // Below this angle with no lateral input the roll snaps to 0, so the
-  // renderer's straight-flight path stays the plain rotation matrix.
+  // Turn term: seconds-per-radian gain — full bank at a sustained nose
+  // swing of 1/YAW_GAIN rad/s (0.25 → 4 rad/s, a deliberate carve).  A
+  // faster flick saturates to a full-bank pulse that settles at
+  // RETURN_RATE, which reads as a snap roll rather than noise.
+  YAW_GAIN: 0.25,
+  // Per-second low-pass on the measured swing rate: pointer jitter arrives
+  // as alternating-sign single-step spikes, and averaging them toward zero
+  // is what keeps a trembling mouse from fluttering the hull.
+  YAW_SMOOTHING: 10,
+  // Below this angle with no signal the roll snaps to 0, so the renderer's
+  // straight-flight path stays the plain rotation matrix.
   REST_EPSILON: 0.01,
 };
 

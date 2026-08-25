@@ -1455,25 +1455,46 @@ export class GameEngine {
   public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
   public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
 
-  /** BANKING ROLL — ease `player.visualRoll` toward the lateral component
-   *  of the thrust input (PLAYER_ROLL_CONSTANTS; the field is documented in
-   *  types.ts).  The target is the input's projection onto the facing
-   *  axis's perpendicular: full sideways thrust is a full bank, thrust
-   *  along the nose (or coasting) is level flight.  Signed so a left and a
-   *  right bank stay distinct through the easing — a hard reversal swings
-   *  through level instead of teleporting across it.  Asymmetric rates:
-   *  rolling INTO a bank tracks the hand, settling back is gentler, which
-   *  is also what keeps twitchy tap-input from strobing the hull. */
+  /** BANKING ROLL — ease `player.visualRoll` toward the two-term signal
+   *  (PLAYER_ROLL_CONSTANTS documents the terms and why both exist; the
+   *  field is documented in types.ts): the STRAFE term is the thrust
+   *  input's projection onto the facing axis's perpendicular, and the TURN
+   *  term is the smoothed rate the facing is swinging, scaled by throttle —
+   *  the term the aim-locked schemes (touch / joystick / gamepad, where
+   *  thrust is always along the nose) actually exercise.  Signed so a left
+   *  and a right bank stay distinct through the easing — a hard reversal
+   *  swings through level instead of teleporting across it.  Asymmetric
+   *  rates: rolling INTO a bank tracks the hand, settling back is gentler,
+   *  which is also what keeps twitchy tap-input from strobing the hull. */
+  private _rollPrevFacing: number | null = null;
+  private _rollYawRate = 0;
   private tickPlayerRoll(dt: number, moveDir: Vector2) {
-    const { RESPONSE_RATE, RETURN_RATE, REST_EPSILON } = PLAYER_ROLL_CONSTANTS;
+    const { RESPONSE_RATE, RETURN_RATE, REST_EPSILON, YAW_GAIN, YAW_SMOOTHING } =
+      PLAYER_ROLL_CONSTANTS;
     const facing = this.player.rotation;
-    // Perpendicular of facing (cos, sin) is (-sin, cos); the sign only
-    // decides WHICH way the hull leans (the cos-squash is even in it).
+    // STRAFE — perpendicular of facing (cos, sin) is (-sin, cos).
     const lat = moveDir.y * Math.cos(facing) - moveDir.x * Math.sin(facing);
+    // TURN — the facing's angular step this tick, wrapped so aiming across
+    // the ±π seam is a small swing rather than a full spin, low-passed to
+    // cancel pointer jitter.  Null prev = first tick (or a respawn reset):
+    // measure from here, spike nothing.
+    const prev = this._rollPrevFacing ?? facing;
+    this._rollPrevFacing = facing;
+    let dTheta = facing - prev;
+    if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
+    else if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
+    const rawRate = dt > 0 ? dTheta / dt : 0;
+    this._rollYawRate += (rawRate - this._rollYawRate) * Math.min(1, YAW_SMOOTHING * dt);
+    // Throttle gates the turn term: carving under thrust banks, a coasting
+    // or parked nose-swing changes no acceleration and stays level.  The
+    // MINUS sign makes the two terms agree: mid-turn, thrust not yet
+    // swung to the new nose lies on the NEGATIVE perp side of it.
+    const throttle = Math.min(1, Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y));
+    const signal = lat - YAW_GAIN * this._rollYawRate * throttle;
     // Max angle comes from the DBG feel cycle (Player ▸ "Roll feel");
     // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
     // levels out through this same easing rather than a separate branch.
-    const target = Math.max(-1, Math.min(1, lat)) * getActivePlayerRollAngle();
+    const target = Math.max(-1, Math.min(1, signal)) * getActivePlayerRollAngle();
     const cur = this.player.visualRoll ?? 0;
     const rate = Math.abs(target) > Math.abs(cur) ? RESPONSE_RATE : RETURN_RATE;
     let next = cur + (target - cur) * Math.min(1, rate * dt);
@@ -4682,6 +4703,8 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.visualRoll = 0;
+      this._rollPrevFacing = null;
+      this._rollYawRate = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;

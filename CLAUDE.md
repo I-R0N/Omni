@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  227 tests.  All run at
+                          anti-flake rules).  228 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -713,10 +713,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
 - `PLAYER_ROLL_CONSTANTS` — the BANKING ROLL: the player ship rolls into
-  lateral acceleration.  `GameEngine.tickPlayerRoll` eases
-  `player.visualRoll` toward the thrust input's component perpendicular
-  to the FACING (aim) axis — full sideways thrust is a full bank
-  (`MAX_ANGLE`), thrust along the nose or coasting settles back to a
+  changing acceleration.  `GameEngine.tickPlayerRoll` eases
+  `player.visualRoll` toward a TWO-TERM signal: the STRAFE term (the
+  thrust input's component perpendicular to the FACING axis) plus the
+  TURN term (the smoothed rate the nose is swinging × throttle, sign
+  chosen so the terms agree).  The turn term exists because the
+  aim-locked schemes — touch / joystick / gamepad, where the ship aims
+  where it flies — put thrust along the nose by construction, so a
+  strafe-only signal never fired there (user report).  Full signal is a
+  full bank (`MAX_ANGLE`; full turn rate = 1/`YAW_GAIN` rad/s), thrust
+  along a steady nose or coasting settles back to a
   literal 0 (asymmetric rates: attack outruns release).  Purely
   presentational: RenderSystem foreshortens the hull across its wing
   line by cos(roll), composed as R(facing) × scale(1, cos roll) ×

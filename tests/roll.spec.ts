@@ -1,11 +1,15 @@
-/** Banking roll — the player ship rolls into lateral acceleration.
+/** Banking roll — the player ship rolls into changing acceleration.
  *
- *  The signal is the thrust input's component PERPENDICULAR to the facing
- *  (aim) axis: strafing across the nose banks the hull, thrusting straight
- *  along it flies level, and coasting settles back.  The roll is purely
- *  presentational — `player.visualRoll` is an eased angle the renderer
- *  projects as a cos(roll) foreshortening across the wing line — so what is
- *  pinned here is the SIGNAL and the EASING, not pixels:
+ *  TWO terms feed the signal (PLAYER_ROLL_CONSTANTS documents why both
+ *  exist): the STRAFE term — the thrust input's component perpendicular to
+ *  the facing axis — and the TURN term — the smoothed rate the nose is
+ *  swinging, gated by throttle, added because under the aim-locked schemes
+ *  (touch / joystick / gamepad) the ship aims where it flies, thrust is
+ *  always along the nose, and a strafe-only signal is zero by construction
+ *  (the user report that prompted it: "not noticing the roll").  The roll
+ *  is purely presentational — `player.visualRoll` is an eased angle the
+ *  renderer projects as a cos(roll) foreshortening across the wing line —
+ *  so what is pinned here is the SIGNAL and the EASING, not pixels:
  *
  *   1. DIRECTIONALITY — lateral thrust banks, nose-line thrust does not,
  *      and a left strafe and a right strafe are distinct (signed) banks.
@@ -14,7 +18,10 @@
  *      that keeps the renderer on its plain-rotation path).
  *   3. ASYMMETRY — rolling INTO a bank is faster than settling out, which
  *      is the tuning that tracks the hand without strobing on tap-input.
- *   4. END TO END — a real held key across live sim steps banks the ship,
+ *   4. TURN TERM — carving a turn under thrust banks even with thrust
+ *      locked along the nose (the aim-locked geometry), a coasting swing
+ *      stays level, and the throttle gate scales rather than switches.
+ *   5. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
  *
@@ -34,8 +41,11 @@ const RETURN_RATE = 4.5;
 const DT = 1 / 60;
 
 /** Drive the roll tick N times against a fixed facing + thrust input, all
- *  inside ONE evaluate so live sim steps can't interleave.  Returns the
- *  roll after the last tick. */
+ *  inside ONE evaluate so live sim steps can't interleave.  Resets the
+ *  turn-term trackers first — the live loop has been feeding them its own
+ *  facing between evaluates, and a stale prev-facing would spike the yaw
+ *  rate on the first measured tick.  Returns the roll after the last
+ *  tick. */
 function driveRoll(
   page: any,
   o: { facing: number; mx: number; my: number; ticks: number; start?: number },
@@ -43,10 +53,39 @@ function driveRoll(
   return engine(page, (e, a: typeof o) => {
     e.player.rotation = a.facing;
     e.player.visualRoll = a.start ?? 0;
+    e._rollPrevFacing = null;
+    e._rollYawRate = 0;
     for (let i = 0; i < a.ticks; i++) {
       e.tickPlayerRoll(1 / 60, { x: a.mx, y: a.my });
     }
     return e.player.visualRoll as number;
+  }, o);
+}
+
+/** Sweep the FACING at a constant rate with thrust locked ALONG it — the
+ *  aim-locked schemes' geometry, where the strafe term is identically zero
+ *  and only the turn term can bank.  Returns the peak |roll| over the
+ *  sweep. */
+function driveTurn(
+  page: any,
+  o: { ratePerSec: number; throttle: number; ticks: number },
+) {
+  return engine(page, (e, a: typeof o) => {
+    e.player.rotation = 0;
+    e.player.visualRoll = 0;
+    e._rollPrevFacing = null;
+    e._rollYawRate = 0;
+    let peak = 0;
+    for (let i = 0; i < a.ticks; i++) {
+      e.player.rotation += a.ratePerSec / 60;
+      const f = e.player.rotation;
+      e.tickPlayerRoll(1 / 60, {
+        x: Math.cos(f) * a.throttle,
+        y: Math.sin(f) * a.throttle,
+      });
+      peak = Math.max(peak, Math.abs(e.player.visualRoll ?? 0));
+    }
+    return peak;
   }, o);
 }
 
@@ -113,6 +152,33 @@ test.describe('the roll signal is the lateral thrust component', () => {
   });
 });
 
+test.describe('the turn term — the aim-locked schemes still bank', () => {
+  test('carving under thrust banks; the same sweep coasting stays level', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // 4 rad/s is the authored full-bank rate (1 / YAW_GAIN).  Thrust rides
+    // the facing exactly — the touch / joystick / gamepad geometry, where
+    // the strafe term is identically zero — so any bank here is the turn
+    // term's alone.  This is the case the user's report was about.
+    const carve = await driveTurn(page, { ratePerSec: 4, throttle: 1, ticks: 120 });
+    expect(carve, 'a full-rate carve reaches a deep bank').toBeGreaterThan(MAX_ANGLE * 0.6);
+
+    // The same sweep with no thrust: a coasting nose-swing changes no
+    // acceleration, so the throttle gate must hold it level.
+    const coast = await driveTurn(page, { ratePerSec: 4, throttle: 0, ticks: 120 });
+    expect(coast, 'a coasting swing stays level').toBeLessThan(0.05);
+
+    // Half throttle banks shallower than full — the gate is a scale, not a
+    // switch.
+    const half = await driveTurn(page, { ratePerSec: 4, throttle: 0.5, ticks: 120 });
+    expect(half).toBeGreaterThan(0.05);
+    expect(half).toBeLessThan(carve);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('the DBG feel cycle steps the bank depth live', () => {
   test('Deep out-banks Default, and Off levels out through the easing', async ({ page }) => {
     const watch = await boot(page);
@@ -125,6 +191,8 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e.dbg.cyclePlayerRoll(); // Default → Deep
       e.player.rotation = 0;
       e.player.visualRoll = 0;
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
       for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
       return e.player.visualRoll as number;
     });
@@ -134,6 +202,8 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e.dbg.cyclePlayerRoll(); // Deep → Off
       e.player.rotation = 0;
       e.player.visualRoll = 0.5; // mid-bank when the preset flips
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
       for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
       return e.player.visualRoll as number;
     });
