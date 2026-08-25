@@ -1850,6 +1850,8 @@ export interface EngineStats {
   controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
+  rollFeelName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */

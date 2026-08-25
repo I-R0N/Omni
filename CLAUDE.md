@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  226 tests.  All run at
+                          anti-flake rules).  227 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -725,7 +725,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   it is the ship that rolls, not the sprite art's axes.  Physics,
   collision and aim never read it.  Works on every input device for
   free, since the signal is the shared movement vector.
-  `tests/roll.spec.ts` pins signal + easing.
+  `PLAYER_ROLL_CYCLE` is the DBG feel knob (Player ▸ "Roll feel"):
+  named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
+  from the pause debug menu; `tickPlayerRoll` reads the active angle, so
+  Off levels out through the same easing rather than a separate branch.
+  `tests/roll.spec.ts` pins signal + easing + the cycle.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy

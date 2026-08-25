@@ -493,6 +493,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleSnitchSpeed();
   };
 
+  const handleCyclePlayerRoll = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePlayerRoll();
+  };
+
   const handleCycleEnemyScale = () => {
       if (engineRef.current) engineRef.current.dbg.cycleEnemyScale();
   };
@@ -793,6 +797,7 @@ const App: React.FC = () => {
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCyclePlayerRoll={handleCyclePlayerRoll}
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSimRate={handleCycleSimRate}
         onCycleHudRate={handleCycleHudRate}

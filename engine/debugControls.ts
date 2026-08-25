@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -697,6 +697,13 @@ export class DebugControls {
    *  playtesting which catch mode feels better. */
   toggleSnitchCatchMode() {
     this.g.snitchCatchMode = this.g.snitchCatchMode === 'collide' ? 'shoot' : 'collide';
+  }
+
+  /** Cycle the DBG banking-roll feel preset (PLAYER_ROLL_CYCLE) — steps the
+   *  bank's max angle live (Off / Subtle / Default / Deep) so how deep the
+   *  roll reads can be A/B'd in flight. */
+  cyclePlayerRoll() {
+    cyclePlayerRoll();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales

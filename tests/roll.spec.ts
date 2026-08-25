@@ -24,7 +24,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, waitForStats } from './helpers';
 
 /** PLAYER_ROLL_CONSTANTS, hard-coded rather than imported (harness rule 7). */
 const MAX_ANGLE = 0.85;
@@ -108,6 +108,41 @@ test.describe('the roll signal is the lateral thrust component', () => {
     expect(deltaIn).toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * DT, 5);
     expect(deltaOut).toBeCloseTo(MAX_ANGLE * RETURN_RATE * DT, 5);
     expect(deltaIn, 'attack outruns release').toBeGreaterThan(deltaOut);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the DBG feel cycle steps the bank depth live', () => {
+  test('Deep out-banks Default, and Off levels out through the easing', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The cycle ships on Default (index 2 of Off / Subtle / Default / Deep),
+    // so one step lands on Deep and one more wraps to Off.  Each probe runs
+    // cycle + ticks inside ONE evaluate so live sim steps can't interleave.
+    const deep = await engine(page, e => {
+      e.dbg.cyclePlayerRoll(); // Default → Deep
+      e.player.rotation = 0;
+      e.player.visualRoll = 0;
+      for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
+      return e.player.visualRoll as number;
+    });
+    expect(Math.abs(deep), 'Deep converges past the Default maximum').toBeGreaterThan(MAX_ANGLE + 0.05);
+
+    const off = await engine(page, e => {
+      e.dbg.cyclePlayerRoll(); // Deep → Off
+      e.player.rotation = 0;
+      e.player.visualRoll = 0.5; // mid-bank when the preset flips
+      for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
+      return e.player.visualRoll as number;
+    });
+    // Off's target is 0 even under full strafe, and the settle rides the
+    // normal easing + rest snap — literal 0, not an epsilon hover.
+    expect(off, 'Off levels a held strafe out completely').toBe(0);
+
+    // The preset name reaches the HUD stats payload the DBG row renders.
+    await waitForStats(page, s => s.rollFeelName === 'Off', 'the Off preset to reach stats');
 
     watch.assertClean();
   });

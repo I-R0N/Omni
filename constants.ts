@@ -2974,6 +2974,29 @@ export const PLAYER_ROLL_CONSTANTS = {
   REST_EPSILON: 0.01,
 };
 
+// DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
+// A/B-ing how deep the bank reads, cycled live from the pause debug menu.
+// Only the ANGLE varies — the response/return rates are the same feel at
+// every depth — and Off (angle 0) rides the normal easing path, so toggling
+// it mid-bank settles the hull out instead of snapping it flat.
+export const PLAYER_ROLL_CYCLE: ReadonlyArray<{ name: string; angle: number }> = [
+  { name: 'Off',     angle: 0 },
+  { name: 'Subtle',  angle: 0.55 },                          // cos ≈ 0.85 squash
+  { name: 'Default', angle: PLAYER_ROLL_CONSTANTS.MAX_ANGLE }, // cos ≈ 0.66
+  { name: 'Deep',    angle: 1.15 },                          // cos ≈ 0.41
+] as const;
+let activePlayerRollIndex = 2; // Default — the shipped feel
+export function getActivePlayerRollAngle(): number {
+  return PLAYER_ROLL_CYCLE[activePlayerRollIndex].angle;
+}
+export function getActivePlayerRollName(): string {
+  return PLAYER_ROLL_CYCLE[activePlayerRollIndex].name;
+}
+export function cyclePlayerRoll(): number {
+  activePlayerRollIndex = (activePlayerRollIndex + 1) % PLAYER_ROLL_CYCLE.length;
+  return activePlayerRollIndex;
+}
+
 export const SHOOTING_STAR_CONSTANTS = {
   MIN_TIMER: 300,
   MAX_TIMER: 700,
