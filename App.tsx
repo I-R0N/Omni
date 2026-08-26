@@ -519,6 +519,27 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleSwarmMove();
   };
 
+  const handleCycleStarDensity = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleStarDensity();
+  };
+
+  const handleCycleStarSize = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleStarSize();
+  };
+
+  const handleCycleStarBands = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleStarBands();
+  };
+
+  const handleCycleStarParallax = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleStarParallax();
+  };
+
+  const handleCycleCollapseMode = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleCollapseMode();
+  };
+
+
   const handleApplyCorrosion = () => {
       if (engineRef.current) engineRef.current.debugApplyCorrosion();
   };
@@ -779,6 +800,11 @@ const App: React.FC = () => {
         onCycleSubstepCap={handleCycleSubstepCap}
         renderScaleName={renderScaleName}
         onCycleSwarmMove={handleCycleSwarmMove}
+        onCycleStarDensity={handleCycleStarDensity}
+        onCycleStarSize={handleCycleStarSize}
+        onCycleStarBands={handleCycleStarBands}
+        onCycleStarParallax={handleCycleStarParallax}
+        onCycleCollapseMode={handleCycleCollapseMode}
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}

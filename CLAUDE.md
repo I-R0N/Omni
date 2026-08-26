@@ -243,7 +243,15 @@ engine/
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
                           incremental tile-destroy patching
     EntityIndex.ts        Per-frame filtered lists (enemies, asteroids, …)
-    BackgroundManager.ts  Parallax stars + nebula BG layers
+    BackgroundManager.ts  Parallax stars + nebula BG layers.  The star
+                          field is DATA, not bitmaps: a struct-of-arrays
+                          of device-pixel positions/sizes sorted into
+                          fillStyle groups, drawn directly every frame by
+                          `renderStars` (one state change per group, zero
+                          allocation).  Count is derived from viewport
+                          AREA at a target density, so every screen size
+                          shows the same sky per unit area.  See §8 and
+                          docs/GAUNTLET_STARFIELD_LOG.md
     IdAllocator.ts        Monotonic nextId() for entity IDs
     PerfController.ts     Load-driven frame-skip coordinator for every
                           skippable periodic pass (see §3 and §8)
@@ -1249,7 +1257,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   out of range instead of being culled the way other POI dots are.  The
   fill carries the portal colour, so an outbound rift (violet) and a
   return rift (sky) read differently at a glance.
-  Showcase maps get NO portals — they stay debug-only.
+  Showcase maps are reachable from the hub's TEST RACK
+  (`HUB_TEST_PORTAL_SITES`) — six portals in a column beside the home
+  station stepping the star-density range — and each therefore carries
+  a return rift too.  (They were menu-only before the star-field
+  gauntlet's S12; a reachable map with no way home is a trap.)
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -1907,8 +1919,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pins a filename for the exceptional case.  The draft stays as the
   FALLBACK, so a missing or
   undecodable file degrades to a different sound rather than to silence,
-  and the standalone build — whose inliner carries images, not audio —
-  stays fully audible on the drafts.  Files are fetched and DECODED ONCE
+  and the standalone build stays fully audible on the drafts.  That build
+  BAKES the recorded takes in as a filename→data-URI table
+  (`window.__omniSfxInline`), which the loader checks before fetching: a
+  single HTML file cannot fetch anything, so recordings were unreachable
+  there and WAV-only mode was silence rather than an A/B.  Everything after
+  the byte source is shared, so a baked take takes the same decode,
+  silent-file rejection and round-robin as a served one.  Files are fetched and DECODED ONCE
   at unlock, never on first trigger: a `decodeAudioData` inside the frame
   a collision lands in is the one way this path could cost frames.  Pitch
   rides `playbackRate`, so the call site's existing `{gain, pitch}`
@@ -2333,6 +2350,56 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     which — unlike the stick — is drawn from the first frame and accepts a
     mouse press: a control that only appears once pressed cannot be found,
     and in that scheme it is the only way to shoot.
+
+- **The STAR FIELD is drawn at whole DEVICE pixels, and its count comes
+  from AREA.**  Two invariants, both measured into place by the star-field
+  gauntlet (`docs/GAUNTLET_STARFIELD_LOG.md`), and both easy to undo by
+  accident:
+  (0) **Every map has its OWN density** (`STAR_DENSITY_BY_MAP`, 90–729), read
+  as ALTITUDE: high = deep space = dense distant sky, low = near a planet =
+  sparse sky.  Parallax spread is DERIVED from it inversely
+  (`parallaxForDensity`) rather than declared alongside — two hand-maintained
+  anti-correlated columns drift.  `BackgroundManager.setMapType` MUST
+  invalidate, since density, parallax and the generation seed all key off the
+  map.
+  (1) **Density is per CSS px², never an absolute count.**  The budget is
+  `(width × height / 10⁴) × STAR_DENSITY_CYCLE[i]`, split across
+  `STARFIELD_CONSTANTS.NUM_BANDS` depth layers.  A fixed count makes a
+  smaller window a denser sky — measured at 3.95× between a 390×844 phone
+  and a 1440×900 desktop, which put 26.9% of the phone's pixels inside a
+  star.  `tests/starfield.spec.ts` fails if the two disagree by >3%.
+  (2) **Stars are rasterized ONCE, SUB-PIXEL, under the IDENTITY transform.**  There is no intermediate canvas — a star's
+  position AND size are whole device pixels, so nothing can resample it.
+  Positions are deliberately FRACTIONAL: a pixel-snapped star cannot move in
+  less than whole-pixel steps, which froze 99% of the field per frame at low
+  ship speed and read as jitter (three milestones were spent learning this —
+  S8/S9/S10).  Snapping was never load-bearing for correctness; the
+  cross-browser bug was the `drawImage` BLIT FILTER on the old pre-rendered
+  band canvases, and S4 deleted those.  What is left is `fillRect` coverage
+  antialiasing on an axis-aligned rect, which is analytic and consistent
+  across engines.  Anything that reintroduces a pre-rendered layer blitted at
+  a fractional or dpr-scaled offset brings the browser-dependence back,
+  because the `drawImage` filter kernel is not specified.  SIZES stay
+  integral — a fractional size softens edges without buying any smoothness.
+  Star generation is SEEDED per map (`starRand`), so a regeneration
+  reproduces the same sky; an unseeded field makes every DBG star cycle an
+  unfair A/B, which is how a knob that changes nothing about star count came
+  to look like it did.  `effectiveDpr()` is a
+  GENERATION input here, not just a draw-time one, so `sceneDpr` is part of
+  the rebuild guard — a render-scale cap change must regenerate the field.
+  (3) **The sky is UNIFORM across a map, and per-map density is the only
+  spatial variation there is.**  A region field that varied density by where
+  in the map the camera sat was built and then REMOVED: gating stars by a
+  world-space field means stars arrive and leave in front of the player,
+  which reads as a rendering defect however smoothly it is faded.  Two facts
+  from it are worth keeping if anything ever varies the backdrop spatially
+  again — a field built from INTEGER wave vectors is exactly periodic over
+  the map and so seam-continuous on the torus, and those vectors must share
+  NO COMMON FACTOR or the same regions tile several times across it (that
+  shipped in a first draft and is invisible in any single frame).  Density
+  itself is DBG-cyclable well past `STAR_DENSITY_RANGE.MAX`, up to the
+  ~2700 the field carried before this gauntlet, so the top of the range can
+  be re-judged on a device rather than argued about.
 
 - **TWO canvas palettes, and they are different KINDS of thing** (gauntlet
   5d, U3).  `UI_CONSTANTS.INDICATORS.COLORS` is the **TYPE LEGEND** — what a

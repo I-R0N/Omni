@@ -44,6 +44,15 @@ export interface RendererDiagnostics {
   bossBarActive: boolean;
   stageDepth: number;
   playerLightToolHalfDeg: number | null;
+  /** Discard generated background content so the next frame rebuilds it.
+   *
+   *  Here rather than in the seam by this file's own rule: its only callers
+   *  are the four DBG star cycles, whose inputs (density, size floor, depth
+   *  layers, parallax spread) are GENERATION-time — without this the change
+   *  would not appear until the viewport was resized. A second renderer may
+   *  stub it; the cost is that those debug knobs do nothing there, which is
+   *  the same trade every other member of this interface makes. */
+  invalidateBackground(): void;
 
   // ── Lighting / fog readouts (displayed by the DBG panel) ─────────────────
   getShadowSoftness(): string;

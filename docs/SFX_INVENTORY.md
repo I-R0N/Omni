@@ -17,6 +17,11 @@ This document has two jobs and one rule.
   engine. Draft sounds are **procedural** (WebAudio oscillators / noise /
   filters / envelopes) — there are no audio asset files, so
   `scripts/inline-build.mjs` and the standalone build are untouched.
+  **Recorded takes ARE now baked into the standalone**, as a filename →
+  data-URI table the loader checks before fetching — the single file cannot
+  fetch anything, so without it the recordings were unreachable there and
+  WAV-only mode was silence rather than an A/B. Cost is the audio's size plus
+  a third for base64 (0.97 MB → 6.91 MB total at 66 takes).
 - **The rule — ids are stable.** Replacing a draft with a real asset is a
   registry change keyed by the same id, never a change at the trigger
   site. If a row's id changes, every consumer changes with it, so don't.
@@ -118,10 +123,17 @@ distance and pan both go through the wrap helpers, no exceptions.
 "whine" reported in playtest was a LOOP or a bulk-fired chip, never a
 single event. A tone that is pleasant once becomes intolerable held. So
 every `L` row here is low — the portal at 55 Hz, the station at ~300 Hz
-broadband, the engine at 36 Hz — and a headless smoke renders each loop
+broadband, the engine at 34/51 Hz — and a headless smoke renders each loop
 through an `OfflineAudioContext` and asserts none of them sits in the
-whine band. The snitch is the brightest of them by design and is still
-capped well below where the complaints came from.
+whine band.
+
+Being low is necessary and **not sufficient**, which the snitch proved
+twice. At 1050 Hz it was the reported whine; the fix that merely lowered
+it was still a held tone, and a held tone demands attention at any pitch.
+What finally worked was making it stop: a full-depth tremolo that returns
+to silence between swells. **For a sustained sound, the duty cycle matters
+as much as the frequency** — prefer something that goes quiet on its own
+over something merely dark.
 
 **Ambient events are NEAR-FIELD; the player's own are not.** A dense shard
 field generates constant shard-on-shard collisions, merges and snaps. At
@@ -140,6 +152,15 @@ player↔shard contact is covered separately by `crash.player.shard`
 (and by `crash.player.tile` for the static-tile case), both full-range
 because the player is a party to them — the near-field rule is about
 physics the player is *not* part of.
+
+**Distance can be made the POINT rather than a side effect.** The shared
+model fades amplitude linearly between the two radii, which is a weak cue:
+halfway out it is still at half amplitude, about 6 dB down, and the ear
+reads that as "close, slightly quieter" rather than "far away". A loop
+whose job is to be *found* can set `curve`, an exponent applied to that
+linear fade, so crossing the radius is dramatic instead of gentle. Today
+only `snitch.near` uses it (2.5). Both radii stay fixed points, so an
+out-of-earshot check is unaffected.
 
 Any row may override its radii; the caller may override them again. The
 precedence is caller → row → global default.
@@ -165,7 +186,7 @@ code path, and the pan lands at zero anyway.
 | `weapon.lightning.fire` | `firePlayerWeapon`, `LIGHTNING` | 1 | 160 | Electric discharge crack — bright noise transient into a short buzzing tail. | noise HP 2 kHz + 60 Hz sawtooth AM ring; 1→140 | pitch ±10%, AM rate varies | 3, ≥100 ms | 0.55 | world |
 | `weapon.homing.fire` | `firePlayerWeapon`, `HOMING` | 1 | 260 | Soft launch *whump* with a doppler-ish tail that suggests the missile leaving. Deliberately less aggressive than the others — it does the work for you. | 180 Hz thump 3→90; noise tail LP 1.8 kHz 20→240 | pitch ±5% | 3, ≥140 ms | 0.50 | world |
 | `weapon.cannon.fire` | `firePlayerWeapon`, `CANNON` | 1 | 380 | Heavy artillery cough. Real low-end weight, slow decay, a sense of recoil. The biggest player sound. | 55 Hz sine 4→300 + noise body LP 900 Hz 2→200 | pitch ±4% | 2, ≥250 ms | 0.75 | world |
-| `weapon.charge.loop` | `updateGameLogic`, on `player.chargeProgress > 0`; stops when it returns to 0 | 1 | **L** | Rising capacitor whine. Pitch tracks `chargeProgress` linearly, so the player hears fullness rather than watching the ring. Quiet — it plays under everything else. | 140 Hz → 900 Hz tracked to progress; sine + saw blend, gain ramps 0→0.3 over the hold | none (it's continuous) | 1 (singleton) | 0.28 | flat |
+| `weapon.charge.loop` | `updateGameLogic`, on `player.chargeProgress > 0`; stops when it returns to 0 | 1 | **L** | Rising capacitor whine. Pitch tracks `chargeProgress` linearly, so the player hears fullness rather than watching the ring. **The WIND-UP is loud, the HOLD is not**: level swells across the charge, peaks just before the shot arms, then collapses to a bare presence. A charge can be held indefinitely, and a sustained tone with no end condition is the shape every whine complaint here has had — `weapon.charge.ready` rings the arming moment, so nothing is lost by getting quiet after it. Shaped on the PARAMETER, not a timer: at full charge `p` simply stays 1, so "held" needs no extra state. | 140 Hz → 900 Hz tracked to progress; sine + saw blend. Level 0.28→1.0 up to p=0.88, then falls to 0.10 by p=1; gain τ = 0.10 s, pitch τ = 0.04 s. Mix cut 0.28→0.24→0.10 over two rounds of "still too loud": the envelope fixed the HOLD, this is the LEAD-UP, which the envelope leaves at full level and which the mix number alone governs | none (it's continuous) | 1 (singleton) | 0.10 | flat |
 | `weapon.charge.ready` | same tick, when `chargeProgress` first reaches 1 | 1 | 140 | A clean bell ping confirming the shot is armed. Distinct from the loop it interrupts. | 1320 Hz sine, 1→130 exp | none | 1, ≥400 ms | 0.42 | flat |
 | `weapon.charged.release` | `handleShooting(_, true)`, layered **over** the family's `.fire` | 1 | 300 | A low sub-drop and a bright airy sweep layered on top of the normal shot, so any charged weapon reads as the same "supercharged" gesture. | 90→40 Hz sub 2→260; noise sweep 8 k→2 kHz 2→180 | pitch ±4% | 2, ≥200 ms | 0.55 | world |
 | `weapon.reject` | `handleShooting` early-return on `systemsDisabled`, or `currentWeapon === undefined` | 2 | 110 | Dead, muted click-thud. The sound of nothing happening. Must not be pleasant. | 160 Hz square, heavily LP'd at 400 Hz; 1→90 | pitch ±3% | 1, ≥250 ms **(hard throttle — the player will mash)** | 0.30 | flat |
@@ -293,8 +314,25 @@ a catastrophic one and the ear cannot. Accepted deliberately — the only
 way to recover it on the tile row is to re-tune the wall, which costs the
 parity above.
 
-**Pitch.** `pitch = clamp((25 / m) ^ 0.25, 0.70, 1.60)` — from MASS, not
+**Pitch.** `pitch = clamp((25 / m) ^ 0.25, 0.46, 2.50)` — from MASS, not
 from size.
+
+**The clamps are sized to the MEASURED populations**, so every material can
+reach its own ends. At the original 0.70/1.60 they bound **21.5%** of all
+hits: a fifth of every impact played at one of exactly two pitches with no
+dynamics, and the pinned ones were the smallest glass shards (all at the top)
+and the heaviest rock (all at the bottom) — precisely the extremes the cue
+exists to distinguish. At 0.46/2.50 it is **0.0%**. The bounds come from
+`crash.player.shard` (glass 0.69–8.2, plastic 4.9–10.3, metal 19.4, rock
+7.2–460.7 → 0.483…2.450) and `crash.player.enemy` (DRAGON mass 500 → 0.473,
+SWARM mass 4 → 1.581); `crash.player.tile` passes `Infinity` and is unpitched
+by design. NEBULA shards are not a consumer despite a 0.01 sentinel mass that
+would demand a clamp of 7.07 — player↔nebula hard collision is default off, so
+that row never fires for them.
+
+Measured at the new ends, the dominant frequency stays well clear of the whine
+band even with jitter stacked on top: the shard row runs 129 Hz at the floor
+and 1043 Hz at the ceiling, the enemy row 98 Hz and 696 Hz.
 
 Gain says how hard, pitch says how big, and because mass is already the
 term inside `I` the two cues cannot disagree with each other or with the
@@ -455,7 +493,7 @@ dispatches by entity class and shard variant.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `move.thrust` | `updateGameLogic`, ALWAYS ON while alive; stops on death / pause / dock | 2 | **L** | Continuous engine rumble that **idles rather than switching on**. Throttle swells an already-running bed — gating the whole loop on `throttle > 0` snapped on and off with the input and read as jarring. Gain *and* cutoff move together (volume alone reads as a fader; timbre too reads as an engine working harder), both heavily smoothed. Must be *bland* — it plays constantly and any character in it becomes torture within five minutes. | noise LP 90 Hz (idle) → 850 Hz (full) + 36 Hz sine bed; gain 0.38→1.0 of mix; both `setTargetAtTime` τ = 0.22 s | none (continuous) | 1 (singleton) | 0.22 | flat |
+| `move.thrust` | `updateGameLogic`, ALWAYS ON while alive; stops on death / pause / dock | 2 | **L** | **An ION DRIVE in vacuum, not a burn.** Continuous, and it **idles rather than switching on** — gating the loop on `throttle > 0` snapped it on and off with the input and read as jarring. The ship has infinite fuel, modest acceleration and a low top speed in deep space, so the TONAL field is the sound and the noise is seasoning (the previous cut had that backwards and a coasting ship still sounded like it was combusting). Two detuned sines beat slowly against each other and LIFT in pitch with throttle — straining, not revving; a coil shimmer fades in only over the top half of the throttle, so full power adds detail rather than volume. Idle is a third of the old floor: not thrusting should sound like not thrusting. | 34/51 Hz detuned sine pair → 46/70 Hz at full; noise LP 55 Hz (idle) → 320 Hz (full) at 0.22 of mix; triangle coil at 4× the upper sine, silent below half throttle; gain 0.13→1.0 of mix; all `setTargetAtTime` τ = 0.34 s | none (continuous) | 1 (singleton) | 0.17 | flat |
 | `move.dent` | `DropSystem.spawnDentShard` (plastic / metal / rock dent) | 3 | 140 | A single deforming knock. Softer than a break — nothing was destroyed. | 260 Hz LP 900 Hz; 2→120 | pitch ±14% | 4, ≥60 ms **+gain** | 0.20 | world |
 | `move.dent.recover` | `ShardSystem` plastic dent snap-back | 3 | 180 | Reverse of the dent — a rubbery *boink* as the shape springs back. | 200→320 Hz up-glide; 3→160 | pitch ±14% | 3, ≥100 ms | 0.16 | world |
 | `move.tilesnap` | `ShardSystem` shard→tile snap (`TILE_SNAP` path), **near-field** | 3 | 260 | Crystallisation — fragments locking into a solid. A warm rising swell resolving on a soft thunk. Metal assembles constantly, so this fires in BULK: it must not stack into a whine. | noise BP 380→820 Hz swell 10→200 + 130 Hz thunk at 200 ms | pitch ±10% | 2, ≥200 ms | 0.28 | world |
@@ -516,7 +554,7 @@ All `flat` — these fire with the sim frozen and a full-screen UI up.
 
 | id | trigger | tier | dur | character | freq / env | var | poly / throttle | mix | pos |
 |---|---|---|---|---|---|---|---|---|---|
-| `snitch.near` | `updateSnitch`, snitch within ~1200 units; stops beyond | 2 | **L** | A delicate, wandering shimmer — still the brightest SUSTAINED sound in the game, because it is a carrot and should glitter, but pitched down out of the fatiguing band. A tone held indefinitely is judged far more harshly than the same tone in a one-shot. | 0.9–1.2 kHz sine, LFO drift 0.25 Hz | continuous drift | 1 (singleton) | 0.16 | world |
+| `snitch.near` | `updateSnitch`, ALWAYS ON with the snitch's live position; the far radius decides audibility | 2 | **L** | **A DISTANT BEACON, and the DISTANCE is the sound.** Its job is to be FOUND, so how far and which bearing is the information and the sound is only the carrier. Two cuts failed here first, for opposite reasons: a held 1050 Hz sine was a whine (a continuous tone cannot stop demanding attention), and a buffer of metallic coin grains fixed the whine but was busy and literal — a lot of sound to carry one bit. What is left is the simplest thing that can carry a bearing: a soft two-note shimmer swelling on a slow FULL-DEPTH tremolo, so it is silent about as often as it sounds and never sits on one level. Quiet enough to sit under the field. | 396 Hz + 594 Hz sines (a fifth) at 1 : 0.38, tremolo 0.32 Hz sweeping 0 → 0.72 (voice peaks ~0.95) | continuous swell | 1 (singleton) | 0.085 | world, near 90 / far 1500, **curve 2.5** |
 | `snitch.dart` | `updateSnitch` burst/panic dart begins | 2 | 240 | A quick whipping *swish* — it just bolted. | noise BP 2 k→5 kHz sweep; 2→220 | pitch ±10% | 2, ≥180 ms | 0.30 | world |
 | `snitch.catch` | `GameEngine.catchSnitch` | 1 | 1500 | The best sound in the game. A crystalline capture chime blooming into a bright rising cascade as the board clears and salvage sprays. | 1568 Hz strike 1→200; cascade 784/1047/1319/1568/2093 Hz 80 ms apart; shimmer bed 200→1400 | none | 1 (singleton, ducks tier 2/3) | 0.95 | flat |
 | `dragon.arrive` | `GameEngine.spawnDragon` / `openDragonPortal` | 1 | 1600 | A distant, enormous roar through a tearing rift. Should make the player look up. | 60→110 Hz growl with formant sweep 100→1200; rift noise 200→1000 | none | 1 (singleton) | 0.72 | world |
@@ -575,7 +613,12 @@ relative to how much the sound matters.
    the game's core loop.
 7. **`move.thrust`** — a loop that plays for the entire session. The
    quality bar is *tolerability*, and a real recording tolerates far
-   better than filtered noise.
+   better than filtered noise. **But it cannot have one yet**: it is one
+   of the seven LOOP ids, and the sample path builds a one-shot
+   `BufferSource`, so a file named after it is refused at discovery rather
+   than silently ignored. It is also the hardest of the seven to port —
+   throttle drives gain, filter cutoff and the pitch of two oscillators
+   together, where a filter over a fixed recording can only subtract.
 8. **`bubble.latch` / `bubble.drain`** — organic wetness is out of reach
    procedurally; the drafts read as electronic rather than alive.
 

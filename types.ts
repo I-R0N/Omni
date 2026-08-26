@@ -1854,6 +1854,17 @@ export interface EngineStats {
   substepCapName?: string;
   enemyScaleInfo?: string;
   swarmMoveName?: string;
+  /** DBG: active star-field density (stars per 10 000 CSS px²). */
+  starDensityName?: string;
+  /** DBG: active star size floor ('Device px' / 'CSS px'). */
+  starSizeName?: string;
+  /** DBG: active parallax depth-layer count. */
+  starBandsName?: string;
+  /** DBG: active parallax SPREAD (nearest-vs-farthest scroll range). */
+  starParallaxName?: string;
+  /** DBG: voice COLLAPSE mode ('Merge' / 'Some' / 'All') — how a burst of
+   *  simultaneous triggers of one id is folded into voices. */
+  collapseModeName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).

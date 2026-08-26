@@ -30,9 +30,14 @@ import { nextId } from '../systems/IdAllocator';
 /** Per-sim-step snitch tick: lifecycle, flow-field steering, comet-tail
  *  emission, and the catch check.  Called from updateGameLogic after the
  *  wave tick so waveState is fresh. */
-/** Range at which the snitch's shimmer loop becomes audible (world units).
- *  Audio-only, and read at exactly one call site (SFX_INVENTORY §7.1). */
-const SNITCH_NEAR_RANGE = 1200;
+// The snitch's presence loop is driven UNCONDITIONALLY from its live
+// position, exactly like the station and portal beds.  It used to be gated
+// on a 1200-unit range check while the sound's own far radius was the
+// 2600-unit default, so it snapped on at two-thirds volume and never faded
+// below that — audible, panned, and yet not remotely positional.
+// `AudioSystem.loop` already treats an out-of-earshot positional loop as OFF,
+// so the range check was never what stopped it holding oscillators; the
+// attenuation is.  Radii live in AUDIO_CONSTANTS.SNITCH_*.
 
 export function updateSnitch(g: GameEngine, dt: number) {
   if (!g.currentMap) return;
@@ -88,11 +93,10 @@ export function updateSnitch(g: GameEngine, dt: number) {
   // Speed eases toward the state target — near-instant on the way up
   // (the burst), visibly slower on the way back down (the catch window
   // opens gradually as the dart bleeds off).
-  // Proximity shimmer — the carrot.  Rides the distance this pass has
-  // already computed, so it costs one comparison.
-  g.audio.loop('snitch.near',
-               playerDistSq < SNITCH_NEAR_RANGE * SNITCH_NEAR_RANGE,
-               { x: s.position.x, y: s.position.y });
+  // Treasure chatter — the carrot.  Always ON with a live position; the
+  // sound's own far radius decides when it is audible, so the approach
+  // swells instead of switching on.
+  g.audio.loop('snitch.near', true, { x: s.position.x, y: s.position.y });
 
   const darting = g.snitchAiState === 'dart';
   // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×

@@ -151,10 +151,17 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    `feedThen` does both in one turn of the event loop. Better still, assert a
    DURABLE consequence (a spawned projectile) rather than the transient.
 9. **Predicates are STRINGIFIED, so they cannot close over test state.**
-   `waitForStats(page, s => s.currentWeapon !== first, …)` does not fail an
-   assertion — it throws `ReferenceError` inside the page and surfaces as an
-   unexplained timeout. Spell the expected value out, or pass it as an `arg`
-   to `engine()`. This one cost two debugging cycles in step 5.
+   `waitForEngine` / `waitForStats` serialise the callback with `toString()`
+   and re-create it inside the page, so `waitForStats(page, s => s.currentWeapon
+   !== first, …)` does not fail an assertion — it throws `ReferenceError` in the
+   page and surfaces as an *unexplained timeout*, which reads like a product
+   bug. Spell the expected value out (`new Function('e', \`return … \${expected}\`)`),
+   or pass it as an `arg` to `engine()`.
+
+   **Two independent sessions hit this and each wrote its own rule** — step 5
+   and the star-field gauntlet — costing two debugging cycles apiece before it
+   was written down here. That it was rediscovered rather than read is the
+   argument for this file.
 10. **Respect the phase machine.** A boss's traits are a function of its
    health, and `updateBosses` stamps a phase one frame after the transition.
    Poll for `bossPhase` instead of reading traits in the same breath as

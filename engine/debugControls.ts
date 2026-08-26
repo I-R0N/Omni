@@ -38,6 +38,8 @@ import {
     toggleWorldLights, toggleDepthAmbient,
     cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix, cycleFog,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
+    cycleStarDensity, cycleStarSize, cycleStarBands, cycleCollapseMode,
+    cycleStarParallax,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -714,6 +716,75 @@ export class DebugControls {
   cycleSwarmMove() {
     cycleSwarmMove();
   }
+
+  /** DBG: cycle the star-field DENSITY (stars per 10k CSS px^2).
+   *
+   *  Aesthetic, so it is a cycle rather than an edit.  185 (the default) is
+   *  the density a 1440x900 desktop window showed before the star count was
+   *  derived from area; 729 is what a 390x844 phone showed from the same
+   *  absolute 24 000 stars, and is kept in the table so the two can be A/B'd
+   *  directly rather than argued about.
+   *
+   *  Star COUNT is a generation-time input, so this has to invalidate the
+   *  background: the bands are otherwise regenerated only on a viewport
+   *  resize and the change would not show up until the window moved. */
+  cycleStarDensity() {
+    cycleStarDensity();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the star SIZE floor — 'device' (a star may be one device
+   *  pixel; default) vs 'css' (never smaller than one CSS pixel, the
+   *  apparent-size floor the field had before the bands went device-
+   *  resolution).  Identical at dpr 1 by construction; the knob only
+   *  differs where the resampling problem was, which is dpr >= 2.
+   *
+   *  Like the density cycle this is a generation-time input, so it has to
+   *  invalidate the background rather than only stepping the constant. */
+  cycleStarSize() {
+    cycleStarSize();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the number of PARALLAX DEPTH LAYERS (240 default / 120 / 480
+   *  / 60).  The star budget is split evenly across them, so this changes how
+   *  finely depth is quantised, not how many stars there are.
+   *
+   *  It was frozen at 60 for as long as a layer was a full-viewport canvas —
+   *  60 of those cost 80-316 MB.  Since the field became data a layer is five
+   *  numbers, so 240 costs about 10 KB and 240 float updates per frame. */
+  cycleStarBands() {
+    cycleStarBands();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the PARALLAX SPREAD — how much faster the nearest depth layer
+   *  scrolls than the farthest.
+   *
+   *  Independent of the layer COUNT, and the two are easy to conflate: the
+   *  span between farthest and nearest is set here, so adding layers cuts the
+   *  SAME range more finely rather than deepening it.  Raising the spread is
+   *  what actually makes the field read as deeper. */
+  cycleStarParallax() {
+    cycleStarParallax();
+    this.g.renderer.invalidateBackground();
+  }
+
+  /** DBG: cycle the VOICE COLLAPSE mode (Merge / Some / All).
+   *
+   *  The shipped answer to a 40-kill frame is to fold simultaneous triggers
+   *  of one id into ONE louder voice, so bulk reads as heavier rather than as
+   *  forty thin copies.  That is a judgement and was never A/B-able; this
+   *  makes the alternatives audible.
+   *
+   *  Note it scales three gates together (window, polyphony, ceilings) —
+   *  loosening the window alone would just move the drop one step later, so a
+   *  cycle that only did that would sound identical and read as broken. */
+  cycleCollapseMode() {
+    cycleCollapseMode();
+  }
+
+
 
   /** DBG: cycle the SUBSTEP CAP (5 default / 3 / 2).
    *

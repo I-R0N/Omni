@@ -30,6 +30,42 @@ if (files.length === 0) {
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
 const page = await browser.newPage();
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => !!window.__omniEngine?.audio, { timeout: 15000 });
+
+/** Which ids fire in BULK — the population the whine rule is actually about.
+ *
+ *  CLAUDE.md §8 scopes it plainly: "A sound that fires in BULK is judged by
+ *  what a HUNDRED of them sound like, not one — and up there, a hundred is a
+ *  whine no matter how quiet each one is." A weapon the player fires
+ *  deliberately is not that, and neither is a one-per-event UI tick.
+ *
+ *  Asked of the REGISTRY rather than listed here, so it stays true as sounds
+ *  are added. Two signals, both meaning "this arrives in floods":
+ *    · tier 3 — the inventory's own name for material chatter
+ *    · `collapse` — the flag that folds simultaneous copies into one voice,
+ *      which exists only for ids that genuinely burst
+ *
+ *  This check was applied to EVERY file until now, which was accidentally
+ *  right while the only recordings were shard contacts and wrong the moment
+ *  the library broadened: it flagged the lightning gun, the charge-ready bell
+ *  and the weapon-cycle tick — three sounds that are SUPPOSED to be bright and
+ *  never arrive a hundred at a time. */
+const bulkIds = await page.evaluate(() => {
+  const a = window.__omniEngine.audio;
+  const out = [];
+  for (const id of a.allIds) {
+    const def = a.defs.get(id);
+    if (!def) continue;                       // a loop; it has no sampled path
+    if (def.tier === 3 || def.collapse) out.push(id);
+  }
+  return out;
+});
+/** Longest-prefix, the same rule discovery uses to bind a file to its id. */
+const dashed = bulkIds.map(id => id.replace(/\./g, '-')).sort((x, y) => y.length - x.length);
+const firesInBulk = (file) => {
+  const stem = file.replace(/\.wav$/i, '').toLowerCase();
+  return dashed.some(d => stem === d || stem.startsWith(d + '-'));
+};
 
 for (const name of files) {
   const bytes = Array.from(readFileSync(resolve(DIR, name)));
@@ -101,10 +137,19 @@ for (const name of files) {
   ok(r.contentMs > 15, `has more than a click of content (${r.contentMs.toFixed(1)}ms)`);
   ok(r.channels === 1, `is mono (${r.channels}ch) — the engine pans positionally`);
   // THE WHINE RULE (CLAUDE.md §8), applied to what the rule is actually
-  // about.  A bright ATTACK is what makes an impact read as hard; a bright
-  // SUSTAIN is the ringing that a hundred repeats turn into a whine.
-  ok(r.sustainHz < 2000,
-     `does not RING in the fatiguing band (sustain ~${r.sustainHz.toFixed(0)}Hz)`);
+  // about — TWICE over.  A bright ATTACK is what makes an impact read as
+  // hard, so the transient is reported and only the SUSTAIN is judged; and
+  // only ids that fire in BULK are judged at all, because "a hundred of them"
+  // is the test the rule states and a deliberate weapon never gets there.
+  if (firesInBulk(name)) {
+    ok(r.sustainHz < 2000,
+       `does not RING in the fatiguing band (sustain ~${r.sustainHz.toFixed(0)}Hz)`);
+  } else if (r.sustainHz >= 2000) {
+    // Still SAID, because a bright sustain is worth a glance even on a
+    // one-shot — just not a failure, since nothing here fires in floods.
+    note(`bright sustain ~${r.sustainHz.toFixed(0)}Hz — fine for a deliberate `
+       + `one-shot, would be a whine if this id fired in bulk`);
+  }
   if (r.attackHz > 2500) {
     note(`bright attack (~${r.attackHz.toFixed(0)}Hz) — fine for a hard impact, but this is the `
        + `one property headless cannot judge: listen to it in a dense rubble field`);

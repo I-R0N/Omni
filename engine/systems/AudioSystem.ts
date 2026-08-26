@@ -1,5 +1,5 @@
 import SFX_MANIFEST from 'virtual:sfx-manifest';
-import { AUDIO_CONSTANTS } from '../../constants';
+import { AUDIO_CONSTANTS, getActiveCollapseMode } from '../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
@@ -135,6 +135,18 @@ export interface SfxLoopDef {
   positional?: boolean;
   near?: number;
   far?: number;
+  /** Exponent applied to the linear distance attenuation, for loops whose
+   *  POINT is the distance rather than the sound.
+   *
+   *  The shared model fades amplitude linearly from `near` to `far`, which
+   *  is a weak cue: halfway out it is still at half amplitude, about 6 dB
+   *  down, and a sound only 6 dB quieter reads as "right here, slightly
+   *  softer" rather than as "far away". Raising it to a power bends that
+   *  toward how loudness actually falls off with distance, so the same
+   *  travel across the same radius becomes a much stronger cue.
+   *
+   *  1 (default) keeps the linear behaviour every other loop has. */
+  curve?: number;
   start: (s: SynthCtx) => LoopVoice;
 }
 
@@ -156,6 +168,10 @@ interface IdState {
   lastGain: GainNode | null;
   /** Accumulated collapse bump on `lastGain`, capped. */
   lastBump: number;
+  /** Triggers seen inside the CURRENT retrigger window, counted so the DBG
+   *  collapse mode can let a fraction of them through.  Reset when a window
+   *  lapses, i.e. when a genuinely new burst starts. */
+  winCount: number;
 }
 
 interface LiveLoop {
@@ -402,7 +418,15 @@ export class AudioSystem {
       names.forEach((name, i) => {
         jobs.push((async () => {
           try {
-            const res = await fetch(`${SFX_ASSET_DIR}${name}`);
+            // The STANDALONE build has no files to fetch — it is one HTML
+            // document — so it bakes the takes in as data URIs and leaves
+            // them here.  Checking the table first is the whole of the
+            // single-file audio path: everything below is unchanged, so a
+            // baked take goes through the same decode, the same silent-file
+            // rejection and the same round-robin as a fetched one.
+            const inlined = (globalThis as { __omniSfxInline?: Record<string, string> })
+              .__omniSfxInline?.[name];
+            const res = await fetch(inlined ?? `${SFX_ASSET_DIR}${name}`);
             if (!res.ok) return;                       // missing → synth draft
             const bytes = await res.arrayBuffer();
             const buf = await this.ctx!.decodeAudioData(bytes);
@@ -558,8 +582,27 @@ export class AudioSystem {
 
     // 1. Retrigger window.  Inside it, either bump the live voice (so a
     //    bulk event reads as one heavier hit) or drop outright.
+    // DBG collapse mode decides how much of a burst survives as real voices.
+    //
+    // It counts triggers rather than scaling the WINDOW, and that is the
+    // whole trick: a mass-death frame fires every trigger at the SAME
+    // context time, so the gap between them is exactly zero and no amount of
+    // shrinking a window lets a second one through. Letting every Nth
+    // in-window trigger past is the only thing that can subdivide a burst.
+    // (Measured: a window-scaling version produced 1 voice from 40 triggers
+    // in both its modes, i.e. a knob that did nothing.)
+    const cm = getActiveCollapseMode();
+    let through = false;
     if (now - st.lastAt < def.minInterval) {
-      if (def.collapse && st.lastGain) {
+      st.winCount++;
+      // pass 0 → nothing through (shipped); 1 → everything; 0.5 → every 2nd.
+      const stride = cm.pass > 0 ? Math.max(1, Math.round(1 / cm.pass)) : 0;
+      through = stride > 0 && st.winCount % stride === 0;
+    } else {
+      st.winCount = 0;
+    }
+    if (now - st.lastAt < def.minInterval && !through) {
+      if (def.collapse && cm.bump && st.lastGain) {
         // Each collapsed trigger multiplies the live voice up, saturating
         // at CAP — so ten simultaneous breaks are audibly bigger than one
         // but forty are not ten times louder than ten.
@@ -579,17 +622,19 @@ export class AudioSystem {
 
     // 2. Per-id polyphony.  Prune retired voices first (lazy — no timers).
     this.prune(st.ends, now);
-    if (st.ends.length >= def.poly) { this.counts.dropped++; return; }
+    if (st.ends.length >= def.poly * cm.poly) { this.counts.dropped++; return; }
 
     // 3. Global ceiling, thinned by tier.  Tier 1 always plays.
     this.pruneGlobal(now);
     if (def.tier > 1) {
-      const cap = def.tier === 3
+      const cap = (def.tier === 3
         ? AUDIO_CONSTANTS.MAX_VOICES_TIER3
-        : AUDIO_CONSTANTS.MAX_VOICES_TIER2;
+        : AUDIO_CONSTANTS.MAX_VOICES_TIER2) * cm.ceiling;
       if (this.globalEnds.length >= cap) { this.counts.dropped++; return; }
     }
-    if (this.globalEnds.length >= AUDIO_CONSTANTS.MAX_VOICES) { this.counts.dropped++; return; }
+    if (this.globalEnds.length >= AUDIO_CONSTANTS.MAX_VOICES * cm.ceiling) {
+      this.counts.dropped++; return;
+    }
 
     // 4. Static per-voice gain: mix level × caller trim × distance.
     let g = def.gain * (opts?.gain ?? 1);
@@ -733,7 +778,8 @@ export class AudioSystem {
         const d = Math.sqrt(dx * dx + dy * dy);
         live.panner.pan.setTargetAtTime(
           Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH)), now, 0.08);
-        live.gain.gain.setTargetAtTime(def.gain * this.attenuation(d, def.near, def.far), now, 0.08);
+        live.gain.gain.setTargetAtTime(
+          def.gain * this.attenuation(d, def.near, def.far, def.curve), now, 0.08);
       }
       return;
     }
@@ -744,7 +790,7 @@ export class AudioSystem {
     if (def.positional && opts?.x !== undefined && opts?.y !== undefined) {
       const dx = wrapDeltaX(this.lx, opts.x);
       const dy = wrapDeltaY(this.ly, opts.y);
-      g *= this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far);
+      g *= this.attenuation(Math.sqrt(dx * dx + dy * dy), def.near, def.far, def.curve);
       panner = this.ctx.createStereoPanner();
       panner.pan.value = Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH));
     }
@@ -843,17 +889,21 @@ export class AudioSystem {
 
   private stateFor(id: string): IdState {
     let st = this.ids.get(id);
-    if (!st) { st = { lastAt: -1e9, ends: [], lastGain: null, lastBump: 1 }; this.ids.set(id, st); }
+    if (!st) { st = { lastAt: -1e9, ends: [], lastGain: null, lastBump: 1, winCount: 0 }; this.ids.set(id, st); }
     return st;
   }
 
   /** Distance attenuation: full inside `near`, linear to zero at `far`. */
-  private attenuation(d: number, near?: number, far?: number): number {
+  private attenuation(d: number, near?: number, far?: number, curve?: number): number {
     const n = near ?? AUDIO_CONSTANTS.NEAR_RADIUS;
     const f = far ?? AUDIO_CONSTANTS.FAR_RADIUS;
     if (d <= n) return 1;
     if (d >= f) return 0;
-    return 1 - (d - n) / (f - n);
+    const linear = 1 - (d - n) / (f - n);
+    // The exponent only bends the curve BETWEEN the radii — both endpoints
+    // are fixed points of `x ** c`, so an out-of-earshot check is unaffected
+    // and a loop still goes fully silent at exactly `far`.
+    return curve && curve !== 1 ? Math.pow(linear, curve) : linear;
   }
 
   /** In-place compaction of retired end times (mutate, don't allocate). */

@@ -1,6 +1,6 @@
 // Produce a single-file standalone HTML from the Vite build output.
 // Inlines the CSS, JS, and any /assets/*.png referenced by the bundle as data URIs.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve, extname, basename } from 'node:path';
 
 const distDir = resolve('dist');
@@ -26,25 +26,24 @@ const mimeFor = (ext) => {
     case '.webp': return 'image/webp';
     case '.svg': return 'image/svg+xml';
     case '.gif': return 'image/gif';
+    case '.wav': return 'audio/wav';
     default: return 'application/octet-stream';
   }
 };
 
-// IMAGES ONLY — AUDIO IS DELIBERATELY EXCLUDED, and this is the answer to
-// docs/AUDIO_PLAN.md §2a (the standalone-build fork).
+// This pattern is for IMAGES, which are referenced in the bundle as literal
+// `/assets/name.png` strings and so can be swapped inline.  AUDIO cannot use
+// it and is handled separately below: a sound's URL is ASSEMBLED at runtime
+// from a directory constant plus a filename, so the full path never appears
+// in the JS for a regex to find.
 //
-// Every sound id carries a procedural synth draft, and a recorded .wav only
-// REPLACES that draft where one is installed.  So the standalone build needs
-// no audio at all: it fetches nothing, falls back to the drafts, and is fully
-// audible.  The recorded library can therefore grow without bound — a
-// hundred takes or a thousand — and this file does not grow by a byte.
-//
-// Do NOT add wav/mp3/ogg to this pattern to "fix" the standalone's sound.
-// It already has sound.  Adding audio here trades a working 5.5MB single
-// file for a broken 50MB one, and base64 inflates it by a further third.
-// If sampled audio in the standalone is ever genuinely wanted, that is a
-// deliberate product decision to take with the repo owner (and probably
-// wants a curated subset, not the whole folder), not a regex edit.
+// (The rule here used to be "audio is deliberately excluded, do not add wav
+// to this pattern".  That was right while every id was a synth draft — the
+// standalone needed no audio because it was already fully audible.  It stopped
+// being right when real takes landed: the standalone was then structurally
+// unable to play the one thing the preview existed to audition, and WAV-only
+// mode was silence rather than an A/B.  The warning's advice still holds
+// though — adding `wav` to THIS pattern would not have worked.)
 const assetPattern = /\/assets\/([A-Za-z0-9_.-]+\.(?:png|jpg|jpeg|webp|svg|gif))/g;
 const referenced = new Set();
 for (const m of jsSource.matchAll(assetPattern)) referenced.add(m[1]);
@@ -74,6 +73,34 @@ for (const [name, dataUri] of replaced) {
   jsSource = jsSource.split(needle).join(dataUri);
 }
 
+// ── Recorded SFX ────────────────────────────────────────────────────────────
+//
+// Emitted as a filename -> data-URI table rather than substituted into the JS,
+// because there is no path string to substitute: `AudioSystem` builds each URL
+// as SFX_ASSET_DIR + name at runtime.  The loader checks this table before
+// fetching, so a baked take takes exactly the same decode / rejection /
+// round-robin path a served one does.
+//
+// Only files the MANIFEST references are baked, so a stray file in the folder
+// costs nothing, and only ids that survive discovery are ever asked for.
+const sfxDir = resolve(publicAssetsDir, 'sfx');
+const sfxInline = {};
+let sfxBytes = 0;
+if (existsSync(sfxDir)) {
+  for (const file of readdirSync(sfxDir)) {
+    if (!/\.wav$/i.test(file)) continue;
+    // The bundle carries the manifest's bare filenames; anything not named
+    // there is unreachable at runtime and would be dead weight in the file.
+    if (!jsSource.includes(file)) continue;
+    const abs = resolve(sfxDir, file);
+    sfxBytes += statSync(abs).size;
+    sfxInline[file] = toDataUri(abs);
+  }
+}
+const sfxTag = Object.keys(sfxInline).length
+  ? `<script>window.__omniSfxInline=${JSON.stringify(sfxInline)};</script>`
+  : '';
+
 const finalHtml = `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -86,6 +113,7 @@ const finalHtml = `<!DOCTYPE html>
   </head>
   <body>
     <div id="root"></div>
+    ${sfxTag}
     <script type="module">${jsSource}</script>
   </body>
 </html>
@@ -94,4 +122,6 @@ const finalHtml = `<!DOCTYPE html>
 const out = resolve('omniverse-standalone.html');
 writeFileSync(out, finalHtml);
 const mb = (finalHtml.length / (1024 * 1024)).toFixed(2);
-console.log(`Wrote ${out} (${mb} MB, ${replaced.size} assets inlined)`);
+const sfxCount = Object.keys(sfxInline).length;
+console.log(`Wrote ${out} (${mb} MB, ${replaced.size} images + ${sfxCount} sfx takes inlined`
+  + `${sfxCount ? `, ${(sfxBytes / 1024 / 1024).toFixed(2)} MB of audio` : ''})`);

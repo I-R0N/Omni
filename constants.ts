@@ -2966,6 +2966,266 @@ export const SHOOTING_STAR_CONSTANTS = {
   SPEED_MAX: 900
 };
 
+// ─── The star field ──────────────────────────────────────────────────────────
+//
+// DENSITY IS PER UNIT AREA, NOT A FIXED COUNT.  The star count used to be
+// absolute — 60 bands x 400 stars = 24 000 stars over whatever the viewport
+// happened to be — so a smaller window was a denser sky.  Measured (gauntlet
+// star field, S1): a 390x844 phone showed 729 stars per 10k CSS px^2 against
+// 185 on a 1440x900 desktop window, a 3.95x density delta over a 3.94x area
+// ratio.  On the phone that put 26.9% of every pixel on screen inside a star,
+// which reads as TV static rather than as a sky.
+//
+// The unit is CSS px^2, not device px^2, and that is deliberate: a star should
+// subtend the same apparent size whatever the display's pixel ratio, and CSS
+// px is the unit that means "apparent size".  `BackgroundManager` derives its
+// scene size as `canvas.width / effectiveDpr()`, which is exactly the CSS
+// viewport, so the two agree by construction.
+export const STARFIELD_CONSTANTS = {
+  /** Scroll rate of the FARTHEST depth layer, as a fraction of camera motion.
+   *  Not zero: a layer pinned to the camera reads as a texture stuck to the
+   *  screen rather than as distant sky. */
+  DEPTH_FLOOR: 0.02,
+  /** Where the milky way sits in the depth range, as a `t` in [0, 1] on the
+   *  same quadratic curve the depth layers use.  Expressed as a DEPTH rather
+   *  than a fixed speed so it keeps its place in the stack when the parallax
+   *  spread is changed — a hardcoded rate would drift relative to everything
+   *  else.  0.0707 reproduces its original 0.03 at the default spread. */
+  MILKY_WAY_DEPTH: 0.0707,
+  /** Milky-way stars per 1000 CSS px of viewport WIDTH.  The milky way is a
+   *  LINE feature — its stars are placed along a diagonal spanning the
+   *  viewport width — so it scales linearly with width, where the star field
+   *  proper scales with area.  Anchored to the phone's original count (80 at
+   *  390 px wide): it is an authored feature that should still read on the
+   *  target device, and it spent its whole life buried under the haze that
+   *  the density fix above removes. */
+  MILKY_WAY_PER_1K_WIDTH: 205,
+} as const;
+
+// ─── DBG: parallax depth layers ──────────────────────────────────────────────
+//
+// How many discrete scroll speeds the field is quantised into.  The star budget
+// is split evenly across them, so this changes the SMOOTHNESS OF THE DEPTH and
+// not the density.
+//
+// This was 60 and effectively frozen there, because a layer used to BE a
+// full-viewport canvas: 60 of them cost 80 MB on a phone and 316 MB on a
+// desktop window, so more depth meant more memory in whole megabytes.  Since
+// the field became data (S4) a layer is five numbers and a scroll accumulator —
+// 240 layers cost about 10 KB and 240 float updates per frame — so depth is
+// essentially free and there is no longer a reason to be stingy with it.
+//
+// 240 IS THE DEFAULT (user call, on the S6 evidence): 4x the depth granularity
+// at no measurable cost.  60 stays in the cycle as the pre-S6 value.
+export const STAR_BANDS_CYCLE: ReadonlyArray<number> = [240, 120, 480, 60] as const;
+let activeStarBandsIndex = 0;
+export function getActiveStarBands(): number { return STAR_BANDS_CYCLE[activeStarBandsIndex]; }
+export function getActiveStarBandsName(): string { return `${STAR_BANDS_CYCLE[activeStarBandsIndex]}`; }
+export function cycleStarBands(): number {
+  activeStarBandsIndex = (activeStarBandsIndex + 1) % STAR_BANDS_CYCLE.length;
+  return STAR_BANDS_CYCLE[activeStarBandsIndex];
+}
+
+// ─── PER-MAP SKY: ALTITUDE, DENSITY AND PARALLAX ─────────────────────────────
+//
+// Every map gets its OWN star density, and its parallax spread follows from
+// that density rather than being set beside it.
+//
+// The idea the numbers encode is ALTITUDE.  A map high in deep space shows a
+// dense, distant sky whose layers barely separate as you move.  A map low near
+// a planet or a landing site shows fewer stars, and the ones it does show sweep
+// past with much more depth separation because you are closer to everything.
+// So DENSITY FALLS and PARALLAX RISES as you descend, and the hub's test-portal
+// column is arranged vertically to match: the LOWER a portal sits on the map,
+// the LOWER the density behind it.
+//
+// The inverse relation is DERIVED, not hand-maintained.  Writing two numbers
+// per map and trusting them to stay anti-correlated is exactly the kind of
+// pairing that drifts the first time someone tunes one of them, so a map
+// declares only its density and `parallaxForDensity` does the rest.  If a map
+// ever needs to break the relation, that is the moment to add an override
+// field — not before.
+export const STAR_DENSITY_RANGE = {
+  /** Lowest sky — closest to a planet.  Below the old 185 floor, per the
+   *  "perhaps a layer lower than this" the range was asked for with. */
+  MIN: 90,
+  /** Densest sky — deep space, far from anything. */
+  MAX: 729,
+} as const;
+
+/** Parallax spread at each end of the density range.  Inverted on purpose:
+ *  sparse skies are NEAR skies, and near things separate more as you move. */
+export const STAR_PARALLAX_RANGE = {
+  AT_MIN_DENSITY: 8,
+  AT_MAX_DENSITY: 1,
+} as const;
+
+/** The inverse relation, in one place.  Linear in density between the two
+ *  endpoints, clamped outside them so a hand-set override cannot produce a
+ *  negative or absurd spread. */
+export function parallaxForDensity(density: number): number {
+  const { MIN, MAX } = STAR_DENSITY_RANGE;
+  const t = Math.max(0, Math.min(1, (density - MIN) / (MAX - MIN)));
+  const { AT_MIN_DENSITY, AT_MAX_DENSITY } = STAR_PARALLAX_RANGE;
+  return AT_MIN_DENSITY + t * (AT_MAX_DENSITY - AT_MIN_DENSITY);
+}
+
+/** Each map's sky, as a single number: stars per 10 000 CSS px^2.
+ *
+ *  Read as ALTITUDE — high value = high above everything = dense distant sky.
+ *  The six showcase fields are the test ladder the hub's portal column steps
+ *  through, so their values are spread evenly across the whole range and their
+ *  ORDER here matches the portals' vertical order on the hub. */
+export const STAR_DENSITY_BY_MAP: Record<MapType, number> = {
+  // The hub is home: high, open, and the densest sky in the game.
+  [MapType.OVERWORLD]:            729,
+
+  // Wave arenas, descending.
+  [MapType.UNIVERSE]:             650,
+  [MapType.RING]:                 520,
+  [MapType.SEVEN_RINGS]:          420,
+  [MapType.POCKET]:               300,
+
+  // The test ladder — evenly spread MIN..MAX, matching the hub column.
+  [MapType.ASTEROID_FIELD]:       729,
+  [MapType.GLASS_FIELD]:          600,
+  [MapType.METAL_FIELD]:          460,
+  [MapType.PLASTIC_FIELD]:        330,
+  [MapType.ROCK_FIELD]:           185,
+  [MapType.NEBULA_FIELD]:          90,
+
+  // Remaining showcase maps — not on the ladder, sensible middles.
+  [MapType.INDESTRUCTIBLE_FIELD]: 400,
+  [MapType.TILE_HEAVY]:           400,
+};
+
+// ─── DBG: star density and parallax ──────────────────────────────────────────
+//
+// Both cycles lead with AUTO (0), which means "use this map's own value" — the
+// per-map table above.  The explicit steps are OVERRIDES, for comparing two
+// settings on one map without flying somewhere else.
+//
+// The panel shows the resolved number alongside, e.g. `Auto 185`, so the map's
+// current sky is legible without a detour into the source.
+//
+// A density override does NOT drag parallax with it: the two DBG rows are
+// independent so either can be isolated. The DERIVED inverse relation applies
+// to the per-map values, which is where it belongs.
+//
+// The cycle runs PAST the top of STAR_DENSITY_RANGE on purpose.  1200 was
+// reported handling easily on a mobile browser at the 'device' star size, and
+// the pre-gauntlet phone sky measured ~2693 stars per 10k CSS px^2 — so the
+// steps above MAX exist to reach the density the field used to have, which is
+// the one comparison the per-map ladder cannot make on its own.  They are
+// OVERRIDES only: no map declares a density above MAX, because the parallax
+// relation is defined across the range and `parallaxForDensity` merely clamps
+// beyond it.  If one of these ever becomes a map's own value, raise MAX and
+// re-space the ladder rather than leaving a map outside the range.
+export const STAR_DENSITY_CYCLE: ReadonlyArray<number> =
+  [0, 729, 400, 185, 90, 1200, 1800, 2700] as const;
+let activeStarDensityIndex = 0;
+export function getStarDensityOverride(): number { return STAR_DENSITY_CYCLE[activeStarDensityIndex]; }
+export function cycleStarDensity(): number {
+  activeStarDensityIndex = (activeStarDensityIndex + 1) % STAR_DENSITY_CYCLE.length;
+  return STAR_DENSITY_CYCLE[activeStarDensityIndex];
+}
+/** The density actually used for `mapType` — the override if one is set,
+ *  otherwise the map's own value. */
+export function resolveStarDensity(mapType: MapType): number {
+  const o = getStarDensityOverride();
+  return o > 0 ? o : (STAR_DENSITY_BY_MAP[mapType] ?? STAR_DENSITY_RANGE.MAX);
+}
+export function getActiveStarDensityName(mapType?: MapType): string {
+  const o = getStarDensityOverride();
+  if (o > 0) return `${o}`;
+  return mapType === undefined ? 'Auto' : `Auto ${resolveStarDensity(mapType)}`;
+}
+
+export const STAR_PARALLAX_CYCLE: ReadonlyArray<number> = [0, 2, 4, 8, 1, 0.5] as const;
+let activeStarParallaxIndex = 0;
+export function getStarParallaxOverride(): number { return STAR_PARALLAX_CYCLE[activeStarParallaxIndex]; }
+export function cycleStarParallax(): number {
+  activeStarParallaxIndex = (activeStarParallaxIndex + 1) % STAR_PARALLAX_CYCLE.length;
+  return STAR_PARALLAX_CYCLE[activeStarParallaxIndex];
+}
+/** The spread actually used for `mapType`: the override if set, otherwise
+ *  derived from the map's density so the inverse relation always holds. */
+export function resolveStarParallax(mapType: MapType): number {
+  const o = getStarParallaxOverride();
+  if (o > 0) return o;
+  return parallaxForDensity(STAR_DENSITY_BY_MAP[mapType] ?? STAR_DENSITY_RANGE.MAX);
+}
+export function getActiveStarParallaxName(mapType?: MapType): string {
+  const o = getStarParallaxOverride();
+  if (o > 0) return `${o}x`;
+  return mapType === undefined ? 'Auto' : `Auto ${resolveStarParallax(mapType).toFixed(1)}x`;
+}
+
+// STAR REGIONS (non-uniform density across the map) WERE TRIED AND REMOVED.
+//
+// The idea was that density would vary by WHERE IN THE MAP the camera sits —
+// fly into a rich region and the sky fills in, fly into a void and it thins
+// out — implemented as a torus-periodic plane-wave field gating a prefix of
+// each draw group.  It worked as specified and it read as a defect: stars
+// appearing and disappearing in view.  The edge fade bought smoothness, not
+// legitimacy — the stars still arrived and left in front of the player, which
+// is not something a sky does.  See the S13 decision in the ledger, and S7 for
+// the flow field this was NOT built on and why.
+//
+// The parts worth keeping are recorded rather than the code: a field built
+// from INTEGER wave vectors is exactly periodic over the map and therefore
+// seam-continuous on the torus, and those vectors must share NO COMMON FACTOR
+// or the same regions tile several times across the map.  Anything that varies
+// the backdrop spatially will need both facts again.
+
+// STAR MOTION IS SUB-PIXEL, AND THERE IS NO LONGER A CHOICE ABOUT IT.
+//
+// Stars are drawn at their exact fractional position, so the field scrolls
+// continuously at any speed.  Canvas antialiases the rect across the pixels it
+// straddles, which makes a star marginally softer than a pixel-snapped one.
+//
+// A 'crisp' pixel-snapped mode existed briefly and was REMOVED after testing:
+// snapping is what made the field jitter at low ship speeds (measured at 99% of
+// stars frozen on any given frame at ship speed 2), and no amount of sharpness
+// paid for that.  A per-star dither was tried before it and was worse still.
+// Both are recorded in docs/GAUNTLET_STARFIELD_LOG.md (S8, S9, S10) so the dead
+// ends are not re-explored.
+//
+// Snapping was never load-bearing for correctness, which is the part worth
+// remembering: the cross-browser bug this gauntlet started from was the
+// `drawImage` BLIT FILTER on the old pre-rendered band canvases, and those
+// canvases are gone.  What remains is fillRect coverage antialiasing on an
+// axis-aligned rect — analytic, and consistent across engines.
+
+// ─── DBG: star size floor ────────────────────────────────────────────────────
+//
+// Star bands are generated at DEVICE resolution and blitted 1:1 at whole
+// device-pixel offsets, so a star occupies exactly the pixels it is drawn into
+// and no resampling filter is in the path (see the star-field gauntlet, S3).
+// That makes the SIZE FLOOR a real choice for the first time — before, every
+// star was a 1-CSS-px fillRect at a fractional origin, which antialiased into
+// a ~2x2 smear and then got filtered again on the way to the screen.
+//
+//   'device' — a star may be a single DEVICE pixel: max(1, round(size x dpr)).
+//              The finest, sharpest sky a display can show; on a dpr-2 phone
+//              most stars become 1-2 device px.  DEFAULT.
+//   'css'    — a star is never smaller than one CSS pixel: the apparent-size
+//              floor the field had before S3, but crisp instead of filtered.
+//
+// At dpr 1 the two are IDENTICAL — the knob only differs where the problem
+// was, which is dpr >= 2.
+export type StarSizeMode = 'device' | 'css';
+export const STAR_SIZE_CYCLE: ReadonlyArray<StarSizeMode> = ['device', 'css'] as const;
+let activeStarSizeIndex = 0;
+export function getActiveStarSizeMode(): StarSizeMode { return STAR_SIZE_CYCLE[activeStarSizeIndex]; }
+export function getActiveStarSizeName(): string {
+  return STAR_SIZE_CYCLE[activeStarSizeIndex] === 'device' ? 'Device px' : 'CSS px';
+}
+export function cycleStarSize(): StarSizeMode {
+  activeStarSizeIndex = (activeStarSizeIndex + 1) % STAR_SIZE_CYCLE.length;
+  return STAR_SIZE_CYCLE[activeStarSizeIndex];
+}
+
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.OVERWORLD]: {
     maxSpeed: 120,
@@ -4640,8 +4900,33 @@ export const AUDIO_CONSTANTS = {
   IMPACT_SPAN_ENEMY: 12,
   IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
   IMPACT_PITCH_EXP: 0.25,
-  IMPACT_PITCH_MIN: 0.70,
-  IMPACT_PITCH_MAX: 1.60,
+  /** The clamps are set to the MEASURED extremes of everything that actually
+   *  reaches a mass-pitched row, so the curve can reach its own ends.
+   *
+   *  At 0.70/1.60 they were binding on **20.9%** of hits — a fifth of every
+   *  impact in the game played at one of exactly two pitches, with no
+   *  dynamics at all. Worst were the smallest glass shards (all pinned to the
+   *  top) and the heaviest rock (all pinned to the bottom), i.e. precisely the
+   *  extremes the cue exists to distinguish. At 0.46/2.50 it is **0.4%**.
+   *
+   *  THREE rows consume this (PhysicsSystem.impactVoice) and the bounds come
+   *  from their real populations:
+   *    · `crash.player.shard` — glass 0.69–8.2, plastic 4.9–10.3, metal 19.4,
+   *      rock 7.2–460.7 → wants 0.483 … 2.450
+   *    · `crash.player.enemy` — SWARM mass 4 → 1.581, DRAGON mass 500 → 0.473
+   *    · `crash.player.tile`  — passes Infinity, so it is unpitched by design
+   *
+   *  NEBULA shards are deliberately NOT a consumer despite a 0.01 sentinel
+   *  mass that would demand a clamp of 7.07: player↔nebula-shard hard
+   *  collision is default OFF (they pass through and swirl), so that row never
+   *  fires for them. If that toggle is ever turned on by default, this comment
+   *  is the thing that breaks.
+   *
+   *  Heavier still is possible — rock merges past 460 over a long run — and
+   *  that is what a floor is FOR. The bound is "every population can reach its
+   *  own ends", not "nothing is ever clamped". */
+  IMPACT_PITCH_MIN: 0.46,
+  IMPACT_PITCH_MAX: 2.50,
   /** Per-row gain floors (docs/SFX_INVENTORY.md §4.4).  A floor is what stops
    *  a voice fading to nothing: the tile crash has none because it is gated
    *  hard enough that a quiet one is meaningful, while the light-contact rows
@@ -4680,8 +4965,83 @@ export const AUDIO_CONSTANTS = {
   PORTAL_FAR_RADIUS: 1600,
   STATION_NEAR_RADIUS: 420,
   STATION_FAR_RADIUS: 2200,
+  // The snitch, whose whole job is to be FOUND — distance and bearing are
+  // the information, and the sound is only the carrier.
+  //
+  // It needs its own radii rather than the default 420/2600 because the
+  // caller used to gate the loop at 1200 units while the default far
+  // radius was 2600: across the entire range it could be heard the
+  // attenuation never fell below 0.64, so it snapped on at two-thirds
+  // volume and stayed there.  That is why it read as non-positional
+  // despite being flagged positional and panning correctly.
+  //
+  // NEAR is deliberately tiny — full volume only when practically on top
+  // of it — and the CURVE is what does the real work: a linear fade is
+  // still at half amplitude halfway out, about 6 dB down, which the ear
+  // reads as "close but quieter" rather than "far".  Raising it to a power
+  // makes the same crossing a dramatic one.  At 500 units of 1500 the
+  // linear model gives 0.70; this gives 0.41.
+  SNITCH_NEAR_RADIUS: 90,
+  SNITCH_FAR_RADIUS: 1500,
+  SNITCH_DISTANCE_CURVE: 2.5,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 } as const;
+
+// ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────
+//
+// A single frame can kill 40 enemies or shatter 200 shards, and the shipped
+// answer is to COLLAPSE simultaneous triggers of one id into a single louder
+// voice (AUDIO_CONSTANTS.COLLAPSE_BUMP) so bulk reads as HEAVIER rather than
+// as forty thin copies or one forty-times-louder one.
+//
+// That is a judgement, not a fact, and it was never A/B-able — so this cycle
+// exists to hear the alternatives instead of arguing about them.  Three
+// scales move together, because relaxing one alone changes nothing: the
+// share of in-window triggers that still get a voice, the per-id POLYPHONY
+// cap, and the global tier CEILINGS.  Let more through without raising the
+// caps and the extras are simply dropped a step later.
+//
+//   Merge  — shipped.  One heavier voice per burst.
+//   Some   — half the window, double the voices.  A burst of 40 lands as
+//            roughly 20 distinct hits instead of 1.
+//   All    — no collapse at all: every trigger that arrives gets a voice,
+//            subject only to a much-raised ceiling.  This is the honest
+//            "what does 40-at-once actually sound like" test, and it is
+//            expected to be ugly — that is the evidence.
+//
+// DELIBERATELY A DBG CYCLE AND NOT A SETTING.  `All` can put dozens of
+// voices in one frame; it is a listening tool, not a supported mix.
+export interface CollapseMode {
+  name: string;
+  /** Fraction of the triggers arriving INSIDE the retrigger window that
+   *  still get their own voice.  0 = none (the shipped merge), 1 = all.
+   *
+   *  A fraction rather than a window scale, because a mass-death frame
+   *  fires every trigger at the same context time: the gap between them is
+   *  exactly zero, so no window is small enough to let a second one
+   *  through.  Counting them is the only thing that can subdivide a burst,
+   *  and a first version that scaled the window measured 1 voice from 40
+   *  triggers in BOTH of its modes. */
+  pass: number;
+  /** Multiplies each id's polyphony cap. */
+  poly: number;
+  /** Multiplies the global + per-tier voice ceilings. */
+  ceiling: number;
+  /** Whether a collapsed retrigger still bumps the live voice's gain. */
+  bump: boolean;
+}
+export const COLLAPSE_MODES: ReadonlyArray<CollapseMode> = [
+  { name: 'Merge', pass: 0,   poly: 1, ceiling: 1, bump: true  },
+  { name: 'Some',  pass: 0.5, poly: 3, ceiling: 3, bump: true  },
+  { name: 'All',   pass: 1,   poly: 8, ceiling: 6, bump: false },
+] as const;
+let activeCollapseIndex = 0;
+export function getActiveCollapseMode(): CollapseMode { return COLLAPSE_MODES[activeCollapseIndex]; }
+export function getActiveCollapseModeName(): string { return COLLAPSE_MODES[activeCollapseIndex].name; }
+export function cycleCollapseMode(): CollapseMode {
+  activeCollapseIndex = (activeCollapseIndex + 1) % COLLAPSE_MODES.length;
+  return COLLAPSE_MODES[activeCollapseIndex];
+}
 
 // ── Snitch ───────────────────────────────────────────────────────────────────
 // A golden-comet snitch rides the asteroid flow field with a burst/coast AI
@@ -5131,6 +5491,27 @@ export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number
   { targetId: 'arena_ring',        x:     0, y: -4200 },
   { targetId: 'arena_seven_rings', x:     0, y:  4200 },
   { targetId: 'arena_pocket',      x: -4400, y:     0 },
+];
+
+/** TEST PORTALS — a vertical rack beside the home station, one per showcase
+ *  map, stepping the whole star-density range in order.
+ *
+ *  The column is the point: +Y is DOWN, so a portal further down the map leads
+ *  to a LOWER-density sky.  Read as descending altitude — the top of the rack
+ *  is deep space and the bottom is the closest thing the game has to a planet
+ *  approach.  Densities are not repeated here; each target's value lives in
+ *  STAR_DENSITY_BY_MAP, and `tests/starfield.spec.ts` asserts the two tables
+ *  agree so they cannot drift apart.
+ *
+ *  Placed at x = +1400: clear of the home station's CLEARANCE (520) and of the
+ *  player spawn, and spaced 600 apart so only one is ever inside USE_RANGE. */
+export const HUB_TEST_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
+  { targetId: 'field_asteroid', x: 1400, y: -1500 },   // densest sky
+  { targetId: 'field_glass',    x: 1400, y:  -900 },
+  { targetId: 'field_metal',    x: 1400, y:  -300 },
+  { targetId: 'field_plastic',  x: 1400, y:   300 },
+  { targetId: 'field_rock',     x: 1400, y:   900 },
+  { targetId: 'field_nebula',   x: 1400, y:  1500 },   // sparsest sky
 ];
 
 /** Where an arena's return portal sits relative to that map's playerSpawn.

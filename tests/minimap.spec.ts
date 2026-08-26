@@ -70,9 +70,16 @@ async function setMaterial(page: any, name: 'Flow' | 'Dots' | 'Off') {
 
 test.describe('off-screen indicators — portals', () => {
   /** Park the player `dist` world units east of the first hub portal and let
-   *  a frame rebuild the indicator buffer. */
+   *  a frame rebuild the indicator buffer.
+   *
+   *  Scoped to THAT portal by target id, not to "any portal in the buffer".
+   *  The hub now carries a six-portal TEST RACK beside the home station on top
+   *  of the four arena rifts, and at the far-side standoff below one of the
+   *  rack portals sits 1345 units away — inside INDICATOR_RANGE (1500). A
+   *  buffer-wide `find(isPortal)` would return that one and report an arrow
+   *  for a rift the test is not asking about. */
   async function standOff(page: any, dist: number) {
-    await engine(page, (e, d: number) => {
+    const target = await engine(page, (e, d: number) => {
       const p = e.portals[0];
       e.player.position.x = p.position.x + d;
       e.player.position.y = p.position.y;
@@ -80,12 +87,14 @@ test.describe('off-screen indicators — portals', () => {
       e.player.velocity.y = 0;
       e.camera.position.x = e.player.position.x;
       e.camera.position.y = e.player.position.y;
+      return p.portalTargetId as string;
     }, dist);
     await page.waitForTimeout(250);
-    return engine(page, e => {
-      const entry = e.renderer._indicatorBuffer.find((i: any) => i.entity.isPortal);
+    return engine(page, (e, id: string) => {
+      const entry = e.renderer._indicatorBuffer.find(
+        (i: any) => i.entity.isPortal && i.entity.portalTargetId === id);
       return entry ? { present: true, onScreen: entry.onScreen } : { present: false, onScreen: false };
-    });
+    }, target);
   }
 
   test('the arrow is bracketed: close enough to matter, not yet visible', async ({ page }) => {

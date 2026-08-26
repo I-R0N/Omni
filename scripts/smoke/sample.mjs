@@ -38,6 +38,43 @@ function makeWav(seconds, rate, seed, amp = 0.8) {
   return bytes;
 }
 
+/** Wait until sample loading STOPS CHANGING, not until it starts.
+ *
+ *  `sampleCount > 0` was a fine proxy while the folder held three files; with
+ *  sixty-six it returns after the first one decodes and every later assertion
+ *  reads a half-loaded library. That is a RACE, and it presented as a content
+ *  failure — the discovery check reported a list of ids that simply had not
+ *  finished arriving yet. Settling is the honest condition, and it does not
+ *  care how many files there are. */
+/** Wait until the SIM is actually running.
+ *
+ *  `startGame()` returns before the loop has run a frame, and `play()` DROPS
+ *  every positional voice while the sim is frozen (`_active`) — so a world
+ *  sound asked for in that gap is silently discarded. This was a real
+ *  intermittent failure in the 404-fallback check, and it looked like the
+ *  fallback was broken: `played: 0`, `dropped: 1`, `active: false`. Every
+ *  other page here happened to be shielded by the settle wait below; the one
+ *  page that went straight from `startGame()` to `evaluate` was the one that
+ *  flaked. */
+const simLive = (page) => page.waitForFunction(
+  () => window.__omniEngine?.audio?._active === true, { timeout: 15000 });
+
+const settled = async (page, quietMs = 600, timeoutMs = 30000) => {
+  const read = () => page.evaluate(() => {
+    const a = window.__omniEngine.audio;
+    return a.sampleCount + a.rejectedSampleCount;
+  });
+  const started = Date.now();
+  let last = await read(), stableSince = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await new Promise(r => setTimeout(r, 100));
+    const now = await read();
+    if (now !== last) { last = now; stableSince = Date.now(); continue; }
+    if (Date.now() - stableSince >= quietMs) return last;
+  }
+  return last;
+};
+
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -63,11 +100,13 @@ const run = async () => {
   await page.evaluate(() => window.__omniEngine.startGame());
 
   // ── Decode ───────────────────────────────────────────────────────────────
-  await page.waitForFunction(() => window.__omniEngine.audio.sampleCount >= 3, { timeout: 15000 })
-    .catch(() => {});
+  // This page CONTROLS the whole library through the route above — every wav
+  // the game asks for is either one of `takes` or a 404 — so these counts come
+  // from the script's own list and are immune to the real folder growing.
+  await settled(page);
   const decoded = await page.evaluate(() => window.__omniEngine.audio.sampleCount);
-  ok(decoded === 3, `all three takes decoded (${decoded}/3)`);
-  ok(served === 3, `each take fetched exactly once (${served} requests)`);
+  ok(decoded === takes.length, `all ${takes.length} takes decoded (${decoded}/${takes.length})`);
+  ok(served === takes.length, `each take fetched exactly once (${served} requests)`);
   ok(await page.evaluate(() => window.__omniEngine.audio.hasSample('crash.player.shard')),
      'crash.player.shard resolves to a recording');
   ok(!await page.evaluate(() => window.__omniEngine.audio.hasSample('crash.player.tile')),
@@ -180,11 +219,18 @@ const run = async () => {
   await page2.mouse.click(195, 700);
   await page2.waitForFunction(() => window.__omniEngine?.audio?.audible === true, { timeout: 15000 });
   await page2.evaluate(() => window.__omniEngine.startGame());
+  await simLive(page2);
   const fell = await page2.evaluate(() => {
-    const a = window.__omniEngine.audio;
+    const e = window.__omniEngine, a = e.audio, p = e.player.position;
     a.resetCounters();
-    a.play('crash.player.shard', { x: 0, y: 0 });
-    return { count: a.sampleCount, has: a.hasSample('crash.player.shard'), played: a.playsOf('crash.player.shard') };
+    // AT THE LISTENER, not at world origin: this id is NEAR-FIELD (240/850)
+    // and the player does not spawn at (0, 0), so the origin is the wrong
+    // place to fire it — the frame-time block below carries the same warning.
+    // (This was NOT what made the check flaky, though it reads like it. See
+    // the `active` wait above for the actual cause.)
+    a.play('crash.player.shard', { x: p.x, y: p.y });
+    return { count: a.sampleCount, has: a.hasSample('crash.player.shard'),
+             played: a.playsOf('crash.player.shard') };
   });
   ok(fell.count === 0, 'a 404 decodes nothing');
   ok(fell.has === false, 'and the id reports no recording');
@@ -195,14 +241,19 @@ const run = async () => {
   // silence.  It is worse than a missing file, because it WINS over a
   // working draft, so the fallback has to cover content and not just fetch.
   const page3 = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await page3.route('**/assets/sfx/*.wav', route =>
-    route.fulfill({ status: 200, contentType: 'audio/wav', body: makeWav(0.2, 22050, 3, 0.0004) }));
+  // EVERY request is answered with a silent take, so the expected rejection
+  // count is however many the manifest asks for — counted here rather than
+  // written down, because the asset library is inventory and is meant to grow.
+  let asked = 0;
+  await page3.route('**/assets/sfx/*.wav', route => {
+    asked++;
+    route.fulfill({ status: 200, contentType: 'audio/wav', body: makeWav(0.2, 22050, 3, 0.0004) });
+  });
   await page3.goto(URL, { waitUntil: 'networkidle' });
   await page3.mouse.click(195, 700);
   await page3.waitForFunction(() => window.__omniEngine?.audio?.audible === true, { timeout: 15000 });
   await page3.evaluate(() => window.__omniEngine.startGame());
-  await page3.waitForFunction(() => window.__omniEngine.audio.rejectedSampleCount >= 3, { timeout: 15000 })
-    .catch(() => {});
+  await settled(page3);
   const silent = await page3.evaluate(() => {
     const e = window.__omniEngine, a = e.audio, p = e.player.position;
     a.resetCounters();
@@ -210,7 +261,9 @@ const run = async () => {
     return { rejected: a.rejectedSampleCount, loaded: a.sampleCount,
              has: a.hasSample('crash.player.shard'), played: a.playsOf('crash.player.shard') };
   });
-  ok(silent.rejected === 3, `a silent take is rejected at decode (${silent.rejected}/3)`);
+  ok(asked > 0, `the page asked for takes at all (${asked})`);
+  ok(silent.rejected === asked,
+     `every silent take is rejected at decode (${silent.rejected}/${asked})`);
   ok(silent.loaded === 0, 'and is not counted as loaded');
   ok(silent.has === false, 'so the id does not resolve to a recording');
   ok(silent.played === 1, 'and the draft still makes the sound');
@@ -221,37 +274,50 @@ const run = async () => {
   await page4.mouse.click(195, 700);
   await page4.waitForFunction(() => window.__omniEngine?.audio?.audible === true, { timeout: 15000 });
   await page4.evaluate(() => window.__omniEngine.startGame());
-  await page4.waitForFunction(() => window.__omniEngine.audio.sampleCount > 0, { timeout: 15000 })
-    .catch(() => {});
+  await settled(page4);
   const disc = await page4.evaluate(() => {
     const a = window.__omniEngine.audio;
     return { sampled: a.sampledIds, unmatched: a.unmatchedFiles, total: a.allIds.length };
   });
-  // The committed takes are named crash-player-shard-*.wav and nothing in the
-  // registry declares them: matching them to the id is the convention working.
-  ok(disc.sampled.includes('crash.player.shard'),
-     `a file named after an id is discovered without being declared (${disc.sampled.join(', ') || 'none'})`);
+  // This page uses the REAL folder, so it asserts the CONVENTION rather than a
+  // named id: some file found its id without the registry declaring it. Naming
+  // one made the check a hostage to which sounds happen to be recorded today.
+  ok(disc.sampled.length > 0,
+     `files named after ids are discovered without being declared (${disc.sampled.length}: `
+     + `${disc.sampled.slice(0, 4).join(', ')}${disc.sampled.length > 4 ? ', …' : ''})`);
   ok(disc.unmatched.length === 0, `no file matches an unknown id (${disc.unmatched.join(', ') || 'none'})`);
   ok(disc.total > 100, `every registered id is reported for coverage (${disc.total})`);
 
   const drafts = await page4.evaluate(() => {
     const e = window.__omniEngine, a = e.audio, p = e.player.position;
+    // PICK the two ids at runtime rather than naming them. The previous cut
+    // used crash.player.tile as its "draft only" case and a later upload gave
+    // that id recordings, so the check began failing while nothing was wrong.
+    // Both must be POSITIONAL — a flat/UI sound ignores the listener and would
+    // measure something else — and neither may be a LOOP, which `play()` does
+    // not serve at all.
+    const recId = a.sampledIds.find(id => a.defs.get(id)?.positional);
+    const draftId = a.allIds.find(id =>
+      !a.hasSample(id) && !a.loopIds.includes(id) && a.defs.get(id)?.positional);
     const run = () => {
       a.resetCounters();
-      const st1 = a.ids?.get('crash.player.shard'); if (st1) st1.lastAt = -999;
-      a.play('crash.player.shard', { x: p.x, y: p.y });          // HAS a recording
-      const st2 = a.ids?.get('crash.player.tile'); if (st2) st2.lastAt = -999;
-      a.play('crash.player.tile', { x: p.x, y: p.y });           // draft only
-      return { rec: a.playsOf('crash.player.shard'), draft: a.playsOf('crash.player.tile') };
+      const st1 = a.ids?.get(recId); if (st1) st1.lastAt = -999;
+      a.play(recId, { x: p.x, y: p.y });                          // HAS a recording
+      const st2 = a.ids?.get(draftId); if (st2) st2.lastAt = -999;
+      a.play(draftId, { x: p.x, y: p.y });                        // draft only
+      return { rec: a.playsOf(recId), draft: a.playsOf(draftId) };
     };
     a.draftsEnabled = true;  const on  = run();
     a.draftsEnabled = false; const off = run();
     a.draftsEnabled = true;
-    return { on, off };
+    return { on, off, recId, draftId };
   });
+  ok(!!drafts.recId && !!drafts.draftId,
+     `found one id of each kind to compare (recorded: ${drafts.recId}, draft-only: ${drafts.draftId})`);
   ok(drafts.on.rec === 1 && drafts.on.draft === 1, 'with drafts ON both a recorded and an unrecorded id sound');
   ok(drafts.off.rec === 1, 'with drafts OFF a recorded id still sounds');
-  ok(drafts.off.draft === 0, 'with drafts OFF an unrecorded id is SILENT — the audition mode');
+  ok(drafts.off.draft === 0,
+     `with drafts OFF an unrecorded id is SILENT — the audition mode (${drafts.draftId})`);
 
   // LOOPS TOO.  The first cut of the audition switch gated `play()` only, so
   // the engine bed and the station hum kept running under WAV-only — the two

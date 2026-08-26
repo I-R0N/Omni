@@ -766,6 +766,13 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     this.backgroundManager.setNebulaImages(paths);
   }
 
+  /** Regenerate the background star field on the next frame — for the DBG
+   *  star-density cycle, which changes what generation produces rather than
+   *  how it is drawn. */
+  public invalidateBackground() {
+    this.backgroundManager.invalidateContent();
+  }
+
   /**
    * Alpha multiplier (1 = unchanged) for the OPACITY automata path —
    * glass-tile, whose translucent face reads interior recession as

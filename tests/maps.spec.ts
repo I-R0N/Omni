@@ -151,13 +151,21 @@ test.describe('map composition — MAP_POPULATION is the authority', () => {
     const r = await engine(page, e => ({
       stations: e.stations.length,
       portals: e.portals.length,
+      arenaRifts: e.portals.filter((p: any) => String(p.portalTargetId).startsWith('arena_')).length,
+      rackRifts: e.portals.filter((p: any) => String(p.portalTargetId).startsWith('field_')).length,
       glass: e.currentMap.entities.filter((x: any) => x.shardVariant === 'glass-tile').length,
       nebula: e.currentMap.entities.filter((x: any) => x.shardVariant === 'nebula-tile').length,
       centers: e.currentMap.nebulaClusterCenters.length,
     }));
 
     expect(r.stations).toBe(4);
-    expect(r.portals).toBe(4);
+    // Four arena rifts PLUS the six-portal test rack beside the home station
+    // (the star-field gauntlet's S12). Asserted as its parts rather than as
+    // the total, so this says WHICH rifts are expected instead of restating a
+    // number that changes whenever one is added.
+    expect(r.arenaRifts).toBe(4);
+    expect(r.rackRifts).toBe(6);
+    expect(r.portals).toBe(r.arenaRifts + r.rackRifts);
     expect(r.glass).toBeGreaterThan(50);
     expect(r.nebula).toBeGreaterThan(300);
     // The background puff layer is driven by these, so an empty list means
