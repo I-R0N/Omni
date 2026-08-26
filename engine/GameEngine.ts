@@ -1581,8 +1581,11 @@ export class GameEngine {
         PLAYER_ROLL_CONSTANTS;
       const rateScale = TUMBLE_RATE * (maxAngle / MAX_ANGLE);
       const ease = Math.min(1, omega * dt);
-      this._rollVel += (sigLat * rateScale - this._rollVel) * ease;
-      this._pitchVel += (sigLong * rateScale - this._pitchVel) * ease;
+      // NEGATED signal (user call): the tumble rolls the opposite way to
+      // the lean's tilt — the read of a ball rolling WITH its travel
+      // rather than tipping against it.
+      this._rollVel += (-sigLat * rateScale - this._rollVel) * ease;
+      this._pitchVel += (-sigLong * rateScale - this._pitchVel) * ease;
       const wrapPi = (a: number) =>
         a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a;
       let roll = wrapPi((this.player.visualRoll ?? 0) + this._rollVel * dt);

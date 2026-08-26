@@ -1475,7 +1475,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
                   'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): scales the tilt spring\'s natural frequency, so the hull tracks the hand looser or tighter with the same overshoot-and-wobble character. Ship weight also slows the spring (inertia).')}
                 {ctrlRow('Tilt mode', onCycleTiltMode, stats.tiltModeName ?? 'Lean',
-                  'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead, so the hull keeps rolling about the axis perpendicular to the thrust — end-over-end under throttle, a barrel roll under strafe — and freezes where it stops.')}
+                  'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead — the hull keeps rolling with its travel about the axis perpendicular to the thrust and freezes where it stops; the white aim marker hides and a fixed chevron reticle ahead of the hull carries the aim.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

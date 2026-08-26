@@ -541,9 +541,12 @@ test.describe('the tumble tilt mode — thrust drives continuous roll', () => {
       // Hold forward thrust: the pitch angle keeps ADVANCING — past any
       // lean-mode maximum — instead of converging on a target.
       let past = 0;
+      let early = 0;
       for (let i = 0; i < 180; i++) {
         e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
         past = Math.max(past, Math.abs(e.player.visualPitch ?? 0));
+        // Sampled before the first ±π wrap, where the sign is unambiguous.
+        if (i === 14) early = e.player.visualPitch as number;
       }
       const mid = e.player.visualPitch as number;
       for (let i = 0; i < 60; i++) e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
@@ -555,15 +558,37 @@ test.describe('the tumble tilt mode — thrust drives continuous roll', () => {
       for (let i = 0; i < 60; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
       const frozen2 = e.player.visualPitch as number;
       e.dbg.cycleTiltMode(); // Tumble → back to Lean
-      return { past, mid, later, frozen1, frozen2 };
+      return { past, early, mid, later, frozen1, frozen2 };
     });
 
     // 1.2 rad is past the Deep preset's 1.15 — unreachable in lean mode.
     expect(r.past, 'the angle sails past any lean maximum').toBeGreaterThan(1.2);
+    // The tumble rolls OPPOSITE to the lean's tilt (user call): forward
+    // thrust — a positive lean pitch — tumbles the angle negative.
+    expect(r.early, 'and it rolls the opposite way to the lean').toBeLessThan(0);
     // One more second of thrust moved it ~4 rad (mod 2π) — still rolling.
     expect(Math.abs(r.later - r.mid), 'and it keeps advancing under thrust')
       .toBeGreaterThan(0.5);
     expect(r.frozen1, 'cutting thrust freezes it mid-roll').toBeCloseTo(r.frozen2, 10);
+
+    // And LIVE: render some tumbling frames — the marker hides and the aim
+    // reticle draws in this mode, and the clean-console assertion is what
+    // covers that draw path.
+    await engine(page, e => {
+      e.dbg.cycleTiltMode(); // Lean → Tumble
+      e.input.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
+      e.input.keys.add('KeyD');
+    });
+    await waitForEngine(
+      page,
+      e => Math.abs(e.player.visualPitch ?? 0) > 0.2,
+      'a live tumble on screen',
+    );
+    await engine(page, e => {
+      e.input.keys.delete('KeyD');
+      e.dbg.cycleTiltMode(); // back to Lean
+    });
+    await waitForStats(page, s => s.tiltModeName === 'Lean', 'the mode restored');
 
     watch.assertClean();
   });

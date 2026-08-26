@@ -110,6 +110,7 @@ export function drawPlayerCube(
   ctx: CanvasRenderingContext2D,
   entity: GameEntity,
   diamond: boolean,
+  tumble: boolean,
 ) {
   const maxDim = Math.max(entity.size.x, entity.size.y);
   const h = maxDim * HALF_EDGE_FRAC;
@@ -145,7 +146,10 @@ export function drawPlayerCube(
     // Depth cue: vertex z is bounded by ±√3·h, so this maps near→bright
     // without clipping.
     const t = Math.max(0, Math.min(1, 0.5 + (_vz[a] + _vz[b]) / (4 * h)));
-    ctx.strokeStyle = edges.nose[e]
+    // In TUMBLE the aim marker HIDES (user call): a white face spinning
+    // with the hull reads as noise, not as an aim — the fixed reticle
+    // below carries the direction instead.
+    ctx.strokeStyle = !tumble && edges.nose[e]
       ? `rgba(255, 255, 255, ${(0.65 + 0.35 * t).toFixed(3)})`
       : `rgba(125, 211, 252, ${(0.30 + 0.55 * t).toFixed(3)})`;
     ctx.beginPath();
@@ -165,5 +169,20 @@ export function drawPlayerCube(
       ctx.lineTo(_vx[edges.b[e]], _vy[edges.b[e]]);
       ctx.stroke();
     }
+  }
+
+  // TUMBLE aim reticle (user call): a small white chevron parked ahead of
+  // the hull.  Drawn in the yaw-rotated local frame — so it tracks the
+  // AIM and ignores the tumbling pitch/roll entirely, which is exactly
+  // what makes it readable while the hull spins.
+  if (tumble) {
+    const rx0 = h * 1.45;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(rx0, -h * 0.3);
+    ctx.lineTo(rx0 + h * 0.34, 0);
+    ctx.lineTo(rx0, h * 0.3);
+    ctx.stroke();
   }
 }

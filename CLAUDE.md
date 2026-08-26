@@ -745,12 +745,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`MAX_TILT` caps the combined angle under π/2 so the cos-projection
   can never mirror the sprite).  TUMBLE (DBG Player ▸ "Tilt mode",
   Lean/Tumble — a TEST mode, user call) turns the clamped signal into
-  angular RATE (`TUMBLE_RATE`): the hull rolls CONTINUOUSLY about the
-  axis perpendicular to the thrust — end-over-end under throttle, a
-  barrel roll under strafe — and freezes where it stopped when thrust
-  drops; angles wrap ±π, the "Roll feel" presets scale the rate (Off
-  stops it), and the sprite squash clamps its tilt locally so tumble
-  angles cannot mirror it.  Purely presentational:
+  angular RATE (`TUMBLE_RATE`, NEGATED so the hull rolls WITH its
+  travel — user call): the hull rolls CONTINUOUSLY about the axis
+  perpendicular to the thrust — end-over-end under throttle, a barrel
+  roll under strafe — and freezes where it stopped when thrust drops;
+  angles wrap ±π, the "Roll feel" presets scale the rate (Off stops
+  it), and the sprite squash clamps its tilt locally so tumble angles
+  cannot mirror it.  While tumbling the wireframe hides its white aim
+  marker (a face spinning with the hull reads as noise) and a small
+  fixed CHEVRON RETICLE ahead of the hull carries the aim instead —
+  drawn in the yaw frame, so it ignores the tumble.  Purely presentational:
   RenderSystem combines both halves into ONE tilt toward the
   acceleration and foreshortens the hull ALONG that direction by
   cos(tilt), composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ)
