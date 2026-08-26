@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { COLORS, ASSETS, isPlayerHullCube, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -13,6 +13,7 @@ import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01, Crack
          crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, shiftX,
          shiftY, roundRectPath } from './render/drawUtils';
 import { drawEnemyShape } from './render/enemyShapes';
+import { drawPlayerCube } from './render/playerCube';
 import { drawDropShape } from './render/dropShapes';
 import { drawProjectileShape } from './render/projectileShapes';
 import { drawNebulaTileCached, drawNebulaEntity } from './render/nebulaTiles';
@@ -1458,8 +1459,16 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // ctx.save / translate / rotate / restore (4 canvas-state ops) with
       // a single matrix write — ~2-3× cheaper per slow-path entity.
       // Mirrors BackgroundManager.ts:370-374 for nebula puffs.
+      // Cube hull (render/playerCube.ts): the player draws as a 3D wire
+      // cube, which is its OWN art — nose = local +x, so no art-alignment
+      // offset and no 2D squash (the cube shows tilt as real rotation).
+      // The canvas carries only R(yaw); a Z-rotation commutes with the
+      // orthographic projection, so pitch/roll happen inside the draw.
+      const cubeHull = entity.type === EntityType.PLAYER && isPlayerHullCube();
       const rotation = entity.rotation + (
-        entity.isRival
+        cubeHull
+          ? 0
+          : entity.isRival
           ? SPRITE_CONSTANTS.RIVAL_ROTATION_OFFSET   // sprite art points up-left
           : entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
@@ -1485,7 +1494,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // local y; pure roll reduces this to the scale(1, cos roll) it
       // shipped with).  One entity per frame, so the extra trig is free;
       // level flight (both components snapped to 0) keeps the plain path.
-      if (entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
+      // (Sprite mode only — the cube shows tilt as 3D rotation instead.)
+      if (!cubeHull && entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
           const r = entity.visualRoll ?? 0;
           const p = entity.visualPitch ?? 0;
           const tilt = Math.sqrt(r * r + p * p);
@@ -1546,8 +1556,16 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
       let drawn = false;
 
+      // --- WIREFRAME-CUBE HULL --- (render/playerCube.ts)
+      // The player's default hull (user call).  Takes the yaw-rotated
+      // local frame set above and does the pitch/roll 3D math itself.
+      if (cubeHull) {
+          drawPlayerCube(ctx, entity);
+          drawn = true;
+      }
+
       // --- SPRITE RENDERING ---
-      if (entity.sprite) {
+      if (!drawn && entity.sprite) {
           const img = this.getImage(entity.sprite);
 
           if (img.complete && img.naturalWidth > 0) {
@@ -1647,16 +1665,22 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
           }
       }
 
-      // A tilting player leaves the squashed matrix behind before the ring
-      // draws below: the shield ring is the PHYSICAL collision radius and
-      // the charge ring is HUD — neither tilts with the hull, and their
-      // `rotate(-rot)` bookkeeping assumes the plain rotation matrix.
-      if (entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
+      // A tilting or cube-hulled player leaves its own matrix behind before
+      // the ring draws below: the shield ring is the PHYSICAL collision
+      // radius and the charge ring is HUD — neither tilts with the hull,
+      // and their `rotate(-rot)` bookkeeping assumes the plain rotation
+      // matrix WITH the art offset (which the cube frame omits, so it is
+      // recomputed here rather than reusing cosR/sinR).
+      if (entity.type === EntityType.PLAYER
+          && (cubeHull || entity.visualRoll || entity.visualPitch)) {
+          const ringRot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          const cRr = Math.cos(ringRot);
+          const sRr = Math.sin(ringRot);
           ctx.setTransform(
-            camA * cosR + camC * sinR,
-            camB * cosR + camD * sinR,
-            -camA * sinR + camC * cosR,
-            -camB * sinR + camD * cosR,
+            camA * cRr + camC * sRr,
+            camB * cRr + camD * sRr,
+            -camA * sRr + camC * cRr,
+            -camB * sRr + camD * cRr,
             camA * rx + camC * ry + camE,
             camB * rx + camD * ry + camF,
           );

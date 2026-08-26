@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  230 tests.  All run at
+                          anti-flake rules).  231 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -747,7 +747,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
   from the pause debug menu; `tickPlayerRoll` reads the active angle, so
   Off levels out through the same easing rather than a separate branch.
-  `tests/roll.spec.ts` pins signal + easing + the cycle.
+  THE PLAYER'S DEFAULT HULL IS A WIREFRAME CUBE (user call,
+  `PLAYER_HULL_CYCLE` / `isPlayerHullCube` — DBG Player ▸ "Hull"):
+  `render/playerCube.ts` draws a 3D wire cube rotating FOR REAL in the
+  three axes the player rotates in — yaw stays on the canvas transform
+  (a Z-rotation commutes with the projection), pitch/roll are real
+  rotations inside the draw, and a MILD perspective divide keeps a level
+  cube reading as a cube (orthographic, front and back faces coincide
+  into a flat square).  The NOSE face's edges draw last in white so the
+  aim survives the cube's symmetry; depth is cued by edge alpha.  The
+  'Ship' step of the cycle restores the sprite + the cos-tilt squash as
+  the A/B — the squash path is sprite-mode only.  The shield/charge
+  rings restore the plain rotation matrix (art offset included, which
+  the cube frame omits) before drawing in BOTH modes.
+  `tests/roll.spec.ts` pins signal + easing + the cycle + the hull
+  default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy

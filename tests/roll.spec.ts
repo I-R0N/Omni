@@ -311,6 +311,40 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
   });
 });
 
+test.describe('the wireframe-cube hull', () => {
+  test('ships as the default, and the DBG toggle restores the sprite', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The cube is the SHIPPED default (user call): the player draws as a
+    // 3D wire cube rotating in yaw + the tilt pitch/roll, with the sprite
+    // one DBG click away as the A/B.  Pinned here because a default is
+    // exactly what drifts unwatched.
+    await waitForStats(page, s => s.hullModeName === 'Cube', 'the cube default');
+
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Ship', 'the sprite A/B');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Cube', 'back to the cube');
+
+    // Drive a bank and a throttle pulse while the cube renders live — the
+    // clean-console assertion is what covers the 3D projection and the
+    // ring-restore transform in the draw path.
+    await engine(page, e => {
+      e.input.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
+      e.input.keys.add('KeyS');
+    });
+    await waitForEngine(
+      page,
+      e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
+      'a live bank on the cube',
+    );
+    await engine(page, e => e.input.keys.delete('KeyS'));
+
+    watch.assertClean();
+  });
+});
+
 test.describe('the bank happens in real flight', () => {
   test('a held strafe key banks the ship and releasing it levels off', async ({ page }) => {
     const watch = await boot(page);

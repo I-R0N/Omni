@@ -3033,6 +3033,27 @@ export function cyclePlayerRoll(): number {
   return activePlayerRollIndex;
 }
 
+// PLAYER HULL — what draws at the player's position (user call): a
+// WIREFRAME CUBE in place of the ship sprite, rotating for real in the
+// three axes the player already rotates in — yaw (the facing) plus the
+// directional-tilt pitch and roll.  Where the sprite could only show tilt
+// as a cos foreshortening, the cube shows it as 3D rotation, pitch SIGN
+// included.  'Cube' is the shipped default; 'Ship' (the sprite + the
+// cos-tilt squash) stays one DBG click away as the A/B
+// (Player ▸ "Hull").
+export const PLAYER_HULL_CYCLE: ReadonlyArray<string> = ['Cube', 'Ship'] as const;
+let activePlayerHullIndex = 0; // Cube — the shipped default
+export function isPlayerHullCube(): boolean {
+  return activePlayerHullIndex === 0;
+}
+export function getActivePlayerHullName(): string {
+  return PLAYER_HULL_CYCLE[activePlayerHullIndex];
+}
+export function cyclePlayerHull(): number {
+  activePlayerHullIndex = (activePlayerHullIndex + 1) % PLAYER_HULL_CYCLE.length;
+  return activePlayerHullIndex;
+}
+
 export const SHOOTING_STAR_CONSTANTS = {
   MIN_TIMER: 300,
   MAX_TIMER: 700,

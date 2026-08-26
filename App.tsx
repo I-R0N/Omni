@@ -497,6 +497,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePlayerRoll();
   };
 
+  const handleCyclePlayerHull = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePlayerHull();
+  };
+
   const handleCycleEnemyScale = () => {
       if (engineRef.current) engineRef.current.dbg.cycleEnemyScale();
   };
@@ -798,6 +802,7 @@ const App: React.FC = () => {
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCyclePlayerRoll={handleCyclePlayerRoll}
+        onCyclePlayerHull={handleCyclePlayerHull}
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSimRate={handleCycleSimRate}
         onCycleHudRate={handleCycleHudRate}

@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -704,6 +704,13 @@ export class DebugControls {
    *  roll reads can be A/B'd in flight. */
   cyclePlayerRoll() {
     cyclePlayerRoll();
+  }
+
+  /** Cycle the player HULL (PLAYER_HULL_CYCLE): the wireframe cube (the
+   *  shipped default — real 3D rotation in yaw/pitch/roll) vs the ship
+   *  sprite + cos-tilt squash, kept as the A/B. */
+  cyclePlayerHull() {
+    cyclePlayerHull();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales

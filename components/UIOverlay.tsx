@@ -136,6 +136,7 @@ interface UIOverlayProps {
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCyclePlayerRoll?: () => void;
+  onCyclePlayerHull?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -431,6 +432,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCyclePlayerRoll,
+  onCyclePlayerHull,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -1464,6 +1466,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap. Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it).')}
                 {ctrlRow('Roll feel', onCyclePlayerRoll, stats.rollFeelName ?? 'Default',
                   'Directional-tilt depth preset (Off / Subtle / Default / Deep) stepping how far the hull pitches and rolls into a carved turn, lateral thrust or a throttle change — purely visual (physics, collision and aim never read it). Off levels out through the normal easing rather than snapping flat.')}
+                {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Cube',
+                  'What draws at the player\'s position. Cube (default): a wireframe cube rotating for real in yaw + the directional-tilt pitch/roll. Ship: the sprite with the cos-tilt squash, kept as the A/B.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

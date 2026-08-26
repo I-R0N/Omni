@@ -1860,6 +1860,8 @@ export interface EngineStats {
   snitchSpeedName?: string;
   // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
   rollFeelName?: string;
+  // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default — or "Ship").
+  hullModeName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */
