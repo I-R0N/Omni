@@ -14,7 +14,10 @@
  *  so a hard turn stays banked through its slide.  The PITCH half
  *  (longitudinal) is nose-line thrust directly (the washout was removed —
  *  user call): a held throttle holds the lean, cutting it settles level,
- *  reverse thrust leans the other way.  Both halves are purely
+ *  reverse thrust leans the other way.  Easing is a SECOND-ORDER SPRING
+ *  whose frequency divides by the square root of the ship's mass ratio,
+ *  and a TUMBLE test mode turns the signal into continuous roll RATE.
+ *  Both halves are purely
  *  presentational — `visualRoll` + `visualPitch` are eased angles the
  *  renderer combines into ONE tilt toward the acceleration and projects
  *  as a cos(tilt) foreshortening along it — so what is pinned here is the
@@ -22,11 +25,14 @@
  *
  *   1. DIRECTIONALITY — lateral thrust banks, nose-line thrust does not,
  *      and a left strafe and a right strafe are distinct (signed) banks.
- *   2. CONVERGENCE — a held strafe approaches the authored MAX_ANGLE and
- *      never overshoots it; releasing settles to EXACTLY level (the snap
+ *   2. CONVERGENCE — a held strafe SETTLES on the authored MAX_ANGLE
+ *      (the transient overshoots — that is claim 3's point — but the
+ *      settle lands on it); releasing settles to EXACTLY level (the snap
  *      that keeps the renderer on its plain-rotation path).
- *   3. ASYMMETRY — rolling INTO a bank is faster than settling out, which
- *      is the tuning that tracks the hand without strobing on tap-input.
+ *   3. SPRING — the first tick carries the ω²·A·dt² signature of a
+ *      second-order spring, and a step OVERSHOOTS and comes back — the
+ *      wobble that reads as inertia.  Ship WEIGHT slows the spring
+ *      (ω ∝ 1/√mass), pinned as an exact first-tick ratio.
  *   4. TURN TERM — carving a turn under thrust banks even with thrust
  *      locked along the nose (the aim-locked geometry), a coasting swing
  *      stays level, and the throttle gate scales rather than switches.
@@ -38,6 +44,9 @@
  *   5b. PHYSICS TERMS — a standing pivot banks at the floor while a
  *      full-speed carve banks fully (centripetal), and a powered drift
  *      banks into the slide while a coasting one stays level (slip).
+ *   5c. TUMBLE — the DBG tilt mode where thrust drives roll RATE: the
+ *      angle sails past any lean maximum and keeps advancing while
+ *      thrust holds, and freezes mid-roll when it drops.
  *   6. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
@@ -52,8 +61,8 @@ import { boot, engine, startRun, waitForEngine, waitForStats } from './helpers';
 
 /** PLAYER_ROLL_CONSTANTS, hard-coded rather than imported (harness rule 7). */
 const MAX_ANGLE = 0.85;
-const RESPONSE_RATE = 9;
-const RETURN_RATE = 4.5;
+const SPRING_OMEGA = 12;
+const SPRING_ZETA = 0.55;
 
 const DT = 1 / 60;
 
@@ -65,20 +74,24 @@ const DT = 1 / 60;
  *  tick. */
 function driveRoll(
   page: any,
-  o: { facing: number; mx: number; my: number; ticks: number; start?: number },
+  o: { facing: number; mx: number; my: number; ticks: number; start?: number; peak?: boolean },
 ) {
   return engine(page, (e, a: typeof o) => {
     e.player.rotation = a.facing;
     e.player.visualRoll = a.start ?? 0;
     e._rollPrevFacing = null;
     e._rollYawRate = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
     e.player.visualPitch = 0;
     e.player.velocity.x = 0;
     e.player.velocity.y = 0;
+    let pk = 0;
     for (let i = 0; i < a.ticks; i++) {
       e.tickPlayerRoll(1 / 60, { x: a.mx, y: a.my });
+      pk = Math.max(pk, Math.abs(e.player.visualRoll ?? 0));
     }
-    return e.player.visualRoll as number;
+    return (a.peak ? pk : e.player.visualRoll) as number;
   }, o);
 }
 
@@ -98,6 +111,8 @@ function driveTurn(
     e.player.visualRoll = 0;
     e._rollPrevFacing = null;
     e._rollYawRate = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
     e.player.visualPitch = 0;
     let peak = 0;
     for (let i = 0; i < a.ticks; i++) {
@@ -127,7 +142,7 @@ test.describe('the roll signal is the lateral thrust component', () => {
     const other = await driveRoll(page, { facing: 0, mx: 0, my: -1, ticks: 240 });
 
     expect(Math.abs(strafe), 'a held strafe reaches a deep bank').toBeGreaterThan(MAX_ANGLE * 0.9);
-    expect(Math.abs(strafe), 'and never overshoots the authored maximum').toBeLessThanOrEqual(MAX_ANGLE + 1e-9);
+    expect(Math.abs(strafe), 'and the settle lands ON the maximum').toBeLessThanOrEqual(MAX_ANGLE + 1e-6);
     expect(level, 'thrust along the nose never banks').toBe(0);
     // Signed: the two strafe directions are distinct banks, not one squash.
     expect(Math.sign(other)).toBe(-Math.sign(strafe));
@@ -159,21 +174,21 @@ test.describe('the roll signal is the lateral thrust component', () => {
     watch.assertClean();
   });
 
-  test('rolling into a bank is faster than settling out', async ({ page }) => {
+  test('the tilt is a second-order spring: it overshoots and settles', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    // One tick each way from the two ends of the swing.  The first-tick
-    // deltas are the rates themselves (MAX_ANGLE * rate * dt), so this is
-    // the asymmetry claim measured where it is largest.
-    const into = await driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 1 });
-    const outOf = await driveRoll(page, { facing: 0, mx: 0, my: 0, ticks: 1, start: MAX_ANGLE });
+    // First tick from rest: semi-implicit Euler picks up v = ω²·A·dt and
+    // moves the angle by v·dt — the ω²·A·dt² signature of a SPRING (a
+    // first-order lerp's first step is rate·A·dt, linear in the rate).
+    const first = await driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 1 });
+    expect(Math.abs(first)).toBeCloseTo(SPRING_OMEGA ** 2 * MAX_ANGLE * DT * DT, 6);
 
-    const deltaIn = Math.abs(into);
-    const deltaOut = MAX_ANGLE - outOf;
-    expect(deltaIn).toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * DT, 5);
-    expect(deltaOut).toBeCloseTo(MAX_ANGLE * RETURN_RATE * DT, 5);
-    expect(deltaIn, 'attack outruns release').toBeGreaterThan(deltaOut);
+    // The transient OVERSHOOTS the target and comes back — ζ < 1 by
+    // design, because the wobble is what reads as a hull with inertia.
+    const peak = await driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 240, peak: true });
+    expect(peak, 'a step overshoots the target').toBeGreaterThan(MAX_ANGLE * 1.03);
+    expect(peak, 'and stays bracketed').toBeLessThan(MAX_ANGLE * 1.35);
 
     watch.assertClean();
   });
@@ -229,6 +244,12 @@ test.describe('the slip term — the drift of a hard turn holds the bank', () =>
         e.player.visualPitch = 0;
         e._rollPrevFacing = null;
         e._rollYawRate = 0;
+        e._rollVel = 0;
+        e._pitchVel = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
         for (let i = 0; i < 240; i++) {
           e.player.velocity.x = 0;
           e.player.velocity.y = a.vf * e.lastMaxSpeed;
@@ -267,6 +288,10 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
       e.player.visualPitch = 0;
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
       // Hold the throttle straight along the nose: with the washout gone
@@ -305,10 +330,14 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
       e.player.visualPitch = 0;
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
       let roll = 0, pitch = 0, maxTilt = 0;
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 300; i++) {
         e.tickPlayerRoll(1 / 60, { x: Math.SQRT1_2, y: Math.SQRT1_2 });
         const rr = Math.abs(e.player.visualRoll ?? 0);
         const pp = Math.abs(e.player.visualPitch ?? 0);
@@ -316,16 +345,21 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
         pitch = Math.max(pitch, pp);
         maxTilt = Math.max(maxTilt, Math.sqrt(rr * rr + pp * pp));
       }
-      return { roll, pitch, maxTilt };
+      const fr = Math.abs(e.player.visualRoll ?? 0);
+      const fp = Math.abs(e.player.visualPitch ?? 0);
+      return { roll, pitch, maxTilt, finalTilt: Math.sqrt(fr * fr + fp * fp) };
     });
 
     expect(r.roll, 'the lateral half fires').toBeGreaterThan(0.1);
     expect(r.pitch, 'the longitudinal half fires').toBeGreaterThan(0.1);
-    // The SIGNAL VECTOR is magnitude-clamped, so the combined tilt stays
+    // The SIGNAL VECTOR is magnitude-clamped, so the SETTLED tilt stays
     // inside the authored maximum instead of reaching √2 of it on a
-    // diagonal (small tolerance: the two components ease independently).
-    expect(r.maxTilt, 'the combined tilt respects the maximum')
-      .toBeLessThanOrEqual(MAX_ANGLE + 0.02);
+    // diagonal; the spring's transient may overshoot, bracketed by the
+    // MAX_TILT mirror ceiling (1.45).
+    expect(r.finalTilt, 'the settled tilt respects the maximum')
+      .toBeLessThanOrEqual(MAX_ANGLE + 1e-6);
+    expect(r.maxTilt, 'and the transient never crosses the mirror ceiling')
+      .toBeLessThanOrEqual(1.45 + 1e-9);
 
     watch.assertClean();
   });
@@ -345,6 +379,10 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e.player.visualRoll = 0;
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
       e.player.visualPitch = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
@@ -359,6 +397,10 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e.player.visualRoll = 0.5; // mid-bank when the preset flips
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+    e._rollVel = 0;
+    e._pitchVel = 0;
       e.player.visualPitch = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
@@ -423,7 +465,7 @@ test.describe('the wireframe-cube hull', () => {
 });
 
 test.describe('the rotation-damping cycle', () => {
-  test('one multiplier scales both ease rates, and the ratio survives', async ({ page }) => {
+  test('one multiplier scales the spring frequency, keeping its character', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -433,6 +475,9 @@ test.describe('the rotation-damping cycle', () => {
 
     // Cycle order is Floaty / Default / Stiff / Snappy, shipped at
     // Default — so one step lands on Stiff, and two more wrap to Floaty.
+    // The multiplier scales the spring's ω, so the first-tick step
+    // (ω²·A·dt²) scales with the SQUARE of the preset.
+    const base = SPRING_OMEGA ** 2 * MAX_ANGLE * DT * DT;
     const atDefault = Math.abs(await oneTick());
     await engine(page, e => e.dbg.cycleRollDamping()); // Default → Stiff
     const atStiff = Math.abs(await oneTick());
@@ -440,17 +485,85 @@ test.describe('the rotation-damping cycle', () => {
     await engine(page, e => e.dbg.cycleRollDamping()); // Snappy → Floaty
     const atFloaty = Math.abs(await oneTick());
 
-    expect(atDefault).toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * DT, 5);
-    expect(atStiff, 'Stiff doubles the attack').toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * 2 * DT, 5);
-    expect(atFloaty, 'Floaty halves it').toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * 0.5 * DT, 5);
+    expect(atDefault).toBeCloseTo(base, 6);
+    expect(atStiff, 'Stiff doubles ω, quadrupling the first step').toBeCloseTo(base * 4, 6);
+    expect(atFloaty, 'Floaty halves ω, quartering it').toBeCloseTo(base * 0.25, 6);
 
-    // The release scales by the SAME multiplier — the attack/release
-    // ratio is the tuned feel and every preset must keep it.
+    // The release moves by the SAME spring — one ω, one ζ — so the
+    // wobble character survives every preset.
     const outFloaty = await driveRoll(page, { facing: 0, mx: 0, my: 0, ticks: 1, start: MAX_ANGLE });
-    expect(MAX_ANGLE - outFloaty, 'Floaty release').toBeCloseTo(MAX_ANGLE * RETURN_RATE * 0.5 * DT, 5);
+    expect(MAX_ANGLE - outFloaty, 'Floaty release').toBeCloseTo(base * 0.25, 6);
 
     await engine(page, e => e.dbg.cycleRollDamping()); // Floaty → Default
     await waitForStats(page, s => s.rollDampName === 'Default', 'the name reaches stats');
+
+    watch.assertClean();
+  });
+});
+
+test.describe('tilt inertia rides ship weight', () => {
+  test('a heavier ship tilts more ponderously — an exact first-tick ratio', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // ω divides by √(mass ratio), so the first-tick step (∝ ω²) divides
+    // by the ratio itself.  The lean start's mass IS the reference mass,
+    // so ×9 gives exactly a ninth of the response — the same physics that
+    // makes a laden hull shrug off shoves makes it tilt slowly.
+    const lean = await driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 1 });
+    await engine(page, e => { e._testSavedMass = e.player.mass; e.player.mass *= 9; });
+    const laden = await driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 1 });
+    await engine(page, e => { e.player.mass = e._testSavedMass; });
+
+    expect(Math.abs(laden), 'nine times the mass, a ninth the response')
+      .toBeCloseTo(Math.abs(lean) / 9, 6);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the tumble tilt mode — thrust drives continuous roll', () => {
+  test('held thrust keeps the hull rolling; cutting it freezes mid-roll', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, e => {
+      e.dbg.cycleTiltMode(); // Lean → Tumble
+      e.player.rotation = 0;
+      e.player.visualRoll = 0;
+      e.player.visualPitch = 0;
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      // Hold forward thrust: the pitch angle keeps ADVANCING — past any
+      // lean-mode maximum — instead of converging on a target.
+      let past = 0;
+      for (let i = 0; i < 180; i++) {
+        e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
+        past = Math.max(past, Math.abs(e.player.visualPitch ?? 0));
+      }
+      const mid = e.player.visualPitch as number;
+      for (let i = 0; i < 60; i++) e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
+      const later = e.player.visualPitch as number;
+      // Cut thrust: the roll rate decays and the hull FREEZES where it
+      // stopped, like a rolled object — no spring pulling it level.
+      for (let i = 0; i < 120; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+      const frozen1 = e.player.visualPitch as number;
+      for (let i = 0; i < 60; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+      const frozen2 = e.player.visualPitch as number;
+      e.dbg.cycleTiltMode(); // Tumble → back to Lean
+      return { past, mid, later, frozen1, frozen2 };
+    });
+
+    // 1.2 rad is past the Deep preset's 1.15 — unreachable in lean mode.
+    expect(r.past, 'the angle sails past any lean maximum').toBeGreaterThan(1.2);
+    // One more second of thrust moved it ~4 rad (mod 2π) — still rolling.
+    expect(Math.abs(r.later - r.mid), 'and it keeps advancing under thrust')
+      .toBeGreaterThan(0.5);
+    expect(r.frozen1, 'cutting thrust freezes it mid-roll').toBeCloseTo(r.frozen2, 10);
 
     watch.assertClean();
   });

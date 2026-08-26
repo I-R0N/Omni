@@ -1866,6 +1866,9 @@ export interface EngineStats {
   // DBG rotation-damping preset name (PLAYER_ROLL_DAMPING_CYCLE, e.g.
   // "Default").
   rollDampName?: string;
+  // DBG tilt-mode name (TILT_MODE_CYCLE: "Lean" — the default — or
+  // "Tumble", the continuous-roll test mode).
+  tiltModeName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */

@@ -1500,7 +1500,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       if (!cubeHull && entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
           const r = entity.visualRoll ?? 0;
           const p = entity.visualPitch ?? 0;
-          const tilt = Math.sqrt(r * r + p * p);
+          // Clamped locally under π/2: in TUMBLE tilt mode the angles are
+          // unbounded (they wrap at ±π), and past π/2 the cos would
+          // mirror the sprite — the wireframe hulls show the full
+          // rotation; the sprite shows the nearest legal lean.
+          const tilt = Math.min(1.45, Math.sqrt(r * r + p * p));
           const c = Math.cos(tilt);
           const phi = Math.atan2(r, p);
           const cp = Math.cos(phi);

@@ -2978,8 +2978,27 @@ export const PLAYER_TRAIL_CONSTANTS = {
 // tilt angle, not a scale factor.
 export const PLAYER_ROLL_CONSTANTS = {
   MAX_ANGLE: 0.85,     // Radians (~49°) at full signal — cos ≈ 0.66 squash
-  RESPONSE_RATE: 9,    // Per-second ease INTO a deeper bank (snappy on input)
-  RETURN_RATE: 4.5,    // Per-second ease back toward level (gentler settle)
+  // SECOND-ORDER SPRING easing (user call, replacing the first-order
+  // attack/release pair): each tilt component carries an angular VELOCITY
+  // and springs toward its target — semi-implicit Euler, so it is stable
+  // at every damping step.  Underdamped on purpose: a step overshoots
+  // ~13% and settles with one visible wobble, which is what reads as a
+  // hull with INERTIA rather than a value being lerped.
+  SPRING_OMEGA: 12,    // Natural frequency, rad/s — the response speed
+  SPRING_ZETA: 0.55,   // Damping ratio; <1 = overshoot + wobble by design
+  // TILT INERTIA rides SHIP WEIGHT (user call): the spring frequency
+  // divides by √(player.mass / PLAYER_MASS) — rotational inertia grows
+  // with mass, ω ∝ 1/√I — so a full outfit (~3× the lean mass) tilts
+  // ~1.7× more ponderously with the same wobble character.
+  // TUMBLE mode (DBG Player ▸ "Tilt mode" — a TEST mode, user call): the
+  // clamped signal vector drives angular RATE instead of angle, so the
+  // hull rolls CONTINUOUSLY about the axis perpendicular to the thrust —
+  // end-over-end under forward throttle, a barrel roll under strafe —
+  // and freezes where it stopped when thrust drops, like a rolled
+  // object.  The rate reuses the tilt-velocity state and eases at the
+  // spring frequency; the "Roll feel" angle presets scale the rate
+  // (Off stops the tumble), and angles wrap to ±π.
+  TUMBLE_RATE: 4,      // rad/s of continuous roll at full signal
   // Turn term: seconds-per-radian gain — full bank at a sustained nose
   // swing of 1/YAW_GAIN rad/s (0.25 → 4 rad/s, a deliberate carve).  A
   // faster flick saturates to a full-bank pulse that settles at
@@ -3012,10 +3031,29 @@ export const PLAYER_ROLL_CONSTANTS = {
   // eased pair is scaled back under this whatever the presets get up to
   // (reachable only transiently, e.g. cycling Deep mid-bank).
   MAX_TILT: 1.45,
-  // Below this angle with no signal a tilt component snaps to 0, so the
-  // renderer's straight-flight path stays the plain rotation matrix.
+  // Below this angle — with no signal and the spring velocity below
+  // REST_VEL_EPSILON — a tilt component snaps to 0, so the renderer's
+  // straight-flight path stays the plain rotation matrix.
   REST_EPSILON: 0.01,
+  REST_VEL_EPSILON: 0.06,
 };
+
+// DBG tilt-mode cycle (Player ▸ "Tilt mode"): 'Lean' (the default — tilt
+// toward the acceleration and settle back) vs 'Tumble' (the continuous-
+// roll TEST mode described above).  Its own cycle rather than a feel
+// preset because it changes what the tilt angles MEAN.
+export const TILT_MODE_CYCLE: ReadonlyArray<string> = ['Lean', 'Tumble'] as const;
+let activeTiltModeIndex = 0; // Lean — the shipped default
+export function getActiveTiltMode(): 'lean' | 'tumble' {
+  return activeTiltModeIndex === 0 ? 'lean' : 'tumble';
+}
+export function getActiveTiltModeName(): string {
+  return TILT_MODE_CYCLE[activeTiltModeIndex];
+}
+export function cycleTiltMode(): number {
+  activeTiltModeIndex = (activeTiltModeIndex + 1) % TILT_MODE_CYCLE.length;
+  return activeTiltModeIndex;
+}
 
 // DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
 // A/B-ing how deep the bank reads, cycled live from the pause debug menu.
@@ -3071,10 +3109,10 @@ export function cyclePlayerHull(): number {
 }
 
 // DBG rotation-damping cycle (Player ▸ "Roll damp"): one multiplier over
-// BOTH tilt ease rates (RESPONSE_RATE and RETURN_RATE together, so the
-// attack/release ratio — the tuned feel — survives every step).  Lower =
-// floatier, the hull swinging behind the hand; higher = stiffer, tracking
-// it near-instantly.
+// the tilt spring's natural frequency (SPRING_OMEGA — and the tumble
+// mode's rate ease).  The damping RATIO is untouched, so every step keeps
+// the same overshoot-and-wobble character: lower = floatier, the hull
+// swinging behind the hand; higher = stiffer, tracking it near-instantly.
 export const PLAYER_ROLL_DAMPING_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
   { name: 'Floaty', mult: 0.5 },
   { name: 'Default', mult: 1 },

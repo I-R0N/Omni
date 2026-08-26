@@ -505,6 +505,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRollDamping();
   };
 
+  const handleCycleTiltMode = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleTiltMode();
+  };
+
   const handleCycleEnemyScale = () => {
       if (engineRef.current) engineRef.current.dbg.cycleEnemyScale();
   };
@@ -808,6 +812,7 @@ const App: React.FC = () => {
         onCyclePlayerRoll={handleCyclePlayerRoll}
         onCyclePlayerHull={handleCyclePlayerHull}
         onCycleRollDamping={handleCycleRollDamping}
+        onCycleTiltMode={handleCycleTiltMode}
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSimRate={handleCycleSimRate}
         onCycleHudRate={handleCycleHudRate}

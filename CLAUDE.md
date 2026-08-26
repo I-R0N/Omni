@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  233 tests.  All run at
+                          anti-flake rules).  235 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -735,9 +735,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the sprite squash cannot).  Full signal is a full tilt (`MAX_ANGLE`; full
   turn rate = 1/`YAW_GAIN` rad/s), the signal VECTOR is
   magnitude-clamped so a diagonal cannot out-tilt the maximum, and no
-  signal settles back to a literal 0 (asymmetric rates: attack outruns
-  release; `MAX_TILT` caps the combined angle under π/2 so the
-  cos-projection can never mirror the sprite).  Purely presentational:
+  signal settles back to a literal 0.  EASING IS A SECOND-ORDER SPRING
+  (user call): each component carries an angular velocity
+  (semi-implicit Euler, `SPRING_OMEGA`/`SPRING_ZETA`), underdamped on
+  purpose so a step overshoots ~13% and settles with one wobble — the
+  read of a hull with inertia — and the frequency divides by
+  √(player.mass / PLAYER_MASS), so a full outfit (~3× the lean mass)
+  tilts ~1.7× more ponderously with the same wobble character
+  (`MAX_TILT` caps the combined angle under π/2 so the cos-projection
+  can never mirror the sprite).  TUMBLE (DBG Player ▸ "Tilt mode",
+  Lean/Tumble — a TEST mode, user call) turns the clamped signal into
+  angular RATE (`TUMBLE_RATE`): the hull rolls CONTINUOUSLY about the
+  axis perpendicular to the thrust — end-over-end under throttle, a
+  barrel roll under strafe — and freezes where it stopped when thrust
+  drops; angles wrap ±π, the "Roll feel" presets scale the rate (Off
+  stops it), and the sprite squash clamps its tilt locally so tumble
+  angles cannot mirror it.  Purely presentational:
   RenderSystem combines both halves into ONE tilt toward the
   acceleration and foreshortens the hull ALONG that direction by
   cos(tilt), composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ)
@@ -773,8 +786,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (art offset included, which the wireframe frame omits) before
   drawing in EVERY mode.  `PLAYER_ROLL_DAMPING_CYCLE` (DBG Player ▸
   "Roll damp": Floaty ½× / Default / Stiff 2× / Snappy 4×) is one
-  multiplier over BOTH tilt ease rates, so the attack/release ratio —
-  the tuned feel — survives every step.
+  multiplier over the spring's natural frequency, so every step keeps
+  the same overshoot-and-wobble character.
   `tests/roll.spec.ts` pins signal + easing + all three cycles + the
   hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)

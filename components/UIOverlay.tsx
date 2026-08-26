@@ -138,6 +138,7 @@ interface UIOverlayProps {
   onCyclePlayerRoll?: () => void;
   onCyclePlayerHull?: () => void;
   onCycleRollDamping?: () => void;
+  onCycleTiltMode?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -435,6 +436,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlayerRoll,
   onCyclePlayerHull,
   onCycleRollDamping,
+  onCycleTiltMode,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -1471,7 +1473,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Cube',
                   'What draws at the player\'s position. Cube (default): a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner (corner up at the viewer, adjacent corner forward) for a gem-cut hull. Ship: the sprite with the cos-tilt squash, kept as the A/B.')}
                 {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
-                  'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): one multiplier over both tilt ease rates, so the hull tracks the hand looser or tighter without changing the attack/release ratio.')}
+                  'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): scales the tilt spring\'s natural frequency, so the hull tracks the hand looser or tighter with the same overshoot-and-wobble character. Ship weight also slows the spring (inertia).')}
+                {ctrlRow('Tilt mode', onCycleTiltMode, stats.tiltModeName ?? 'Lean',
+                  'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead, so the hull keeps rolling about the axis perpendicular to the thrust — end-over-end under throttle, a barrel roll under strafe — and freezes where it stops.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PLAYER_ROLL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PLAYER_ROLL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -1045,6 +1045,7 @@ export class GameEngine {
       rollFeelName: getActivePlayerRollName(),
       hullModeName: getActivePlayerHullName(),
       rollDampName: getActiveRollDampingName(),
+      tiltModeName: getActiveTiltModeName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
       hudRateName: getActiveHudRateName(),
@@ -1471,23 +1472,49 @@ export class GameEngine {
    *  it settles level.  Components are signed so reversals swing
    *  through level instead of teleporting across it, and the signal VECTOR
    *  is magnitude-clamped so a diagonal cannot out-tilt the authored
-   *  maximum.  Asymmetric rates: tilting IN tracks the hand, settling back
-   *  is gentler, which also keeps twitchy tap-input from strobing the
-   *  hull. */
+   *  maximum.  Easing is a SECOND-ORDER SPRING (user call): each component
+   *  carries an angular velocity and overshoots-and-settles rather than
+   *  lerping, its frequency divided by √(mass ratio) so a heavy outfit
+   *  tilts ponderously.  TUMBLE mode (DBG "Tilt mode") repurposes the same
+   *  velocity state as a continuous roll rate — see the constants note. */
   private _rollPrevFacing: number | null = null;
   private _rollYawRate = 0;
-  /** Ease one tilt component toward its target with the shared attack /
-   *  release asymmetry and the rest snap.  The DBG damping cycle
-   *  (Player ▸ "Roll damp") scales BOTH rates together, so the tuned
-   *  attack/release ratio survives every step. */
-  private easeTilt(cur: number, target: number, dt: number): number {
-    const { RESPONSE_RATE, RETURN_RATE, REST_EPSILON } = PLAYER_ROLL_CONSTANTS;
-    const damp = getActiveRollDampingMult();
-    const rate = (Math.abs(target) > Math.abs(cur) ? RESPONSE_RATE : RETURN_RATE) * damp;
-    let next = cur + (target - cur) * Math.min(1, rate * dt);
-    // Snap to true level once the settle is invisible, so the renderer's
-    // straight-flight path stays the plain rotation matrix.
-    if (target === 0 && Math.abs(next) < REST_EPSILON) next = 0;
+  /** Tilt spring state: the angular velocities of the two eased
+   *  components in LEAN mode, and the continuous roll rates in TUMBLE. */
+  private _rollVel = 0;
+  private _pitchVel = 0;
+  /** The tilt spring's effective natural frequency: the authored omega ×
+   *  the DBG damping step, over √(mass ratio) — rotational inertia grows
+   *  with mass and ω ∝ 1/√I, so the same outfit that shoves slower also
+   *  tilts slower, with the wobble character (the damping RATIO)
+   *  unchanged. */
+  private tiltOmega(): number {
+    const { SPRING_OMEGA } = PLAYER_ROLL_CONSTANTS;
+    const massRatio = Math.max(1e-6, this.player.mass / PHYSICS_CONSTANTS.PLAYER_MASS);
+    return SPRING_OMEGA * getActiveRollDampingMult() / Math.sqrt(Math.max(1, massRatio));
+  }
+  /** One semi-implicit Euler step of the tilt spring for one component.
+   *  Returns the new angle; the velocity lives in `_rollVel`/`_pitchVel`
+   *  and is written back by the caller.  Semi-implicit (velocity first)
+   *  keeps it stable at every damping step. */
+  private springTilt(
+    cur: number, velKey: '_rollVel' | '_pitchVel', target: number,
+    dt: number, omega: number,
+  ): number {
+    const { SPRING_ZETA, REST_EPSILON, REST_VEL_EPSILON } = PLAYER_ROLL_CONSTANTS;
+    const k = omega * omega;
+    const c = 2 * SPRING_ZETA * omega;
+    let v = this[velKey];
+    v += (k * (target - cur) - c * v) * dt;
+    let next = cur + v * dt;
+    // Snap to true level once the settle is invisible — angle AND velocity
+    // both small — so the renderer's straight-flight path stays the plain
+    // rotation matrix.
+    if (target === 0 && Math.abs(next) < REST_EPSILON && Math.abs(v) < REST_VEL_EPSILON) {
+      next = 0;
+      v = 0;
+    }
+    this[velKey] = v;
     return next;
   }
   private tickPlayerRoll(dt: number, moveDir: Vector2) {
@@ -1540,11 +1567,47 @@ export class GameEngine {
     // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
     // levels out through this same easing rather than a separate branch.
     const maxAngle = getActivePlayerRollAngle();
-    let roll = this.easeTilt(this.player.visualRoll ?? 0, sigLat * maxAngle, dt);
-    let pitch = this.easeTilt(this.player.visualPitch ?? 0, sigLong * maxAngle, dt);
+    const omega = this.tiltOmega();
+
+    if (getActiveTiltMode() === 'tumble') {
+      // CONTINUOUS ROLL (test mode — user call): the clamped signal drives
+      // angular RATE, not angle, so the hull keeps rolling about the axis
+      // perpendicular to the thrust — end-over-end under forward
+      // throttle, a barrel roll under strafe — and freezes where it
+      // stopped when thrust drops, like a rolled object.  The velocity
+      // state doubles as the rate; the "Roll feel" presets scale the rate
+      // so Off stops the tumble; angles wrap to ±π.
+      const { TUMBLE_RATE, MAX_ANGLE, REST_EPSILON, REST_VEL_EPSILON } =
+        PLAYER_ROLL_CONSTANTS;
+      const rateScale = TUMBLE_RATE * (maxAngle / MAX_ANGLE);
+      const ease = Math.min(1, omega * dt);
+      this._rollVel += (sigLat * rateScale - this._rollVel) * ease;
+      this._pitchVel += (sigLong * rateScale - this._pitchVel) * ease;
+      const wrapPi = (a: number) =>
+        a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a;
+      let roll = wrapPi((this.player.visualRoll ?? 0) + this._rollVel * dt);
+      let pitch = wrapPi((this.player.visualPitch ?? 0) + this._pitchVel * dt);
+      // A stopped tumble that happens to sit near level snaps to it, so an
+      // idle ship still earns the renderer's plain path.
+      if (Math.abs(this._rollVel) < REST_VEL_EPSILON) {
+        this._rollVel = sigLat === 0 ? 0 : this._rollVel;
+        if (this._rollVel === 0 && Math.abs(roll) < REST_EPSILON) roll = 0;
+      }
+      if (Math.abs(this._pitchVel) < REST_VEL_EPSILON) {
+        this._pitchVel = sigLong === 0 ? 0 : this._pitchVel;
+        if (this._pitchVel === 0 && Math.abs(pitch) < REST_EPSILON) pitch = 0;
+      }
+      this.player.visualRoll = roll;
+      this.player.visualPitch = pitch;
+      return;
+    }
+
+    let roll = this.springTilt(this.player.visualRoll ?? 0, '_rollVel', sigLat * maxAngle, dt, omega);
+    let pitch = this.springTilt(this.player.visualPitch ?? 0, '_pitchVel', sigLong * maxAngle, dt, omega);
     // Combined-tilt ceiling: past π/2 the cos-foreshortening mirrors the
-    // sprite.  Only transiently reachable (a preset cycled mid-bank), but
-    // a mirror is the one artefact that must never draw.
+    // sprite.  The spring OVERSHOOTS by design, so this also brackets a
+    // Deep-preset overshoot; a mirror is the one artefact that must never
+    // draw.
     const tilt = Math.sqrt(roll * roll + pitch * pitch);
     if (tilt > MAX_TILT) { const s = MAX_TILT / tilt; roll *= s; pitch *= s; }
     this.player.visualRoll = roll;
@@ -1903,6 +1966,7 @@ export class GameEngine {
       rollFeelName: getActivePlayerRollName(),
       hullModeName: getActivePlayerHullName(),
       rollDampName: getActiveRollDampingName(),
+      tiltModeName: getActiveTiltModeName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
       hudRateName: getActiveHudRateName(),
@@ -4755,6 +4819,8 @@ export class GameEngine {
       this.player.visualPitch = 0;
       this._rollPrevFacing = null;
       this._rollYawRate = 0;
+      this._rollVel = 0;
+      this._pitchVel = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
