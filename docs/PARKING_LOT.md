@@ -1531,3 +1531,37 @@ Also noted for the same session: the planned desktop-browser framerate
 investigation (user report, 2026-08-16) — the PerfRecorder now carries
 light/fog columns and a self-describing `set` line, so a desktop capture
 will attribute correctly out of the box.
+
+---
+
+## Six recorded takes are longer than their polyphony allows (2026-08-26)
+
+Found by `scripts/smoke/assets.mjs` once the recorded library grew from 3
+files to 66. Not a code problem — a re-export, whenever the sounds get
+another pass.
+
+| id | takes | length | budget |
+|---|---|---|---|
+| `weapon.cannon.fire` | a, b, c | 380 ms | ≤ 300 ms |
+| `enemy.shot.boss` | a, b, c | 340 ms | ≤ 300 ms |
+
+**Why the length matters, and why it is not just "a bit long".** Each id has
+a polyphony cap — how many copies may sound at once — and a take that outlives
+the gap between triggers starves its own cap: the fourth shot steals the voice
+of the first, so a sustained burst audibly cuts itself off mid-tail. The
+guideline is the cap times the fire interval, and 300 ms is where these two
+sit. The cannon is the more likely to be noticed, because it is a weapon the
+player fires deliberately and listens to.
+
+Two ways out, and the choice is aesthetic rather than technical:
+
+- **Shorten the takes** to ~280 ms, keeping the transient and trimming the
+  tail. Cheapest, and the tail is the part least likely to be missed on a
+  weapon that is about impact.
+- **Raise the polyphony** for these two ids so the overlap is legal. Costs
+  voices from a budget that already thins tier 3 first under load, so it
+  trades against material chatter in exactly the frames where a cannon is
+  most likely to be firing.
+
+Deliberately NOT auto-fixed: these are authored assets, and trimming someone's
+recording to satisfy a linter is the wrong default.
