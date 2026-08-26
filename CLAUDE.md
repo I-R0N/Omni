@@ -775,16 +775,24 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   REAL in the three axes the player rotates in — yaw stays on the
   canvas transform (a Z-rotation commutes with the projection),
   pitch/roll are real rotations inside the draw, and the projection is
-  ORTHOGRAPHIC (no perspective — user call).  TWO base orientations:
-  'Cube' (the default — axis-aligned, so at rest it is a FLAT SQUARE
-  with the NOSE FACE edge-on as the forward edge) and 'Diamond' (the
-  cube stood on a corner: one corner straight up at the viewer, the
-  adjacent corner's projection dead forward — exact up AND exact
-  forward is impossible, adjacent cube corners subtend ~70.5° — a
-  gem-cut hexagonal silhouette with a point at the aim).  The aim
-  marker draws last in white — the nose FACE's four edges on the flat
-  cube, the three edges meeting at the forward CORNER on the diamond;
-  depth is cued by edge alpha.  The 'Ship' step restores the sprite +
+  ORTHOGRAPHIC (no perspective — user call).  The hulls are a SHAPE
+  TABLE (`HullDef`: unit-radius vertices + edge list + nose-marker
+  flags + per-shape scale), so a new shape is a table entry, never a
+  new draw path.  FIVE wireframes today: 'Cube' (the default —
+  axis-aligned, so at rest it is a FLAT SQUARE with the NOSE FACE
+  edge-on as the forward edge), 'Diamond' (the cube stood on a corner:
+  one corner straight up at the viewer, the adjacent corner's
+  projection dead forward — exact up AND exact forward is impossible,
+  adjacent cube corners subtend ~70.5° — a gem-cut hexagonal
+  silhouette with a point at the aim), 'Sphere' (three great circles +
+  a small nose RING around the forward pole — a sphere has no edges,
+  so the ring is what makes its spin readable), 'Dodeca' (a regular
+  dodecahedron rotated so a pentagonal FACE aims forward; its five
+  edges are the marker), and 'Rhombic' (the rhombic dodecahedron with
+  a degree-4 axis VERTEX forward — at rest a diamond silhouette; the
+  four edges meeting at that vertex are the marker).  The aim marker
+  draws last in white; depth is cued by edge alpha.  The 'Ship' step
+  restores the sprite +
   the cos-tilt squash as the A/B — the squash path is sprite-mode
   only.  The shield/charge rings restore the plain rotation matrix
   (art offset included, which the wireframe frame omits) before

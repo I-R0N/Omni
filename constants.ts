@@ -3090,15 +3090,24 @@ export function cyclePlayerRoll(): number {
 //  'Diamond' — the cube stood on a corner (corner straight up at the
 //              viewer, the adjacent corner's projection dead forward):
 //              a gem-cut hexagonal silhouette with a point at the aim;
+//  'Sphere'  — three orthogonal great-circle rings; the aim marker is a
+//              small white ring around the nose pole;
+//  'Dodeca'  — a regular dodecahedron, oriented so a pentagonal FACE
+//              points at the aim (its five edges draw white);
+//  'Rhombic' — a rhombic dodecahedron, its degree-4 axis vertex forward
+//              (the four edges meeting there draw white);
 //  'Ship'    — the sprite + the cos-tilt squash, kept as the A/B.
-// DBG Player ▸ "Hull".
-export const PLAYER_HULL_CYCLE: ReadonlyArray<string> = ['Cube', 'Diamond', 'Ship'] as const;
+// The shapes live in render/playerCube.ts as vertex/edge tables — adding
+// one is a table entry, never a new draw path.  DBG Player ▸ "Hull".
+export const PLAYER_HULL_CYCLE: ReadonlyArray<string> =
+  ['Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Ship'] as const;
 let activePlayerHullIndex = 0; // Cube — the shipped default
-export type PlayerHullMode = 'cube' | 'diamond' | 'sprite';
+export type PlayerHullMode =
+  'cube' | 'diamond' | 'sphere' | 'dodeca' | 'rhombic' | 'sprite';
+const PLAYER_HULL_MODES: ReadonlyArray<PlayerHullMode> =
+  ['cube', 'diamond', 'sphere', 'dodeca', 'rhombic', 'sprite'] as const;
 export function getActivePlayerHullMode(): PlayerHullMode {
-  return activePlayerHullIndex === 0 ? 'cube'
-       : activePlayerHullIndex === 1 ? 'diamond'
-       : 'sprite';
+  return PLAYER_HULL_MODES[activePlayerHullIndex];
 }
 export function getActivePlayerHullName(): string {
   return PLAYER_HULL_CYCLE[activePlayerHullIndex];

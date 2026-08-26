@@ -1566,8 +1566,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // The player's default hull (user call).  Takes the yaw-rotated
       // local frame set above and does the pitch/roll 3D math itself.
       if (cubeHull) {
-          drawPlayerCube(ctx, entity, hullMode === 'diamond',
-                         getActiveTiltMode() === 'tumble');
+          drawPlayerCube(ctx, entity, hullMode, getActiveTiltMode() === 'tumble');
           drawn = true;
       }
 

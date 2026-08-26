@@ -418,23 +418,20 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
   });
 });
 
-test.describe('the wireframe-cube hull', () => {
-  test('ships as the default, and the DBG toggle restores the sprite', async ({ page }) => {
+test.describe('the wireframe hull shapes', () => {
+  test('the cube ships as the default, and every shape renders a live bank', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    // The flat cube is the SHIPPED default (user call): the player draws
-    // as a 3D wire cube rotating in yaw + the tilt pitch/roll — at rest a
-    // flat square with the nose face edge-on.  The corner-up DIAMOND
-    // orientation and the sprite are each one DBG click away.  Pinned here
+    // The flat cube is the SHIPPED default (user call), with the other
+    // shapes — corner-up Diamond, Sphere, Dodecahedron, Rhombic
+    // dodecahedron — and the sprite each one DBG step away.  Pinned here
     // because a default is exactly what drifts unwatched.
     await waitForStats(page, s => s.hullModeName === 'Cube', 'the cube default');
 
-    await engine(page, e => e.dbg.cyclePlayerHull());
-    await waitForStats(page, s => s.hullModeName === 'Diamond', 'the diamond orientation');
-
-    // Drive a bank while the DIAMOND renders live — the clean-console
-    // assertion is what covers its base-orientation projection.
+    // Hold a strafe for the whole walk, so every wireframe shape renders
+    // BANKED live frames — the clean-console assertion is what covers
+    // each shape's vertex/edge table and projection.
     await engine(page, e => {
       e.input.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
       e.input.keys.add('KeyS');
@@ -442,23 +439,27 @@ test.describe('the wireframe-cube hull', () => {
     await waitForEngine(
       page,
       e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
-      'a live bank on the diamond',
+      'a live bank on the cube',
     );
-    await engine(page, e => e.input.keys.delete('KeyS'));
 
+    // Unrolled rather than looped: waitForStats SERIALIZES its predicate
+    // into the page (harness rule — no closure variables survive), so each
+    // shape's name must be a literal.  The stats push between steps
+    // implies rendered frames — each shape drew banked.
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Diamond', 'the Diamond hull');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Sphere', 'the Sphere hull');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Dodeca', 'the Dodeca hull');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Rhombic', 'the Rhombic hull');
+
+    await engine(page, e => e.input.keys.delete('KeyS'));
     await engine(page, e => e.dbg.cyclePlayerHull());
     await waitForStats(page, s => s.hullModeName === 'Ship', 'the sprite A/B');
     await engine(page, e => e.dbg.cyclePlayerHull());
     await waitForStats(page, s => s.hullModeName === 'Cube', 'back to the cube');
-
-    // And a bank on the default cube too, for the same reason.
-    await engine(page, e => e.input.keys.add('KeyS'));
-    await waitForEngine(
-      page,
-      e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
-      'a live bank on the cube',
-    );
-    await engine(page, e => e.input.keys.delete('KeyS'));
 
     watch.assertClean();
   });
