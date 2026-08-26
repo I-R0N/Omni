@@ -1812,6 +1812,56 @@ k. After N waves, spawn a portal to a new map.
        stray takes previously uploaded to the integration
        branch.
 
+54. **Sweep review: 5d shipped + three user-driven gauntlets
+    (PRs #89, #87, #88, #85; 2026-08-26).**
+    a. **5d UI gauntlet DONE (PR #89), per brief.** Six
+       milestones; the audit MEASURED the DOM rather than
+       eyeballing it (font-size histograms, panel-recipe
+       class strings); unified button/panel/type vocabulary;
+       fixed four genuine breaks at 390×844 (boss bar landing
+       on the Salvage chip, hex-flower drop-target overlap,
+       wrapping titles, death/stage-clear sharing a
+       data-overlay identity); viewport suites landed
+       (tests/viewports.spec.ts). Ledger:
+       docs/GAUNTLET_5D_LOG.md.
+    b. **WebGPU feasibility spike (PR #87): VERDICT — DO NOT
+       BUILD; keep the Stage-3 renderer seam.** The spike
+       proved WebGPU 5× faster on the hardest primitive
+       (dented-tile ramp, on device, kill gates honoured) —
+       and then the device capture showed Omni is NOT
+       render-bound (worst frames ~88% sim). Decisive
+       second reason: WebGPU needs iOS 26+, excluding ~12%
+       of iOS players, so Canvas2D could never be deleted —
+       dual-renderer maintenance forever. A model spike:
+       probe pages removed, findings preserved in
+       docs/GAUNTLET_WEBGPU_LOG.md (incl. the vsync caveat
+       that invalidates naive frame-time comparisons).
+    c. **Lighting system (PR #88) — a NEW user-driven visual
+       layer, complete through A4b/A5g**: occluder store,
+       shadow-cast point lights with per-edge shadow volumes,
+       cone penumbra, glass light transmission + refraction
+       prototype, emission, seven quality tiers. Along the
+       way its instrumentation found the deep-run render
+       collapse: the density-tint cache miss storm — fixed,
+       render worst-frames 60–111 ms → 2–8 ms and 36–48 →
+       57 FPS at 4k entities on device. THE largest single
+       60 fps win of the plan, and it came from measurement
+       infrastructure, not guessing. The ~5k+ sim wall
+       remains; the parking lot now carries the user's
+       design direction for it (GRAVITY COLLAPSE — dense
+       shard fields collapsing into tile knots via the
+       existing merge/snap pipeline) — parked, not scheduled.
+    d. **Starfield resampling (PR #85)**: audited four prior
+       claims (confirmed 3, refuted 1, corrected 1), fixed
+       the 3.95× window-size density delta + source-level
+       star smear + fractional-dpr resampling.
+    e. **Test net: 138 passing** (from 38 at 5b). Sound
+       production: 66 of ~130 cues recorded. Remaining
+       roadmap: step 6 (tuning, user in the loop) → step 7
+       (final playtest + second deploy), with sound
+       production and any further lighting polish in
+       parallel.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
