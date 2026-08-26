@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  235 tests.  All run at
+                          anti-flake rules).  236 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -799,8 +799,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   drawing in EVERY mode.  `PLAYER_ROLL_DAMPING_CYCLE` (DBG Player ▸
   "Roll damp": Floaty ½× / Default / Stiff 2× / Snappy 4×) is one
   multiplier over the spring's natural frequency, so every step keeps
-  the same overshoot-and-wobble character.
-  `tests/roll.spec.ts` pins signal + easing + all three cycles + the
+  the same overshoot-and-wobble character.  `LEAN_DIR_CYCLE` (DBG
+  Player ▸ "Lean dir": Default / Reversed) is the direction A/B for
+  LEAN mode — one sign over both spring targets, so Reversed tips the
+  hull AWAY from the acceleration (nose rising under throttle) with
+  the same signal, easing and clamps; deliberately lean-only, since
+  Tumble's roll-with-the-travel sign was its own user call.
+  `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
   hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /

@@ -47,6 +47,9 @@
  *   5c. TUMBLE — the DBG tilt mode where thrust drives roll RATE: the
  *      angle sails past any lean maximum and keeps advancing while
  *      thrust holds, and freezes mid-roll when it drops.
+ *   5d. LEAN DIR — the DBG A/B that negates both axes: one sign over the
+ *      signal vector, so each axis's first tick mirrors EXACTLY, and
+ *      Tumble deliberately keeps its own direction.
  *   6. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
@@ -590,6 +593,68 @@ test.describe('the tumble tilt mode — thrust drives continuous roll', () => {
       e.dbg.cycleTiltMode(); // back to Lean
     });
     await waitForStats(page, s => s.tiltModeName === 'Lean', 'the mode restored');
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the lean-direction A/B', () => {
+  test('Reversed mirrors both axes exactly; Tumble keeps its own direction', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // One tick into a diagonal (both axes firing) at each direction — the
+    // reversal is ONE sign over the whole signal vector, so each axis's
+    // first tick mirrors EXACTLY: same spring, same magnitude, opposite
+    // sign.  Anything less than exact would mean a second code path.
+    const probe = () => engine(page, e => {
+      e.player.rotation = 0;
+      e.player.visualRoll = 0;
+      e.player.visualPitch = 0;
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      e.tickPlayerRoll(1 / 60, { x: 0.6, y: 0.8 });
+      return { roll: e.player.visualRoll as number, pitch: e.player.visualPitch as number };
+    });
+
+    const fwd = await probe();
+    await engine(page, e => e.dbg.cycleLeanDir()); // Default → Reversed
+    const rev = await probe();
+    await engine(page, e => e.dbg.cycleLeanDir()); // Reversed → back to Default
+
+    expect(fwd.roll, 'the default strafe bank keeps the shipped sign').toBeGreaterThan(0);
+    expect(fwd.pitch, 'and the default throttle lean').toBeGreaterThan(0);
+    expect(rev.roll, 'Reversed mirrors the roll exactly').toBeCloseTo(-fwd.roll, 12);
+    expect(rev.pitch, 'and the pitch').toBeCloseTo(-fwd.pitch, 12);
+
+    // Tumble is deliberately UNAFFECTED — its direction (roll WITH the
+    // travel) was its own user call, and the lean sign must not
+    // double-negate it.  Same early-sample claim the tumble suite pins.
+    const tumbleEarly = await engine(page, e => {
+      e.dbg.cycleLeanDir();  // Default → Reversed
+      e.dbg.cycleTiltMode(); // Lean → Tumble
+      e.player.rotation = 0;
+      e.player.visualRoll = 0;
+      e.player.visualPitch = 0;
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
+      e._rollVel = 0;
+      e._pitchVel = 0;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      for (let i = 0; i < 15; i++) e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
+      const p = e.player.visualPitch as number;
+      e.dbg.cycleTiltMode(); // back to Lean
+      e.dbg.cycleLeanDir();  // back to Default
+      return p;
+    });
+    expect(tumbleEarly, 'Tumble keeps its own direction under Reversed').toBeLessThan(0);
+
+    await waitForStats(page, s => s.leanDirName === 'Default', 'the name reaches stats');
 
     watch.assertClean();
   });

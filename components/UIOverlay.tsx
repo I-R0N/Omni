@@ -139,6 +139,7 @@ interface UIOverlayProps {
   onCyclePlayerHull?: () => void;
   onCycleRollDamping?: () => void;
   onCycleTiltMode?: () => void;
+  onCycleLeanDir?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -437,6 +438,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlayerHull,
   onCycleRollDamping,
   onCycleTiltMode,
+  onCycleLeanDir,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -1471,11 +1473,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Roll feel', onCyclePlayerRoll, stats.rollFeelName ?? 'Default',
                   'Directional-tilt depth preset (Off / Subtle / Default / Deep) stepping how far the hull pitches and rolls into a carved turn, lateral thrust or a throttle change — purely visual (physics, collision and aim never read it). Off levels out through the normal easing rather than snapping flat.')}
                 {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Cube',
-                  'What draws at the player\'s position. Cube (default): a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner (corner up at the viewer, adjacent corner forward) for a gem-cut hull. Ship: the sprite with the cos-tilt squash, kept as the A/B.')}
+                  'What draws at the player\'s position. Cube (default): a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner for a gem-cut hull. Sphere: three great circles with a nose ring at the forward pole. Dodeca: a dodecahedron with a pentagonal face forward. Rhombic: the rhombic dodecahedron, axis vertex forward. Ship: the sprite with the cos-tilt squash, kept as the A/B.')}
                 {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
                   'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): scales the tilt spring\'s natural frequency, so the hull tracks the hand looser or tighter with the same overshoot-and-wobble character. Ship weight also slows the spring (inertia).')}
                 {ctrlRow('Tilt mode', onCycleTiltMode, stats.tiltModeName ?? 'Lean',
                   'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead — the hull keeps rolling with its travel about the axis perpendicular to the thrust and freezes where it stops; the white aim marker hides and a fixed chevron reticle ahead of the hull carries the aim.')}
+                {ctrlRow('Lean dir', onCycleLeanDir, stats.leanDirName ?? 'Default',
+                  'A/B for which way the hull tips in Lean mode. Default: bank INTO the acceleration, like an aircraft carving its turn. Reversed: both pitch and roll mirrored — the hull kicked back by its own thrust, nose rising under throttle. Same signal, easing and clamps; Tumble is unaffected.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

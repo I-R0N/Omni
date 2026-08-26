@@ -3055,6 +3055,27 @@ export function cycleTiltMode(): number {
   return activeTiltModeIndex;
 }
 
+// DBG lean-direction cycle (Player ▸ "Lean dir"): the A/B for which way the
+// hull tips into acceleration in LEAN mode.  'Default' banks INTO the
+// acceleration (an aircraft carving its turn); 'Reversed' negates BOTH
+// components — the read of a hull kicked back by its own thrust, nose
+// rising under throttle.  One sign over the whole signal vector, so the
+// tilt stays a single direction in 360° and the magnitude clamp is
+// untouched.  LEAN-only on purpose: Tumble's direction was its own user
+// call (roll WITH the travel) and this knob must not double-negate it.
+export const LEAN_DIR_CYCLE: ReadonlyArray<string> = ['Default', 'Reversed'] as const;
+let activeLeanDirIndex = 0; // Default — the shipped direction
+export function getActiveLeanDirSign(): 1 | -1 {
+  return activeLeanDirIndex === 0 ? 1 : -1;
+}
+export function getActiveLeanDirName(): string {
+  return LEAN_DIR_CYCLE[activeLeanDirIndex];
+}
+export function cycleLeanDir(): number {
+  activeLeanDirIndex = (activeLeanDirIndex + 1) % LEAN_DIR_CYCLE.length;
+  return activeLeanDirIndex;
+}
+
 // DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
 // A/B-ing how deep the bank reads, cycled live from the pause debug menu.
 // Only the ANGLE varies — the response/return rates are the same feel at

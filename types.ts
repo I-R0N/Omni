@@ -1861,7 +1861,7 @@ export interface EngineStats {
   // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
   rollFeelName?: string;
   // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default —
-  // "Diamond", or "Ship").
+  // "Diamond", "Sphere", "Dodeca", "Rhombic", or "Ship").
   hullModeName?: string;
   // DBG rotation-damping preset name (PLAYER_ROLL_DAMPING_CYCLE, e.g.
   // "Default").
@@ -1869,6 +1869,9 @@ export interface EngineStats {
   // DBG tilt-mode name (TILT_MODE_CYCLE: "Lean" — the default — or
   // "Tumble", the continuous-roll test mode).
   tiltModeName?: string;
+  // DBG lean-direction A/B name (LEAN_DIR_CYCLE: "Default" — tilt into
+  // the acceleration — or "Reversed").
+  leanDirName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */
