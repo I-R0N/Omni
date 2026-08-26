@@ -384,12 +384,20 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
-  /** BANKING ROLL (player only today).  Signed roll angle in radians, eased
-   *  toward the lateral component of the thrust input each step
+  /** DIRECTIONAL TILT (player only today) — the ROLL half.  Signed lateral
+   *  tilt angle in radians, eased toward the strafe + turn signal each step
    *  (`GameEngine.tickPlayerRoll`, tuning in `PLAYER_ROLL_CONSTANTS`).
-   *  Purely presentational — RenderSystem foreshortens the hull across its
-   *  wing line by cos(roll); physics/collision never read it. */
+   *  Purely presentational — RenderSystem combines it with `visualPitch`
+   *  into one tilt toward the acceleration and foreshortens the hull along
+   *  that direction by cos(tilt); physics/collision never read it. */
   visualRoll?: number;
+  /** DIRECTIONAL TILT — the PITCH half.  Signed longitudinal tilt angle in
+   *  radians, driven by CHANGES in thrust along the nose (a washout
+   *  filter): punching the throttle pitches, cruising settles level,
+   *  cutting thrust dips.  The top-down projection cannot show nose-up vs
+   *  nose-down (both foreshorten the same), so the sign exists only to keep
+   *  the easing continuous through reversals. */
+  visualPitch?: number;
   /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
    *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
    *  while it is positive and fades over the last `FADE_DURATION`.  A

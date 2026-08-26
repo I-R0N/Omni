@@ -1455,25 +1455,43 @@ export class GameEngine {
   public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
   public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
 
-  /** BANKING ROLL — ease `player.visualRoll` toward the two-term signal
-   *  (PLAYER_ROLL_CONSTANTS documents the terms and why both exist; the
-   *  field is documented in types.ts): the STRAFE term is the thrust
-   *  input's projection onto the facing axis's perpendicular, and the TURN
-   *  term is the smoothed rate the facing is swinging, scaled by throttle —
-   *  the term the aim-locked schemes (touch / joystick / gamepad, where
-   *  thrust is always along the nose) actually exercise.  Signed so a left
-   *  and a right bank stay distinct through the easing — a hard reversal
-   *  swings through level instead of teleporting across it.  Asymmetric
-   *  rates: rolling INTO a bank tracks the hand, settling back is gentler,
-   *  which is also what keeps twitchy tap-input from strobing the hull. */
+  /** DIRECTIONAL TILT — ease `player.visualRoll` + `player.visualPitch`
+   *  toward the tilt signal (PLAYER_ROLL_CONSTANTS documents every term and
+   *  why it exists; the fields are documented in types.ts).  ROLL (lateral)
+   *  is the STRAFE term — the thrust input's projection onto the facing
+   *  axis's perpendicular — plus the TURN term — the smoothed rate the
+   *  facing is swinging, scaled by throttle, the term the aim-locked
+   *  schemes (touch / joystick / gamepad, where thrust is always along the
+   *  nose) actually exercise.  PITCH (longitudinal) is nose-line thrust
+   *  high-passed through a washout baseline, so throttle CHANGES pulse and
+   *  a cruise settles level.  Components are signed so reversals swing
+   *  through level instead of teleporting across it, and the signal VECTOR
+   *  is magnitude-clamped so a diagonal cannot out-tilt the authored
+   *  maximum.  Asymmetric rates: tilting IN tracks the hand, settling back
+   *  is gentler, which also keeps twitchy tap-input from strobing the
+   *  hull. */
   private _rollPrevFacing: number | null = null;
   private _rollYawRate = 0;
+  private _pitchBase = 0;
+  /** Ease one tilt component toward its target with the shared attack /
+   *  release asymmetry and the rest snap. */
+  private easeTilt(cur: number, target: number, dt: number): number {
+    const { RESPONSE_RATE, RETURN_RATE, REST_EPSILON } = PLAYER_ROLL_CONSTANTS;
+    const rate = Math.abs(target) > Math.abs(cur) ? RESPONSE_RATE : RETURN_RATE;
+    let next = cur + (target - cur) * Math.min(1, rate * dt);
+    // Snap to true level once the settle is invisible, so the renderer's
+    // straight-flight path stays the plain rotation matrix.
+    if (target === 0 && Math.abs(next) < REST_EPSILON) next = 0;
+    return next;
+  }
   private tickPlayerRoll(dt: number, moveDir: Vector2) {
-    const { RESPONSE_RATE, RETURN_RATE, REST_EPSILON, YAW_GAIN, YAW_SMOOTHING } =
+    const { YAW_GAIN, YAW_SMOOTHING, PITCH_GAIN, PITCH_WASHOUT, MAX_TILT } =
       PLAYER_ROLL_CONSTANTS;
     const facing = this.player.rotation;
+    const cosF = Math.cos(facing);
+    const sinF = Math.sin(facing);
     // STRAFE — perpendicular of facing (cos, sin) is (-sin, cos).
-    const lat = moveDir.y * Math.cos(facing) - moveDir.x * Math.sin(facing);
+    const lat = moveDir.y * cosF - moveDir.x * sinF;
     // TURN — the facing's angular step this tick, wrapped so aiming across
     // the ±π seam is a small swing rather than a full spin, low-passed to
     // cancel pointer jitter.  Null prev = first tick (or a respawn reset):
@@ -1490,18 +1508,30 @@ export class GameEngine {
     // MINUS sign makes the two terms agree: mid-turn, thrust not yet
     // swung to the new nose lies on the NEGATIVE perp side of it.
     const throttle = Math.min(1, Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y));
-    const signal = lat - YAW_GAIN * this._rollYawRate * throttle;
+    let sigLat = lat - YAW_GAIN * this._rollYawRate * throttle;
+    // PITCH — nose-line thrust minus its washout baseline, so a throttle
+    // STEP pulses and a held cruise settles level (see the constants note).
+    const long = moveDir.x * cosF + moveDir.y * sinF;
+    this._pitchBase += (long - this._pitchBase) * Math.min(1, PITCH_WASHOUT * dt);
+    let sigLong = (long - this._pitchBase) * PITCH_GAIN;
+    // Clamp the SIGNAL VECTOR's magnitude, not each component: the tilt is
+    // one direction in 360°, and clamping per-axis would let a diagonal
+    // reach √2 of the authored maximum.
+    const sigMag = Math.sqrt(sigLat * sigLat + sigLong * sigLong);
+    if (sigMag > 1) { sigLat /= sigMag; sigLong /= sigMag; }
     // Max angle comes from the DBG feel cycle (Player ▸ "Roll feel");
     // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
     // levels out through this same easing rather than a separate branch.
-    const target = Math.max(-1, Math.min(1, signal)) * getActivePlayerRollAngle();
-    const cur = this.player.visualRoll ?? 0;
-    const rate = Math.abs(target) > Math.abs(cur) ? RESPONSE_RATE : RETURN_RATE;
-    let next = cur + (target - cur) * Math.min(1, rate * dt);
-    // Snap to true level once the settle is invisible, so the renderer's
-    // straight-flight path stays the plain rotation matrix.
-    if (target === 0 && Math.abs(next) < REST_EPSILON) next = 0;
-    this.player.visualRoll = next;
+    const maxAngle = getActivePlayerRollAngle();
+    let roll = this.easeTilt(this.player.visualRoll ?? 0, sigLat * maxAngle, dt);
+    let pitch = this.easeTilt(this.player.visualPitch ?? 0, sigLong * maxAngle, dt);
+    // Combined-tilt ceiling: past π/2 the cos-foreshortening mirrors the
+    // sprite.  Only transiently reachable (a preset cycled mid-bank), but
+    // a mirror is the one artefact that must never draw.
+    const tilt = Math.sqrt(roll * roll + pitch * pitch);
+    if (tilt > MAX_TILT) { const s = MAX_TILT / tilt; roll *= s; pitch *= s; }
+    this.player.visualRoll = roll;
+    this.player.visualPitch = pitch;
   }
 
   public setDifficulty(level: number) {
@@ -4703,8 +4733,10 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.visualRoll = 0;
+      this.player.visualPitch = 0;
       this._rollPrevFacing = null;
       this._rollYawRate = 0;
+      this._pitchBase = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;

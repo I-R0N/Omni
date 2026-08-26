@@ -1472,24 +1472,46 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // Local 2×2 (canvas [[a,c],[b,d]] layout) — plain rotation for
       // everything…
       let l11 = cosR, l21 = sinR, l12 = -sinR, l22 = cosR;
-      // …except a BANKING player (GameEngine.tickPlayerRoll): foreshorten
-      // the hull across its wing line by cos(roll), the top-down projection
-      // of a flat ship rolling.  The squash must sit BETWEEN the facing
-      // rotation and the art-alignment offset — it is the SHIP that rolls,
-      // not the sprite art's axes — so the matrix is composed as
-      // R(facing) × scale(1, cos roll) × R(art offset) rather than folded
-      // into one angle.  One entity per frame, so the extra trig is free;
-      // level flight (visualRoll snapped to 0) keeps the plain path.
-      if (entity.type === EntityType.PLAYER && entity.visualRoll) {
-          const squash = Math.cos(entity.visualRoll);
+      // …except a TILTING player (GameEngine.tickPlayerRoll): the roll
+      // (across the wings) and pitch (along the nose) components combine
+      // into ONE tilt toward the acceleration, and the hull foreshortens
+      // ALONG that direction by cos(tilt) — the top-down projection of a
+      // flat ship tilting about the perpendicular axis.  The squash must
+      // sit BETWEEN the facing rotation and the art-alignment offset — it
+      // is the SHIP that tilts, not the sprite art's axes — so the matrix
+      // is composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ) ×
+      // R(art offset), where φ is the tilt direction in the ship frame
+      // (pitch squashes along the nose = local x, roll across the wings =
+      // local y; pure roll reduces this to the scale(1, cos roll) it
+      // shipped with).  One entity per frame, so the extra trig is free;
+      // level flight (both components snapped to 0) keeps the plain path.
+      if (entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
+          const r = entity.visualRoll ?? 0;
+          const p = entity.visualPitch ?? 0;
+          const tilt = Math.sqrt(r * r + p * p);
+          const c = Math.cos(tilt);
+          const phi = Math.atan2(r, p);
+          const cp = Math.cos(phi);
+          const sp = Math.sin(phi);
+          // A = R(φ) × scale(c, 1) × R(−φ): the symmetric squash along the
+          // tilt direction (sign of φ vs φ+π cancels in the products,
+          // matching the projection's own sign-blindness).
+          const a11 = c * cp * cp + sp * sp;
+          const a12 = (c - 1) * cp * sp;
+          const a22 = c * sp * sp + cp * cp;
           const ch = Math.cos(entity.rotation);
           const sh = Math.sin(entity.rotation);
           const co = Math.cos(SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET);
           const so = Math.sin(SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET);
-          l11 = ch * co - sh * squash * so;
-          l21 = sh * co + ch * squash * so;
-          l12 = -ch * so - sh * squash * co;
-          l22 = -sh * so + ch * squash * co;
+          // B = R(facing) × A, then L = B × R(art offset).
+          const b11 = ch * a11 - sh * a12;
+          const b12 = ch * a12 - sh * a22;
+          const b21 = sh * a11 + ch * a12;
+          const b22 = sh * a12 + ch * a22;
+          l11 = b11 * co + b12 * so;
+          l12 = -b11 * so + b12 * co;
+          l21 = b21 * co + b22 * so;
+          l22 = -b21 * so + b22 * co;
       }
       ctx.setTransform(
         camA * l11 + camC * l21,
@@ -1625,11 +1647,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
           }
       }
 
-      // A banked player leaves the squashed matrix behind before the ring
+      // A tilting player leaves the squashed matrix behind before the ring
       // draws below: the shield ring is the PHYSICAL collision radius and
-      // the charge ring is HUD — neither rolls with the hull, and their
+      // the charge ring is HUD — neither tilts with the hull, and their
       // `rotate(-rot)` bookkeeping assumes the plain rotation matrix.
-      if (entity.type === EntityType.PLAYER && entity.visualRoll) {
+      if (entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
           ctx.setTransform(
             camA * cosR + camC * sinR,
             camB * cosR + camD * sinR,

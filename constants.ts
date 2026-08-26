@@ -2970,9 +2970,12 @@ export const PLAYER_TRAIL_CONSTANTS = {
 //      turn under thrust is changing the acceleration's direction, and it
 //      is the term every aim-locked scheme actually exercises.  Coasting
 //      nose-swings stay level — no thrust, no acceleration change.
-// The renderer foreshortens the sprite across its wing line by cos(roll) —
-// the top-down projection of a flat ship rolling — so MAX_ANGLE is
-// authored as a real bank angle, not a scale factor.
+// The ROLL pair above is half of a full 360° DIRECTIONAL TILT: the PITCH
+// half (the PITCH_* knobs below) reads changes in nose-line thrust, and the
+// renderer combines both into ONE tilt toward the acceleration,
+// foreshortening the hull along that direction by cos(tilt) — the top-down
+// projection of a flat ship tilting — so MAX_ANGLE is authored as a real
+// tilt angle, not a scale factor.
 export const PLAYER_ROLL_CONSTANTS = {
   MAX_ANGLE: 0.85,     // Radians (~49°) at full signal — cos ≈ 0.66 squash
   RESPONSE_RATE: 9,    // Per-second ease INTO a deeper bank (snappy on input)
@@ -2986,8 +2989,24 @@ export const PLAYER_ROLL_CONSTANTS = {
   // as alternating-sign single-step spikes, and averaging them toward zero
   // is what keeps a trembling mouse from fluttering the hull.
   YAW_SMOOTHING: 10,
-  // Below this angle with no signal the roll snaps to 0, so the renderer's
-  // straight-flight path stays the plain rotation matrix.
+  // PITCH — the longitudinal half of the 360° directional tilt.  Unlike
+  // the roll, pitch keys on CHANGES in nose-line thrust (a washout
+  // filter): forward thrust is the default state of flight, so a steady
+  // cruise must settle level rather than hold a permanent nose tilt.  The
+  // signal is (instantaneous longitudinal thrust − its washout-eased
+  // baseline) × PITCH_GAIN — punching the throttle lunges the hull,
+  // cutting it dips, and the pulse decays as the baseline catches up.
+  PITCH_GAIN: 1.0,
+  // Per-second rate the washout baseline chases the live thrust — the
+  // inverse of roughly how long a throttle step stays visible (~0.7 s).
+  PITCH_WASHOUT: 1.5,
+  // Safety ceiling on the COMBINED tilt angle √(roll² + pitch²): past π/2
+  // the cos-foreshortening goes negative and mirrors the sprite, so the
+  // eased pair is scaled back under this whatever the presets get up to
+  // (reachable only transiently, e.g. cycling Deep mid-bank).
+  MAX_TILT: 1.45,
+  // Below this angle with no signal a tilt component snaps to 0, so the
+  // renderer's straight-flight path stays the plain rotation matrix.
   REST_EPSILON: 0.01,
 };
 

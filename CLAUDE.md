@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  228 tests.  All run at
+                          anti-flake rules).  230 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -712,25 +712,37 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
-- `PLAYER_ROLL_CONSTANTS` — the BANKING ROLL: the player ship rolls into
-  changing acceleration.  `GameEngine.tickPlayerRoll` eases
-  `player.visualRoll` toward a TWO-TERM signal: the STRAFE term (the
-  thrust input's component perpendicular to the FACING axis) plus the
-  TURN term (the smoothed rate the nose is swinging × throttle, sign
-  chosen so the terms agree).  The turn term exists because the
-  aim-locked schemes — touch / joystick / gamepad, where the ship aims
-  where it flies — put thrust along the nose by construction, so a
-  strafe-only signal never fired there (user report).  Full signal is a
-  full bank (`MAX_ANGLE`; full turn rate = 1/`YAW_GAIN` rad/s), thrust
-  along a steady nose or coasting settles back to a
-  literal 0 (asymmetric rates: attack outruns release).  Purely
-  presentational: RenderSystem foreshortens the hull across its wing
-  line by cos(roll), composed as R(facing) × scale(1, cos roll) ×
-  R(art offset) inside the player's single setTransform — the squash
-  sits BETWEEN the facing rotation and the art-alignment offset because
-  it is the ship that rolls, not the sprite art's axes.  Physics,
-  collision and aim never read it.  Works on every input device for
-  free, since the signal is the shared movement vector.
+- `PLAYER_ROLL_CONSTANTS` — the DIRECTIONAL TILT: the player ship
+  pitches and rolls into changing acceleration, full 360°.
+  `GameEngine.tickPlayerRoll` eases `player.visualRoll` +
+  `player.visualPitch` toward a tilt signal whose ROLL half has two
+  terms — the STRAFE term (the thrust input's component perpendicular
+  to the FACING axis) plus the TURN term (the smoothed rate the nose is
+  swinging × throttle, sign chosen so the terms agree; it exists
+  because the aim-locked schemes — touch / joystick / gamepad, where
+  the ship aims where it flies — put thrust along the nose by
+  construction, so a strafe-only signal never fired there (user
+  report)) — and whose PITCH half is nose-line thrust high-passed
+  through a WASHOUT baseline (`PITCH_WASHOUT`), so a throttle change
+  pulses and a held cruise settles level (forward thrust is the default
+  state of flight and must not hold a permanent tilt; the top-down
+  projection cannot show tilt sign anyway, so the sign only keeps the
+  easing continuous).  Full signal is a full tilt (`MAX_ANGLE`; full
+  turn rate = 1/`YAW_GAIN` rad/s), the signal VECTOR is
+  magnitude-clamped so a diagonal cannot out-tilt the maximum, and no
+  signal settles back to a literal 0 (asymmetric rates: attack outruns
+  release; `MAX_TILT` caps the combined angle under π/2 so the
+  cos-projection can never mirror the sprite).  Purely presentational:
+  RenderSystem combines both halves into ONE tilt toward the
+  acceleration and foreshortens the hull ALONG that direction by
+  cos(tilt), composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ)
+  × R(art offset) inside the player's single setTransform (φ = the
+  tilt direction in the ship frame; pure roll reduces it to the
+  scale(1, cos roll) it shipped with) — the squash sits BETWEEN the
+  facing rotation and the art-alignment offset because it is the ship
+  that tilts, not the sprite art's axes.  Physics, collision and aim
+  never read it.  Works on every input device for free, since the
+  signal is the shared movement vector.
   `PLAYER_ROLL_CYCLE` is the DBG feel knob (Player ▸ "Roll feel"):
   named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
   from the pause debug menu; `tickPlayerRoll` reads the active angle, so

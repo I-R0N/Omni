@@ -1,15 +1,21 @@
-/** Banking roll — the player ship rolls into changing acceleration.
+/** Directional tilt — the player ship pitches and rolls into changing
+ *  acceleration, full 360°.
  *
- *  TWO terms feed the signal (PLAYER_ROLL_CONSTANTS documents why both
- *  exist): the STRAFE term — the thrust input's component perpendicular to
- *  the facing axis — and the TURN term — the smoothed rate the nose is
- *  swinging, gated by throttle, added because under the aim-locked schemes
- *  (touch / joystick / gamepad) the ship aims where it flies, thrust is
- *  always along the nose, and a strafe-only signal is zero by construction
- *  (the user report that prompted it: "not noticing the roll").  The roll
- *  is purely presentational — `player.visualRoll` is an eased angle the
- *  renderer projects as a cos(roll) foreshortening across the wing line —
- *  so what is pinned here is the SIGNAL and the EASING, not pixels:
+ *  The ROLL half (lateral) has two terms (PLAYER_ROLL_CONSTANTS documents
+ *  why both exist): the STRAFE term — the thrust input's component
+ *  perpendicular to the facing axis — and the TURN term — the smoothed
+ *  rate the nose is swinging, gated by throttle, added because under the
+ *  aim-locked schemes (touch / joystick / gamepad) the ship aims where it
+ *  flies, thrust is always along the nose, and a strafe-only signal is
+ *  zero by construction (the user report that prompted it: "not noticing
+ *  the roll").  The PITCH half (longitudinal) is nose-line thrust
+ *  high-passed through a washout baseline: throttle CHANGES pulse, a held
+ *  cruise settles level — forward thrust is the default state of flight
+ *  and must not hold a permanent tilt.  Both halves are purely
+ *  presentational — `visualRoll` + `visualPitch` are eased angles the
+ *  renderer combines into ONE tilt toward the acceleration and projects
+ *  as a cos(tilt) foreshortening along it — so what is pinned here is the
+ *  SIGNAL and the EASING, not pixels:
  *
  *   1. DIRECTIONALITY — lateral thrust banks, nose-line thrust does not,
  *      and a left strafe and a right strafe are distinct (signed) banks.
@@ -21,7 +27,12 @@
  *   4. TURN TERM — carving a turn under thrust banks even with thrust
  *      locked along the nose (the aim-locked geometry), a coasting swing
  *      stays level, and the throttle gate scales rather than switches.
- *   5. END TO END — a real held key across live sim steps banks the ship,
+ *   5. PITCH — a throttle step lunges then washes out to level, cutting
+ *      thrust dips the other way, pure nose-line thrust never rolls, a
+ *      diagonal fires BOTH axes, and the combined tilt vector respects
+ *      the authored maximum (the per-axis clamp would let a diagonal
+ *      reach √2 of it).
+ *   6. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
  *
@@ -55,6 +66,8 @@ function driveRoll(
     e.player.visualRoll = a.start ?? 0;
     e._rollPrevFacing = null;
     e._rollYawRate = 0;
+    e.player.visualPitch = 0;
+    e._pitchBase = 0;
     for (let i = 0; i < a.ticks; i++) {
       e.tickPlayerRoll(1 / 60, { x: a.mx, y: a.my });
     }
@@ -75,6 +88,8 @@ function driveTurn(
     e.player.visualRoll = 0;
     e._rollPrevFacing = null;
     e._rollYawRate = 0;
+    e.player.visualPitch = 0;
+    e._pitchBase = 0;
     let peak = 0;
     for (let i = 0; i < a.ticks; i++) {
       e.player.rotation += a.ratePerSec / 60;
@@ -179,6 +194,80 @@ test.describe('the turn term — the aim-locked schemes still bank', () => {
   });
 });
 
+test.describe('the pitch half — throttle changes pulse, cruise settles level', () => {
+  test('a throttle step lunges then washes out, and cutting thrust dips', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, e => {
+      e.player.rotation = 0;
+      e.player.visualRoll = 0;
+      e.player.visualPitch = 0;
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
+      e._pitchBase = 0;
+      let peak = 0, dipPeak = 0;
+      // Punch the throttle straight along the nose: pure longitudinal.
+      for (let i = 0; i < 300; i++) {
+        e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
+        peak = Math.max(peak, Math.abs(e.player.visualPitch ?? 0));
+      }
+      const cruise = Math.abs(e.player.visualPitch ?? 0);
+      const rollDuring = Math.abs(e.player.visualRoll ?? 0);
+      // Cut the throttle: the washout baseline is charged, so the step
+      // DOWN pulses the other way — the braking dive.
+      for (let i = 0; i < 300; i++) {
+        e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+        dipPeak = Math.max(dipPeak, Math.abs(e.player.visualPitch ?? 0));
+      }
+      const settled = Math.abs(e.player.visualPitch ?? 0);
+      return { peak, cruise, rollDuring, dipPeak, settled };
+    });
+
+    expect(r.peak, 'the step pulses a visible pitch').toBeGreaterThan(MAX_ANGLE * 0.3);
+    expect(r.cruise, 'a held cruise settles level — no permanent tilt').toBeLessThan(0.03);
+    expect(r.rollDuring, 'pure nose-line thrust never rolls').toBeLessThan(1e-9);
+    expect(r.dipPeak, 'cutting thrust dips').toBeGreaterThan(MAX_ANGLE * 0.3);
+    expect(r.settled, 'and settles level again').toBeLessThan(0.03);
+
+    watch.assertClean();
+  });
+
+  test('a diagonal thrust tilts on BOTH axes, inside the authored maximum', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, e => {
+      e.player.rotation = 0;
+      e.player.visualRoll = 0;
+      e.player.visualPitch = 0;
+      e._rollPrevFacing = null;
+      e._rollYawRate = 0;
+      e._pitchBase = 0;
+      let roll = 0, pitch = 0, maxTilt = 0;
+      for (let i = 0; i < 60; i++) {
+        e.tickPlayerRoll(1 / 60, { x: Math.SQRT1_2, y: Math.SQRT1_2 });
+        const rr = Math.abs(e.player.visualRoll ?? 0);
+        const pp = Math.abs(e.player.visualPitch ?? 0);
+        roll = Math.max(roll, rr);
+        pitch = Math.max(pitch, pp);
+        maxTilt = Math.max(maxTilt, Math.sqrt(rr * rr + pp * pp));
+      }
+      return { roll, pitch, maxTilt };
+    });
+
+    expect(r.roll, 'the lateral half fires').toBeGreaterThan(0.1);
+    expect(r.pitch, 'the longitudinal half fires').toBeGreaterThan(0.1);
+    // The SIGNAL VECTOR is magnitude-clamped, so the combined tilt stays
+    // inside the authored maximum instead of reaching √2 of it on a
+    // diagonal (small tolerance: the two components ease independently).
+    expect(r.maxTilt, 'the combined tilt respects the maximum')
+      .toBeLessThanOrEqual(MAX_ANGLE + 0.02);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('the DBG feel cycle steps the bank depth live', () => {
   test('Deep out-banks Default, and Off levels out through the easing', async ({ page }) => {
     const watch = await boot(page);
@@ -193,6 +282,8 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e.player.visualRoll = 0;
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
+      e.player.visualPitch = 0;
+      e._pitchBase = 0;
       for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
       return e.player.visualRoll as number;
     });
@@ -204,6 +295,8 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e.player.visualRoll = 0.5; // mid-bank when the preset flips
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
+      e.player.visualPitch = 0;
+      e._pitchBase = 0;
       for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
       return e.player.visualRoll as number;
     });
