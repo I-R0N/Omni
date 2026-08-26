@@ -316,20 +316,18 @@ test.describe('the wireframe-cube hull', () => {
     const watch = await boot(page);
     await startRun(page);
 
-    // The cube is the SHIPPED default (user call): the player draws as a
-    // 3D wire cube rotating in yaw + the tilt pitch/roll, with the sprite
-    // one DBG click away as the A/B.  Pinned here because a default is
-    // exactly what drifts unwatched.
+    // The flat cube is the SHIPPED default (user call): the player draws
+    // as a 3D wire cube rotating in yaw + the tilt pitch/roll — at rest a
+    // flat square with the nose face edge-on.  The corner-up DIAMOND
+    // orientation and the sprite are each one DBG click away.  Pinned here
+    // because a default is exactly what drifts unwatched.
     await waitForStats(page, s => s.hullModeName === 'Cube', 'the cube default');
 
     await engine(page, e => e.dbg.cyclePlayerHull());
-    await waitForStats(page, s => s.hullModeName === 'Ship', 'the sprite A/B');
-    await engine(page, e => e.dbg.cyclePlayerHull());
-    await waitForStats(page, s => s.hullModeName === 'Cube', 'back to the cube');
+    await waitForStats(page, s => s.hullModeName === 'Diamond', 'the diamond orientation');
 
-    // Drive a bank and a throttle pulse while the cube renders live — the
-    // clean-console assertion is what covers the 3D projection and the
-    // ring-restore transform in the draw path.
+    // Drive a bank while the DIAMOND renders live — the clean-console
+    // assertion is what covers its base-orientation projection.
     await engine(page, e => {
       e.input.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
       e.input.keys.add('KeyS');
@@ -337,9 +335,57 @@ test.describe('the wireframe-cube hull', () => {
     await waitForEngine(
       page,
       e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
+      'a live bank on the diamond',
+    );
+    await engine(page, e => e.input.keys.delete('KeyS'));
+
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Ship', 'the sprite A/B');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Cube', 'back to the cube');
+
+    // And a bank on the default cube too, for the same reason.
+    await engine(page, e => e.input.keys.add('KeyS'));
+    await waitForEngine(
+      page,
+      e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
       'a live bank on the cube',
     );
     await engine(page, e => e.input.keys.delete('KeyS'));
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the rotation-damping cycle', () => {
+  test('one multiplier scales both ease rates, and the ratio survives', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    /** One tick into a full strafe from level, at the current damping —
+     *  the first-tick delta IS the effective attack rate. */
+    const oneTick = () => driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 1 });
+
+    // Cycle order is Floaty / Default / Stiff / Snappy, shipped at
+    // Default — so one step lands on Stiff, and two more wrap to Floaty.
+    const atDefault = Math.abs(await oneTick());
+    await engine(page, e => e.dbg.cycleRollDamping()); // Default → Stiff
+    const atStiff = Math.abs(await oneTick());
+    await engine(page, e => e.dbg.cycleRollDamping()); // Stiff → Snappy
+    await engine(page, e => e.dbg.cycleRollDamping()); // Snappy → Floaty
+    const atFloaty = Math.abs(await oneTick());
+
+    expect(atDefault).toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * DT, 5);
+    expect(atStiff, 'Stiff doubles the attack').toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * 2 * DT, 5);
+    expect(atFloaty, 'Floaty halves it').toBeCloseTo(MAX_ANGLE * RESPONSE_RATE * 0.5 * DT, 5);
+
+    // The release scales by the SAME multiplier — the attack/release
+    // ratio is the tuned feel and every preset must keep it.
+    const outFloaty = await driveRoll(page, { facing: 0, mx: 0, my: 0, ticks: 1, start: MAX_ANGLE });
+    expect(MAX_ANGLE - outFloaty, 'Floaty release').toBeCloseTo(MAX_ANGLE * RETURN_RATE * 0.5 * DT, 5);
+
+    await engine(page, e => e.dbg.cycleRollDamping()); // Floaty → Default
+    await waitForStats(page, s => s.rollDampName === 'Default', 'the name reaches stats');
 
     watch.assertClean();
   });

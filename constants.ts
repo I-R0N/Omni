@@ -3034,17 +3034,26 @@ export function cyclePlayerRoll(): number {
 }
 
 // PLAYER HULL — what draws at the player's position (user call): a
-// WIREFRAME CUBE in place of the ship sprite, rotating for real in the
+// WIREFRAME hull in place of the ship sprite, rotating for real in the
 // three axes the player already rotates in — yaw (the facing) plus the
 // directional-tilt pitch and roll.  Where the sprite could only show tilt
-// as a cos foreshortening, the cube shows it as 3D rotation, pitch SIGN
-// included.  'Cube' is the shipped default; 'Ship' (the sprite + the
-// cos-tilt squash) stays one DBG click away as the A/B
-// (Player ▸ "Hull").
-export const PLAYER_HULL_CYCLE: ReadonlyArray<string> = ['Cube', 'Ship'] as const;
+// as a cos foreshortening, the wireframe shows it as 3D rotation, pitch
+// SIGN included.  The projection is ORTHOGRAPHIC (no perspective — user
+// call), and the cycle carries TWO base orientations plus the sprite:
+//  'Cube'    — axis-aligned: at rest a flat square whose forward edge is
+//              the NOSE FACE edge-on (the shipped default);
+//  'Diamond' — the cube stood on a corner (corner straight up at the
+//              viewer, the adjacent corner's projection dead forward):
+//              a gem-cut hexagonal silhouette with a point at the aim;
+//  'Ship'    — the sprite + the cos-tilt squash, kept as the A/B.
+// DBG Player ▸ "Hull".
+export const PLAYER_HULL_CYCLE: ReadonlyArray<string> = ['Cube', 'Diamond', 'Ship'] as const;
 let activePlayerHullIndex = 0; // Cube — the shipped default
-export function isPlayerHullCube(): boolean {
-  return activePlayerHullIndex === 0;
+export type PlayerHullMode = 'cube' | 'diamond' | 'sprite';
+export function getActivePlayerHullMode(): PlayerHullMode {
+  return activePlayerHullIndex === 0 ? 'cube'
+       : activePlayerHullIndex === 1 ? 'diamond'
+       : 'sprite';
 }
 export function getActivePlayerHullName(): string {
   return PLAYER_HULL_CYCLE[activePlayerHullIndex];
@@ -3052,6 +3061,29 @@ export function getActivePlayerHullName(): string {
 export function cyclePlayerHull(): number {
   activePlayerHullIndex = (activePlayerHullIndex + 1) % PLAYER_HULL_CYCLE.length;
   return activePlayerHullIndex;
+}
+
+// DBG rotation-damping cycle (Player ▸ "Roll damp"): one multiplier over
+// BOTH tilt ease rates (RESPONSE_RATE and RETURN_RATE together, so the
+// attack/release ratio — the tuned feel — survives every step).  Lower =
+// floatier, the hull swinging behind the hand; higher = stiffer, tracking
+// it near-instantly.
+export const PLAYER_ROLL_DAMPING_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: 'Floaty', mult: 0.5 },
+  { name: 'Default', mult: 1 },
+  { name: 'Stiff', mult: 2 },
+  { name: 'Snappy', mult: 4 },
+] as const;
+let activeRollDampingIndex = 1; // Default — the shipped feel
+export function getActiveRollDampingMult(): number {
+  return PLAYER_ROLL_DAMPING_CYCLE[activeRollDampingIndex].mult;
+}
+export function getActiveRollDampingName(): string {
+  return PLAYER_ROLL_DAMPING_CYCLE[activeRollDampingIndex].name;
+}
+export function cycleRollDamping(): number {
+  activeRollDampingIndex = (activeRollDampingIndex + 1) % PLAYER_ROLL_DAMPING_CYCLE.length;
+  return activeRollDampingIndex;
 }
 
 export const SHOOTING_STAR_CONSTANTS = {

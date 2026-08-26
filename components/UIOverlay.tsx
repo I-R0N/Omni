@@ -137,6 +137,7 @@ interface UIOverlayProps {
   onCycleSnitchSpeed?: () => void;
   onCyclePlayerRoll?: () => void;
   onCyclePlayerHull?: () => void;
+  onCycleRollDamping?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -433,6 +434,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleSnitchSpeed,
   onCyclePlayerRoll,
   onCyclePlayerHull,
+  onCycleRollDamping,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -1467,7 +1469,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Roll feel', onCyclePlayerRoll, stats.rollFeelName ?? 'Default',
                   'Directional-tilt depth preset (Off / Subtle / Default / Deep) stepping how far the hull pitches and rolls into a carved turn, lateral thrust or a throttle change — purely visual (physics, collision and aim never read it). Off levels out through the normal easing rather than snapping flat.')}
                 {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Cube',
-                  'What draws at the player\'s position. Cube (default): a wireframe cube rotating for real in yaw + the directional-tilt pitch/roll. Ship: the sprite with the cos-tilt squash, kept as the A/B.')}
+                  'What draws at the player\'s position. Cube (default): a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner (corner up at the viewer, adjacent corner forward) for a gem-cut hull. Ship: the sprite with the cos-tilt squash, kept as the A/B.')}
+                {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
+                  'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): one multiplier over both tilt ease rates, so the hull tracks the hand looser or tighter without changing the attack/release ratio.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

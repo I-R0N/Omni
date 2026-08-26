@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -706,11 +706,20 @@ export class DebugControls {
     cyclePlayerRoll();
   }
 
-  /** Cycle the player HULL (PLAYER_HULL_CYCLE): the wireframe cube (the
-   *  shipped default — real 3D rotation in yaw/pitch/roll) vs the ship
-   *  sprite + cos-tilt squash, kept as the A/B. */
+  /** Cycle the player HULL (PLAYER_HULL_CYCLE): the flat wireframe cube
+   *  (the shipped default — real 3D rotation in yaw/pitch/roll), the
+   *  corner-up DIAMOND orientation, or the ship sprite + cos-tilt squash
+   *  kept as the A/B. */
   cyclePlayerHull() {
     cyclePlayerHull();
+  }
+
+  /** Cycle the DBG rotation-damping preset (PLAYER_ROLL_DAMPING_CYCLE):
+   *  one multiplier over both tilt ease rates — Floaty / Default / Stiff /
+   *  Snappy — so how tightly the hull tracks the hand can be A/B'd in
+   *  flight. */
+  cycleRollDamping() {
+    cycleRollDamping();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
