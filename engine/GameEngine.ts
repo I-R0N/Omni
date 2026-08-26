@@ -1464,9 +1464,11 @@ export class GameEngine {
    *  axis's perpendicular — plus the TURN term — the smoothed rate the
    *  facing is swinging, scaled by throttle, the term the aim-locked
    *  schemes (touch / joystick / gamepad, where thrust is always along the
-   *  nose) actually exercise.  PITCH (longitudinal) is nose-line thrust
-   *  high-passed through a washout baseline, so throttle CHANGES pulse and
-   *  a cruise settles level.  Components are signed so reversals swing
+   *  nose) actually exercise, scaled by the CENTRIPETAL gate (bank scales
+   *  with real speed), plus the SLIP term (drift relative to the nose
+   *  holds the bank through a hard turn's slide).  PITCH (longitudinal)
+   *  is nose-line thrust directly — held throttle holds the lean, cutting
+   *  it settles level.  Components are signed so reversals swing
    *  through level instead of teleporting across it, and the signal VECTOR
    *  is magnitude-clamped so a diagonal cannot out-tilt the authored
    *  maximum.  Asymmetric rates: tilting IN tracks the hand, settling back
@@ -1474,7 +1476,6 @@ export class GameEngine {
    *  hull. */
   private _rollPrevFacing: number | null = null;
   private _rollYawRate = 0;
-  private _pitchBase = 0;
   /** Ease one tilt component toward its target with the shared attack /
    *  release asymmetry and the rest snap.  The DBG damping cycle
    *  (Player ▸ "Roll damp") scales BOTH rates together, so the tuned
@@ -1490,7 +1491,7 @@ export class GameEngine {
     return next;
   }
   private tickPlayerRoll(dt: number, moveDir: Vector2) {
-    const { YAW_GAIN, YAW_SMOOTHING, PITCH_GAIN, PITCH_WASHOUT, MAX_TILT } =
+    const { YAW_GAIN, YAW_SMOOTHING, PITCH_GAIN, SLIP_GAIN, TURN_SPEED_FLOOR, MAX_TILT } =
       PLAYER_ROLL_CONSTANTS;
     const facing = this.player.rotation;
     const cosF = Math.cos(facing);
@@ -1508,17 +1509,28 @@ export class GameEngine {
     else if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
     const rawRate = dt > 0 ? dTheta / dt : 0;
     this._rollYawRate += (rawRate - this._rollYawRate) * Math.min(1, YAW_SMOOTHING * dt);
-    // Throttle gates the turn term: carving under thrust banks, a coasting
-    // or parked nose-swing changes no acceleration and stays level.  The
-    // MINUS sign makes the two terms agree: mid-turn, thrust not yet
-    // swung to the new nose lies on the NEGATIVE perp side of it.
     const throttle = Math.min(1, Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y));
-    let sigLat = lat - YAW_GAIN * this._rollYawRate * throttle;
-    // PITCH — nose-line thrust minus its washout baseline, so a throttle
-    // STEP pulses and a held cruise settles level (see the constants note).
+    // TURN gate — CENTRIPETAL (tan(bank) ∝ v·ω): the bank of a carved
+    // turn scales with actual SPEED, floored so a low-speed turn still
+    // reads, and gated by throttle so a coasting or parked nose-swing —
+    // which curves no path — stays level.  The MINUS sign makes the turn
+    // and strafe terms agree: mid-turn, thrust not yet swung to the new
+    // nose lies on the NEGATIVE perp side of it.
+    const turnGate = throttle
+      * (TURN_SPEED_FLOOR + (1 - TURN_SPEED_FLOOR) * this.playerSpeedFraction());
+    // SLIP — the velocity's lateral component relative to the nose, under
+    // power: after a hard turn the path lags the nose and the hull stays
+    // banked into the drift until it catches up.  Same sign convention as
+    // the strafe term (thrusting and drifting the same way reinforce).
+    const vel = this.player.velocity;
+    const vLat = (vel.y * cosF - vel.x * sinF) / Math.max(1e-6, this.lastMaxSpeed);
+    const slip = SLIP_GAIN * Math.max(-1, Math.min(1, vLat)) * throttle;
+    let sigLat = lat + slip - YAW_GAIN * this._rollYawRate * turnGate;
+    // PITCH — nose-line thrust directly (the washout was removed, user
+    // call): holding the throttle holds the lean, cutting it settles
+    // level, reverse thrust leans the other way.
     const long = moveDir.x * cosF + moveDir.y * sinF;
-    this._pitchBase += (long - this._pitchBase) * Math.min(1, PITCH_WASHOUT * dt);
-    let sigLong = (long - this._pitchBase) * PITCH_GAIN;
+    let sigLong = long * PITCH_GAIN;
     // Clamp the SIGNAL VECTOR's magnitude, not each component: the tilt is
     // one direction in 360°, and clamping per-axis would let a diagonal
     // reach √2 of the authored maximum.
@@ -4743,7 +4755,6 @@ export class GameEngine {
       this.player.visualPitch = 0;
       this._rollPrevFacing = null;
       this._rollYawRate = 0;
-      this._pitchBase = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;

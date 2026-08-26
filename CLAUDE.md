@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  232 tests.  All run at
+                          anti-flake rules).  233 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -722,12 +722,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   because the aim-locked schemes — touch / joystick / gamepad, where
   the ship aims where it flies — put thrust along the nose by
   construction, so a strafe-only signal never fired there (user
-  report)) — and whose PITCH half is nose-line thrust high-passed
-  through a WASHOUT baseline (`PITCH_WASHOUT`), so a throttle change
-  pulses and a held cruise settles level (forward thrust is the default
-  state of flight and must not hold a permanent tilt; the top-down
-  projection cannot show tilt sign anyway, so the sign only keeps the
-  easing continuous).  Full signal is a full tilt (`MAX_ANGLE`; full
+  report)).  TWO PHYSICS TERMS refine the roll: the turn gate is
+  CENTRIPETAL — bank in a real turn is tan(bank) ∝ v·ω, so it scales
+  with measured speed, floored at `TURN_SPEED_FLOOR` so a standing
+  pivot still reads — and a SLIP term (`SLIP_GAIN`) reads the
+  velocity's lateral drift off the nose under power, so a hard turn
+  stays banked through its slide until the path catches up (throttle-
+  gated, keeping the "no input, no tilt" rule).  The PITCH half is
+  nose-line thrust DIRECTLY (the washout filter was removed — user
+  call): a held throttle holds the lean, cutting it settles level,
+  reverse thrust leans the other way (the cube hull shows the sign;
+  the sprite squash cannot).  Full signal is a full tilt (`MAX_ANGLE`; full
   turn rate = 1/`YAW_GAIN` rad/s), the signal VECTOR is
   magnitude-clamped so a diagonal cannot out-tilt the maximum, and no
   signal settles back to a literal 0 (asymmetric rates: attack outruns

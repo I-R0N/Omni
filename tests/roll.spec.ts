@@ -8,10 +8,13 @@
  *  aim-locked schemes (touch / joystick / gamepad) the ship aims where it
  *  flies, thrust is always along the nose, and a strafe-only signal is
  *  zero by construction (the user report that prompted it: "not noticing
- *  the roll").  The PITCH half (longitudinal) is nose-line thrust
- *  high-passed through a washout baseline: throttle CHANGES pulse, a held
- *  cruise settles level — forward thrust is the default state of flight
- *  and must not hold a permanent tilt.  Both halves are purely
+ *  the roll").  Two physics terms refine the roll: the turn gate is
+ *  CENTRIPETAL (tan(bank) ∝ v·ω — bank scales with real speed, floored),
+ *  and a SLIP term reads the velocity's drift off the nose under power,
+ *  so a hard turn stays banked through its slide.  The PITCH half
+ *  (longitudinal) is nose-line thrust directly (the washout was removed —
+ *  user call): a held throttle holds the lean, cutting it settles level,
+ *  reverse thrust leans the other way.  Both halves are purely
  *  presentational — `visualRoll` + `visualPitch` are eased angles the
  *  renderer combines into ONE tilt toward the acceleration and projects
  *  as a cos(tilt) foreshortening along it — so what is pinned here is the
@@ -27,11 +30,14 @@
  *   4. TURN TERM — carving a turn under thrust banks even with thrust
  *      locked along the nose (the aim-locked geometry), a coasting swing
  *      stays level, and the throttle gate scales rather than switches.
- *   5. PITCH — a throttle step lunges then washes out to level, cutting
- *      thrust dips the other way, pure nose-line thrust never rolls, a
- *      diagonal fires BOTH axes, and the combined tilt vector respects
- *      the authored maximum (the per-axis clamp would let a diagonal
- *      reach √2 of it).
+ *   5. PITCH — a held throttle holds the lean, cutting it settles to
+ *      literal level, reverse thrust leans the other way, pure nose-line
+ *      thrust never rolls, a diagonal fires BOTH axes, and the combined
+ *      tilt vector respects the authored maximum (a per-axis clamp would
+ *      let a diagonal reach √2 of it).
+ *   5b. PHYSICS TERMS — a standing pivot banks at the floor while a
+ *      full-speed carve banks fully (centripetal), and a powered drift
+ *      banks into the slide while a coasting one stays level (slip).
  *   6. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
@@ -67,7 +73,8 @@ function driveRoll(
     e._rollPrevFacing = null;
     e._rollYawRate = 0;
     e.player.visualPitch = 0;
-    e._pitchBase = 0;
+    e.player.velocity.x = 0;
+    e.player.velocity.y = 0;
     for (let i = 0; i < a.ticks; i++) {
       e.tickPlayerRoll(1 / 60, { x: a.mx, y: a.my });
     }
@@ -77,11 +84,14 @@ function driveRoll(
 
 /** Sweep the FACING at a constant rate with thrust locked ALONG it — the
  *  aim-locked schemes' geometry, where the strafe term is identically zero
- *  and only the turn term can bank.  Returns the peak |roll| over the
- *  sweep. */
+ *  and only the turn term can bank.  `speedFrac` pins the VELOCITY along
+ *  the facing each tick (as a fraction of the speed cap), because the
+ *  turn gate is centripetal — bank scales with real speed — and keeping
+ *  the velocity on the nose keeps the slip term silent.  Returns the peak
+ *  |roll| over the sweep. */
 function driveTurn(
   page: any,
-  o: { ratePerSec: number; throttle: number; ticks: number },
+  o: { ratePerSec: number; throttle: number; ticks: number; speedFrac: number },
 ) {
   return engine(page, (e, a: typeof o) => {
     e.player.rotation = 0;
@@ -89,11 +99,13 @@ function driveTurn(
     e._rollPrevFacing = null;
     e._rollYawRate = 0;
     e.player.visualPitch = 0;
-    e._pitchBase = 0;
     let peak = 0;
     for (let i = 0; i < a.ticks; i++) {
       e.player.rotation += a.ratePerSec / 60;
       const f = e.player.rotation;
+      const spd = a.speedFrac * e.lastMaxSpeed;
+      e.player.velocity.x = Math.cos(f) * spd;
+      e.player.velocity.y = Math.sin(f) * spd;
       e.tickPlayerRoll(1 / 60, {
         x: Math.cos(f) * a.throttle,
         y: Math.sin(f) * a.throttle,
@@ -176,26 +188,76 @@ test.describe('the turn term — the aim-locked schemes still bank', () => {
     // the facing exactly — the touch / joystick / gamepad geometry, where
     // the strafe term is identically zero — so any bank here is the turn
     // term's alone.  This is the case the user's report was about.
-    const carve = await driveTurn(page, { ratePerSec: 4, throttle: 1, ticks: 120 });
-    expect(carve, 'a full-rate carve reaches a deep bank').toBeGreaterThan(MAX_ANGLE * 0.6);
+    const carve = await driveTurn(page, { ratePerSec: 4, throttle: 1, ticks: 120, speedFrac: 1 });
+    expect(carve, 'a full-speed carve reaches a deep bank').toBeGreaterThan(MAX_ANGLE * 0.6);
 
-    // The same sweep with no thrust: a coasting nose-swing changes no
-    // acceleration, so the throttle gate must hold it level.
-    const coast = await driveTurn(page, { ratePerSec: 4, throttle: 0, ticks: 120 });
+    // The same sweep with no thrust: a coasting nose-swing curves no
+    // path, so the throttle gate must hold it level.
+    const coast = await driveTurn(page, { ratePerSec: 4, throttle: 0, ticks: 120, speedFrac: 1 });
     expect(coast, 'a coasting swing stays level').toBeLessThan(0.05);
 
     // Half throttle banks shallower than full — the gate is a scale, not a
     // switch.
-    const half = await driveTurn(page, { ratePerSec: 4, throttle: 0.5, ticks: 120 });
+    const half = await driveTurn(page, { ratePerSec: 4, throttle: 0.5, ticks: 120, speedFrac: 1 });
     expect(half).toBeGreaterThan(0.05);
     expect(half).toBeLessThan(carve);
+
+    // CENTRIPETAL (physics: tan(bank) ∝ v·ω): the same stick motion while
+    // barely moving banks at the TURN_SPEED_FLOOR, not the full carve — a
+    // pivot in place curves almost no path.
+    const pivot = await driveTurn(page, { ratePerSec: 4, throttle: 1, ticks: 120, speedFrac: 0 });
+    expect(pivot, 'a standing pivot still reads').toBeGreaterThan(0.1);
+    expect(pivot, 'but banks shallower than the full-speed carve')
+      .toBeLessThan(carve * 0.6);
 
     watch.assertClean();
   });
 });
 
-test.describe('the pitch half — throttle changes pulse, cruise settles level', () => {
-  test('a throttle step lunges then washes out, and cutting thrust dips', async ({ page }) => {
+test.describe('the slip term — the drift of a hard turn holds the bank', () => {
+  test('drifting sideways under power banks; the same drift coasting does not', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    /** Hold a fixed facing + thrust with the VELOCITY pinned per tick —
+     *  the post-hard-turn state, where the nose points one way and the
+     *  path still runs another. */
+    const drive = (mx: number, my: number, vLatFrac: number) =>
+      engine(page, (e, a: { mx: number; my: number; vf: number }) => {
+        e.player.rotation = 0;
+        e.player.visualRoll = 0;
+        e.player.visualPitch = 0;
+        e._rollPrevFacing = null;
+        e._rollYawRate = 0;
+        for (let i = 0; i < 240; i++) {
+          e.player.velocity.x = 0;
+          e.player.velocity.y = a.vf * e.lastMaxSpeed;
+          e.tickPlayerRoll(1 / 60, { x: a.mx, y: a.my });
+        }
+        return e.player.visualRoll as number;
+      }, { mx, my, vf: vLatFrac });
+
+    // Full lateral drift under nose-line thrust: the strafe term is zero
+    // and the nose is steady, so the lateral half is the slip term's
+    // alone — SLIP_GAIN (0.5), shared with the held pitch through the
+    // vector clamp, so the realized bank sits between the floor'd and
+    // unclamped values rather than at an exact figure.
+    const drift = await drive(1, 0, 1);
+    expect(Math.abs(drift), 'a powered drift banks into the slide')
+      .toBeGreaterThan(MAX_ANGLE * 0.35);
+    expect(Math.abs(drift)).toBeLessThan(MAX_ANGLE * 0.55);
+
+    // The same drift with no thrust: the throttle gate holds it level —
+    // the "no input, no tilt" rule survives the new term.
+    const coast = await drive(0, 0, 1);
+    expect(coast, 'a coasting drift stays level').toBe(0);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the pitch half — thrust holds the lean, cutting it settles', () => {
+  test('held throttle holds the lean, cutting settles to level, reverse leans back', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -205,30 +267,30 @@ test.describe('the pitch half — throttle changes pulse, cruise settles level',
       e.player.visualPitch = 0;
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
-      e._pitchBase = 0;
-      let peak = 0, dipPeak = 0;
-      // Punch the throttle straight along the nose: pure longitudinal.
-      for (let i = 0; i < 300; i++) {
-        e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
-        peak = Math.max(peak, Math.abs(e.player.visualPitch ?? 0));
-      }
-      const cruise = Math.abs(e.player.visualPitch ?? 0);
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+      // Hold the throttle straight along the nose: with the washout gone
+      // (user call), the lean CONVERGES and HOLDS rather than pulsing.
+      for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 1, y: 0 });
+      const held = e.player.visualPitch as number;
       const rollDuring = Math.abs(e.player.visualRoll ?? 0);
-      // Cut the throttle: the washout baseline is charged, so the step
-      // DOWN pulses the other way — the braking dive.
-      for (let i = 0; i < 300; i++) {
-        e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
-        dipPeak = Math.max(dipPeak, Math.abs(e.player.visualPitch ?? 0));
-      }
-      const settled = Math.abs(e.player.visualPitch ?? 0);
-      return { peak, cruise, rollDuring, dipPeak, settled };
+      // Cut the throttle: the target is exactly 0, so the lean settles to
+      // literal level through the same easing + rest snap.
+      for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+      const settled = e.player.visualPitch as number;
+      // Reverse thrust leans the OTHER way — the sign keeps the easing
+      // continuous through the reversal.
+      for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: -1, y: 0 });
+      const reversed = e.player.visualPitch as number;
+      return { held, rollDuring, settled, reversed };
     });
 
-    expect(r.peak, 'the step pulses a visible pitch').toBeGreaterThan(MAX_ANGLE * 0.3);
-    expect(r.cruise, 'a held cruise settles level — no permanent tilt').toBeLessThan(0.03);
+    expect(Math.abs(r.held), 'a held throttle holds a deep lean').toBeGreaterThan(MAX_ANGLE * 0.9);
+    expect(Math.abs(r.held), 'without overshooting the maximum').toBeLessThanOrEqual(MAX_ANGLE + 1e-9);
     expect(r.rollDuring, 'pure nose-line thrust never rolls').toBeLessThan(1e-9);
-    expect(r.dipPeak, 'cutting thrust dips').toBeGreaterThan(MAX_ANGLE * 0.3);
-    expect(r.settled, 'and settles level again').toBeLessThan(0.03);
+    expect(r.settled, 'cutting thrust settles to literal level').toBe(0);
+    expect(Math.sign(r.reversed), 'reverse thrust leans the other way').toBe(-Math.sign(r.held));
+    expect(Math.abs(r.reversed)).toBeCloseTo(Math.abs(r.held), 5);
 
     watch.assertClean();
   });
@@ -243,7 +305,8 @@ test.describe('the pitch half — throttle changes pulse, cruise settles level',
       e.player.visualPitch = 0;
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
-      e._pitchBase = 0;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
       let roll = 0, pitch = 0, maxTilt = 0;
       for (let i = 0; i < 60; i++) {
         e.tickPlayerRoll(1 / 60, { x: Math.SQRT1_2, y: Math.SQRT1_2 });
@@ -283,7 +346,8 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
       e.player.visualPitch = 0;
-      e._pitchBase = 0;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
       for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
       return e.player.visualRoll as number;
     });
@@ -296,7 +360,8 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e._rollPrevFacing = null;
       e._rollYawRate = 0;
       e.player.visualPitch = 0;
-      e._pitchBase = 0;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
       for (let i = 0; i < 300; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
       return e.player.visualRoll as number;
     });

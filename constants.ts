@@ -2971,7 +2971,7 @@ export const PLAYER_TRAIL_CONSTANTS = {
 //      is the term every aim-locked scheme actually exercises.  Coasting
 //      nose-swings stay level — no thrust, no acceleration change.
 // The ROLL pair above is half of a full 360° DIRECTIONAL TILT: the PITCH
-// half (the PITCH_* knobs below) reads changes in nose-line thrust, and the
+// half (the PITCH_* knobs below) reads nose-line thrust, and the
 // renderer combines both into ONE tilt toward the acceleration,
 // foreshortening the hull along that direction by cos(tilt) — the top-down
 // projection of a flat ship tilting — so MAX_ANGLE is authored as a real
@@ -2989,17 +2989,24 @@ export const PLAYER_ROLL_CONSTANTS = {
   // as alternating-sign single-step spikes, and averaging them toward zero
   // is what keeps a trembling mouse from fluttering the hull.
   YAW_SMOOTHING: 10,
-  // PITCH — the longitudinal half of the 360° directional tilt.  Unlike
-  // the roll, pitch keys on CHANGES in nose-line thrust (a washout
-  // filter): forward thrust is the default state of flight, so a steady
-  // cruise must settle level rather than hold a permanent nose tilt.  The
-  // signal is (instantaneous longitudinal thrust − its washout-eased
-  // baseline) × PITCH_GAIN — punching the throttle lunges the hull,
-  // cutting it dips, and the pulse decays as the baseline catches up.
+  // PITCH — the longitudinal half of the 360° directional tilt: nose-line
+  // thrust DIRECTLY (the washout filter that made a cruise settle level
+  // was removed — user call).  Holding the throttle holds the lean,
+  // cutting it settles back to level, reverse thrust leans the other way.
   PITCH_GAIN: 1.0,
-  // Per-second rate the washout baseline chases the live thrust — the
-  // inverse of roughly how long a throttle step stays visible (~0.7 s).
-  PITCH_WASHOUT: 1.5,
+  // SLIP — the sideslip term (physics: after a hard turn the velocity
+  // lags the nose, and the lateral airflow's side force keeps a real
+  // airframe banked INTO the drift until the path catches up).  The
+  // signal is the velocity's component perpendicular to the nose as a
+  // fraction of the speed cap, gated by throttle — a coasting drift
+  // stays level, matching the "no input, no tilt" rule everywhere else.
+  SLIP_GAIN: 0.5,
+  // TURN-rate gate — centripetal (physics: bank in a coordinated turn is
+  // tan(bank) ∝ v·ω, so it scales with actual SPEED, not stick
+  // deflection).  The turn term's gate is throttle × (FLOOR +
+  // (1−FLOOR)·speedFrac): a full-speed carve banks fully, a pivot in
+  // place banks at the floor — still readable, honestly shallower.
+  TURN_SPEED_FLOOR: 0.35,
   // Safety ceiling on the COMBINED tilt angle √(roll² + pitch²): past π/2
   // the cos-foreshortening goes negative and mirrors the sprite, so the
   // eased pair is scaled back under this whatever the presets get up to
