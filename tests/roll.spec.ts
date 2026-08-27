@@ -730,9 +730,37 @@ test.describe('the tilt-source A/B', () => {
       for (let i = 0; i < 30; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
       const tumblePitch = e.player.visualPitch as number;
       e.dbg.cycleTiltMode();   // back to Lean
+
+      // VEL GAIN — the sensitivity cycle multiplies the normalised
+      // signal BEFORE the clamp, so a step moves WHERE the tilt
+      // saturates, never how deep it goes.  First-tick arithmetic at a
+      // pinned drift makes each step exact (SLIP_GAIN 0.5 rides along:
+      // at gain 1× and half cruise the target is (0.5 + 0.5·0.5·0.5)
+      // = 0.625 of max; any gain-saturated case is exactly full).
+      const oneTick = (vy: number) => {
+        reset();
+        e.player.velocity.y = vy;
+        e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+        return e.player.visualRoll as number;
+      };
+      const halfAt1 = oneTick(e.lastCruiseSpeed / 2);      // gain 1×
+      e.dbg.cycleVelGain();                                 // 1× → 2×
+      const halfAt2 = oneTick(e.lastCruiseSpeed / 2);      // saturates
+      e.dbg.cycleVelGain();                                 // 2× → 4×
+      e.dbg.cycleVelGain();                                 // 4× → 10×
+      const tinyAt10 = oneTick(e.lastCruiseSpeed * 0.15);  // extreme: saturates
+      e.dbg.cycleVelGain();                                 // 10× → back to 1×
+
       e.dbg.cycleTiltSource(); // back to Thrust
-      return { coastBank, restTick, tumblePitch, cruiseFrac };
+      return { coastBank, restTick, tumblePitch, cruiseFrac, halfAt1, halfAt2, tinyAt10 };
     });
+
+    // The spring's first-tick signature at a full-strength target.
+    const base = SPRING_OMEGA ** 2 * MAX_ANGLE * DT * DT;
+    expect(r.halfAt1, 'half cruise at 1× is the un-gained 0.625 signal')
+      .toBeCloseTo(base * 0.625, 6);
+    expect(r.halfAt2, '2× saturates the same drift to full').toBeCloseTo(base, 6);
+    expect(r.tinyAt10, '10× saturates a 15%-cruise drift to full').toBeCloseTo(base, 6);
 
     expect(r.coastBank, 'a drift at real cruise speed settles a DEEP bank')
       .toBeGreaterThan(MAX_ANGLE * 0.9);
@@ -742,6 +770,7 @@ test.describe('the tilt-source A/B', () => {
     expect(Math.abs(r.tumblePitch), 'and coasting motion drives the tumble').toBeGreaterThan(0.2);
 
     await waitForStats(page, s => s.tiltSourceName === 'Thrust', 'the name reaches stats');
+    await waitForStats(page, s => s.velGainName === '1×', 'the gain name reaches stats');
 
     watch.assertClean();
   });

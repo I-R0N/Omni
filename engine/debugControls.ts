@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -744,6 +744,15 @@ export class DebugControls {
    *  Reaches BOTH tilt modes; the substitution is at the signal source. */
   cycleTiltSource() {
     cycleTiltSource();
+  }
+
+  /** Cycle the DBG velocity-gain step (VEL_GAIN_CYCLE): sensitivity of
+   *  the Velocity tilt source — the gain multiplies the cruise-normalised
+   *  signal before its clamp, so higher steps saturate the tilt at ever
+   *  lower speeds (10× = any motion reads as full).  Velocity-source
+   *  only; Thrust mode never reads it. */
+  cycleVelGain() {
+    cycleVelGain();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales

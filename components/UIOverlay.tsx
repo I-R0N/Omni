@@ -141,6 +141,7 @@ interface UIOverlayProps {
   onCycleTiltMode?: () => void;
   onCycleLeanDir?: () => void;
   onCycleTiltSource?: () => void;
+  onCycleVelGain?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -441,6 +442,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleTiltMode,
   onCycleLeanDir,
   onCycleTiltSource,
+  onCycleVelGain,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -1484,6 +1486,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'A/B for which way the hull tips in Lean mode. Default: bank INTO the acceleration, like an aircraft carving its turn. Reversed: both pitch and roll mirrored — the hull kicked back by its own thrust — and the wireframe re-bases NOSE-UP, so each shape\'s front face/vertex faces the screen at rest. Same signal, easing and clamps; Tumble is unaffected.')}
                 {ctrlRow('Tilt src', onCycleTiltSource, stats.tiltSourceName ?? 'Thrust',
                   'A/B for what drives the tilt signal, in BOTH tilt modes. Thrust (default): the input vector — no input, no tilt. Velocity: the ship\'s actual motion, normalized by its real cruise speed — a coasting drift holds its lean, a wall bounce reads on the hull, and a tumble keeps rolling as long as the ship moves. Every term downstream is unchanged.')}
+                {ctrlRow('Vel gain', onCycleVelGain, stats.velGainName ?? '1×',
+                  'Sensitivity of the Velocity tilt source (1× / 2× / 4× / 10×): multiplies the cruise-normalized velocity signal before its clamp, so higher steps reach the full tilt at ever lower speeds — 2× at half cruise, 10× on almost any motion. Saturates earlier, never tilts deeper. Thrust mode ignores it.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

@@ -1875,6 +1875,9 @@ export interface EngineStats {
   // DBG tilt-source A/B name (TILT_SOURCE_CYCLE: "Thrust" — the input
   // drives the tilt, the default — or "Velocity", the ship's motion).
   tiltSourceName?: string;
+  // DBG velocity-gain step name (VEL_GAIN_CYCLE, e.g. "1×") — the
+  // Velocity tilt source's sensitivity multiplier.
+  velGainName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */

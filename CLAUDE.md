@@ -821,7 +821,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ran all three ~3× weak in real flight (user report), since the cap
   exists for knockback overshoot and level flight never nears it.  One
   substitution at the top of `tickPlayerRoll`; every term downstream
-  is unchanged.
+  is unchanged.  `VEL_GAIN_CYCLE` (DBG Player ▸ "Vel gain": 1× / 2× /
+  4× / 10×) is the Velocity source's SENSITIVITY step — the gain
+  multiplies the cruise-normalised vector BEFORE the magnitude clamp,
+  so each step moves WHERE the tilt saturates (2× = full at half
+  cruise; 10× = almost any motion reads full), never past the authored
+  maximum.  Thrust mode never reads it.
   `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
   hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)

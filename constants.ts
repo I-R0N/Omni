@@ -3097,6 +3097,32 @@ export function cycleTiltSource(): number {
   return activeTiltSourceIndex;
 }
 
+// DBG velocity-gain cycle (Player ▸ "Vel gain"): sensitivity steps for the
+// VELOCITY tilt source only — the gain multiplies the cruise-normalised
+// velocity vector BEFORE the existing magnitude clamp, so 2× reaches full
+// tilt at half cruise speed and 10× saturates on almost any motion at all
+// (the extreme end, for A/B-ing how twitchy the hull should read).  The
+// clamp is what keeps every step safe: gain can only move WHERE the
+// signal saturates, never past the authored maximum.  Thrust mode never
+// reads it.
+export const VEL_GAIN_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: '1×',  mult: 1 },   // the shipped default — full tilt at cruise
+  { name: '2×',  mult: 2 },   // full tilt at half cruise
+  { name: '4×',  mult: 4 },   // full tilt at quarter cruise
+  { name: '10×', mult: 10 },  // extreme — any motion reads as full
+];
+let activeVelGainIndex = 0;
+export function getActiveVelGainMult(): number {
+  return VEL_GAIN_CYCLE[activeVelGainIndex].mult;
+}
+export function getActiveVelGainName(): string {
+  return VEL_GAIN_CYCLE[activeVelGainIndex].name;
+}
+export function cycleVelGain(): number {
+  activeVelGainIndex = (activeVelGainIndex + 1) % VEL_GAIN_CYCLE.length;
+  return activeVelGainIndex;
+}
+
 // DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
 // A/B-ing how deep the bank reads, cycled live from the pause debug menu.
 // Only the ANGLE varies — the response/return rates are the same feel at
