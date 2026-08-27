@@ -1456,6 +1456,17 @@ export class GameEngine {
     const speed = Math.sqrt(v.x * v.x + v.y * v.y);
     return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastMaxSpeed)));
   }
+  /** The ship's real terminal speed under held thrust (see the movement
+   *  block for the derivation) — the tilt code's velocity normaliser. */
+  private lastCruiseSpeed: number = PHYSICS_CONSTANTS.MAX_SPEED;
+  /** How close the ship is to its CRUISE speed, 0..1 — the fraction the
+   *  tilt terms read.  Separate from `playerSpeedFraction` (the cap
+   *  fraction), which the thrust trigger's resistance still reports. */
+  private playerCruiseFraction(): number {
+    const v = this.player.velocity;
+    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastCruiseSpeed)));
+  }
 
   public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
   public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
@@ -1537,7 +1548,10 @@ export class GameEngine {
     let mx = moveDir.x;
     let my = moveDir.y;
     if (getActiveTiltSource() === 'velocity') {
-      const inv = 1 / Math.max(1e-6, this.lastMaxSpeed);
+      // Normalised by the CRUISE speed, not the cap: terminal speed under
+      // held thrust is ~a third of the cap, so a cap normaliser read every
+      // real flight speed as a weak signal (user report).
+      const inv = 1 / Math.max(1e-6, this.lastCruiseSpeed);
       mx = vel.x * inv;
       my = vel.y * inv;
       const m = Math.sqrt(mx * mx + my * my);
@@ -1564,12 +1578,12 @@ export class GameEngine {
     // and strafe terms agree: mid-turn, thrust not yet swung to the new
     // nose lies on the NEGATIVE perp side of it.
     const turnGate = throttle
-      * (TURN_SPEED_FLOOR + (1 - TURN_SPEED_FLOOR) * this.playerSpeedFraction());
+      * (TURN_SPEED_FLOOR + (1 - TURN_SPEED_FLOOR) * this.playerCruiseFraction());
     // SLIP — the velocity's lateral component relative to the nose, under
     // power: after a hard turn the path lags the nose and the hull stays
     // banked into the drift until it catches up.  Same sign convention as
     // the strafe term (thrusting and drifting the same way reinforce).
-    const vLat = (vel.y * cosF - vel.x * sinF) / Math.max(1e-6, this.lastMaxSpeed);
+    const vLat = (vel.y * cosF - vel.x * sinF) / Math.max(1e-6, this.lastCruiseSpeed);
     const slip = SLIP_GAIN * Math.max(-1, Math.min(1, vLat)) * throttle;
     let sigLat = lat + slip - YAW_GAIN * this._rollYawRate * turnGate;
     // PITCH — nose-line thrust directly (the washout was removed, user
@@ -3349,6 +3363,16 @@ export class GameEngine {
     // ship is to its cap.  Read here rather than recomputed, so the number the
     // hand feels is the number the sim is enforcing.
     this.lastMaxSpeed = maxSpeed;
+    // The ship's actual TERMINAL speed under held thrust: each 60Hz tick the
+    // movement below adds `acc` and PhysicsSystem multiplies by the per-map
+    // friction f, so speed settles at acc·f/(1−f) — about a THIRD of the cap
+    // on the shipped tuning (the cap only matters for knockback overshoot).
+    // Cached for the tilt code, which normalises every velocity read by what
+    // the ship can actually REACH: dividing by the cap ran the slip term, the
+    // centripetal gate and the whole Velocity tilt source ~3× too weak
+    // (user report: "velocity effects are very weak or not showing").
+    const fr = moveConfig ? moveConfig.friction : PHYSICS_CONSTANTS.FRICTION;
+    this.lastCruiseSpeed = Math.min(maxSpeed, (acc * fr) / Math.max(1e-6, 1 - fr));
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt

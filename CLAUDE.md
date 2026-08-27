@@ -812,10 +812,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `TILT_SOURCE_CYCLE` (DBG Player ▸ "Tilt src": Thrust / Velocity) is
   the SOURCE A/B, and it reaches BOTH tilt modes: Thrust (default)
   reads the input vector — no input, no tilt — while Velocity reads
-  the ship's actual velocity normalised by the speed cap, so a
-  coasting drift holds its lean, a wall bounce reads on the hull, and
-  a tumble rolls as long as the ship moves.  One substitution at the
-  top of `tickPlayerRoll`; every term downstream is unchanged.
+  the ship's actual velocity normalised by the CRUISE speed — the real
+  terminal speed under held thrust (acc·f/(1−f), ~a third of the cap;
+  `lastCruiseSpeed`, cached in the movement block) — so a coasting
+  drift holds its lean, a wall bounce reads on the hull, and a tumble
+  rolls as long as the ship moves.  The slip term and the centripetal
+  gate read the SAME cruise normaliser: dividing velocity by the cap
+  ran all three ~3× weak in real flight (user report), since the cap
+  exists for knockback overshoot and level flight never nears it.  One
+  substitution at the top of `tickPlayerRoll`; every term downstream
+  is unchanged.
   `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
   hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)

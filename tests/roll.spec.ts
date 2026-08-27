@@ -705,10 +705,16 @@ test.describe('the tilt-source A/B', () => {
       // velocity source.  The exact case the slip test pins to literal 0
       // under the Thrust default, so together the two tests prove the
       // A/B is a real behavioural flip rather than a renamed knob.
+      // Pinned at the ship's real CRUISE speed, not the cap: the signal
+      // must read FULL-strength at speeds the ship actually reaches
+      // (normalising by the cap ran it ~3× weak — user report), so this
+      // drift must settle a DEEP bank, and the normaliser itself must
+      // sit well under the cap or it has regressed to the cap.
       reset();
-      e.player.velocity.y = e.lastMaxSpeed;
-      for (let i = 0; i < 30; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+      e.player.velocity.y = e.lastCruiseSpeed;
+      for (let i = 0; i < 240; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
       const coastBank = e.player.visualRoll as number;
+      const cruiseFrac = e.lastCruiseSpeed / e.lastMaxSpeed;
 
       // Full thrust from a standstill: velocity is zero, so the first
       // tick moves NOTHING — the input stopped being the signal.
@@ -720,15 +726,18 @@ test.describe('the tilt-source A/B', () => {
       // the hull rolling — the source reaches both tilt modes.
       e.dbg.cycleTiltMode(); // Lean → Tumble
       reset();
-      e.player.velocity.x = e.lastMaxSpeed;
+      e.player.velocity.x = e.lastCruiseSpeed;
       for (let i = 0; i < 30; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
       const tumblePitch = e.player.visualPitch as number;
       e.dbg.cycleTiltMode();   // back to Lean
       e.dbg.cycleTiltSource(); // back to Thrust
-      return { coastBank, restTick, tumblePitch };
+      return { coastBank, restTick, tumblePitch, cruiseFrac };
     });
 
-    expect(r.coastBank, 'a coasting drift banks under the velocity source').toBeGreaterThan(0.3);
+    expect(r.coastBank, 'a drift at real cruise speed settles a DEEP bank')
+      .toBeGreaterThan(MAX_ANGLE * 0.9);
+    expect(r.cruiseFrac, 'the normaliser is the terminal speed, well under the cap')
+      .toBeLessThan(0.5);
     expect(r.restTick, 'thrust at rest moves nothing — velocity is the signal now').toBe(0);
     expect(Math.abs(r.tumblePitch), 'and coasting motion drives the tumble').toBeGreaterThan(0.2);
 
