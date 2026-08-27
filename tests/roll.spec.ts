@@ -658,6 +658,24 @@ test.describe('the lean-direction A/B', () => {
     });
     expect(tumbleEarly, 'Tumble keeps its own direction under Reversed').toBeLessThan(0);
 
+    // And LIVE under Reversed: the wireframe RE-BASES nose-up (the nose
+    // feature faces the viewer at rest — user call) — render banked
+    // frames so the clean-console assertion covers the re-based path.
+    await engine(page, e => {
+      e.dbg.cycleLeanDir(); // Default → Reversed
+      e.input.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
+      e.input.keys.add('KeyS');
+    });
+    await waitForEngine(
+      page,
+      e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
+      'a live reversed bank on the nose-up hull',
+    );
+    await engine(page, e => {
+      e.input.keys.delete('KeyS');
+      e.dbg.cycleLeanDir(); // back to Default
+    });
+
     await waitForStats(page, s => s.leanDirName === 'Default', 'the name reaches stats');
 
     watch.assertClean();

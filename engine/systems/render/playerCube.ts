@@ -34,6 +34,11 @@
  *     vertices); a degree-4 axis vertex is the nose, aim = its four
  *     edges.
  *
+ *  Under the REVERSED lean direction (DBG "Lean dir") every shape is
+ *  RE-BASED nose-up (user call): the nose feature faces the VIEWER at
+ *  rest instead of the aim — a +90° pitch of the geometry alone, applied
+ *  before the dynamic roll/pitch so both keep acting in the travel frame.
+ *
  *  Two legibility rules shared by all: DEPTH is cued by alpha (nearer
  *  edges brighter), and in TUMBLE tilt mode the aim marker HIDES (a
  *  marker spinning with the hull reads as noise) and a small fixed
@@ -227,6 +232,7 @@ export function drawPlayerCube(
   entity: GameEntity,
   mode: PlayerHullMode,
   tumble: boolean,
+  noseUp: boolean,
 ) {
   const def = HULL_DEFS[mode] ?? CUBE;
   const maxDim = Math.max(entity.size.x, entity.size.y);
@@ -239,9 +245,19 @@ export function drawPlayerCube(
   const nE = def.ea.length;
 
   for (let i = 0; i < nV; i++) {
-    const x = def.vx[i] * R;
+    let x = def.vx[i] * R;
     const y = def.vy[i] * R;
-    const z = def.vz[i] * R;
+    let z = def.vz[i] * R;
+    // NOSE-UP re-base (user call, rides the Reversed lean direction): the
+    // shape stands with its nose FEATURE facing the VIEWER at rest —
+    // (x,y,z) → (−z,y,x), a +90° pitch of the GEOMETRY only, applied
+    // before the dynamic rotations so roll and pitch keep acting in the
+    // travel frame (bank still turns about the travel axis).
+    if (noseUp) {
+      const t = x;
+      x = -z;
+      z = t;
+    }
     // Rx(roll) about the nose axis…
     const y1 = y * cr - z * sr;
     const z1 = y * sr + z * cr;

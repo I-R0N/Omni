@@ -804,7 +804,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   LEAN mode — one sign over both spring targets, so Reversed tips the
   hull AWAY from the acceleration (nose rising under throttle) with
   the same signal, easing and clamps; deliberately lean-only, since
-  Tumble's roll-with-the-travel sign was its own user call.
+  Tumble's roll-with-the-travel sign was its own user call.  Under
+  Reversed the wireframe hulls also RE-BASE NOSE-UP (user call): the
+  nose feature faces the VIEWER at rest instead of the aim — a +90°
+  pitch of the geometry alone inside `drawPlayerCube`, applied before
+  the dynamic roll/pitch so both keep acting in the travel frame.
   `TILT_SOURCE_CYCLE` (DBG Player ▸ "Tilt src": Thrust / Velocity) is
   the SOURCE A/B, and it reaches BOTH tilt modes: Thrust (default)
   reads the input vector — no input, no tilt — while Velocity reads
