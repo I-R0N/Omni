@@ -50,6 +50,10 @@
  *   5d. LEAN DIR — the DBG A/B that negates both axes: one sign over the
  *      signal vector, so each axis's first tick mirrors EXACTLY, and
  *      Tumble deliberately keeps its own direction.
+ *   5e. TILT SOURCE — the DBG A/B swapping what drives the signal:
+ *      Thrust (default — no input, no tilt) vs Velocity (the ship's
+ *      motion — a coasting drift banks, thrust at rest is silent, and
+ *      coasting motion keeps a tumble rolling).
  *   6. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
@@ -655,6 +659,62 @@ test.describe('the lean-direction A/B', () => {
     expect(tumbleEarly, 'Tumble keeps its own direction under Reversed').toBeLessThan(0);
 
     await waitForStats(page, s => s.leanDirName === 'Default', 'the name reaches stats');
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the tilt-source A/B', () => {
+  test('Velocity leans with motion: a coasting drift banks, thrust at rest is silent', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const r = await engine(page, e => {
+      const reset = () => {
+        e.player.rotation = 0;
+        e.player.visualRoll = 0;
+        e.player.visualPitch = 0;
+        e._rollPrevFacing = null;
+        e._rollYawRate = 0;
+        e._rollVel = 0;
+        e._pitchVel = 0;
+        e.player.velocity.x = 0;
+        e.player.velocity.y = 0;
+      };
+      e.dbg.cycleTiltSource(); // Thrust → Velocity
+
+      // A coasting sideways drift — ZERO input — banks under the
+      // velocity source.  The exact case the slip test pins to literal 0
+      // under the Thrust default, so together the two tests prove the
+      // A/B is a real behavioural flip rather than a renamed knob.
+      reset();
+      e.player.velocity.y = e.lastMaxSpeed;
+      for (let i = 0; i < 30; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+      const coastBank = e.player.visualRoll as number;
+
+      // Full thrust from a standstill: velocity is zero, so the first
+      // tick moves NOTHING — the input stopped being the signal.
+      reset();
+      e.tickPlayerRoll(1 / 60, { x: 0, y: 1 });
+      const restTick = e.player.visualRoll as number;
+
+      // TUMBLE under the velocity source: coasting motion alone keeps
+      // the hull rolling — the source reaches both tilt modes.
+      e.dbg.cycleTiltMode(); // Lean → Tumble
+      reset();
+      e.player.velocity.x = e.lastMaxSpeed;
+      for (let i = 0; i < 30; i++) e.tickPlayerRoll(1 / 60, { x: 0, y: 0 });
+      const tumblePitch = e.player.visualPitch as number;
+      e.dbg.cycleTiltMode();   // back to Lean
+      e.dbg.cycleTiltSource(); // back to Thrust
+      return { coastBank, restTick, tumblePitch };
+    });
+
+    expect(r.coastBank, 'a coasting drift banks under the velocity source').toBeGreaterThan(0.3);
+    expect(r.restTick, 'thrust at rest moves nothing — velocity is the signal now').toBe(0);
+    expect(Math.abs(r.tumblePitch), 'and coasting motion drives the tumble').toBeGreaterThan(0.2);
+
+    await waitForStats(page, s => s.tiltSourceName === 'Thrust', 'the name reaches stats');
 
     watch.assertClean();
   });

@@ -1872,6 +1872,9 @@ export interface EngineStats {
   // DBG lean-direction A/B name (LEAN_DIR_CYCLE: "Default" — tilt into
   // the acceleration — or "Reversed").
   leanDirName?: string;
+  // DBG tilt-source A/B name (TILT_SOURCE_CYCLE: "Thrust" — the input
+  // drives the tilt, the default — or "Velocity", the ship's motion).
+  tiltSourceName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */

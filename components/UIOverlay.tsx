@@ -140,6 +140,7 @@ interface UIOverlayProps {
   onCycleRollDamping?: () => void;
   onCycleTiltMode?: () => void;
   onCycleLeanDir?: () => void;
+  onCycleTiltSource?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -439,6 +440,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleRollDamping,
   onCycleTiltMode,
   onCycleLeanDir,
+  onCycleTiltSource,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -1480,6 +1482,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead — the hull keeps rolling with its travel about the axis perpendicular to the thrust and freezes where it stops; the white aim marker hides and a fixed chevron reticle ahead of the hull carries the aim.')}
                 {ctrlRow('Lean dir', onCycleLeanDir, stats.leanDirName ?? 'Default',
                   'A/B for which way the hull tips in Lean mode. Default: bank INTO the acceleration, like an aircraft carving its turn. Reversed: both pitch and roll mirrored — the hull kicked back by its own thrust, nose rising under throttle. Same signal, easing and clamps; Tumble is unaffected.')}
+                {ctrlRow('Tilt src', onCycleTiltSource, stats.tiltSourceName ?? 'Thrust',
+                  'A/B for what drives the tilt signal, in BOTH tilt modes. Thrust (default): the input vector — no input, no tilt. Velocity: the ship\'s actual motion, normalized by the speed cap — a coasting drift holds its lean, a wall bounce reads on the hull, and a tumble keeps rolling as long as the ship moves. Every term downstream is unchanged.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}

@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -736,6 +736,14 @@ export class DebugControls {
    *  Lean-mode only; Tumble's direction is its own call. */
   cycleLeanDir() {
     cycleLeanDir();
+  }
+
+  /** Cycle the DBG tilt source A/B (TILT_SOURCE_CYCLE): Thrust (the
+   *  input drives the tilt — no input, no tilt) vs Velocity (the ship's
+   *  actual motion drives it — a coasting drift holds its lean).
+   *  Reaches BOTH tilt modes; the substitution is at the signal source. */
+  cycleTiltSource() {
+    cycleTiltSource();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales

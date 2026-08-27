@@ -3076,6 +3076,27 @@ export function cycleLeanDir(): number {
   return activeLeanDirIndex;
 }
 
+// DBG tilt-source cycle (Player ▸ "Tilt src"): what DRIVES the tilt
+// signal, in BOTH tilt modes.  'Thrust' (default) reads the input vector
+// — no input, no tilt, the shipped rule.  'Velocity' reads the ship's
+// actual velocity normalised by the speed cap: the hull leans with its
+// MOTION, so a coasting drift holds its lean, a wall bounce reads on the
+// hull, and a tumble keeps rolling as long as the ship is moving.  One
+// substitution at the source — every term downstream (strafe, throttle
+// gate, slip, pitch) is unchanged, so the A/B compares the source alone.
+export const TILT_SOURCE_CYCLE: ReadonlyArray<string> = ['Thrust', 'Velocity'] as const;
+let activeTiltSourceIndex = 0; // Thrust — the shipped default
+export function getActiveTiltSource(): 'thrust' | 'velocity' {
+  return activeTiltSourceIndex === 0 ? 'thrust' : 'velocity';
+}
+export function getActiveTiltSourceName(): string {
+  return TILT_SOURCE_CYCLE[activeTiltSourceIndex];
+}
+export function cycleTiltSource(): number {
+  activeTiltSourceIndex = (activeTiltSourceIndex + 1) % TILT_SOURCE_CYCLE.length;
+  return activeTiltSourceIndex;
+}
+
 // DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
 // A/B-ing how deep the bank reads, cycled live from the pause debug menu.
 // Only the ANGLE varies — the response/return rates are the same feel at

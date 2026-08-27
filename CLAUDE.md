@@ -59,7 +59,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  236 tests.  All run at
+                          anti-flake rules).  237 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -805,6 +805,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   hull AWAY from the acceleration (nose rising under throttle) with
   the same signal, easing and clamps; deliberately lean-only, since
   Tumble's roll-with-the-travel sign was its own user call.
+  `TILT_SOURCE_CYCLE` (DBG Player ▸ "Tilt src": Thrust / Velocity) is
+  the SOURCE A/B, and it reaches BOTH tilt modes: Thrust (default)
+  reads the input vector — no input, no tilt — while Velocity reads
+  the ship's actual velocity normalised by the speed cap, so a
+  coasting drift holds its lean, a wall bounce reads on the hull, and
+  a tumble rolls as long as the ship moves.  One substitution at the
+  top of `tickPlayerRoll`; every term downstream is unchanged.
   `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
   hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
