@@ -11,6 +11,7 @@ import {
   randomPlasticShardShade,
   getActiveShatterGraceDelay,
   getActiveFractureMode,
+  GLASS_SHARD_HP,
   METAL_ASSEMBLY,
   METAL_BREAK_SHARDS_PER_TIER,
   rockHitCeiling,
@@ -361,8 +362,8 @@ export class DropSystem {
         rotationSpeed:  (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
         color:          '#b4e6fd',   // blue-white tile hue
         active:         true,
-        health:         1,
-        maxHealth:      1,
+        health:         GLASS_SHARD_HP, // V9 damage layer
+        maxHealth:      GLASS_SHARD_HP,
         mass:           SHARD_VARIANTS['glass-shard'].spawn.sizeToMass(size),
         polygonPoints:  pts,
         // Let the debris scatter before the overlap-collapse pass can

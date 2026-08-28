@@ -35,6 +35,7 @@ import {
   METAL_MAX_DENSITY_TIER,
   getActiveShatterGraceDelay,
   getActiveFractureMode,
+  GLASS_SHARD_HP,
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
   NEBULA_CONDENSE_STALL_BONDS,
@@ -680,6 +681,7 @@ export class ShardSystem {
     entity.health = entity.maxHealth;
     entity.active = true;
     entity.regenProgress = undefined;
+    entity.deathDispatched = undefined; // revived — killable again (V9)
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +
@@ -863,6 +865,8 @@ export class ShardSystem {
         // voronoi routing (V5: plastic-tile children keep their 24-HP
         // dent life, decoupled from the tile's brittle face).
         hp = parentVariant.dent.shardHealth;
+      } else if (childVariant.id === 'glass-shard') {
+        hp = GLASS_SHARD_HP; // V9 damage layer — 2 blaster hits
       } else {
         const baseHp = newSize > 30 ? 2 : 1;
         hp = densityTier !== undefined
@@ -980,7 +984,9 @@ export class ShardSystem {
     }
     const hp = childVariant.id === 'rock-shard'
       ? rockHitCeiling(newSize, densityTier)
-      : (newSize > 30 ? 2 : 1);
+      : childVariant.id === 'glass-shard'
+        ? GLASS_SHARD_HP
+        : (newSize > 30 ? 2 : 1);
 
     const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
     const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
@@ -1290,12 +1296,19 @@ export class ShardSystem {
         // hit ceiling (ROCK_BREAK), not a flat HP.
         hp = rockHitCeiling(newSize, densityTier);
       } else {
-        // glass / plastic / metal debris keep the original brittle 1-2 HP,
-        // gently scaled by density (sqrt) when condensed.
-        const baseHp = newSize > 30 ? 2 : 1;
-        hp = densityTier !== undefined
-          ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
-          : baseHp;
+        // plastic / metal debris keep the original brittle 1-2 HP,
+        // gently scaled by density (sqrt) when condensed; glass carries
+        // the V9 damage layer in BOTH fracture modes (it is tile/shard
+        // durability, not fracture geometry, so it is not part of the
+        // A/B).
+        if (childVariant.id === 'glass-shard') {
+          hp = GLASS_SHARD_HP;
+        } else {
+          const baseHp = newSize > 30 ? 2 : 1;
+          hp = densityTier !== undefined
+            ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
+            : baseHp;
+        }
       }
 
       let scatterAngle: number;
@@ -2550,8 +2563,8 @@ export class ShardSystem {
         rotationSpeed: (Math.random() - 0.5) * 2,
         color:         variant === 'plastic-shard' ? randomPlasticShardShade() : COLORS.STRUCTURE,
         active:        true,
-        health:        1,
-        maxHealth:     1,
+        health:        variant === 'glass-shard' ? GLASS_SHARD_HP : 1,
+        maxHealth:     variant === 'glass-shard' ? GLASS_SHARD_HP : 1,
         polygonPoints: points,
         mass,
         collapseGraceTimer: getActiveShatterGraceDelay(),

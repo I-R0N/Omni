@@ -1296,6 +1296,17 @@ export interface GameEntity {
   // stable.  Derived from fractureCells; cleared wherever it is.
   fractureEdges?: import('./engine/systems/fracture').FractureEdge[];
 
+  // Death-dispatch re-entry guard for STRUCTURE entities (V9).  The
+  // damage-feedback hook (onDamage → progressFracture) can route an
+  // entity through handleEntityDeath MID-HIT via the min-remainder
+  // rule; the outer damage path then sees health <= 0 and raises
+  // onDeath a second time — and with the decomposition cached, the
+  // second shatter spawned an exact duplicate of every fragment.
+  // Set by handleEntityDeath's STRUCTURE branch on first dispatch;
+  // cleared by ShardSystem.completeRegen (regen REUSES the entity
+  // object, so a revived tile must be killable again).
+  deathDispatched?: boolean;
+
   // Polygon area at the FIRST partial-fracture detach (V4) — the
   // baseline the min-remainder death rule measures against
   // (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Never cleared: cumulative

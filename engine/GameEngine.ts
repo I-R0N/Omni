@@ -2948,6 +2948,18 @@ export class GameEngine {
       // 40-fragment shatter to one heavier sound instead of 40 thin ones.
       // Resolved ONCE and reused for the burst below, so a class's look and
       // its voice come from a single classification.
+      // STRUCTURE deaths are IDEMPOTENT (V9).  progressFracture can kill
+      // an entity from INSIDE the damage-feedback hook (min-remainder),
+      // after which the outer damage path still sees health <= 0 and
+      // raises onDeath again — the cached decomposition then spawned an
+      // exact duplicate of every fragment (user report: large rocks
+      // releasing doubled shards).  Enemies/player already guard via
+      // isExploding; structures get an explicit stamp, cleared on regen
+      // revival (completeRegen reuses the entity object).
+      if (entity.type === EntityType.STRUCTURE) {
+          if (entity.deathDispatched === true) return;
+          entity.deathDispatched = true;
+      }
       const death = entity.isExploding ? { fx: null, sfx: null } : this.deathFx(entity);
       if (death.sfx) {
           // AMBIENT shard breaks (shard-on-shard, shard-on-tile) are

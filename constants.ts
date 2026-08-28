@@ -3718,7 +3718,10 @@ export const STRUCTURE_CONSTANTS = {
 // take damage and never regenerate — they're permanent walls.
 export const STRUCTURE_VARIANTS = {
   glass: {
-    health: 1,
+    // V9 damage layer (user call): glass survives multiple base Blaster
+    // hits (damage 4) and shows its fracture pattern as cracks between
+    // them — 12 HP = 3 blaster hits; heavier weapons still one-shot.
+    health: 12,
     mass: Infinity,
     indestructible: false,
     sprite: ASSETS.HEX_STRUCTURE,
@@ -3891,7 +3894,17 @@ export const MATERIAL_DAMAGE_CRACKS = {
   // Metal tiles (24 HP) + metal composites: tough, so cracks accrue slowly —
   // first split after ~5 hits, capped at 5 so even a dense block stays read.
   metal: { freq: 5,   cap: 5 },
+  // Glass (V9 damage layer): one crack step per base Blaster hit (damage
+  // 4 against the 12-HP tile / 8-HP shard), so the fracture pattern
+  // reveals across the pane's short life.
+  glass: { freq: 4, cap: 3 },
 } as const;
+
+// Glass-shard durability (V9 damage layer) — 2 base Blaster hits.  Wired
+// at every glass-shard spawn site (spawnGlassShards debris, snap debris,
+// voronoi + powerlaw shatter children); the tile-face HP lives in
+// STRUCTURE_VARIANTS.glass.health.
+export const GLASS_SHARD_HP = 8;
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
@@ -8260,10 +8273,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // creation goes away with the cells).  breakShards stays as the DBG
     // 'legacy' A/B config until V7.
     fracture: {
+      // V9: the glass-like radial pattern (user call) — more cells,
+      // crowded toward the impact.
       siteCountMin: 5,
-      siteCountMax: 9,
-      sizePerSite: 9,
-      impactBias: 0.5,
+      siteCountMax: 12,
+      sizePerSite: 7,
+      impactBias: 0.75,
       radialSpeed: 1.4,
       // V8: hits highlight the tile's cell boundaries; each piece whose
       // boundary completes breaks off, and the hit ceiling breaks the
@@ -8372,10 +8387,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // Site count ≈ the legacy rock count mapping (max(2, size/40),
       // cap 30), raised to mergeCount for composed boulders — so the
       // fragment-count REBALANCE at V2 is zero for rock-shard.
-      siteCountMin: 2,
+      // V9 (user call: rock should fracture like glass — the radial
+      // voronoi look, not big angular chunks): denser sites, crowded
+      // toward the impact.  sizePerSite 40 → 22 also gives mid-size
+      // rocks enough edges for the progressive chip-off to read.
+      siteCountMin: 3,
       siteCountMax: 30,
-      sizePerSite: 40,
-      impactBias: 0.5,
+      sizePerSite: 22,
+      impactBias: 0.75,
       radialSpeed: 1.0,
       // V8: the pattern is applied once at first damage; boundaries
       // highlight with each hit and a fully-highlighted piece breaks
@@ -8432,8 +8451,20 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
       defaultOutcome: 'compose',
     },
+    // V9: glass-shards join voronoi so the cracks their damage layer
+    // shows (GLASS_SHARD_HP = 2 blaster hits) are the exact seams the
+    // shard breaks into — a pattern that lied about the break is the
+    // defect this gauntlet exists to remove.  Powerlaw fields stay as
+    // the DBG legacy path.
+    fracture: {
+      siteCountMin: 2,
+      siteCountMax: 6,
+      sizePerSite: 8,
+      impactBias: 0.75,
+      radialSpeed: 1.0,
+    },
     shatter: {
-      kind: 'powerlaw',
+      kind: 'voronoi',
       style: 'scatter',
       countMin: 2, countMax: 5,
       alphaMin: 0.4, alphaMax: 2.0,

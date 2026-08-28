@@ -136,6 +136,13 @@ export const METAL_CRACK_STYLE: CrackStyle = {
     scorchRgb: '8,11,18', scorchBase: 0.10, scorchGain: 0.30,
     crackColor: 'rgba(2,6,12,0.55)', crackWidth: 1.1, glint: false,
 };
+// Glass (V9 damage layer): BRIGHT hairlines, not dark ones — a crack in
+// glass catches the light, and a dark stroke on a translucent pane reads
+// as dirt.  Near-zero scorch: glass doesn't char, the pane just webs.
+export const GLASS_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '148,163,184', scorchBase: 0.03, scorchGain: 0.08,
+    crackColor: 'rgba(224,242,254,0.85)', crackWidth: 1.0, glint: false,
+};
 
 // Stable [0,1000) per-entity seed for the crack overlay, lazily derived
 // from the entity id (same id-hash the enemy core-pulse uses for

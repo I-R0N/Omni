@@ -19,9 +19,11 @@ import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, STATIC_TILE_STAMPS_PER_FRAME, SPRITE_CONSTANTS, COLORS, ASSETS,
+    MATERIAL_DAMAGE_CRACKS,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
-import { shiftX, shiftY } from './drawUtils';
+import { shiftX, shiftY, drawFractureCracks, GLASS_CRACK_STYLE } from './drawUtils';
+import { ensureFractureEdges, fractureRevealedEdgeCount } from '../fractureCache';
 
 /** Upper bound on either dimension of the offscreen cache canvas.  Lived as
  *  a private readonly on `RenderSystem`; the cache is its only reader, so it
@@ -94,6 +96,36 @@ function stampHexSpriteTileToCache(r: RenderSystem, cx: CanvasRenderingContext2D
     if (alpha !== 1) cx.globalAlpha = alpha;
     cx.drawImage(baseSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
     if (alpha !== 1) cx.globalAlpha = 1;
+    // Glass damage layer (V9): bake the revealed fracture edges into the
+    // stamp so a damaged pane keeps its webbing on the cached path too
+    // (damage flips _staticCached, so every HP change re-stamps).  In
+    // the current build the placeholder sprite keeps glass on the vector
+    // slow path, which draws the same overlay live — this is the
+    // sprite-present future's correctness.
+    if (e.shardVariant === 'glass-tile'
+        && (e.health ?? 0) < (e.maxHealth ?? 0)
+        && e.polygonPoints !== undefined && e.polygonPoints.length >= 3) {
+        const edges = ensureFractureEdges(e);
+        if (edges !== null && edges.length > 0) {
+            const upTo = fractureRevealedEdgeCount(e, edges.length, MATERIAL_DAMAGE_CRACKS.glass.freq);
+            if (upTo > 0) {
+                const maxHp = e.maxHealth ?? 1;
+                const dmgFrac = Math.min(1, Math.max(0, 1 - (e.health ?? maxHp) / maxHp));
+                cx.save();
+                cx.translate(wx, wy);
+                cx.scale(s, s);
+                cx.rotate(e.rotation);
+                cx.beginPath();
+                const pts = e.polygonPoints;
+                cx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) cx.lineTo(pts[i].x, pts[i].y);
+                cx.closePath();
+                cx.clip();
+                drawFractureCracks(cx, edges, upTo, maxDim * 0.5, dmgFrac, GLASS_CRACK_STYLE);
+                cx.restore();
+            }
+        }
+    }
     captureStampPolyOnce(e);
     e._staticCached = true;
     r._staticTileCacheSet.add(e);

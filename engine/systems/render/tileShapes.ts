@@ -41,7 +41,7 @@ import {
 import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01,
-         CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, roundedPolyPath, drawFractureCracks } from './drawUtils';
+         CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, roundedPolyPath, drawFractureCracks, GLASS_CRACK_STYLE } from './drawUtils';
 import { ensureFractureEdges, fractureRevealedEdgeCount } from '../fractureCache';
 
 /**
@@ -613,6 +613,18 @@ export function drawTileShape(
             ctx.drawImage(rs.getSpecularBitmap(), -15, -17);
         }
 
+        // Glass damage layer (V9): the fracture pattern webs across the
+        // pane as HP falls — bright hairlines along the cell boundaries
+        // the pane will actually break into.
+        if (entity.shardVariant === 'glass-tile') {
+            const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+            overlayMaterialCracks(
+                ctx, entity, rr, buildPath,
+                GLASS_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.glass,
+                camera.zoom,
+            );
+        }
+
         // Indestructible-tile lighting — the fill-only warm-white
         // radial bloom (no edge stroke), painted last.  Glass-tile
         // uses its own layer 2b above instead.
@@ -1036,6 +1048,19 @@ export function drawTileShape(
             ctx.strokeStyle = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},0.85)`;
             ctx.lineWidth   = isFlash ? 2.5 : 1.5;
             ctx.stroke();
+
+            // Glass damage layer (V9) — same webbing as the tile:
+            // glass-shards carry their own fracture block, so these are
+            // the exact cell seams the shard breaks into.
+            ctx.globalAlpha = fadeAlpha;
+            {
+                const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+                overlayMaterialCracks(
+                    ctx, entity, rr, buildPath,
+                    GLASS_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.glass,
+                    camera.zoom,
+                );
+            }
 
         } else {
             // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay

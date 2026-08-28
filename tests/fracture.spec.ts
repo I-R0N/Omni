@@ -324,11 +324,11 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
     });
 
     expect(r.voronoi.dead).toBe(true);
-    // fracture: siteCountMin 5 (a 42px hex maps to 5 sites); sliver
+    // fracture: a 42px hex maps to ~6 sites (sizePerSite 7, clamp 5-12); sliver
     // retirement may retire a couple, never below 2; cells can exceed
     // sites only on a concave parent, which a hex is not.
     expect(r.voronoi.count).toBeGreaterThanOrEqual(3);
-    expect(r.voronoi.count).toBeLessThanOrEqual(9);
+    expect(r.voronoi.count).toBeLessThanOrEqual(12);
     // Legacy: exactly the 3 breakShards rock-tile ships with.
     expect(r.legacy.dead).toBe(true);
     expect(r.legacy.count).toBe(3);
@@ -638,6 +638,136 @@ test.describe('partial fracture (V4)', () => {
     // damage read; legacy keeps the shipped dent.
     expect(r.movedVoronoi).toBe(false);
     expect(r.movedLegacy).toBe(true);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('death is dispatched once (V9 regression)', () => {
+  test('a mid-hit min-remainder death does not double-shatter into duplicate fragments', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const fr = (window as any).__omniFracture;
+      const ents = e.currentMap.entities;
+      const w = 42;
+      const pts: any[] = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+      }
+      // Full health, 2-hit ceiling: the FIRST hit never triggers the
+      // probabilistic rock break (its chance is 0 at one hit taken), so
+      // the kill can only come from progressFracture's min-remainder
+      // death INSIDE the damage hook — the exact mid-hit shape the
+      // double-dispatch bug needs (verified: with the guard disabled
+      // this scenario yields 2 dispatches and an exact duplicate of
+      // every fragment).
+      const tile: any = {
+        id: 'v9_dup_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
+        position: { x: 4200, y: 2600 }, velocity: { x: 0, y: 0 }, rotation: 0,
+        size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
+        health: 2, maxHealth: 2, polygonPoints: pts,
+      };
+      ents.push(tile);
+      tile.lastImpactVelocity = { x: -9, y: 0 };
+      // The min-remainder trip: any splice lands under the floor.
+      tile.fractureOriginalArea = fr.polygonArea(pts) * 5;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      // REAL projectile kill path: onDamage (progressFracture -> death)
+      // runs BEFORE the outer health<=0 block — the exact double-dispatch
+      // shape of the bug.
+      e.physics.resolveCollision(
+        {
+          id: 'v9_shell', type: 'PROJECTILE',
+          position: { x: tile.position.x + w * 0.5 + 4, y: tile.position.y },
+          velocity: { x: -900, y: 0 }, rotation: Math.PI,
+          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+          damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+        },
+        tile, { x: 0, y: 0 },
+        // The REAL damage-feedback hook — the chip/progressFracture site
+        // lives inside it, and the bug was exactly its death racing the
+        // outer health<=0 dispatch.
+        e.spawnDamageText.bind(e),
+        e.handleEntityDeath,
+      );
+      const children = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      // Duplicate detector: under the bug every fragment spawned twice at
+      // the same cell centroid.  Quantise positions and count collisions.
+      const seen = new Set<string>();
+      let dupes = 0;
+      for (const c of children) {
+        const key = Math.round(c.position.x) + ',' + Math.round(c.position.y);
+        if (seen.has(key)) dupes++;
+        seen.add(key);
+      }
+      return { died: tile.active === false, childCount: children.length, dupes };
+    });
+
+    expect(r.died).toBe(true);
+    expect(r.childCount).toBeGreaterThanOrEqual(2);
+    // The bug spawned an exact overlapping duplicate of EVERY fragment.
+    expect(r.dupes).toBe(0);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('the glass damage layer (V9)', () => {
+  test('a real glass tile survives base blaster hits, webs with cracks, and its shards carry the shard HP', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'glass-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no glass tile on the glass field');
+      const shoot = (dmg: number) => {
+        e.physics.resolveCollision(
+          {
+            id: 'v9_blaster_' + Math.random(), type: 'PROJECTILE',
+            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: dmg, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
+        );
+      };
+      const maxHp = t.maxHealth;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      shoot(4); // one base blaster hit
+      const afterOne = { alive: t.active === true, health: t.health };
+      shoot(4);
+      const afterTwo = { alive: t.active === true, health: t.health };
+      shoot(4); // third hit — the pane goes
+      const dead = t.active === false;
+      const children = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'glass-shard' && x.mass !== Infinity);
+      return {
+        maxHp, afterOne, afterTwo, dead,
+        childCount: children.length,
+        childHp: children.map((c: any) => c.maxHealth),
+      };
+    });
+
+    // The MAP-SPAWNED tile carries the new 12-HP damage layer.
+    expect(r.maxHp).toBe(12);
+    // Three base blaster hits: crack, crack, shatter.
+    expect(r.afterOne.alive).toBe(true);
+    expect(r.afterOne.health).toBe(8);
+    expect(r.afterTwo.alive).toBe(true);
+    expect(r.afterTwo.health).toBe(4);
+    expect(r.dead).toBe(true);
+    expect(r.childCount).toBeGreaterThanOrEqual(2);
+    // The debris carries the shard damage layer — 2 blaster hits each.
+    for (const hp of r.childHp) expect(hp).toBe(8);
 
     watch.assertClean();
   });

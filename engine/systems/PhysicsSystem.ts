@@ -3907,7 +3907,13 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }
-              structure.health -= 1;
+              // Glass is BRITTLE to physical smashes (V9): its damage
+              // layer meters WEAPON hits, but a hull over the crash
+              // threshold takes the whole pane — the pre-damage-layer
+              // behaviour, kept on purpose.
+              structure.health -= structure.shardVariant === 'glass-tile'
+                  ? Math.max(1, structure.health)
+                  : 1;
               PhysicsSystem.applyDentStep(structure, player.position);
               // A crash is a hit too — let rock break early on the same
               // rising-odds roll as a blaster shot (no-op for other tiles).
@@ -3989,7 +3995,11 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
-                  structure.health -= 1;
+                  // Glass shatters under any qualifying smash (V9 — see
+                  // the player-crash site).
+                  structure.health -= structure.shardVariant === 'glass-tile'
+                      ? Math.max(1, structure.health)
+                      : 1;
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
@@ -4023,7 +4033,9 @@ export class PhysicsSystem {
               structure.tilePressureCooldown = STRUCTURE_CONSTANTS.TILE_PRESSURE_COOLDOWN;
               if (structure.tilePressureCount >= STRUCTURE_CONSTANTS.TILE_PRESSURE_HITS) {
                   structure.tilePressureCount = 0;
-                  structure.health -= 1;
+                  structure.health -= structure.shardVariant === 'glass-tile'
+                      ? Math.max(1, structure.health)
+                      : 1; // glass still "dies in one" pressure trigger (V9)
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);

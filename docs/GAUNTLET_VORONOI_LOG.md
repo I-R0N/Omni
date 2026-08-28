@@ -677,3 +677,65 @@ fracture green; boot + loop + terrain + economy + attribution + shake +
 knockback + healthbars (38) green; typecheck ✓ · build ✓ · simbench
 medians 0.816 / 1.682 / 1.012 / 2.004 — all at or below the V0
 baseline.  CLAUDE.md §4/§8 and SHARD_SYSTEM.md §2b re-synced.
+
+---
+
+## V9 — Play-test round 2 (2026-08-28, user feedback)
+
+Four items from the user's second play-test.
+
+**1. The duplicate-fragment bug (root-caused, regression-pinned).**
+"Large rock shards release duplicate shards after shattering."  Cause:
+in the projectile path, `onDamage` (the damage-feedback hook that hosts
+`progressFracture`) runs BEFORE the `health <= 0` death block — so a
+min-remainder death raised INSIDE the hook returned to a handler that
+saw zero health and dispatched `onDeath` a SECOND time, and with the
+decomposition cached the second shatter spawned an exact duplicate of
+every fragment.  Fix: STRUCTURE deaths are idempotent —
+`GameEntity.deathDispatched`, stamped by `handleEntityDeath`'s
+structure branch, cleared by `completeRegen` (regen REUSES the entity
+object).  The regression test was VERIFIED against the bug: with the
+guard disabled the scenario (full-health 2-hit rock-tile, first hit —
+the probabilistic rock break is 0% at one hit, so only the mid-hook
+death can kill — with a preset original area tripping min-remainder)
+produces 2 dispatches and 6 duplicated positions out of 12 children;
+with the guard, 6 children, 0 duplicates.  (A first repro attempt
+failed for two instructive reasons, both logged: the test wasn't
+passing the REAL `onDamage` into `resolveCollision`, and a
+99-hits-taken tile died to the rock-break roll before the hook ran.)
+
+**2. The glass damage layer.**  `STRUCTURE_VARIANTS.glass.health`
+1 → 12 and new `GLASS_SHARD_HP` = 8, wired at every glass-shard spawn
+site (the spawnGlassShards debris, snap debris, voronoi + powerlaw
+children — the HP is durability, not fracture geometry, so it is NOT
+part of the A/B): three / two base Blaster (damage 4) hits, heavier
+weapons still one-shot.  New `MATERIAL_DAMAGE_CRACKS.glass`
+(freq 4, cap 3) + `GLASS_CRACK_STYLE` — BRIGHT hairlines, near-zero
+scorch (glass webs, it doesn't char) — drawn in the glass-tile vector
+path, the glass-shard branch, and baked into the static-cache stamp
+(future-proofing: the placeholder sprite keeps glass on the vector path
+today).  glass-shard OPTS INTO voronoi with its own fracture block so
+the cracks its damage layer shows are the exact seams it breaks into.
+BRITTLENESS PRESERVED: physical smashes — the player/shard crash over
+the momentum threshold and the tile-pressure trigger — take the whole
+pane, exactly as at 1 HP; the damage layer meters WEAPON hits.  (Found
+by the terrain crush-parity suite going red: a 12-HP pane surviving a
+boulder slam; the "glass dies in one" pressure comment is now enforced
+explicitly.)
+
+**3. Rock fractures like glass.**  The user's read: rock shattered into
+big sharp-angular chunks; glass's impact-crowded radial pattern is the
+look.  rock-tile: sizePerSite 9 → 7, siteCountMax 9 → 12, impactBias
+0.5 → 0.75.  rock-shard: sizePerSite 40 → 22, siteCountMin 2 → 3,
+impactBias 0.5 → 0.75.
+
+**4. Rock shards chip like rock tiles.**  Fell out of 3: the old
+2–4-site patterns on mobile rocks left too few edges for the floor-paced
+reveal to complete any boundary before the hit ceiling — a 100px rock
+now carries ~5 sites / enough edges that pieces highlight and break off
+mid-life exactly like tiles.
+
+Gates: typecheck ✓ · build ✓ · fracture (16, two new) + terrain re-green
+after the brittleness fix · FULL suite **253/253** (13.8m) ✓.
+CLAUDE.md §5 re-synced (glass damage layer, glass-shard opt-in, the
+rock pattern retune).
