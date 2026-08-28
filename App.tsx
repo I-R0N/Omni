@@ -8,6 +8,11 @@ import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
 import { installMenuNav, pickNext } from './components/menuNav';
+import {
+  enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
+} from './engine/systems/render/shipSprites';
+import { drawPlayerCube } from './engine/systems/render/playerCube';
+import { SHIP_SHEETS } from './assets';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,6 +81,21 @@ const App: React.FC = () => {
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.
     (window as any).__omniMenuNav = { pickNext };
+
+    // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
+    // above: `enumerateCells` / `resolveTiltCell` / `cellMatrix` are pure,
+    // and they are wrong in a way nothing reports — a cell order that
+    // disagrees with the authoring guide, or a mirror that folds the wrong
+    // half of the azimuth circle, draws a plausible ship in the WRONG pose,
+    // which no exception and no log will ever mention.  Exposing them lets
+    // the suite pin the contract, and lets scripts/gen-ship-sheet.mjs render
+    // placeholder art against the very table the engine indexes (which is
+    // also what keeps docs/SHIP_SPRITE_SHEETS.md honest).  `drawPlayerCube`
+    // rides along because the generator draws its placeholder poses with it.
+    // Nothing in the game reads this.
+    (window as any).__omniShip = {
+      enumerateCells, resolveTiltCell, cellIndex, cellMatrix, drawPlayerCube, SHIP_SHEETS,
+    };
 
     const handleResize = () => {
       if (canvasRef.current) {

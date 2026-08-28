@@ -3167,16 +3167,21 @@ export function cyclePlayerRoll(): number {
 //  'Tri'     — a triangular DART ship: nose far forward, two swept
 //              wingtips, and a dorsal peak + ventral keel giving the
 //              body 3D depth (the four nose edges draw white);
+//  'Sheet'   — PRE-RENDERED TILT ART: one authored pose per (tilt
+//              magnitude, tilt-axis azimuth), snapped to the nearest cell,
+//              with yaw still on the canvas transform (a Z-rotation is
+//              exact there).  Falls back to the squash until art exists.
+//              See assets.ts SHIP_SHEETS / docs/SHIP_SPRITE_SHEETS.md;
 //  'Ship'    — the sprite + the cos-tilt squash, kept as the A/B.
 // The shapes live in render/playerCube.ts as vertex/edge tables — adding
 // one is a table entry, never a new draw path.  DBG Player ▸ "Hull".
 export const PLAYER_HULL_CYCLE: ReadonlyArray<string> =
-  ['Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Tri', 'Ship'] as const;
+  ['Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Tri', 'Sheet', 'Ship'] as const;
 let activePlayerHullIndex = 0; // Cube — the shipped default
 export type PlayerHullMode =
-  'cube' | 'diamond' | 'sphere' | 'dodeca' | 'rhombic' | 'tri' | 'sprite';
+  'cube' | 'diamond' | 'sphere' | 'dodeca' | 'rhombic' | 'tri' | 'sheet' | 'sprite';
 const PLAYER_HULL_MODES: ReadonlyArray<PlayerHullMode> =
-  ['cube', 'diamond', 'sphere', 'dodeca', 'rhombic', 'tri', 'sprite'] as const;
+  ['cube', 'diamond', 'sphere', 'dodeca', 'rhombic', 'tri', 'sheet', 'sprite'] as const;
 export function getActivePlayerHullMode(): PlayerHullMode {
   return PLAYER_HULL_MODES[activePlayerHullIndex];
 }

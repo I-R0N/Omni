@@ -14,6 +14,11 @@ import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01, Crack
          shiftY, roundRectPath } from './render/drawUtils';
 import { drawEnemyShape } from './render/enemyShapes';
 import { drawPlayerCube } from './render/playerCube';
+import {
+  ShipSheetCache, resolveTiltCell, cellMatrix,
+  type ShipCellRef,
+} from './render/shipSprites';
+import { SHIP_SHEETS } from '../../assets';
 import { drawDropShape } from './render/dropShapes';
 import { drawProjectileShape } from './render/projectileShapes';
 import { drawNebulaTileCached, drawNebulaEntity } from './render/nebulaTiles';
@@ -349,6 +354,27 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // content's visual centre lands on the rotation pivot.  Prevents
   // sprite "orbiting" when the art isn't perfectly centred in its frame.
   private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
+
+  // SHIP TILT SHEETS (render/shipSprites.ts).  One cache per ship id,
+  // built on first use and holding only the pose table — the pixels stay
+  // in the shared image cache.  `_getImg` is bound ONCE: the draw path
+  // hands it to the sheet every frame, and a closure built per frame is
+  // the allocation pattern CLAUDE.md §8 warns about.
+  private _shipSheets: Map<string, ShipSheetCache> = new Map();
+  private _getImg = (src: string): HTMLImageElement => this.getImage(src);
+
+  /** The pose cache for a ship id, preloading its cells on first use so
+   *  nothing decodes inside a frame. */
+  shipSheet(id: string): ShipSheetCache | null {
+      const hit = this._shipSheets.get(id);
+      if (hit) return hit;
+      const def = SHIP_SHEETS[id];
+      if (!def) return null;
+      const cache = new ShipSheetCache(def);
+      cache.preload(this._getImg);
+      this._shipSheets.set(id, cache);
+      return cache;
+  }
   // Projectile glow gradient cache.  Every standard / charged shot used to
   // rebuild a createRadialGradient + 5-6 addColorStop (each parses a CSS
   // colour string) PER PROJECTILE PER FRAME — the dominant per-frame cost in
@@ -1466,7 +1492,16 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // carries only R(yaw); a Z-rotation commutes with the orthographic
       // projection, so pitch/roll happen inside the draw.
       const hullMode = entity.type === EntityType.PLAYER ? getActivePlayerHullMode() : 'sprite';
-      const cubeHull = hullMode !== 'sprite';
+      // TILT SHEET (render/shipSprites.ts): the hull as pre-rendered ART,
+      // one authored pose per (tilt magnitude, tilt-axis azimuth), with yaw
+      // still on the canvas transform.  While the sheet has NO art loaded
+      // the mode falls through to the legacy sprite + squash, so selecting
+      // it can never blank the ship and a sheet can be authored ring by
+      // ring and watched to improve.
+      const sheetCache = hullMode === 'sheet' ? this.shipSheet('base') : null;
+      const sheetHull = !!sheetCache && sheetCache.anyReady(this._getImg);
+      let sheetRef: ShipCellRef | null = null;
+      const cubeHull = hullMode !== 'sprite' && hullMode !== 'sheet';
       const rotation = entity.rotation + (
         cubeHull
           ? 0
@@ -1497,7 +1532,15 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // shipped with).  One entity per frame, so the extra trig is free;
       // level flight (both components snapped to 0) keeps the plain path.
       // (Sprite mode only — the cube shows tilt as 3D rotation instead.)
-      if (!cubeHull && entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
+      if (sheetHull && sheetCache) {
+          // The pose is IN the art, so the matrix only has to orient it:
+          // R(facing + artOffset), or the reflection about the nose axis
+          // when this cell is a mirrored partner.
+          sheetRef = resolveTiltCell(
+            sheetCache.sheet, entity.visualRoll ?? 0, entity.visualPitch ?? 0, entity.rotation);
+          const m = cellMatrix(sheetCache.sheet, sheetRef, entity.rotation);
+          l11 = m.l11; l12 = m.l12; l21 = m.l21; l22 = m.l22;
+      } else if (!cubeHull && entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
           const r = entity.visualRoll ?? 0;
           const p = entity.visualPitch ?? 0;
           // Clamped locally under π/2: in TUMBLE tilt mode the angles are
@@ -1561,6 +1604,29 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       }
 
       let drawn = false;
+
+      // --- TILT SHEET --- (render/shipSprites.ts)
+      // One blit of the authored pose.  `nearestImage` covers a partial
+      // sheet by falling back to the closest pose that HAS art.
+      if (sheetHull && sheetCache && sheetRef) {
+          const cell = sheetCache.nearestImage(sheetRef, this._getImg);
+          if (cell) {
+              const drawSize = Math.max(entity.size.x, entity.size.y) * sheetCache.sheet.drawScale;
+              const o = -(drawSize / 2);
+              ctx.drawImage(cell.img, cell.sx, cell.sy, cell.sw, cell.sh, o, o, drawSize, drawSize);
+              // Same blow-out-toward-white hit read the sprite path gives.
+              if (entity.hitFlash && entity.hitFlash > 0) {
+                  const f = Math.min(1, entity.hitFlash * 3);
+                  ctx.save();
+                  ctx.globalAlpha = Math.min(1, 0.55 + f);
+                  ctx.filter = `brightness(${(2 + f * 6).toFixed(2)})`;
+                  ctx.drawImage(cell.img, cell.sx, cell.sy, cell.sw, cell.sh, o, o, drawSize, drawSize);
+                  ctx.filter = 'none';
+                  ctx.restore();
+              }
+              drawn = true;
+          }
+      }
 
       // --- WIREFRAME HULL --- (render/playerCube.ts)
       // The player's default hull (user call).  Takes the yaw-rotated
@@ -1678,7 +1744,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // matrix WITH the art offset (which the cube frame omits, so it is
       // recomputed here rather than reusing cosR/sinR).
       if (entity.type === EntityType.PLAYER
-          && (cubeHull || entity.visualRoll || entity.visualPitch)) {
+          && (cubeHull || sheetHull || entity.visualRoll || entity.visualPitch)) {
           const ringRot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
           const cRr = Math.cos(ringRot);
           const sRr = Math.sin(ringRot);

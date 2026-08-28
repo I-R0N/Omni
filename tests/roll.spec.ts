@@ -463,6 +463,10 @@ test.describe('the wireframe hull shapes', () => {
     await waitForStats(page, s => s.hullModeName === 'Rhombic', 'the Rhombic hull');
     await engine(page, e => e.dbg.cyclePlayerHull());
     await waitForStats(page, s => s.hullModeName === 'Tri', 'the Tri dart ship');
+    // 'Sheet' is the pre-rendered-art hull (render/shipSprites.ts); banked
+    // here like the wireframes, so this walk covers its blit path too.
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Sheet', 'the tilt-sheet hull');
 
     await engine(page, e => e.input.keys.delete('KeyS'));
     await engine(page, e => e.dbg.cyclePlayerHull());

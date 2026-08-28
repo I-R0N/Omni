@@ -49,6 +49,9 @@ playwright.config.ts      Test harness: one 390×844 project (the DESIGN
                           that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
+scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
+                          authoring angle table, --placeholder renders
+                          stand-in cells from the wireframe hull
 
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
@@ -56,10 +59,10 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           viewports / healthbars (5d), lighting (the
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
-                          flashlight / nebulaspin / roll,
+                          flashlight / nebulaspin / roll / shipsprites,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  237 tests.  All run at
+                          anti-flake rules).  242 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -203,6 +206,13 @@ engine/
                           debris) and the proximity-interactable POIs
                           (station, portal, snitch).  Like enemyShapes,
                           takes no engine and no renderer
+      shipSprites.ts      SHIP TILT SHEETS — the player hull as
+                          PRE-RENDERED art, one authored pose per (tilt
+                          magnitude, tilt-axis azimuth).  The grid, the
+                          nearest-pose resolver, the mirror fold and the
+                          cell order.  Takes no engine and no renderer;
+                          docs/SHIP_SPRITE_SHEETS.md is GENERATED from
+                          its own `enumerateCells`
       hud.ts              The SCREEN-SPACE layer: minimap + its static
                           layer + its flow-streamline layer, off-screen
                           indicators, loadout strip, player messages,
@@ -794,7 +804,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   triangular DART ship — the one shape that is a ship rather than a
   solid: nose far forward, two swept wingtips, a dorsal peak + ventral
   keel for 3D depth; the four nose edges are the marker).  The aim marker
-  draws last in white; depth is cued by edge alpha.  The 'Ship' step
+  draws last in white; depth is cued by edge alpha.  'Sheet' is the
+  SPRITE answer to the same problem (see the tilt-sheet note in §8), and
+  the 'Ship' step
   restores the sprite +
   the cos-tilt squash as the A/B — the squash path is sprite-mode
   only.  The shield/charge rings restore the plain rotation matrix
@@ -2195,11 +2207,47 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   engine internals (`runTimeSec`, `waves.waveOffset`) and call private
   methods (`physics.resolveCollision`) straight off the handle.  That is
   intended, and is what lets a test measure damage arithmetic in situ
-  instead of reimplementing it.  `__omniHid` is the same idea with a sharper
+  instead of reimplementing it.  `__omniShip` (the tilt-sheet grid) joins them on identical terms: a cell
+  order that disagrees with the authoring guide, or a mirror that folds the
+  wrong half of the azimuth circle, draws a perfectly plausible ship in the
+  WRONG pose — nothing throws and nothing logs.  Exposing the pure
+  resolver also lets `scripts/gen-ship-sheet.mjs` render placeholder art
+  against the very table the engine indexes.
+  `__omniHid` is the same idea with a sharper
   motive: those builders are the one place in the input layer that can be
   wrong with NO symptom to read (a pad discards a malformed report in
   silence), and they are pure with a published CRC test vector, so they are
   pinnable without hardware.
+- **SHIP TILT SHEETS: yaw is FREE, pitch and roll are the art**
+  (`engine/systems/render/shipSprites.ts`, DBG Player ▸ Hull ▸ 'Sheet').
+  The player hull can draw as PRE-RENDERED poses instead of the cos(tilt)
+  squash, and the whole design is one decomposition that is easy to get
+  expensively wrong: YAW is a rotation about the VIEW axis, so it commutes
+  with the orthographic projection and `ctx.rotate` reproduces it EXACTLY
+  — baking headings into art buys nothing but pixel crispness and costs
+  ×N cells plus a snapping reticle.  PITCH and ROLL are rotations about
+  IN-PLANE axes: they rotate depth into view, no 2D transform can produce
+  them, and they are the entire reason art exists here.  So a sheet is a
+  2D grid over the TILT ONLY.  It is POLAR — `theta` = tilt magnitude,
+  `psi` = tilt-axis azimuth measured in the deck plane from the nose —
+  because `tickPlayerRoll` magnitude-clamps the tilt VECTOR, so the
+  reachable set is a DISC and a square grid would spend cells on corners
+  that can never draw.  Azimuth counts GROW with the ring (the lean
+  direction only matters in proportion to sin(theta)), and a hull
+  symmetric about its nose axis authors only `psi` in [-90°, +90°] and
+  flips for the rest — a reflection maps azimuth `psi` to `180° - psi`,
+  making the two pure PITCHES the fixed points.  That is 35 authored cells
+  for the standard grid, 57 unmirrored.  Poses SNAP to the nearest cell
+  rather than cross-fading: a crossfade ghosts on a held lean, while a
+  snap is only ever half a grid step wrong in an angle the player has no
+  reference for.  A PARTIAL sheet is legal — a missing cell falls back to
+  the nearest authored pose, and a sheet with no art at all falls back to
+  the legacy squash, so the mode can never blank the ship.
+  `docs/SHIP_SPRITE_SHEETS.md` is the authoring guide and is GENERATED
+  from the module's own `enumerateCells` (`scripts/gen-ship-sheet.mjs
+  --table`), so the table an artist works from cannot drift from the table
+  the engine indexes; `--placeholder` renders stand-in cells from the
+  wireframe hull, which is what lets CI exercise the real blit path.
 - **The `ui` column in any PerfRecorder capture taken before
   2026-08-16 is INVALID — it measured scheduling, not rendering.**  It was
   fed `GameEngine.lastStatsPushMs`, a bracket around the `onStatsUpdate`
