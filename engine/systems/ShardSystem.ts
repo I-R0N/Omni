@@ -34,6 +34,7 @@ import {
   METAL_ASSEMBLY,
   METAL_MAX_DENSITY_TIER,
   getActiveShatterGraceDelay,
+  getActiveFractureMode,
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
   NEBULA_CONDENSE_STALL_BONDS,
@@ -54,6 +55,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
+import { computeFracture, seedFromEntityId, FractureCell } from './fracture';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -757,12 +759,251 @@ export class ShardSystem {
       return;
     }
 
+    // Voronoi fracture (voronoi gauntlet, V2).  Under the DBG 'legacy'
+    // A/B a 'voronoi' variant takes its OLD path instead: dent tiles
+    // (breakShards non-empty) break via DropSystem.spawnDentShard — the
+    // GameEngine death gate routes them there, so this call is a no-op —
+    // and mobile shards fall through to the powerlaw pipeline below.
+    if (variant.shatter.kind === 'voronoi') {
+      if (getActiveFractureMode() === 'voronoi') {
+        this.shatterVoronoiStyle(parent, variant, entities);
+        return;
+      }
+      const dent = variant.dent;
+      if (dent !== undefined && dent.breakShards.length > 0) return;
+      this.shatterAsteroidStyle(parent, variant, entities);
+      return;
+    }
+
     if (variant.shatter.kind !== 'powerlaw') return;
 
     if (variant.shatter.style === 'nebula') {
       this.shatterNebulaStyle(parent, variant, entities);
     } else {
       this.shatterAsteroidStyle(parent, variant, entities);
+    }
+  }
+
+  /**
+   * Compute (or return the cached) seeded Voronoi decomposition of an
+   * entity's polygon.  Lazy: first damage or first crack draw computes,
+   * death consumes; a one-shot kill computes on the spot with the
+   * killing hit's impact info.  Cached on `entity.fractureCells` and
+   * INVALIDATED at every site that mutates the polygon, the size, or the
+   * merge count (dent, snap-back, compose).  Site count is a function of
+   * size + merge history only — never the killing hit — so the cracks
+   * shown while alive are the exact seams of the eventual break.
+   */
+  public ensureFracture(e: GameEntity, variant: ShardVariantDef): FractureCell[] | null {
+    const f = variant.fracture;
+    if (f === undefined) return null;
+    if (e.polygonPoints === undefined || e.polygonPoints.length < 3) return null;
+    if (e.fractureCells !== undefined) return e.fractureCells;
+
+    const size = Math.max(e.size.x, e.size.y);
+    let sites = Math.round(size / f.sizePerSite);
+    const merges = e.mergeCount ?? 1;
+    if (merges > 1) sites = Math.max(sites, merges);
+    sites = Math.max(f.siteCountMin, Math.min(f.siteCountMax, sites));
+
+    const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
+
+    // Impact point in entity-local coords: the hit landed on the side the
+    // impactor came FROM, so project against the impact velocity, rotated
+    // into the entity's frame.
+    let impact: { x: number; y: number; bias: number } | undefined;
+    const iv = e.lastImpactVelocity;
+    if (iv !== undefined) {
+      const s = Math.hypot(iv.x, iv.y);
+      if (s > 1e-3) {
+        const cos = Math.cos(-e.rotation), sin = Math.sin(-e.rotation);
+        const lx = (iv.x * cos - iv.y * sin) / s;
+        const ly = (iv.x * sin + iv.y * cos) / s;
+        const r = size * 0.4;
+        impact = { x: -lx * r, y: -ly * r, bias: f.impactBias };
+      }
+    }
+
+    e.fractureCells = computeFracture(e.polygonPoints, {
+      siteCount: sites,
+      seed,
+      impact,
+      minAreaFraction: f.minAreaFraction,
+    }).cells;
+    return e.fractureCells;
+  }
+
+  /**
+   * Voronoi shatter (V2): the cached decomposition becomes the children —
+   * each cell is a fragment carrying the CELL's polygon (translated to
+   * the cell centroid, rotated with the parent), an area-proportional
+   * size (Σ child size² = parent size², the same conservation the merge
+   * paths keep), rock hit-ceiling HP, and a velocity of impact scatter
+   * plus a small radial term along its own centroid direction so the
+   * pattern visibly flies apart along its seams.  Density-tier mixing,
+   * the dust burst and the grace timer mirror shatterAsteroidStyle.
+   */
+  private shatterVoronoiStyle(
+    parent: GameEntity,
+    parentVariant: ShardVariantDef,
+    entities: GameEntity[],
+  ): void {
+    const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
+    const childSpawn = childVariant.spawn;
+    const MIN_SIZE = childSpawn.sizeMin;
+    // Same tiny-parent floor as the area-conservative powerlaw mode: a
+    // chip without room for two minimum children dies clean.  MOBILE
+    // parents only — a static tile always breaks into its cells, exactly
+    // as the legacy dent path spawned its breakShards with no size gate
+    // (a 42px hex is smaller than two 30px rock minimums, and gating it
+    // here made rock-tiles vanish without debris).
+    if (parent.mass !== Infinity
+      && parent.size.x * parent.size.x < MIN_SIZE * MIN_SIZE * 2) return;
+
+    const cells = this.ensureFracture(parent, parentVariant);
+    if (cells === null || cells.length < 2) {
+      // Degenerate polygon (or no fracture block despite the kind) —
+      // fall back to the legacy pipeline rather than vanish silently.
+      this.shatterAsteroidStyle(parent, parentVariant, entities);
+      return;
+    }
+
+    let totalArea = 0;
+    for (const cell of cells) totalArea += cell.area;
+    if (totalArea <= 0) return;
+
+    const iv = parent.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const HALF_CONE = parentVariant.shatter.scatterHalfCone;
+    const radialSpeed = parentVariant.fracture!.radialSpeed;
+
+    const isRockParent = parent.shardVariant === 'rock-shard'
+      || parent.shardVariant === 'rock-tile';
+    const maxTier = ROCK_CONDENSE.DENSITY_MULT.length - 1;
+    const parentTier = parent.densityTier ?? 0;
+
+    const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
+    const parentSize = parent.size.x;
+
+    for (const cell of cells) {
+      const newSize = parentSize * Math.sqrt(cell.area / totalArea);
+
+      // Density mix as in the powerlaw rock path: fragments spread ±2
+      // tiers around the parent so a dense boulder breaks unevenly.
+      let densityTier: number | undefined = undefined;
+      let childMass = childSpawn.sizeToMass(newSize);
+      if (isRockParent && childVariant.id === 'rock-shard') {
+        const offset = Math.floor(Math.random() * 5) - 2;
+        densityTier = Math.max(0, Math.min(maxTier, parentTier + offset));
+        childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
+      }
+      let hp: number;
+      if (childVariant.id === 'rock-shard') {
+        hp = rockHitCeiling(newSize, densityTier);
+      } else {
+        const baseHp = newSize > 30 ? 2 : 1;
+        hp = densityTier !== undefined
+          ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
+          : baseHp;
+      }
+
+      // World-space cell centroid: rotate the local centroid with the
+      // parent so the fragment sits exactly where its cell rendered.
+      const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
+      const wy = parent.position.y + cell.centroid.x * sin + cell.centroid.y * cos;
+
+      // Radial direction — along the (rotated) centroid offset, so the
+      // pieces separate along their own seams; a cell centred on the
+      // parent origin takes a random direction.
+      const rlen = Math.hypot(cell.centroid.x, cell.centroid.y);
+      let rdx: number, rdy: number;
+      if (rlen > 1e-3) {
+        rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
+        rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
+      } else {
+        const a = Math.random() * Math.PI * 2;
+        rdx = Math.cos(a); rdy = Math.sin(a);
+      }
+      const rSpeed = radialSpeed * (0.7 + Math.random() * 0.6);
+
+      // Shared forward term from the killing hit — same magnitude curve
+      // and cap as the powerlaw path, with a narrower per-child cone
+      // (the geometry already scatters the pattern).
+      let vx = parent.velocity.x + rdx * rSpeed;
+      let vy = parent.velocity.y + rdy * rSpeed;
+      if (impactAngle !== null) {
+        const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
+        const fa = impactAngle + (Math.random() - 0.5) * HALF_CONE * 0.5;
+        vx += Math.cos(fa) * fwd;
+        vy += Math.sin(fa) * fwd;
+      }
+
+      // Fragment polygon: the cell's own shape, re-centred on its
+      // centroid (entity-local space; entity rotation carries the
+      // parent's so the pattern alignment survives the handoff).
+      const points: Vector2[] = new Array(cell.points.length);
+      for (let i = 0; i < cell.points.length; i++) {
+        points[i] = {
+          x: cell.points[i].x - cell.centroid.x,
+          y: cell.points[i].y - cell.centroid.y,
+        };
+      }
+
+      const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
+      entities.push({
+        id:            nextId('shard'),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  childVariant.id,
+        position:      { x: wx, y: wy },
+        velocity:      { x: vx, y: vy },
+        size:          { x: newSize, y: newSize },
+        rotation:      parent.rotation,
+        rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+        color:         parent.color || COLORS.ASTEROID,
+        active:        true,
+        health:        hp,
+        maxHealth:     hp,
+        polygonPoints: points,
+        mass:          childMass,
+        densityTier,
+        sprite:        parent.sprite,
+        linearDamping:  childSpawn.linearDamping,
+        angularDamping: childSpawn.angularDamping,
+        restSpeed:      childSpawn.restSpeed,
+        restSpin:       childSpawn.restSpin,
+        collapseGraceTimer: getActiveShatterGraceDelay(),
+      });
+    }
+
+    this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
+  }
+
+  /** The variant-driven dust/debris burst shared by the powerlaw and
+   *  voronoi shatter styles (extracted verbatim from the powerlaw tail). */
+  private spawnShatterDust(
+    parent: GameEntity,
+    parentVariant: ShardVariantDef,
+    entities: GameEntity[],
+    impactSpeed: number,
+    impactAngle: number | null,
+  ): void {
+    const onParticles = parentVariant.onShatterParticles;
+    if (onParticles && onParticles !== 'none') {
+      const dustColor = onParticles === 'inherit'
+        ? (parent.color || '#94a3b8')
+        : onParticles.color;
+      const dustCount = 5 + Math.floor(parent.size.x / 20);
+      const dustSpeed = impactSpeed * 0.4 + 2;
+      this.particles.spawn(entities, parent.position, dustCount, dustColor, {
+        speedMin: 1, speedMax: dustSpeed,
+        sizeMin: 1, sizeMax: 2.5,
+        lifetimeMin: 0.25, lifetimeMax: 0.55,
+        spreadAngle: impactAngle ?? undefined,
+        spreadCone: Math.PI,
+        baseVelocity: parent.velocity,
+      });
     }
   }
 
@@ -1071,26 +1312,8 @@ export class ShardSystem {
       });
     }
 
-    // Variant-driven dust/debris burst.  Today's per-parent count
-    // formula `5 + floor(parent.size.x / 20)` is preserved inline;
-    // the variant's onShatterParticles supplies the colour ('inherit'
-    // → parent.color for tile shards; { color } for rock shards).
-    const onParticles = parentVariant.onShatterParticles;
-    if (onParticles && onParticles !== 'none') {
-      const dustColor = onParticles === 'inherit'
-        ? (parent.color || '#94a3b8')
-        : onParticles.color;
-      const dustCount = 5 + Math.floor(parent.size.x / 20);
-      const dustSpeed = impactSpeed * 0.4 + 2;
-      this.particles.spawn(entities, parent.position, dustCount, dustColor, {
-        speedMin: 1, speedMax: dustSpeed,
-        sizeMin: 1, sizeMax: 2.5,
-        lifetimeMin: 0.25, lifetimeMax: 0.55,
-        spreadAngle: impactAngle ?? undefined,
-        spreadCone: Math.PI,
-        baseVelocity: parent.velocity,
-      });
-    }
+    // Variant-driven dust/debris burst — shared with the voronoi style.
+    this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
   }
 
   /**
@@ -2209,6 +2432,7 @@ export class ShardSystem {
       if (mutated) {
         e._satCacheAxes = undefined;
         e._occluderR = undefined;   // the shadow radius is derived from the polygon
+        e.fractureCells = undefined; // decomposition rides the polygon (voronoi gauntlet)
         if (e._staticCached === true) e._staticCached = false;
       }
     }
@@ -2997,6 +3221,13 @@ export class ShardSystem {
     physics: PhysicsSystem,
   ): void {
     if (!a.active || !b.active) return;
+
+    // A compose mutates the survivor's size / mass / merge count (and,
+    // through condense, sometimes its polygon), all inputs of the
+    // fracture decomposition — drop both caches up front (voronoi
+    // gauntlet; the dead partner's entry is moot but harmless).
+    a.fractureCells = undefined;
+    b.fractureCells = undefined;
 
     // Stage 5: shard-family entities are now all EntityType.STRUCTURE.
     // Distinguish by variant id rather than the legacy EntityTypes.

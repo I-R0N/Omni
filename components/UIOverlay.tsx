@@ -108,6 +108,7 @@ interface UIOverlayProps {
   onCycleFog?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
+  onCycleFractureMode?: () => void;
   onCycleNebulaWakeSpin?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -418,6 +419,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFog,
   onCycleShadowSoftness,
   onCycleRockPalette,
+  onCycleFractureMode,
   onCycleNebulaWakeSpin,
   onToggleRumble,
   onSetControlScheme,
@@ -1797,6 +1799,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Rock palette', onCycleRockPalette,
                   stats.rockPaletteName ?? 'mixed',
                   'Rock body colour family. Mixed (default): mostly slate with rust and mineral running through it, so a field reads as ROCK with variation. Slate: the old single flat grey. Rust / mineral: the pure warm and cool families, kept for regional-identity work and for judging them side by side. Shades are rolled per instance AT SPAWN — reload the map to repaint a whole field.')}
+                {ctrlRow('Fracture', onCycleFractureMode,
+                  stats.fractureModeName ?? 'voronoi',
+                  'How fracture-capable materials break (voronoi gauntlet A/B). VORONOI (default): the entity carries a seeded Voronoi cell decomposition of its own polygon - the cells are the fragments, so a break flies apart along its own seams and conserves area. LEGACY: the shipped pre-gauntlet model - fresh random star-polygon fragments (powerlaw) and the rock-tile 3-chunk dent break. Applies at the next break; judge on a rock field.')}
                 {ctrlRow('Neb spin', onCycleNebulaWakeSpin,
                   stats.nebulaWakeSpinName ?? 'physical',
                   'Which way the player\'s wake spins a passing nebula shard. PHYSICAL: the wake shear — a shard passed on the STARBOARD side turns clockwise, port-side counter-clockwise. INVERTED: the same cross product negated (the A/B). RANDOM: the old per-shard id-parity vortices, with no consistent handedness. Proper rotational mechanics are parked for their own session.')}

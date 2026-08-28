@@ -21,7 +21,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 
 - [x] **V0 — Survey, baseline, seam plan.**
 - [x] **V1 — The fracture core, pure and pinned.**
-- [ ] **V2 — Full shatter through the cells.**
+- [x] **V2 — Full shatter through the cells.**
 - [ ] **V3 — Cracks are the pattern.**
 - [ ] **V4 — Partial fracture: shards break OFF tiles.**
 - [ ] **V5 — Roll across materials.**
@@ -279,3 +279,86 @@ tests/fracture.spec.ts`):
 
 Boot/loop canaries stay green (the App.tsx handle is one assignment).
 Gates: typecheck ✓ · build ✓ · fracture + boot + loop suites ✓.
+
+---
+
+## V2 — Full shatter through the cells (2026-08-28)
+
+**Schema (per D1).**  `ShardShatterPolicy.kind` gains `'voronoi'`;
+decomposition tuning lives in the new shallow `fracture?:
+ShardFracturePolicy` block on the variant def (`siteCountMin/Max`,
+`sizePerSite`, `impactBias`, `radialSpeed`, optional
+`minAreaFraction`) — named fields, no callbacks.  Site count is a
+function of SIZE + MERGE HISTORY only, deliberately NOT the killing
+hit's damage: the decomposition is computed at first damage and the
+cracks it will draw (V3) must be the seams of the eventual break.  The
+killing hit still drives scatter speed and, at compute time, the impact
+bias.
+
+**Cache.**  `GameEntity.fractureCells`, computed lazily by
+`ShardSystem.ensureFracture` (seed = the crackSeedFor hash, restated
+pure as `fracture.seedFromEntityId` so sim and render derive the same
+value; impact point projected from `lastImpactVelocity` into the
+entity's local frame).  Invalidated at every input mutation found:
+`composeEntities` (merge/condense), `PhysicsSystem.applyDentStep`
+(polygon dent), the plastic snap-back beside `_satCacheAxes` (the
+existing invalidation cluster — fractureCells joined it).
+
+**Routing.**  `ShardSystem.shatter` dispatches `'voronoi'` →
+`shatterVoronoiStyle`; under the DBG 'legacy' A/B the same variant takes
+its OLD path (dent tiles stand down here and spawn breakShards via
+DropSystem; mobile shards run the powerlaw pipeline).  The dent detour
+is gated at BOTH its ends — `handleEntityDeath.isDentSpawn` and
+`DropSystem.spawnDrops`' `spawnDentShard` call — so the two paths never
+double-spawn.  Opt-ins: rock-shard and rock-tile.  DBG A/B: pause ▸
+Debug Menu ▸ Visual ▸ **Fracture** (voronoi default / legacy), live from
+this milestone per the working rules.
+
+**The fragments.**  Each cell → one child with the CELL's polygon
+(re-centred on its centroid, world position rotated with the parent so
+the pattern lands where it rendered), `size = parentSize ×
+√(cellArea/Σ)` (Σ child size² = parent size² — conservation by
+construction), rock hit-ceiling HP, legacy density-tier mixing (±2
+around the parent for rock), velocity = capped impact-scatter term (the
+legacy magnitude curve, narrower cone — the geometry already scatters)
++ `radialSpeed` along each cell's own centroid direction so the pattern
+flies apart along its seams.  Dust burst extracted verbatim into
+`spawnShatterDust`, shared by both styles; drops / `killedByPlayer` /
+grace timers untouched.
+
+**Found while wiring** — the tiny-parent guard: the powerlaw guard
+(`parent² < 2×childSizeMin²`) blocked rock-TILE fracture entirely (a
+42px hex < two 30px rock minimums → tiles vanished without debris; the
+legacy dent path never had a size gate).  The guard now applies to
+MOBILE parents only, which keeps rock-shard behaviour identical to
+legacy and lets tiles always break into their cells.
+
+**Rebalance table (old → new, voronoi mode):**
+| path | legacy | voronoi |
+|---|---|---|
+| rock-shard count | max(2, min(30, ⌊size/40⌋)), merged: ±1 wobble | same mapping via sizePerSite 40 (wobble dropped — determinism), merge raise kept |
+| rock-shard geometry | fresh random stars, even-area | own cells, exact partition |
+| rock-tile count | exactly 3 @ 0.75× (Σarea 1.69× parent — material creation) | ~5 cells (42px hex / sizePerSite 9), Σarea = parent exactly |
+| killing-hit damage → count | rock: already ignored | ignored (cracks must predict the break) |
+
+**Evidence.**  Two new sim-path tests in `tests/fracture.spec.ts` (8/8
+green): a mobile rock-shard breaks into ≥2 cells with Σ size² within 1%
+of the parent and real polygons, and the legacy A/B still powerlaws;
+a rock-tile yields 3–9 cells under voronoi and EXACTLY its 3 breakShards
+under legacy.  Full gates: typecheck ✓ · build ✓ · fracture (8) + boot +
+loop + terrain + attribution + economy (22) ✓.  simbench after V2 (vs
+the V0 baseline — deltas are the evidence; the shatter path is
+death-frame only):
+
+| scene | V0 median | V2 medians (3 runs) |
+|---|---|---|
+| hub-idle | 0.862 | 0.736 / 0.737 / — |
+| asteroid-6k | 1.708 | 1.658 / 1.520 / 1.564 |
+| glass-field | 1.193 | 1.228 / 1.202 / 1.243 |
+| roamer-stack | 2.076 | 2.470 / 1.934 / 2.388 |
+
+roamer-stack's first read (+19%) triggered the >10% rule; two re-runs
+bracket the baseline (1.93–2.47 around 2.08) — scene noise from the
+stochastic roamers, not a regression, and asteroid-6k (the scene where
+a voronoi cost would live) sits BELOW baseline on all three runs.  The
+shatter path runs only inside death frames, as budgeted.

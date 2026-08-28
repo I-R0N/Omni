@@ -1274,8 +1274,22 @@ export interface GameEntity {
   // from the id on first draw.  Mirrors the enemy `glowPhase` seed but
   // for the shared seeded crack pattern in RenderSystem.drawDamageCracks
   // so fractures hold still frame-to-frame and only accrue as HP drops.
-  // Render-only; never read by the sim.
+  // Render-only; never read by the sim.  (Since the voronoi gauntlet the
+  // SAME value also seeds the fracture decomposition below — derived by
+  // the identical pure hash `fracture.seedFromEntityId` — so cracks and
+  // fragments share one pattern; the sim never reads this field, it
+  // re-derives the seed.)
   crackSeed?: number;
+
+  // Seeded Voronoi fracture cache (voronoi gauntlet, V2).  Computed
+  // lazily by ShardSystem.ensureFracture (first damage, or on the spot
+  // for a one-shot kill) for variants carrying a
+  // SHARD_VARIANTS[..].fracture block; cells are entity-LOCAL polygons.
+  // EVERY site that mutates the inputs — polygon deform (dent /
+  // snap-back), size change, merge/compose — must set this back to
+  // undefined.  The render layer reads it for the crack overlay (V3);
+  // the shatter path consumes it on death.
+  fractureCells?: import('./engine/systems/fracture').FractureCell[];
 }
 
 export interface CameraState {
@@ -1776,6 +1790,9 @@ export interface EngineStats {
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */
   rockPaletteName?: string;
+  /** DBG (voronoi gauntlet): the fracture A/B — 'voronoi' (seeded cell
+   *  decomposition) / 'legacy' (the shipped powerlaw + dent-spawn break). */
+  fractureModeName?: string;
   nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).

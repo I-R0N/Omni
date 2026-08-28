@@ -1588,6 +1588,12 @@ export class PhysicsSystem {
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
 
+      // The dent mutates the polygon in place — the fracture
+      // decomposition is computed on the deformed shape, so the cache
+      // dies here and lazily recomputes on the next read (voronoi
+      // gauntlet; ~0.1 ms per damage event, never per frame).
+      tile.fractureCells = undefined;
+
       // Plastic dent recovery: snapshot the polygon BEFORE this dent
       // into the module-level _dentPreSnapshot scratch buffer (zero
       // per-dent allocation), then compute the post-dent delta after

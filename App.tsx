@@ -366,6 +366,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
   };
 
+  const handleCycleFractureMode = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureMode();
+  };
+
   const handleCycleNebulaWakeSpin = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaWakeSpin();
   };
@@ -878,6 +882,7 @@ const App: React.FC = () => {
         onCycleTintMix={handleCycleTintMix}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
+        onCycleFractureMode={handleCycleFractureMode}
         onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}

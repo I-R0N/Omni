@@ -34,7 +34,7 @@ import {
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
+    cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
     toggleWorldLights, toggleDepthAmbient,
@@ -363,6 +363,14 @@ export class DebugControls {
    *  on newly generated rock; reload the map to repaint a whole field. */
   cycleRockPalette() {
     cycleRockPalette();
+  }
+
+  /** DBG (Visual): the fracture A/B (voronoi gauntlet) — voronoi
+   *  (default: variants break along their seeded Voronoi cell
+   *  decomposition) / legacy (the shipped powerlaw + dent-spawn break).
+   *  Applies at the next break; nothing cached needs a reload. */
+  cycleFractureMode() {
+    cycleFractureMode();
   }
 
   /** DBG (Visual): which way the player's wake spins a passing nebula

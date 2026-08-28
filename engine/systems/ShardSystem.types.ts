@@ -279,7 +279,14 @@ export interface ShardBlendPolicy {
 // ── Shatter policy ──────────────────────────────────────────────────
 
 export interface ShardShatterPolicy {
-  kind: 'none' | 'powerlaw';
+  /** 'voronoi' (voronoi gauntlet, V2): on death the entity's cached
+   *  seeded Voronoi decomposition (see `ShardFracturePolicy` and
+   *  `engine/systems/fracture.ts`) becomes the children — each cell is a
+   *  fragment with the CELL's polygon.  While the DBG A/B lives
+   *  (`getActiveFractureMode()`), 'legacy' mode routes a 'voronoi'
+   *  variant through its OLD path instead: the powerlaw pipeline for
+   *  mobile shards, the dent breakShards spawn for dent tiles. */
+  kind: 'none' | 'powerlaw' | 'voronoi';
   /** Output count — for nebula today: 2..3, for asteroid: 2..5. */
   countMin: number;
   countMax: number;
@@ -333,6 +340,32 @@ export interface ShardShatterPolicy {
    *  Only meaningful when `kind === 'powerlaw'`.  Variants with
    *  `kind === 'none'` ignore this field. */
   style?: 'asteroid' | 'nebula';
+}
+
+// ── Voronoi fracture policy ─────────────────────────────────────────
+// The decomposition/crack/detach tuning for a fracture-capable variant
+// (voronoi gauntlet, D1).  Site count is a function of SIZE and MERGE
+// HISTORY only — deliberately NOT of the killing hit's damage, because
+// the decomposition is computed at FIRST damage and the cracks it draws
+// must be the seams the entity later breaks along.  The killing hit
+// still drives scatter speed and (via lastImpactVelocity at compute
+// time) the impact bias of the site distribution.
+
+export interface ShardFracturePolicy {
+  /** Site count = clamp(round(size / sizePerSite), min, max), raised to
+   *  the entity's mergeCount when it was composed from more pieces. */
+  siteCountMin: number;
+  siteCountMax: number;
+  /** Pixels of entity diameter per Voronoi site. */
+  sizePerSite: number;
+  /** Fraction of sites biased toward the impact point (0..1). */
+  impactBias: number;
+  /** Outward fling along each cell's centroid direction at shatter, so
+   *  the pattern visibly flies apart along its own seams (added on top
+   *  of the shared impact-scatter term). */
+  radialSpeed: number;
+  /** Optional override of the sliver threshold (see fracture.ts). */
+  minAreaFraction?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────
@@ -550,6 +583,15 @@ export interface ShardVariantDef {
    *  see g3 material-interactions design), but still feels the
    *  metal-tile field for the queued attraction work. */
   repelImmuneFrom?: ShardVariantId[];
+  /** Seeded Voronoi fracture (voronoi gauntlet).  Present on variants
+   *  whose `shatter.kind === 'voronoi'` (and, later milestones, variants
+   *  whose CRACK RENDER rides the decomposition).  Shallow named fields
+   *  only — ShardSystem reads this, never callbacks.  The decomposition
+   *  itself is computed lazily (first damage / death) and cached on
+   *  `entity.fractureCells`; every site that mutates the polygon, the
+   *  size, or the merge count must invalidate that cache. */
+  fracture?: ShardFracturePolicy;
+
   /** Pass-through-and-shatter rule (g3 material-interactions).  When
    *  this variant contacts an entity whose variant id is in `targets`,
    *  PhysicsSystem skips collision impulse on the pair (the carrier's

@@ -2937,6 +2937,24 @@ export function cycleShatterGrace(): number {
   return activeShatterGraceIndex;
 }
 
+// ── Fracture mode (voronoi gauntlet, V2 — the day-one DBG A/B) ────────
+// 'voronoi': variants with shatter.kind='voronoi' break along their
+// seeded Voronoi cell decomposition (engine/systems/fracture.ts).
+// 'legacy': the same variants take the shipped pre-gauntlet path —
+// powerlaw fragments for mobile shards, dent breakShards for tiles —
+// so every milestone can be judged on a device against the old look.
+// The legacy path is deleted only at V7, after the user has called it.
+export type FractureMode = 'voronoi' | 'legacy';
+const FRACTURE_MODES: ReadonlyArray<FractureMode> = ['voronoi', 'legacy'] as const;
+let activeFractureModeIndex = 0; // 'voronoi'
+export function getActiveFractureMode(): FractureMode {
+  return FRACTURE_MODES[activeFractureModeIndex];
+}
+export function cycleFractureMode(): number {
+  activeFractureModeIndex = (activeFractureModeIndex + 1) % FRACTURE_MODES.length;
+  return activeFractureModeIndex;
+}
+
 // ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
 // Rock self-merges condense CONTINUOUSLY (any two shards, never refused)
 // through a discrete size × density grid, preferring density (denser-
@@ -8172,14 +8190,29 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // top of dent's breakShards (GameEngine.handleEntityDeath skips
     // shatter for any dent variant).
     regen: { kind: 'none' },
+    // Voronoi opt-in (voronoi gauntlet, V2): rock-tile death routes to
+    // ShardSystem.shatter (the plastic-shard dent+shatter precedent)
+    // and the tile breaks into its OWN cells instead of the 3 fresh
+    // rock-shards below.  REBALANCE (logged in GAUNTLET_VORONOI_LOG):
+    // a ~44px hex yields ~5 area-conserving fragments where the legacy
+    // break spawned 3 at 0.75× (Σareas 1.69× the tile — the material
+    // creation goes away with the cells).  breakShards stays as the DBG
+    // 'legacy' A/B config until V7.
+    fracture: {
+      siteCountMin: 5,
+      siteCountMax: 9,
+      sizePerSite: 9,
+      impactBias: 0.5,
+      radialSpeed: 1.4,
+    },
     shatter: {
-      kind: 'none',
+      kind: 'voronoi',
       style: 'asteroid',
       countMin: 0, countMax: 0,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'rock-shard',
-      forwardDrag: 0, perpScatter: 0,
-      scatterHalfCone: 0,
+      forwardDrag: 0.12, perpScatter: 0,
+      scatterHalfCone: Math.PI * 0.55,
     },
     dent: {
       // GENTLE dent now that the seeded crack overlay carries the per-hit
@@ -8266,8 +8299,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
       defaultOutcome: 'compose',
     },
+    // Voronoi opt-in (voronoi gauntlet, V2): on death the cached seeded
+    // cell decomposition becomes the fragments.  The powerlaw fields
+    // below STAY — they are the DBG 'legacy' A/B path until V7 calls it.
+    fracture: {
+      // Site count ≈ the legacy rock count mapping (max(2, size/40),
+      // cap 30), raised to mergeCount for composed boulders — so the
+      // fragment-count REBALANCE at V2 is zero for rock-shard.
+      siteCountMin: 2,
+      siteCountMax: 30,
+      sizePerSite: 40,
+      impactBias: 0.5,
+      radialSpeed: 1.0,
+    },
     shatter: {
-      kind: 'powerlaw',
+      kind: 'voronoi',
       style: 'asteroid',
       // countMax lowered 5 → 3: an asteroid break yields 2–3 chunky
       // mass-conserving pieces instead of a 2–5 spray, so the field

@@ -100,6 +100,17 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+/** The crackSeedFor hash (drawUtils) restated pure: stable [1, 1001)
+ *  seed from an entity id.  ShardSystem uses it to seed the decomposition
+ *  without importing the render layer; drawUtils caches the SAME value on
+ *  `entity.crackSeed`, so cracks and cells share one pattern by
+ *  construction.  Keep the two implementations identical. */
+export function seedFromEntityId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+  return (h / 997) * 1000 + 1;
+}
+
 // ── Polygon primitives ──────────────────────────────────────────────
 
 export function polygonSignedArea(pts: ReadonlyArray<FracturePoint>): number {

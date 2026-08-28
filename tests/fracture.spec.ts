@@ -22,7 +22,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot } from './helpers';
+import { boot, engine, startRun, waitForStats } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
@@ -214,6 +214,124 @@ test.describe('fracture core — conservation and validity', () => {
 
     expect(r.failures, r.failures.join('\n')).toEqual([]);
     expect(r.edgeCount).toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('voronoi shatter — the sim path (V2)', () => {
+  test('a mobile rock-shard breaks into its own cells, area-conserving; legacy A/B still powerlaws', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const kill = (mode: string) => {
+        const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-shard'
+          && x.mass !== Infinity && x.size.x >= 80 && (x.mergeCount ?? 1) === 1);
+        if (!t) throw new Error('no big rock-shard on the field');
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        const parentSizeSq = t.size.x * t.size.x;
+        // Drive the death dispatch directly with the stamps the real
+        // impact path (killStructureByImpact / the projectile path)
+        // leaves — the probabilistic rock hit model would otherwise
+        // shed ROCK_CHIP entities into the count.
+        // Mirror killStructureByImpact's contract: the CALLER stamps the
+        // impact, zeroes health, flips active and drops the grid entry,
+        // THEN raises onDeath.
+        t.lastImpactVelocity = { x: -9, y: 0 };
+        t.lastImpactDamage = 3;
+        t.health = 0;
+        t.active = false;
+        e.handleEntityDeath(t);
+        const children = ents.filter((x: any) => x.active && !before.has(x.id)
+          && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+        let childSizeSq = 0;
+        let polysOk = true;
+        for (const c of children) {
+          childSizeSq += c.size.x * c.size.x;
+          if (!c.polygonPoints || c.polygonPoints.length < 3) polysOk = false;
+        }
+        return {
+          mode, parentSizeSq, childSizeSq,
+          count: children.length, polysOk, dead: t.active === false,
+        };
+      };
+      const voronoi = kill('voronoi');
+      e.dbg.cycleFractureMode(); // → legacy
+      const legacy = kill('legacy');
+      e.dbg.cycleFractureMode(); // → back to voronoi
+      return { voronoi, legacy };
+    });
+
+    // Voronoi: cells conserve the size² metric exactly by construction.
+    expect(r.voronoi.dead).toBe(true);
+    expect(r.voronoi.count).toBeGreaterThanOrEqual(2);
+    expect(r.voronoi.polysOk).toBe(true);
+    expect(Math.abs(r.voronoi.childSizeSq - r.voronoi.parentSizeSq) / r.voronoi.parentSizeSq)
+      .toBeLessThan(0.01);
+    // Legacy A/B: the powerlaw path still runs (even-area split for rock,
+    // so it conserves too — the A/B difference is the GEOMETRY).
+    expect(r.legacy.dead).toBe(true);
+    expect(r.legacy.count).toBeGreaterThanOrEqual(2);
+
+    watch.assertClean();
+  });
+
+  test('a rock-tile breaks into cells under voronoi and into its 3 breakShards under legacy', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const mkTile = (px: number, py: number) => {
+        // A synthetic rock-tile mirroring TileGenerator.buildStructureTile's
+        // shape: canonical hex polygon, mass ∞, hit-ceiling HP.
+        const w = 42;
+        const pts = [] as any[];
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+        }
+        const tile: any = {
+          id: 'vor_tile_' + px, type: 'STRUCTURE', shardVariant: 'rock-tile',
+          position: { x: px, y: py }, velocity: { x: 0, y: 0 }, rotation: 0,
+          size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
+          health: 4, maxHealth: 4, polygonPoints: pts,
+        };
+        ents.push(tile);
+        return tile;
+      };
+      const kill = (mode: string, px: number) => {
+        const t = mkTile(px, 3000);
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        t.lastImpactVelocity = { x: -9, y: 0 };
+        t.lastImpactDamage = 3;
+        t.health = 0;
+        t.active = false;
+        e.handleEntityDeath(t);
+        const children = ents.filter((x: any) => x.active && !before.has(x.id)
+          && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+        return { mode, count: children.length, dead: t.active === false };
+      };
+      const voronoi = kill('voronoi', 4000);
+      e.dbg.cycleFractureMode(); // → legacy
+      const legacy = kill('legacy', 4400);
+      e.dbg.cycleFractureMode(); // → back
+      return { voronoi, legacy };
+    });
+
+    expect(r.voronoi.dead).toBe(true);
+    // fracture: siteCountMin 5 (a 42px hex maps to 5 sites); sliver
+    // retirement may retire a couple, never below 2; cells can exceed
+    // sites only on a concave parent, which a hex is not.
+    expect(r.voronoi.count).toBeGreaterThanOrEqual(3);
+    expect(r.voronoi.count).toBeLessThanOrEqual(9);
+    // Legacy: exactly the 3 breakShards rock-tile ships with.
+    expect(r.legacy.dead).toBe(true);
+    expect(r.legacy.count).toBe(3);
 
     watch.assertClean();
   });
