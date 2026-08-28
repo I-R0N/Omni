@@ -576,8 +576,17 @@ k. After N waves, spawn a portal to a new map.
     e. Estimated 2+ sessions. Slots between Phase 2 (k)
        and Phase 3 or alongside Pair B/C polish.
 
-26. **voronoi-rock-fracture (deferred / queued).** New
-    rock shatter algorithm. Specifications:
+26. **voronoi-rock-fracture — CLOSED (voronoi gauntlet, 2026-08-28).**
+    Shipped in full on the voronoi-fracture gauntlet branch: (a) true
+    Voronoi cell decomposition of the tile's own polygon — the cells are
+    the fragments, the interior edges are the cracks, and geometric
+    sector chips are carved OUT of the polygon (partial fracture), with
+    (c) cumulative chip-off area driving the break threshold
+    (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Rolled beyond rock to glass
+    and plastic; metal keeps its lattice; DBG A/B (Visual ▸ Fracture)
+    holds the legacy model pending the user's call.  Full ledger:
+    `docs/GAUNTLET_VORONOI_LOG.md`.  Original spec kept below for the
+    record:
     a. Rock-tile fractures via Voronoi cell decomposition
        — chip a sector off the tile per hit, leaving the
        remainder of the tile mostly intact.
@@ -2007,7 +2016,7 @@ of the items in Phase 1 follow-ups.
 |----|------|-------|
 | waves-to-nodes | Wave gameplay relocates into portal-node sub-maps; base map goes combat-light | **DEFERRED to the Overworld plan** (decision #37f) — the design lives in `docs/WEAPONS_AMMO_PLAN.md` §2.4/§8.6. Rejected for this plan because it restructures where the core loop happens and would double (k)'s scope; in this plan a combat-light base map is mostly empty space. The overworld plan (whose thesis IS layered maps) is the right home; WaveSystem activation re-plumbing happens there. |
 | orbital-fields-moons | Orbital flow fields + moving moons with gravity | **MOVED to the Overworld plan** (decision #36) — planets and moving celestial landmarks are overworld features per `docs/GAME_STRUCTURE_STRATEGY.md`. Original sketch preserved in decision #25; it becomes an early task of the next plan, not this one. |
-| voronoi-rock-fracture | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). Still QUEUED for the true Voronoi cell decomposition (geometric sector chips from the tile polygon); user wants to keep it for consideration. See decision #26. |
+| voronoi-rock-fracture (CLOSED — see decision #26 / docs/GAUNTLET_VORONOI_LOG.md) | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). Still QUEUED for the true Voronoi cell decomposition (geometric sector chips from the tile polygon); user wants to keep it for consideration. See decision #26. |
 
 ---
 

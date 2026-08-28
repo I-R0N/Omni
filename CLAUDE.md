@@ -252,6 +252,19 @@ engine/
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
+                          (+ ShardFracturePolicy, the voronoi gauntlet's
+                          per-variant fracture axis)
+    fracture.ts           PURE seeded Voronoi fracture core (voronoi
+                          gauntlet) — mulberry32, site placement, cell
+                          decomposition via robust polygon-line
+                          splitting, boundary-cell subtraction, interior
+                          edges.  Zero engine imports; pinned by
+                          tests/fracture.spec.ts via __omniFracture
+    fractureCache.ts      The entity-facing cache policy over fracture.ts
+                          — ensureFractureCells / ensureFractureEdges,
+                          shared by the SIM (shatter consumes cells at
+                          death) and the RENDER layer (cracks draw the
+                          interior edges), so the two cannot disagree
     NebulaSystem.ts       Slim nebula adapter: neighbour-count refresh,
                           shard→tile transmutation, regen-completion hook,
                           salvage-drop roll
@@ -259,7 +272,8 @@ engine/
                           seeding only)
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
                           incremental tile-destroy patching
-    EntityIndex.ts        Per-frame filtered lists (enemies, asteroids, …)
+    EntityIndex.ts        Per-frame filtered lists (enemies, mobile
+                          shards, projectiles, …)
     BackgroundManager.ts  Parallax stars + nebula BG layers.  The star
                           field is DATA, not bitmaps: a struct-of-arrays
                           of device-pixel positions/sizes sorted into
@@ -682,12 +696,22 @@ Notable existing field categories on `GameEntity`:
   (`'glass-tile' | 'plastic-tile' | 'metal-tile' |
   'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
   'glass-shard' | 'plastic-shard' | 'metal-shard' | 'nebula-shard'`),
-  `asteroidHitCount`, `asteroidHitTimer`, `asteroidHitCooldown`,
-  `regenProgress`, `regenPopTimer`.  Per-variant policy
-  (regen / merge / shatter / dent / repel / glow / automata /
-  passThrough) lives in `SHARD_VARIANTS` (see §5).  Shared
+  `tilePressureCount`, `tilePressureTimer`, `tilePressureCooldown`
+  (the tile PRESSURE accumulator — sub-threshold impacts ON a tile;
+  renamed from the `asteroidHit*` misnomer in the voronoi gauntlet's
+  V6), `regenProgress`, `regenPopTimer`.  Per-variant policy
+  (regen / merge / shatter / fracture / dent / repel / glow / automata /
+  passThrough) lives in `SHARD_VARIANTS` (see §5).  FRACTURE cache
+  (voronoi gauntlet): `fractureCells` (the seeded Voronoi decomposition,
+  computed lazily at first damage/death by
+  `fractureCache.ensureFractureCells`), `fractureEdges` (its interior
+  edges, impact-sorted — the cracks), `fractureOriginalArea` (the
+  min-remainder death baseline); the cells/edges pair is INVALIDATED at
+  every polygon/size/merge mutation (compose, dent, snap-back, partial
+  detach) EXCEPT the killing blow's dent, so fragments separate along
+  exactly the cracks last shown.  Shared
   merge/density bookkeeping: `mergeCount` (accumulated by
-  `composeEntities`; drives fragment count on asteroid-style
+  `composeEntities`; drives fragment count on powerlaw-style
   shatter), `densityTier` + `densityCachedTint` (tint cache —
   invalidate when tier or neighbour count mutates),
   `materialNeighborCount` (automata input, frozen at map-load
@@ -942,8 +966,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
   twinkle scheduling)
-- `SHARD_VARIANTS` — per-variant regen / merge / shatter / dent /
-  repel / glow / automata / passThrough / renderCache policy.
+- `SHARD_VARIANTS` — per-variant regen / merge / shatter / fracture /
+  dent / repel / glow / automata / passThrough / renderCache policy.
   Source of truth for the shard-family behaviour table.  11 variants
   today:
   glass-tile / plastic-tile / metal-tile / indestructible-tile /
@@ -954,9 +978,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`maxNeighbors` + `saturationBrightness` / `saturationOpacity`)
   drives the aggregation-coloring rules.  The optional `blend` block
   (`ShardBlendPolicy`) is the one PRESENTATION entry in the table — how
-  a live cohesion bond is DRAWN (today: plastic-shard; see §8).  See
-  `engine/systems/ShardSystem.types.ts` for the schema and
-  `docs/SHARD_SYSTEM.md` for the design rationale.
+  a live cohesion bond is DRAWN (today: plastic-shard; see §8).
+  The `fracture` block
+  (voronoi gauntlet) + `shatter.kind: 'voronoi'` opt a variant into the
+  SEEDED VORONOI CELL DECOMPOSITION of its own polygon: the cells are
+  the fragments at death, the interior cell edges are the cracks it
+  shows as HP falls, and for rock a qualifying hit DETACHES the cell
+  nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
+  holds the min-remainder death rule).  Opted in today: rock-tile /
+  rock-shard (full + partial), glass-tile / plastic-tile /
+  plastic-shard (full break only).  Metal keeps `decomposeMetalComposite`
+  as its fracture (the lattice IS its cell set — composite cracks stroke
+  the lattice edges); nebula and indestructible are excluded.  The DBG
+  A/B (pause ▸ Debug Menu ▸ Visual ▸ Fracture) flips every opted-in
+  variant back to its shipped legacy break — powerlaw spray, dent
+  breakShards, the spawnGlassShards fan, ROCK_CHIP — pending the user's
+  call (`getActiveFractureMode`).  See
+  `engine/systems/ShardSystem.types.ts` for the schema,
+  `docs/SHARD_SYSTEM.md` for the design rationale, and
+  `docs/GAUNTLET_VORONOI_LOG.md` for the gauntlet ledger.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
   count table, and since step 5 (G7) the ACTUAL authority rather than a
   parallel description: every map's rock free-spawn
@@ -1002,7 +1042,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   alive — seeded in `startGame`, topped up offscreen on a timer, suppressed
   while a DBG enemy-test forces another type).  Passive movement
   (`AISystem.updateBubble`) rides the asteroid flow field
-  (`flowField.sampleAsteroidFlow`), peeling OFF the flow to chase + eat the
+  (`flowField.sampleShardFlow`), peeling OFF the flow to chase + eat the
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
   via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
   (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
@@ -1890,7 +1930,36 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   enemies, salvage-drop roll via `NebulaSystem.handleDeath()` for nebula
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
-  and the variant isn't a nebula).
+  and the variant isn't a nebula).  A `shatter.kind: 'voronoi'` variant
+  under the voronoi fracture mode routes to `shatterVoronoiStyle` (its
+  cached cells become the fragments) and the legacy detours stand down
+  behind MIRRORED gates — the dent-breakShards spawn is gated at BOTH
+  `handleEntityDeath.isDentSpawn` and `DropSystem.spawnDrops`, and the
+  glass-tile `spawnGlassShards` fan likewise; under the DBG 'legacy'
+  mode every gate flips back and the shipped paths run verbatim.
+- **Cracks ARE the fracture pattern for voronoi materials.**
+  `overlayMaterialCracks` draws the interior cell edges of the cached
+  decomposition (impact-nearest first, revealed by the same
+  `MATERIAL_DAMAGE_CRACKS` freq/cap pacing) for any variant with a
+  `fracture` block; everything else — metal tiles, single metal shards,
+  enemy hulls — keeps the seeded radial spokes (`drawDamageCracks`).
+  The metal COMPOSITE strokes its own lattice-cell outlines instead
+  (the exact `decomposeMetalComposite` seams).  The one ordering rule
+  that makes "cracks predict the break" TRUE: `applyDentStep` skips the
+  fracture-cache invalidation on the killing blow (health is
+  decremented before the dent), so the shatter consumes exactly the
+  decomposition whose edges were last drawn.
+- **Partial fracture replaces the rock chip under voronoi.**  A
+  qualifying non-lethal hit on rock (same `ROCK_CHIP.CHIP_CHANCE`
+  cadence) carves the cell nearest the impact OFF the parent
+  (`GameEngine.detachFractureChip` → `fracture.subtractBoundaryCell`,
+  an exact arc-splice subtraction): the chip is a real shard with the
+  cell's own polygon, the parent keeps the spliced remainder (size and
+  position untouched — the dent contract — so the static grid never
+  rebuilds), and below `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%) of
+  the original area the whole entity dies through the normal death
+  path.  `releaseRockChip` survives as the DBG legacy path and as the
+  fallback for parents too small to carry 3 cells.
 - **A COLOUR MUST NEVER PARSE TO NaN.**  `hexToRgb` (render/drawUtils) feeds
   its channels straight back into `rgb()`/`rgba()` strings for gradient
   stops, and `addColorStop` THROWS on a colour it cannot parse — inside the

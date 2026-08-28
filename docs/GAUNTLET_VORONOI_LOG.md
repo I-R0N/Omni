@@ -26,7 +26,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 - [x] **V4 — Partial fracture: shards break OFF tiles.**
 - [x] **V5 — Roll across materials.**
 - [x] **V6 — The asteroid rename.**
-- [ ] **V7 — Ship it.**
+- [x] **V7 — Ship it.**
 
 (Full milestone descriptions are in the prompt; each entry below opens
 with what was measured/read, then what was done, then the evidence.)
@@ -561,3 +561,54 @@ keep-set needed no exclusion logic.
 
 **Evidence of zero change: the FULL suite — 249/249 green** (build +
 `npx playwright test`, 9.1m), typecheck ✓.  No pinned value moved.
+
+---
+
+## V7 — Ship it (2026-08-28)
+
+**What was NOT deleted, and why.**  The prompt gates both deletions on
+a user call that has not occurred, so the DBG A/B (Visual ▸ Fracture)
+STAYS for the play-test, and with it every legacy path it routes: the
+powerlaw pipeline (`shatterPowerlawStyle` — also still the live path
+for glass-shard, metal-tile snap debris sizing and the nebula style's
+sibling), the dent `breakShards` spawns, the `spawnGlassShards` fan,
+and `releaseRockChip` + `ROCK_CHIP` (doubly alive: the legacy A/B AND
+the voronoi mode's small-rock dust fallback — the V4 outcome).  An
+unused-code sweep found nothing deletable that the A/B does not still
+reach.  Collapsing the A/B to voronoi-only is a one-milestone follow-up
+once the user calls it: flip the gates' `getActiveFractureMode()` reads
+to constants, delete the legacy branches they guarded, empty rock-tile's
+`breakShards`, and reduce `ROCK_CHIP` to the dust roll.
+
+**Docs synced** (part of the deliverable): CLAUDE.md §2 (fracture.ts /
+fractureCache.ts rows, EntityIndex row), §4 (fracture cache fields, the
+tile-pressure rename), §5 (the SHARD_VARIANTS fracture axis +
+FRACTURE_DETACH + the A/B), §8 (death routing gates, "cracks ARE the
+pattern", partial fracture, `sampleShardFlow`);
+`docs/SHARD_SYSTEM.md` §2b (the fracture axis, same shallow-table
+rule); `docs/GAME_FEEDBACK_PLAN.md` item 26 CLOSED with a pointer here
+(spec kept for the record).
+
+**Final gates.**  typecheck ✓ · build ✓ · FULL `npx playwright test`
+**249/249** ✓ (twice this session: after V6 and after V7's doc-only
+changes).  Final simbench vs the V0 baseline (ms/substep, medians):
+
+| scene | V0 | V7 |
+|---|---|---|
+| hub-idle | 0.862 | 0.694 |
+| asteroid-6k | 1.708 | 1.624 |
+| glass-field | 1.193 | 1.005 |
+| roamer-stack | 2.076 | 2.313 (inside the 1.93–2.47 noise band measured at V2) |
+
+No scene regressed beyond noise; the three deterministic scenes all
+read AT or BELOW baseline, consistent with the budget rule holding —
+the decomposition is computed only at damage/death events and cached.
+Per D4, the before/after "visual capture" is the analytic evidence in
+this log (the V0 fragment table vs the V2/V5 rebalance tables + the
+pinned conservation/centroid-match tests); on-device judgement rides
+the DBG A/B, which is the control built for exactly that.
+
+**Gauntlet complete.**  V0–V7 all ticked.  Open item for the user:
+judge the A/B on a device (rock field for chips + full breaks, glass
+field for the radial shatter, a plastic cluster for the burst), then
+call the collapse.
