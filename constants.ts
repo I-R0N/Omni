@@ -3860,6 +3860,24 @@ export const ROCK_CHIP = {
   SOLID_MIN_PARENT_DIAM: 30,
 } as const;
 
+// ── Partial fracture (voronoi gauntlet, V4) ────────────────────────────────
+// A qualifying non-lethal hit on a voronoi material detaches the cell
+// nearest the impact as a REAL mobile shard; the parent keeps the spliced
+// remainder (see fracture.subtractBoundaryCell).  This replaces
+// ROCK_CHIP's spawn-beside-an-intact-parent chips for rock in voronoi
+// mode; ROCK_CHIP survives as the DBG 'legacy' path (and the dust rolls).
+export const FRACTURE_DETACH = {
+  // Below this fraction of the entity's ORIGINAL polygon area the
+  // remainder routes to FULL death instead of lingering as a sliver —
+  // "the last cells detaching" (feedback item 26c: cumulative chip-off
+  // area drives the break threshold).
+  MIN_REMAINDER_FRAC: 0.25,
+  // A decomposition needs at least this many cells before detaching one
+  // reads as a chip rather than as halving the entity; smaller parents
+  // fall back to the legacy dust puff.
+  MIN_CELLS: 3,
+} as const;
+
 // ── Material damage cracks ─────────────────────────────────────────────────
 // Drives the seeded fracture overlay (RenderSystem.drawDamageCracks) for the
 // rocky / metal destructibles.  Rock now caps at 4-6 hits (ROCK_BREAK), so it

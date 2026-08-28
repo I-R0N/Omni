@@ -419,6 +419,123 @@ test.describe('cracks are the pattern (V3)', () => {
   });
 });
 
+test.describe('partial fracture (V4)', () => {
+  test('subtractBoundaryCell: remainder = parent minus the cell, exactly', async ({ page }) => {
+    const watch = await boot(page);
+
+    const r = await page.evaluate(`(() => {
+      const fr = window.__omniFracture;
+      ${STAR_POLY_SRC}
+      let attempts = 0, spliced = 0;
+      const failures = [];
+      for (let seed = 1; seed <= 10; seed++) {
+        const poly = starPoly(fr, 40, seed * 13.1);
+        const parentArea = fr.polygonArea(poly);
+        const res = fr.computeFracture(poly, { siteCount: 7, seed: seed * 2.2 });
+        for (const cell of res.cells) {
+          attempts++;
+          const rem = fr.subtractBoundaryCell(poly, cell.points);
+          if (rem === null) continue; // interior / unspliceable — a legal no
+          spliced++;
+          const err = Math.abs(fr.polygonArea(rem) - (parentArea - cell.area)) / parentArea;
+          if (err > 0.02) failures.push('area seed=' + seed + ' err=' + err);
+          if (!fr.isSimplePolygon(rem)) failures.push('non-simple seed=' + seed);
+        }
+      }
+      return { attempts, spliced, failures };
+    })()`) as any;
+
+    expect(r.failures, r.failures.join('\n')).toEqual([]);
+    // Most cells of a convex-ish star are boundary cells; the splice must
+    // succeed often enough to carry the chip cadence.
+    expect(r.spliced).toBeGreaterThan(r.attempts * 0.5);
+
+    watch.assertClean();
+  });
+
+  test('a hit carves the nearest cell OFF a rock-tile; enough hits kill it through the death path', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const fr = (window as any).__omniFracture;
+      const ents = e.currentMap.entities;
+      const w = 42;
+      const pts: any[] = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+      }
+      const tile: any = {
+        id: 'v4_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
+        position: { x: 4200, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
+        size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
+        health: 6, maxHealth: 6, polygonPoints: pts,
+      };
+      ents.push(tile);
+      tile.lastImpactVelocity = { x: -9, y: 0 };
+      const impact = { x: tile.position.x + w * 0.45, y: tile.position.y };
+
+      const areaBefore = fr.polygonArea(tile.polygonPoints);
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const first = e.detachFractureChip(tile, impact);
+      const areaAfter = fr.polygonArea(tile.polygonPoints);
+      const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+
+      const firstDetach = {
+        handled: first,
+        areaBefore, areaAfter,
+        chipCount: chips.length,
+        chipArea: chips.length === 1 ? fr.polygonArea(chips[0].polygonPoints) : 0,
+        stillAlive: tile.active === true,
+        cacheCleared: tile.fractureCells === undefined,
+      };
+
+      // The min-remainder death branch, made deterministic: a second
+      // tile whose recorded ORIGINAL area dwarfs its polygon, so the
+      // first successful detach lands under the 25% floor and the whole
+      // entity routes through the real death path — the last cells
+      // detaching.
+      const pts2 = pts.map((p: any) => ({ x: p.x, y: p.y }));
+      const tile2: any = {
+        id: 'v4_tile_b', type: 'STRUCTURE', shardVariant: 'rock-tile',
+        position: { x: 4600, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
+        size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
+        health: 6, maxHealth: 6, polygonPoints: pts2,
+      };
+      ents.push(tile2);
+      tile2.lastImpactVelocity = { x: -9, y: 0 };
+      tile2.fractureOriginalArea = fr.polygonArea(pts2) * 5;
+      const before2 = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      let died = false;
+      for (let k = 0; k < 8 && !died; k++) {
+        e.detachFractureChip(tile2, { x: tile2.position.x + w * 0.45, y: tile2.position.y });
+        died = tile2.active === false;
+      }
+      const debris = ents.filter((x: any) => x.active && !before2.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      return { firstDetach, died, debrisCount: debris.length };
+    });
+
+    const f = r.firstDetach;
+    expect(f.handled).toBe(true);
+    expect(f.stillAlive).toBe(true);
+    expect(f.chipCount).toBe(1);
+    // Conservation: the parent lost exactly what the chip carries.
+    expect(Math.abs((f.areaBefore - f.areaAfter) - f.chipArea) / f.areaBefore)
+      .toBeLessThan(0.05);
+    expect(f.cacheCleared).toBe(true);
+    // The min-remainder rule ends it through the REAL death path, and the
+    // last cells detach as debris.
+    expect(r.died).toBe(true);
+    expect(r.debrisCount).toBeGreaterThanOrEqual(2);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('fracture core — cost', () => {
   test('µs per decomposition at 4/8/16/30 sites stays inside the lazy-cache budget', async ({ page }) => {
     const watch = await boot(page);

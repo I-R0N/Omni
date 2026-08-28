@@ -1295,6 +1295,12 @@ export interface GameEntity {
   // sorted nearest-impact-first at build so the progressive reveal is
   // stable.  Derived from fractureCells; cleared wherever it is.
   fractureEdges?: import('./engine/systems/fracture').FractureEdge[];
+
+  // Polygon area at the FIRST partial-fracture detach (V4) — the
+  // baseline the min-remainder death rule measures against
+  // (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Never cleared: cumulative
+  // chip-off area drives the break threshold across the entity's life.
+  fractureOriginalArea?: number;
 }
 
 export interface CameraState {

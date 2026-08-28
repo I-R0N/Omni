@@ -931,6 +931,102 @@ export class ShardSystem {
     this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
   }
 
+  /**
+   * Spawn ONE detached Voronoi cell as a mobile fragment (partial
+   * fracture, V4) — the same recipe as a shatterVoronoiStyle child
+   * (cell polygon re-centred on its centroid, size = parentSize ×
+   * √(cellArea/refArea) so the size² metric is conserved against the
+   * parent's loss, rock hit-ceiling HP), but chip-flavoured motion: it
+   * pops OFF the parent along its own centroid direction plus a share
+   * of the impact velocity, inheriting the parent's density tier
+   * unchanged (a chip is the same material, not a re-rolled mix).
+   */
+  public spawnDetachedCell(
+    parent: GameEntity,
+    cell: { points: ReadonlyArray<Vector2>; centroid: Vector2; area: number },
+    refArea: number,
+    entities: GameEntity[],
+  ): void {
+    const variantId = shardVariantOf(parent);
+    if (variantId === null) return;
+    const parentVariant = SHARD_VARIANTS[variantId];
+    const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
+    const childSpawn = childVariant.spawn;
+    const f = parentVariant.fracture;
+    if (f === undefined || refArea <= 0) return;
+
+    const newSize = Math.max(6, parent.size.x * Math.sqrt(cell.area / refArea));
+    const densityTier = parent.densityTier;
+    let childMass = childSpawn.sizeToMass(newSize);
+    if (densityTier !== undefined && densityTier > 0) {
+      childMass *= ROCK_CONDENSE.DENSITY_MULT[
+        Math.min(densityTier, ROCK_CONDENSE.DENSITY_MULT.length - 1)];
+    }
+    const hp = childVariant.id === 'rock-shard'
+      ? rockHitCeiling(newSize, densityTier)
+      : (newSize > 30 ? 2 : 1);
+
+    const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
+    const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
+    const wy = parent.position.y + cell.centroid.x * sin + cell.centroid.y * cos;
+
+    const rlen = Math.hypot(cell.centroid.x, cell.centroid.y);
+    let rdx: number, rdy: number;
+    if (rlen > 1e-3) {
+      rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
+      rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
+    } else {
+      const a = Math.random() * Math.PI * 2;
+      rdx = Math.cos(a); rdy = Math.sin(a);
+    }
+    const rSpeed = f.radialSpeed * (1.0 + Math.random() * 0.6);
+    let vx = parent.velocity.x + rdx * rSpeed;
+    let vy = parent.velocity.y + rdy * rSpeed;
+    const iv = parent.lastImpactVelocity;
+    if (iv !== undefined) {
+      const s = Math.hypot(iv.x, iv.y);
+      if (s > 1e-3) {
+        const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          s * parentVariant.shatter.forwardDrag + 0.3 + Math.random() * 0.8);
+        vx += (iv.x / s) * fwd;
+        vy += (iv.y / s) * fwd;
+      }
+    }
+
+    const points: Vector2[] = new Array(cell.points.length);
+    for (let i = 0; i < cell.points.length; i++) {
+      points[i] = {
+        x: cell.points[i].x - cell.centroid.x,
+        y: cell.points[i].y - cell.centroid.y,
+      };
+    }
+
+    const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
+    entities.push({
+      id:            nextId('shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  childVariant.id,
+      position:      { x: wx, y: wy },
+      velocity:      { x: vx, y: vy },
+      size:          { x: newSize, y: newSize },
+      rotation:      parent.rotation,
+      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+      color:         parent.color || COLORS.ASTEROID,
+      active:        true,
+      health:        hp,
+      maxHealth:     hp,
+      polygonPoints: points,
+      mass:          childMass,
+      densityTier,
+      sprite:        parent.sprite,
+      linearDamping:  childSpawn.linearDamping,
+      angularDamping: childSpawn.angularDamping,
+      restSpeed:      childSpawn.restSpeed,
+      restSpin:       childSpawn.restSpin,
+      collapseGraceTimer: getActiveShatterGraceDelay(),
+    });
+  }
+
   /** The variant-driven dust/debris burst shared by the powerlaw and
    *  voronoi shatter styles (extracted verbatim from the powerlaw tail). */
   private spawnShatterDust(

@@ -490,6 +490,150 @@ export function computeFracture(
   return { cells, sites: sites as FracturePoint[], totalArea: total, retiredSites: retired };
 }
 
+// ── Cell subtraction (partial fracture, V4) ─────────────────────────
+
+interface BoundaryLoc { e: number; t: number; pt: FracturePoint }
+
+/** Locate the point's closest position on the polygon boundary as
+ *  (edge index, param t along that edge). */
+function locateOnBoundary(p: FracturePoint, poly: ReadonlyArray<FracturePoint>): BoundaryLoc {
+  let best: BoundaryLoc = { e: 0, t: 0, pt: p };
+  let bestD = Infinity;
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const qx = a.x + dx * t - p.x, qy = a.y + dy * t - p.y;
+    const d = qx * qx + qy * qy;
+    if (d < bestD) { bestD = d; best = { e: i, t, pt: p }; }
+  }
+  return best;
+}
+
+/** Walk the polygon boundary FORWARD (in vertex order) from one
+ *  boundary location to another, returning the path points including
+ *  both endpoints. */
+function boundaryPathForward(
+  poly: ReadonlyArray<FracturePoint>,
+  from: BoundaryLoc, to: BoundaryLoc,
+): FracturePoint[] {
+  const out: FracturePoint[] = [from.pt];
+  const n = poly.length;
+  if (from.e === to.e && to.t >= from.t) { out.push(to.pt); return out; }
+  for (let k = 1; k <= n; k++) {
+    const idx = (from.e + k) % n;
+    out.push(poly[idx]); // the start vertex of edge `idx`
+    if (idx === to.e) { out.push(to.pt); return out; }
+  }
+  return out;
+}
+
+/** Remove near-duplicate consecutive points (splice seams). */
+function dedupeLoop(pts: FracturePoint[], eps: number): FracturePoint[] {
+  const out: FracturePoint[] = [];
+  const eps2 = eps * eps;
+  for (const p of pts) {
+    const q = out[out.length - 1];
+    if (q !== undefined) {
+      const dx = p.x - q.x, dy = p.y - q.y;
+      if (dx * dx + dy * dy < eps2) continue;
+    }
+    out.push(p);
+  }
+  if (out.length >= 2) {
+    const a = out[0], b = out[out.length - 1];
+    const dx = a.x - b.x, dy = a.y - b.y;
+    if (dx * dx + dy * dy < eps2) out.pop();
+  }
+  return out;
+}
+
+/** Subtract a BOUNDARY cell of a decomposition from its parent polygon —
+ *  the geometric heart of partial fracture (V4): the cell detaches as a
+ *  fragment and the parent keeps the spliced remainder.
+ *
+ *  Works by ARC SPLICING rather than general polygon boolean ops: a
+ *  boundary cell's outline is one contiguous run of vertices ON the
+ *  parent boundary (the arc) plus one interior chain (its bisector
+ *  edges).  The remainder is the parent boundary walked the long way
+ *  between the arc's endpoints, closed through the interior chain.  Both
+ *  complementary walks are built and the one whose area matches
+ *  parentArea − cellArea (and is simple) wins.
+ *
+ *  Returns null — meaning "do not detach this cell" — when the cell is
+ *  interior (a hole), touches the boundary in more than one run
+ *  (concave-parent pathology), covers the whole parent, or neither
+ *  candidate validates.  Callers treat null as "no chip this hit". */
+export function subtractBoundaryCell(
+  parent: ReadonlyArray<FracturePoint>,
+  cell: ReadonlyArray<FracturePoint>,
+): FracturePoint[] | null {
+  const parentArea = polygonArea(parent);
+  const cellArea = polygonArea(cell);
+  if (parentArea <= 0 || cellArea <= 0) return null;
+  const eps = Math.sqrt(parentArea) * 5e-4;
+  const eps2 = eps * eps;
+
+  const n = cell.length;
+  const onB: boolean[] = new Array(n);
+  let boundaryCount = 0;
+  for (let i = 0; i < n; i++) {
+    onB[i] = onParentBoundary(cell[i].x, cell[i].y, parent, eps2);
+    if (onB[i]) boundaryCount++;
+  }
+  if (boundaryCount < 2 || boundaryCount === n) return null;
+
+  // Exactly one contiguous circular run of boundary vertices.
+  let runs = 0, runStart = -1, runEnd = -1;
+  for (let i = 0; i < n; i++) {
+    const prev = onB[(i + n - 1) % n];
+    if (onB[i] && !prev) { runs++; runStart = i; }
+    if (onB[i] && !onB[(i + 1) % n]) runEnd = i;
+  }
+  if (runs !== 1 || runStart < 0 || runEnd < 0) return null;
+
+  const sPt = cell[runStart];  // arc start (cell winding order)
+  const ePt = cell[runEnd];    // arc end
+  // Interior chain: cell vertices strictly between runEnd and runStart.
+  const chain: FracturePoint[] = [];
+  for (let k = 1; k < n; k++) {
+    const idx = (runEnd + k) % n;
+    if (idx === runStart) break;
+    chain.push(cell[idx]);
+  }
+  if (chain.length === 0) return null; // straight-chord cells splice too,
+  // but a chainless cell means arc-only geometry — nothing to close with.
+
+  const locS = locateOnBoundary(sPt, parent);
+  const locE = locateOnBoundary(ePt, parent);
+
+  const target = parentArea - cellArea;
+  const tol = Math.max(parentArea * 0.02, eps * eps);
+
+  // Candidate A: parent forward e→s, close through the chain reversed.
+  const candA = dedupeLoop(
+    boundaryPathForward(parent, locE, locS).concat(chain.slice().reverse()), eps);
+  // Candidate B: parent forward s→e, close through the chain in order.
+  const candB = dedupeLoop(
+    boundaryPathForward(parent, locS, locE).concat(chain), eps);
+
+  let best: FracturePoint[] | null = null;
+  let bestErr = tol;
+  for (const cand of [candA, candB]) {
+    if (cand.length < 3) continue;
+    const err = Math.abs(polygonArea(cand) - target);
+    if (err < bestErr && isSimplePolygon(cand)) {
+      best = cand;
+      bestErr = err;
+    }
+  }
+  if (best === null) return null;
+  return polygonSignedArea(best) < 0 ? best.slice().reverse() : best;
+}
+
 // ── Interior edges (the crack pattern, V3's input) ──────────────────
 
 export interface FractureEdge {

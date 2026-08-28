@@ -17,6 +17,7 @@ import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
 import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
          isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
+         subtractBoundaryCell,
        } from './engine/systems/fracture';
 
 const App: React.FC = () => {
@@ -93,6 +94,7 @@ const App: React.FC = () => {
     (window as any).__omniFracture = {
       mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
       isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
+      subtractBoundaryCell,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two

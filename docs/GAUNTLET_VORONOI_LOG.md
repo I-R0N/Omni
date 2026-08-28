@@ -23,7 +23,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 - [x] **V1 — The fracture core, pure and pinned.**
 - [x] **V2 — Full shatter through the cells.**
 - [x] **V3 — Cracks are the pattern.**
-- [ ] **V4 — Partial fracture: shards break OFF tiles.**
+- [x] **V4 — Partial fracture: shards break OFF tiles.**
 - [ ] **V5 — Roll across materials.**
 - [ ] **V6 — The asteroid rename.**
 - [ ] **V7 — Ship it.**
@@ -406,3 +406,68 @@ green).
 
 Gates: typecheck ✓ · build ✓ · fracture (9) + boot + loop + terrain +
 healthbars + shake + knockback + lighting (51) ✓.
+
+---
+
+## V4 — Partial fracture: shards break OFF tiles (2026-08-28)
+
+**The subtraction — arc splicing, not general booleans (logged choice).**
+`fracture.subtractBoundaryCell`: a boundary cell's outline is one
+contiguous run of vertices ON the parent boundary (the arc) plus one
+interior chain (its bisector edges), so the remainder is the parent
+boundary walked the long way between the arc's endpoints, closed through
+the chain.  Both complementary walks are built; the one that is simple
+AND matches parentArea − cellArea (2% tolerance) wins; anything else —
+interior cell, multi-arc contact, validation failure — returns null,
+which callers treat as "no chip this hit".  The prompt's alternative
+("simply loses the detached cells") is what this is: an exact per-cell
+subtraction with a validity-gated refusal, no polygon union library.
+
+**The detach** (`GameEngine.detachFractureChip`, called from the rock
+chip site under the same `ROCK_CHIP.CHIP_CHANCE` cadence roll): the cell
+nearest the impact detaches via `ShardSystem.spawnDetachedCell` (the V2
+fragment recipe, chip-flavoured motion, parent's density tier inherited
+unchanged), the parent takes the spliced remainder, mobile parents scale
+mass by the area removed, and the full dent-machinery invalidation
+cluster fires (SAT axes, occluder radius, collision radius,
+`_staticCached`, both fracture caches).  `entity.size` and `position`
+stay untouched (the dent contract: stable footprint, `position ===
+hexCoord`) so the static grid never rebuilds; the tile cache re-stamps
+through the flip it already does on every damage event.  Legacy
+`releaseRockChip` survives untouched as the DBG 'legacy' path and as the
+fallback for parents too small for 3 cells (their dust cadence in
+voronoi mode is CHIP_CHANCE² — noted, accepted).
+
+**Min-remainder rule.**  `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (0.25) of
+the entity's ORIGINAL area (`fractureOriginalArea`, stamped at first
+detach): a detach that would leave less routes the WHOLE entity through
+the normal death path — health 0, `removeStaticEntity` for tiles
+(public), `handleEntityDeath` — so the last cells detach as the final
+break, and the flow-field patch, drops and scoring all ride the existing
+plumbing.  This is feedback item 26c verbatim: cumulative chip-off area
+drives the break threshold, alongside the untouched hit-ceiling model
+(each qualifying hit ≈ one cell of area, so the two thresholds track).
+
+**Found by measurement — the splice wedge.**  A 42px hex stalled at 70%
+area after 4 bites: the jagged remainder put every cached cell's
+boundary contact into multiple runs, nothing spliced, and with the cache
+kept the entity could never chip again.  Two fixes: candidate cells are
+tried in nearest-impact order until one splices, and a TOTAL failure
+drops the caches (the next hit's fresh impact bias re-seeds the
+distribution) and falls back to the legacy chip for that hit.  Regen
+interaction: N/A today (rock has `regen: none`); logged for V5+: regen
+respawns the canonical tile, so partial loss never touches the regen
+queue — only full death enqueues.
+
+**Evidence.**  Two new tests (11/11 fracture green): the pure splice
+across 10 decomposed rock polygons (remainder = parent − cell within 2%,
+simple, >50% of cells spliceable), and the sim path — first detach
+carves exactly one chip whose area equals the parent's loss, caches
+invalidate, and a deterministic min-remainder case dies through the real
+death path with ≥2 cells as debris.  Wider suites: boot + loop + terrain
++ economy + attribution + shake + knockback (31) ✓.  typecheck ✓ ·
+build ✓ · simbench (medians): hub-idle 0.730 / asteroid-6k 1.772 /
+glass-field 1.225 / roamer-stack 2.132 — all inside the noise band
+established at V2 (asteroid-6k's V2 spread was 1.52–1.71; +3.7% over the
+V0 single read is within it, and the detach path runs only on damage
+events).
