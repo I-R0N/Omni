@@ -20,7 +20,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 ## Checklist
 
 - [x] **V0 — Survey, baseline, seam plan.**
-- [ ] **V1 — The fracture core, pure and pinned.**
+- [x] **V1 — The fracture core, pure and pinned.**
 - [ ] **V2 — Full shatter through the cells.**
 - [ ] **V3 — Cracks are the pattern.**
 - [ ] **V4 — Partial fracture: shards break OFF tiles.**
@@ -220,3 +220,62 @@ build artifact).  By identifier, classified:
 
 Gates at V0: `npm run typecheck` ✓, `npm run build` ✓ (2.78s), no test
 run needed (no code change).
+
+---
+
+## V1 — The fracture core, pure and pinned (2026-08-28)
+
+**What was built.**  `engine/systems/fracture.ts` — pure geometry, zero
+imports (the DualSenseHID precedent), no `Math.random` anywhere.
+Exports: `mulberry32` (the BackgroundManager mixer restated as a pure
+factory, D3), polygon primitives (`polygonArea` / `polygonSignedArea` /
+`polygonCentroid` / `pointInPolygon` / `isSimplePolygon`),
+`placeFractureSites` (rejection sampling with a soft min-separation rule
++ optional impact-biased fraction), `computeFracture` (the
+decomposition), `collectInteriorEdges` (the bisector segments — V3's
+crack input, deduped, midpoints carried for impact ordering).  Debug
+handle #6: `window.__omniFracture` (App.tsx), pinned by
+`tests/fracture.spec.ts` (6 tests).
+
+**The clipping decision — measured, not assumed.**  The prompt's V1
+hazard was real.  First cut: Sutherland–Hodgman (concave parent ×
+convex Voronoi region) + a post-split at duplicated vertices.  The
+suite's deep-star case (alternating radii 1.0/0.42, 12 vertices, 24
+sites, seed 42.9) produced **self-intersecting cells** — S-H bridges a
+disconnected intersection along the clip line but subdivides the doubled
+edge differently in each direction, so the bridge is not findable by
+vertex identity.  REPLACED with repeated LINE SPLITTING
+(`splitPolygonKeepNeg`): each cell is the parent split by every
+bisector, keeping the near side, using the sorted-crossing algorithm
+(crossings of a simple polygon along the cut line alternate
+inside/outside, so pairing sorted crossings 0-1, 2-3… yields the
+interior bridges exactly; chains stitched across bridges close real
+disjoint pieces, each simple BY CONSTRUCTION).  On-line vertices snap to
+the keep side (eps = 1e-5·√area) so tangencies never leave odd crossing
+counts; the residual same-kind-pair degeneracy falls back to
+single-polygon S-H (area-conserving even when bridged).  The failing
+case now passes.
+
+**Sliver rule.**  A cell piece below
+`minAreaFraction (0.15) × parentArea / siteCount` retires its SITE and
+the decomposition recomputes — neighbours absorb the territory, which is
+the "merge slivers into neighbours" rule with no polygon union.  Bounded
+loop, never below 2 sites.
+
+**Pinned by the suite** (all six green, `npx playwright test
+tests/fracture.spec.ts`):
+- determinism: same (polygon, seed) → JSON-identical result;
+- area conservation: 48 decompositions (12 rock-shape polygons spanning
+  chip 12px → boulder 160px × site counts 4/8/16/30), Σcells within
+  0.1% of parent;
+- validity: every cell simple, positive winding, no sliver below the
+  minimum (deep-concave star included);
+- impact bias: biased sites measurably nearer the hit across 6 seeds;
+- interior edges: midpoints strictly inside the parent, deduplicated;
+- cost (software-raster container): **n4 = 77 µs, n8 = 62 µs,
+  n16 = 125 µs, n30 = 495 µs** per decomposition — comfortably inside
+  the lazy-compute-and-cache budget (a decomposition is a per-damage
+  event, never per-frame).
+
+Boot/loop canaries stay green (the App.tsx handle is one assignment).
+Gates: typecheck ✓ · build ✓ · fracture + boot + loop suites ✓.

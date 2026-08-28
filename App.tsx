@@ -15,6 +15,9 @@ import {
 } from './engine/systems/render/shipSprites';
 import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
+import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
+         isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
+       } from './engine/systems/fracture';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -83,6 +86,14 @@ const App: React.FC = () => {
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.
     (window as any).__omniMenuNav = { pickNext };
+    // Debug handle #6 (voronoi gauntlet, V1) — the seeded fracture core, on
+    // the __omniHid terms: pure functions with no engine imports, pinned by
+    // tests/fracture.spec.ts for determinism, area conservation, cell
+    // validity and cost.  Nothing in the game reads this handle.
+    (window as any).__omniFracture = {
+      mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
+      isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
+    };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
     // above: `enumerateCells` / `resolveTiltCell` / `cellMatrix` are pure,
