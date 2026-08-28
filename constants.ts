@@ -3164,16 +3164,19 @@ export function cyclePlayerRoll(): number {
 //              points at the aim (its five edges draw white);
 //  'Rhombic' — a rhombic dodecahedron, its degree-4 axis vertex forward
 //              (the four edges meeting there draw white);
+//  'Tri'     — a triangular DART ship: nose far forward, two swept
+//              wingtips, and a dorsal peak + ventral keel giving the
+//              body 3D depth (the four nose edges draw white);
 //  'Ship'    — the sprite + the cos-tilt squash, kept as the A/B.
 // The shapes live in render/playerCube.ts as vertex/edge tables — adding
 // one is a table entry, never a new draw path.  DBG Player ▸ "Hull".
 export const PLAYER_HULL_CYCLE: ReadonlyArray<string> =
-  ['Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Ship'] as const;
+  ['Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Tri', 'Ship'] as const;
 let activePlayerHullIndex = 0; // Cube — the shipped default
 export type PlayerHullMode =
-  'cube' | 'diamond' | 'sphere' | 'dodeca' | 'rhombic' | 'sprite';
+  'cube' | 'diamond' | 'sphere' | 'dodeca' | 'rhombic' | 'tri' | 'sprite';
 const PLAYER_HULL_MODES: ReadonlyArray<PlayerHullMode> =
-  ['cube', 'diamond', 'sphere', 'dodeca', 'rhombic', 'sprite'] as const;
+  ['cube', 'diamond', 'sphere', 'dodeca', 'rhombic', 'tri', 'sprite'] as const;
 export function getActivePlayerHullMode(): PlayerHullMode {
   return PLAYER_HULL_MODES[activePlayerHullIndex];
 }

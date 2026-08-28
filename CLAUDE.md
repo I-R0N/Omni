@@ -778,7 +778,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ORTHOGRAPHIC (no perspective — user call).  The hulls are a SHAPE
   TABLE (`HullDef`: unit-radius vertices + edge list + nose-marker
   flags + per-shape scale), so a new shape is a table entry, never a
-  new draw path.  FIVE wireframes today: 'Cube' (the default —
+  new draw path.  SIX wireframes today: 'Cube' (the default —
   axis-aligned, so at rest it is a FLAT SQUARE with the NOSE FACE
   edge-on as the forward edge), 'Diamond' (the cube stood on a corner:
   one corner straight up at the viewer, the adjacent corner's
@@ -790,7 +790,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   dodecahedron rotated so a pentagonal FACE aims forward; its five
   edges are the marker), and 'Rhombic' (the rhombic dodecahedron with
   a degree-4 axis VERTEX forward — at rest a diamond silhouette; the
-  four edges meeting at that vertex are the marker).  The aim marker
+  four edges meeting at that vertex are the marker), and 'Tri' (the
+  triangular DART ship — the one shape that is a ship rather than a
+  solid: nose far forward, two swept wingtips, a dorsal peak + ventral
+  keel for 3D depth; the four nose edges are the marker).  The aim marker
   draws last in white; depth is cued by edge alpha.  The 'Ship' step
   restores the sprite +
   the cos-tilt squash as the A/B — the squash path is sprite-mode

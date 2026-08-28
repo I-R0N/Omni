@@ -1861,7 +1861,7 @@ export interface EngineStats {
   // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
   rollFeelName?: string;
   // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default —
-  // "Diamond", "Sphere", "Dodeca", "Rhombic", or "Ship").
+  // "Diamond", "Sphere", "Dodeca", "Rhombic", "Tri", or "Ship").
   hullModeName?: string;
   // DBG rotation-damping preset name (PLAYER_ROLL_DAMPING_CYCLE, e.g.
   // "Default").

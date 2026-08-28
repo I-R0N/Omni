@@ -461,6 +461,8 @@ test.describe('the wireframe hull shapes', () => {
     await waitForStats(page, s => s.hullModeName === 'Dodeca', 'the Dodeca hull');
     await engine(page, e => e.dbg.cyclePlayerHull());
     await waitForStats(page, s => s.hullModeName === 'Rhombic', 'the Rhombic hull');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Tri', 'the Tri dart ship');
 
     await engine(page, e => e.input.keys.delete('KeyS'));
     await engine(page, e => e.dbg.cyclePlayerHull());

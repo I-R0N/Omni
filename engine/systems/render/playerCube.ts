@@ -33,6 +33,10 @@
  *   - RHOMBIC — a rhombic dodecahedron (8 cube corners + 6 axis
  *     vertices); a degree-4 axis vertex is the nose, aim = its four
  *     edges.
+ *   - TRI — the triangular DART ship (the one shape that is a ship
+ *     rather than a solid): nose far forward, two swept wingtips, a
+ *     dorsal peak and a ventral keel for 3D depth; aim = the four nose
+ *     edges, the lit leading edge.
  *
  *  Under the REVERSED lean direction (DBG "Lean dir") every shape is
  *  RE-BASED nose-up (user call): the nose feature faces the VIEWER at
@@ -211,12 +215,42 @@ const RHOMBIC = makeDef(
   0.95,
 );
 
+// ── TRI — the triangular DART ship ─────────────────────────────────────
+// The one shape here that is a SHIP rather than a solid: a nose vertex
+// far forward, two wingtips swept aft, and a dorsal peak + ventral keel
+// amidships-aft giving the body real 3D depth — so a bank visibly dips a
+// wing and a pitch shows the spine or the keel.  At rest the silhouette
+// is a clean arrowhead with the ridge lines converging aft; the dorsal-
+// to-keel strut projects to a point at rest (both sit on the centreline)
+// and opens up as the hull tilts, which is itself a depth cue.  The four
+// edges meeting at the nose are the white marker — the lit leading edge.
+const TRI_VERTS: number[][] = [
+  [2.0, 0, 0],        // 0 nose
+  [-1.0, -1.15, 0],   // 1 port wingtip
+  [-1.0, 1.15, 0],    // 2 starboard wingtip
+  [-0.55, 0, 0.55],   // 3 dorsal peak
+  [-0.55, 0, -0.35],  // 4 ventral keel
+];
+const TRI_EDGES: [number, number][] = [
+  [0, 1], [0, 2], [0, 3], [0, 4],  // leading edges + nose ridges
+  [1, 2],                          // tail edge
+  [1, 3], [2, 3],                  // wing → dorsal
+  [1, 4], [2, 4],                  // wing → keel
+  [3, 4],                          // aft strut (a point at rest)
+];
+const TRI = makeDef(
+  TRI_VERTS, TRI_EDGES,
+  (a, b) => a === 0 || b === 0,
+  1.30,  // long and narrow — drawn larger so it carries the cube's visual mass
+);
+
 const HULL_DEFS: Partial<Record<PlayerHullMode, HullDef>> = {
   cube: CUBE,
   diamond: DIAMOND,
   sphere: SPHERE,
   dodeca: DODECA,
   rhombic: RHOMBIC,
+  tri: TRI,
 };
 
 /** Projected-vertex scratch, sized for the largest shape (the sphere's
