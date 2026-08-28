@@ -455,16 +455,16 @@ export class PhysicsSystem {
           // Asteroid-pressure accumulator decay.  The rolling window
           // expires into a full reset (both count and cooldown cleared)
           // so a tile only breaks under *sustained* pressure within
-          // ASTEROID_PRESSURE_WINDOW, not from hits spread over a minute.
-          if (entity.asteroidHitCooldown !== undefined && entity.asteroidHitCooldown > 0) {
-              entity.asteroidHitCooldown -= dt;
-              if (entity.asteroidHitCooldown <= 0) entity.asteroidHitCooldown = undefined;
+          // TILE_PRESSURE_WINDOW, not from hits spread over a minute.
+          if (entity.tilePressureCooldown !== undefined && entity.tilePressureCooldown > 0) {
+              entity.tilePressureCooldown -= dt;
+              if (entity.tilePressureCooldown <= 0) entity.tilePressureCooldown = undefined;
           }
-          if (entity.asteroidHitTimer !== undefined && entity.asteroidHitTimer > 0) {
-              entity.asteroidHitTimer -= dt;
-              if (entity.asteroidHitTimer <= 0) {
-                  entity.asteroidHitTimer = undefined;
-                  entity.asteroidHitCount = undefined;
+          if (entity.tilePressureTimer !== undefined && entity.tilePressureTimer > 0) {
+              entity.tilePressureTimer -= dt;
+              if (entity.tilePressureTimer <= 0) {
+                  entity.tilePressureTimer = undefined;
+                  entity.tilePressureCount = undefined;
               }
           }
           continue;
@@ -679,7 +679,7 @@ export class PhysicsSystem {
       // pair in front of resolveCollision so the passthroughShatter
       // branch there can fire even when shardTileCollisionsEnabled
       // is off.  Dynamic-vs-dynamic pairs (metal-shard ↔ glass-
-      // shard) flow through resolveAsteroidPair, which calls the
+      // shard) flow through resolveShardPair, which calls the
       // same helper inline.
       this.resolvePassthroughShatterPairs(asteroids, onDamage, onDeath, onShake, onHit);
     }
@@ -958,7 +958,7 @@ export class PhysicsSystem {
                 }
                 if (isMobileShard) {
                     entity.active = false;
-                    if (onDamage && !attractor.isPortal) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
+                    if (onDamage && !attractor.isPortal) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.SHARD_CRUSH, entity);
                     continue;
                 }
             }
@@ -2063,7 +2063,7 @@ export class PhysicsSystem {
    * shard-only spatial hash from the caller-supplied list of mobile
    * shards (typically `entityIndex.shardCandidates`), then walks
    * each shard's 3×3 cell neighbourhood for pairs and dispatches to
-   * `resolveAsteroidPair`.
+   * `resolveShardPair`.
    *
    * Called from physics.update gated by `shouldRunShardPairsThisStep()`,
    * so on skip-frames the entire build + walk are bypassed (this is
@@ -2141,7 +2141,7 @@ export class PhysicsSystem {
                     // Process each unordered pair once.  Numeric dedup on the
                     // pass-local _pairSeq (set in the grid build above) — cheaper
                     // than the old `a.id > b.id` string compare, run per candidate
-                    // over dense piles.  resolveAsteroidPair + its delegates are
+                    // over dense piles.  resolveShardPair + its delegates are
                     // fully order-independent, so which side is the representative
                     // doesn't change the outcome.
                     if (a._pairSeq! > b._pairSeq!) continue;
@@ -2162,7 +2162,7 @@ export class PhysicsSystem {
                     // rate before the shard is visible.
                     if (viewportGate && !catchUpPhase
                         && a.offscreen === true && b.offscreen === true) continue;
-                    this.resolveAsteroidPair(a, b, onDeath);
+                    this.resolveShardPair(a, b, onDeath);
                 }
             }
         }
@@ -2222,7 +2222,7 @@ export class PhysicsSystem {
 
   /**
    * Pass-through-and-shatter rule (g3 material-interactions).  Called
-   * from the impulse-resolution sites (resolveAsteroidPair fast-path
+   * from the impulse-resolution sites (resolveShardPair fast-path
    * and resolveCollision full-path) before any bounce math runs.
    * Returns true when the pair matches the rule and the target has
    * been routed through its death pipeline; callers should bail
@@ -2252,7 +2252,7 @@ export class PhysicsSystem {
    * spontaneous crumble, and they are the same two the projectile path sets:
    * `lastImpactVelocity` gives the fragments a direction to scatter along,
    * and `lastImpactDamage` scales how many pieces and how fine
-   * (ShardSystem.shatterAsteroidStyle / DropSystem.spawnGlassShards read it
+   * (ShardSystem.shatterPowerlawStyle / DropSystem.spawnGlassShards read it
    * as 1..5 → few-and-large .. many-and-small).
    *
    * ORDER MATTERS: the static grid entry has to go before `onDeath`, because
@@ -2479,7 +2479,7 @@ export class PhysicsSystem {
       }
   }
 
-  private resolveAsteroidPair(
+  private resolveShardPair(
       a: GameEntity,
       b: GameEntity,
       onDeath?: (entity: GameEntity) => void,
@@ -3000,7 +3000,7 @@ export class PhysicsSystem {
 
   /** Shard-pair resolution where a metal composite is involved — per-cell
    *  SAT bounce along the contact normal (replaces the bounding-circle path
-   *  in resolveAsteroidPair for composites). */
+   *  in resolveShardPair for composites). */
   private resolveCompositeShardPair(a: GameEntity, b: GameEntity, onDeath?: (entity: GameEntity) => void): void {
       if (this.tryPassthroughShatter(a, b, onDeath)) return;
       if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
@@ -3041,7 +3041,7 @@ export class PhysicsSystem {
                   const van = rvx * nx + rvy * ny;
                   if (van <= 0) {
                       // Mass-bias-compressed impulse split — same policy
-                      // as resolveAsteroidPair / resolveCollision.
+                      // as resolveShardPair / resolveCollision.
                       const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
                       const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
                       const j = -(1 + ELASTICITY) * van / (effInvMassA + effInvMassB);
@@ -3967,7 +3967,7 @@ export class PhysicsSystem {
           const momentum = asteroid.mass * impactSpeed;
           const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
-          if (momentum > STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM) {
+          if (momentum > STRUCTURE_CONSTANTS.SHARD_CRASH_MOMENTUM) {
               // Rough momentum transfer to the tile fragments.
               asteroid.velocity.x *= 0.85;
               asteroid.velocity.y *= 0.85;
@@ -3985,7 +3985,7 @@ export class PhysicsSystem {
                       // bare-threshold nudge leaves a few big chunks, a slam
                       // several times over the threshold powders it.  Mapped
                       // onto the 1..5 the shatter tables already speak.
-                      const over = momentum / STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM - 1;
+                      const over = momentum / STRUCTURE_CONSTANTS.SHARD_CRASH_MOMENTUM - 1;
                       const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
                       this.killStructureByImpact(structure, asteroid, impactDamage, false, onDeath);
                   }
@@ -3998,19 +3998,19 @@ export class PhysicsSystem {
           // debounces multi-substep re-hits from one bounce event so a
           // single glancing collision counts as one pressure event
           // rather than two or three.  Once the accumulator reaches
-          // ASTEROID_PRESSURE_HITS within the ASTEROID_PRESSURE_WINDOW,
+          // TILE_PRESSURE_HITS within the TILE_PRESSURE_WINDOW,
           // the tile takes a damage tier the same way a single above-
           // threshold crash would (glass dies in one; tiered tiles step
           // down one tier per trigger).  Indestructible tiles accumulate
           // nothing — they're inert under pressure.
           if (!isIndestructible
-              && asteroid.mass >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_MIN_MASS
-              && !(structure.asteroidHitCooldown ?? 0)) {
-              structure.asteroidHitCount = (structure.asteroidHitCount ?? 0) + 1;
-              structure.asteroidHitTimer = STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_WINDOW;
-              structure.asteroidHitCooldown = STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_COOLDOWN;
-              if (structure.asteroidHitCount >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_HITS) {
-                  structure.asteroidHitCount = 0;
+              && asteroid.mass >= STRUCTURE_CONSTANTS.TILE_PRESSURE_MIN_MASS
+              && !(structure.tilePressureCooldown ?? 0)) {
+              structure.tilePressureCount = (structure.tilePressureCount ?? 0) + 1;
+              structure.tilePressureTimer = STRUCTURE_CONSTANTS.TILE_PRESSURE_WINDOW;
+              structure.tilePressureCooldown = STRUCTURE_CONSTANTS.TILE_PRESSURE_COOLDOWN;
+              if (structure.tilePressureCount >= STRUCTURE_CONSTANTS.TILE_PRESSURE_HITS) {
+                  structure.tilePressureCount = 0;
                   structure.health -= 1;
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
@@ -4030,7 +4030,7 @@ export class PhysicsSystem {
 
       // Mobile-shard vs Player — speed-gated environmental damage
       // (bypasses shield).  Stage 5: mobile shards now live on
-      // STRUCTURE+finite mass; the legacy ASTEROID type is still
+      // STRUCTURE+finite mass; the legacy ROCK_SHARD type is still
       // accepted for any not-yet-migrated spawn site.
       const aIsPlayerLike = a.type === EntityType.PLAYER;
       const bIsPlayerLike = b.type === EntityType.PLAYER;

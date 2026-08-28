@@ -68,7 +68,7 @@ export function updateDragons(g: GameEngine, dt: number) {
             }
             speedMul = D.LEAVE_SPEED_MULT;
         } else {
-            const flow = g.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+            const flow = g.flowField.sampleShardFlow(d.position.x, d.position.y);
             const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
             const cosW = Math.cos(wob), sinW = Math.sin(wob);
             dirX = flow.x * cosW - flow.y * sinW;

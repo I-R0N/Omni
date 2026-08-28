@@ -20,7 +20,7 @@ export interface ViewportRect {
  *
  * Phase 4 of the engine upgrade.  Multiple systems used to scan the master
  * entity list independently ("find all active enemies", "find all
- * projectiles", "find all asteroids for gravity"), each a full O(N) walk.
+ * projectiles", "find all mobile shards for gravity"), each a full O(N) walk.
  * EntityIndex performs a single O(N) classification pass and exposes the
  * filtered slices so every downstream consumer stays O(matches) instead
  * of O(all entities).
@@ -33,22 +33,17 @@ export class EntityIndex {
   /** Active enemies (ships, shooters, rammers). */
   public enemies: GameEntity[] = [];
 
-  /** Active asteroids (includes shard debris with type=ASTEROID). */
-  public asteroids: GameEntity[] = [];
-
   /** Active projectiles (both player- and enemy-owned). */
   public projectiles: GameEntity[] = [];
 
   /**
-   * Active mobile shard candidates — the broadphase input set used by
-   * ShardSystem's gravity-pull and stick-bond passes (see
-   * docs/SHARD_SYSTEM.md §6.D).  Stage 1 uses the same filter as
-   * `asteroids` so this list is byte-identical to the existing one;
-   * the predicate flips to `type === STRUCTURE && mass !== Infinity`
-   * in Stage 5 once the EntityType collapse lands.  Maintained as a
-   * separate list so callers that want all asteroid-class entities
-   * (weapon homing, etc.) keep the narrow filter while ShardSystem
-   * has its own input.
+   * Active mobile shards — every finite-mass STRUCTURE that isn't a
+   * dragon body segment.  ONE list, one name (voronoi gauntlet V6): the
+   * legacy `asteroids` slice was byte-identical to this from the day the
+   * EntityType collapse landed — "asteroid" only ever meant "a large
+   * rock-shard spawned at map load" — so its consumers (gravity, homing,
+   * the roamer food scans, ShardSystem's merge broadphase) all read this
+   * list now.
    */
   public shardCandidates: GameEntity[] = [];
 
@@ -112,9 +107,9 @@ export class EntityIndex {
     // that idiom allocates.  Four lists rebuilt once per sim substep (120 Hz)
     // made this the fifth-largest allocator in the engine.  Same contents,
     // same lengths, same order.
-    const enemies = this.enemies, asteroids = this.asteroids;
+    const enemies = this.enemies;
     const projectiles = this.projectiles, shardCandidates = this.shardCandidates;
-    let nEne = 0, nAst = 0, nPrj = 0, nShard = 0;
+    let nEne = 0, nPrj = 0, nShard = 0;
     this.particleCount = 0;
     this.interactableCount = 0;
     this.activeCount = 0;
@@ -133,7 +128,6 @@ export class EntityIndex {
           // body segments (Stage 6) are chain-controlled, so they're kept OUT of
           // the shard indices (ShardSystem / flow-drift / consume ignore them).
           if (e.mass !== Infinity && e.dragonSegment !== true) {
-            asteroids[nAst++] = e;
             shardCandidates[nShard++] = e;
           }
           break;
@@ -151,7 +145,6 @@ export class EntityIndex {
 
     // Truncate only on an actual shrink; in steady state these are no-ops.
     if (enemies.length !== nEne) enemies.length = nEne;
-    if (asteroids.length !== nAst) asteroids.length = nAst;
     if (projectiles.length !== nPrj) projectiles.length = nPrj;
     if (shardCandidates.length !== nShard) shardCandidates.length = nShard;
   }
@@ -159,7 +152,6 @@ export class EntityIndex {
   /** Clear all lists — used when loading a map / restarting. */
   public clear() {
     this.enemies.length = 0;
-    this.asteroids.length = 0;
     this.projectiles.length = 0;
     this.shardCandidates.length = 0;
     this.particleCount = 0;

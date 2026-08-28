@@ -541,8 +541,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleColorBlendInterval();
   };
 
-  const handleToggleAsteroidFlow = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleAsteroidFlow();
+  const handleToggleShardFlow = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardFlow();
   };
 
   const handleToggleSnitchCatchMode = () => {
@@ -907,7 +907,7 @@ const App: React.FC = () => {
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
-        onToggleAsteroidFlow={handleToggleAsteroidFlow}
+        onToggleShardFlow={handleToggleShardFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCyclePortalWarp={handleCyclePortalWarp}

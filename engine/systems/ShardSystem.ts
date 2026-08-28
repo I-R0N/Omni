@@ -402,7 +402,7 @@ export class ShardSystem {
   private _mergeGridScratch: Map<number, number[]> = new Map();
 
   // ── Per-shatter scratch buffers (allocation discipline) ─────────────────
-  // shatterAsteroidStyle used to allocate the size / raw-area / density-tier
+  // shatterPowerlawStyle used to allocate the size / raw-area / density-tier
   // temp arrays (via Array.from / map / filter) every shatter, and
   // generateShardPolygon allocated an intermediate {angle,r}[] + sort/map
   // closures per polygon.  A mass-shatter frame (a cluster crushed at once)
@@ -723,7 +723,7 @@ export class ShardSystem {
    *  - 'asteroid' — power-law area distribution over parent area,
    *                 cone scatter around impact direction, count
    *                 driven by lastImpactDamage.  Replaces today's
-   *                 `GameEngine.createAsteroidShards`.
+   *                 the long-deleted `GameEngine.createAsteroidShards`.
    *  - 'nebula'   — fixed 2–3 children sized off GLASS_TILE_HALF²
    *                 (independent of parent size), rear-cone fan
    *                 positioning, tangent-rule spin, parallel/perp
@@ -734,7 +734,7 @@ export class ShardSystem {
    *  can dispatch unconditionally.  STRUCTURE tile variants today
    *  spawn glass-shards via DropSystem.spawnGlassShards (out of
    *  scope per task brief) and `shatter.kind === 'powerlaw'` is
-   *  currently invoked only by ASTEROID + NEBULA + NEBULA_SHARD
+   *  currently invoked only by ROCK_SHARD + NEBULA + NEBULA_SHARD
    *  death dispatch in GameEngine.
    */
   public shatter(parent: GameEntity, entities: GameEntity[]): void {
@@ -771,7 +771,7 @@ export class ShardSystem {
       }
       const dent = variant.dent;
       if (dent !== undefined && dent.breakShards.length > 0) return;
-      this.shatterAsteroidStyle(parent, variant, entities);
+      this.shatterPowerlawStyle(parent, variant, entities);
       return;
     }
 
@@ -780,7 +780,7 @@ export class ShardSystem {
     if (variant.shatter.style === 'nebula') {
       this.shatterNebulaStyle(parent, variant, entities);
     } else {
-      this.shatterAsteroidStyle(parent, variant, entities);
+      this.shatterPowerlawStyle(parent, variant, entities);
     }
   }
 
@@ -792,7 +792,7 @@ export class ShardSystem {
    * paths keep), rock hit-ceiling HP, and a velocity of impact scatter
    * plus a small radial term along its own centroid direction so the
    * pattern visibly flies apart along its seams.  Density-tier mixing,
-   * the dust burst and the grace timer mirror shatterAsteroidStyle.
+   * the dust burst and the grace timer mirror shatterPowerlawStyle.
    */
   private shatterVoronoiStyle(
     parent: GameEntity,
@@ -815,7 +815,7 @@ export class ShardSystem {
     if (cells === null || cells.length < 2) {
       // Degenerate polygon (or no fracture block despite the kind) —
       // fall back to the legacy pipeline rather than vanish silently.
-      this.shatterAsteroidStyle(parent, parentVariant, entities);
+      this.shatterPowerlawStyle(parent, parentVariant, entities);
       return;
     }
 
@@ -922,7 +922,7 @@ export class ShardSystem {
         // material inherits the parent body colour.
         color:         childVariant.id === 'plastic-shard'
           ? randomPlasticShardShade()
-          : (parent.color || COLORS.ASTEROID),
+          : (parent.color || COLORS.ROCK_SHARD),
         active:        true,
         health:        hp,
         maxHealth:     hp,
@@ -1021,7 +1021,7 @@ export class ShardSystem {
       size:          { x: newSize, y: newSize },
       rotation:      parent.rotation,
       rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-      color:         parent.color || COLORS.ASTEROID,
+      color:         parent.color || COLORS.ROCK_SHARD,
       active:        true,
       health:        hp,
       maxHealth:     hp,
@@ -1111,13 +1111,13 @@ export class ShardSystem {
   }
 
   /**
-   * Asteroid-style shatter — port of GameEngine.createAsteroidShards.
+   * Powerlaw scatter shatter — port of the long-deleted GameEngine.createAsteroidShards.
    * Power-law area distribution over the parent's area, cone scatter
    * around impact direction, child count driven by impact damage.
    * Used by rock-shard, glass-shard, rock-tile, and (when wired in
    * future stages) STRUCTURE-tile variants.
    */
-  private shatterAsteroidStyle(
+  private shatterPowerlawStyle(
     parent: GameEntity,
     parentVariant: ShardVariantDef,
     entities: GameEntity[],
@@ -1158,7 +1158,7 @@ export class ShardSystem {
     // shards in, N fragments out" holds regardless of how hard the
     // killing hit was.  A small ±1 wobble keeps the fragment count
     // from feeling mechanically uniform on repeated breaks.  Applies
-    // to every variant going through shatterAsteroidStyle (rock-
+    // to every variant going through shatterPowerlawStyle (rock-
     // shard / glass-shard / plastic-shard); base shards (mergeCount
     // === 1 or undefined) fall through to the existing size-keyed
     // and damage-based formulas.
@@ -1332,7 +1332,7 @@ export class ShardSystem {
       // inherits the parent's colour.
       const childColor = childVariant.id === 'plastic-shard'
         ? randomPlasticShardShade()
-        : (isTile ? parent.color : (parent.color || COLORS.ASTEROID));
+        : (isTile ? parent.color : (parent.color || COLORS.ROCK_SHARD));
 
       entities.push({
         id:           nextId('shard'),
@@ -1734,7 +1734,7 @@ export class ShardSystem {
     // Candidate set: every mobile shard-family entity + eligible drops.
     // Stage 5: shards live on EntityType.STRUCTURE with finite mass
     // (mass=Infinity tiles are in the static grid — never candidates).
-    // The legacy ASTEROID branch is kept as defence for any spawn
+    // The legacy ROCK_SHARD branch is kept as defence for any spawn
     // site that hasn't migrated yet.  Fading nebula-shards are
     // skipped (they're in their death animation).
     const candidates: GameEntity[] = [];
@@ -3488,7 +3488,7 @@ export class ShardSystem {
         a.densityCachedTint = undefined;
       }
       // Merge-count sum — tracks how many base shards composed this
-      // entity so shatterAsteroidStyle can fragment it back into the
+      // entity so shatterPowerlawStyle can fragment it back into the
       // same count on death.  Applies to EVERY compose path (rock
       // condense / glass-self / plastic-self) so the "N in, N out"
       // invariant holds across all variants going through this

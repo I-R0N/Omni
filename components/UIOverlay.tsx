@@ -135,7 +135,7 @@ interface UIOverlayProps {
   onCycleColorBlendInterval?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
-  onToggleAsteroidFlow?: () => void;
+  onToggleShardFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCyclePortalWarp?: () => void;
@@ -446,7 +446,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleColorBlendInterval,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
-  onToggleAsteroidFlow,
+  onToggleShardFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCyclePortalWarp,
@@ -1979,8 +1979,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Pattern', onCycleFFPattern,
                   stats.ffPatternName ?? 'Map',
                   'Cycle the base-flow pattern: Map (default) → Meander → Circular → Spiral → Well → WavyWell → Outward → Horiz → Vert → WavyH → WavyV. Re-bakes the asteroid field; kernel / tangent / breathing apply on top.')}
-                {ctrlRow('Ast flow', onToggleAsteroidFlow,
-                  stats.asteroidFlowEnabled === false ? 'Off' : 'On',
+                {ctrlRow('Ast flow', onToggleShardFlow,
+                  stats.shardFlowEnabled === false ? 'Off' : 'On',
                   'Toggle the asteroid/shard flow-field velocity nudge. OFF: asteroids decay to zero velocity and from then on only move via collisions / gravity.')}
                 {ctrlRow('Density', onCycleFFDensity,
                   `${stats.ffCellSize ?? 256}u`,
@@ -2025,7 +2025,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {renderSectionHeader('perf', 'Perf')}
                 {!collapsed.perf && (<>
                   {statRow('enemies', perf.enemyCount)}
-                  {statRow('asteroids', perf.asteroidCount)}
+                  {statRow('asteroids', perf.mobileShardCount)}
                   {statRow('projectiles', perf.projectileCount)}
                   {statRow('particles', perf.particleCount)}
                   {statRow('drops/POI', perf.interactableCount)}

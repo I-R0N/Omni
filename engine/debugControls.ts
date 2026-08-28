@@ -720,8 +720,8 @@ export class DebugControls {
    * in the DBG panel for A/B-testing the contribution of the flow nudge
    * to the asteroid-field "feel".
    */
-  toggleAsteroidFlow() {
-    this.g.asteroidFlowEnabled = !this.g.asteroidFlowEnabled;
+  toggleShardFlow() {
+    this.g.shardFlowEnabled = !this.g.shardFlowEnabled;
   }
 
   /** Toggle the snitch catch interaction (collide ↔ shoot) — DBG aid for
@@ -1017,7 +1017,7 @@ export class DebugControls {
     this.g.flowField.initObstacles(this.g.currentMap.entities);
     // Re-bake under the active pattern selection (not necessarily the
     // map's own sampler) so the chosen pattern survives density changes.
-    this.g.flowField.buildAsteroidField(this.g.flowSamplerFor(this.g.currentMap));
+    this.g.flowField.buildShardFlowField(this.g.flowSamplerFor(this.g.currentMap));
     // The new grid starts with defaults; push the current cycled
     // values back so they survive density changes.
     this.g.flowField.setKernelR(this.g.ffKernelR);
@@ -1105,7 +1105,7 @@ export class DebugControls {
     const order = FF_PATTERN_CYCLE;
     const idx = order.indexOf(this.g.ffPattern);
     this.g.ffPattern = order[(idx + 1) % order.length];
-    this.g.flowField.buildAsteroidField(this.g.flowSamplerFor(this.g.currentMap));
+    this.g.flowField.buildShardFlowField(this.g.flowSamplerFor(this.g.currentMap));
   }
 
   /**

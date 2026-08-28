@@ -25,7 +25,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 - [x] **V3 — Cracks are the pattern.**
 - [x] **V4 — Partial fracture: shards break OFF tiles.**
 - [x] **V5 — Roll across materials.**
-- [ ] **V6 — The asteroid rename.**
+- [x] **V6 — The asteroid rename.**
 - [ ] **V7 — Ship it.**
 
 (Full milestone descriptions are in the prompt; each entry below opens
@@ -522,3 +522,42 @@ the old fans still run (glass fan, plastic 8–12 @ 24 HP).  Wider: boot +
 loop + terrain + lighting + economy + attribution + healthbars (56) ✓ —
 terrain's glass-field parity tests now exercise the VORONOI glass path
 and hold unchanged.  typecheck ✓ · build ✓.
+
+---
+
+## V6 — The asteroid rename (2026-08-28)
+
+Zero behaviour change; scripted word-boundary renames over the V0
+inventory (21 files).  The applied map:
+
+| old (sim API) | new |
+|---|---|
+| `spawnAsteroids` / `createAsteroid` / `handleAsteroidRespawn` | `spawnRockShards` / `createRockShard` / `handleRockShardRespawn` |
+| `EntityIndex.asteroids` | **FOLDED into `shardCandidates`** (was byte-identical; one list, one name — consumers: gravity, homing, roamer food scans, merge broadphase) |
+| `buildAsteroidField` / `sampleAsteroidFlow` / `_computeAsteroidCell` / `_rebakeAsteroidKernel` | `buildShardFlowField` / `sampleShardFlow` / `_computeShardFlowCell` / `_rebakeShardFlowKernel` |
+| `asteroidFlowEnabled` + toggle/handler chain | `shardFlowEnabled` + `toggleShardFlow` / `onToggleShardFlow` / `handleToggleShardFlow` |
+| `resolveAsteroidPair` | `resolveShardPair` |
+| `asteroidHitCount/Timer/Cooldown` | `tilePressureCount/Timer/Cooldown` (it IS a tile pressure accumulator) |
+| `ASTEROID_CRASH_MOMENTUM` / `ASTEROID_PRESSURE_*` / `DAMAGE.ASTEROID_CRUSH` | `SHARD_CRASH_MOMENTUM` / `TILE_PRESSURE_*` / `SHARD_CRUSH` |
+| `COLORS.ASTEROID` / `SALVAGE_DROP_CHANCE_ASTEROID` | `COLORS.ROCK_SHARD` / `SALVAGE_DROP_CHANCE_ROCK_SHARD` |
+| `PerfCounts.asteroidCount` / `currentAsteroidCount` | `mobileShardCount` / `currentMobileShardCount` (the folded list's length) |
+| `shatterAsteroidStyle` + `style: 'asteroid'` | `shatterPowerlawStyle` + `style: 'scatter'` (the type union too) |
+
+**KEPT, per the prompt** (flavour, registry ids, asset keys):
+`MapType.ASTEROID_FIELD`, descriptor id `field_asteroid`,
+`AsteroidFieldMap`, display names, DBG row labels (the perf panel still
+prints "asteroids"), `asteroidAssets` + `ASTEROID_ICE` /
+`ASTEROID_VOLCANIC`, and prose comments where "asteroid" means a big
+rock.  Also deliberately untouched: DropSystem's function-local
+`SlotKind = 'asteroid'` literal (an internal enumeration inside one
+function, not an API), and `ASTEROID_GENERATION_CONFIG` mentions in
+comments that describe deleted history.  Stale comments naming the
+deleted `createAsteroidShards` / `AsteroidStyle` updated; the
+`type=ASTEROID` ghost in EntityIndex died with the fold.
+
+The bare-token rule that made the script safe: `\bASTEROID\b(?!_)`
+cannot match `ASTEROID_FIELD` (underscore is a word character), so the
+keep-set needed no exclusion logic.
+
+**Evidence of zero change: the FULL suite — 249/249 green** (build +
+`npx playwright test`, 9.1m), typecheck ✓.  No pinned value moved.

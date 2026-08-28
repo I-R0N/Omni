@@ -372,13 +372,13 @@ export class GameEngine {
   screenShakeEnabled: boolean = true;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
-  // When `asteroidFlowEnabled` is false, the per-asteroid / per-drop
+  // When `shardFlowEnabled` is false, the per-asteroid / per-drop
   // velocity nudge in updatePhysics is skipped entirely.  Asteroids that
   // were moving keep their current velocity but receive no further
   // streamline correction; combined with `linearDamping` they decay
   // toward zero velocity over a few seconds and then only move when
   // collided with or pulled by gravity.  Default true.
-  asteroidFlowEnabled: boolean = true;
+  shardFlowEnabled: boolean = true;
 
   // ── Snitch state ──────────────────────────────────────────────────────
   // One quidditch-style snitch that persists across waves: rides the
@@ -703,7 +703,7 @@ export class GameEngine {
   private perfCounts = {
       totalEntities: 0,
       enemyCount: 0,
-      asteroidCount: 0,
+      mobileShardCount: 0,
       projectileCount: 0,
       particleCount: 0,
       interactableCount: 0,
@@ -806,7 +806,7 @@ export class GameEngine {
     // Hand the renderer a reference to the flow field so the DBG
     // asteroid/shard FF overlays (vectors / cells / obstacles /
     // rebuilds) can read per-cell state directly without going
-    // through allocation-heavy `sampleAsteroidFlow()` calls.
+    // through allocation-heavy `sampleShardFlow()` calls.
     this.renderer.setFlowField(this.flowField);
 
     // Central performance controller — injected into every system that
@@ -1055,7 +1055,7 @@ export class GameEngine {
       shatterGraceName:   getActiveShatterGraceName(),
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
-      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      shardFlowEnabled: this.shardFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
       gamepadInfo: this.input.padDebugName(),
       gamepadAxes: this.input.padDebugAxes(),
@@ -2161,7 +2161,7 @@ export class GameEngine {
       shatterGraceName:   getActiveShatterGraceName(),
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
-      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      shardFlowEnabled: this.shardFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
       gamepadInfo: this.input.padDebugName(),
       gamepadAxes: this.input.padDebugAxes(),
@@ -2471,7 +2471,7 @@ export class GameEngine {
       // add 1 to totalEntities to match the existing entityCount semantics.
       this.perfCounts.totalEntities     = this.entityIndex.activeCount + 1;
       this.perfCounts.enemyCount        = this.entityIndex.enemies.length;
-      this.perfCounts.asteroidCount     = this.entityIndex.asteroids.length;
+      this.perfCounts.mobileShardCount     = this.entityIndex.shardCandidates.length;
       this.perfCounts.projectileCount   = this.entityIndex.projectiles.length;
       this.perfCounts.particleCount     = this.entityIndex.particleCount;
       this.perfCounts.interactableCount = this.entityIndex.interactableCount;
@@ -2529,7 +2529,7 @@ export class GameEngine {
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
           return;
       }
-      const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
+      const flow = this.flowField.sampleShardFlow(e.position.x, e.position.y);
       // Per-shard lane jitter: nudge the target slightly
       // perpendicular to the flow by a STABLE per-shard amount so
       // shards ride parallel lanes instead of collapsing onto one
@@ -2650,7 +2650,7 @@ export class GameEngine {
       if (this.perfController.shouldRun('ai')) {
           const aiDt = dt * this.perfController.effectiveInterval('ai');
           this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField,
-              this.entityIndex.asteroids, this.entityIndex.projectiles);
+              this.entityIndex.shardCandidates, this.entityIndex.projectiles);
       } else {
           this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
       }
@@ -2658,7 +2658,7 @@ export class GameEngine {
 
       this.physics.update(
         allEntities,
-        this.entityIndex.asteroids,
+        this.entityIndex.shardCandidates,
         this.player,
         this.currentMap.type,
         dt,
@@ -2695,11 +2695,11 @@ export class GameEngine {
       // (e.g. Pocket, count = 2) with Deep Space's 140 asteroids.
       const config = getRockShardFreeSpawn(this.currentMap.type);
       const newlyDestroyed: GameEntity[] = [];
-      let currentAsteroidCount = 0;
+      let currentMobileShardCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const e = this.currentMap.entities[i];
           if (e.shardVariant !== 'rock-shard') continue;
-          currentAsteroidCount++;
+          currentMobileShardCount++;
           if (!e.active) newlyDestroyed.push(e);
       }
       for (const ast of newlyDestroyed) {
@@ -2708,8 +2708,8 @@ export class GameEngine {
           // and the size-floor check now lives inside shatter() too.
           if (this.currentMap) this.shards.shatter(ast, this.currentMap.entities);
       }
-      if (currentAsteroidCount < config.count) {
-          this.handleAsteroidRespawn(config);
+      if (currentMobileShardCount < config.count) {
+          this.handleRockShardRespawn(config);
       }
 
       // Flow-field nudge: steer each asteroid toward the grid flow direction.
@@ -2730,8 +2730,8 @@ export class GameEngine {
       //   out onto the flow lines.
       const FLOW_CORRECTION = GameEngine.FLOW_CORRECTION;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
-      const asteroids = this.entityIndex.asteroids;
-      const flowEnabled = this.asteroidFlowEnabled;
+      const asteroids = this.entityIndex.shardCandidates;
+      const flowEnabled = this.shardFlowEnabled;
       const laneJitter = this.ffLaneJitter;
       for (let i = 0; i < asteroids.length; i++) {
           this.applyFlowTo(asteroids[i], dt, FLOW_TARGET_SPEED, flowEnabled, laneJitter);
@@ -2748,7 +2748,7 @@ export class GameEngine {
               if (!d.active) continue;
               if (!isCollectibleDrop(d)) continue;
               if (d.magnetized) continue;
-              const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+              const flow = this.flowField.sampleShardFlow(d.position.x, d.position.y);
               let fxDir = flow.x, fyDir = flow.y;
               if (laneJitter > 0) {
                   if (d.flowLane === undefined) d.flowLane = Math.random() * 2 - 1;
@@ -3300,7 +3300,7 @@ export class GameEngine {
       }
   };
 
-  private handleAsteroidRespawn(config: any) {
+  private handleRockShardRespawn(config: any) {
       // Collect POIs once outside the placement-attempt loop.
       const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
       for (let i=0; i<5; i++) {
@@ -3320,7 +3320,7 @@ export class GameEngine {
           }
 
           if (safe && this.currentMap) {
-               const newAst = this.currentMap.createAsteroid(x, y,
+               const newAst = this.currentMap.createRockShard(x, y,
                   config.minSize + Math.random() * (config.maxSize - config.minSize),
                   config.speedMultiplier
                );
@@ -5336,7 +5336,7 @@ export class GameEngine {
       this.projectiles.updateLightningGravity(
           this.entityIndex.projectiles,
           this.entityIndex.enemies,
-          this.entityIndex.asteroids,
+          this.entityIndex.shardCandidates,
           dt,
       );
   }
@@ -5373,7 +5373,7 @@ export class GameEngine {
       // full entity array.  Exploding entities are still skipped since the
       // index holds `active` entities that may be mid-animation.
       const enemies = this.entityIndex.enemies;
-      const asteroids = this.entityIndex.asteroids;
+      const asteroids = this.entityIndex.shardCandidates;
       const nodesByDepth: GameEntity[][] = [[firstTarget]];
       const edges: { from: GameEntity; to: GameEntity }[] = [];
       const hitSet = new Set<string>([firstTarget.id]);
@@ -6079,7 +6079,7 @@ export class GameEngine {
   private loadMap(map: BaseMapLayer) {
       // Push the new map's dimensions into the shared toroidal module
       // BEFORE the map initialises or any system rebuilds its static
-      // state — initializeStaticGrid, initObstacles, buildAsteroidField
+      // state — initializeStaticGrid, initObstacles, buildShardFlowField
       // all read dimension-derived constants that must reflect the
       // active map.  Listeners registered by PhysicsSystem, FlowField,
       // and FlowFieldGrid update their caches synchronously here.
@@ -6109,7 +6109,7 @@ export class GameEngine {
       // Bake under the active DBG pattern (DEFAULT = the map's own
       // sampler) so a selected pattern persists across map loads /
       // restarts.
-      this.flowField.buildAsteroidField(this.flowSamplerFor(map));
+      this.flowField.buildShardFlowField(this.flowSamplerFor(map));
       this.flowField.setKernelR(this.ffKernelR);
       this.flowField.setTangentMix(this.ffTangentMix);
       this.renderer.setMapType(map.type);
@@ -6331,7 +6331,7 @@ export class GameEngine {
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),
           totalEntities:     this.perfCounts.totalEntities,
           enemyCount:        this.perfCounts.enemyCount,
-          asteroidCount:     this.perfCounts.asteroidCount,
+          mobileShardCount:     this.perfCounts.mobileShardCount,
           projectileCount:   this.perfCounts.projectileCount,
           particleCount:     this.perfCounts.particleCount,
           interactableCount: this.perfCounts.interactableCount,

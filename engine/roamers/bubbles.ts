@@ -319,7 +319,7 @@ export function updateConsumers(g: GameEngine, dt: number) {
     if (!g.currentMap) return;
     const enemies = g.entityIndex.enemies;
     // Candidates: mobile shards (asteroids index) and/or static tiles.
-    const shards = g.entityIndex.asteroids;
+    const shards = g.entityIndex.shardCandidates;
     for (let c = 0; c < enemies.length; c++) {
         const consumer = enemies[c];
         const cfg = consumer.consume;

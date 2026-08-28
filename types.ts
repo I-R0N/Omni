@@ -857,15 +857,15 @@ export interface GameEntity {
 
   // ── Tile asteroid-pressure accumulator ───────────────────────────────────
   // Set on STRUCTURE tiles to track repeated sub-crash-threshold asteroid
-  // impacts.  When `asteroidHitCount` reaches STRUCTURE_CONSTANTS
-  // .ASTEROID_PRESSURE_HITS within the decaying `asteroidHitTimer` window,
+  // impacts.  When `tilePressureCount` reaches STRUCTURE_CONSTANTS
+  // .TILE_PRESSURE_HITS within the decaying `tilePressureTimer` window,
   // the tile breaks permanently the same way a single above-threshold
-  // momentum crash would.  `asteroidHitCooldown` debounces multi-substep
+  // momentum crash would.  `tilePressureCooldown` debounces multi-substep
   // re-hits from a single bouncing rock so one glancing bounce counts as
   // one pressure event, not several.
-  asteroidHitCount?: number;
-  asteroidHitTimer?: number;
-  asteroidHitCooldown?: number;
+  tilePressureCount?: number;
+  tilePressureTimer?: number;
+  tilePressureCooldown?: number;
 
   // ── Unified shard-variant identity ──────────────────────────────────────
   // Single source of truth for which SHARD_VARIANTS entry a shard-family
@@ -885,11 +885,11 @@ export interface GameEntity {
   // Tile-break / shatter spawns start implicitly at 1 (undefined ===
   // 1); composeEntities sums the two parents' counts on every merge
   // (rock condense / glass-self / plastic-self).  shatter
-  // AsteroidStyle reads this on death and breaks the shard into ~
+  // PowerlawStyle reads this on death and breaks the shard into ~
   // mergeCount fragments with even per-fragment sizing, so a merged
   // shard always fragments back into roughly the same number of
   // base-sized pieces that built it — applies to every variant going
-  // through shatterAsteroidStyle (rock-shard, glass-shard, plastic-
+  // through shatterPowerlawStyle (rock-shard, glass-shard, plastic-
   // shard); metal-shard.shatter.kind is 'none' so the field exists
   // but the override path doesn't fire there.
   mergeCount?: number;
@@ -1446,7 +1446,7 @@ export interface PerfSnapshot {
   // Entity counts (snapshot of most recent sim step)
   totalEntities: number;
   enemyCount: number;
-  asteroidCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
+  mobileShardCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
   projectileCount: number;
   particleCount: number;
   interactableCount: number; // Drops, portals, POIs
@@ -1865,7 +1865,7 @@ export interface EngineStats {
   // DBG-toggleable to OFF for A/B-testing zero-flow behaviour
   // (asteroids decay toward zero velocity over a few seconds; only
   // collisions / gravity move them after that).
-  asteroidFlowEnabled?: boolean;
+  shardFlowEnabled?: boolean;
   // Snitch catch mode — DBG-toggleable while playtesting which catch
   // interaction feels better.  'collide' (default): fly into the snitch.
   // 'shoot': any player-owned projectile within its catch radius nabs it.

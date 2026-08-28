@@ -24,7 +24,7 @@ export const COLORS = {
   ENEMY: '#f87171',       // Red 400
   STAR: '#fbbf24',        // Amber 400
   PLANET: '#4ade80',      // Green 400
-  ASTEROID: '#94a3b8',    // Slate 400
+  ROCK_SHARD: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
   // Plastic — amber-shade family.  Per-instance random shade
@@ -43,7 +43,7 @@ export const COLORS = {
 };
 
 // ── Rock palettes (material-palette-residual, decision #30) ─────────
-// Rock was ONE flat slate (`COLORS.ASTEROID`), so a rock field read as grey
+// Rock was ONE flat slate (`COLORS.ROCK_SHARD`), so a rock field read as grey
 // gravel — the most common material in the game and the least characterful.
 // Decision #30 asked for a "rock red+blue palette": per-instance shades
 // spanning a warm oxidised red and a cold mineral blue, so a rock cluster
@@ -819,7 +819,7 @@ export const COLLISION_CONFIG = {
 
   // Damage Values
   DAMAGE: {
-    ASTEROID_CRUSH: 999, // Instant kill
+    SHARD_CRUSH: 999, // Instant kill
     PLAYER_RAM_ENEMY: 15,
     STRUCTURE_IMPACT: 10,
     MINOR_IMPACT: 1
@@ -843,7 +843,7 @@ export const COLLISION_CONFIG = {
      * The player-collision shake used to be `min(impactSpeed, HEAVY) *
      * CAP_MULTIPLIER` — SPEED ALONE, with no mass anywhere in it.  Every
      * other part of the collision code weighs mass: the crash gate is
-     * `mass * impactSpeed > ASTEROID_CRASH_MOMENTUM`, and the impulse solver
+     * `mass * impactSpeed > SHARD_CRASH_MOMENTUM`, and the impulse solver
      * splits by (bias-compressed) inverse mass.  Shake was the exception, so
      * a 15px chip and a static wall shook the camera identically at the same
      * closing speed, and the chip pinned the cap (user report: "very small
@@ -2476,7 +2476,7 @@ export const LOCAL_GRAVITY_CONSTANTS = {
 // feel relies on the flow-field nudge and stick-bond cohesion alone.
 
 // ── Shard-pair collision pacing ─────────────────────────────────────
-// Shard ↔ shard pairs run through the cheap `resolveAsteroidPair`
+// Shard ↔ shard pairs run through the cheap `resolveShardPair`
 // (circle-only, no SAT) but still pay O(k²) per cell × hundreds of
 // shards in dense fields — the dominant cost of the collision pass
 // during cannon spam.  Two lightweight optimisations applied:
@@ -2501,7 +2501,7 @@ export const SHARD_PAIR_CONSTANTS = {
   FRAME_INTERVAL: 0,
   // (rel-vel)² gate for stable-pair skip.  Combines with the overlap
   // gate below — both must be true to bail early inside
-  // resolveAsteroidPair.  0.04 ≈ 0.2 px/frame relative drift.
+  // resolveShardPair.  0.04 ≈ 0.2 px/frame relative drift.
   STABLE_REL_VEL_SQ: 0.04,
   // Overlap fraction of (rA + rB) below which a pair is considered
   // settled.  0.04 = 4 % of contact distance — visually unnoticeable.
@@ -2553,7 +2553,7 @@ export const SHARD_PAIR_CONSTANTS = {
 //
 // A shard whose speed² and |spin| both stay below the epsilons below
 // for DELAY_SECONDS is flagged `asleep`.  resolveShardPairs then skips
-// the SAT+impulse `resolveAsteroidPair` call for asleep↔asleep pairs —
+// the SAT+impulse `resolveShardPair` call for asleep↔asleep pairs —
 // the dominant cost in a settled field, where almost every pair is two
 // resting shards.  Pairs with at least one awake party always resolve,
 // and a resolved collision wakes both ends, so a disturbance ripples
@@ -3690,19 +3690,19 @@ export const STRUCTURE_CONSTANTS = {
   // asteroid plows through a tile permanently.  At 200 a cruising
   // size-100 merged cluster just barely crashes, while a 20-mass
   // shard at drift speed doesn't.
-  ASTEROID_CRASH_MOMENTUM: 200,
+  SHARD_CRASH_MOMENTUM: 200,
   // Pressure accumulator — sustained sub-crash-momentum impacts from
   // "large enough" asteroids also break a tile permanently, simulating
   // repeated-impact pressure without a full stress model.  A tile
-  // breaks the first time its accumulator reaches ASTEROID_PRESSURE_HITS
-  // within the rolling ASTEROID_PRESSURE_WINDOW.  Only asteroids with
-  // mass ≥ ASTEROID_PRESSURE_MIN_MASS contribute, so trivial drift
-  // shards don't count.  ASTEROID_PRESSURE_COOLDOWN debounces multi-
+  // breaks the first time its accumulator reaches TILE_PRESSURE_HITS
+  // within the rolling TILE_PRESSURE_WINDOW.  Only asteroids with
+  // mass ≥ TILE_PRESSURE_MIN_MASS contribute, so trivial drift
+  // shards don't count.  TILE_PRESSURE_COOLDOWN debounces multi-
   // substep re-hits from a single bouncing rock.
-  ASTEROID_PRESSURE_HITS: 5,
-  ASTEROID_PRESSURE_WINDOW: 2.0,
-  ASTEROID_PRESSURE_MIN_MASS: 40,
-  ASTEROID_PRESSURE_COOLDOWN: 0.1,
+  TILE_PRESSURE_HITS: 5,
+  TILE_PRESSURE_WINDOW: 2.0,
+  TILE_PRESSURE_MIN_MASS: 40,
+  TILE_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 
@@ -3777,7 +3777,7 @@ export const STRUCTURE_VARIANTS = {
     mass: Infinity,
     indestructible: false,
     sprite: '',
-    color: COLORS.ASTEROID,
+    color: COLORS.ROCK_SHARD,
   },
 } as const;
 
@@ -4206,7 +4206,7 @@ export const LIGHTNING_CHAIN_BRANCHES = 2;          // simultaneous jumps per ch
 // Mobile shard variants the lightning chain refuses to hop to.  Conductive
 // targets (enemies, glass-shards, nebula-shards) still chain freely — only
 // inert/dielectric materials sit this dance out.  Static tiles are already
-// excluded structurally (entityIndex.asteroids holds mobile shards only).
+// excluded structurally (entityIndex.shardCandidates holds mobile shards only).
 //
 // NOTE for future material work (Phase 1 g2 — plastic-shard / metal-shard):
 //   - 'plastic-shard' SHOULD be added here (plastic is an insulator).
@@ -5956,7 +5956,7 @@ export const SALVAGE_CONSTANTS = {
 // locked loadout), and hull repair.  It's an EntityType.INTERACTABLE with
 // mass ∞ and no dropType: the physics broadphase skips non-drop
 // INTERACTABLE pairs entirely, the static grid and the flow-field obstacle
-// bake both exclude INTERACTABLEs, and handleAsteroidRespawn already
+// bake both exclude INTERACTABLEs, and handleRockShardRespawn already
 // avoids POIs — so the station is pure scenery + a dock zone with zero
 // collision/flow surprises.  Docking freezes the sim (cardChoicePending-
 // style loop short-circuit) and opens the station UI.
@@ -6395,7 +6395,7 @@ export const DROP_CONFIG = {
   // chances (WEAPONS_AMMO_PLAN §4: reuse today's rates as the starting
   // point).  Every salvage drop carries value 1; there is no per-source
   // amount anymore.
-  SALVAGE_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops salvage
+  SALVAGE_DROP_CHANCE_ROCK_SHARD:        0.45, // 45 % chance an asteroid drops salvage
   SALVAGE_DROP_CHANCE_DENT_SHARD:      0.85, // dent shards take several hits — higher reward
   // Plastic-shards may break into a small number of sub-shards (each
   // a drop opportunity), so their per-shard drop chance is cut well
@@ -7849,7 +7849,7 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
     // policy below mirrors that glass-shard population so it stays
     // a usable spec for any variant inheriting STRUCTURE_TILE_BASE.
     kind: 'powerlaw',
-    style: 'asteroid',
+    style: 'scatter',
     countMin: 4, countMax: 6,
     alphaMin: 1.0, alphaMax: 1.0,
     childVariant: 'glass-shard',
@@ -8066,7 +8066,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'voronoi',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 4, countMax: 6,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'glass-shard',
@@ -8126,7 +8126,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'voronoi',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 8, countMax: 12,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'plastic-shard',
@@ -8209,7 +8209,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 0, countMax: 0,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'glass-shard',
@@ -8272,7 +8272,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'voronoi',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 0, countMax: 0,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'rock-shard',
@@ -8379,7 +8379,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'voronoi',
-      style: 'asteroid',
+      style: 'scatter',
       // countMax lowered 5 → 3: an asteroid break yields 2–3 chunky
       // mass-conserving pieces instead of a 2–5 spray, so the field
       // doesn't flood with chips when a cluster is shot apart.
@@ -8390,7 +8390,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // impactor's speed so an asteroid breaks into a gentle outward spread
       // rather than rocketing the pieces away (a blaster shot at speed 16
       // used to fling shards at ~6.6; now ~2).  The scatter is also hard-
-      // capped in shatterAsteroidStyle so a fast weapon can't blow it up.
+      // capped in shatterPowerlawStyle so a fast weapon can't blow it up.
       forwardDrag: 0.12, perpScatter: 0.0,
       scatterHalfCone: Math.PI * 0.55,
     },
@@ -8429,7 +8429,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'powerlaw',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 2, countMax: 5,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'glass-shard',
@@ -8554,7 +8554,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'voronoi',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 2, countMax: 5,
       alphaMin: 1.0, alphaMax: 1.6,
       childVariant: 'plastic-shard',
@@ -8629,7 +8629,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // on health = 0 with drops + particles.  No recursive sub-shards.
     shatter: {
       kind: 'none',
-      style: 'asteroid',
+      style: 'scatter',
       countMin: 0, countMax: 0,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'metal-shard',

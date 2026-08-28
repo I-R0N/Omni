@@ -180,7 +180,7 @@ export class DropSystem {
           ? DROP_CONFIG.SALVAGE_DROP_CHANCE_PLASTIC_SHARD
           : isDentShard
             ? DROP_CONFIG.SALVAGE_DROP_CHANCE_DENT_SHARD
-            : DROP_CONFIG.SALVAGE_DROP_CHANCE_ASTEROID;
+            : DROP_CONFIG.SALVAGE_DROP_CHANCE_ROCK_SHARD;
         if (Math.random() < dropChance) {
           this.spawnSalvageDrop(entities, activeDrops, pos, pv);
         }
@@ -267,7 +267,7 @@ export class DropSystem {
         size:         { x: size, y: size },
         rotation:      Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
-        color:         isTile ? '#b4e6fd' : COLORS.ASTEROID,
+        color:         isTile ? '#b4e6fd' : COLORS.ROCK_SHARD,
         active:        true,
         health:        1,
         maxHealth:     1,
