@@ -453,7 +453,111 @@ test.describe('partial fracture (V4)', () => {
     watch.assertClean();
   });
 
-  test('a hit carves the nearest cell OFF a rock-tile; enough hits kill it through the death path', async ({ page }) => {
+  test('damage highlights the pattern and fully-highlighted pieces break off, ending in the death path', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const fr = (window as any).__omniFracture;
+      const ents = e.currentMap.entities;
+      const w = 42;
+      const pts: any[] = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+      }
+      // maxHealth 100 gives the reveal fine granularity so the
+      // progressive story is visible step by step.  The id fixes the
+      // seed, so this whole test is deterministic.
+      const tile: any = {
+        id: 'v8_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
+        position: { x: 4200, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
+        size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
+        health: 100, maxHealth: 100, polygonPoints: pts,
+      };
+      ents.push(tile);
+      tile.lastImpactVelocity = { x: -9, y: 0 };
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const chips = () => ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+
+      // Undamaged: the pattern is applied but NOTHING detaches.
+      e.progressFracture(tile);
+      const initialCells = tile.fractureCells.length;
+      const initialCentroids = tile.fractureCells.map((c: any) =>
+        Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10));
+      const originalArea = fr.polygonArea(tile.polygonPoints);
+      const atZero = {
+        patternApplied: initialCells >= 2 && tile.fractureEdges.length > 0,
+        chips: chips().length,
+      };
+
+      // Step the damage down; each step highlights more boundaries and
+      // detaches every piece whose boundary completed.
+      const steps: any[] = [];
+      for (const hp of [80, 60, 40, 20, 1]) {
+        if (!tile.active) break;
+        tile.health = hp;
+        e.progressFracture(tile);
+        steps.push({
+          hp,
+          alive: tile.active === true,
+          cellsLeft: tile.active ? tile.fractureCells.length : 0,
+          chips: chips().length,
+        });
+      }
+
+      // Persistence: surviving cells are a SUBSET of the original
+      // pattern — nothing was recomputed between detaches.
+      let subset = true;
+      if (tile.active) {
+        for (const c of tile.fractureCells) {
+          const key = Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10);
+          if (!initialCentroids.includes(key)) subset = false;
+        }
+      }
+
+      // Conservation: what broke off plus what remains is the shape the
+      // pattern was cut from.
+      let chipArea = 0;
+      for (const c of chips()) chipArea += fr.polygonArea(c.polygonPoints);
+      const remainderArea = tile.active ? fr.polygonArea(tile.polygonPoints) : 0;
+
+      return {
+        atZero, initialCells, steps, subset,
+        finalAlive: tile.active === true,
+        totalDebris: chips().length,
+        conservationErr: Math.abs((chipArea + remainderArea) - originalArea) / originalArea,
+      };
+    });
+
+    expect(r.atZero.patternApplied).toBe(true);
+    expect(r.atZero.chips).toBe(0);
+    // Pieces broke off along the way — the highlight completing is the
+    // trigger, no chance roll involved.
+    const detached = r.steps.some((s: any) => s.chips > 0);
+    expect(detached).toBe(true);
+    // Cells only ever leave the pattern, never reshuffle back.
+    for (let i = 1; i < r.steps.length; i++) {
+      if (r.steps[i].alive) {
+        expect(r.steps[i].cellsLeft).toBeLessThanOrEqual(r.steps[i - 1].cellsLeft);
+      }
+    }
+    expect(r.subset).toBe(true);
+    if (r.finalAlive) {
+      // Alive: every broken piece + the remainder tile the original shape.
+      expect(r.conservationErr).toBeLessThan(0.02);
+    } else {
+      // Dead via min-remainder: chips + death fragments carry the whole
+      // pattern.
+      expect(r.totalDebris).toBeGreaterThanOrEqual(r.initialCells - 1);
+    }
+
+    watch.assertClean();
+  });
+
+  test('the min-remainder rule routes the last pieces through the real death path', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
@@ -468,69 +572,72 @@ test.describe('partial fracture (V4)', () => {
         pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
       }
       const tile: any = {
-        id: 'v4_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
-        position: { x: 4200, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
+        id: 'v8_tile_b', type: 'STRUCTURE', shardVariant: 'rock-tile',
+        position: { x: 4600, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
         size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
-        health: 6, maxHealth: 6, polygonPoints: pts,
+        health: 1, maxHealth: 100, polygonPoints: pts,
       };
       ents.push(tile);
       tile.lastImpactVelocity = { x: -9, y: 0 };
-      const impact = { x: tile.position.x + w * 0.45, y: tile.position.y };
-
-      const areaBefore = fr.polygonArea(tile.polygonPoints);
+      // A recorded original area far above the polygon puts ANY splice
+      // under the 25% floor, so the first completed boundary routes the
+      // whole entity through the death path deterministically.
+      tile.fractureOriginalArea = fr.polygonArea(pts) * 5;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      const first = e.detachFractureChip(tile, impact);
-      const areaAfter = fr.polygonArea(tile.polygonPoints);
-      const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+      e.progressFracture(tile);
+      const debris = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
-
-      const firstDetach = {
-        handled: first,
-        areaBefore, areaAfter,
-        chipCount: chips.length,
-        chipArea: chips.length === 1 ? fr.polygonArea(chips[0].polygonPoints) : 0,
-        stillAlive: tile.active === true,
-        cacheCleared: tile.fractureCells === undefined,
-      };
-
-      // The min-remainder death branch, made deterministic: a second
-      // tile whose recorded ORIGINAL area dwarfs its polygon, so the
-      // first successful detach lands under the 25% floor and the whole
-      // entity routes through the real death path — the last cells
-      // detaching.
-      const pts2 = pts.map((p: any) => ({ x: p.x, y: p.y }));
-      const tile2: any = {
-        id: 'v4_tile_b', type: 'STRUCTURE', shardVariant: 'rock-tile',
-        position: { x: 4600, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
-        size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
-        health: 6, maxHealth: 6, polygonPoints: pts2,
-      };
-      ents.push(tile2);
-      tile2.lastImpactVelocity = { x: -9, y: 0 };
-      tile2.fractureOriginalArea = fr.polygonArea(pts2) * 5;
-      const before2 = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      let died = false;
-      for (let k = 0; k < 8 && !died; k++) {
-        e.detachFractureChip(tile2, { x: tile2.position.x + w * 0.45, y: tile2.position.y });
-        died = tile2.active === false;
-      }
-      const debris = ents.filter((x: any) => x.active && !before2.has(x.id)
-        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
-      return { firstDetach, died, debrisCount: debris.length };
+      return { died: tile.active === false, debrisCount: debris.length };
     });
 
-    const f = r.firstDetach;
-    expect(f.handled).toBe(true);
-    expect(f.stillAlive).toBe(true);
-    expect(f.chipCount).toBe(1);
-    // Conservation: the parent lost exactly what the chip carries.
-    expect(Math.abs((f.areaBefore - f.areaAfter) - f.chipArea) / f.areaBefore)
-      .toBeLessThan(0.05);
-    expect(f.cacheCleared).toBe(true);
-    // The min-remainder rule ends it through the REAL death path, and the
-    // last cells detach as debris.
     expect(r.died).toBe(true);
     expect(r.debrisCount).toBeGreaterThanOrEqual(2);
+
+    watch.assertClean();
+  });
+
+  test('the dent pull stands down for progressive variants under voronoi and runs under legacy', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const w = 42;
+      const mk = (id: string, px: number) => {
+        const pts: any[] = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+        }
+        const tile: any = {
+          id, type: 'STRUCTURE', shardVariant: 'rock-tile',
+          position: { x: px, y: 3400 }, velocity: { x: 0, y: 0 }, rotation: 0,
+          size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
+          health: 6, maxHealth: 6, polygonPoints: pts,
+        };
+        ents.push(tile);
+        return tile;
+      };
+      const Physics = Object.getPrototypeOf(e.physics).constructor;
+      const dent = (t: any) => {
+        const beforePts = JSON.stringify(t.polygonPoints);
+        Physics.applyDentStep(t, { x: t.position.x + w * 0.5, y: t.position.y });
+        return JSON.stringify(t.polygonPoints) !== beforePts;
+      };
+      const tV = mk('v8_dent_v', 5200);
+      const movedVoronoi = dent(tV);
+      e.dbg.cycleFractureMode(); // -> legacy
+      const tL = mk('v8_dent_l', 5600);
+      const movedLegacy = dent(tL);
+      e.dbg.cycleFractureMode(); // -> back
+      return { movedVoronoi, movedLegacy };
+    });
+
+    // The pattern must stay stable under voronoi - the highlight is the
+    // damage read; legacy keeps the shipped dent.
+    expect(r.movedVoronoi).toBe(false);
+    expect(r.movedLegacy).toBe(true);
 
     watch.assertClean();
   });

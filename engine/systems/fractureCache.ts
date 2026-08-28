@@ -76,6 +76,30 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   return e.fractureCells;
 }
 
+/** How many of the entity's fracture edges are REVEALED at its current
+ *  HP — the ONE formula the crack render and the progressive-detach sim
+ *  share, so what the player sees highlighted and what breaks off
+ *  cannot disagree (V8).  Runs 0 → all edges linearly over the entity's
+ *  hit life: `hits / (maxHp / freq)` of the (impact-sorted) edge list.
+ *  FLOOR pacing on purpose: the LAST boundary completes exactly at the
+ *  hit ceiling — so a small pattern (a 2-cell rock with one interior
+ *  edge) never splits on an early hit; its one seam highlights late and
+ *  the ceiling breaks it, while bigger patterns shed their
+ *  early-completed pieces hit by hit. */
+export function fractureRevealedEdgeCount(
+  e: GameEntity,
+  edgeCount: number,
+  freq: number,
+): number {
+  const maxHp = e.maxHealth ?? 0;
+  const hp = e.health ?? maxHp;
+  if (maxHp <= 0 || edgeCount <= 0) return 0;
+  const hits = Math.floor((maxHp - hp) / freq);
+  if (hits <= 0) return 0;
+  const totalHits = Math.max(1, maxHp / freq);
+  return Math.min(edgeCount, Math.floor((edgeCount * hits) / totalHits));
+}
+
 /** The decomposition's interior (bisector) edges — the entity's CRACKS —
  *  sorted nearest-the-impact first (falling back to centre-out) so the
  *  progressive HP reveal grows outward from where the hits land.  The

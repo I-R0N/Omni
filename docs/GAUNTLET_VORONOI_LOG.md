@@ -612,3 +612,68 @@ the DBG A/B, which is the control built for exactly that.
 judge the A/B on a device (rock field for chips + full breaks, glass
 field for the radial shatter, a plastic cluster for the burst), then
 call the collapse.
+
+---
+
+## V8 — Fracture propagation (2026-08-28, user correction of V4)
+
+**The correction.**  The user's read of V4 was right: it used the cells
+as fragment GEOMETRY while the old fracture system still decided WHEN
+things broke (the `CHIP_CHANCE` roll picked detach moments, the
+decomposition recomputed after every bite, and the crack reveal was a
+parallel readout).  The intended mechanic: the pattern is applied ONCE;
+damage progressively HIGHLIGHTS the cell boundaries; and a piece breaks
+off exactly when its boundary is fully highlighted — the cracks are not
+a preview of the break, they are its progress meter.
+
+**What changed.**
+- `FractureEdge` gains `cells` (edge→cell adjacency, built during the
+  dedupe walk in `collectInteriorEdges`; a T-junction twin that fails
+  to dedupe leaves a single-owner edge that simply binds its owner).
+- `ShardFracturePolicy.progressive` — rock-tile + rock-shard opt in.
+- `fractureCache.fractureRevealedEdgeCount` — the ONE reveal formula,
+  shared verbatim by the crack render and the detach sim.  FLOOR-paced
+  over the entity's hit life so the LAST boundary completes exactly at
+  the hit ceiling: a 2-cell rock (one interior edge) never halves on an
+  early hit, while larger patterns shed their early-completed pieces
+  hit by hit.  (First cut used ceil; the V3 suite caught a 2-cell
+  100px rock splitting — and dying — on its first hit.)
+- `GameEngine.progressFracture` replaces `detachFractureChip`: after
+  each hit, every cell whose BINDING edges are all revealed detaches
+  (arc-splice; boundary-complete-but-unspliceable cells wait); an edge
+  stops binding once its partner cell has departed, so interior pieces
+  free up as neighbours leave; the loop cascades.  NO `CHIP_CHANCE`
+  roll — the legacy dust fallback remains only for degenerate polygons.
+- **The pattern PERSISTS**: a detach removes its cell from
+  `fractureCells` and splices the polygon but never recomputes — the
+  survivors are the same cells the player has been watching.  Only
+  compose/merge invalidates now; `applyDentStep` stands down entirely
+  for progressive variants under voronoi (a per-hit polygon pull would
+  drift the fixed pattern off the shape and wedge the splice), so the
+  V3 killing-blow special case is moot for rock and stays only for the
+  non-progressive dent materials.
+- Death (hit ceiling, or min-remainder — also triggered when the last
+  piece would leave) breaks the REMAINING cells; `shatterVoronoiStyle`
+  and `spawnDetachedCell` size fragments against `fractureOriginalArea`
+  so pieces stay area-true to the shape the pattern was cut from even
+  after earlier pieces left (fixes a latent V4 inflation).
+
+**Rebalance (old → new, voronoi rock):** chips per hit 0.7-chance
+random-cell → deterministic boundary-completion (0 on early hits while
+the pattern highlights, cascading later); rock-tile dent pull under
+voronoi → none (the highlight is the damage read; legacy mode keeps
+the dent, pinned by test); small-rock dust fallback now only for
+degenerate polygons.
+
+**Tests** (old → new, logged per the working rules): the V4 sim test
+("a hit carves the nearest cell OFF a rock-tile", chance-roll driven)
+is REPLACED by three: the progressive story (pattern applied undamaged
+with zero detaches; pieces break off as HP steps down with no chance
+roll; surviving cells a SUBSET of the original pattern — no recompute;
+chips + remainder tile the original area within 2%), the deterministic
+min-remainder death (unchanged trick), and the dent stand-down A/B.
+The pure splice test and every other suite stand unchanged.  14/14
+fracture green; boot + loop + terrain + economy + attribution + shake +
+knockback + healthbars (38) green; typecheck ✓ · build ✓ · simbench
+medians 0.816 / 1.682 / 1.012 / 2.004 — all at or below the V0
+baseline.  CLAUDE.md §4/§8 and SHARD_SYSTEM.md §2b re-synced.

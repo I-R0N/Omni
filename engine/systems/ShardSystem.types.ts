@@ -366,6 +366,21 @@ export interface ShardFracturePolicy {
   radialSpeed: number;
   /** Optional override of the sliver threshold (see fracture.ts). */
   minAreaFraction?: number;
+  /** PROGRESSIVE FRACTURE (V8 — the user's correction of V4).  When
+   *  true, the decomposition is applied ONCE at first damage and then
+   *  FIXED for the entity's life: damage progressively highlights the
+   *  cell boundaries (the same impact-sorted edge reveal the crack
+   *  overlay draws), and a cell whose binding edges are all revealed —
+   *  its boundary fully highlighted — BREAKS OFF as that piece, the
+   *  parent keeping the spliced remainder and the surviving cells of
+   *  the same pattern.  No chip-chance roll, no recompute between
+   *  detaches; edges shared with departed cells stop binding, so
+   *  interior pieces free up as their neighbours leave.  Death (hit
+   *  ceiling or min-remainder) breaks the REMAINING cells.  Variants
+   *  with progressive fracture skip the dent polygon pull under
+   *  voronoi mode — the pattern must stay stable, and the highlight IS
+   *  the damage read.  Today: rock-tile + rock-shard. */
+  progressive?: boolean;
 }
 
 // ── Density compaction policy ───────────────────────────────────────

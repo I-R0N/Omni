@@ -705,11 +705,14 @@ Notable existing field categories on `GameEntity`:
   (voronoi gauntlet): `fractureCells` (the seeded Voronoi decomposition,
   computed lazily at first damage/death by
   `fractureCache.ensureFractureCells`), `fractureEdges` (its interior
-  edges, impact-sorted — the cracks), `fractureOriginalArea` (the
-  min-remainder death baseline); the cells/edges pair is INVALIDATED at
-  every polygon/size/merge mutation (compose, dent, snap-back, partial
-  detach) EXCEPT the killing blow's dent, so fragments separate along
-  exactly the cracks last shown.  Shared
+  edges, impact-sorted, each knowing the cells it binds — the cracks),
+  `fractureOriginalArea` (the min-remainder death baseline).  For
+  PROGRESSIVE variants (rock) the pattern is applied ONCE and FIXED:
+  a detach removes its cell from the cache and the survivors persist
+  (V8) — only compose/merge invalidates (and the dent pull stands down
+  under voronoi so nothing else mutates the polygon).  Non-progressive
+  fracture variants (plastic) still invalidate on dent/snap-back and
+  recompute on the deformed shape at death.  Shared
   merge/density bookkeeping: `mergeCount` (accumulated by
   `composeEntities`; drives fragment count on powerlaw-style
   shatter), `densityTier` + `densityCachedTint` (tint cache —
@@ -1949,17 +1952,26 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   fracture-cache invalidation on the killing blow (health is
   decremented before the dent), so the shatter consumes exactly the
   decomposition whose edges were last drawn.
-- **Partial fracture replaces the rock chip under voronoi.**  A
-  qualifying non-lethal hit on rock (same `ROCK_CHIP.CHIP_CHANCE`
-  cadence) carves the cell nearest the impact OFF the parent
-  (`GameEngine.detachFractureChip` → `fracture.subtractBoundaryCell`,
-  an exact arc-splice subtraction): the chip is a real shard with the
-  cell's own polygon, the parent keeps the spliced remainder (size and
-  position untouched — the dent contract — so the static grid never
-  rebuilds), and below `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%) of
-  the original area the whole entity dies through the normal death
-  path.  `releaseRockChip` survives as the DBG legacy path and as the
-  fallback for parents too small to carry 3 cells.
+- **Progressive fracture IS the rock damage model under voronoi** (V8 —
+  the boundary-highlight rework).  The decomposition is applied ONCE at
+  first damage and FIXED; each hit reveals more of the impact-sorted
+  edge list (`fractureCache.fractureRevealedEdgeCount` — the ONE
+  formula the crack render and the sim share, floor-paced so the last
+  boundary completes exactly at the hit ceiling), and a cell whose
+  BINDING edges are all revealed — its boundary fully highlighted —
+  BREAKS OFF as that piece (`GameEngine.progressFracture` →
+  `fracture.subtractBoundaryCell`, an exact arc-splice): the parent
+  keeps the spliced remainder (size and position untouched — the dent
+  contract — so the static grid never rebuilds) and the SURVIVING cells
+  of the same pattern stay cached for the next pieces.  An edge stops
+  binding when its partner cell has departed, so interior pieces free
+  up as neighbours leave.  There is NO chip-chance roll — the highlight
+  completing is the trigger — and progressive variants skip the dent
+  pull under voronoi (the pattern must stay stable; the highlight is
+  the damage read).  Below `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%)
+  of the original area — or at the hit ceiling — the remaining cells
+  break through the normal death path.  `releaseRockChip` survives as
+  the DBG legacy path and as the fallback for degenerate polygons.
 - **A COLOUR MUST NEVER PARSE TO NaN.**  `hexToRgb` (render/drawUtils) feeds
   its channels straight back into `rgb()`/`rgba()` strings for gradient
   stops, and `addColorStop` THROWS on a colour it cannot parse — inside the

@@ -640,6 +640,13 @@ export interface FractureEdge {
   ax: number; ay: number; bx: number; by: number;
   /** Midpoint, for impact-distance ordering. */
   mx: number; my: number;
+  /** siteIndexes of the cells this edge BINDS (V8, fracture
+   *  propagation): the two cells sharing the bisector segment, or one
+   *  when the twin didn't dedupe (a T-junction from independent
+   *  splitting) — a single-owner edge simply binds its owner until
+   *  revealed.  A cell whose binding edges are all revealed has a fully
+   *  highlighted boundary and breaks off. */
+  cells: number[];
 }
 
 function distToSegment2(
@@ -679,7 +686,7 @@ export function collectInteriorEdges(
   const eps = Math.sqrt(Math.max(parentArea, 1e-12)) * 5e-4;
   const eps2 = eps * eps;
   const q = 1 / Math.max(eps, 1e-9);
-  const seen = new Set<string>();
+  const seen = new Map<string, FractureEdge>();
   const out: FractureEdge[] = [];
   for (const cell of cells) {
     const pts = cell.points;
@@ -691,13 +698,21 @@ export function collectInteriorEdges(
         && onParentBoundary(b.x, b.y, parent, eps2)
         && onParentBoundary(mx, my, parent, eps2)) continue;
       // Order-normalised quantised key so the twin from the adjacent cell
-      // collapses onto the same entry.
+      // collapses onto the same entry — and hands it its second owner.
       const k1 = `${Math.round(a.x * q)},${Math.round(a.y * q)}`;
       const k2 = `${Math.round(b.x * q)},${Math.round(b.y * q)}`;
       const key = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, mx, my });
+      const existing = seen.get(key);
+      if (existing !== undefined) {
+        if (!existing.cells.includes(cell.siteIndex)) existing.cells.push(cell.siteIndex);
+        continue;
+      }
+      const edge: FractureEdge = {
+        ax: a.x, ay: a.y, bx: b.x, by: b.y, mx, my,
+        cells: [cell.siteIndex],
+      };
+      seen.set(key, edge);
+      out.push(edge);
     }
   }
   return out;

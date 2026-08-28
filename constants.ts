@@ -3872,10 +3872,6 @@ export const FRACTURE_DETACH = {
   // "the last cells detaching" (feedback item 26c: cumulative chip-off
   // area drives the break threshold).
   MIN_REMAINDER_FRAC: 0.25,
-  // A decomposition needs at least this many cells before detaching one
-  // reads as a chip rather than as halving the entity; smaller parents
-  // fall back to the legacy dust puff.
-  MIN_CELLS: 3,
 } as const;
 
 // ── Material damage cracks ─────────────────────────────────────────────────
@@ -8269,6 +8265,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       sizePerSite: 9,
       impactBias: 0.5,
       radialSpeed: 1.4,
+      // V8: hits highlight the tile's cell boundaries; each piece whose
+      // boundary completes breaks off, and the hit ceiling breaks the
+      // remainder.  The gentle dent pull is skipped under voronoi (the
+      // pattern must stay stable; the highlight is the damage read).
+      progressive: true,
     },
     shatter: {
       kind: 'voronoi',
@@ -8376,6 +8377,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       sizePerSite: 40,
       impactBias: 0.5,
       radialSpeed: 1.0,
+      // V8: the pattern is applied once at first damage; boundaries
+      // highlight with each hit and a fully-highlighted piece breaks
+      // off.  See ShardFracturePolicy.progressive.
+      progressive: true,
     },
     shatter: {
       kind: 'voronoi',

@@ -284,15 +284,22 @@ the entity-facing cache both the sim and the render layer read):
   edges, revealed nearest-impact-first as HP falls — the cracks ARE the
   seams the entity breaks along (the killing blow deliberately does not
   invalidate the cache, so the match is exact).
-- **Partial fracture** (rock; `GameEngine.detachFractureChip`): a
-  qualifying hit carves the cell nearest the impact OFF the entity via
-  exact arc-splice subtraction (`subtractBoundaryCell`); the remainder
-  survives with the bite taken out until `FRACTURE_DETACH`'s
-  min-remainder rule routes the last cells through the full death path.
+- **Progressive fracture** (rock; `GameEngine.progressFracture`, V8):
+  the pattern is applied ONCE at first damage and FIXED; hits reveal the
+  impact-sorted edge list (the same count the crack render draws, via
+  the shared `fractureRevealedEdgeCount`), and a cell whose binding
+  edges are all revealed — its boundary fully highlighted — breaks off
+  via exact arc-splice subtraction (`subtractBoundaryCell`), the
+  surviving cells persisting for the next pieces.  No chance roll; the
+  dent pull stands down for progressive variants under voronoi.  The
+  min-remainder rule (or the hit ceiling) routes the last cells through
+  the full death path.
 
 Site count is a function of size + merge history ONLY (never the
 killing hit), because the decomposition is fixed at first damage and
-the cracks must predict the break.  A variant WITHOUT the block keeps
+the cracks must predict the break — for progressive variants the
+cracks don't just predict it, they METER it: a piece leaves exactly
+when its boundary is fully highlighted.  A variant WITHOUT the block keeps
 the legacy behaviour end to end, and the DBG A/B (Visual ▸ Fracture)
 flips opted-in variants back to their shipped legacy paths.  Metal
 deliberately does not opt in: its `metalCells` lattice IS its cell set

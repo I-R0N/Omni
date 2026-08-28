@@ -25,11 +25,11 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
-import { ensureFractureCells } from './systems/fractureCache';
+import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount } from './systems/fractureCache';
 import { subtractBoundaryCell, polygonArea as fracturePolygonArea } from './systems/fracture';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -4912,12 +4912,12 @@ export class GameEngine {
               const voronoiMode = SHARD_VARIANTS[target.shardVariant].shatter.kind === 'voronoi'
                   && getActiveFractureMode() === 'voronoi';
               if (voronoiMode) {
-                  // Same cadence roll the legacy chip uses — most hits just
-                  // crack.  detachFractureChip returns false only when the
-                  // parent is too small to carry cells, which falls back to
-                  // the legacy dust puff so tiny rocks keep their ambience.
-                  if (Math.random() < ROCK_CHIP.CHIP_CHANCE
-                      && !this.detachFractureChip(target, impactWorldPos)) {
+                  // V8: no cadence roll — damage highlights the pattern's
+                  // boundaries and a piece breaks off exactly when its
+                  // boundary completes.  Only an entity with no
+                  // decomposition at all (degenerate polygon) falls back
+                  // to the legacy dust puff.
+                  if (!this.progressFracture(target)) {
                       this.releaseRockChip(target, impactWorldPos);
                   }
               } else {
@@ -5003,111 +5003,134 @@ export class GameEngine {
   }
 
   /**
-   * PARTIAL FRACTURE (voronoi gauntlet, V4) — the headline: on a
-   * qualifying non-lethal hit, the decomposition cell nearest the impact
-   * DETACHES as a real mobile shard and the parent keeps the spliced
-   * remainder (fracture.subtractBoundaryCell): its polygon loses exactly
-   * the cell, its mass (mobile) scales by the area removed, and the
-   * decomposition cache invalidates so cracks recompute on the new
-   * shape.  entity.size and position are deliberately untouched (the
-   * dent-machinery contract: footprint stays stable, `position ===
-   * hexCoord` for tiles), so the static grid needs no rebuild; the
-   * static tile cache re-stamps via the same `_staticCached` flip every
-   * damage event already does.  When the remainder would fall below
-   * FRACTURE_DETACH.MIN_REMAINDER_FRAC of the entity's ORIGINAL area,
-   * the whole entity dies through the normal death path instead — the
-   * last cells detach as the final break (feedback item 26c: cumulative
-   * chip-off area IS the break threshold), and the flow-field patch +
-   * drops + scoring all ride the existing handleEntityDeath.
+   * PROGRESSIVE FRACTURE (voronoi gauntlet, V8 — the user's correction
+   * of V4).  The decomposition is applied ONCE at first damage and then
+   * FIXED: each hit reveals more of the impact-sorted edge list — the
+   * same reveal the crack overlay draws, via the shared
+   * `fractureRevealedEdgeCount` — and a cell whose BINDING edges are all
+   * revealed has a fully highlighted boundary and BREAKS OFF as that
+   * piece: it detaches with the cell's own polygon, the parent keeps
+   * the spliced remainder (`subtractBoundaryCell`), and the SURVIVING
+   * cells of the same pattern stay cached so later pieces break off the
+   * decomposition the player has been watching.  An edge stops binding
+   * once its partner cell has departed (that seam is open air), so
+   * interior pieces free up as their neighbours leave; a cell whose
+   * boundary is complete but which cannot splice yet simply waits.
+   * There is NO chip-chance roll — the highlight completing IS the
+   * trigger — and no recompute between detaches.
    *
-   * Returns false when the parent cannot carry a decomposition of
-   * FRACTURE_DETACH.MIN_CELLS (the caller falls back to the legacy dust
-   * puff); true when the hit was handled — including the deliberate
-   * no-ops (unspliceable cell), where the crack overlay already
-   * telegraphed the damage.
+   * entity.size and position stay untouched (the dent contract: stable
+   * footprint, `position === hexCoord` for tiles) so the static grid
+   * never rebuilds; the tile cache re-stamps via the `_staticCached`
+   * flip every damage event already does.  The remainder routes to FULL
+   * death — the remaining cells breaking as the final pieces — when it
+   * would fall below FRACTURE_DETACH.MIN_REMAINDER_FRAC of the original
+   * area, or when only one cell is left (feedback item 26c: cumulative
+   * chip-off area IS the break threshold); the hit ceiling ends it the
+   * same way.
+   *
+   * Returns false only when the entity carries no decomposition at all
+   * (degenerate polygon) — the caller falls back to the legacy dust
+   * puff; true means the hit was handled, including the quiet ticks
+   * where boundaries merely highlighted further.
    */
-  private detachFractureChip(target: GameEntity, impactWorldPos: Vector2): boolean {
+  private progressFracture(target: GameEntity): boolean {
       if (!this.currentMap) return true;
+      if (!target.active || (target.health ?? 0) <= 0) return true;
       const cells = ensureFractureCells(target);
-      if (cells === null || cells.length < FRACTURE_DETACH.MIN_CELLS) return false;
-      const pts = target.polygonPoints;
-      if (!pts || pts.length < 3) return false;
+      if (cells === null || cells.length === 0) return false;
+      const edges = ensureFractureEdges(target);
+      // A single-cell pattern has no interior boundary to highlight —
+      // the hit-ceiling model owns that break.
+      if (edges === null || edges.length === 0) return true;
+      const pts0 = target.polygonPoints;
+      if (!pts0 || pts0.length < 3) return false;
 
-      // Impact point in entity-local coords (torus-safe delta).
-      const dx = wrapDeltaX(target.position.x, impactWorldPos.x);
-      const dy = wrapDeltaY(target.position.y, impactWorldPos.y);
-      const cos = Math.cos(-target.rotation), sin = Math.sin(-target.rotation);
-      const lx = dx * cos - dy * sin;
-      const ly = dx * sin + dy * cos;
-
-      // Candidate cells in nearest-the-impact order.  The nearest is the
-      // chip the hit deserves, but a cell can be UNSPLICEABLE (interior,
-      // or multi-arc on a jagged remainder) — and with the decomposition
-      // cached, retrying the same cell every hit would wedge the entity
-      // into never chipping again.  So walk outward until one splices.
-      const order = cells
-          .map(c => {
-              const cdx = c.centroid.x - lx, cdy = c.centroid.y - ly;
-              return { c, d: cdx * cdx + cdy * cdy };
-          })
-          .sort((a, b) => a.d - b.d);
-
-      const polyArea = fracturePolygonArea(pts);
       const original = target.fractureOriginalArea
-          ?? (target.fractureOriginalArea = polyArea);
+          ?? (target.fractureOriginalArea = fracturePolygonArea(pts0));
 
-      let cell = order[0].c;
-      let remainder: { x: number; y: number }[] | null = null;
-      for (const cand of order) {
-          remainder = subtractBoundaryCell(pts, cand.c.points);
-          if (remainder !== null) { cell = cand.c; break; }
-      }
-      if (remainder === null) {
-          // NOTHING splices — a jagged remainder can put every cell's
-          // boundary contact into multiple runs.  With the cache kept,
-          // every future hit would retry the same cells and the entity
-          // would wedge into never chipping again (measured: a 42px hex
-          // stalled at 70% area after 4 bites).  Drop the cache — the
-          // next hit's fresh impact bias re-seeds the site distribution —
-          // and let THIS hit fall back to the legacy chip so the cadence
-          // holds.  The hit-ceiling death model still ends the entity.
-          target.fractureCells = undefined;
-          target.fractureEdges = undefined;
-          return false;
-      }
-      const remainderArea = fracturePolygonArea(remainder);
+      // Rock reveals one crack per hit (MATERIAL_DAMAGE_CRACKS.rock);
+      // only rock is progressive today, so its freq is the one to read.
+      const revealed = fractureRevealedEdgeCount(
+          target, edges.length, MATERIAL_DAMAGE_CRACKS.rock.freq);
+      if (revealed <= 0) return true;
 
-      if (remainderArea < FRACTURE_DETACH.MIN_REMAINDER_FRAC * original) {
-          // The last cells detach: route the whole entity through the
-          // normal death path (shatter consumes the cached decomposition,
-          // so the pieces are these same cells).  Mirrors the
-          // killStructureByImpact contract; killedByPlayer was already
-          // stamped by the damage path that brought us here.
-          target.health = 0;
-          target.active = false;
-          if (target.mass === Infinity) this.physics.removeStaticEntity(target);
-          this.handleEntityDeath(target);
-          return true;
-      }
+      const living = new Set<number>();
+      for (const c of cells) living.add(c.siteIndex);
 
-      // Detach: fragment first (it reads the pre-mutation parent), then
-      // splice the parent down to the remainder.
-      this.shards.spawnDetachedCell(target, cell, polyArea, this.currentMap.entities);
-      target.polygonPoints = remainder;
-      if (target.mass !== Infinity && polyArea > 0) {
-          target.mass *= remainderArea / polyArea;
+      // Detach every completed cell; repeat because a departure can
+      // complete a neighbour (its shared seam stops binding).
+      let guard = 0;
+      let detachedAny = true;
+      while (detachedAny && guard++ <= edges.length + 2) {
+          detachedAny = false;
+          for (let i = 0; i < cells.length; i++) {
+              const c = cells[i];
+              // Only UNREVEALED edges can still bind (the edges array is
+              // the reveal order, so indexes < revealed are highlighted).
+              let complete = true;
+              for (let k = revealed; k < edges.length; k++) {
+                  const ed = edges[k];
+                  if (!ed.cells.includes(c.siteIndex)) continue;
+                  let binds = ed.cells.length === 1;
+                  if (!binds) {
+                      for (const site of ed.cells) {
+                          if (site !== c.siteIndex && living.has(site)) { binds = true; break; }
+                      }
+                  }
+                  if (binds) { complete = false; break; }
+              }
+              if (!complete) continue;
+
+              const pts = target.polygonPoints;
+              if (!pts || pts.length < 3) return true;
+              const polyArea = fracturePolygonArea(pts);
+              const remainder = cells.length <= 1
+                  ? null
+                  : subtractBoundaryCell(pts, c.points);
+              const remainderArea = remainder !== null
+                  ? fracturePolygonArea(remainder) : 0;
+
+              if (cells.length <= 1
+                  || (remainder !== null
+                      && remainderArea < FRACTURE_DETACH.MIN_REMAINDER_FRAC * original)) {
+                  // The last pieces: the whole entity goes through the
+                  // normal death path, and the shatter consumes exactly
+                  // the surviving cells of this pattern.  killedByPlayer
+                  // was already stamped by the damage path.
+                  target.health = 0;
+                  target.active = false;
+                  if (target.mass === Infinity) this.physics.removeStaticEntity(target);
+                  this.handleEntityDeath(target);
+                  return true;
+              }
+              if (remainder === null) continue; // boundary-complete but not
+              // spliceable yet — it leaves once a neighbour frees its arc.
+
+              // Fragment first (it reads the pre-mutation parent), then
+              // splice.  refArea is the ORIGINAL polygon area so every
+              // piece of the pattern comes out area-true to the shape it
+              // was cut from.
+              this.shards.spawnDetachedCell(target, c, original, this.currentMap.entities);
+              target.polygonPoints = remainder;
+              if (target.mass !== Infinity && polyArea > 0) {
+                  target.mass *= remainderArea / polyArea;
+              }
+              // The PATTERN persists — surviving cells + edges stay so the
+              // rest of the decomposition breaks off later; only the
+              // derived collision/render caches die.
+              cells.splice(i, 1);
+              living.delete(c.siteIndex);
+              target._satCacheAxes = undefined;
+              target._occluderR = undefined;
+              if (target._staticCached === true) target._staticCached = false;
+              invalidateCollisionR(target);
+              this.audio.play('destroy.shard.rock', {
+                  x: target.position.x, y: target.position.y });
+              detachedAny = true;
+              i--;
+          }
       }
-      // The shape changed: the same invalidation cluster the dent
-      // machinery uses (SAT axes, occluder radius, collision radius,
-      // static-tile restamp) plus the fracture caches.
-      target.fractureCells = undefined;
-      target.fractureEdges = undefined;
-      target._satCacheAxes = undefined;
-      target._occluderR = undefined;
-      if (target._staticCached === true) target._staticCached = false;
-      invalidateCollisionR(target);
-      this.audio.play('destroy.shard.rock', {
-          x: impactWorldPos.x, y: impactWorldPos.y });
       return true;
   }
 

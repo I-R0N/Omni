@@ -822,6 +822,12 @@ export class ShardSystem {
     let totalArea = 0;
     for (const cell of cells) totalArea += cell.area;
     if (totalArea <= 0) return;
+    // Size against the ORIGINAL polygon area when pieces already broke
+    // off progressively (V8): entity.size never shrank with the splices,
+    // so distributing the full size² over the SURVIVING cells would
+    // inflate the final fragments.  With no detach history the two
+    // denominators coincide.
+    const refArea = Math.max(totalArea, parent.fractureOriginalArea ?? 0);
 
     const iv = parent.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
@@ -838,7 +844,7 @@ export class ShardSystem {
     const parentSize = parent.size.x;
 
     for (const cell of cells) {
-      const newSize = parentSize * Math.sqrt(cell.area / totalArea);
+      const newSize = parentSize * Math.sqrt(cell.area / refArea);
 
       // Density mix as in the powerlaw rock path: fragments spread ±2
       // tiers around the parent so a dense boulder breaks unevenly.
