@@ -1290,6 +1290,11 @@ export interface GameEntity {
   // undefined.  The render layer reads it for the crack overlay (V3);
   // the shatter path consumes it on death.
   fractureCells?: import('./engine/systems/fracture').FractureCell[];
+
+  // The decomposition's interior edges — the entity's CRACKS (V3) —
+  // sorted nearest-impact-first at build so the progressive reveal is
+  // stable.  Derived from fractureCells; cleared wherever it is.
+  fractureEdges?: import('./engine/systems/fracture').FractureEdge[];
 }
 
 export interface CameraState {

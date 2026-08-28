@@ -195,6 +195,42 @@ export function drawDamageCracks(
     }
 }
 
+/** Draw the first `upTo` INTERIOR CELL EDGES of a fracture decomposition
+ *  as the entity's cracks (voronoi gauntlet, V3) — same scorch + stroke +
+ *  glint treatment as drawDamageCracks, but the fissures are the exact
+ *  seams the entity will break along instead of seeded radial spokes.
+ *  Edges arrive pre-sorted (nearest-impact first, see
+ *  fractureCache.ensureFractureEdges), so revealing a prefix grows the
+ *  pattern outward from the hits without reshuffling frame to frame.
+ *  Caller owns the silhouette clip, exactly as with drawDamageCracks. */
+export function drawFractureCracks(
+    ctx: CanvasRenderingContext2D,
+    edges: ReadonlyArray<{ ax: number; ay: number; bx: number; by: number }>,
+    upTo: number,
+    r: number,
+    dmgFrac: number,
+    s: CrackStyle,
+): void {
+    ctx.fillStyle = `rgba(${s.scorchRgb},${s.scorchBase + s.scorchGain * dmgFrac})`;
+    ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+    ctx.lineCap = 'round';
+    const n = Math.min(upTo, edges.length);
+    for (let i = 0; i < n; i++) {
+        const e = edges[i];
+        ctx.beginPath();
+        ctx.moveTo(e.ax, e.ay);
+        ctx.lineTo(e.bx, e.by);
+        ctx.strokeStyle = s.crackColor;
+        ctx.lineWidth = s.crackWidth;
+        ctx.stroke();
+        if (s.glint && dmgFrac > 0.5) {
+            ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+        }
+    }
+}
+
 /**
  * Return the shift that brings a world-space point (wx, wy) into the
  * camera's wrap zone — i.e. the copy of that point whose delta from the

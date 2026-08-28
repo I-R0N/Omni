@@ -22,7 +22,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats } from './helpers';
+import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
@@ -332,6 +332,88 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
     // Legacy: exactly the 3 breakShards rock-tile ships with.
     expect(r.legacy.dead).toBe(true);
     expect(r.legacy.count).toBe(3);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('cracks are the pattern (V3)', () => {
+  test('a damaged rock shows its cell edges, and the break separates along exactly those seams', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    // Damage a big rock-shard parked ON SCREEN through the real
+    // projectile path (rock is hit-counted: −1 HP per hit; the first hit
+    // never breaks — ROCK_BREAK's curve is 0 at one hit).
+    const shardId = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-shard'
+        && x.mass !== Infinity && x.size.x >= 100 && (x.mergeCount ?? 1) === 1);
+      if (!t) throw new Error('no big rock-shard on the field');
+      t.position.x = e.player.position.x + 90;
+      t.position.y = e.player.position.y;
+      t.velocity.x = 0; t.velocity.y = 0;
+      e.physics.resolveCollision(
+        {
+          id: 'v3_shell', type: 'PROJECTILE',
+          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+          velocity: { x: -900, y: 0 }, rotation: Math.PI,
+          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+          damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+        },
+        t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
+      );
+      if (t.active !== true) throw new Error('first hit must not kill the rock');
+      // Marker for the polls below — waitForEngine's predicate is
+      // serialized, so it cannot close over the id.
+      t.__v3probe = true;
+      return t.id;
+    });
+    void shardId;
+
+    // The crack overlay computes the decomposition on the next drawn
+    // frame — the render path, not a test back door, fills the cache.
+    await waitForEngine(page, (e: any) => {
+      const t = e.currentMap.entities.find((x: any) => x.__v3probe === true);
+      return t !== undefined && t.fractureEdges !== undefined;
+    }, 'the crack overlay to build the decomposition');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.__v3probe === true);
+      const cells = t.fractureCells.map((c: any) => ({
+        cx: c.centroid.x, cy: c.centroid.y, area: c.area,
+      }));
+      const edgeCount = t.fractureEdges.length;
+      const px = t.position.x, py = t.position.y, rot = t.rotation;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      // The killing blow, per the killStructureByImpact contract.
+      t.lastImpactVelocity = { x: -9, y: 0 };
+      t.lastImpactDamage = 2;
+      t.health = 0;
+      t.active = false;
+      e.handleEntityDeath(t);
+      const children = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      // Match each child to its cell: the fragment sits at the cell
+      // centroid rotated into world space.
+      const cos = Math.cos(rot), sin = Math.sin(rot);
+      let matched = 0;
+      for (const c of cells) {
+        const wx = px + c.cx * cos - c.cy * sin;
+        const wy = py + c.cx * sin + c.cy * cos;
+        if (children.some((k: any) =>
+          Math.abs(k.position.x - wx) < 1 && Math.abs(k.position.y - wy) < 1)) matched++;
+      }
+      return { cellCount: cells.length, edgeCount, childCount: children.length, matched };
+    });
+
+    expect(r.edgeCount).toBeGreaterThan(0);
+    expect(r.childCount).toBe(r.cellCount);
+    // Every cell produced a fragment AT its own centroid — the pattern
+    // the cracks drew is the pattern the pieces fly apart along.
+    expect(r.matched).toBe(r.cellCount);
 
     watch.assertClean();
   });

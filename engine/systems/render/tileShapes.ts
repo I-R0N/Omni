@@ -41,8 +41,8 @@ import {
 import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01,
-         CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE,
-         METAL_CRACK_STYLE, roundedPolyPath } from './drawUtils';
+         CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, roundedPolyPath, drawFractureCracks } from './drawUtils';
+import { ensureFractureEdges } from '../fractureCache';
 
 /**
  * PAuto automata colour for a plastic-shard: the active palette's
@@ -377,7 +377,22 @@ export function overlayMaterialCracks(
     ctx.save();
     buildPath();
     ctx.clip();
-    drawDamageCracks(ctx, r, crackSeedFor(entity), count, dmgFrac, style);
+    // Voronoi materials (a SHARD_VARIANTS `fracture` block — rock today)
+    // draw the INTERIOR CELL EDGES of the cached decomposition instead of
+    // seeded spokes: the cracks ARE the seams the entity breaks along
+    // (V3).  The per-material pacing survives — `count / cfg.cap` of the
+    // (nearest-impact-first) edge list is revealed, so the full pattern
+    // shows exactly at the old cap.  Everything else (metal, and enemy
+    // hulls via enemyShapes) keeps the legacy spoke look.
+    const fractured = entity.shardVariant !== undefined
+        && SHARD_VARIANTS[entity.shardVariant].fracture !== undefined
+        ? ensureFractureEdges(entity) : null;
+    if (fractured !== null && fractured.length > 0) {
+        const upTo = Math.max(1, Math.ceil(fractured.length * count / cfg.cap));
+        drawFractureCracks(ctx, fractured, upTo, r, dmgFrac, style);
+    } else {
+        drawDamageCracks(ctx, r, crackSeedFor(entity), count, dmgFrac, style);
+    }
     ctx.restore();
 }
 

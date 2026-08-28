@@ -1591,8 +1591,17 @@ export class PhysicsSystem {
       // The dent mutates the polygon in place — the fracture
       // decomposition is computed on the deformed shape, so the cache
       // dies here and lazily recomputes on the next read (voronoi
-      // gauntlet; ~0.1 ms per damage event, never per frame).
-      tile.fractureCells = undefined;
+      // gauntlet; ~0.1 ms per damage event, never per frame).  EXCEPT on
+      // the KILLING blow: the damage path decrements health BEFORE this
+      // dent step, so health ≤ 0 here means the entity dies this event —
+      // keeping the cache makes the shatter consume exactly the
+      // decomposition whose edges were drawn as cracks last frame, so
+      // the fragments separate along the lines the player was shown
+      // (the final dent never renders; V3 acceptance).
+      if (tile.health === undefined || tile.health > 0) {
+          tile.fractureCells = undefined;
+          tile.fractureEdges = undefined;
+      }
 
       // Plastic dent recovery: snapshot the polygon BEFORE this dent
       // into the module-level _dentPreSnapshot scratch buffer (zero

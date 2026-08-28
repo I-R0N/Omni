@@ -22,7 +22,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 - [x] **V0 — Survey, baseline, seam plan.**
 - [x] **V1 — The fracture core, pure and pinned.**
 - [x] **V2 — Full shatter through the cells.**
-- [ ] **V3 — Cracks are the pattern.**
+- [x] **V3 — Cracks are the pattern.**
 - [ ] **V4 — Partial fracture: shards break OFF tiles.**
 - [ ] **V5 — Roll across materials.**
 - [ ] **V6 — The asteroid rename.**
@@ -362,3 +362,47 @@ bracket the baseline (1.93–2.47 around 2.08) — scene noise from the
 stochastic roamers, not a regression, and asteroid-6k (the scene where
 a voronoi cost would live) sits BELOW baseline on all three runs.  The
 shatter path runs only inside death frames, as budgeted.
+
+---
+
+## V3 — Cracks are the pattern (2026-08-28)
+
+**The shared accessor.**  New `engine/systems/fractureCache.ts` —
+`ensureFractureCells` / `ensureFractureEdges`, the ONE cache policy both
+layers read (the sim consumes cells at death, the render draws edges as
+cracks; neither layer may own it, or they could disagree).
+`ShardSystem.ensureFracture` (V2) moved here verbatim; pure geometry
+stays in `fracture.ts`.  Edges are sorted at build — nearest-the-impact
+first when `lastImpactVelocity` gives an impact point, centre-out
+otherwise — so the progressive reveal grows outward from the hits and
+NEVER reshuffles between frames.  `GameEntity.fractureEdges` caches the
+sorted list; every site clearing `fractureCells` clears it too.
+
+**The render swap.**  `overlayMaterialCracks` branches once: a variant
+with a `fracture` block draws the first `⌈edges × count/cap⌉` interior
+cell edges via the new `drawUtils.drawFractureCracks` (same scorch,
+stroke style and glint treatment as the spokes — CrackStyle survives as
+styling); everything else falls through to `drawDamageCracks` unchanged.
+So rock-tile + rock-shard show their seams; metal (tiles, composites,
+loose shards) and enemy hulls keep the legacy spoke look, per the plan.
+The `MATERIAL_DAMAGE_CRACKS` freq/cap pacing survives — the full pattern
+is visible exactly at the old crack cap.  The LOD bail
+(`MIN_APPARENT_RADIUS_PX`) and the static-tile-cache invalidation
+(damage flips `_staticCached`, PhysicsSystem:~1686) are untouched — the
+tile stamp already re-runs on every HP change.
+
+**The killing-blow subtlety (found by reading, fixed by ordering).**
+`applyDentStep` runs on EVERY damage event, the killing blow included —
+and the damage path decrements health BEFORE the dent.  A naive
+invalidation there would recompute the decomposition on the final
+(never-rendered) dented polygon, so the fragments would separate along a
+SLIGHTLY different pattern than the cracks just shown.  The dent-step
+invalidation now skips when `health ≤ 0`: the shatter consumes exactly
+the decomposition whose edges were on screen.  Acceptance is pinned by a
+new test that damages a rock through the REAL projectile path, waits for
+the REAL render frame to build the cache, kills it, and asserts every
+cell produced a fragment at that cell's own centroid (9/9 fracture tests
+green).
+
+Gates: typecheck ✓ · build ✓ · fracture (9) + boot + loop + terrain +
+healthbars + shake + knockback + lighting (51) ✓.

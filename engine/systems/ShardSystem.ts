@@ -55,7 +55,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
-import { computeFracture, seedFromEntityId, FractureCell } from './fracture';
+import { ensureFractureCells } from './fractureCache';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -785,55 +785,6 @@ export class ShardSystem {
   }
 
   /**
-   * Compute (or return the cached) seeded Voronoi decomposition of an
-   * entity's polygon.  Lazy: first damage or first crack draw computes,
-   * death consumes; a one-shot kill computes on the spot with the
-   * killing hit's impact info.  Cached on `entity.fractureCells` and
-   * INVALIDATED at every site that mutates the polygon, the size, or the
-   * merge count (dent, snap-back, compose).  Site count is a function of
-   * size + merge history only — never the killing hit — so the cracks
-   * shown while alive are the exact seams of the eventual break.
-   */
-  public ensureFracture(e: GameEntity, variant: ShardVariantDef): FractureCell[] | null {
-    const f = variant.fracture;
-    if (f === undefined) return null;
-    if (e.polygonPoints === undefined || e.polygonPoints.length < 3) return null;
-    if (e.fractureCells !== undefined) return e.fractureCells;
-
-    const size = Math.max(e.size.x, e.size.y);
-    let sites = Math.round(size / f.sizePerSite);
-    const merges = e.mergeCount ?? 1;
-    if (merges > 1) sites = Math.max(sites, merges);
-    sites = Math.max(f.siteCountMin, Math.min(f.siteCountMax, sites));
-
-    const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
-
-    // Impact point in entity-local coords: the hit landed on the side the
-    // impactor came FROM, so project against the impact velocity, rotated
-    // into the entity's frame.
-    let impact: { x: number; y: number; bias: number } | undefined;
-    const iv = e.lastImpactVelocity;
-    if (iv !== undefined) {
-      const s = Math.hypot(iv.x, iv.y);
-      if (s > 1e-3) {
-        const cos = Math.cos(-e.rotation), sin = Math.sin(-e.rotation);
-        const lx = (iv.x * cos - iv.y * sin) / s;
-        const ly = (iv.x * sin + iv.y * cos) / s;
-        const r = size * 0.4;
-        impact = { x: -lx * r, y: -ly * r, bias: f.impactBias };
-      }
-    }
-
-    e.fractureCells = computeFracture(e.polygonPoints, {
-      siteCount: sites,
-      seed,
-      impact,
-      minAreaFraction: f.minAreaFraction,
-    }).cells;
-    return e.fractureCells;
-  }
-
-  /**
    * Voronoi shatter (V2): the cached decomposition becomes the children —
    * each cell is a fragment carrying the CELL's polygon (translated to
    * the cell centroid, rotated with the parent), an area-proportional
@@ -860,7 +811,7 @@ export class ShardSystem {
     if (parent.mass !== Infinity
       && parent.size.x * parent.size.x < MIN_SIZE * MIN_SIZE * 2) return;
 
-    const cells = this.ensureFracture(parent, parentVariant);
+    const cells = ensureFractureCells(parent);
     if (cells === null || cells.length < 2) {
       // Degenerate polygon (or no fracture block despite the kind) —
       // fall back to the legacy pipeline rather than vanish silently.
@@ -2433,6 +2384,7 @@ export class ShardSystem {
         e._satCacheAxes = undefined;
         e._occluderR = undefined;   // the shadow radius is derived from the polygon
         e.fractureCells = undefined; // decomposition rides the polygon (voronoi gauntlet)
+        e.fractureEdges = undefined;
         if (e._staticCached === true) e._staticCached = false;
       }
     }
@@ -3227,7 +3179,9 @@ export class ShardSystem {
     // fracture decomposition — drop both caches up front (voronoi
     // gauntlet; the dead partner's entry is moot but harmless).
     a.fractureCells = undefined;
+    a.fractureEdges = undefined;
     b.fractureCells = undefined;
+    b.fractureEdges = undefined;
 
     // Stage 5: shard-family entities are now all EntityType.STRUCTURE.
     // Distinguish by variant id rather than the legacy EntityTypes.
