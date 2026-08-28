@@ -903,7 +903,38 @@ export function drawTileShape(
                     }
                     ctx.clip();
                     const dmgFracC = Math.min(1, Math.max(0, 1 - hpC / maxHpC));
-                    drawDamageCracks(ctx, radC, crackSeedFor(entity), countC, dmgFracC, METAL_CRACK_STYLE);
+                    // V5 (metal keeps the lattice): the composite's cracks
+                    // run along its OWN lattice-cell edges — the exact
+                    // seams decomposeMetalComposite breaks it into — not
+                    // the seeded radial spokes.  Reveal a crackSeed-rotated
+                    // prefix of cells (stable per entity, grows with
+                    // damage), stroking each revealed cell's outline; the
+                    // scorch darken is kept from the spoke treatment.
+                    ctx.fillStyle = `rgba(${METAL_CRACK_STYLE.scorchRgb},${
+                        METAL_CRACK_STYLE.scorchBase + METAL_CRACK_STYLE.scorchGain * dmgFracC})`;
+                    ctx.fillRect(-radC * 1.2, -radC * 1.2, radC * 2.4, radC * 2.4);
+                    const showC = Math.max(1, Math.ceil(cells.length * countC / cfgC.cap));
+                    const rot = Math.floor(crackSeedFor(entity)) % cells.length;
+                    ctx.strokeStyle = METAL_CRACK_STYLE.crackColor;
+                    ctx.lineWidth = METAL_CRACK_STYLE.crackWidth;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    for (let k = 0; k < showC && k < cells.length; k++) {
+                        const c = cells[(rot + k) % cells.length];
+                        const ccx = c.ix * ux - cmx;
+                        const ccy = c.iy * uy - cmy;
+                        if (c.up) {
+                            ctx.moveTo(ccx, ccy - R);
+                            ctx.lineTo(ccx + ux, ccy + uy);
+                            ctx.lineTo(ccx - ux, ccy + uy);
+                        } else {
+                            ctx.moveTo(ccx, ccy + R);
+                            ctx.lineTo(ccx + ux, ccy - uy);
+                            ctx.lineTo(ccx - ux, ccy - uy);
+                        }
+                        ctx.closePath();
+                    }
+                    ctx.stroke();
                     ctx.restore();
                 }
             }

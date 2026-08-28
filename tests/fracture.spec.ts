@@ -536,6 +536,81 @@ test.describe('partial fracture (V4)', () => {
   });
 });
 
+test.describe('materials through the cells (V5)', () => {
+  test('glass and plastic tiles break into their own cells under voronoi, legacy fans under legacy', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the field');
+
+    const r = await engine(page, (e: any) => {
+      const fr = (window as any).__omniFracture;
+      const ents = e.currentMap.entities;
+      let px = 5000;
+      const mkTile = (variant: string) => {
+        const w = 42;
+        const pts: any[] = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+        }
+        px += 400;
+        const tile: any = {
+          id: 'v5_' + variant + '_' + px, type: 'STRUCTURE', shardVariant: variant,
+          position: { x: px, y: 3200 }, velocity: { x: 0, y: 0 }, rotation: 0,
+          size: { x: w, y: w }, mass: Infinity, active: true, color: '#a5f3fc',
+          health: 4, maxHealth: 4, polygonPoints: pts,
+        };
+        ents.push(tile);
+        return tile;
+      };
+      const kill = (variant: string, childVariant: string) => {
+        const t = mkTile(variant);
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        const areaBefore = fr.polygonArea(t.polygonPoints);
+        t.lastImpactVelocity = { x: -9, y: 0 };
+        t.lastImpactDamage = 3;
+        t.health = 0;
+        t.active = false;
+        e.handleEntityDeath(t);
+        const children = ents.filter((x: any) => x.active && !before.has(x.id)
+          && x.shardVariant === childVariant && x.mass !== Infinity);
+        let childArea = 0;
+        for (const c of children) childArea += fr.polygonArea(c.polygonPoints);
+        return {
+          count: children.length,
+          areaErr: Math.abs(childArea - areaBefore) / areaBefore,
+          healths: children.map((c: any) => c.health),
+        };
+      };
+
+      const glassV = kill('glass-tile', 'glass-shard');
+      const plasticV = kill('plastic-tile', 'plastic-shard');
+      e.dbg.cycleFractureMode(); // → legacy
+      const glassL = kill('glass-tile', 'glass-shard');
+      const plasticL = kill('plastic-tile', 'plastic-shard');
+      e.dbg.cycleFractureMode(); // → back to voronoi
+      return { glassV, plasticV, glassL, plasticL };
+    });
+
+    // Voronoi: cells partition the tile — child polygon area sums to the
+    // tile's own polygon area.
+    expect(r.glassV.count).toBeGreaterThanOrEqual(3);
+    expect(r.glassV.areaErr).toBeLessThan(0.02);
+    expect(r.plasticV.count).toBeGreaterThanOrEqual(3);
+    expect(r.plasticV.areaErr).toBeLessThan(0.02);
+    // Plastic children keep the dent contract's 24-HP durability.
+    for (const h of r.plasticV.healths) expect(h).toBe(24);
+    // Legacy A/B: the old fans still run (glass 2-12 fresh silhouettes,
+    // plastic exactly the 8-12 breakShards burst at 24 HP).
+    expect(r.glassL.count).toBeGreaterThanOrEqual(2);
+    expect(r.plasticL.count).toBeGreaterThanOrEqual(8);
+    expect(r.plasticL.count).toBeLessThanOrEqual(12);
+    for (const h of r.plasticL.healths) expect(h).toBe(24);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('fracture core — cost', () => {
   test('µs per decomposition at 4/8/16/30 sites stays inside the lazy-cache budget', async ({ page }) => {
     const watch = await boot(page);

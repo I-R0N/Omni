@@ -852,6 +852,11 @@ export class ShardSystem {
       let hp: number;
       if (childVariant.id === 'rock-shard') {
         hp = rockHitCeiling(newSize, densityTier);
+      } else if (parentVariant.dent?.shardHealth !== undefined) {
+        // The dent contract's released-shard durability survives the
+        // voronoi routing (V5: plastic-tile children keep their 24-HP
+        // dent life, decoupled from the tile's brittle face).
+        hp = parentVariant.dent.shardHealth;
       } else {
         const baseHp = newSize > 30 ? 2 : 1;
         hp = densityTier !== undefined
@@ -912,7 +917,12 @@ export class ShardSystem {
         size:          { x: newSize, y: newSize },
         rotation:      parent.rotation,
         rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-        color:         parent.color || COLORS.ASTEROID,
+        // Plastic re-rolls its shade per child (the powerlaw path's
+        // rule) so each generation keeps visible variation; every other
+        // material inherits the parent body colour.
+        color:         childVariant.id === 'plastic-shard'
+          ? randomPlasticShardShade()
+          : (parent.color || COLORS.ASTEROID),
         active:        true,
         health:        hp,
         maxHealth:     hp,

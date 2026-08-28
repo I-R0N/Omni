@@ -133,7 +133,8 @@ export class DropSystem {
       && getActiveFractureMode() === 'voronoi';
     const isDentTile   = isStaticTile && tileDent !== undefined && !voronoiShatter;
     const isGlassFamilyTile = isStaticTile
-      && entity.shardVariant === 'glass-tile';
+      && entity.shardVariant === 'glass-tile'
+      && !voronoiShatter; // V5: under voronoi the tile breaks into its cells
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
     if (isDentTile) {
       // Dented-out tile detaches as the shards in variant.dent.breakShards.

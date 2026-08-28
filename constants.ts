@@ -8050,6 +8050,29 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // (see PhysicsSystem) accumulates only from the player / enemies so
     // the glow tracks the player's repel field, not passing shards.
     glow:  { color: '#a5f3fc', range: 250, peakAlpha: 0.85 },
+    // Voronoi opt-in (voronoi gauntlet, V5): glass-tile death breaks
+    // into its OWN cells instead of the spawnGlassShards fan.  Glass is
+    // the material whose real fracture IS a Voronoi/radial hybrid, so
+    // the impact bias is the highest of any material — most sites crowd
+    // the hit point, giving small cells at the impact growing outward,
+    // which is the radial look.  The legacy fan survives as the DBG
+    // 'legacy' path until V7.
+    fracture: {
+      siteCountMin: 5,
+      siteCountMax: 10,
+      sizePerSite: 6,
+      impactBias: 0.75,
+      radialSpeed: 1.2,
+    },
+    shatter: {
+      kind: 'voronoi',
+      style: 'asteroid',
+      countMin: 4, countMax: 6,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'glass-shard',
+      forwardDrag: 0.1, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.6,
+    },
   },
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -8086,6 +8109,30 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // diameter range — overlapping the tile footprint so the break
     // reads as the sheet fragmenting into big visible chunks.
     regen: { kind: 'none' },
+    // Voronoi opt-in (voronoi gauntlet, V5): the dent + snap-back
+    // per-hit behaviour is untouched — the decomposition is computed on
+    // the DEFORMED polygon and invalidated per dent (the V2/V3
+    // invalidation sites) — and only the FULL break uses the cells.
+    // Sites sized to land in the legacy 8–12 burst range on a standard
+    // hex; children keep the 24-HP dent durability via the shardHealth
+    // override shatterVoronoiStyle reads from `dent`.  breakShards
+    // stays as the DBG 'legacy' path until V7.
+    fracture: {
+      siteCountMin: 6,
+      siteCountMax: 12,
+      sizePerSite: 5,
+      impactBias: 0.5,
+      radialSpeed: 1.5,
+    },
+    shatter: {
+      kind: 'voronoi',
+      style: 'asteroid',
+      countMin: 8, countMax: 12,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'plastic-shard',
+      forwardDrag: 0.0, perpScatter: 0.0,
+      scatterHalfCone: Math.PI,
+    },
     dent: {
       vertexJitter: 0.30,
       pullVertexCount: 3,
@@ -8492,12 +8539,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // diameter range plastic shards actually span.
       envelope: 0.18,
     },
-    // Plastic-shards take the standard rock/metal-style shatter on
-    // death.  No per-size count override and no fractional child
-    // sizing — the asteroid power-law over parent area + MIN_SIZE
-    // floor terminates the recursion naturally.
+    // Plastic-shards break along their OWN cells on death (voronoi
+    // gauntlet, V5) — computed on the DEFORMED, snap-back-adjusted
+    // polygon since the dent invalidation sites clear the cache.  The
+    // powerlaw fields below stay as the DBG 'legacy' path until V7;
+    // recursion terminates the same way (children below the spawn
+    // floor die clean via the mobile-parent guard).
+    fracture: {
+      siteCountMin: 2,
+      siteCountMax: 5,
+      sizePerSite: 16,
+      impactBias: 0.5,
+      radialSpeed: 0.8,
+    },
     shatter: {
-      kind: 'powerlaw',
+      kind: 'voronoi',
       style: 'asteroid',
       countMin: 2, countMax: 5,
       alphaMin: 1.0, alphaMax: 1.6,

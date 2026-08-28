@@ -24,7 +24,7 @@ direction: PR #65's `ROCK_BREAK`/`ROCK_CHIP` satisfied the feel goals
 - [x] **V2 — Full shatter through the cells.**
 - [x] **V3 — Cracks are the pattern.**
 - [x] **V4 — Partial fracture: shards break OFF tiles.**
-- [ ] **V5 — Roll across materials.**
+- [x] **V5 — Roll across materials.**
 - [ ] **V6 — The asteroid rename.**
 - [ ] **V7 — Ship it.**
 
@@ -471,3 +471,54 @@ glass-field 1.225 / roamer-stack 2.132 — all inside the noise band
 established at V2 (asteroid-6k's V2 spread was 1.52–1.71; +3.7% over the
 V0 single read is within it, and the detach path runs only on damage
 events).
+
+---
+
+## V5 — Roll across materials (2026-08-28)
+
+**Glass.**  glass-tile opts into `shatter.kind: 'voronoi'` with the
+HIGHEST impact bias of any material (`impactBias 0.75`) — most sites
+crowd the hit, so cells are small at the impact and grow outward, which
+is the radial/Voronoi hybrid look real glass has.  The two legacy gates
+open together: `handleEntityDeath`'s `variant !== 'glass-tile'` skip
+gains `|| voronoiShatter`, and `DropSystem`'s `isGlassFamilyTile`
+branch (the `spawnGlassShards` fan) stands down under voronoi —
+mirrored gates, same pattern as the dent detour.  The fan survives as
+the DBG 'legacy' path.  Glass-SHARD (mobile debris) deliberately keeps
+powerlaw — the prompt names the tile path, and glass debris is 1–2 HP
+one-shot chaff whose decomposition would never be seen.  Rebalance:
+4–12 damage-scaled fresh silhouettes → 5–10 area-exact cells.
+
+**Plastic.**  plastic-tile and plastic-shard opt in; the dent +
+snap-back per-hit behaviour is UNTOUCHED and the decomposition rides
+the deformed polygon (the V2/V3 invalidation sites already cover dent
+and snap-back), so only the full break uses the cells.  Two child
+contracts preserved in `shatterVoronoiStyle`: the dent
+`shardHealth` override (plastic-tile children keep their 24-HP dent
+life, pinned by test) and the per-child plastic shade re-roll.
+Rebalance: 8–12 @ 0.44–0.64 fresh 4-gons (Σareas ≈ 2.3× tile — more
+material creation) → 6–12 area-exact cells.
+
+**Metal — the V0 presumption held.**  Metal keeps
+`decomposeMetalComposite` as its fracture; what moved is the COMPOSITE's
+crack render: instead of seeded spokes it now strokes a
+crackSeed-rotated, damage-revealed prefix of its OWN lattice-cell
+outlines (scorch kept) — the exact seams the decomposition breaks it
+into, inside the existing cell-union clip, allocation-free.  metal-TILE
+keeps the spoke look, logged deliberately: its death spawns 5–6
+equilateral triangles at RANDOM orientations (`equilateralTriangle`
+breakShards), so there is no fixed cell set for tile cracks to
+predict — routing them onto an invented lattice would be the exact
+"cracks lie about the break" defect this gauntlet removes.
+
+**Nebula / indestructible: excluded** (a cloud has no cracks;
+`shatterNebulaStyle` untouched — still the only `'powerlaw'`+`'nebula'`
+consumer — and indestructible never dies).
+
+**Evidence.**  New V5 test (12/12 fracture green): glass + plastic tiles
+under voronoi break into ≥3 cells whose polygon areas sum to the tile's
+own polygon area within 2%, plastic children all at 24 HP; under legacy
+the old fans still run (glass fan, plastic 8–12 @ 24 HP).  Wider: boot +
+loop + terrain + lighting + economy + attribution + healthbars (56) ✓ —
+terrain's glass-field parity tests now exercise the VORONOI glass path
+and hold unchanged.  typecheck ✓ · build ✓.

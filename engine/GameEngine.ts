@@ -3106,7 +3106,13 @@ export class GameEngine {
               && getActiveFractureMode() === 'voronoi';
           const isDentSpawn = dent !== undefined && dent.breakShards.length > 0
               && !voronoiShatter;
-          if (this.currentMap && variant !== 'glass-tile' && !isDentSpawn) {
+          // glass-tile's legacy debris comes from spawnGlassShards (via
+          // spawnDrops), so it skips shatter — EXCEPT under voronoi (V5),
+          // where its death breaks it into its own cells and the
+          // spawnGlassShards call stands down (mirrored gate in
+          // DropSystem.spawnDrops).
+          if (this.currentMap && (variant !== 'glass-tile' || voronoiShatter)
+              && !isDentSpawn) {
               this.shards.shatter(entity, this.currentMap.entities);
           }
 
