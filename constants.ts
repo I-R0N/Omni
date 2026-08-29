@@ -2974,13 +2974,53 @@ export function cycleFractureMode(): number {
  *    4 rounds → CV 0.19, roundness 0.79
  *  Cost is flat in practice: relaxation also stops the sliver-retirement
  *  loop from re-running, which pays for the extra decompositions. */
-export const FRACTURE_RELAX_CYCLE: ReadonlyArray<number> = [0, 1, 2, 3, 4] as const;
-let activeFractureRelaxIndex = 2; // 2 rounds
+// ── Grain regularity (material grain spec, A1) ────────────────────────
+// `GrainSpec.regularity` is ONE dial 0..1 over the two knobs that
+// actually produce the look — Lloyd relaxation rounds and blue-noise
+// minimum site separation.  Both used to come from the global DBG
+// accessors below, which is why per-material regularity was not
+// expressible at all: every material shared the debug setting.
+//
+// The mapping is calibrated so regularity 0.5 reproduces the old global
+// defaults EXACTLY (2 rounds, 0.45 separation).  That is what lets the
+// shipped materials adopt the field with zero behaviour change.
+export const GRAIN_REGULARITY = {
+  RELAX_MAX: 4,          // Lloyd rounds at regularity 1
+  SEPARATION_MIN: 0.15,  // at regularity 0
+  SEPARATION_MAX: 0.75,  // at regularity 1
+} as const;
+
+/** Lloyd relaxation rounds for a material's regularity. */
+export function grainRelaxFor(regularity: number): number {
+  const r = Math.max(0, Math.min(1, regularity));
+  return Math.round(r * GRAIN_REGULARITY.RELAX_MAX);
+}
+/** A material's authored regularity, or null when it carries no grain
+ *  spec.  The one read a caller needs to reason about a material's
+ *  pattern without reaching into SHARD_VARIANTS itself. */
+export function grainRegularityOf(variantId: ShardVariantId): number | null {
+  return SHARD_VARIANTS[variantId].grain?.regularity ?? null;
+}
+
+/** Blue-noise minimum site separation for a material's regularity. */
+export function grainSeparationFor(regularity: number): number {
+  const r = Math.max(0, Math.min(1, regularity));
+  return GRAIN_REGULARITY.SEPARATION_MIN
+    + r * (GRAIN_REGULARITY.SEPARATION_MAX - GRAIN_REGULARITY.SEPARATION_MIN);
+}
+
+// The DBG cycles are OVERRIDES now, not the source.  Their first entry
+// (-1, 'material', the default) defers to each material's own
+// `regularity`; the rest force a value across every material at once, so
+// the knob still answers "what would this look like everywhere at 4
+// rounds" while the shipped game reads the material table.
+export const FRACTURE_RELAX_CYCLE: ReadonlyArray<number> = [-1, 0, 1, 2, 3, 4] as const;
+let activeFractureRelaxIndex = 0; // material
 
 /** Minimum site separation, as a fraction of the mean cell radius.
  *  Blue-noise placement BEFORE relaxation; mostly matters at relax 0. */
-export const FRACTURE_SEPARATION_CYCLE: ReadonlyArray<number> = [0.2, 0.35, 0.45, 0.6, 0.75] as const;
-let activeFractureSeparationIndex = 2; // 0.45
+export const FRACTURE_SEPARATION_CYCLE: ReadonlyArray<number> = [-1, 0.2, 0.35, 0.45, 0.6, 0.75] as const;
+let activeFractureSeparationIndex = 0; // material
 
 /** Multiplier on the per-variant site count — fewer, bigger chunks or
  *  more, smaller ones, without touching the variant table. */
@@ -2999,11 +3039,14 @@ let fractureTuningGen = 0;
  *  older value are recomputed on next read. */
 export function getFractureTuningGen(): number { return fractureTuningGen; }
 
-export function getFractureRelax(): number {
-  return FRACTURE_RELAX_CYCLE[activeFractureRelaxIndex];
+/** null → defer to the material's own `regularity`. */
+export function getFractureRelaxOverride(): number | null {
+  const v = FRACTURE_RELAX_CYCLE[activeFractureRelaxIndex];
+  return v < 0 ? null : v;
 }
 export function getFractureRelaxName(): string {
-  return String(FRACTURE_RELAX_CYCLE[activeFractureRelaxIndex]);
+  const v = FRACTURE_RELAX_CYCLE[activeFractureRelaxIndex];
+  return v < 0 ? 'material' : String(v);
 }
 export function cycleFractureRelax(): number {
   activeFractureRelaxIndex = (activeFractureRelaxIndex + 1) % FRACTURE_RELAX_CYCLE.length;
@@ -3011,11 +3054,14 @@ export function cycleFractureRelax(): number {
   return activeFractureRelaxIndex;
 }
 
-export function getFractureSeparation(): number {
-  return FRACTURE_SEPARATION_CYCLE[activeFractureSeparationIndex];
+/** null → defer to the material's own `regularity`. */
+export function getFractureSeparationOverride(): number | null {
+  const v = FRACTURE_SEPARATION_CYCLE[activeFractureSeparationIndex];
+  return v < 0 ? null : v;
 }
 export function getFractureSeparationName(): string {
-  return FRACTURE_SEPARATION_CYCLE[activeFractureSeparationIndex].toFixed(2);
+  const v = FRACTURE_SEPARATION_CYCLE[activeFractureSeparationIndex];
+  return v < 0 ? 'material' : v.toFixed(2);
 }
 export function cycleFractureSeparation(): number {
   activeFractureSeparationIndex = (activeFractureSeparationIndex + 1) % FRACTURE_SEPARATION_CYCLE.length;
@@ -3051,7 +3097,7 @@ export function cycleFractureBias(): number {
 }
 
 /** GRAIN-BOUNDARY STRENGTH multiplier (V15) — scales every material's
- *  `fracture.boundaryStrength` at once, so "how tough is terrain in
+ *  `fracture.bondStrength` at once, so "how tough is terrain in
  *  general" can be judged on a device without re-deriving each
  *  material's own number.  Relative material strengths are the variant
  *  table's job; this is the master.  Cycling it invalidates cached
@@ -3081,7 +3127,7 @@ export function cycleBoundaryStrength(): number {
  *  initialised at module scope; every caller runs at frame time. */
 export function isProgressiveFracture(variantId: ShardVariantId): boolean {
   const v = SHARD_VARIANTS[variantId];
-  return v.fracture?.progressive === true
+  return v.grain?.progressive === true
     && v.shatter.kind === 'voronoi'
     && getActiveFractureMode() === 'voronoi';
 }
@@ -8243,11 +8289,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // the hit point, giving small cells at the impact growing outward,
     // which is the radial look.  The legacy fan survives as the DBG
     // 'legacy' path until V7.
-    fracture: {
-      siteCountMin: 5,
-      siteCountMax: 10,
-      sizePerSite: 6,
+    grain: {
+      grainCountMin: 5,
+      grainCountMax: 10,
+      grainSize: 6,
       impactBias: 0.75,
+      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
+      // 0.45 separation).  Per-material values are A3's tuning pass.
+      regularity: 0.5,
       radialSpeed: 1.2,
       // V10 (user call): glass takes ROCK'S breaking behaviour — the
       // pattern is applied once and pieces break off as their
@@ -8256,10 +8305,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
-      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // its own pattern — see GrainSpec.bondStrength.
       // V15: glass is the brittler material — 0.16 against rock's 0.27,
       // so a 36px pane is ~20 damage (5 Blaster hits, its V9 HP).
-      boundaryStrength: 0.16,
+      bondStrength: 0.16,
     },
     shatter: {
       kind: 'voronoi',
@@ -8314,11 +8363,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // hex; children keep the 24-HP dent durability via the shardHealth
     // override shatterVoronoiStyle reads from `dent`.  breakShards
     // stays as the DBG 'legacy' path until V7.
-    fracture: {
-      siteCountMin: 6,
-      siteCountMax: 12,
-      sizePerSite: 5,
+    grain: {
+      grainCountMin: 6,
+      grainCountMax: 12,
+      grainSize: 5,
       impactBias: 0.5,
+      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
+      // 0.45 separation).  Per-material values are A3's tuning pass.
+      regularity: 0.5,
       radialSpeed: 1.5,
     },
     shatter: {
@@ -8460,13 +8512,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // break spawned 3 at 0.75× (Σareas 1.69× the tile — the material
     // creation goes away with the cells).  breakShards stays as the DBG
     // 'legacy' A/B config until V7.
-    fracture: {
+    grain: {
       // V9: the glass-like radial pattern (user call) — more cells,
       // crowded toward the impact.
-      siteCountMin: 7,
-      siteCountMax: 16,
-      sizePerSite: 5,
+      grainCountMin: 7,
+      grainCountMax: 16,
+      grainSize: 5,
       impactBias: 0.75,
+      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
+      // 0.45 separation).  Per-material values are A3's tuning pass.
+      regularity: 0.5,
       radialSpeed: 1.4,
       // V8: hits highlight the tile's cell boundaries; each piece whose
       // boundary completes breaks off, and the hit ceiling breaks the
@@ -8475,12 +8530,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
-      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // its own pattern — see GrainSpec.bondStrength.
       // V15: damage per PIXEL of grain boundary — one number for the
       // material, tile and shard alike; a bigger body has more boundary
       // and is tougher for free.  0.27 puts a 36px tile at ~36 damage
       // (9 Blaster hits, its old hit ceiling) and a 15px chip at ~6.
-      boundaryStrength: 0.27,
+      bondStrength: 0.27,
     },
     shatter: {
       kind: 'voronoi',
@@ -8579,29 +8634,32 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Voronoi opt-in (voronoi gauntlet, V2): on death the cached seeded
     // cell decomposition becomes the fragments.  The powerlaw fields
     // below STAY — they are the DBG 'legacy' A/B path until V7 calls it.
-    fracture: {
+    grain: {
       // Site count ≈ the legacy rock count mapping (max(2, size/40),
       // cap 30), raised to mergeCount for composed boulders — so the
       // fragment-count REBALANCE at V2 is zero for rock-shard.
       // V9 (user call: rock should fracture like glass — the radial
       // voronoi look, not big angular chunks): denser sites, crowded
-      // toward the impact.  sizePerSite 40 → 22 also gives mid-size
+      // toward the impact.  grainSize 40 → 22 also gives mid-size
       // rocks enough edges for the progressive chip-off to read.
-      siteCountMin: 3,
-      siteCountMax: 30,
-      sizePerSite: 22,
+      grainCountMin: 3,
+      grainCountMax: 30,
+      grainSize: 22,
       impactBias: 0.75,
+      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
+      // 0.45 separation).  Per-material values are A3's tuning pass.
+      regularity: 0.5,
       radialSpeed: 1.0,
       // V8: the pattern is applied once at first damage; boundaries
       // highlight with each hit and a fully-highlighted piece breaks
-      // off.  See ShardFracturePolicy.progressive.
+      // off.  See GrainSpec.progressive.
       progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
-      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // its own pattern — see GrainSpec.bondStrength.
       // The same rock: strength is a material property, not a per-entity
       // HP.  ~6 damage on a 15px chip, rising with size and merge history.
-      boundaryStrength: 0.27,
+      bondStrength: 0.27,
     },
     shatter: {
       kind: 'voronoi',
@@ -8658,18 +8716,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // shard breaks into — a pattern that lied about the break is the
     // defect this gauntlet exists to remove.  Powerlaw fields stay as
     // the DBG legacy path.
-    fracture: {
-      siteCountMin: 2,
-      siteCountMax: 6,
-      sizePerSite: 8,
+    grain: {
+      grainCountMin: 2,
+      grainCountMax: 6,
+      grainSize: 8,
       impactBias: 0.75,
+      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
+      // 0.45 separation).  Per-material values are A3's tuning pass.
+      regularity: 0.5,
       radialSpeed: 1.0,
       progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
-      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // its own pattern — see GrainSpec.bondStrength.
       // The same glass; a small chip is ~2 damage, i.e. one bolt.
-      boundaryStrength: 0.16,
+      bondStrength: 0.16,
     },
     shatter: {
       kind: 'voronoi',
@@ -8789,11 +8850,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // powerlaw fields below stay as the DBG 'legacy' path until V7;
     // recursion terminates the same way (children below the spawn
     // floor die clean via the mobile-parent guard).
-    fracture: {
-      siteCountMin: 2,
-      siteCountMax: 5,
-      sizePerSite: 16,
+    grain: {
+      grainCountMin: 2,
+      grainCountMax: 5,
+      grainSize: 16,
       impactBias: 0.5,
+      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
+      // 0.45 separation).  Per-material values are A3's tuning pass.
+      regularity: 0.5,
       radialSpeed: 0.8,
     },
     shatter: {

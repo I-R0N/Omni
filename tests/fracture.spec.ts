@@ -22,7 +22,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
+import { boot, engine, startRun, stats, waitForStats, waitForEngine } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
@@ -324,7 +324,7 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
     });
 
     expect(r.voronoi.dead).toBe(true);
-    // fracture: a 42px hex maps to ~6 sites (sizePerSite 7, clamp 5-12); sliver
+    // fracture: a 42px hex maps to ~6 sites (grainSize 7, clamp 5-12); sliver
     // retirement may retire a couple, never below 2; cells can exceed
     // sites only on a concave parent, which a hex is not.
     expect(r.voronoi.count).toBeGreaterThanOrEqual(3);
@@ -644,7 +644,7 @@ test.describe('partial fracture (V4)', () => {
       }
       function edgeNeed(t: any, ed: any) {
         const len = Math.hypot(ed.bx - ed.ax, ed.by - ed.ay);
-        // rock's shipped boundaryStrength; the assertion below only needs
+        // rock's shipped bondStrength; the assertion below only needs
         // the ORDER of magnitude, so a drift in the constant cannot make
         // this pass falsely.
         return Math.max(0.05, 0.27 * len);
@@ -1717,6 +1717,141 @@ test.describe('grain boundaries (V15)', () => {
     // Two grains touching only at a point are not one body: refused, so
     // the caller keeps the old shape rather than handing SAT a bowtie.
     expect(r.diagonal).toBe(true);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('per-material grain regularity (A1)', () => {
+  // A1 moved the two knobs that produce a pattern's regularity — Lloyd
+  // relaxation rounds and blue-noise minimum separation — out of GLOBAL
+  // DBG accessors and into the material's own `GrainSpec.regularity`.
+  // Two claims to hold: the capability now exists, and adopting it
+  // changed nothing for the materials already shipped.
+
+  test('A1 changes no behaviour: every shipped material resolves to the old globals',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await waitForEngine(page, () => true, 'the engine handle');
+
+    const r = await page.evaluate(`(() => {
+      const g = window.__omniGrain;
+      const ids = ['rock-tile', 'rock-shard', 'glass-tile', 'glass-shard',
+                   'plastic-tile', 'plastic-shard'];
+      return ids.map(id => {
+        const reg = g.grainRegularityOf(id);
+        return { id, reg,
+          relax: reg === null ? null : g.grainRelaxFor(reg),
+          sep: reg === null ? null : g.grainSeparationFor(reg) };
+      });
+    })()`) as any[];
+
+    for (const row of r) {
+      // Every grain-bearing material carries the field...
+      expect(row.reg, row.id).not.toBeNull();
+      // ...and resolves to EXACTLY what the global DBG defaults supplied
+      // before A1 (2 Lloyd rounds, 0.45 separation).  This is the whole
+      // no-behaviour-change claim, pinned as a number.
+      expect(row.relax, row.id).toBe(2);
+      expect(row.sep, row.id).toBeCloseTo(0.45, 9);
+    }
+
+    watch.assertClean();
+  });
+
+  test('regularity is a real dial: the ends resolve apart and produce measurably different grains',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await waitForEngine(page, () => true, 'the engine handle');
+
+    const r = await page.evaluate(`(() => {
+      const g = window.__omniGrain;
+      const fr = window.__omniFracture;
+      // The resolver's ends.
+      const ends = [0, 0.5, 1].map(x => ({
+        r: x, relax: g.grainRelaxFor(x), sep: g.grainSeparationFor(x) }));
+
+      // And what those ends DO, measured on one polygon: area spread
+      // (coefficient of variation) and isoperimetric roundness.
+      const w = 42, pts = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+      }
+      const measure = (reg) => {
+        const cells = fr.computeFracture(pts, {
+          siteCount: 10, seed: 12345,
+          relaxIterations: g.grainRelaxFor(reg),
+          minSeparation: g.grainSeparationFor(reg),
+        }).cells;
+        const areas = cells.map(c => Math.abs(c.area));
+        const mean = areas.reduce((a, b) => a + b, 0) / areas.length;
+        const sd = Math.sqrt(areas.reduce((a, b) => a + (b - mean) ** 2, 0) / areas.length);
+        let round = 0;
+        for (const c of cells) {
+          let per = 0;
+          for (let i = 0; i < c.points.length; i++) {
+            const p = c.points[i], q = c.points[(i + 1) % c.points.length];
+            per += Math.hypot(q.x - p.x, q.y - p.y);
+          }
+          round += per > 0 ? (4 * Math.PI * Math.abs(c.area)) / (per * per) : 0;
+        }
+        return { cv: sd / mean, roundness: round / cells.length, n: cells.length };
+      };
+      return { ends, ragged: measure(0), shipped: measure(0.5), regular: measure(1) };
+    })()`) as any;
+
+    // The two knobs move together and monotonically across the dial.
+    expect(r.ends[0].relax).toBe(0);
+    expect(r.ends[1].relax).toBe(2);
+    expect(r.ends[2].relax).toBe(4);
+    expect(r.ends[0].sep).toBeLessThan(r.ends[1].sep);
+    expect(r.ends[1].sep).toBeLessThan(r.ends[2].sep);
+
+    // And the dial is not cosmetic: regularity 1 makes grains measurably
+    // more even in size AND rounder than regularity 0.  Without this the
+    // field could be authored per material and mean nothing.
+    expect(r.regular.cv).toBeLessThan(r.ragged.cv);
+    expect(r.regular.roundness).toBeGreaterThan(r.ragged.roundness);
+    // The shipped setting sits between them, as 0.5 should.
+    expect(r.shipped.cv).toBeLessThanOrEqual(r.ragged.cv);
+    expect(r.shipped.roundness).toBeGreaterThanOrEqual(r.ragged.roundness);
+
+    console.log('[A1 regularity] cv', r.ragged.cv.toFixed(3), '->',
+      r.shipped.cv.toFixed(3), '->', r.regular.cv.toFixed(3),
+      '| roundness', r.ragged.roundness.toFixed(3), '->',
+      r.shipped.roundness.toFixed(3), '->', r.regular.roundness.toFixed(3));
+
+    watch.assertClean();
+  });
+
+  test('the DBG cycle is an OVERRIDE, and its default defers to the material',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    // The shipped default: the game takes regularity from the material
+    // table, not from a debug knob.  This is the half of A1 that matters
+    // for the game rather than for the debug menu.
+    const start0 = await stats(page);
+    expect(start0.fractureRelaxName).toBe('material');
+    expect(start0.fractureSeparationName).toBe('material');
+
+    // Cycling forces a value across every material at once...
+    await engine(page, (e: any) => { e.dbg.cycleFractureRelax(); });
+    const forced = await waitForStats(page, s => s.fractureRelaxName !== 'material',
+      'the relax override to engage');
+    expect(forced.fractureRelaxName).toBe('0');
+
+    // ...and the cycle comes back round to deferring again, so the knob
+    // can always be put back without a reload.
+    await engine(page, (e: any) => {
+      for (let i = 0; i < 5; i++) e.dbg.cycleFractureRelax();
+    });
+    const back = await waitForStats(page, s => s.fractureRelaxName === 'material',
+      'the relax cycle to return to material');
+    expect(back.fractureRelaxName).toBe('material');
 
     watch.assertClean();
   });

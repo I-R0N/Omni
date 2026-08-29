@@ -280,7 +280,7 @@ export interface ShardBlendPolicy {
 
 export interface ShardShatterPolicy {
   /** 'voronoi' (voronoi gauntlet, V2): on death the entity's cached
-   *  seeded Voronoi decomposition (see `ShardFracturePolicy` and
+   *  seeded Voronoi decomposition (see `GrainSpec` and
    *  `engine/systems/fracture.ts`) becomes the children — each cell is a
    *  fragment with the CELL's polygon.  While the DBG A/B lives
    *  (`getActiveFractureMode()`), 'legacy' mode routes a 'voronoi'
@@ -351,15 +351,33 @@ export interface ShardShatterPolicy {
 // still drives scatter speed and (via lastImpactVelocity at compute
 // time) the impact bias of the site distribution.
 
-export interface ShardFracturePolicy {
-  /** Site count = clamp(round(size / sizePerSite), min, max), raised to
+export interface GrainSpec {
+  /** Site count = clamp(round(size / grainSize), min, max), raised to
    *  the entity's mergeCount when it was composed from more pieces. */
-  siteCountMin: number;
-  siteCountMax: number;
+  grainCountMin: number;
+  grainCountMax: number;
   /** Pixels of entity diameter per Voronoi site. */
-  sizePerSite: number;
+  grainSize: number;
   /** Fraction of sites biased toward the impact point (0..1). */
   impactBias: number;
+  /** GRAIN REGULARITY (A1) — 0 = raw Poisson Voronoi (ragged outlines,
+   *  wildly uneven grain sizes), 1 = near-honeycomb.  ONE dial standing
+   *  for the two that produce the look: Lloyd relaxation rounds and
+   *  blue-noise minimum site separation, both resolved through
+   *  `grainRelaxFor` / `grainSeparationFor`.
+   *
+   *  This is a MATERIAL property and it could not be one before: the
+   *  relaxation and separation values were read from global DBG
+   *  accessors, so every material on the map shared whatever the debug
+   *  knob said.  Metal wanting near-perfect grains while plastic wants
+   *  ragged ones is not expressible without this field.  The DBG cycles
+   *  survive as an OVERRIDE (their 'material' entry, the default, defers
+   *  here).
+   *
+   *  0.5 reproduces the values the globals used to supply (2 relaxation
+   *  rounds, 0.45 separation) exactly, which is why the shipped
+   *  materials carry it and why A1 changes no behaviour. */
+  regularity: number;
   /** Outward fling along each cell's centroid direction at shatter, so
    *  the pattern visibly flies apart along its own seams (added on top
    *  of the shared impact-scatter term). */
@@ -387,7 +405,7 @@ export interface ShardFracturePolicy {
    *  and a cell breaks off exactly when every boundary binding it has
    *  been broken through.  This number is the damage needed to break a
    *  boundary AS LONG AS THE BODY IS WIDE, so each edge costs
-   *  `boundaryStrength × (edgeLength / bodySize)` and a material's
+   *  `bondStrength × (edgeLength / bodySize)` and a material's
    *  toughness is ONE number.
    *
    *  The entity's HP is then DERIVED — `Σ edge strengths`, computed
@@ -396,7 +414,7 @@ export interface ShardFracturePolicy {
    *  genuinely tougher and nothing "shatters at an arbitrary limit":
    *  health reaching zero and the last boundary breaking are the same
    *  event by construction.  Requires `progressive`. */
-  boundaryStrength?: number;
+  bondStrength?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────
@@ -621,7 +639,7 @@ export interface ShardVariantDef {
    *  itself is computed lazily (first damage / death) and cached on
    *  `entity.fractureCells`; every site that mutates the polygon, the
    *  size, or the merge count must invalidate that cache. */
-  fracture?: ShardFracturePolicy;
+  grain?: GrainSpec;
 
   /** Pass-through-and-shatter rule (g3 material-interactions).  When
    *  this variant contacts an entity whose variant id is in `targets`,

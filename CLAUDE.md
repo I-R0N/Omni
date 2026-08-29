@@ -997,10 +997,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   drives the aggregation-coloring rules.  The optional `blend` block
   (`ShardBlendPolicy`) is the one PRESENTATION entry in the table — how
   a live cohesion bond is DRAWN (today: plastic-shard; see §8).
-  The `fracture` block
-  (voronoi gauntlet) + `shatter.kind: 'voronoi'` opt a variant into the
-  SEEDED VORONOI CELL DECOMPOSITION of its own polygon, and its
-  `boundaryStrength` (V15) additionally opts it into the GRAIN-BOUNDARY
+  The `grain` block (a
+  `GrainSpec` — the MATERIAL GRAIN SPEC's A1 rename of the voronoi
+  gauntlet's `fracture` / `ShardFracturePolicy`; see
+  docs/MATERIAL_GRAIN_SPEC.md) + `shatter.kind: 'voronoi'` opt a variant
+  into the SEEDED VORONOI CELL DECOMPOSITION of its own polygon, and its
+  `bondStrength` (V15) additionally opts it into the GRAIN-BOUNDARY
   damage model — damage per PIXEL of interior boundary, from which the
   body's HP is DERIVED rather than authored (see §8): the cells are
   the fragments at death, the interior cell edges are the cracks it
@@ -2000,7 +2002,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `overlayMaterialCracks` draws the interior cell edges of the cached
   decomposition (impact-nearest first, revealed by the same
   `MATERIAL_DAMAGE_CRACKS` freq/cap pacing) for any variant with a
-  `fracture` block; everything else — metal tiles, single metal shards,
+  `grain` block; everything else — metal tiles, single metal shards,
   enemy hulls — keeps the seeded radial spokes (`drawDamageCracks`).
   The metal COMPOSITE strokes its own lattice-cell outlines instead
   (the exact `decomposeMetalComposite` seams).  The one ordering rule
@@ -2009,11 +2011,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   decremented before the dent), so the shatter consumes exactly the
   decomposition whose edges were last drawn.
 - **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
-  user call).  A variant carrying `fracture.boundaryStrength` does not have
+  user call).  A variant carrying `grain.bondStrength` does not have
   an HP pool that damage counts down.  Damage ACCUMULATES ON THE INTERIOR
   BOUNDARIES of its cached decomposition — grain by grain, nearest the
   contact first — and a cell breaks off exactly when every boundary still
-  binding it has been broken through.  `boundaryStrength` is damage per
+  binding it has been broken through.  `bondStrength` is damage per
   PIXEL of boundary: ONE number per material (rock 0.27, glass 0.16), and
   deliberately NOT normalised by body size, because normalising cancels
   scale and would force separate numbers for a material's tiles and its

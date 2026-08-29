@@ -846,7 +846,7 @@ export class ShardSystem {
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE = parentVariant.shatter.scatterHalfCone;
-    const radialSpeed = parentVariant.fracture!.radialSpeed;
+    const radialSpeed = parentVariant.grain!.radialSpeed;
 
     const isRockParent = parent.shardVariant === 'rock-shard'
       || parent.shardVariant === 'rock-tile';
@@ -983,7 +983,7 @@ export class ShardSystem {
     const parentVariant = SHARD_VARIANTS[variantId];
     const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
     const childSpawn = childVariant.spawn;
-    const f = parentVariant.fracture;
+    const f = parentVariant.grain;
     if (f === undefined || refArea <= 0) return;
 
     const newSize = Math.max(6, parent.size.x * Math.sqrt(cell.area / refArea));

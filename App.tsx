@@ -3,7 +3,8 @@ import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
-         computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect } from './constants';
+         computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
+         GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -95,6 +96,15 @@ const App: React.FC = () => {
       mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
       isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
       subtractBoundaryCell, pointToPolygonDistance2, unionOfCells,
+    };
+    // Debug handle #7 (material grain spec, A1) — the material-side
+    // resolvers, on the __omniFracture terms: pure, and wrong in a way
+    // nothing reports.  If the regularity mapping drifts, every
+    // material's pattern silently changes shape and nothing throws; and
+    // "A1 changes no behaviour" is exactly the claim that needs pinning
+    // against a number rather than against a screenshot.
+    (window as any).__omniGrain = {
+      GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two

@@ -23,7 +23,8 @@ import { GameEntity, Vector2 } from '../../types';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import {
   SHARD_VARIANTS, FRACTURE_DETACH,
-  getFractureRelax, getFractureSeparation, getFractureSiteScale,
+  getFractureRelaxOverride, getFractureSeparationOverride, getFractureSiteScale,
+  grainRelaxFor, grainSeparationFor,
   getFractureBiasOverride, getFractureTuningGen,
   isProgressiveFracture, getBoundaryStrengthScale,
 } from '../../constants';
@@ -69,10 +70,10 @@ function localImpactPoint(e: GameEntity): { x: number; y: number } | null {
  *  entities without a usable polygon.  Site count is a function of size
  *  + merge history only — never the killing hit — so the cracks shown
  *  while alive are the exact seams of the eventual break (see
- *  ShardFracturePolicy). */
+ *  GrainSpec). */
 export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   if (e.shardVariant === undefined) return null;
-  const f = SHARD_VARIANTS[e.shardVariant].fracture;
+  const f = SHARD_VARIANTS[e.shardVariant].grain;
   if (f === undefined) return null;
   if (e.polygonPoints === undefined || e.polygonPoints.length < 3) return null;
   // A DBG shape knob moved since this pattern was built (V11): drop it so
@@ -87,10 +88,10 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   }
 
   const size = Math.max(e.size.x, e.size.y);
-  let sites = Math.round((size / f.sizePerSite) * getFractureSiteScale());
+  let sites = Math.round((size / f.grainSize) * getFractureSiteScale());
   const merges = e.mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
-  sites = Math.max(f.siteCountMin, Math.min(f.siteCountMax, sites));
+  sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 
@@ -107,8 +108,12 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
     seed,
     impact,
     minAreaFraction: f.minAreaFraction,
-    relaxIterations: getFractureRelax(),
-    minSeparation: getFractureSeparation(),
+    // Per-MATERIAL regularity (A1), with the DBG cycles as overrides
+    // rather than the source.  Before this the two knobs were read
+    // globally, so every material on the map shared one setting and
+    // "metal regular, plastic ragged" could not be said at all.
+    relaxIterations: getFractureRelaxOverride() ?? grainRelaxFor(f.regularity),
+    minSeparation: getFractureSeparationOverride() ?? grainSeparationFor(f.regularity),
   }).cells;
   return e.fractureCells;
 }
@@ -218,7 +223,7 @@ export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
  *  for tiles and for shards of the same material, which is exactly the
  *  "one number per material" the model exists to give.  With absolute
  *  length a big body has more boundary to break and is therefore tougher
- *  for free, and `boundaryStrength` reads as a real material property:
+ *  for free, and `bondStrength` reads as a real material property:
  *  damage per pixel of grain boundary. */
 function edgeStrength(_e: GameEntity, edge: FractureEdge, strength: number): number {
   const len = Math.hypot(edge.bx - edge.ax, edge.by - edge.ay);
@@ -228,11 +233,11 @@ function edgeStrength(_e: GameEntity, edge: FractureEdge, strength: number): num
 /** The variant's boundary strength under the live DBG multiplier, or
  *  null when this entity is not running the grain model (no `fracture`
  *  block, not progressive, no strength authored, or the legacy A/B). */
-export function boundaryStrengthFor(e: GameEntity): number | null {
+export function bondStrengthFor(e: GameEntity): number | null {
   if (e.shardVariant === undefined) return null;
   if (!isProgressiveFracture(e.shardVariant)) return null;
-  const f = SHARD_VARIANTS[e.shardVariant].fracture;
-  const s = f?.boundaryStrength;
+  const f = SHARD_VARIANTS[e.shardVariant].grain;
+  const s = f?.bondStrength;
   if (s === undefined) return null;
   return s * getBoundaryStrengthScale();
 }
@@ -248,7 +253,7 @@ export function boundaryStrengthFor(e: GameEntity): number | null {
 export function ensureBoundaryModel(
   e: GameEntity,
 ): { edges: FractureEdge[]; fill: number[]; strength: number } | null {
-  const strength = boundaryStrengthFor(e);
+  const strength = bondStrengthFor(e);
   if (strength === null) return null;
   const edges = ensureFractureEdges(e);
   if (edges === null || edges.length === 0) return null;
@@ -360,7 +365,7 @@ export function applyBoundaryDamage(e: GameEntity, damage: number): boolean {
  *  crack overlay draws and the detach test reads, so what the player
  *  sees and what comes loose cannot disagree. */
 export function edgeBreakFraction(e: GameEntity, index: number): number {
-  const strength = boundaryStrengthFor(e);
+  const strength = bondStrengthFor(e);
   const edges = e.fractureEdges;
   const fill = e.fractureEdgeFill;
   if (strength === null || edges === undefined || fill === undefined) return 0;

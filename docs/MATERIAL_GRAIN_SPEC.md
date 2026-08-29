@@ -1,6 +1,8 @@
 # Material Grain Spec
 
-**Status: PROPOSED.  Nothing in this file is implemented yet.**  V15
+**Status: A1 IMPLEMENTED; the rest PROPOSED.**  A1 (the GrainSpec types
+and per-material regularity) shipped — see §7 for what that covered and
+what is still ahead.  V15
 shipped the grain-boundary model for rock and glass (see
 `docs/GAUNTLET_VORONOI_LOG.md`); this spec generalises it into a material
 system and folds BONDING into the same object, so that adding a material
@@ -8,6 +10,29 @@ is filling in a row rather than writing a mechanic.
 
 Read `CLAUDE.md` §8 "DAMAGE LANDS ON GRAIN BOUNDARIES" first — this
 document assumes that model and extends it.
+
+---
+
+## 0. Vocabulary
+
+Four terms, deliberately distinct.  GRAINS DO NOT REPLACE SHARDS — they
+are what a shard is made of, and what a shard was before it left.
+
+| term | what it is | lifetime |
+|---|---|---|
+| **material** | a row in the spec (rock, glass, metal, plastic…) | config |
+| **grain** | one internal cell of a body's pattern | lives inside a body |
+| **shard** | a MOBILE entity (finite mass).  A grain that detaches becomes one | an entity |
+| **tile** | a STATIC entity (mass ∞) | an entity |
+
+So a grain becomes a shard when it breaks off, and a shard is itself made
+of grains — the model applies to tiles and shards alike, which is what
+V15 already ships (`rock-tile`, `rock-shard`, `glass-tile`, `glass-shard`
+all carry it).  `SHARD_VARIANTS`, `shardVariant` and `ShardVariantId`
+keep their names and meanings; what A1 renames is the POLICY that
+describes a body's internal grain structure
+(`ShardFracturePolicy` → `GrainSpec`, and the variant field
+`fracture` → `grain`), which hangs off tile and shard rows equally.
 
 ---
 
@@ -318,7 +343,16 @@ dimple reads too weakly.
 
 ## 7. Build order
 
-- **A1** GrainSpec types + per-material regularity (unblocks everything)
+- **A1** GrainSpec types + per-material regularity — **DONE.**
+  `ShardFracturePolicy` → `GrainSpec`, the variant field `fracture` →
+  `grain`, `sizePerSite` → `grainSize`, `siteCountMin/Max` →
+  `grainCountMin/Max`, `boundaryStrength` → `bondStrength` (the rename is
+  the point: it is now also the JOIN strength).  `regularity` added and
+  wired, with the DBG cycles demoted to overrides.  Verified to generate
+  BYTE-FOR-BYTE identical patterns to the previous commit across
+  rock/glass/plastic tiles and shards, so the capability landed with zero
+  behaviour change; the measured dial runs cell-area CV 0.404 → 0.185 →
+  0.093 and roundness 0.650 → 0.779 → 0.790 across regularity 0 → 0.5 → 1.
 - **A2** `sizeSpread` placement + `bondSpread`
 - **A3** metal + plastic rows, tuned and measured like V15 was
 - **B1** per-grain dent, outer-vertices-only (§5.3 option 1)

@@ -5076,7 +5076,7 @@ export class GameEngine {
       // is not, and a cell is loose when every boundary still binding it
       // has been broken.  There is no reveal SCHEDULE any more — the
       // damage each boundary has absorbed is the whole state.  Variants
-      // with no `boundaryStrength` (and the legacy A/B) keep the old
+      // with no `bondStrength` (and the legacy A/B) keep the old
       // HP-paced reveal, so this is additive rather than a fork.
       const grain = ensureBoundaryModel(target);
       let revealed = 0;

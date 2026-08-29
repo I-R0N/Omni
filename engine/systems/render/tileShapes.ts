@@ -42,7 +42,7 @@ import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01,
          CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, roundedPolyPath, drawFractureCracks, GLASS_CRACK_STYLE } from './drawUtils';
-import { ensureFractureEdges, fractureRevealedEdgeCount, boundaryStrengthFor, edgeBreakFraction } from '../fractureCache';
+import { ensureFractureEdges, fractureRevealedEdgeCount, edgeBreakFraction, bondStrengthFor } from '../fractureCache';
 
 /**
  * PAuto automata colour for a plastic-shard: the active palette's
@@ -386,7 +386,7 @@ export function overlayMaterialCracks(
     // about to break off.  Everything else (metal, and enemy hulls via
     // enemyShapes) keeps the legacy spoke look.
     const fractured = entity.shardVariant !== undefined
-        && SHARD_VARIANTS[entity.shardVariant].fracture !== undefined
+        && SHARD_VARIANTS[entity.shardVariant].grain !== undefined
         ? ensureFractureEdges(entity) : null;
     if (fractured !== null && fractured.length > 0) {
         // No max(1, …) floor: the helper's count IS the truth the sim
@@ -396,8 +396,8 @@ export function overlayMaterialCracks(
         // progress, so the overlay draws PARTIAL cracks and a boundary the
         // player sees complete is exactly one that no longer binds.  The
         // legacy HP-paced reveal stays for variants without a
-        // `boundaryStrength` (and for the legacy fracture A/B).
-        const grain = boundaryStrengthFor(entity) !== null;
+        // `bondStrength` (and for the legacy fracture A/B).
+        const grain = bondStrengthFor(entity) !== null;
         const upTo = grain ? fractured.length
             : fractureRevealedEdgeCount(entity, fractured.length, cfg.freq);
         drawFractureCracks(ctx, fractured, upTo, r, dmgFrac, style,
