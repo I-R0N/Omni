@@ -692,6 +692,11 @@ test.describe('the star field', () => {
   });
 });
 
+/** PORTAL_LENS_CYCLE's length — how many clicks can be needed to reach any
+ *  step from any other.  Kept here rather than imported: the suites drive the
+ *  built app through its debug handles, never the source constants. */
+const PORTAL_LENS_STEPS = 4;
+
 test.describe('the wormhole star lens', () => {
   /** The DBG Lens knob has to CHANGE something, and this is the test that
    *  says so — because the shipped lens failed exactly that.
@@ -719,19 +724,27 @@ test.describe('the wormhole star lens', () => {
     const watch = await boot(page);
     await startRun(page);
 
-    // Park beside the hub's Deep Space rift: the biggest horizon, so the
-    // warped region is comfortably wider than the sampling bands.
-    await engine(page, e => {
-      const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
-      e.player.position.x = p.position.x;
-      e.player.position.y = p.position.y + 300;
-      e.player.velocity.x = 0;
-      e.player.velocity.y = 0;
-    });
-    await page.waitForTimeout(800);
-
-    /** Star coverage (% lit) in 20-CSS-px annuli above the rift's centre. */
+    /** Star coverage (% lit) in 20-CSS-px annuli above the rift's centre.
+     *
+     *  RE-PARKS THE SHIP FIRST, EVERY TIME, and that is not tidiness: the
+     *  player sits inside the rift's own gravity well, so between samples it
+     *  drifts toward the mouth, the camera follows, and each reading lands on
+     *  a DIFFERENT patch of sky.  That confound is bigger than the warp at the
+     *  weakest lens setting — it inverted the 0.25x-vs-off comparison in a
+     *  full-suite run while passing in isolation, because a busier machine
+     *  means more sim time (and so more drift) between readings.  Parking to
+     *  the same spot each time makes the sampled sky identical and the knob
+     *  the only variable.  Residual drift over the settle below is ~1px. */
     const bands = async (): Promise<number[]> => {
+      await engine(page, e => {
+        // The hub's Deep Space rift: the biggest horizon, so the warped
+        // region is comfortably wider than the sampling bands.
+        const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
+        e.player.position.x = p.position.x;
+        e.player.position.y = p.position.y + 300;
+        e.player.velocity.x = 0;
+        e.player.velocity.y = 0;
+      });
       await page.waitForTimeout(500);
       return page.evaluate(() => {
         const e = (window as any).__omniEngine;
@@ -768,20 +781,42 @@ test.describe('the wormhole star lens', () => {
     // straddles its edge, so neither says anything.
     const warp = (b: number[]) => b[4] - b[2];
 
-    const full = warp(await bands());                                  // 1.00x
-    await engine(page, e => e.dbg.cyclePortalLens());
-    const half = warp(await bands());                                  // 0.50x
-    await engine(page, e => e.dbg.cyclePortalLens());
-    const quarter = warp(await bands());                               // 0.25x
-    await engine(page, e => e.dbg.cyclePortalLens());
-    const offBands = await bands();                                    // off
+    /** Drive the Lens knob to a NAMED step and prove it landed there.
+     *
+     *  Cycling N times from an assumed starting index is what makes a knob
+     *  test order-dependent: one stray cycle and every later reading is
+     *  silently taken at the wrong setting, which surfaces as a baffling
+     *  VALUE failure ("no lens" measuring a full warp) rather than as "the
+     *  knob was in the wrong place".  Driving to the label instead makes the
+     *  test immune to where the cycle happened to start. */
+    const setLens = async (label: string) => {
+      for (let i = 0; i < PORTAL_LENS_STEPS + 1; i++) {
+        const now = await page.evaluate(() => (window as any).__omniStats?.portalLensName);
+        if (now === label) return;
+        await engine(page, e => e.dbg.cyclePortalLens());
+      }
+      throw new Error(`could not reach lens "${label}"`);
+    };
+
+    await setLens('1×');
+    const full = warp(await bands());
+    await setLens('0.5×');
+    const half = warp(await bands());
+    await setLens('0.25×');
+    const quarter = warp(await bands());
+    await setLens('off');
+    const offBands = await bands();
     const off = warp(offBands);
 
-    // Every step down flattens the sky, and by a margin no sampling wobble
-    // covers.  Measured 3.1 / 1.4 / 0.3 / -0.4, so each gap has >=0.3 of
-    // headroom over the 0.4 asserted here.
-    expect(full, `full ${full} vs half ${half}`).toBeGreaterThan(half + 0.4);
-    expect(half, `half ${half} vs quarter ${quarter}`).toBeGreaterThan(quarter + 0.4);
+    // Every step down flattens the sky, by a margin set at roughly HALF the
+    // measured gap.  Over four runs with the geometry held still:
+    //
+    //   1.00x  2.92 - 3.05      0.50x  1.34 - 1.62
+    //   0.25x  0.27 - 0.38      off   -0.16 - -0.14
+    //
+    // so the gaps are ~1.4 / ~1.1 / ~0.47 against the thresholds below.
+    expect(full, `full ${full} vs half ${half}`).toBeGreaterThan(half + 0.6);
+    expect(half, `half ${half} vs quarter ${quarter}`).toBeGreaterThan(quarter + 0.5);
     expect(quarter, `quarter ${quarter} vs off ${off}`).toBeGreaterThan(off + 0.2);
     // With the lens off there is no warp at all — the field is flat, which is
     // what makes the readings above differences in the LENS and not in the sky.
@@ -790,10 +825,8 @@ test.describe('the wormhole star lens', () => {
     // The warp is LOCAL: past the lens radius the field is untouched at every
     // setting.  Without this the test would also pass on a lens that merely
     // dimmed the whole sky.
-    const fullBands = await (async () => {
-      await engine(page, e => e.dbg.cyclePortalLens());   // back round to 1.00x
-      return bands();
-    })();
+    await setLens('1×');
+    const fullBands = await bands();
     for (const b of [9, 11, 13]) {
       expect(Math.abs(fullBands[b] - offBands[b]),
         `far band ${b}: ${fullBands[b]} vs ${offBands[b]}`).toBeLessThan(1);
