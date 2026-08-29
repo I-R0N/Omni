@@ -1915,9 +1915,30 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   gamepad layer in InputSystem; OR its button into the `selected` flag
   when it lands.  The prompt naming the control is drawn AT the ship
   (`GameEntity.interactPrompt`, stamped per step, rendered via
-  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  The idle rift is pure render-side
-  animation (zero particle cost); `openPortal` only fires on an actual
-  transit.
+  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  THE IDLE RIFT IS A HOLE AND NOTHING ELSE (user call): the world art
+  is ONE black disc plus the destination tag.  The bloom, inspiral
+  arms, energy ring, photon ring, coloured rim, funnel throat, white
+  core and in-range halo were all deleted — the star LENS is what says
+  "wormhole", and the drawn ornament was a second louder voice saying
+  the same thing.  There is no animation left at all, so a portal costs
+  one fill and one string.  Its radius is `portalHorizonRadius(e)` in
+  `constants.ts` — the ONE definition the renderer AND
+  `PhysicsSystem.applyGravity` both call, so matter is swallowed
+  exactly where the hole is drawn — and it SCALES WITH THE
+  DESTINATION: a rift is a window onto the arena at the other end, so
+  `addPortal` stamps `portalDestSpan` from `MAP_SPANS` (built off the
+  map classes' own statics in `MapClasses.ts`, so there is no second
+  copy of a map's size) and the disc grows with it.  Every destination
+  draws SMALLER than the old fixed 0.62 disc: Pocket 4k → 18, showcase
+  6k → 25, hub / Ring / Seven Rings 12k → 42, Deep Space 16k → 52.
+  The span is passed as DATA rather than looked up in `constants`
+  because the map classes import that module — a lookup there would be
+  an import cycle.  Note the LENS radius is still keyed to the entity's
+  own `size.x` (×`LENS.RADIUS_MULT`), NOT to this disc, so at full lens
+  strength the star void is much wider than the hole and the two read
+  as one dark shape; the destination-size variation is legible with the
+  DBG Lens knob dialled down.  `openPortal` still fires only on an
+  actual transit.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
   collapsible section) — the old floating top-left DBG button/panel is
   gone.  The 'Overlays' row inside is the old master toggle (renderer

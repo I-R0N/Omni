@@ -5129,6 +5129,29 @@ export function cycleSnitchSpeed(): number {
   return activeSnitchSpeedIndex;
 }
 
+/** The portal's event-horizon radius in WORLD units — the black disc the
+ *  renderer draws AND the radius at which the well swallows a shard.
+ *
+ *  ONE definition, called by both, because they are the same circle: matter
+ *  has to disappear exactly where the hole is drawn, and two copies of this
+ *  arithmetic would drift the moment either side was tuned.  (Same argument
+ *  as `computeMinimapRect` — see CLAUDE.md §8, "ONE screen corner, one rect".)
+ *
+ *  Scales with the DESTINATION's map span, stamped on the entity as
+ *  `portalDestSpan` by `BaseMapLayer.addPortal` — passed as data rather than
+ *  looked up here, because the map classes import `constants`, so reading map
+ *  dimensions from this module would be an import cycle.  A portal with no
+ *  span recorded falls back to the reference (1×) rather than vanishing. */
+export function portalHorizonRadius(e: GameEntity): number {
+  const H = PORTAL_CONSTANTS.HORIZON;
+  const span = e.portalDestSpan;
+  const scale = span && span > 0
+    ? Math.min(H.MAX_SCALE, Math.max(H.MIN_SCALE,
+        Math.pow(span / H.REFERENCE_SPAN, H.EXPONENT)))
+    : 1;
+  return (e.size.x / 2) * H.BASE_FRACTION * scale * getPortalSizeMult();
+}
+
 // ── DBG portal tuning (user call: the rift reads as too POWERFUL) ───────────
 // Five live multipliers over the wormhole's shipped numbers, so how strong a
 // portal is can be judged by FLYING past one rather than by rebuilding.  Every
@@ -5590,6 +5613,35 @@ export const PORTAL_CONSTANTS = {
     SPEED_MAX: 5.5,
     SCATTER: 70,
     GRACE_SEC: 2.5,
+  },
+  // ── The event horizon (user call) ─────────────────────────────────
+  // The rift's WORLD ART is now exactly one thing: a black disc.  Every
+  // decoration it used to carry — the bloom, the inspiral arms, the energy
+  // ring, the photon ring, the coloured rim, the funnel throat, the white
+  // core and the in-range halo — was deleted, because the star LENS is what
+  // says "wormhole" and the drawn ornament was competing with it.  What is
+  // left is a hole, the lens bending light around it, the destination tag
+  // and the off-screen chevron.
+  //
+  // Its radius READS THE DESTINATION: a rift is a window onto the arena at
+  // the other end, so a bigger world shows a bigger mouth.  BASE_FRACTION is
+  // of the entity's own half-size at the REFERENCE span, and every
+  // destination lands under the old 0.62 disc (the biggest, Deep Space at
+  // 16k, comes out ≈0.52) — "smaller than the default, varying up and down
+  // from there".
+  //
+  // Spans in the game today, and what they draw at (entity half-size 100,
+  // DBG Size 1×): Pocket 4k → 18, showcase 6k → 25, hub / Ring / Seven
+  // Rings 12k → 42, Deep Space 16k → 52.  The EXPONENT is what makes that
+  // range legible: raw linear scaling would put Pocket at 14 against Deep
+  // Space's 56, which reads as two unrelated objects rather than one kind
+  // of thing sized by where it goes.
+  HORIZON: {
+    BASE_FRACTION: 0.42,
+    REFERENCE_SPAN: 12000,   // the hub's span — what every return rift shows
+    EXPONENT: 0.75,
+    MIN_SCALE: 0.35,
+    MAX_SCALE: 1.35,
   },
   // ── Background star lensing (BackgroundManager.renderStars) ───────
   // Screen-space warp around each on-screen attractor: stars inside

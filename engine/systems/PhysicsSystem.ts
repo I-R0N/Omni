@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, getPortalSizeMult} from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -865,7 +865,6 @@ export class PhysicsSystem {
             const isPortalAttr = attractor.isPortal === true;
             const gMult = isPortalAttr ? getPortalGravityMult() : 1;
             const rMult = isPortalAttr ? getPortalGravityRangeMult() : 1;
-            const sMult = isPortalAttr ? getPortalSizeMult() : 1;
             const range = attractor.gravityRange! * rMult;
             const rangeSq = range * range;
 
@@ -883,8 +882,12 @@ export class PhysicsSystem {
             // references.
             const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity
                 && entity.dragonSegment !== true;
+            // A portal swallows at exactly the radius it is DRAWN at — the
+            // same `portalHorizonRadius` the renderer calls, so matter can
+            // never vanish beside the hole or survive inside it.  (It carries
+            // the destination-span scaling and the DBG Size knob with it.)
             const crushR = isPortalAttr
-                ? attractor.size.x * 0.31 * sMult   // the DRAWN horizon, tuning included
+                ? portalHorizonRadius(attractor)
                 : attractor.size.x / 2;
             if (distSq < crushR * crushR && isMobileShard) {
                 entity.active = false;

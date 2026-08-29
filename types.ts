@@ -359,6 +359,10 @@ export interface GameEntity {
                                // (portals: a tug, never a trap — see PORTAL_CONSTANTS)
   portalGraceTimer?: number;   // Portal-gravity immunity window on freshly-emerged
                                // transit debris, so the exit well can't re-swallow it
+  portalDestSpan?: number;     // The DESTINATION map's span (world units), stamped by
+                               // addPortal.  A rift is a window onto the arena at the
+                               // other end, so its horizon is sized from this — see
+                               // `portalHorizonRadius`
 
   // AI
   enemySubtype?: EnemySubtype;
