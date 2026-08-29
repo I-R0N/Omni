@@ -1938,6 +1938,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   map-load bake (`materialNeighborCount`); `densityCachedTint` must
   be invalidated at every site that mutates its inputs. Master DBG
   `Tile shade` toggle gates both compute and render.
+- **A body shatters at most ONCE, and only the death path breaks it.**
+  `ShardSystem.shatter` refuses a second call per entity
+  (`GameEntity.shattered`, cleared by `completeRegen`).  This is a
+  measured invariant, not padding: a legacy census sweep in
+  `updateGameLogic` used to shatter every rock-shard it found
+  deactivated, so a death that had already shattered through
+  `handleEntityDeath` spawned its fragment set TWICE (4 pieces became 8
+  one frame later), and on a quiet field it shattered FULL-HEALTH shards
+  that a merge had just absorbed.  That sweep now only counts the
+  rock-shard population for the free-spawn respawn target.
 - **EVERY structure death goes through `onDeath` — including collision
   kills.**  `PhysicsSystem.killStructureByImpact` is the one path for a
   tile/shard killed by a COLLISION (player crash, asteroid crash, asteroid

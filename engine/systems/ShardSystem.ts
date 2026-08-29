@@ -682,6 +682,7 @@ export class ShardSystem {
     entity.active = true;
     entity.regenProgress = undefined;
     entity.deathDispatched = undefined; // revived — killable again (V9)
+    entity.shattered = undefined;       // ...and breakable again (V13)
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +
@@ -742,6 +743,16 @@ export class ShardSystem {
   public shatter(parent: GameEntity, entities: GameEntity[]): void {
     const variantId = shardVariantOf(parent);
     if (variantId === null) return;
+    // AN ENTITY SHATTERS AT MOST ONCE.  Not defensive padding: a legacy
+    // census sweep in the sim loop used to call this on every rock-shard
+    // it found deactivated, so a death that had already shattered through
+    // `handleEntityDeath` spawned its whole fragment set twice (measured:
+    // 4 pieces became 8).  That caller is gone; this makes the invariant
+    // enforced instead of assumed, since the cached decomposition makes a
+    // repeat call spawn an exact copy rather than merely more debris.
+    // Cleared by ShardSystem.completeRegen — regen reuses the object.
+    if (parent.shattered === true) return;
+    parent.shattered = true;
     const variant = SHARD_VARIANTS[variantId];
 
     // Metal-composite decomposition — metal-shard.shatter.kind is

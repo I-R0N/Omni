@@ -962,3 +962,57 @@ in code this milestone does not touch.  Logged as a load flake in the
 14-minute run, alongside the `input.spec` charge-ring one noted at V10;
 neither is chased here, but two different timing-sensitive suites
 flaking under full-run load is worth a dedicated pass if it recurs.
+
+---
+
+## V13 — The duplicate shards, actually found (2026-08-29, user report)
+
+> "I still get duplicate shards when large rock shards shatter.  They
+> properly chip shards off but upon shattering they release duplicate
+> shards for each shard released."
+
+**V9 fixed a different double-dispatch, and I stopped looking.**  That
+one was real (a min-remainder death inside the damage hook racing the
+outer `health <= 0` block) and its regression test genuinely fails
+without its guard — but it was not this.  The guard sat inside
+`handleEntityDeath`, and the actual second shatter never went through
+`handleEntityDeath` at all.
+
+**The real cause.**  `updateGameLogic` carried a legacy census sweep: it
+scanned the master entity list for `rock-shard` entities found
+DEACTIVATED and called `ShardSystem.shatter` on each.  That predates
+`handleEntityDeath` owning structure deaths (CLAUDE.md §8: "EVERY
+structure death goes through `onDeath`"); once the death path gained the
+shatter, this became a second, unguarded one.  It filtered on
+`shardVariant === 'rock-shard'`, which is exactly why only MOBILE ROCK
+doubled and tiles never did — matching the report precisely.
+
+Measured on a large rock-shard driven through the real death path:
+`shatterCalls: 2`, **4 fragments at death, 8 one frame later**.  The
+duplicates were not detectable by comparing positions, because the first
+set had already drifted before the second spawned — only the COUNT
+across a frame boundary shows it, which is why the V9 test (counting at
+the moment of death) passed throughout.
+
+**A second, latent bug in the same loop.**  Instrumenting a QUIET field
+— nothing being shot at all — showed the census shattering shards at
+FULL HEALTH (10/10 and 11/11 hp): healthy bodies that a MERGE had just
+absorbed.  So every compose was spraying debris.  That is what settled
+the fix: the sweep was not a safety net for deaths the pipeline missed,
+it was manufacturing breaks that never happened.
+
+**The fix.**  The census keeps its real job (counting live rock-shards
+for the free-spawn respawn target) and loses the shatter entirely.  On
+top, `ShardSystem.shatter` now refuses a second call per entity
+(`GameEntity.shattered`, cleared by `completeRegen` since regen reuses
+the object) — the invariant enforced rather than assumed, and it matters
+more under voronoi than it did before: with the decomposition cached, a
+repeat call spawns an EXACT copy of every fragment rather than merely
+more random debris.
+
+**Evidence.**  After: `shatterCalls: 1`, 5 fragments at death and 5 a
+frame later; the quiet-field probe records zero full-health shatters.
+Three new regressions — fragments must not multiply across a frame,
+`shatter` must refuse a second call, and a quiet field must never
+shatter a full-health body — and ALL THREE were verified to FAIL with
+the census sweep restored and the guard disabled.  26/26 fracture green.

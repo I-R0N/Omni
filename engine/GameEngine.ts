@@ -2693,29 +2693,28 @@ export class GameEngine {
           }
       }
 
-      // Asteroid census + shard generation.  EntityIndex only contains
-      // active asteroids, so we still need a master-list scan to catch
-      // asteroids that were just deactivated this step (they're no longer
-      // in the index) and to preserve the original total-count semantics.
-      //
+      // Rock-shard population census, for the free-spawn respawn target.
       // Pulls count/minSize/maxSize from the CURRENT map's config so the
       // respawn loop honours per-map population targets — previously
       // this was hardcoded to MapType.UNIVERSE which filled small maps
       // (e.g. Pocket, count = 2) with Deep Space's 140 asteroids.
+      //
+      // This loop USED to also shatter every rock-shard it found
+      // deactivated, from before `handleEntityDeath` owned structure
+      // deaths (CLAUDE.md §8: EVERY structure death goes through
+      // `onDeath`).  Once the death path gained the shatter, that made it
+      // a SECOND, unguarded shatter — measured: a large rock-shard's 4
+      // fragments became 8 one frame later, each cell spawned twice, and
+      // rock-shard was the only variant filtered for, which is exactly
+      // why only mobile rocks doubled.  Worse, with no shooting at all it
+      // shattered shards at FULL HEALTH (10/10, 11/11) — healthy shards
+      // that a MERGE had just absorbed — spraying debris out of every
+      // compose.  Deleted; ShardSystem.shatter now also refuses a second
+      // call per entity so no future caller can reintroduce it.
       const config = getRockShardFreeSpawn(this.currentMap.type);
-      const newlyDestroyed: GameEntity[] = [];
       let currentMobileShardCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
-          const e = this.currentMap.entities[i];
-          if (e.shardVariant !== 'rock-shard') continue;
-          currentMobileShardCount++;
-          if (!e.active) newlyDestroyed.push(e);
-      }
-      for (const ast of newlyDestroyed) {
-          // Asteroid-style shatter is variant-driven via ShardSystem
-          // (Stage 3): the variant config gates count / size / scatter
-          // and the size-floor check now lives inside shatter() too.
-          if (this.currentMap) this.shards.shatter(ast, this.currentMap.entities);
+          if (this.currentMap.entities[i].shardVariant === 'rock-shard') currentMobileShardCount++;
       }
       if (currentMobileShardCount < config.count) {
           this.handleRockShardRespawn(config);

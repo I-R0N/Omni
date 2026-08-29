@@ -721,6 +721,110 @@ test.describe('death is dispatched once (V9 regression)', () => {
   });
 });
 
+test.describe('a body shatters exactly once (V13 regression)', () => {
+  test('a large rock shard\'s fragments do not multiply on the following frame', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    // The bug: a legacy census sweep in the sim loop shattered every
+    // rock-shard it found deactivated, on top of the death path's own
+    // shatter — so the fragment set appeared TWICE, one frame apart.
+    // Counting across a real frame boundary is what catches it; counting
+    // only at the moment of death does not.
+    const r = await engine(page, async (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-shard'
+        && x.mass !== Infinity && x.size.x >= 90);
+      if (!t) throw new Error('no large rock shard on the field');
+      t.velocity.x = 0; t.velocity.y = 0;
+      e.player.position.x = t.position.x + 6000;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const kids = () => ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity).length;
+
+      t.lastImpactVelocity = { x: -9, y: 0 };
+      t.lastImpactDamage = 2;
+      t.health = 0;
+      t.active = false;
+      e.handleEntityDeath(t);
+      const atDeath = kids();
+      // Let the sim run real frames — the census swept on the step AFTER
+      // the death, which is why one frame has to elapse.
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+      return { atDeath, afterFrame: kids() };
+    });
+
+    expect(r.atDeath).toBeGreaterThanOrEqual(2);
+    // Not "no duplicate positions": the second set drifted before it could
+    // be compared, so only the COUNT exposes the doubling.
+    expect(r.afterFrame).toBe(r.atDeath);
+
+    watch.assertClean();
+  });
+
+  test('shatter refuses a second call on the same body', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-shard'
+        && x.mass !== Infinity && x.size.x >= 90);
+      if (!t) throw new Error('no large rock shard on the field');
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const kids = () => ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity).length;
+      t.lastImpactVelocity = { x: -9, y: 0 };
+      t.lastImpactDamage = 2;
+      t.health = 0;
+      t.active = false;
+      e.shards.shatter(t, ents);
+      const once = kids();
+      e.shards.shatter(t, ents);
+      e.shards.shatter(t, ents);
+      return { once, thrice: kids() };
+    });
+
+    expect(r.once).toBeGreaterThanOrEqual(2);
+    expect(r.thrice).toBe(r.once);
+
+    watch.assertClean();
+  });
+
+  test('an ordinary merge sprays no debris — only damage breaks a body', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    // The same census sweep also shattered FULL-HEALTH shards that a
+    // merge had just absorbed (measured: 10/10 and 11/11 hp bodies), so
+    // a quiet field with nothing being shot still produced debris.
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      (window as any).__shatteredHealthy = 0;
+      const orig = e.shards.shatter.bind(e.shards);
+      e.shards.shatter = (p: any, arr: any) => {
+        if ((p.health ?? 0) >= (p.maxHealth ?? 0) && (p.maxHealth ?? 0) > 0) {
+          (window as any).__shatteredHealthy++;
+        }
+        return orig(p, arr);
+      };
+      return { entities: ents.length };
+    });
+    expect(r.entities).toBeGreaterThan(0);
+
+    // Let the field live: merges happen constantly on a rock field.
+    await waitForEngine(page, (e: any) => e.runTimeSec > 4, 'a few seconds of quiet field');
+
+    const healthy = await page.evaluate(() => (window as any).__shatteredHealthy);
+    expect(healthy).toBe(0);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('the glass damage layer (V9)', () => {
   test('a real glass tile survives base blaster hits, webs with cracks, and its shards carry the shard HP', async ({ page }) => {
     const watch = await boot(page);

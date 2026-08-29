@@ -1296,6 +1296,12 @@ export interface GameEntity {
   // stable.  Derived from fractureCells; cleared wherever it is.
   fractureEdges?: import('./engine/systems/fracture').FractureEdge[];
 
+  // "This body has already broken apart" (V13).  ShardSystem.shatter
+  // refuses a second call, because with the decomposition cached a
+  // repeat spawns an EXACT copy of every fragment rather than just
+  // extra debris.  Cleared by completeRegen (regen reuses the object).
+  shattered?: boolean;
+
   // Death-dispatch re-entry guard for STRUCTURE entities (V9).  The
   // damage-feedback hook (onDamage → progressFracture) can route an
   // entity through handleEntityDeath MID-HIT via the min-remainder
