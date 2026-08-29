@@ -20,7 +20,7 @@
  */
 
 import { GameEntity } from '../../types';
-import { SHARD_VARIANTS } from '../../constants';
+import { SHARD_VARIANTS, FRACTURE_DETACH } from '../../constants';
 import {
   computeFracture, collectInteriorEdges, seedFromEntityId,
   FractureCell, FractureEdge,
@@ -80,12 +80,10 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
  *  HP — the ONE formula the crack render and the progressive-detach sim
  *  share, so what the player sees highlighted and what breaks off
  *  cannot disagree (V8).  Runs 0 → all edges linearly over the entity's
- *  hit life: `hits / (maxHp / freq)` of the (impact-sorted) edge list.
- *  FLOOR pacing on purpose: the LAST boundary completes exactly at the
- *  hit ceiling — so a small pattern (a 2-cell rock with one interior
- *  edge) never splits on an early hit; its one seam highlights late and
- *  the ceiling breaks it, while bigger patterns shed their
- *  early-completed pieces hit by hit. */
+ *  hit life: `hits / (maxHp / freq)` of the reveal-ordered edge list
+ *  (cell-grouped since V10 — see ensureFractureEdges).
+ *  FLOOR pacing on purpose, so an early hit on a small pattern reveals
+ *  nothing and the body cracks before it sheds. */
 export function fractureRevealedEdgeCount(
   e: GameEntity,
   edgeCount: number,
@@ -96,28 +94,56 @@ export function fractureRevealedEdgeCount(
   if (maxHp <= 0 || edgeCount <= 0) return 0;
   const hits = Math.floor((maxHp - hp) / freq);
   if (hits <= 0) return 0;
-  const totalHits = Math.max(1, maxHp / freq);
+  // The pattern finishes revealing at REVEAL_COMPLETE_FRAC of the hit
+  // life, leaving the tail for the last pieces to break off individually
+  // instead of being dumped at death.
+  const totalHits = Math.max(1, (maxHp / freq) * FRACTURE_DETACH.REVEAL_COMPLETE_FRAC);
   return Math.min(edgeCount, Math.floor((edgeCount * hits) / totalHits));
 }
 
 /** The decomposition's interior (bisector) edges — the entity's CRACKS —
- *  sorted nearest-the-impact first (falling back to centre-out) so the
- *  progressive HP reveal grows outward from where the hits land.  The
- *  order is fixed at build time: cracks only ever EXTEND, they never
- *  reshuffle between frames. */
+ *  in REVEAL ORDER.  The order is fixed at build time: cracks only ever
+ *  EXTEND, they never reshuffle between frames.
+ *
+ *  Ordered CELL BY CELL, nearest the impact first (V10).  Within a cell
+ *  its binding edges come out together, so the highlight visibly traces
+ *  ONE piece's outline and that piece breaks off when the tracing
+ *  completes — which is the mechanic itself, not a presentation choice.
+ *  A pure nearest-edge-first sort (V3-V9) looked the same on any single
+ *  frame but completed almost nothing until the end: a cell only leaves
+ *  when its LAST-RANKED binding edge is revealed, and under a global
+ *  distance sort most cells' last edge sits near the end of the list, so
+ *  a rock shed one piece mid-life and dumped the rest at death (measured
+ *  on a real 9-hit rock tile: 1 piece).  Grouping by cell makes the
+ *  cadence roughly one piece per (cell's edge count) hits. */
 export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
   if (e.fractureEdges !== undefined) return e.fractureEdges;
   const cells = ensureFractureCells(e);
   if (cells === null || e.polygonPoints === undefined) return null;
   const edges = collectInteriorEdges(cells, e.polygonPoints);
   const ip = localImpactPoint(e);
-  if (ip !== null) {
-    edges.sort((a, b) =>
-      ((a.mx - ip.x) ** 2 + (a.my - ip.y) ** 2)
-      - ((b.mx - ip.x) ** 2 + (b.my - ip.y) ** 2));
-  } else {
-    edges.sort((a, b) => (a.mx * a.mx + a.my * a.my) - (b.mx * b.mx + b.my * b.my));
+  const px = ip !== null ? ip.x : 0;
+  const py = ip !== null ? ip.y : 0;
+  const d2 = (x: number, y: number) => (x - px) ** 2 + (y - py) ** 2;
+
+  // Cells nearest the impact are traced (and so break off) first.
+  const order = cells
+    .map(c => ({ site: c.siteIndex, d: d2(c.centroid.x, c.centroid.y) }))
+    .sort((a, b) => a.d - b.d);
+
+  const out: FractureEdge[] = [];
+  const taken = new Set<FractureEdge>();
+  for (const { site } of order) {
+    // A cell's own edges, its nearest side first, so each piece's
+    // outline is drawn from the impact outward rather than at random.
+    const mine = edges.filter(ed => !taken.has(ed) && ed.cells.includes(site));
+    mine.sort((a, b) => d2(a.mx, a.my) - d2(b.mx, b.my));
+    for (const ed of mine) { taken.add(ed); out.push(ed); }
   }
-  e.fractureEdges = edges;
-  return edges;
+  // Anything not bound to a surviving cell (shouldn't happen) keeps its
+  // distance order at the tail so no edge is ever dropped.
+  for (const ed of edges) if (!taken.has(ed)) out.push(ed);
+
+  e.fractureEdges = out;
+  return out;
 }

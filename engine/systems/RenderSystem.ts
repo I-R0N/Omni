@@ -23,7 +23,7 @@ import { drawDropShape } from './render/dropShapes';
 import { drawProjectileShape } from './render/projectileShapes';
 import { drawNebulaTileCached, drawNebulaEntity } from './render/nebulaTiles';
 import { drawTileShape } from './render/tileShapes';
-import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
+import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer, tileShowsDamage,
          prepareStaticTileCacheForFrame, syncStaticTileCacheAgainstDeaths,
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
@@ -1540,7 +1540,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined
-          && !inGlowRange) {
+          && !inGlowRange
+          // V10: a damaged glass pane shows crack lines and a chipped
+          // polygon; the sprite draws neither, so it takes the slow path.
+          && !tileShowsDamage(entity)) {
           // Fallback fast path for tiles not currently in the static
           // canvas (e.g. world-canvas allocation failed, hex sprite was
           // still loading at map load, or pre-blit prepare missed an

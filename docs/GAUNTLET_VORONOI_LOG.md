@@ -739,3 +739,79 @@ Gates: typecheck ✓ · build ✓ · fracture (16, two new) + terrain re-green
 after the brittleness fix · FULL suite **253/253** (13.8m) ✓.
 CLAUDE.md §5 re-synced (glass damage layer, glass-shard opt-in, the
 rock pattern retune).
+
+---
+
+## V10 — Chip depth, and rock's model as the default for glass (2026-08-29, user feedback)
+
+> "I really like the way rock tiles chip in general. I would prefer they
+> chip more now before they shatter fully. Then I would like to make the
+> rock breaking behavior the default for rock and glass."
+
+**Why so little chipping was happening (measured, not guessed).**  Three
+compounding causes, found by instrumenting a real rock tile through the
+real projectile path:
+
+1. **The legacy early-break roll ended most rocks at hit 2-3.**
+   `maybeRockEarlyBreak` gives a rising random chance of instant death
+   from the second hit on (a 4-hit rock: ~33% at hit 2, ~67% at hit 3).
+   The progressive model never got the hits it needed to reveal
+   anything.  It now STANDS DOWN under progressive fracture — the
+   pattern owns the break rule (hit ceiling + min-remainder).  Legacy
+   mode keeps it, pinned by an A/B test (40 rolls at the guaranteed-break
+   end kill nothing under voronoi; one roll kills under legacy).
+2. **The reveal ORDER completed almost nothing until the end.**  Edges
+   were revealed nearest-the-impact first, globally.  But a cell leaves
+   only when its LAST-ranked binding edge is revealed, and under a global
+   distance sort most cells' last edge sits near the end of the list — so
+   a 9-hit tile shed ONE piece mid-life and dumped the other five at
+   death (measured).  The reveal is now grouped CELL BY CELL, nearest
+   cell first: the highlight traces one piece's outline, that piece
+   breaks off, then the next — which is the mechanic as described rather
+   than a presentation tweak.
+3. **The reveal finished exactly ON the killing hit**, so the last cells
+   never had a chance to leave individually.  New
+   `FRACTURE_DETACH.REVEAL_COMPLETE_FRAC` (0.55) finishes the pattern
+   early and leaves the tail of the hit life for them.
+
+**Tuning** (all one-line knobs): `ROCK_BREAK` 4/6 → 8/12 hits (every one
+of them now visibly sheds material, so this is chipping, not sponge);
+`MIN_REMAINDER_FRAC` 0.25 → 0.10; rock-tile pattern denser (sizePerSite
+7 → 5, count 5-12 → 7-16) so more cells sit on the boundary and can
+splice off.
+
+Measured on real map tiles, six samples each, real projectile hits:
+
+| | hits | pieces total | broken off WHILE ALIVE |
+|---|---|---|---|
+| rock tile, before V10 | ~2-3 (early-break roll) | 3-6 | ~0-1 |
+| rock tile, after | 9 | 8 | 2-5 |
+| glass tile, after | 5 | 7 | 2-3 |
+
+**Rock's behaviour is now the default for glass too.**  glass-tile and
+glass-shard carry `fracture.progressive`, and the chip call site is
+generalised from a rock-only branch to any variant with the flag (via
+the new shared `isProgressiveFracture` predicate, which the dent
+stand-down and the early-break stand-down also read, so "progressive"
+means one thing everywhere).  Reveal pacing is per material through the
+new `crackConfigForVariant` lookup — the sim no longer hardcodes rock's
+freq — so glass paces one step per Blaster hit and rock one per HP, both
+from the same table the crack render reads.  Glass durability rose to
+20 HP / 12 HP (5 / 3 Blaster hits) to give the reveal room to land
+pieces.
+
+**Found while wiring**: a damaged glass pane would have rendered as a
+pristine full hex.  Glass has BOTH a static-cache stamp and a
+hex-sprite fast path, and neither draws crack lines or a chipped
+polygon.  New `tileShowsDamage` predicate now excludes a damaged tile
+from both (it sits beside `hitFlash` / `regenPopTimer` in the same
+acceptance checks, so the existing erase-on-flip path handles the
+transition); the V9 crack-baking in the stamp is deleted as unreachable.
+
+**Tests** (old → new): the min-remainder trick's recorded area ×5 → ×12
+(the floor moved 0.25 → 0.10); the glass damage-layer test's pinned HP
+12/8/4 → 20/16/12 and shard HP 8 → 12, and its final-hit loop now tolerates
+the pane leaving early via chipping.  Three NEW tests: the early-break
+A/B, a real rock tile shedding ≥3 pieces mid-life across ≥4 hits, and a
+real glass tile chipping (pieces off + its own polygon area shrinking)
+before the pane goes.  19/19 fracture green.

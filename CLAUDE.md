@@ -989,14 +989,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   shows as HP falls, and for rock a qualifying hit DETACHES the cell
   nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
   holds the min-remainder death rule).  Opted in today: rock-tile /
-  rock-shard (full + progressive), glass-tile / glass-shard /
-  plastic-tile / plastic-shard (full break only).  GLASS also carries a
-  DAMAGE LAYER (V9, user call): 12-HP tiles / `GLASS_SHARD_HP` (8)
-  shards — three / two base Blaster hits — webbing with BRIGHT
+  rock-shard AND glass-tile / glass-shard (full + PROGRESSIVE — V10, user
+  call: glass takes rock's breaking behaviour), plastic-tile /
+  plastic-shard (full break only).  GLASS also carries a
+  DAMAGE LAYER (V9, user call): 20-HP tiles / `GLASS_SHARD_HP` (12)
+  shards — five / three base Blaster hits — webbing with BRIGHT
   hairline cracks (`GLASS_CRACK_STYLE`, `MATERIAL_DAMAGE_CRACKS.glass`)
   along the exact cells they break into; physical smashes (crash over
   the momentum threshold, the pressure trigger) still take the whole
-  pane, because the layer meters weapons, not boulders.  Rock's
+  pane, because the layer meters weapons, not boulders.  A DAMAGED glass
+  tile leaves the static-tile cache and the hex-sprite fast path
+  (`tileShowsDamage`) — neither can express cracks or a chipped polygon.
+  CHIP DEPTH is three constants (V10): `ROCK_BREAK.MIN/MAX_HITS` (8/12
+  — the hits the pattern reveals across), `FRACTURE_DETACH
+  .REVEAL_COMPLETE_FRAC` (0.55 — finish revealing EARLY so the last
+  pieces can leave one by one instead of being dumped at death) and
+  `MIN_REMAINDER_FRAC` (0.10).  Rock's
   fracture params are tuned to the GLASS look (impact-crowded radial
   sites) per the same user call.  Metal keeps `decomposeMetalComposite`
   as its fracture (the lattice IS its cell set — composite cracks stroke

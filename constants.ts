@@ -2955,6 +2955,20 @@ export function cycleFractureMode(): number {
   return activeFractureModeIndex;
 }
 
+/** True when this variant is running the PROGRESSIVE fracture model
+ *  right now — a `fracture.progressive` variant whose shatter routes
+ *  through the cells, with the DBG A/B on 'voronoi'.  The ONE predicate
+ *  the three behavioural stand-downs read (the dent pull, the rock
+ *  early-break roll, and the chip call site), so "progressive" means the
+ *  same thing in all of them.  Declared after SHARD_VARIANTS is
+ *  initialised at module scope; every caller runs at frame time. */
+export function isProgressiveFracture(variantId: ShardVariantId): boolean {
+  const v = SHARD_VARIANTS[variantId];
+  return v.fracture?.progressive === true
+    && v.shatter.kind === 'voronoi'
+    && getActiveFractureMode() === 'voronoi';
+}
+
 // ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
 // Rock self-merges condense CONTINUOUSLY (any two shards, never refused)
 // through a discrete size × density grid, preferring density (denser-
@@ -3720,8 +3734,11 @@ export const STRUCTURE_VARIANTS = {
   glass: {
     // V9 damage layer (user call): glass survives multiple base Blaster
     // hits (damage 4) and shows its fracture pattern as cracks between
-    // them — 12 HP = 3 blaster hits; heavier weapons still one-shot.
-    health: 12,
+    // them.  V10 raises it 12 -> 20 (5 blaster hits) because glass now
+    // CHIPS like rock: the extra steps are what the pattern reveals
+    // across, and every one of them sheds a piece.  Heavier weapons
+    // still take the pane in one.
+    health: 20,
     mass: Infinity,
     indestructible: false,
     sprite: ASSETS.HEX_STRUCTURE,
@@ -3799,8 +3816,15 @@ export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
 //   breakChance  = ((hitsTaken - 1) / (ceiling - 1)) ^ CURVE   (0 at hit 1,
 //                  1 at the ceiling)
 export const ROCK_BREAK = {
-  MIN_HITS: 4,   // smallest rock — crack, then ~50/50 break on hits 2-3, forced by 4
-  MAX_HITS: 6,   // largest / densest boulder
+  // V10 (user call: "chip more before shattering fully").  Under
+  // PROGRESSIVE fracture these are the number of hits the pattern has to
+  // reveal itself across — every one of them visibly sheds material, so
+  // a higher ceiling is more chipping, not more sponge.  The old 4/6
+  // pair left only 3-5 reveal steps, and the probabilistic early break
+  // (which now stands down for progressive variants — see
+  // PhysicsSystem.maybeRockEarlyBreak) usually ended it at hit 2-3.
+  MIN_HITS: 8,   // smallest rock
+  MAX_HITS: 12,  // largest / densest boulder
   SIZE_MIN: 20,  // size mapping to MIN_HITS
   SIZE_MAX: 160, // size mapping to MAX_HITS (linear between, clamped outside)
   // Density tiers add to the ceiling: +1 hit per this many tiers (clamped
@@ -3873,8 +3897,19 @@ export const FRACTURE_DETACH = {
   // Below this fraction of the entity's ORIGINAL polygon area the
   // remainder routes to FULL death instead of lingering as a sliver —
   // "the last cells detaching" (feedback item 26c: cumulative chip-off
-  // area drives the break threshold).
-  MIN_REMAINDER_FRAC: 0.25,
+  // area drives the break threshold).  V10: 0.25 -> 0.10 so a body can
+  // be whittled most of the way down before the final break, which is
+  // what "chip more before it shatters" asks for.
+  MIN_REMAINDER_FRAC: 0.10,
+  // Fraction of the body's hit life over which the pattern finishes
+  // revealing (V10).  At 1.0 the last boundary completes exactly on the
+  // killing hit, so the final cells never get a chance to leave on their
+  // own and the body dumps them at death — measured 2-3 chips out of 6
+  // pieces on a real 9-hit rock tile.  Finishing the reveal EARLY leaves
+  // the tail of the hit life for those last pieces to break off one by
+  // one, which is what "chip more before it shatters" means; the
+  // min-remainder rule then takes whatever sliver is left.
+  REVEAL_COMPLETE_FRAC: 0.55,
 } as const;
 
 // ── Material damage cracks ─────────────────────────────────────────────────
@@ -3895,16 +3930,31 @@ export const MATERIAL_DAMAGE_CRACKS = {
   // first split after ~5 hits, capped at 5 so even a dense block stays read.
   metal: { freq: 5,   cap: 5 },
   // Glass (V9 damage layer): one crack step per base Blaster hit (damage
-  // 4 against the 12-HP tile / 8-HP shard), so the fracture pattern
-  // reveals across the pane's short life.
-  glass: { freq: 4, cap: 3 },
+  // 4 against the 20-HP tile / 12-HP shard), so the fracture pattern
+  // reveals across the pane's life.  cap tracks the tile's step count.
+  glass: { freq: 4, cap: 5 },
 } as const;
 
-// Glass-shard durability (V9 damage layer) — 2 base Blaster hits.  Wired
+/** The crack config for a shard-family variant — the ONE lookup the
+ *  crack RENDER and the progressive-detach SIM share (V10), so a
+ *  material's reveal pacing cannot differ between what the player sees
+ *  highlighted and what actually breaks off.  Undefined for variants
+ *  with no damage-crack layer (nebula, indestructible, plastic). */
+export function crackConfigForVariant(
+  variantId: string,
+): { freq: number; cap: number } | undefined {
+  if (variantId === 'rock-tile'  || variantId === 'rock-shard')  return MATERIAL_DAMAGE_CRACKS.rock;
+  if (variantId === 'glass-tile' || variantId === 'glass-shard') return MATERIAL_DAMAGE_CRACKS.glass;
+  if (variantId === 'metal-tile' || variantId === 'metal-shard') return MATERIAL_DAMAGE_CRACKS.metal;
+  return undefined;
+}
+
+// Glass-shard durability (V9 damage layer; V10: 8 -> 12, 3 base Blaster
+// hits, so a shard chips too rather than only cracking once).  Wired
 // at every glass-shard spawn site (spawnGlassShards debris, snap debris,
 // voronoi + powerlaw shatter children); the tile-face HP lives in
 // STRUCTURE_VARIANTS.glass.health.
-export const GLASS_SHARD_HP = 8;
+export const GLASS_SHARD_HP = 12;
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
@@ -8072,6 +8122,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       sizePerSite: 6,
       impactBias: 0.75,
       radialSpeed: 1.2,
+      // V10 (user call): glass takes ROCK'S breaking behaviour — the
+      // pattern is applied once and pieces break off as their
+      // boundaries complete, instead of the pane surviving whole until
+      // one final full break.
+      progressive: true,
     },
     shatter: {
       kind: 'voronoi',
@@ -8275,9 +8330,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     fracture: {
       // V9: the glass-like radial pattern (user call) — more cells,
       // crowded toward the impact.
-      siteCountMin: 5,
-      siteCountMax: 12,
-      sizePerSite: 7,
+      siteCountMin: 7,
+      siteCountMax: 16,
+      sizePerSite: 5,
       impactBias: 0.75,
       radialSpeed: 1.4,
       // V8: hits highlight the tile's cell boundaries; each piece whose
@@ -8462,6 +8517,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       sizePerSite: 8,
       impactBias: 0.75,
       radialSpeed: 1.0,
+      progressive: true,   // V10 — as the tile
     },
     shatter: {
       kind: 'voronoi',

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1302,6 +1302,13 @@ export class PhysicsSystem {
   public static maybeRockEarlyBreak(target: GameEntity): void {
       if (target.health === undefined || target.health <= 0) return;
       if (target.shardVariant !== 'rock-tile' && target.shardVariant !== 'rock-shard') return;
+      // PROGRESSIVE fracture owns the break rule (V10): pieces come off
+      // as their boundaries complete and the body dies at the hit
+      // ceiling or the min-remainder floor.  This legacy coin-flip ENDED
+      // most rocks at hit 2-3 — before the pattern had revealed enough
+      // to shed anything — which is exactly the "not enough chipping"
+      // the user reported.  Legacy mode keeps it.
+      if (isProgressiveFracture(target.shardVariant)) return;
       const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
       const hitsTaken = ceiling - target.health;
       if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
@@ -1592,10 +1599,7 @@ export class PhysicsSystem {
       // drift the pattern off the shape and wedge the arc splice).  The
       // highlight + break-off IS the per-hit damage read for these
       // materials; under the DBG 'legacy' mode the dent runs as shipped.
-      const fract = SHARD_VARIANTS[tile.shardVariant].fracture;
-      if (fract?.progressive === true
-          && SHARD_VARIANTS[tile.shardVariant].shatter.kind === 'voronoi'
-          && getActiveFractureMode() === 'voronoi') return;
+      if (isProgressiveFracture(tile.shardVariant)) return;
 
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;

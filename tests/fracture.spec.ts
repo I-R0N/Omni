@@ -580,9 +580,10 @@ test.describe('partial fracture (V4)', () => {
       ents.push(tile);
       tile.lastImpactVelocity = { x: -9, y: 0 };
       // A recorded original area far above the polygon puts ANY splice
-      // under the 25% floor, so the first completed boundary routes the
-      // whole entity through the death path deterministically.
-      tile.fractureOriginalArea = fr.polygonArea(pts) * 5;
+      // under the min-remainder floor, so the first completed boundary
+      // routes the whole entity through the death path deterministically.
+      // x12 against the V10 floor of 0.10 (was x5 against 0.25).
+      tile.fractureOriginalArea = fr.polygonArea(pts) * 12;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       e.progressFracture(tile);
       const debris = ents.filter((x: any) => x.active && !before.has(x.id)
@@ -674,7 +675,7 @@ test.describe('death is dispatched once (V9 regression)', () => {
       ents.push(tile);
       tile.lastImpactVelocity = { x: -9, y: 0 };
       // The min-remainder trip: any splice lands under the floor.
-      tile.fractureOriginalArea = fr.polygonArea(pts) * 5;
+      tile.fractureOriginalArea = fr.polygonArea(pts) * 12;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       // REAL projectile kill path: onDamage (progressFracture -> death)
       // runs BEFORE the outer health<=0 block — the exact double-dispatch
@@ -746,7 +747,10 @@ test.describe('the glass damage layer (V9)', () => {
       const afterOne = { alive: t.active === true, health: t.health };
       shoot(4);
       const afterTwo = { alive: t.active === true, health: t.health };
-      shoot(4); // third hit — the pane goes
+      // V10: glass chips like rock, so the pane may leave early via the
+      // min-remainder rule — keep hitting until it goes, capped.
+      let hits = 2;
+      while (t.active && hits < 8) { shoot(4); hits++; }
       const dead = t.active === false;
       const children = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'glass-shard' && x.mass !== Infinity);
@@ -757,17 +761,171 @@ test.describe('the glass damage layer (V9)', () => {
       };
     });
 
-    // The MAP-SPAWNED tile carries the new 12-HP damage layer.
-    expect(r.maxHp).toBe(12);
-    // Three base blaster hits: crack, crack, shatter.
+    // The MAP-SPAWNED tile carries the damage layer (V9: 12 HP; V10: 20,
+    // five base blaster hits, so the progressive reveal has room to shed
+    // pieces on the way down).
+    expect(r.maxHp).toBe(20);
+    // It survives base blaster hits and loses exactly the weapon damage.
     expect(r.afterOne.alive).toBe(true);
-    expect(r.afterOne.health).toBe(8);
+    expect(r.afterOne.health).toBe(16);
     expect(r.afterTwo.alive).toBe(true);
-    expect(r.afterTwo.health).toBe(4);
+    expect(r.afterTwo.health).toBe(12);
+    // And it does eventually go, leaving its cells behind.
     expect(r.dead).toBe(true);
     expect(r.childCount).toBeGreaterThanOrEqual(2);
-    // The debris carries the shard damage layer — 2 blaster hits each.
-    for (const hp of r.childHp) expect(hp).toBe(8);
+    // The debris carries the shard damage layer (V9: 8; V10: 12).
+    for (const hp of r.childHp) expect(hp).toBe(12);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('chip depth and the glass roll-out (V10)', () => {
+  test('the rock early-break roll stands down under voronoi and still fires under legacy', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+
+    const r = await engine(page, (e: any) => {
+      const Physics = Object.getPrototypeOf(e.physics).constructor;
+      const mk = () => ({
+        id: 'v10_roll', type: 'STRUCTURE', shardVariant: 'rock-tile',
+        position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 }, rotation: 0,
+        size: { x: 42, y: 42 }, mass: Infinity, active: true, color: '#8a8a8a',
+        // hitsTaken = ceiling - health = 7 of 8: the legacy curve is at
+        // its guaranteed-break end, so one call is certain to kill.
+        health: 1, maxHealth: 8,
+      } as any);
+      // Voronoi (default): the roll must never end the rock early — the
+      // progressive model owns the break.
+      let killedUnderVoronoi = 0;
+      for (let i = 0; i < 40; i++) {
+        const t = mk();
+        Physics.maybeRockEarlyBreak(t);
+        if (t.health <= 0) killedUnderVoronoi++;
+      }
+      e.dbg.cycleFractureMode(); // -> legacy
+      const legacyTile = mk();
+      Physics.maybeRockEarlyBreak(legacyTile);
+      const killedUnderLegacy = legacyTile.health <= 0;
+      e.dbg.cycleFractureMode(); // -> back
+      return { killedUnderVoronoi, killedUnderLegacy };
+    });
+
+    expect(r.killedUnderVoronoi).toBe(0);
+    expect(r.killedUnderLegacy).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('a real rock tile sheds several pieces across its life before the final break', async ({ page }) => {
+    const watch = await boot(page);
+    // ROCK_FIELD is the rock-TILE showcase; ASTEROID_FIELD is the mobile
+    // rock-shard one.
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no rock tile on the field');
+      e.player.position.x = t.position.x + 4000;
+      e.player.position.y = t.position.y + 4000;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const debris = () => ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity).length;
+
+      const ceiling = t.maxHealth;
+      let hits = 0;
+      let debrisWhileAlive = 0;
+      while (t.active && hits < 40) {
+        e.physics.resolveCollision(
+          {
+            id: 'v10_shot_' + hits, type: 'PROJECTILE',
+            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+        );
+        hits++;
+        if (t.active) debrisWhileAlive = debris();
+      }
+      return { ceiling, hits, debrisWhileAlive, totalDebris: debris(), died: !t.active };
+    });
+
+    // V10 raised the ceiling (4-6 -> 8-12) so the pattern has hits to
+    // reveal across; with the early-break roll gone the tile actually
+    // reaches them.
+    expect(r.ceiling).toBeGreaterThanOrEqual(8);
+    expect(r.died).toBe(true);
+    // THE ASK: pieces come off DURING its life, not only at the end.
+    expect(r.debrisWhileAlive).toBeGreaterThanOrEqual(3);
+    expect(r.totalDebris).toBeGreaterThan(r.debrisWhileAlive);
+    // It survived more than the old 4-hit floor to do it.
+    expect(r.hits).toBeGreaterThanOrEqual(4);
+
+    watch.assertClean();
+  });
+
+  test('a real glass tile chips like rock — pieces break off before the pane goes', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'glass-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no glass tile on the field');
+      e.player.position.x = t.position.x + 4000;
+      e.player.position.y = t.position.y + 4000;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const debris = () => ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'glass-shard' && x.mass !== Infinity).length;
+      const areaOf = (pts: any[]) => {
+        let a = 0;
+        for (let i = 0, n = pts.length; i < n; i++) {
+          const p = pts[i], q = pts[(i + 1) % n];
+          a += p.x * q.y - q.x * p.y;
+        }
+        return Math.abs(a / 2);
+      };
+      const area0 = areaOf(t.polygonPoints);
+      let hits = 0, debrisWhileAlive = 0, areaWhileAlive = area0;
+      while (t.active && hits < 12) {
+        e.physics.resolveCollision(
+          {
+            id: 'v10_glass_' + hits, type: 'PROJECTILE',
+            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+        );
+        hits++;
+        if (t.active) {
+          debrisWhileAlive = debris();
+          areaWhileAlive = areaOf(t.polygonPoints);
+        }
+      }
+      return {
+        maxHp: t.maxHealth, hits, died: !t.active,
+        debrisWhileAlive, totalDebris: debris(),
+        shrank: areaWhileAlive < area0 * 0.999,
+      };
+    });
+
+    expect(r.maxHp).toBe(20);
+    expect(r.died).toBe(true);
+    // THE ASK: glass now takes rock's breaking behaviour — pieces detach
+    // mid-life and the pane's own polygon loses their area.
+    expect(r.debrisWhileAlive).toBeGreaterThanOrEqual(1);
+    expect(r.shrank).toBe(true);
+    expect(r.totalDebris).toBeGreaterThan(r.debrisWhileAlive);
 
     watch.assertClean();
   });

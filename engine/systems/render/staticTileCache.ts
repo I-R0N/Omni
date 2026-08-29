@@ -19,11 +19,9 @@ import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, Vector2 } from '../../../types';
 import {
     SHARD_VARIANTS, STATIC_TILE_STAMPS_PER_FRAME, SPRITE_CONSTANTS, COLORS, ASSETS,
-    MATERIAL_DAMAGE_CRACKS,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
-import { shiftX, shiftY, drawFractureCracks, GLASS_CRACK_STYLE } from './drawUtils';
-import { ensureFractureEdges, fractureRevealedEdgeCount } from '../fractureCache';
+import { shiftX, shiftY } from './drawUtils';
 
 /** Upper bound on either dimension of the offscreen cache canvas.  Lived as
  *  a private readonly on `RenderSystem`; the cache is its only reader, so it
@@ -50,6 +48,21 @@ const STATIC_TILE_MAX_CANVAS_DIM = 3072;
  *    rendering requires the spatial-grid neighbour lookup; not worth
  *    the extra complexity for the smaller marginal gain.
  */
+/**
+ * A cacheable tile that must NEVER be baked or sprite-fast-pathed right
+ * now because its DAMAGE STATE is visible (V10).  Glass grew a damage
+ * layer and progressive chipping, so a hurt pane carries crack lines AND
+ * a polygon with cells missing — neither of which the hex-sprite stamp
+ * can express; it would paint a pristine full hex over a chipped one.
+ * Dynamic state, so it belongs beside `hitFlash` / `regenPopTimer` in
+ * the acceptance checks rather than in `isStaticTileCacheable` (which is
+ * about the VARIANT), and the same reason rock-tile is excluded outright.
+ * Indestructible never takes damage, so this only ever fires for glass.
+ */
+export function tileShowsDamage(e: GameEntity): boolean {
+    return (e.health ?? 0) < (e.maxHealth ?? 0);
+}
+
 export function isStaticTileCacheable(r: RenderSystem, e: GameEntity): boolean {
     return e.type === EntityType.STRUCTURE
         && e.mass === Infinity
@@ -96,36 +109,6 @@ function stampHexSpriteTileToCache(r: RenderSystem, cx: CanvasRenderingContext2D
     if (alpha !== 1) cx.globalAlpha = alpha;
     cx.drawImage(baseSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
     if (alpha !== 1) cx.globalAlpha = 1;
-    // Glass damage layer (V9): bake the revealed fracture edges into the
-    // stamp so a damaged pane keeps its webbing on the cached path too
-    // (damage flips _staticCached, so every HP change re-stamps).  In
-    // the current build the placeholder sprite keeps glass on the vector
-    // slow path, which draws the same overlay live — this is the
-    // sprite-present future's correctness.
-    if (e.shardVariant === 'glass-tile'
-        && (e.health ?? 0) < (e.maxHealth ?? 0)
-        && e.polygonPoints !== undefined && e.polygonPoints.length >= 3) {
-        const edges = ensureFractureEdges(e);
-        if (edges !== null && edges.length > 0) {
-            const upTo = fractureRevealedEdgeCount(e, edges.length, MATERIAL_DAMAGE_CRACKS.glass.freq);
-            if (upTo > 0) {
-                const maxHp = e.maxHealth ?? 1;
-                const dmgFrac = Math.min(1, Math.max(0, 1 - (e.health ?? maxHp) / maxHp));
-                cx.save();
-                cx.translate(wx, wy);
-                cx.scale(s, s);
-                cx.rotate(e.rotation);
-                cx.beginPath();
-                const pts = e.polygonPoints;
-                cx.moveTo(pts[0].x, pts[0].y);
-                for (let i = 1; i < pts.length; i++) cx.lineTo(pts[i].x, pts[i].y);
-                cx.closePath();
-                cx.clip();
-                drawFractureCracks(cx, edges, upTo, maxDim * 0.5, dmgFrac, GLASS_CRACK_STYLE);
-                cx.restore();
-            }
-        }
-    }
     captureStampPolyOnce(e);
     e._staticCached = true;
     r._staticTileCacheSet.add(e);
@@ -261,7 +244,7 @@ export function buildStaticTileLayer(r: RenderSystem, entities: GameEntity[], ma
             e._staticCached = false;
             continue;
         }
-        if (!hexReady) { e._staticCached = false; continue; }
+        if (!hexReady || tileShowsDamage(e)) { e._staticCached = false; continue; }
         stampStaticTileToCache(r, e);
     }
 }
@@ -333,7 +316,8 @@ export function prepareStaticTileCacheForFrame(r: RenderSystem, playerPos: Vecto
         const wantsCache = entity.active
             && !entity.hitFlash
             && entity.regenPopTimer === undefined
-            && !inGlowRange;
+            && !inGlowRange
+            && !tileShowsDamage(entity);
         if (wantsCache && entity._staticCached !== true) {
             // BUDGETED (see STATIC_TILE_STAMPS_PER_FRAME): stamping is a
             // clearRect + drawImage on a map-sized offscreen canvas, and
