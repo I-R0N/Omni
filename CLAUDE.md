@@ -320,7 +320,11 @@ perf/                     Headless capture harness (gauntlet 5c) —
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
                           EXCEPT docs/SFX_INVENTORY.md, which IS current
-                          and IS the source of truth for sound (see §8)
+                          and IS the source of truth for sound (see §8),
+                          and docs/MATERIAL_GRAIN_SPEC.md, which is a
+                          PROPOSED design (explicitly not implemented) —
+                          the generalisation of V15's grain model into a
+                          material system with unified bonding
 .github/workflows/        pr-checks (the merge gate: typecheck + build +
                           Playwright on every PR), pr-preview,
                           publish-standalone

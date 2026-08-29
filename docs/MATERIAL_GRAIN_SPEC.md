@@ -1,0 +1,330 @@
+# Material Grain Spec
+
+**Status: PROPOSED.  Nothing in this file is implemented yet.**  V15
+shipped the grain-boundary model for rock and glass (see
+`docs/GAUNTLET_VORONOI_LOG.md`); this spec generalises it into a material
+system and folds BONDING into the same object, so that adding a material
+is filling in a row rather than writing a mechanic.
+
+Read `CLAUDE.md` §8 "DAMAGE LANDS ON GRAIN BOUNDARIES" first — this
+document assumes that model and extends it.
+
+---
+
+## 1. The one idea: a boundary IS a bond
+
+V15 made a body a set of GRAINS held together by BOUNDARIES, where a
+boundary carries a strength, absorbs damage, and fails.  A grain leaves
+when nothing binds it any more.
+
+Joining is that same relationship, formed instead of broken.  Two grains
+that come to rest against each other and stick have created a boundary;
+the body they now form is a set of grains held together by boundaries.
+Breaking and joining are one mechanic viewed from two directions:
+
+| | breaking | joining |
+|---|---|---|
+| the object | a boundary between two grains | a boundary between two grains |
+| the event | damage fills it until it fails | contact holds until it forms |
+| the number | `bondStrength × length` | `bondStrength × length` |
+| the result | the grain leaves the body | the grain joins the body |
+
+Everything below follows from taking that literally.  Three things fall
+out that are otherwise separate features:
+
+- **Metal's lattice stops being bespoke code.**  "Small, highly regular
+  grains that stick to each other very hard" is a parameter row, not the
+  `METAL_ASSEMBLY` / `metalCells` machinery.
+- **Composite materials (per-grain material) become cheap.**  If a
+  boundary's strength is a function of the two grains it separates, a
+  body whose grains carry different materials needs no new mechanic —
+  only a pair function.
+- **The seven joining mechanisms below collapse toward one.**
+
+### 1.1 What "joining" is today
+
+Seven parallel mechanisms, none aware of the others:
+
+| # | mechanism | where | materials |
+|---|---|---|---|
+| 1 | gravity pull (`merge.attractedTo`, pull range/strength/inner) | ShardSystem | all mobile |
+| 2 | contact stick bonds (`merge.bondsWith`, bond seconds, `bondPartners` with `cohesionOnly` + strength tiers) | ShardSystem | all mobile |
+| 3 | compose (the single `MergeOutcome`, accumulates `mergeCount`) | ShardSystem | all |
+| 4 | rock density condensation (`ROCK_CONDENSE`, 25 size×density tiers, top cell → static tile) | ShardSystem | rock |
+| 5 | metal composite lattice (`METAL_ASSEMBLY`, `metalCells` 6-cell hexagon, `metalExcessCells` invisible mass, per-cell SAT colliders) | ShardSystem + PhysicsSystem | metal |
+| 6 | tile snap (`TILE_SNAP`, merged area ≥ 2× tile diameter + rest speed → static tile + debris) | ShardSystem | plastic, glass, metal |
+| 7 | nebula transmutation (area threshold → nebula tile) | NebulaSystem | nebula |
+
+Note `MergeOutcome` is a union with exactly one member (`'compose'`).
+The seam for "a merge can end differently" was cut and never used; 4, 5,
+6 and 7 all grew as separate code paths beside it instead.
+
+---
+
+## 2. The GrainSpec
+
+A material is a row.  Four groups of parameters, each answering one
+question, and every one of them a number rather than a branch.
+
+### 2.1 Grain geometry — what the pattern looks like
+
+| field | meaning | range |
+|---|---|---|
+| `grainSize` | px of body diameter per grain.  Small = many grains | 4–40 |
+| `grainCountMin` / `Max` | clamp on the count the size implies | 2–40 |
+| `regularity` | 0 = raw Poisson (ragged, uneven), 1 = near-honeycomb | 0–1 |
+| `sizeSpread` | 0 = every grain the same size, 1 = a wide mix of coarse and fine in one body | 0–1 |
+| `impactBias` | fraction of grains crowded toward the hit — the radial "glass star" look | 0–1 |
+
+**`regularity` is the blocking change.**  The two dials that produce it
+already exist — Lloyd relaxation rounds and blue-noise minimum
+separation — but they are read from GLOBAL DBG accessors
+(`getFractureRelax()` / `getFractureSeparation()` in
+`fractureCache.ensureFractureCells`).  Per-material regularity is not
+expressible today at all, and it is exactly what "metal highly regular,
+plastic irregular" needs.  The fix is small: move both into the spec,
+keep the DBG cycles as an override rather than the source.
+
+**`sizeSpread` is a new axis** and the one that buys "equal amounts of
+smaller and larger grains".  Implementation: place a `spread`-determined
+fraction of sites with a large minimum separation (the coarse
+population) and the rest with a small one (the fines), then relax.  At 0
+this reduces exactly to today's single-separation placement, so it costs
+nothing when unused.
+
+### 2.2 Bond strength — how hard it is to break, and to form
+
+| field | meaning |
+|---|---|
+| `bondStrength` | damage per PIXEL of boundary.  The material's toughness, one number (V15) |
+| `bondSpread` | 0..1 seeded per-boundary variance, so some grains pop early and some hold |
+| `bondFormSeconds` | contact time before a touching grain sticks (today's `bondTimeSeconds`) |
+| `cohesion` | how strongly a formed bond drags its partner's velocity (today's `strength: 'strong' \| 'default'`, made continuous) |
+
+`bondSpread` is the cheap 80% of the composite feature: varied breaking
+WITHIN one material, with no per-grain material and no matrix.  It is
+worth shipping before Tier C for exactly that reason.
+
+### 2.3 Deformation — what a hit does before anything breaks
+
+| field | meaning |
+|---|---|
+| `grainDent` | per-hit inward pull on the STRUCK GRAIN's own outline, as a fraction of its radius |
+| `dentRecovery` | seconds to spring back, 0 = permanent |
+
+This is the "deformation applied at each voronoi shard within a tile"
+ask.  The mechanism it replaces (`applyDentStep`) pulls the WHOLE body's
+outline and stands down entirely under progressive fracture, which is
+why plastic and metal currently cannot be both dentable and grained.
+
+Per-grain denting composes with V15 cleanly because the parent's outline
+is already **derived** from its grains (`unionOfCells`): dent a grain,
+re-derive the union, and the body's silhouette follows for free.  The one
+real cost is §5.2 below.
+
+### 2.4 Coupling — parameters that track entity state
+
+| field | meaning |
+|---|---|
+| `densityCouplesGrainSize` | grain size scales DOWN with `densityTier` |
+| `densityCouplesStrength` | bond strength scales UP with `densityTier` |
+
+This is how metal gets "small to large grains based on metal colouring":
+`densityTier` already drives metal's brightness, so grain size tracking
+the same number means the colour IS the readout of the grain structure.
+A pale, low-tier plate has coarse grains and breaks up easily; a bright,
+dense one is fine-grained and very hard — visible before you shoot it.
+
+### 2.5 The archetype table
+
+The point of the axes is that materials are positions in the space, not
+code.  Shipped today, requested now, and illustrative:
+
+| material | grainSize | regularity | sizeSpread | bondStrength | grainDent | notes |
+|---|---|---|---|---|---|---|
+| glass *(shipped)* | 6 | 0.3 | 0.2 | 0.16 | 0 | brittle, radial, dies in 5 |
+| rock *(shipped)* | 5 | 0.5 | 0.4 | 0.27 | 0 | the reference |
+| **metal** *(new)* | 4→10 by tier | **0.95** | 0.1 | **1.2** | 0.06 | fine regular grains, very tough, dents slightly |
+| **plastic** *(new)* | 14 | 0.55 | 0.6 | **0.9** | 0.25 | few large grains, visibly warps, tough |
+| *sand* | 3 | 0.2 | 0.3 | 0.04 | 0 | crumbles on contact |
+| *ceramic armour* | 3 | 0.9 | 0.1 | 2.0 | 0 | many fine grains, each hard — the "super tough" case |
+| *aggregate* | 8 | 0.4 | **0.95** | 0.5 | 0 | coarse chunks in a fine matrix |
+| *rubber* | 20 | 0.7 | 0.2 | 0.6 | 0.4 | few grains, mostly deforms |
+
+Two of those rows are the request; the rest exist to show the space is
+actually spanned.  Derived HP for a 36px tile is roughly
+`Σ boundary length × bondStrength`, and Σ length runs ~130px at
+grainSize 5, so ceramic armour lands near 260 damage and sand near 5 —
+a 50× toughness range from one number.
+
+---
+
+## 3. Bonding, unified
+
+### 3.1 The bond record
+
+```
+Bond {
+  a, b        the two grains (or bodies) it joins
+  strength    pairStrength(materialOf(a), materialOf(b)) × length
+  fill        damage absorbed so far          // V15's fractureEdgeFill
+  state       forming | bound | broken
+}
+```
+
+A body is then: a set of grains, plus the bonds between them, plus the
+outline derived from the grains that remain (`unionOfCells`).  That is
+already true post-V15 for rock and glass — the bonds are just called
+`fractureEdges` + `fractureEdgeFill` and can only be broken, never
+formed.
+
+### 3.2 Three events, replacing seven mechanisms
+
+| event | what happens | replaces |
+|---|---|---|
+| **APPROACH** | a body pulls candidates within range | 1 (unchanged, already generic) |
+| **FORM** | contact held for `bondFormSeconds` creates a bond; the two bodies become one body of N grains | 2, 3, 5-form, 7 |
+| **BEAR** | a bond drags its partner (cohesion) and carries load | 2's cohesion tiers |
+| **BREAK** | damage fills a bond past its strength; a grain with no bonds left leaves | V15, 5-break |
+
+What the mechanisms become:
+
+- **Metal's lattice (5)** → `regularity` 0.95 + a very high self bond +
+  `densityCouplesGrainSize`.  The hexagon shape it enforces today is
+  what a highly-relaxed Voronoi pattern produces anyway.
+- **Rock condensation (4)** → density coupling: bonding raises
+  `densityTier`, which shrinks grain size and raises strength, which IS
+  "denser but smaller and harder".
+- **Tile snap (6)** → an outcome of FORM, not a separate pass: when a
+  grained body's area passes the tile threshold at rest, it becomes
+  static.  This is the `MergeOutcome` seam finally being used.
+- **Nebula (7)** → stays out.  Nebula is a cloud with `passThrough` and
+  no fracture block; it does not want grains and should keep its own
+  transmutation.
+
+### 3.3 The cost, stated honestly
+
+`metalCells` is not only an assembly mechanic — PhysicsSystem carries
+**per-cell SAT colliders** for composites (~10 call sites: broadphase
+pair selection, the composite-vs-composite path, sub-collider counting).
+Unifying metal means either (a) keeping per-grain colliders for grained
+bodies generally, which is a real narrowphase change, or (b) accepting
+the union outline as the collider, which is what rock and glass already
+do and is strictly cheaper.
+
+**Recommendation: (b).**  The union outline is one convex-ish polygon per
+body instead of N, matches what V15 already ships, and the fidelity lost
+is a concave notch in a composite's silhouette.  If per-grain collision
+is later wanted it can be reintroduced for grained bodies generally
+rather than for metal specifically — which is the whole point of
+unifying.
+
+---
+
+## 4. Per-grain materials (Tier C), and why the foundation is nearly free
+
+Once a bond's strength comes from `pairStrength(A, B)`, a body whose
+grains carry different materials needs no new mechanic.  Two design
+notes make it affordable:
+
+**The matrix does not need authoring.**  Default
+`pairStrength(A, B) = min(A.bondStrength, B.bondStrength) × MIX_PENALTY`
+— an interface between unlike materials is weaker than either, which is
+both physically right and the interesting gameplay case (a composite
+fails at its seams).  A sparse override table handles the exceptions
+(metal-to-metal welds stronger than the rule; glass-to-plastic is
+already a special pair today via `bondPartners`).  M² authoring is never
+required; the matrix is a lookup with a default.
+
+**The real cost is RENDER, not simulation.**  A per-grain material means
+per-grain fill colour, which means a body can no longer be one path fill.
+Tiles are the game's most numerous entity and currently ride a
+pre-rendered static cache plus a hex-sprite fast path — both of which a
+multicoloured body leaves (`tileShowsDamage` already does this for
+damaged glass).  This is the piece with genuine performance risk and it
+is why C should follow A and B rather than ship with them.
+
+Mitigation if C proceeds: cache the composite body's rendered bitmap and
+invalidate on grain loss (bodies change rarely; they are drawn every
+frame), and cap per-grain materials to bodies above a size threshold so
+the numerous small chips stay single-material.
+
+---
+
+## 5. What changes in code
+
+### 5.1 Where the spec lives
+
+`ShardFracturePolicy` (in `engine/systems/ShardSystem.types.ts`) becomes
+`GrainSpec` and absorbs the strength/regularity/spread/dent fields.  The
+existing `boundaryStrength` is renamed `bondStrength` — same number, and
+the rename is the point: it is now also the JOIN strength.
+`SHARD_VARIANTS[..].merge` keeps the approach/pull half and hands its
+bond half to the spec.
+
+### 5.2 Files, in dependency order
+
+| file | change | size |
+|---|---|---|
+| `ShardSystem.types.ts` | `GrainSpec`, `Bond`, the pair function's type | small |
+| `constants.ts` | the archetype table; metal + plastic rows | small |
+| `fractureCache.ts` | per-material relax/separation (currently global); `sizeSpread` placement; `bondSpread` | **medium** |
+| `fracture.ts` | two-population site placement for `sizeSpread` | small |
+| `GameEngine.progressFracture` | already generic — reads strengths per bond | none expected |
+| per-grain dent | new: dent the struck grain, re-derive union, invalidate SAT | **medium** |
+| `tileShapes.ts` | draw per-grain outlines when dented (grains no longer tile the parent exactly) | **medium** |
+| PhysicsSystem metal composite | delete or retire per-cell colliders (§3.3) | **large, separable** |
+
+### 5.3 The one genuine technical risk
+
+Per-grain denting breaks an invariant V15 relies on: that grains TILE
+the parent exactly, which is what makes `unionOfCells` work (an edge
+shared by two survivors is interior, everything else is boundary).  Dent
+a grain inward and it no longer shares vertices with its neighbour, so
+the shared-edge test stops matching and the union walk fails.
+
+Three options, in preference order:
+
+1. **Dent only the OUTER boundary vertices of a grain** — those on the
+   body's outline.  Interior vertices stay shared, the union walk keeps
+   working unchanged, and the visible result is the same (an inward
+   dimple on the silhouette where the shot landed).  Cheapest and safest.
+2. Keep the tiling and apply the dent at RENDER only, leaving collision
+   on the undented union.  Visually right, physically a lie; acceptable
+   for a small dent depth.
+3. Replace vertex matching with a spatial-hash union tolerant of small
+   displacement.  Most general, most likely to produce subtle geometry
+   bugs of the kind the tail case in V15 already demonstrated.
+
+**Recommendation: option 1**, with option 2 as the fallback if the
+dimple reads too weakly.
+
+---
+
+## 6. Decisions needed before building
+
+1. **Metal composite retirement** (§3.3) — confirmed as intended; the
+   spec assumes the union outline replaces per-cell colliders.
+2. **Does a formed bond survive a body becoming static?**  Tile snap
+   currently discards 75% of merged area as debris.  Under a unified
+   model a body could instead become a static tile that KEEPS its grain
+   structure — which would mean a player-assembled tile breaks along the
+   seams they built it from.  Attractive, and a scope increase.
+3. **Do grains inherit damage across a break?**  A grain that leaves a
+   body carrying half-broken bonds could spawn pre-damaged.  Physically
+   right, and it makes chips progressively easier to destroy.
+4. **`bondSpread` before or with Tier C?**  It delivers most of the
+   visual variety of composites at a fraction of the cost.
+
+## 7. Build order
+
+- **A1** GrainSpec types + per-material regularity (unblocks everything)
+- **A2** `sizeSpread` placement + `bondSpread`
+- **A3** metal + plastic rows, tuned and measured like V15 was
+- **B1** per-grain dent, outer-vertices-only (§5.3 option 1)
+- **B2** retire the metal composite lattice onto the union outline
+- **C** per-grain materials + pair function, behind a render cache
+
+A1–A3 are the material system and the two new materials.  B1–B2 are the
+deformation ask and the bonding unification.  C stays a separate
+decision, taken with A and B measured.
