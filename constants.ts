@@ -3076,18 +3076,30 @@ export function cycleLeanDir(): number {
   return activeLeanDirIndex;
 }
 
-// DBG tilt-source cycle (Player ▸ "Tilt src"): what DRIVES the tilt
+// DBG tilt-source cycle (Ship Tilt ▸ "Tilt src"): what DRIVES the tilt
 // signal, in BOTH tilt modes.  'Thrust' (default) reads the input vector
 // — no input, no tilt, the shipped rule.  'Velocity' reads the ship's
-// actual velocity normalised by the speed cap: the hull leans with its
+// actual velocity normalised by the CRUISE speed: the hull leans with its
 // MOTION, so a coasting drift holds its lean, a wall bounce reads on the
-// hull, and a tumble keeps rolling as long as the ship is moving.  One
-// substitution at the source — every term downstream (strafe, throttle
-// gate, slip, pitch) is unchanged, so the A/B compares the source alone.
-export const TILT_SOURCE_CYCLE: ReadonlyArray<string> = ['Thrust', 'Velocity'] as const;
+// hull, and a tumble keeps rolling as long as the ship is moving.
+// 'Average' and 'Sum' run BOTH and blend the results (see below).
+// AVERAGE and SUM combine the two ROTATION EFFECTS rather than the two
+// input vectors (user call), which is the meaningful reading: each source
+// runs the full signal pipeline — its own throttle gate, its own slip
+// weighting — and the RESULTS are then blended.  Averaging the raw vectors
+// instead would gate both halves by one blended throttle and lose exactly
+// the difference the A/B exists to show.  Average keeps the pair inside the
+// range either source reaches alone; Sum lets them reinforce, so the tilt
+// saturates earlier (the magnitude clamp is what keeps that safe — Sum can
+// bank sooner, never deeper).
+export const TILT_SOURCE_CYCLE: ReadonlyArray<string> =
+  ['Thrust', 'Velocity', 'Average', 'Sum'] as const;
 let activeTiltSourceIndex = 0; // Thrust — the shipped default
-export function getActiveTiltSource(): 'thrust' | 'velocity' {
-  return activeTiltSourceIndex === 0 ? 'thrust' : 'velocity';
+export type TiltSource = 'thrust' | 'velocity' | 'average' | 'sum';
+const TILT_SOURCES: ReadonlyArray<TiltSource> =
+  ['thrust', 'velocity', 'average', 'sum'] as const;
+export function getActiveTiltSource(): TiltSource {
+  return TILT_SOURCES[activeTiltSourceIndex];
 }
 export function getActiveTiltSourceName(): string {
   return TILT_SOURCE_CYCLE[activeTiltSourceIndex];

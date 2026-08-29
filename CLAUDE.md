@@ -834,8 +834,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   nose feature faces the VIEWER at rest instead of the aim — a +90°
   pitch of the geometry alone inside `drawPlayerCube`, applied before
   the dynamic roll/pitch so both keep acting in the travel frame.
-  `TILT_SOURCE_CYCLE` (DBG Ship Tilt ▸ "Tilt src": Thrust / Velocity) is
-  the SOURCE A/B, and it reaches BOTH tilt modes: Thrust (default)
+  `TILT_SOURCE_CYCLE` (DBG Ship Tilt ▸ "Tilt src": Thrust / Velocity /
+  Average / Sum) chooses the SOURCE, and it reaches BOTH tilt modes:
+  Thrust (default)
   reads the input vector — no input, no tilt — while Velocity reads
   the ship's actual velocity normalised by the CRUISE speed — the real
   terminal speed under held thrust (acc·f/(1−f), ~a third of the cap;
@@ -846,7 +847,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ran all three ~3× weak in real flight (user report), since the cap
   exists for knockback overshoot and level flight never nears it.  One
   substitution at the top of `tickPlayerRoll`; every term downstream
-  is unchanged.  `VEL_GAIN_CYCLE` (DBG Ship Tilt ▸ "Vel gain": 1× / 2× /
+  is unchanged.  AVERAGE and SUM run BOTH sources and blend the
+  resulting ROTATION EFFECTS rather than the two input vectors (user
+  call) — the meaningful reading, since each source runs its own
+  throttle gate and slip weighting, and blending the vectors first
+  would gate both halves by one merged throttle and lose exactly the
+  difference the A/B exists to show.  `tiltSignalFrom` is the extracted
+  per-source pipeline both calls; Average is their midpoint and Sum
+  their total (so exactly 2× Average pre-clamp), which means Sum banks
+  SOONER and — because the magnitude clamp still applies once, after
+  the blend — never deeper.  `VEL_GAIN_CYCLE` (DBG Ship Tilt ▸ "Vel gain": 1× / 2× /
   4× / 10×) is the Velocity source's SENSITIVITY step — the gain
   multiplies the cruise-normalised vector BEFORE the magnitude clamp,
   so each step moves WHERE the tilt saturates (2× = full at half

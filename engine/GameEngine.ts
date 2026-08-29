@@ -1531,56 +1531,29 @@ export class GameEngine {
     this[velKey] = v;
     return next;
   }
-  private tickPlayerRoll(dt: number, moveDir: Vector2) {
-    const { YAW_GAIN, YAW_SMOOTHING, PITCH_GAIN, SLIP_GAIN, TURN_SPEED_FLOOR, MAX_TILT } =
-      PLAYER_ROLL_CONSTANTS;
-    const facing = this.player.rotation;
-    const cosF = Math.cos(facing);
-    const sinF = Math.sin(facing);
+  /** The tilt signal for ONE source vector, written to the scratch pair
+   *  below (no allocation — this runs up to twice per sim step).
+   *
+   *  Everything that makes a source distinct lives here: the STRAFE term
+   *  reads the vector, and BOTH the turn gate and the slip term are scaled
+   *  by the THROTTLE derived from it.  That is why 'Average' and 'Sum'
+   *  blend the two RESULTS rather than the two input vectors — blending
+   *  the vectors first would gate both halves by one merged throttle and
+   *  lose exactly the difference the A/B exists to show. */
+  private _tiltSigLat = 0;
+  private _tiltSigLong = 0;
+  private tiltSignalFrom(mx: number, my: number, cosF: number, sinF: number) {
+    const { YAW_GAIN, PITCH_GAIN, SLIP_GAIN, TURN_SPEED_FLOOR } = PLAYER_ROLL_CONSTANTS;
     const vel = this.player.velocity;
-    // The DBG "Tilt src" A/B (user call): what DRIVES the signal — the
-    // THRUST input (default: no input, no tilt) or the ship's VELOCITY,
-    // normalised by the speed cap, so the hull leans with its actual
-    // MOTION: a coasting drift holds its lean, a wall bounce reads on
-    // the hull, and a tumble rolls as long as the ship moves.  One
-    // substitution at the source; every term downstream is unchanged,
-    // so the A/B compares the source alone — and it reaches BOTH tilt
-    // modes, since the branch below reads the same clamped signal.
-    let mx = moveDir.x;
-    let my = moveDir.y;
-    if (getActiveTiltSource() === 'velocity') {
-      // Normalised by the CRUISE speed, not the cap: terminal speed under
-      // held thrust is ~a third of the cap, so a cap normaliser read every
-      // real flight speed as a weak signal (user report).  The DBG "Vel
-      // gain" sensitivity step rides the normaliser — the clamp below is
-      // what keeps an extreme gain safe (it saturates earlier, never
-      // deeper).
-      const inv = getActiveVelGainMult() / Math.max(1e-6, this.lastCruiseSpeed);
-      mx = vel.x * inv;
-      my = vel.y * inv;
-      const m = Math.sqrt(mx * mx + my * my);
-      if (m > 1) { mx /= m; my /= m; }
-    }
     // STRAFE — perpendicular of facing (cos, sin) is (-sin, cos).
     const lat = my * cosF - mx * sinF;
-    // TURN — the facing's angular step this tick, wrapped so aiming across
-    // the ±π seam is a small swing rather than a full spin, low-passed to
-    // cancel pointer jitter.  Null prev = first tick (or a respawn reset):
-    // measure from here, spike nothing.
-    const prev = this._rollPrevFacing ?? facing;
-    this._rollPrevFacing = facing;
-    let dTheta = facing - prev;
-    if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
-    else if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
-    const rawRate = dt > 0 ? dTheta / dt : 0;
-    this._rollYawRate += (rawRate - this._rollYawRate) * Math.min(1, YAW_SMOOTHING * dt);
     const throttle = Math.min(1, Math.sqrt(mx * mx + my * my));
     // TURN gate — CENTRIPETAL (tan(bank) ∝ v·ω): the bank of a carved
     // turn scales with actual SPEED, floored so a low-speed turn still
     // reads, and gated by throttle so a coasting or parked nose-swing —
-    // which curves no path — stays level.  The MINUS sign makes the turn
-    // and strafe terms agree: mid-turn, thrust not yet swung to the new
-    // nose lies on the NEGATIVE perp side of it.
+    // which curves no path — stays level.  The MINUS sign below makes the
+    // turn and strafe terms agree: mid-turn, thrust not yet swung to the
+    // new nose lies on the NEGATIVE perp side of it.
     const turnGate = throttle
       * (TURN_SPEED_FLOOR + (1 - TURN_SPEED_FLOOR) * this.playerCruiseFraction());
     // SLIP — the velocity's lateral component relative to the nose, under
@@ -1589,12 +1562,73 @@ export class GameEngine {
     // the strafe term (thrusting and drifting the same way reinforce).
     const vLat = (vel.y * cosF - vel.x * sinF) / Math.max(1e-6, this.lastCruiseSpeed);
     const slip = SLIP_GAIN * Math.max(-1, Math.min(1, vLat)) * throttle;
-    let sigLat = lat + slip - YAW_GAIN * this._rollYawRate * turnGate;
+    this._tiltSigLat = lat + slip - YAW_GAIN * this._rollYawRate * turnGate;
     // PITCH — nose-line thrust directly (the washout was removed, user
     // call): holding the throttle holds the lean, cutting it settles
     // level, reverse thrust leans the other way.
-    const long = mx * cosF + my * sinF;
-    let sigLong = long * PITCH_GAIN;
+    this._tiltSigLong = (mx * cosF + my * sinF) * PITCH_GAIN;
+  }
+  private tickPlayerRoll(dt: number, moveDir: Vector2) {
+    const { YAW_SMOOTHING, MAX_TILT } = PLAYER_ROLL_CONSTANTS;
+    const facing = this.player.rotation;
+    const cosF = Math.cos(facing);
+    const sinF = Math.sin(facing);
+    const vel = this.player.velocity;
+    // TURN tracker — the facing's angular step this tick, wrapped so aiming
+    // across the ±π seam is a small swing rather than a full spin, low-passed
+    // to cancel pointer jitter.  Null prev = first tick (or a respawn reset):
+    // measure from here, spike nothing.  Ticked ONCE per step, above the
+    // source dispatch, so a two-source blend does not advance it twice.
+    const prev = this._rollPrevFacing ?? facing;
+    this._rollPrevFacing = facing;
+    let dTheta = facing - prev;
+    if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
+    else if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
+    const rawRate = dt > 0 ? dTheta / dt : 0;
+    this._rollYawRate += (rawRate - this._rollYawRate) * Math.min(1, YAW_SMOOTHING * dt);
+
+    // The DBG "Tilt src" A/B (user call): what DRIVES the signal.  THRUST
+    // (the default) is the input vector — no input, no tilt.  VELOCITY is
+    // the ship's motion normalised by the CRUISE speed, so the hull leans
+    // with where it is actually going: a coasting drift holds its lean, a
+    // wall bounce reads on the hull, and a tumble rolls as long as the ship
+    // moves.  AVERAGE and SUM run BOTH and blend the RESULTS.  Whichever it
+    // is, the branch below reads one clamped signal, so the choice reaches
+    // both tilt modes for free.
+    const src = getActiveTiltSource();
+    // The velocity vector, cruise-normalised and gain-stepped, clamped to
+    // the same 0..1 range the thrust input already lives in so the two are
+    // commensurable before anything blends them.  The DBG "Vel gain" step
+    // rides the normaliser: it moves WHERE the signal saturates, never how
+    // deep it goes.
+    const inv = getActiveVelGainMult() / Math.max(1e-6, this.lastCruiseSpeed);
+    let vx = vel.x * inv;
+    let vy = vel.y * inv;
+    const vm = Math.sqrt(vx * vx + vy * vy);
+    if (vm > 1) { vx /= vm; vy /= vm; }
+
+    let sigLat: number;
+    let sigLong: number;
+    if (src === 'thrust' || src === 'velocity') {
+      const useVel = src === 'velocity';
+      this.tiltSignalFrom(useVel ? vx : moveDir.x, useVel ? vy : moveDir.y, cosF, sinF);
+      sigLat = this._tiltSigLat;
+      sigLong = this._tiltSigLong;
+    } else {
+      // BOTH effects, blended.  Average keeps the pair inside the range
+      // either source reaches alone (it is the midpoint); Sum lets them
+      // reinforce, so the hull banks SOONER — the magnitude clamp below is
+      // what makes that safe, exactly as it does for an extreme Vel gain.
+      // Sum is therefore 2× Average pre-clamp, and identical to it wherever
+      // the pair already saturates.
+      this.tiltSignalFrom(moveDir.x, moveDir.y, cosF, sinF);
+      const tLat = this._tiltSigLat;
+      const tLong = this._tiltSigLong;
+      this.tiltSignalFrom(vx, vy, cosF, sinF);
+      const scale = src === 'average' ? 0.5 : 1;
+      sigLat = (tLat + this._tiltSigLat) * scale;
+      sigLong = (tLong + this._tiltSigLong) * scale;
+    }
     // Clamp the SIGNAL VECTOR's magnitude, not each component: the tilt is
     // one direction in 360°, and clamping per-axis would let a diagonal
     // reach √2 of the authored maximum.

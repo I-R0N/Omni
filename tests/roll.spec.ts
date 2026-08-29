@@ -50,10 +50,13 @@
  *   5d. LEAN DIR — the DBG A/B that negates both axes: one sign over the
  *      signal vector, so each axis's first tick mirrors EXACTLY, and
  *      Tumble deliberately keeps its own direction.
- *   5e. TILT SOURCE — the DBG A/B swapping what drives the signal:
+ *   5e. TILT SOURCE — the DBG cycle choosing what drives the signal:
  *      Thrust (default — no input, no tilt) vs Velocity (the ship's
  *      motion — a coasting drift banks, thrust at rest is silent, and
- *      coasting motion keeps a tumble rolling).
+ *      coasting motion keeps a tumble rolling), plus AVERAGE and SUM,
+ *      which blend the two rotation EFFECTS: Average is exactly their
+ *      midpoint, Sum exactly their total (so twice Average), and Sum
+ *      saturates on the authored maximum where Average is still short.
  *   6. END TO END — a real held key across live sim steps banks the ship,
  *      and releasing it levels off, with the renderer drawing throughout
  *      (the clean-console assertion is what covers the transform math).
@@ -774,7 +777,11 @@ test.describe('the tilt-source A/B', () => {
       const tinyAt10 = oneTick(e.lastCruiseSpeed * 0.15);  // extreme: saturates
       e.dbg.cycleVelGain();                                 // 10× → back to 1×
 
-      e.dbg.cycleTiltSource(); // back to Thrust
+      // The cycle is FOUR long now (Thrust / Velocity / Average / Sum), so
+      // getting back to Thrust from Velocity is three steps, not one.
+      e.dbg.cycleTiltSource(); // Velocity → Average
+      e.dbg.cycleTiltSource(); // Average → Sum
+      e.dbg.cycleTiltSource(); // Sum → wraps to Thrust
       return { coastBank, restTick, tumblePitch, cruiseFrac, halfAt1, halfAt2, tinyAt10 };
     });
 
@@ -793,7 +800,83 @@ test.describe('the tilt-source A/B', () => {
     expect(Math.abs(r.tumblePitch), 'and coasting motion drives the tumble').toBeGreaterThan(0.2);
 
     await waitForStats(page, s => s.tiltSourceName === 'Thrust', 'the name reaches stats');
+    // AVERAGE and SUM blend the two rotation EFFECTS, not the two input
+    // vectors — each source runs its own throttle gate and slip weighting
+    // first, which is the whole difference the A/B exists to show.  Probed
+    // at a gentle thrust + drift so NOTHING saturates: every step is then
+    // exactly checkable against the two it is built from.
+    const blend = await engine(page, e => {
+      const reset = () => {
+        e.player.rotation = 0;
+        e.player.visualRoll = 0;
+        e.player.visualPitch = 0;
+        e._rollPrevFacing = null;
+        e._rollYawRate = 0;
+        e._rollVel = 0;
+        e._pitchVel = 0;
+      };
+      // One tick from level at each source: the first-tick delta is
+      // proportional to the target, so the deltas carry the signals.
+      const tick = () => {
+        reset();
+        e.player.velocity.x = 0;
+        e.player.velocity.y = 0.2 * e.lastCruiseSpeed; // gentle lateral drift
+        e.tickPlayerRoll(1 / 60, { x: 0, y: 0.4 });    // gentle strafe
+        return e.player.visualRoll as number;
+      };
+      const thrust = tick();
+      e.dbg.cycleTiltSource();               // Thrust → Velocity
+      const velocity = tick();
+      e.dbg.cycleTiltSource();               // Velocity → Average
+      const average = tick();
+      e.dbg.cycleTiltSource();               // Average → Sum
+      const sum = tick();
+      // And a case sized so the PAIR crosses the clamp while NEITHER half
+      // does: each source alone signals 0.625 of the maximum (0.5 strafe +
+      // 0.125 slip), so Average stays there while Sum's 1.25 saturates.
+      // Picking a bigger pair would clamp them both and prove nothing.
+      const big = () => {
+        reset();
+        e.player.velocity.x = 0;
+        e.player.velocity.y = 0.5 * e.lastCruiseSpeed;
+        e.tickPlayerRoll(1 / 60, { x: 0, y: 0.5 });
+        return e.player.visualRoll as number;
+      };
+      const sumBig = big();
+      e.dbg.cycleTiltSource();               // Sum → wraps to Thrust
+      e.dbg.cycleTiltSource(); e.dbg.cycleTiltSource(); // → Average
+      const avgBig = big();
+      e.dbg.cycleTiltSource();               // Average → Sum
+      e.dbg.cycleTiltSource();               // Sum → Thrust
+      return { thrust, velocity, average, sum, sumBig, avgBig };
+    });
+
+    // Both halves contribute, and differently — otherwise the blends below
+    // would be vacuous.
+    expect(blend.thrust).toBeGreaterThan(0);
+    expect(blend.velocity).toBeGreaterThan(0);
+    expect(blend.velocity, 'the gentler source reads lower').toBeLessThan(blend.thrust);
+
+    // THE BLEND CLAIMS, exact: Average is the midpoint of the two effects
+    // and Sum is their total.  Blending the raw INPUT vectors instead would
+    // miss both, because the throttle gate is nonlinear in the vector.
+    expect(blend.average, 'Average is the midpoint of the two effects')
+      .toBeCloseTo((blend.thrust + blend.velocity) / 2, 12);
+    expect(blend.sum, 'Sum is their total').toBeCloseTo(blend.thrust + blend.velocity, 12);
+    expect(blend.sum, 'so Sum is exactly twice Average').toBeCloseTo(blend.average * 2, 12);
+
+    // Sum banks SOONER, never deeper: with a bigger pair it saturates on the
+    // authored maximum while Average is still climbing toward it.
+    const firstTickAtMax = SPRING_OMEGA ** 2 * MAX_ANGLE * DT * DT;
+    expect(blend.sumBig, 'Sum saturates on the authored maximum').toBeCloseTo(firstTickAtMax, 10);
+    // 0.625 of the maximum, exactly — Average is unclamped and is the
+    // midpoint, so the arithmetic is fully determined.
+    expect(blend.avgBig, 'while Average is still short of it')
+      .toBeCloseTo(firstTickAtMax * 0.625, 10);
+
+    await waitForStats(page, s => s.tiltSourceName === 'Thrust', 'back to the Thrust default');
     await waitForStats(page, s => s.velGainName === '1×', 'the gain name reaches stats');
+
 
     watch.assertClean();
   });
