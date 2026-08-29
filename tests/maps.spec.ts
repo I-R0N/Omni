@@ -176,6 +176,69 @@ test.describe('map composition — MAP_POPULATION is the authority', () => {
   });
 });
 
+test.describe('portal arrival — the wormhole throws you clear', () => {
+  /** Arriving used to land the ship DEAD-STOPPED at ARRIVAL_OFFSET (165) from
+   *  the exit mouth — which is inside that rift's own gravity well, so the
+   *  hole it had just come out of started pulling it back in.  The arrival now
+   *  carries an outward velocity sized to leave the well outright.
+   *
+   *  The assertion is the REQUIREMENT, not the mechanism: let the sim run and
+   *  check the ship actually ends up beyond GRAVITY_RANGE, still moving away.
+   *  Testing "velocity was set" would pass just as happily on a shove too weak
+   *  to escape, which is the whole thing being fixed. */
+  test('the player is ejected hard enough to leave the exit rift behind', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const arrived = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
+      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+      if (!rift) return null;
+      e.player.position.x = rift.position.x + 180;
+      e.player.position.y = rift.position.y;
+      if (!e.transitionToMap(rift.portalTargetId)) return null;
+      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+      return {
+        speed: Math.hypot(e.player.velocity.x, e.player.velocity.y),
+        dist: Math.hypot(e.player.position.x - exit.position.x,
+                         e.player.position.y - exit.position.y),
+        range: exit.gravityRange,
+      };
+    });
+
+    expect(arrived, 'an arena rift and a way home').not.toBeNull();
+    // Thrown, not deposited — and outward, so the first thing the ship does is
+    // leave rather than drift back through the door.
+    expect(arrived!.speed).toBeGreaterThan(5);
+    expect(arrived!.dist).toBeLessThan(arrived!.range);   // starts INSIDE the well
+
+    // Now let the well do its worst.  The escape takes well under a second at
+    // the shipped speed; poll for it rather than waiting a fixed time, and let
+    // the timeout be the failure if the ship never gets out.
+    await waitForEngine(page, e => {
+      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+      if (!exit) return false;
+      return Math.hypot(e.player.position.x - exit.position.x,
+                        e.player.position.y - exit.position.y) > exit.gravityRange;
+    }, 'the ship to climb out of the exit rift\'s gravity well', 20_000);
+
+    // And it is still LEAVING at the boundary — escaped, not lobbed to the
+    // edge and caught.  Sampled as a distance that keeps growing.
+    const escaping = await page.evaluate(async () => {
+      const e = (window as any).__omniEngine;
+      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+      const d = () => Math.hypot(e.player.position.x - exit.position.x,
+                                 e.player.position.y - exit.position.y);
+      const before = d();
+      await new Promise(r => setTimeout(r, 600));
+      return { before, after: d() };
+    });
+    expect(escaping.after).toBeGreaterThan(escaping.before);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('debris transit — the wormhole takes what is around you', () => {
   /** Loose entities near the ship travel through a portal and re-emerge from
    *  the EXIT rift after the player, flung out at random headings/speeds

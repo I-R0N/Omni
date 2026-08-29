@@ -5613,6 +5613,23 @@ export const PORTAL_CONSTANTS = {
     SPEED_MAX: 5.5,
     SCATTER: 70,
     GRACE_SEC: 2.5,
+    // The PLAYER is EJECTED, not deposited (user call).  Arriving
+    // dead-stopped ARRIVAL_OFFSET from the mouth leaves the ship inside the
+    // exit rift's own well, which then tugs it straight back toward the hole
+    // it just came out of.  Coming out of a wormhole should throw you clear,
+    // so the arrival carries an outward velocity sized to LEAVE THE WELL
+    // OUTRIGHT rather than merely to look energetic.
+    //
+    // The arithmetic, in px per 60 Hz step (cruise is ~42, so this reads as a
+    // firm shove rather than a launch).  The player feels
+    // GRAVITY_STRENGTH × GRAVITY_PLAYER_SCALE = 480, so a(d) = 480/max(d²,1e4).
+    // Climbing from ARRIVAL_OFFSET (165) to the edge of GRAVITY_RANGE (700)
+    // costs ∫480/d² dd ÷ v = 480 × (1/165 − 1/700) / v = 2.22/v of speed, and
+    // the trip also pays friction (0.998 per step).  At v = 3 the ship barely
+    // crawls out; at 12 it clears the range in ~0.75 s still doing ~10.8, so
+    // the escape is decisive at every difficulty and hull weight — mass does
+    // not enter, since gravity is applied as an acceleration.
+    PLAYER_EJECT_SPEED: 12,
   },
   // ── The event horizon (user call) ─────────────────────────────────
   // The rift's WORLD ART is now exactly one thing: a black disc.  Every

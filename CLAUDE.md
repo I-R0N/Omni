@@ -340,6 +340,17 @@ is now reachable only through that dropdown.
   placement changes).  Coming home used to dump the player at their base
   station across the hub, throwing the trip away.  No matching rift — a
   descent into a fresh arena, or a new run — falls back to `playerSpawn`.
+  AND THE PLAYER IS THROWN CLEAR (user call): `placePlayerAtSpawn` lands
+  the ship dead-stopped, which left it at rest INSIDE the exit rift's own
+  well, so the hole it had just come out of pulled it back in.  The
+  arrival now carries an outward velocity along the mouth→ship axis
+  (`TRANSIT.PLAYER_EJECT_SPEED`, sized from the escape arithmetic rather
+  than for feel — 12 px/step clears `GRAVITY_RANGE` in ~0.75 s still
+  doing ~10.8, against the ~3 that merely crawls out).  RADIAL, unlike
+  the debris' random headings: being spat sideways into the terrain you
+  arrived beside is not an arrival.  `exitMouthFor(fromId)` is the ONE
+  definition of "the rift you came out of" — where you land, which way
+  you are thrown and where your debris re-emerges must agree on it.
   DEBRIS TRAVELS WITH YOU (user call): mobile shards + collectible drops
   within `PORTAL_CONSTANTS.TRANSIT.RADIUS` of the ship are captured out
   of the departing map (nearest win the `MAX_ENTITIES` cap; enemies stay

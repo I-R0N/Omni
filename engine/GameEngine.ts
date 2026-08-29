@@ -1345,6 +1345,26 @@ export class GameEngine {
       // the spawn when there is no matching rift (a descent into a fresh
       // arena has none).
       this.placePlayerAtSpawn(this.arrivalBesideRift(fromId));
+      // …AND THROWN CLEAR.  `placePlayerAtSpawn` lands the ship dead-stopped,
+      // which puts it at rest INSIDE the exit rift's own gravity well — so the
+      // hole it just came out of immediately started pulling it back in.  The
+      // arrival now carries an outward velocity along the mouth→ship axis,
+      // sized to leave the well outright (PLAYER_EJECT_SPEED documents the
+      // escape arithmetic).  Radial rather than random, unlike the debris:
+      // being spat sideways into the terrain you arrived beside is not an
+      // arrival, and the player is the one thing that must never have to
+      // fight its way out of the door.
+      const exitMouth = this.exitMouthFor(fromId);
+      if (exitMouth) {
+          const ex = wrapDeltaX(exitMouth.position.x, this.player.position.x);
+          const ey = wrapDeltaY(exitMouth.position.y, this.player.position.y);
+          const len = Math.hypot(ex, ey);
+          if (len > 1e-3) {
+              const k = PORTAL_CONSTANTS.TRANSIT.PLAYER_EJECT_SPEED / len;
+              this.player.velocity.x = ex * k;
+              this.player.velocity.y = ey * k;
+          }
+      }
       // Combat state belongs to the fight left behind: shield resumes its
       // normal recharge and lingering debuffs (corrosion DoT / EMP) drop.
       // Hull damage does NOT — that's the carry.
@@ -1360,7 +1380,7 @@ export class GameEngine {
       // hop's cargo is all it holds.  Stagger delays are rolled here;
       // headings and speeds are rolled at emergence.
       if (captured.length > 0) {
-          const mouth = this.portals.find(p => p.portalTargetId === fromId);
+          const mouth = this.exitMouthFor(fromId);
           const exit = mouth ? mouth.position : this.player.position;
           this.portalTransitExit.x = exit.x;
           this.portalTransitExit.y = exit.y;
@@ -5177,9 +5197,17 @@ export class GameEngine {
    *  so the player emerges NEXT TO the rift (it stays visible, and the ship
    *  isn't sitting inside the thing it just came out of) while still being in
    *  USE_RANGE, so turning straight around is one tap. */
-  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+  /** The rift on THIS map that points back where the player just came from —
+   *  the mouth they surface out of.  One definition, because three things now
+   *  depend on agreeing about it: where the player lands, which way they are
+   *  thrown, and where their debris re-emerges. */
+  private exitMouthFor(fromId?: string): GameEntity | undefined {
       if (!fromId) return undefined;
-      const mouth = this.portals.find(p => p.portalTargetId === fromId);
+      return this.portals.find(p => p.portalTargetId === fromId);
+  }
+
+  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+      const mouth = this.exitMouthFor(fromId);
       if (!mouth) return undefined;
       const pos = {
           x: mouth.position.x + PORTAL_CONSTANTS.ARRIVAL_OFFSET,
