@@ -2955,6 +2955,101 @@ export function cycleFractureMode(): number {
   return activeFractureModeIndex;
 }
 
+// ── Fracture SHAPE tuning (V11) — the DBG-cyclable knobs ─────────────
+// The per-variant `fracture` block says how many pieces and where they
+// crowd; these four say what SHAPE they come out.  Global rather than
+// per-variant on purpose: they are the dials you turn while looking at
+// the game, and a play-test wants one control, not one per material.
+// Every cycle bumps `fractureTuningGen`, which invalidates cached
+// decompositions so a change is visible on the next hit instead of only
+// on freshly-spawned terrain (fractureCache.ensureFractureCells).
+
+/** LLOYD RELAXATION rounds.  The regularity dial: 0 is raw Poisson
+ *  Voronoi (ragged, wildly uneven cells), 2 is the shipped default,
+ *  4 is nearly a honeycomb.  Measured over 14 seeded rock polygons at
+ *  8 sites — cell-area coefficient of variation / mean roundness
+ *  (4πA/P², where a square is 0.785 and a regular hexagon 0.907):
+ *    0 rounds → CV 0.53, roundness 0.69   (the V10 look)
+ *    2 rounds → CV 0.28, roundness 0.77
+ *    4 rounds → CV 0.19, roundness 0.79
+ *  Cost is flat in practice: relaxation also stops the sliver-retirement
+ *  loop from re-running, which pays for the extra decompositions. */
+export const FRACTURE_RELAX_CYCLE: ReadonlyArray<number> = [0, 1, 2, 3, 4] as const;
+let activeFractureRelaxIndex = 2; // 2 rounds
+
+/** Minimum site separation, as a fraction of the mean cell radius.
+ *  Blue-noise placement BEFORE relaxation; mostly matters at relax 0. */
+export const FRACTURE_SEPARATION_CYCLE: ReadonlyArray<number> = [0.2, 0.35, 0.45, 0.6, 0.75] as const;
+let activeFractureSeparationIndex = 2; // 0.45
+
+/** Multiplier on the per-variant site count — fewer, bigger chunks or
+ *  more, smaller ones, without touching the variant table. */
+export const FRACTURE_SITE_SCALE_CYCLE: ReadonlyArray<number> = [0.5, 0.75, 1, 1.5, 2] as const;
+let activeFractureSiteScaleIndex = 2; // x1
+
+/** Impact-bias override.  -1 means "use the variant's own value"; the
+ *  rest force it, so the radial-crowding half of the look can be judged
+ *  independently of the regularity half (they pull against each other —
+ *  crowding sites near the hit is what makes cell sizes uneven). */
+export const FRACTURE_BIAS_CYCLE: ReadonlyArray<number> = [-1, 0, 0.25, 0.5, 0.75, 1] as const;
+let activeFractureBiasIndex = 0; // variant default
+
+let fractureTuningGen = 0;
+/** Bumped by every shape-knob cycle; cached decompositions carrying an
+ *  older value are recomputed on next read. */
+export function getFractureTuningGen(): number { return fractureTuningGen; }
+
+export function getFractureRelax(): number {
+  return FRACTURE_RELAX_CYCLE[activeFractureRelaxIndex];
+}
+export function getFractureRelaxName(): string {
+  return String(FRACTURE_RELAX_CYCLE[activeFractureRelaxIndex]);
+}
+export function cycleFractureRelax(): number {
+  activeFractureRelaxIndex = (activeFractureRelaxIndex + 1) % FRACTURE_RELAX_CYCLE.length;
+  fractureTuningGen++;
+  return activeFractureRelaxIndex;
+}
+
+export function getFractureSeparation(): number {
+  return FRACTURE_SEPARATION_CYCLE[activeFractureSeparationIndex];
+}
+export function getFractureSeparationName(): string {
+  return FRACTURE_SEPARATION_CYCLE[activeFractureSeparationIndex].toFixed(2);
+}
+export function cycleFractureSeparation(): number {
+  activeFractureSeparationIndex = (activeFractureSeparationIndex + 1) % FRACTURE_SEPARATION_CYCLE.length;
+  fractureTuningGen++;
+  return activeFractureSeparationIndex;
+}
+
+export function getFractureSiteScale(): number {
+  return FRACTURE_SITE_SCALE_CYCLE[activeFractureSiteScaleIndex];
+}
+export function getFractureSiteScaleName(): string {
+  return '\u00d7' + FRACTURE_SITE_SCALE_CYCLE[activeFractureSiteScaleIndex];
+}
+export function cycleFractureSiteScale(): number {
+  activeFractureSiteScaleIndex = (activeFractureSiteScaleIndex + 1) % FRACTURE_SITE_SCALE_CYCLE.length;
+  fractureTuningGen++;
+  return activeFractureSiteScaleIndex;
+}
+
+/** null → the variant's own impactBias. */
+export function getFractureBiasOverride(): number | null {
+  const v = FRACTURE_BIAS_CYCLE[activeFractureBiasIndex];
+  return v < 0 ? null : v;
+}
+export function getFractureBiasName(): string {
+  const v = FRACTURE_BIAS_CYCLE[activeFractureBiasIndex];
+  return v < 0 ? 'variant' : v.toFixed(2);
+}
+export function cycleFractureBias(): number {
+  activeFractureBiasIndex = (activeFractureBiasIndex + 1) % FRACTURE_BIAS_CYCLE.length;
+  fractureTuningGen++;
+  return activeFractureBiasIndex;
+}
+
 /** True when this variant is running the PROGRESSIVE fracture model
  *  right now — a `fracture.progressive` variant whose shatter routes
  *  through the cells, with the DBG A/B on 'voronoi'.  The ONE predicate

@@ -792,28 +792,35 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
         id: 'v10_roll', type: 'STRUCTURE', shardVariant: 'rock-tile',
         position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 }, rotation: 0,
         size: { x: 42, y: 42 }, mass: Infinity, active: true, color: '#8a8a8a',
-        // hitsTaken = ceiling - health = 7 of 8: the legacy curve is at
-        // its guaranteed-break end, so one call is certain to kill.
+        // hitsTaken = ceiling - health = 7 of 8, i.e. p(break) = 6/7 on
+        // the legacy curve.  NOT a certainty — hence the count-over-many
+        // shape below rather than a single call, which flaked at ~14%.
         health: 1, maxHealth: 8,
       } as any);
+      const rolls = (n: number) => {
+        let killed = 0;
+        for (let i = 0; i < n; i++) {
+          const t = mk();
+          Physics.maybeRockEarlyBreak(t);
+          if (t.health <= 0) killed++;
+        }
+        return killed;
+      };
       // Voronoi (default): the roll must never end the rock early — the
-      // progressive model owns the break.
-      let killedUnderVoronoi = 0;
-      for (let i = 0; i < 40; i++) {
-        const t = mk();
-        Physics.maybeRockEarlyBreak(t);
-        if (t.health <= 0) killedUnderVoronoi++;
-      }
+      // progressive model owns the break.  Deterministic: the stand-down
+      // returns before any Math.random call.
+      const killedUnderVoronoi = rolls(40);
       e.dbg.cycleFractureMode(); // -> legacy
-      const legacyTile = mk();
-      Physics.maybeRockEarlyBreak(legacyTile);
-      const killedUnderLegacy = legacyTile.health <= 0;
+      // Legacy: p(break) is 6/7 per roll, so 40 rolls yielding zero has
+      // probability ~1e-33 — effectively deterministic without pinning a
+      // single coin flip.
+      const killedUnderLegacy = rolls(40);
       e.dbg.cycleFractureMode(); // -> back
       return { killedUnderVoronoi, killedUnderLegacy };
     });
 
     expect(r.killedUnderVoronoi).toBe(0);
-    expect(r.killedUnderLegacy).toBe(true);
+    expect(r.killedUnderLegacy).toBeGreaterThan(0);
 
     watch.assertClean();
   });
@@ -1001,6 +1008,123 @@ test.describe('materials through the cells (V5)', () => {
     expect(r.plasticL.count).toBeGreaterThanOrEqual(8);
     expect(r.plasticL.count).toBeLessThanOrEqual(12);
     for (const h of r.plasticL.healths) expect(h).toBe(24);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('cell regularity (V11)', () => {
+  test('Lloyd relaxation makes the chunks measurably more regular, and stays deterministic', async ({ page }) => {
+    const watch = await boot(page);
+
+    const r = await page.evaluate(`(() => {
+      const fr = window.__omniFracture;
+      ${STAR_POLY_SRC}
+      const perim = (pts) => {
+        let p = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i], b = pts[(i + 1) % pts.length];
+          p += Math.hypot(b.x - a.x, b.y - a.y);
+        }
+        return p;
+      };
+      // Two shape statistics, both standard:
+      //   areaCV   — coefficient of variation of cell areas. Lower means
+      //              the pieces are more equally sized.
+      //   roundness — 4*pi*A / P^2 per cell. 1 is a circle, 0.907 a
+      //              regular hexagon, 0.785 a square; slivers tend to 0.
+      const measure = (relax) => {
+        let cv = 0, round = 0, cells = 0, polys = 0, areaErr = 0;
+        for (let seed = 1; seed <= 14; seed++) {
+          const poly = starPoly(fr, 24, seed * 7.3);
+          const parentArea = fr.polygonArea(poly);
+          const res = fr.computeFracture(poly, {
+            siteCount: 8, seed: seed * 3.1,
+            impact: { x: 8, y: 0, bias: 0.75 },
+            relaxIterations: relax, minSeparation: 0.35,
+          });
+          areaErr = Math.max(areaErr, Math.abs(res.totalArea - parentArea) / parentArea);
+          const areas = res.cells.map(c => c.area);
+          const mean = areas.reduce((a, b) => a + b, 0) / areas.length;
+          const sd = Math.sqrt(areas.reduce((a, b) => a + (b - mean) ** 2, 0) / areas.length);
+          cv += sd / mean;
+          polys++;
+          for (const c of res.cells) {
+            const p = perim(c.points);
+            round += (4 * Math.PI * c.area) / (p * p);
+            cells++;
+            if (!fr.isSimplePolygon(c.points)) return { broken: true };
+          }
+        }
+        return { areaCV: cv / polys, roundness: round / cells, areaErr };
+      };
+      const poly = starPoly(fr, 24, 99.5);
+      const opts = { siteCount: 8, seed: 4.25, relaxIterations: 3, minSeparation: 0.35 };
+      return {
+        raw: measure(0),
+        relaxed: measure(2),
+        heavy: measure(4),
+        deterministic: JSON.stringify(fr.computeFracture(poly, opts))
+                    === JSON.stringify(fr.computeFracture(poly, opts)),
+      };
+    })()`) as any;
+
+    expect(r.raw.broken).toBeUndefined();
+    expect(r.relaxed.broken).toBeUndefined();
+    expect(r.heavy.broken).toBeUndefined();
+
+    // More relaxation => more equally sized pieces, and rounder ones.
+    // The absolute figures measured here were CV 0.53 / 0.28 / 0.19 and
+    // roundness 0.69 / 0.77 / 0.79 — pinned as ORDERING plus loose
+    // bounds, so a tuning change moves them without failing the suite
+    // but a regression that flattens the effect does fail.
+    expect(r.relaxed.areaCV).toBeLessThan(r.raw.areaCV);
+    expect(r.heavy.areaCV).toBeLessThanOrEqual(r.relaxed.areaCV);
+    expect(r.relaxed.roundness).toBeGreaterThan(r.raw.roundness);
+    expect(r.relaxed.areaCV).toBeLessThan(r.raw.areaCV * 0.8);
+    expect(r.relaxed.roundness).toBeGreaterThan(0.72);
+
+    // Relaxation must not break the invariants the rest of the system
+    // rests on: area still partitions the parent exactly.
+    expect(r.raw.areaErr).toBeLessThan(1e-3);
+    expect(r.relaxed.areaErr).toBeLessThan(1e-3);
+    expect(r.heavy.areaErr).toBeLessThan(1e-3);
+
+    // And it is still a pure function of (polygon, seed, options).
+    expect(r.deterministic).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('the shape knobs are live — a cycle rebuilds a cached pattern', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no rock tile on the field');
+      t.lastImpactVelocity = { x: -9, y: 0 };
+      // Build a pattern under the current knobs...
+      e.progressFracture(t);
+      const before = t.fractureCells.map((c: any) =>
+        Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10)).join('|');
+      const genBefore = t.fractureGen;
+      // ...turn the site-count multiplier, and read it back.
+      e.dbg.cycleFractureSiteScale();
+      e.progressFracture(t);
+      const after = t.fractureCells.map((c: any) =>
+        Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10)).join('|');
+      const genAfter = t.fractureGen;
+      // Restore (the cycle is global state shared with the other specs).
+      for (let i = 0; i < 4; i++) e.dbg.cycleFractureSiteScale();
+      return { changed: before !== after, genMoved: genAfter !== genBefore };
+    });
+
+    expect(r.genMoved).toBe(true);
+    expect(r.changed).toBe(true);
 
     watch.assertClean();
   });

@@ -372,6 +372,22 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleFractureMode();
   };
 
+  const handleCycleFractureRelax = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureRelax();
+  };
+
+  const handleCycleFractureSeparation = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureSeparation();
+  };
+
+  const handleCycleFractureSiteScale = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureSiteScale();
+  };
+
+  const handleCycleFractureBias = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureBias();
+  };
+
   const handleCycleNebulaWakeSpin = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaWakeSpin();
   };
@@ -885,6 +901,10 @@ const App: React.FC = () => {
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
         onCycleFractureMode={handleCycleFractureMode}
+        onCycleFractureRelax={handleCycleFractureRelax}
+        onCycleFractureSeparation={handleCycleFractureSeparation}
+        onCycleFractureSiteScale={handleCycleFractureSiteScale}
+        onCycleFractureBias={handleCycleFractureBias}
         onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}

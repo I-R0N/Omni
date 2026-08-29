@@ -109,6 +109,10 @@ interface UIOverlayProps {
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
   onCycleFractureMode?: () => void;
+  onCycleFractureRelax?: () => void;
+  onCycleFractureSeparation?: () => void;
+  onCycleFractureSiteScale?: () => void;
+  onCycleFractureBias?: () => void;
   onCycleNebulaWakeSpin?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -420,6 +424,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleShadowSoftness,
   onCycleRockPalette,
   onCycleFractureMode,
+  onCycleFractureRelax,
+  onCycleFractureSeparation,
+  onCycleFractureSiteScale,
+  onCycleFractureBias,
   onCycleNebulaWakeSpin,
   onToggleRumble,
   onSetControlScheme,
@@ -1802,6 +1810,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Fracture', onCycleFractureMode,
                   stats.fractureModeName ?? 'voronoi',
                   'How fracture-capable materials break (voronoi gauntlet A/B). VORONOI (default): the entity carries a seeded Voronoi cell decomposition of its own polygon - the cells are the fragments, so a break flies apart along its own seams and conserves area. LEGACY: the shipped pre-gauntlet model - fresh random star-polygon fragments (powerlaw) and the rock-tile 3-chunk dent break. Applies at the next break; judge on a rock field.')}
+                {ctrlRow('Frac relax', onCycleFractureRelax,
+                  stats.fractureRelaxName ?? '2',
+                  'LLOYD RELAXATION rounds on the fracture pattern - the REGULARITY dial. Each round moves every Voronoi site to its own cell\'s centroid, which evens the piece SIZES out and pulls the shapes toward convex, near-hexagonal chunks. 0 is raw Poisson Voronoi (ragged, some slivers, wildly uneven); 2 (default) measured a cell-area coefficient of variation of 0.28 and roundness 0.77 against 0.53 / 0.69 at zero rounds; 4 is close to a honeycomb. Effectively free - relaxation also stops the sliver-retirement pass re-running. Takes effect on the next hit (cached patterns rebuild).')}
+                {ctrlRow('Frac sep', onCycleFractureSeparation,
+                  stats.fractureSeparationName ?? '0.45',
+                  'Minimum spacing between fracture sites, as a fraction of the mean cell radius - blue-noise placement BEFORE relaxation. Higher means sites refuse to bunch, so cells start out more even. Matters most at Frac relax 0; relaxation largely supersedes it.')}
+                {ctrlRow('Frac sites', onCycleFractureSiteScale,
+                  stats.fractureSiteScaleName ?? 'x1',
+                  'Multiplier on the per-variant fracture site count - fewer, bigger chunks or more, smaller ones, without editing the variant table. Clamped by each variant\'s own min/max, so a big multiplier saturates rather than exploding the piece count.')}
+                {ctrlRow('Frac bias', onCycleFractureBias,
+                  stats.fractureBiasName ?? 'variant',
+                  'Impact bias: the fraction of sites crowded toward the hit point, which is what makes the pattern radiate from the impact the way real glass does. VARIANT uses each material\'s own value (rock and glass ship 0.75). Pulls AGAINST Frac relax by design - crowding sites is precisely what makes cell sizes uneven - so 0 plus relaxation gives the most uniform chunks, and 1 plus relax 0 the most chaotic.')}
                 {ctrlRow('Neb spin', onCycleNebulaWakeSpin,
                   stats.nebulaWakeSpinName ?? 'physical',
                   'Which way the player\'s wake spins a passing nebula shard. PHYSICAL: the wake shear — a shard passed on the STARBOARD side turns clockwise, port-side counter-clockwise. INVERTED: the same cross product negated (the A/B). RANDOM: the old per-shard id-parity vortices, with no consistent handedness. Proper rotational mechanics are parked for their own session.')}

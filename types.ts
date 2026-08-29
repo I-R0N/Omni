@@ -1307,6 +1307,11 @@ export interface GameEntity {
   // object, so a revived tile must be killable again).
   deathDispatched?: boolean;
 
+  // The fracture SHAPE-KNOB generation this entity's cached pattern was
+  // built under (V11).  A DBG cycle bumps the global counter, so a stale
+  // value here forces one recompute; untouched in normal play.
+  fractureGen?: number;
+
   // Polygon area at the FIRST partial-fracture detach (V4) — the
   // baseline the min-remainder death rule measures against
   // (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Never cleared: cumulative
@@ -1815,6 +1820,12 @@ export interface EngineStats {
   /** DBG (voronoi gauntlet): the fracture A/B — 'voronoi' (seeded cell
    *  decomposition) / 'legacy' (the shipped powerlaw + dent-spawn break). */
   fractureModeName?: string;
+  /** DBG (V11) — the four fracture SHAPE knobs: Lloyd relaxation rounds,
+   *  site min-separation, site-count multiplier, impact-bias override. */
+  fractureRelaxName?: string;
+  fractureSeparationName?: string;
+  fractureSiteScaleName?: string;
+  fractureBiasName?: string;
   nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).

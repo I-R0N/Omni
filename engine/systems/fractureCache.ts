@@ -20,7 +20,11 @@
  */
 
 import { GameEntity } from '../../types';
-import { SHARD_VARIANTS, FRACTURE_DETACH } from '../../constants';
+import {
+  SHARD_VARIANTS, FRACTURE_DETACH,
+  getFractureRelax, getFractureSeparation, getFractureSiteScale,
+  getFractureBiasOverride, getFractureTuningGen,
+} from '../../constants';
 import {
   computeFracture, collectInteriorEdges, seedFromEntityId,
   FractureCell, FractureEdge,
@@ -53,10 +57,19 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   const f = SHARD_VARIANTS[e.shardVariant].fracture;
   if (f === undefined) return null;
   if (e.polygonPoints === undefined || e.polygonPoints.length < 3) return null;
-  if (e.fractureCells !== undefined) return e.fractureCells;
+  // A DBG shape knob moved since this pattern was built (V11): drop it so
+  // the new setting is visible on the next hit rather than only on
+  // freshly-spawned terrain.  In normal play the generation never
+  // changes, so this is one number compare on a cache hit.
+  const gen = getFractureTuningGen();
+  if (e.fractureCells !== undefined) {
+    if (e.fractureGen === gen) return e.fractureCells;
+    e.fractureCells = undefined;
+    e.fractureEdges = undefined;
+  }
 
   const size = Math.max(e.size.x, e.size.y);
-  let sites = Math.round(size / f.sizePerSite);
+  let sites = Math.round((size / f.sizePerSite) * getFractureSiteScale());
   const merges = e.mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
   sites = Math.max(f.siteCountMin, Math.min(f.siteCountMax, sites));
@@ -64,14 +77,20 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 
   const ip = localImpactPoint(e);
-  const impact = ip !== null ? { x: ip.x, y: ip.y, bias: f.impactBias } : undefined;
+  const biasOverride = getFractureBiasOverride();
+  const impact = ip !== null
+    ? { x: ip.x, y: ip.y, bias: biasOverride ?? f.impactBias }
+    : undefined;
 
   e.fractureEdges = undefined; // edges are derived — never outlive the cells
+  e.fractureGen = gen;
   e.fractureCells = computeFracture(e.polygonPoints, {
     siteCount: sites,
     seed,
     impact,
     minAreaFraction: f.minAreaFraction,
+    relaxIterations: getFractureRelax(),
+    minSeparation: getFractureSeparation(),
   }).cells;
   return e.fractureCells;
 }
@@ -117,9 +136,13 @@ export function fractureRevealedEdgeCount(
  *  on a real 9-hit rock tile: 1 piece).  Grouping by cell makes the
  *  cadence roughly one piece per (cell's edge count) hits. */
 export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
-  if (e.fractureEdges !== undefined) return e.fractureEdges;
+  // Cells FIRST: that call is what drops both caches when a DBG shape
+  // knob moved (V11), so checking the edge cache ahead of it would hand
+  // back edges belonging to a pattern that no longer exists.  It returns
+  // immediately on a hit, so this stays O(1).
   const cells = ensureFractureCells(e);
   if (cells === null || e.polygonPoints === undefined) return null;
+  if (e.fractureEdges !== undefined) return e.fractureEdges;
   const edges = collectInteriorEdges(cells, e.polygonPoints);
   const ip = localImpactPoint(e);
   const px = ip !== null ? ip.x : 0;

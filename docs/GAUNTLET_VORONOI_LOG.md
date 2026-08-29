@@ -815,3 +815,78 @@ the pane leaving early via chipping.  Three NEW tests: the early-break
 A/B, a real rock tile shedding ≥3 pieces mid-life across ≥4 hits, and a
 real glass tile chipping (pieces off + its own polygon area shrinking)
 before the pane goes.  19/19 fracture green.
+
+---
+
+## V11 — Regular chunks, and the shape knobs (2026-08-29, user request)
+
+> "Can we adjust the voronoi parameters to get more regularly shaped
+> chunks? And perhaps provide some debugging toggles for these
+> parameters if possible."
+
+**LLOYD RELAXATION is the answer, and it is nearly free.**  Voronoi over
+a purely random (Poisson) site set is *supposed* to look ragged — that is
+what makes the cells uneven and sliver-prone.  The textbook cure is to
+iterate toward a CENTROIDAL Voronoi tessellation: decompose, move every
+site to its own cell's area-weighted centroid, repeat.  `computeFracture`
+now takes `relaxIterations` and does exactly that (deterministic — no
+PRNG use, so the seed still fixes the result; a site whose new centroid
+lands outside a concave parent keeps its old position rather than
+jumping into a hole).
+
+Measured over 14 seeded rock polygons at 8 sites — cell-area coefficient
+of variation, and mean roundness `4πA/P²` (regular hexagon 0.907,
+square 0.785, slivers → 0):
+
+| rounds | area CV | roundness | ms/decomposition |
+|---|---|---|---|
+| 0 (the V10 look) | 0.533 | 0.687 | 0.32 |
+| 1 | 0.365 | 0.753 | 0.36 |
+| **2 (shipped)** | **0.284** | **0.772** | 0.32 |
+| 3 | 0.230 | 0.781 | 0.26 |
+| 4 | 0.191 | 0.787 | 0.29 |
+
+The cost column is the surprise and it is real: relaxation pays for its
+own extra decompositions by removing slivers, which is what the
+retirement loop was re-running the whole decomposition to fix.  The
+suite's cost ceiling (5 ms at 30 sites) is untouched — measured 0.77 ms.
+
+**Four DBG knobs** (pause ▸ Debug Menu ▸ Visual), all global rather than
+per-variant because they are dials you turn while looking at the game:
+`Frac relax` (0-4, default 2), `Frac sep` (site spacing before
+relaxation, 0.2-0.75, default 0.45), `Frac sites` (×0.5-×2 on the
+variant's site count) and `Frac bias` (force the impact crowding, or
+leave it to the variant).  Every cycle bumps a TUNING GENERATION stamped
+on each entity's cached pattern, so a knob change rebuilds patterns on
+their next hit instead of only affecting freshly-spawned terrain — a
+mid-life rebuild resets that body's chip progress, which is the right
+trade for a debug control.  `Frac bias` deliberately pulls against
+`Frac relax`: crowding sites toward the impact is precisely what makes
+cell sizes uneven, so bias 0 + relax 4 is the most uniform look
+available and bias 1 + relax 0 the most chaotic.
+
+**Found while wiring**: `ensureFractureEdges` returned its cached edges
+BEFORE consulting `ensureFractureCells`, which is the call that drops
+both caches on a generation change — so a knob change would have left
+the crack lines belonging to a pattern that no longer existed.  Cells
+are consulted first now (still O(1) on a hit).
+
+Chip behaviour is unchanged by the retune (rock 2-4 pieces shed mid-life
+of 8 total, glass 1-2 of 7 — the V10 figures).  Two new tests: the
+regularity statistics (ordering plus loose bounds, so tuning may move
+the numbers but a regression that flattens the effect fails), and a
+live-knob test proving a cycle rebuilds a cached pattern.  21/21
+fracture green.
+
+**Flake found and fixed in the V10 suite** (surfaced by the full run,
+not by the file alone): the early-break A/B pinned a SINGLE legacy roll
+at `hitsTaken` 7 of ceiling 8, which the curve puts at p = 6/7 — an
+85.7% assertion, i.e. a ~14% flake, and the comment claiming a
+"guaranteed-break end" was simply wrong.  Both sides now count 40 rolls:
+voronoi must kill exactly 0 (deterministic — the stand-down returns
+before any `Math.random`), legacy must kill at least one (p ≈ 1e-33 of a
+false failure).  Verified with `--repeat-each 6`.
+
+`tests/input.spec.ts` "the charge ring reads the pad hold" also failed
+once in the same 14-minute run and passes on re-run; it is timing-
+sensitive and untouched by this work, so it is noted rather than chased.

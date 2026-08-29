@@ -69,6 +69,19 @@ export interface FractureOptions {
    *  sliver: its site is retired and the decomposition recomputed.
    *  Default 0.15. */
   minAreaFraction?: number;
+  /** LLOYD RELAXATION rounds (V11) — the standard cure for the ragged
+   *  cells a purely random site set produces.  Each round moves every
+   *  site to its own cell's centroid, which evens the cell AREAS out and
+   *  pulls the shapes toward convex, blobby, near-hexagonal chunks.  0
+   *  is the raw Poisson look; 2-3 reads as "broken into regular pieces";
+   *  beyond ~4 the returns vanish and the pattern starts to look
+   *  manufactured.  Costs one extra decomposition per round, and the
+   *  whole thing is still computed once and cached. */
+  relaxIterations?: number;
+  /** Minimum site separation as a fraction of the mean cell radius
+   *  (`sqrt(area / count)`).  Higher = blue-noise-ish placement = more
+   *  even cells before relaxation even runs.  Default 0.35. */
+  minSeparation?: number;
 }
 
 export interface FractureResult {
@@ -335,6 +348,7 @@ export function placeFractureSites(
   count: number,
   rand: () => number,
   impact?: FractureImpact,
+  minSeparation = 0.35,
 ): FracturePoint[] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of poly) {
@@ -343,7 +357,7 @@ export function placeFractureSites(
   }
   const area = polygonArea(poly);
   const c = polygonCentroid(poly);
-  const minSep = 0.35 * Math.sqrt(area / Math.max(1, count));
+  const minSep = minSeparation * Math.sqrt(area / Math.max(1, count));
   const minSep2 = minSep * minSep;
   const biasR = 0.45 * Math.sqrt(area);
   const biasedCount = impact ? Math.round(Math.max(0, Math.min(1, impact.bias)) * count) : 0;
@@ -460,7 +474,37 @@ export function computeFracture(
   const minArea = (opts.minAreaFraction ?? 0.15) * (parentArea / count);
 
   const rand = mulberry32(opts.seed);
-  let sites = placeFractureSites(parent, count, rand, opts.impact);
+  let sites = placeFractureSites(parent, count, rand, opts.impact, opts.minSeparation);
+
+  // LLOYD RELAXATION (V11).  Each round decomposes, then moves every site
+  // to the AREA-WEIGHTED centroid of its own cell — the fixed point of
+  // that map is a centroidal Voronoi tessellation, whose cells are
+  // famously even and near-hexagonal.  A site whose new centroid falls
+  // outside the parent (possible when a concave parent splits a cell
+  // into lobes) keeps its old position rather than jumping into a hole.
+  // Deterministic: no PRNG use here, so the seed still fixes the result.
+  const relax = Math.max(0, Math.min(8, Math.floor(opts.relaxIterations ?? 0)));
+  for (let it = 0; it < relax; it++) {
+    const cells = buildCells(parent, sites, lineEps, tinyArea);
+    if (cells.length === 0) break;
+    const sumX = new Float64Array(sites.length);
+    const sumY = new Float64Array(sites.length);
+    const sumA = new Float64Array(sites.length);
+    for (const cell of cells) {
+      const i = cell.siteIndex;
+      if (i < 0 || i >= sites.length) continue;
+      sumX[i] += cell.centroid.x * cell.area;
+      sumY[i] += cell.centroid.y * cell.area;
+      sumA[i] += cell.area;
+    }
+    const moved: FracturePoint[] = new Array(sites.length);
+    for (let i = 0; i < sites.length; i++) {
+      if (sumA[i] <= 0) { moved[i] = sites[i]; continue; }
+      const nx = sumX[i] / sumA[i], ny = sumY[i] / sumA[i];
+      moved[i] = pointInPolygon(nx, ny, parent) ? { x: nx, y: ny } : sites[i];
+    }
+    sites = moved;
+  }
 
   let cells: FractureCell[] = [];
   let retired = 0;

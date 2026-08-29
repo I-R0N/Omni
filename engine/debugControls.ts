@@ -35,6 +35,7 @@ import {
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
+    cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
     toggleWorldLights, toggleDepthAmbient,
@@ -363,6 +364,37 @@ export class DebugControls {
    *  on newly generated rock; reload the map to repaint a whole field. */
   cycleRockPalette() {
     cycleRockPalette();
+  }
+
+  /** DBG (Visual): LLOYD RELAXATION rounds on the fracture pattern —
+   *  the REGULARITY dial (V11).  0 is raw Poisson Voronoi (ragged,
+   *  wildly uneven chunks), 2 ships, 4 is nearly a honeycomb.  Applies
+   *  to patterns computed from here on: the cycle bumps the tuning
+   *  generation, so already-cracked terrain rebuilds on its next hit
+   *  (and a mid-life rebuild resets that body's chip progress — expected
+   *  for a debug knob). */
+  cycleFractureRelax() {
+    cycleFractureRelax();
+  }
+
+  /** DBG (Visual): minimum fracture-site separation (blue noise before
+   *  relaxation).  Matters most at relaxation 0. */
+  cycleFractureSeparation() {
+    cycleFractureSeparation();
+  }
+
+  /** DBG (Visual): multiplier on the per-variant fracture site count —
+   *  fewer/bigger or more/smaller chunks without touching the table. */
+  cycleFractureSiteScale() {
+    cycleFractureSiteScale();
+  }
+
+  /** DBG (Visual): force the impact bias (site crowding toward the hit)
+   *  or leave it to the variant.  Pulls AGAINST regularity by design —
+   *  crowding sites is what makes cell sizes uneven — so this is the
+   *  other half of the same look. */
+  cycleFractureBias() {
+    cycleFractureBias();
   }
 
   /** DBG (Visual): the fracture A/B (voronoi gauntlet) — voronoi

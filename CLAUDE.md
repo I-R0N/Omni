@@ -1009,6 +1009,18 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   sites) per the same user call.  Metal keeps `decomposeMetalComposite`
   as its fracture (the lattice IS its cell set — composite cracks stroke
   the lattice edges); nebula and indestructible are excluded.  The DBG
+  SHAPE of the cells is four DBG knobs beside that A/B (V11, pause ▸
+  Debug Menu ▸ Visual): **Frac relax** (LLOYD RELAXATION rounds — the
+  regularity dial; each round moves every site to its own cell's
+  centroid, so 0 is raw ragged Poisson Voronoi and the shipped 2
+  measured cell-area CV 0.28 / roundness 0.77 against 0.53 / 0.69 at
+  zero, for no net cost since relaxation also stops the sliver-retirement
+  pass re-running), **Frac sep** (blue-noise site spacing before
+  relaxation), **Frac sites** (a multiplier on the variant's site count)
+  and **Frac bias** (force the impact crowding, which pulls AGAINST
+  regularity by construction).  All four bump a tuning GENERATION that
+  invalidates cached patterns, so a knob is visible on the next hit
+  rather than only on fresh terrain.  The
   A/B (pause ▸ Debug Menu ▸ Visual ▸ Fracture) flips every opted-in
   variant back to its shipped legacy break — powerlaw spray, dent
   breakShards, the spawnGlassShards fan, ROCK_CHIP — pending the user's
