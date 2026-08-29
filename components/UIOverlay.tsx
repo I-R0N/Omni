@@ -502,7 +502,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, tilt: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
@@ -1474,20 +1474,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration. Terminal cruise = acceleration/(1−friction), so this is the knob that actually changes everyday top speed.')}
                 {ctrlRow('Speed', onCyclePlayerSpeed, stats.playerSpeedName ?? '1×',
                   'Player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap. Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it).')}
-                {ctrlRow('Roll feel', onCyclePlayerRoll, stats.rollFeelName ?? 'Default',
-                  'Directional-tilt depth preset (SHIPS OFF; Off / Subtle / Default / Deep) stepping how far the hull pitches and rolls into a carved turn, lateral thrust or a throttle change — purely visual (physics, collision and aim never read it). Off levels out through the normal easing rather than snapping flat.')}
-                {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Cube',
-                  'What draws at the player\'s position. Ship (DEFAULT): the legacy sprite with the cos-tilt squash — an untouched build looks exactly as it always did. Sheet: PRE-RENDERED tilt art, one authored pose per lean, snapped to the nearest cell with yaw still on the canvas (see docs/SHIP_SPRITE_SHEETS.md); falls back to the squash until art exists, and needs "Roll feel" off Off to show anything. Cube: a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner for a gem-cut hull. Sphere: three great circles with a nose ring at the forward pole. Dodeca: a dodecahedron with a pentagonal face forward. Rhombic: the rhombic dodecahedron, axis vertex forward. Tri: a triangular dart ship — nose, swept wingtips, dorsal peak and keel.')}
-                {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
-                  'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): scales the tilt spring\'s natural frequency, so the hull tracks the hand looser or tighter with the same overshoot-and-wobble character. Ship weight also slows the spring (inertia).')}
-                {ctrlRow('Tilt mode', onCycleTiltMode, stats.tiltModeName ?? 'Lean',
-                  'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead — the hull keeps rolling with its travel about the axis perpendicular to the thrust and freezes where it stops; the white aim marker hides and a fixed chevron reticle ahead of the hull carries the aim.')}
-                {ctrlRow('Lean dir', onCycleLeanDir, stats.leanDirName ?? 'Default',
-                  'A/B for which way the hull tips in Lean mode. Default: bank INTO the acceleration, like an aircraft carving its turn. Reversed: both pitch and roll mirrored — the hull kicked back by its own thrust — and the wireframe re-bases NOSE-UP, so each shape\'s front face/vertex faces the screen at rest. Same signal, easing and clamps; Tumble is unaffected.')}
-                {ctrlRow('Tilt src', onCycleTiltSource, stats.tiltSourceName ?? 'Thrust',
-                  'A/B for what drives the tilt signal, in BOTH tilt modes. Thrust (default): the input vector — no input, no tilt. Velocity: the ship\'s actual motion, normalized by its real cruise speed — a coasting drift holds its lean, a wall bounce reads on the hull, and a tumble keeps rolling as long as the ship moves. Every term downstream is unchanged.')}
-                {ctrlRow('Vel gain', onCycleVelGain, stats.velGainName ?? '1×',
-                  'Sensitivity of the Velocity tilt source (1× / 2× / 4× / 10×): multiplies the cruise-normalized velocity signal before its clamp, so higher steps reach the full tilt at ever lower speeds — 2× at half cruise, 10× on almost any motion. Saturates earlier, never tilts deeper. Thrust mode ignores it.')}
                 {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
                   stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}
@@ -1535,6 +1521,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
                 {ctrlRow('Station', onTeleportStation, 'Go',
                   'Teleport the player to the station\'s doorstep (docking-test harness). Overworld only — no-op on maps without a station.')}
+              </>)}
+
+              {/* ── Ship Tilt (the directional-tilt system: what draws at
+                     the player's position and how it leans).  Its own
+                     section because these seven rows are one subsystem and
+                     they are A/B knobs for it — the Player section above is
+                     unrelated movement / input / test controls, and reading
+                     either was harder with the two interleaved.  The whole
+                     thing SHIPS OFF (Hull 'Ship' + Roll feel 'Off'), so
+                     turning it on is the first two rows here. ── */}
+              {renderSectionHeader('tilt', 'Ship Tilt')}
+              {!collapsed.tilt && (<>
+                {ctrlRow('Roll feel', onCyclePlayerRoll, stats.rollFeelName ?? 'Off',
+                  'Directional-tilt depth preset (SHIPS OFF; Off / Subtle / Default / Deep) stepping how far the hull pitches and rolls into a carved turn, lateral thrust or a throttle change — purely visual (physics, collision and aim never read it). Off levels out through the normal easing rather than snapping flat.')}
+                {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Ship',
+                  'What draws at the player\'s position. Ship (DEFAULT): the legacy sprite with the cos-tilt squash — an untouched build looks exactly as it always did. Sheet: PRE-RENDERED tilt art, one authored pose per lean, snapped to the nearest cell with yaw still on the canvas (see docs/SHIP_SPRITE_SHEETS.md); falls back to the squash until art exists, and needs "Roll feel" off Off to show anything. Cube: a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner for a gem-cut hull. Sphere: three great circles with a nose ring at the forward pole. Dodeca: a dodecahedron with a pentagonal face forward. Rhombic: the rhombic dodecahedron, axis vertex forward. Tri: a triangular dart ship — nose, swept wingtips, dorsal peak and keel.')}
+                {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
+                  'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): scales the tilt spring\'s natural frequency, so the hull tracks the hand looser or tighter with the same overshoot-and-wobble character. Ship weight also slows the spring (inertia).')}
+                {ctrlRow('Tilt mode', onCycleTiltMode, stats.tiltModeName ?? 'Lean',
+                  'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead — the hull keeps rolling with its travel about the axis perpendicular to the thrust and freezes where it stops; the white aim marker hides and a fixed chevron reticle ahead of the hull carries the aim.')}
+                {ctrlRow('Lean dir', onCycleLeanDir, stats.leanDirName ?? 'Default',
+                  'A/B for which way the hull tips in Lean mode. Default: bank INTO the acceleration, like an aircraft carving its turn. Reversed: both pitch and roll mirrored — the hull kicked back by its own thrust — and the wireframe re-bases NOSE-UP, so each shape\'s front face/vertex faces the screen at rest. Same signal, easing and clamps; Tumble is unaffected.')}
+                {ctrlRow('Tilt src', onCycleTiltSource, stats.tiltSourceName ?? 'Thrust',
+                  'A/B for what drives the tilt signal, in BOTH tilt modes. Thrust (default): the input vector — no input, no tilt. Velocity: the ship\'s actual motion, normalized by its real cruise speed — a coasting drift holds its lean, a wall bounce reads on the hull, and a tumble keeps rolling as long as the ship moves. Every term downstream is unchanged.')}
+                {ctrlRow('Vel gain', onCycleVelGain, stats.velGainName ?? '1×',
+                  'Sensitivity of the Velocity tilt source (1× / 2× / 4× / 10×): multiplies the cruise-normalized velocity signal before its clamp, so higher steps reach the full tilt at ever lower speeds — 2× at half cruise, 10× on almost any motion. Saturates earlier, never tilts deeper. Thrust mode ignores it.')}
               </>)}
 
               {/* ── Modules (DBG grants — varieties at fixed marks) ── */}

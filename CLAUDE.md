@@ -754,7 +754,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   √(player.mass / PLAYER_MASS), so a full outfit (~3× the lean mass)
   tilts ~1.7× more ponderously with the same wobble character
   (`MAX_TILT` caps the combined angle under π/2 so the cos-projection
-  can never mirror the sprite).  TUMBLE (DBG Player ▸ "Tilt mode",
+  can never mirror the sprite).  TUMBLE (DBG Ship Tilt ▸ "Tilt mode",
   Lean/Tumble — a TEST mode, user call) turns the clamped signal into
   angular RATE (`TUMBLE_RATE`, NEGATED so the hull rolls WITH its
   travel — user call): the hull rolls CONTINUOUSLY about the axis
@@ -776,7 +776,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   that tilts, not the sprite art's axes.  Physics, collision and aim
   never read it.  Works on every input device for free, since the
   signal is the shared movement vector.
-  `PLAYER_ROLL_CYCLE` is the DBG feel knob (Player ▸ "Roll feel"):
+  `PLAYER_ROLL_CYCLE` is the DBG feel knob (Ship Tilt ▸ "Roll feel"):
   named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
   from the pause debug menu; `tickPlayerRoll` reads the active angle, so
   Off levels out through the same easing rather than a separate branch.
@@ -786,12 +786,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   tilt, the renderer's plain-rotation path.  Off is a max angle of 0
   rather than a bypass, so nothing is dead code: the signal is computed
   and eased as always and simply converges on literal level.  Turning it
-  on is TWO rows of the debug menu — "Roll feel" onto a preset and
-  "Hull" onto its next step — which is why the hull cycle is ordered
+  on is the first TWO rows of the debug menu's SHIP TILT section —
+  "Roll feel" onto a preset and "Hull" onto its next step — which is why the hull cycle is ordered
   'Ship', 'Sheet', then the wireframes: the pre-rendered art is one step
   from the default and the experimental shapes sit behind it.
   THE PLAYER'S WIREFRAME HULLS (`PLAYER_HULL_CYCLE` /
-  `getActivePlayerHullMode` — DBG Player ▸ "Hull"): `render/playerCube.ts` draws a 3D wire cube rotating FOR
+  `getActivePlayerHullMode` — DBG Ship Tilt ▸ "Hull"): `render/playerCube.ts` draws a 3D wire cube rotating FOR
   REAL in the three axes the player rotates in — yaw stays on the
   canvas transform (a Z-rotation commutes with the projection),
   pitch/roll are real rotations inside the draw, and the projection is
@@ -821,11 +821,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the cos-tilt squash as the A/B — the squash path is sprite-mode
   only.  The shield/charge rings restore the plain rotation matrix
   (art offset included, which the wireframe frame omits) before
-  drawing in EVERY mode.  `PLAYER_ROLL_DAMPING_CYCLE` (DBG Player ▸
+  drawing in EVERY mode.  `PLAYER_ROLL_DAMPING_CYCLE` (DBG Ship Tilt ▸
   "Roll damp": Floaty ½× / Default / Stiff 2× / Snappy 4×) is one
   multiplier over the spring's natural frequency, so every step keeps
   the same overshoot-and-wobble character.  `LEAN_DIR_CYCLE` (DBG
-  Player ▸ "Lean dir": Default / Reversed) is the direction A/B for
+  Ship Tilt ▸ "Lean dir": Default / Reversed) is the direction A/B for
   LEAN mode — one sign over both spring targets, so Reversed tips the
   hull AWAY from the acceleration (nose rising under throttle) with
   the same signal, easing and clamps; deliberately lean-only, since
@@ -834,7 +834,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   nose feature faces the VIEWER at rest instead of the aim — a +90°
   pitch of the geometry alone inside `drawPlayerCube`, applied before
   the dynamic roll/pitch so both keep acting in the travel frame.
-  `TILT_SOURCE_CYCLE` (DBG Player ▸ "Tilt src": Thrust / Velocity) is
+  `TILT_SOURCE_CYCLE` (DBG Ship Tilt ▸ "Tilt src": Thrust / Velocity) is
   the SOURCE A/B, and it reaches BOTH tilt modes: Thrust (default)
   reads the input vector — no input, no tilt — while Velocity reads
   the ship's actual velocity normalised by the CRUISE speed — the real
@@ -846,7 +846,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ran all three ~3× weak in real flight (user report), since the cap
   exists for knockback overshoot and level flight never nears it.  One
   substitution at the top of `tickPlayerRoll`; every term downstream
-  is unchanged.  `VEL_GAIN_CYCLE` (DBG Player ▸ "Vel gain": 1× / 2× /
+  is unchanged.  `VEL_GAIN_CYCLE` (DBG Ship Tilt ▸ "Vel gain": 1× / 2× /
   4× / 10×) is the Velocity source's SENSITIVITY step — the gain
   multiplies the cruise-normalised vector BEFORE the magnitude clamp,
   so each step moves WHERE the tilt saturates (2× = full at half
@@ -2229,7 +2229,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   silence), and they are pure with a published CRC test vector, so they are
   pinnable without hardware.
 - **SHIP TILT SHEETS: yaw is FREE, pitch and roll are the art**
-  (`engine/systems/render/shipSprites.ts`, DBG Player ▸ Hull ▸ 'Sheet').
+  (`engine/systems/render/shipSprites.ts`, DBG Ship Tilt ▸ Hull ▸ 'Sheet').
   The player hull can draw as PRE-RENDERED poses instead of the cos(tilt)
   squash, and the whole design is one decomposition that is easy to get
   expensively wrong: YAW is a rotation about the VIEW axis, so it commutes

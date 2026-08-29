@@ -189,7 +189,8 @@ art at 30px, not at 1024.
 - `spritegen ship --backend=stub` produces a complete, valid sheet, and
   `spritegen validate` passes on it — with no GPU present.
 - The sheet loads in the real game: build, run, open **pause ▸ Debug Menu ▸
-  Player ▸ "Hull" ▸ Sheet**, and confirm the ship banks through the poses.
+  Ship Tilt ▸ "Hull" ▸ Sheet** (and step "Roll feel" off Off — the tilt
+  ships disabled), then confirm the ship banks through the poses.
   The suites already do exactly this — `tests/shipsprites.spec.ts` and the
   hull walk in `tests/roll.spec.ts` are your working examples of driving the
   engine headlessly and screenshotting it.

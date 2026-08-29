@@ -151,7 +151,7 @@ export const SHIP_SHEET_INTERCEPTOR: ShipSpriteSheet = {
 ```
 
 Then add it to `SHIP_SHEETS`. Select the mode in game at
-**pause ▸ Debug Menu ▸ Player ▸ "Hull" ▸ Sheet**.
+**pause ▸ Debug Menu ▸ Ship Tilt ▸ "Hull" ▸ Sheet** (with "Roll feel" stepped off Off — the tilt ships disabled).
 
 ## 7. Placeholder art, and checking your own
 
