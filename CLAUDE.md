@@ -1893,7 +1893,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   around it with a time-advancing differential rotation (screen-space,
   applied per star in `renderStars`; the no-lens path is the original
   untouched loop, and positions stay fractional / sizes integral so the
-  S3 no-resampling invariant holds).  There is NO HUD dock/enter button —
+  S3 no-resampling invariant holds).  HOW STRONG all of that is is a
+  live A/B (user report: the rift reads as too powerful, and strafing it
+  is dizzying) — DBG ▸ **Portals** carries five multipliers: rift SIZE,
+  gravity STRENGTH and RANGE, and the star lens split into AMOUNT and
+  SPIN.  Every one is applied AT THE READ (`getPortalSizeMult` et al. in
+  PhysicsSystem / BackgroundManager / dropShapes), never baked into the
+  portal entity, so the entity keeps `PORTAL_CONSTANTS` as its base and
+  a knob re-tunes the rifts already in the world with no map reload.
+  Two things are deliberate: SIZE moves the drawn mouth, the swallow
+  horizon and the lens radius TOGETHER (all three are `size.x` reads)
+  but never `USE_RANGE`, which is an interaction rule rather than a
+  look; and the lens is TWO knobs because the complaint is about MOTION
+  — "frozen" keeps the warp's shape while stopping its rotation, which
+  is what separates displacement from spin as the cause.  Index 0 of
+  every cycle is the shipped value, so the first click is always the
+  A/B.  There is NO HUD dock/enter button —
   the ship prompt is the whole affordance (a pill on top of it was
   redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
   intended path and is deliberately NOT wired here — Pair C (c2) owns the

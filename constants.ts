@@ -5129,6 +5129,87 @@ export function cycleSnitchSpeed(): number {
   return activeSnitchSpeedIndex;
 }
 
+// ── DBG portal tuning (user call: the rift reads as too POWERFUL) ───────────
+// Five live multipliers over the wormhole's shipped numbers, so how strong a
+// portal is can be judged by FLYING past one rather than by rebuilding.  Every
+// one is applied at the READ, never baked into the portal entity: the entity
+// keeps PORTAL_CONSTANTS as its base truth, so a knob takes effect on the
+// portals already in the world (no map reload) and nothing drifts out of sync.
+//
+// The reported dizziness is a MOTION complaint — strafing the mouth swings the
+// lensed star field back and forth — so the lens is split into two knobs, one
+// for how far it displaces and one for how fast it turns.  Either can be taken
+// to 0 independently, which is what separates "the warp is too strong" from
+// "the warp must not MOVE" as answers.
+//
+// SIZE scales the drawn rift, its swallow horizon and its lens radius
+// together (all three are `size.x` reads).  It deliberately does NOT touch
+// USE_RANGE: how close you must be to ENTER is an interaction rule, not a look,
+// and a knob that quietly moved it would make every other A/B unreadable.
+export const PORTAL_SIZE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 0.35, 1.25] as const;
+export const PORTAL_GRAVITY_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 1.5] as const;
+export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 1.5] as const;
+export const PORTAL_LENS_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0] as const;
+export const PORTAL_LENS_SPIN_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 2.0] as const;
+// Index 0 of every cycle is the SHIPPED value, so the panel opens on what the
+// player just flew through and the first click is always the A/B.
+let activePortalSizeIndex = 0;
+let activePortalGravityIndex = 0;
+let activePortalGravityRangeIndex = 0;
+let activePortalLensIndex = 0;
+let activePortalLensSpinIndex = 0;
+
+export function getPortalSizeMult(): number { return PORTAL_SIZE_CYCLE[activePortalSizeIndex]; }
+export function getPortalGravityMult(): number { return PORTAL_GRAVITY_CYCLE[activePortalGravityIndex]; }
+export function getPortalGravityRangeMult(): number { return PORTAL_GRAVITY_RANGE_CYCLE[activePortalGravityRangeIndex]; }
+export function getPortalLensMult(): number { return PORTAL_LENS_CYCLE[activePortalLensIndex]; }
+export function getPortalLensSpinMult(): number { return PORTAL_LENS_SPIN_CYCLE[activePortalLensSpinIndex]; }
+
+export function getPortalSizeName(): string { return `${PORTAL_SIZE_CYCLE[activePortalSizeIndex]}×`; }
+export function getPortalGravityName(): string {
+  const v = PORTAL_GRAVITY_CYCLE[activePortalGravityIndex];
+  return v === 0 ? 'off' : `${v}×`;
+}
+export function getPortalGravityRangeName(): string { return `${PORTAL_GRAVITY_RANGE_CYCLE[activePortalGravityRangeIndex]}×`; }
+export function getPortalLensName(): string {
+  const v = PORTAL_LENS_CYCLE[activePortalLensIndex];
+  return v === 0 ? 'off' : `${v}×`;
+}
+export function getPortalLensSpinName(): string {
+  const v = PORTAL_LENS_SPIN_CYCLE[activePortalLensSpinIndex];
+  return v === 0 ? 'frozen' : `${v}×`;
+}
+/** Live readout of what the knobs currently resolve to, in the units the
+ *  constants are authored in — so a chosen combination can be copied back
+ *  into PORTAL_CONSTANTS once an A/B settles. */
+export function getPortalTuningInfo(): string {
+  const size = Math.round(PORTAL_CONSTANTS.SIZE * getPortalSizeMult());
+  const str = Math.round(PORTAL_CONSTANTS.GRAVITY_STRENGTH * getPortalGravityMult());
+  const rng = Math.round(PORTAL_CONSTANTS.GRAVITY_RANGE * getPortalGravityRangeMult());
+  return `${size}px g${str}/${rng}`;
+}
+
+export function cyclePortalSize(): number {
+  activePortalSizeIndex = (activePortalSizeIndex + 1) % PORTAL_SIZE_CYCLE.length;
+  return activePortalSizeIndex;
+}
+export function cyclePortalGravity(): number {
+  activePortalGravityIndex = (activePortalGravityIndex + 1) % PORTAL_GRAVITY_CYCLE.length;
+  return activePortalGravityIndex;
+}
+export function cyclePortalGravityRange(): number {
+  activePortalGravityRangeIndex = (activePortalGravityRangeIndex + 1) % PORTAL_GRAVITY_RANGE_CYCLE.length;
+  return activePortalGravityRangeIndex;
+}
+export function cyclePortalLens(): number {
+  activePortalLensIndex = (activePortalLensIndex + 1) % PORTAL_LENS_CYCLE.length;
+  return activePortalLensIndex;
+}
+export function cyclePortalLensSpin(): number {
+  activePortalLensSpinIndex = (activePortalLensSpinIndex + 1) % PORTAL_LENS_SPIN_CYCLE.length;
+  return activePortalLensSpinIndex;
+}
+
 // ── Control schemes (user directive, step 5 G9) ──────────────────────────────
 // Picked at game start (main menu) and changeable from the pause menu.  Like
 // DIFFICULTY, the choice is a PREFERENCE: it survives restarts and is not

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode} from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, getPortalSizeMult} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -859,7 +859,15 @@ export class PhysicsSystem {
             const dx = wrapDeltaX(entity.position.x, attractor.position.x);
             const dy = wrapDeltaY(entity.position.y, attractor.position.y);
             const distSq = dx*dx + dy*dy;
-            const rangeSq = attractor.gravityRange! ** 2;
+            // DBG portal tuning is applied at the READ, so the entity keeps
+            // PORTAL_CONSTANTS as its base and a knob re-tunes the portals
+            // already in the world.  Non-portal attractors read 1×.
+            const isPortalAttr = attractor.isPortal === true;
+            const gMult = isPortalAttr ? getPortalGravityMult() : 1;
+            const rMult = isPortalAttr ? getPortalGravityRangeMult() : 1;
+            const sMult = isPortalAttr ? getPortalSizeMult() : 1;
+            const range = attractor.gravityRange! * rMult;
+            const rangeSq = range * range;
 
             // Mobile shard-family entities get the close-attractor crush
             // (mobile shards = STRUCTURE with finite mass).  A wormhole
@@ -875,7 +883,9 @@ export class PhysicsSystem {
             // references.
             const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity
                 && entity.dragonSegment !== true;
-            const crushR = attractor.isPortal ? attractor.size.x * 0.31 : attractor.size.x / 2;
+            const crushR = isPortalAttr
+                ? attractor.size.x * 0.31 * sMult   // the DRAWN horizon, tuning included
+                : attractor.size.x / 2;
             if (distSq < crushR * crushR && isMobileShard) {
                 entity.active = false;
                 if (onDamage && !attractor.isPortal) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
@@ -883,7 +893,7 @@ export class PhysicsSystem {
             }
 
             if (distSq < rangeSq) {
-                let force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
+                let force = ((attractor.gravityStrength || 1000) * gMult) / Math.max(distSq, 10000);
                 const maxAccel = entity.type === EntityType.PLAYER ? 0.2 : 5.0;
                 // Attractor-side player scaling (portals): shards and enemies
                 // take the full well, the player only a fraction of it, so a

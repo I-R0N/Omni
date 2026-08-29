@@ -180,26 +180,39 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
   /** Loose entities near the ship travel through a portal and re-emerge from
    *  the EXIT rift after the player, flung out at random headings/speeds
    *  (PORTAL_CONSTANTS.TRANSIT).  Direct engine drives — "can the ship fly
-   *  there" is not the question.  Planted shards + a salvage drop are moved
-   *  next to the ship at an arena rift, the transit is triggered, and the
-   *  same ids are then expected in the DESTINATION map near its return rift,
-   *  moving, with the portal-gravity grace stamped. */
+   *  there" is not the question.
+   *
+   *  The claim is about EMERGENCE, so the state is sampled AT emergence by a
+   *  per-frame in-page observer rather than read once the queue has drained.
+   *  That distinction is load-bearing rather than fussy: emerged debris is
+   *  ordinary world matter the moment it lands, so within a second or two a
+   *  shard may legitimately merge into a neighbour and a salvage drop may
+   *  fuse with another (both conserve mass/value and both DEACTIVATE one of
+   *  the pair), and the id then vanishes for a reason that has nothing to do
+   *  with the transit.  A drained-queue read turns that into a flake — it is
+   *  what this test failed on first — while the observer measures the frame
+   *  the wormhole actually spat each entity out. */
   test('nearby shards and a drop travel through and flow out of the exit rift', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    const setup = await engine(page, e => {
+    // Plant the cargo, arm the observer and travel in ONE evaluate: no sim
+    // time passes in between, so nothing can move the fixture before it
+    // ships.  (An earlier two-step version lost a shard to the portal's own
+    // swallow horizon between the two round trips — the feature eating its
+    // own test fixture.)  The ship parks well CLEAR of the mouth for the same
+    // reason: a ring planted 120 units around a ship 180 from the rift puts
+    // its nearest shard inside the horizon.
+    const run = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
       const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
       if (!rift) return null;
-      e.player.position.x = rift.position.x + 180;
+      e.player.position.x = rift.position.x + 500;
       e.player.position.y = rift.position.y;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
-      // Plant four mobile shards in a ring around the ship, well inside
-      // TRANSIT.RADIUS, and one salvage drop beside it.
-      // Nebula shards are excluded from the plant: their heavy cloud
-      // damping would fail the "still moving" assertion below without
-      // saying anything about the transit itself.
+      // Nebula shards are excluded: their heavy cloud damping would fail the
+      // "still moving" assertion without saying anything about the transit.
       const shards = e.currentMap.entities
         .filter((x: any) => x.active && x.mass !== Infinity
           && x.shardVariant && String(x.shardVariant).endsWith('-shard')
@@ -215,49 +228,59 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
         e.currentMap.entities, e.activeDrops,
         { x: e.player.position.x + 60, y: e.player.position.y }, { x: 0, y: 0 });
       const drop = e.activeDrops[e.activeDrops.length - 1];
-      const ids = [...shards.map((s: any) => s.id), drop.id];
+      const ids: string[] = [...shards.map((s: any) => s.id), drop.id];
+
+      // The observer records each watched id the first frame it appears in
+      // the destination map, so a later merge cannot erase the evidence.
+      const seen: Record<string, any> = {};
+      (window as any).__transitSeen = seen;
+      const tick = () => {
+        const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+        const anchor = exit ? exit.position : e.player.position;
+        for (const id of ids) {
+          if (seen[id]) continue;
+          const en = e.currentMap.entities.find((x: any) => x.id === id && x.active);
+          if (!en) continue;
+          seen[id] = {
+            speed: Math.hypot(en.velocity.x, en.velocity.y),
+            dist: Math.hypot(en.position.x - anchor.x, en.position.y - anchor.y),
+            grace: en.portalGraceTimer ?? 0,
+          };
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
       const ok = e.transitionToMap(rift.portalTargetId);
-      return { ok, ids, queued: e.portalTransit.length };
+      const queuedIds = e.portalTransit.map((t: any) => t.entity.id);
+      return { ok, ids, queued: e.portalTransit.length, carried: ids.filter(id => queuedIds.includes(id)).length };
     });
 
-    expect(setup, 'an arena rift on the hub').not.toBeNull();
-    expect(setup!.ok).toBe(true);
-    // Everything planted was captured (ambient debris in radius may add more,
-    // up to TRANSIT.MAX_ENTITIES).
-    expect(setup!.queued).toBeGreaterThanOrEqual(setup!.ids.length);
+    expect(run, 'an arena rift on the hub').not.toBeNull();
+    expect(run!.ok, 'the transition ran').toBe(true);
+    // Every planted entity was captured — the whole point of the radius
+    // sweep.  Ambient debris in range may add more, up to TRANSIT.MAX_ENTITIES.
+    expect(run!.carried).toBe(run!.ids.length);
+    expect(run!.queued).toBeGreaterThanOrEqual(run!.ids.length);
 
-    // The stagger tops out at DELAY_MAX (1.6 sim-seconds); poll the queue
-    // empty rather than waiting a fixed time (harness rule 1).
+    // 3. The stagger tops out at DELAY_MAX (1.6 sim-seconds); poll the queue
+    //    empty rather than waiting a fixed time (harness rule 1).
     await waitForEngine(page, e => e.portalTransit.length === 0,
       'the transit queue to drain');
 
-    const out = await engine(page, (e, ids: string[]) => {
-      // The arena's one portal is its return rift home — the exit mouth.
-      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
-      const anchor = exit ? exit.position : e.player.position;
-      return ids.map(id => {
-        const en = e.currentMap.entities.find((x: any) => x.id === id);
-        if (!en) return null;
-        return {
-          active: en.active,
-          speed: Math.hypot(en.velocity.x, en.velocity.y),
-          dist: Math.hypot(en.position.x - anchor.x, en.position.y - anchor.y),
-          grace: en.portalGraceTimer ?? 0,
-        };
-      });
-    }, setup!.ids);
+    const seen = await page.evaluate(() => (window as any).__transitSeen as Record<string, any>);
 
-    for (const o of out) {
-      expect(o, 'every travelled entity exists in the destination map').not.toBeNull();
-      expect(o!.active).toBe(true);
-      // Flung, not parked: still moving despite a moment of damping/flow.
-      expect(o!.speed).toBeGreaterThan(0.3);
-      // Emerged AT the exit rift: mouth scatter (70) plus at most ~1.6s of
+    for (const id of run!.ids) {
+      const o = seen[id];
+      expect(o, `entity ${id} emerged in the destination map`).toBeTruthy();
+      // Flung, not parked.
+      expect(o.speed).toBeGreaterThan(0.3);
+      // Emerged AT the exit rift: mouth scatter (70) plus a frame or two of
       // flight at the top ejection speed, with margin.
-      expect(o!.dist).toBeLessThan(1200);
+      expect(o.dist).toBeLessThan(400);
       // The portal-gravity grace window is live, so the exit well cannot
       // swallow what it just spat out.
-      expect(o!.grace).toBeGreaterThan(0);
+      expect(o.grace).toBeGreaterThan(0);
     }
 
     watch.assertClean();

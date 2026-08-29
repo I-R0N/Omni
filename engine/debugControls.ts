@@ -31,6 +31,8 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
+    cyclePortalLens, cyclePortalLensSpin,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -703,6 +705,39 @@ export class DebugControls {
    *  both AI speed states live so the chase feel can be tuned in-game. */
   cycleSnitchSpeed() {
     cycleSnitchSpeed();
+  }
+
+  // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────
+  // Five live multipliers over PORTAL_CONSTANTS, applied at the read so they
+  // re-tune the portals already in the world — no map reload, and the entity
+  // keeps the shipped numbers as its base.  See the cycle tables in
+  // constants.ts for what each one covers.
+
+  /** Rift SIZE — the drawn mouth, its swallow horizon and its lens radius.
+   *  Deliberately not the entry range: that is an interaction rule. */
+  cyclePortalSize() {
+    cyclePortalSize();
+  }
+
+  /** Portal gravity STRENGTH (0 = the well off entirely, art intact). */
+  cyclePortalGravity() {
+    cyclePortalGravity();
+  }
+
+  /** How far the portal's pull REACHES. */
+  cyclePortalGravityRange() {
+    cyclePortalGravityRange();
+  }
+
+  /** Star-lens strength — how far the warp displaces the background. */
+  cyclePortalLens() {
+    cyclePortalLens();
+  }
+
+  /** Star-lens SPIN — the swirl's time advance only, so the warp can be
+   *  frozen without being flattened (the dizziness is a motion complaint). */
+  cyclePortalLensSpin() {
+    cyclePortalLensSpin();
   }
 
   /** Cycle the DBG enemy-scaling multiplier (ENEMY_SCALE_CYCLE) — scales

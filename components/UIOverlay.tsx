@@ -135,6 +135,11 @@ interface UIOverlayProps {
   onToggleAsteroidFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
+  onCyclePortalSize?: () => void;
+  onCyclePortalGravity?: () => void;
+  onCyclePortalGravityRange?: () => void;
+  onCyclePortalLens?: () => void;
+  onCyclePortalLensSpin?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -429,6 +434,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleAsteroidFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
+  onCyclePortalSize,
+  onCyclePortalGravity,
+  onCyclePortalGravityRange,
+  onCyclePortalLens,
+  onCyclePortalLensSpin,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -490,6 +500,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
+    portal: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -1596,6 +1607,26 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ))}
                 </div>
               )}
+
+              {/* ── Portals (wormhole tuning, DBG) ─────────────────── */}
+              {/* Five live multipliers over PORTAL_CONSTANTS.  All applied at
+                  the READ, so each takes effect on the rifts already in the
+                  world — fly past one and click.  Index 0 of every cycle is
+                  the SHIPPED value, so the first click is always the A/B. */}
+              {renderSectionHeader('portal', 'Portals')}
+              {!collapsed.portal && (<>
+                {ctrlRow('Size', onCyclePortalSize, stats.portalSizeName ?? '1×',
+                  'Rift SIZE multiplier (1 / 0.75 / 0.5 / 0.35 / 1.25×) — scales the drawn mouth, the horizon that swallows shards, and the star-lens radius together, live on the portals already placed. Deliberately does NOT change how close you must be to ENTER (USE_RANGE): that is an interaction rule, not a look, and moving it would make the other comparisons unreadable.')}
+                {ctrlRow('Gravity', onCyclePortalGravity, stats.portalGravityName ?? '1×',
+                  'Portal gravity STRENGTH (1 / 0.5 / 0.25 / off / 1.5×) — how hard the well pulls shards, enemies and drops (the player always feels only GRAVITY_PLAYER_SCALE of it). "off" leaves the art and the lens untouched, so this isolates the pull from the look.')}
+                {ctrlRow('  ↳ range', onCyclePortalGravityRange, stats.portalGravityRangeName ?? '1×',
+                  'How far the pull REACHES (1 / 0.75 / 0.5 / 1.5× of GRAVITY_RANGE). Separate from strength because a well can be too WIDE without being too strong — a short, firm well reads as a mouth, a long faint one as the whole area sagging.')}
+                {ctrlRow('Lens', onCyclePortalLens, stats.portalLensName ?? '1×',
+                  'Background star-warp strength (1 / 0.5 / 0.25 / off). Scales how far stars are displaced off the throat AND the standing twist. At "off" the star field takes its original untouched draw path — the cheapest possible A/B against the warp existing at all.')}
+                {ctrlRow('  ↳ spin', onCyclePortalLensSpin, stats.portalLensSpinName ?? '1×',
+                  'Star-lens SPIN (1 / 0.5 / 0.25 / frozen / 2×) — the swirl\'s TIME advance only. Split from Lens because dizziness is a motion complaint: "frozen" keeps the warp\'s shape but stops it turning, which tells you whether the discomfort is the displacement or the rotation.')}
+                {statRow('  ↳ live', stats.portalTuningInfo ?? '—', 'text-slate-400')}
+              </>)}
 
               {/* ── Boss capstone summon ((h), DBG) ────────────────── */}
               {renderSectionHeader('boss', 'Bosses')}

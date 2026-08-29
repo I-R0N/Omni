@@ -16,7 +16,7 @@
  *  rotation itself.
  */
 import { GameEntity, EntityType, Vector2 } from '../../../types';
-import { PORTAL_CONSTANTS, STATION_CONSTANTS } from '../../../constants';
+import { PORTAL_CONSTANTS, STATION_CONSTANTS, getPortalSizeMult } from '../../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb } from './drawUtils';
 
@@ -243,7 +243,14 @@ export function drawDropShape(
         // (nowSec) — the entity is static, mass-∞ scenery, and the
         // idle rift costs NO particles (the openPortal burst only
         // fires on an actual transit).
-        const r = entity.size.x / 2;
+        // DBG portal SIZE tuning is applied here rather than to the entity, so
+        // the rift's `size` stays the base PORTAL_CONSTANTS truth and the knob
+        // re-scales the portals already in the world.  The swallow horizon
+        // (PhysicsSystem) and the star lens (BackgroundManager) read the same
+        // multiplier, so all three stay one object.  USE_RANGE deliberately
+        // does NOT scale — the entry halo below is the interaction radius, not
+        // the art.
+        const r = (entity.size.x / 2) * getPortalSizeMult();
         const breathe = 0.85 + 0.15 * Math.sin(nowSec * 1.6);
         const spin = nowSec * 0.5;
 

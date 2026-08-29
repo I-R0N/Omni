@@ -1848,6 +1848,14 @@ export interface EngineStats {
   controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // DBG portal tuning (pause ▸ Debug Menu ▸ Portals) — five live multipliers
+  // over PORTAL_CONSTANTS, plus a readout of what they resolve to.
+  portalSizeName?: string;
+  portalGravityName?: string;
+  portalGravityRangeName?: string;
+  portalLensName?: string;
+  portalLensSpinName?: string;
+  portalTuningInfo?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */

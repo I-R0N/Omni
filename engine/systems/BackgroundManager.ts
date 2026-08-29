@@ -4,6 +4,7 @@ import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
   getActiveStarBands, resolveStarParallax, PORTAL_CONSTANTS,
+  getPortalSizeMult, getPortalLensMult, getPortalLensSpinMult,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -217,14 +218,21 @@ export class BackgroundManager {
    *  the per-puff and per-star loops only ever see lenses that can matter. */
   private buildLensList(cameraPos: Vector2, attractors: GameEntity[],
                         width: number, height: number, zoom: number): void {
+    // DBG portal tuning: SIZE scales the lens radius with the rift it belongs
+    // to, and LENS scales the warp's strength (0 = no lens at all, which is
+    // why an empty list is the honest way to express it — the star loop then
+    // takes its original untouched fast path).
+    const lensMult = getPortalLensMult();
+    const sizeMult = getPortalSizeMult();
     let n = 0;
-    for (let i = 0; i < attractors.length; i++) {
+    for (let i = 0; i < attractors.length && lensMult > 0; i++) {
         const attr = attractors[i];
         if (!attr.active) continue;
         const sx = width / 2 + wrapDeltaX(cameraPos.x, attr.position.x) * zoom;
         const sy = height / 2 + wrapDeltaY(cameraPos.y, attr.position.y) * zoom;
-        const starR = attr.size.x * PORTAL_CONSTANTS.LENS.RADIUS_MULT * zoom;
-        const puffR = attr.size.x * 8 * zoom;
+        const scaled = attr.size.x * (attr.isPortal ? sizeMult : 1);
+        const starR = scaled * PORTAL_CONSTANTS.LENS.RADIUS_MULT * zoom;
+        const puffR = scaled * 8 * zoom;
         const maxR = Math.max(starR, puffR);
         if (sx < -maxR || sx > width + maxR || sy < -maxR || sy > height + maxR) continue;
         this._lensCX[n] = sx;
@@ -774,9 +782,15 @@ public setMapType(type: MapType) {
         lr[l] = this._lensStarR[l] * dpr;
         lr2[l] = lr[l] * lr[l];
     }
-    const pushDev = PORTAL_CONSTANTS.LENS.PUSH * dpr;
-    const swirlNow = PORTAL_CONSTANTS.LENS.SWIRL_WIND
-        + performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE;
+    // DBG: LENS scales how far the warp displaces (push AND the standing
+    // twist); LENS SPIN scales only the TIME advance, so the swirl can be
+    // frozen without flattening the warp.  The two are separate knobs
+    // because the reported dizziness is about MOTION, not displacement.
+    const lensMult = getPortalLensMult();
+    const spinMult = getPortalLensSpinMult();
+    const pushDev = PORTAL_CONSTANTS.LENS.PUSH * dpr * lensMult;
+    const swirlNow = (PORTAL_CONSTANTS.LENS.SWIRL_WIND
+        + performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE * spinMult) * lensMult;
 
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
