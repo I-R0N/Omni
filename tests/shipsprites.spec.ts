@@ -34,7 +34,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine, waitForStats } from './helpers';
+import { boot, enableTilt, engine, startRun, waitForEngine, waitForStats } from './helpers';
 
 /** assets.ts SHIP_TILT_GRID_STANDARD, hard-coded (harness rule 7). */
 const RING_DEG = [0, 15, 30, 45, 60, 75, 90];
@@ -199,10 +199,13 @@ test.describe('the sheet renders in a real run', () => {
   test('Sheet mode draws a live bank from authored poses', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    // The tilt ships OFF and the hull ships as the legacy sprite, so a
+    // player sees none of this without opting in — which makes turning it
+    // on exactly two rows: "Roll feel" onto a preset, "Hull" onto Sheet.
+    await enableTilt(page);
 
-    // Cube is the default; Sheet is six steps along the hull cycle.
     await engine(page, e => {
-      for (let i = 0; i < 6; i++) e.dbg.cyclePlayerHull();
+      e.dbg.cyclePlayerHull(); // Ship -> Sheet, one step
       e.input.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
     });
     await waitForStats(page, s => s.hullModeName === 'Sheet', 'the sheet hull');
@@ -222,8 +225,8 @@ test.describe('the sheet renders in a real run', () => {
     await waitForEngine(page, e => (e.player.visualRoll ?? 1) === 0, 'levelled off');
 
     // Back to the shipped default so nothing leaks into another spec.
-    await engine(page, e => { for (let i = 0; i < 2; i++) e.dbg.cyclePlayerHull(); });
-    await waitForStats(page, s => s.hullModeName === 'Cube', 'back to the cube');
+    await engine(page, e => { for (let i = 0; i < 7; i++) e.dbg.cyclePlayerHull(); });
+    await waitForStats(page, s => s.hullModeName === 'Ship', 'back to the sprite default');
 
     watch.assertClean();
   });

@@ -779,17 +779,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
   from the pause debug menu; `tickPlayerRoll` reads the active angle, so
   Off levels out through the same easing rather than a separate branch.
-  THE PLAYER'S DEFAULT HULL IS A WIREFRAME CUBE (user call,
-  `PLAYER_HULL_CYCLE` / `getActivePlayerHullMode` — DBG Player ▸
-  "Hull"): `render/playerCube.ts` draws a 3D wire cube rotating FOR
+  THE WHOLE TILT SHIPS OFF (user call): `PLAYER_ROLL_CYCLE` defaults to
+  'Off' and `PLAYER_HULL_CYCLE` to 'Ship', so an untouched build renders
+  EXACTLY as it did before any of this existed — the legacy sprite, no
+  tilt, the renderer's plain-rotation path.  Off is a max angle of 0
+  rather than a bypass, so nothing is dead code: the signal is computed
+  and eased as always and simply converges on literal level.  Turning it
+  on is TWO rows of the debug menu — "Roll feel" onto a preset and
+  "Hull" onto its next step — which is why the hull cycle is ordered
+  'Ship', 'Sheet', then the wireframes: the pre-rendered art is one step
+  from the default and the experimental shapes sit behind it.
+  THE PLAYER'S WIREFRAME HULLS (`PLAYER_HULL_CYCLE` /
+  `getActivePlayerHullMode` — DBG Player ▸ "Hull"): `render/playerCube.ts` draws a 3D wire cube rotating FOR
   REAL in the three axes the player rotates in — yaw stays on the
   canvas transform (a Z-rotation commutes with the projection),
   pitch/roll are real rotations inside the draw, and the projection is
   ORTHOGRAPHIC (no perspective — user call).  The hulls are a SHAPE
   TABLE (`HullDef`: unit-radius vertices + edge list + nose-marker
   flags + per-shape scale), so a new shape is a table entry, never a
-  new draw path.  SIX wireframes today: 'Cube' (the default —
-  axis-aligned, so at rest it is a FLAT SQUARE with the NOSE FACE
+  new draw path.  SIX wireframes today: 'Cube' (axis-aligned, so at
+  rest it is a FLAT SQUARE with the NOSE FACE
   edge-on as the forward edge), 'Diamond' (the cube stood on a corner:
   one corner straight up at the viewer, the adjacent corner's
   projection dead forward — exact up AND exact forward is impossible,

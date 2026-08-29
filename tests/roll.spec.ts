@@ -64,7 +64,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine, waitForStats } from './helpers';
+import { boot, enableTilt, engine, startRun, waitForEngine, waitForStats } from './helpers';
 
 /** PLAYER_ROLL_CONSTANTS, hard-coded rather than imported (harness rule 7). */
 const MAX_ANGLE = 0.85;
@@ -142,6 +142,7 @@ test.describe('the roll signal is the lateral thrust component', () => {
   test('strafing banks, nose-line thrust flies level, and the sign follows the side', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // Facing +x: thrust along +y is a pure strafe, +x is pure nose-line.
     const strafe = await driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 240 });
@@ -168,6 +169,7 @@ test.describe('the roll signal is the lateral thrust component', () => {
   test('releasing settles to EXACTLY level, and coasting never banks', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // From a full bank with no input the roll must reach literal 0 — the
     // snap that keeps the renderer on its plain-rotation path — not hover
@@ -184,6 +186,7 @@ test.describe('the roll signal is the lateral thrust component', () => {
   test('the tilt is a second-order spring: it overshoots and settles', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // First tick from rest: semi-implicit Euler picks up v = ω²·A·dt and
     // moves the angle by v·dt — the ω²·A·dt² signature of a SPRING (a
@@ -205,6 +208,7 @@ test.describe('the turn term — the aim-locked schemes still bank', () => {
   test('carving under thrust banks; the same sweep coasting stays level', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // 4 rad/s is the authored full-bank rate (1 / YAW_GAIN).  Thrust rides
     // the facing exactly — the touch / joystick / gamepad geometry, where
@@ -240,6 +244,7 @@ test.describe('the slip term — the drift of a hard turn holds the bank', () =>
   test('drifting sideways under power banks; the same drift coasting does not', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     /** Hold a fixed facing + thrust with the VELOCITY pinned per tick —
      *  the post-hard-turn state, where the nose points one way and the
@@ -288,6 +293,7 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
   test('held throttle holds the lean, cutting settles to level, reverse leans back', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     const r = await engine(page, e => {
       e.player.rotation = 0;
@@ -330,6 +336,7 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
   test('a diagonal thrust tilts on BOTH axes, inside the authored maximum', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     const r = await engine(page, e => {
       e.player.rotation = 0;
@@ -376,9 +383,11 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
   test('Deep out-banks Default, and Off levels out through the easing', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
-    // The cycle ships on Default (index 2 of Off / Subtle / Default / Deep),
-    // so one step lands on Deep and one more wraps to Off.  Each probe runs
+    // The cycle SHIPS on Off (an untouched build has no tilt at all);
+    // enableTilt above stepped it to Default, so one step from here lands
+    // on Deep and one more wraps back to Off.  Each probe runs
     // cycle + ticks inside ONE evaluate so live sim steps can't interleave.
     const deep = await engine(page, e => {
       e.dbg.cyclePlayerRoll(); // Default → Deep
@@ -425,16 +434,18 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
   });
 });
 
-test.describe('the wireframe hull shapes', () => {
-  test('the cube ships as the default, and every shape renders a live bank', async ({ page }) => {
+test.describe('the hull cycle', () => {
+  test('the sprite ships as the default, and every hull renders a live bank', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
-    // The flat cube is the SHIPPED default (user call), with the other
-    // shapes — corner-up Diamond, Sphere, Dodecahedron, Rhombic
-    // dodecahedron — and the sprite each one DBG step away.  Pinned here
-    // because a default is exactly what drifts unwatched.
-    await waitForStats(page, s => s.hullModeName === 'Cube', 'the cube default');
+    // The legacy SPRITE is the shipped default (user call): an untouched
+    // build must look exactly as it did before any of the tilt work
+    // existed.  Pinned here because a default is exactly what drifts
+    // unwatched — and because the whole point of the Off/Ship pair is that
+    // a player who never opens the debug menu sees none of this.
+    await waitForStats(page, s => s.hullModeName === 'Ship', 'the sprite default');
 
     // Hold a strafe for the whole walk, so every wireframe shape renders
     // BANKED live frames — the clean-console assertion is what covers
@@ -446,13 +457,20 @@ test.describe('the wireframe hull shapes', () => {
     await waitForEngine(
       page,
       e => Math.abs(e.player.visualRoll ?? 0) > 0.3,
-      'a live bank on the cube',
+      'a live bank on the sprite',
     );
 
     // Unrolled rather than looped: waitForStats SERIALIZES its predicate
     // into the page (harness rule — no closure variables survive), so each
     // shape's name must be a literal.  The stats push between steps
     // implies rendered frames — each shape drew banked.
+    // ORDER IS THE POINT: 'Sheet' sits immediately after the default, so
+    // switching to the pre-rendered art is ONE step of this row.  The
+    // wireframes are the experimental tail behind it.
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Sheet', 'the tilt-sheet hull, one step from the default');
+    await engine(page, e => e.dbg.cyclePlayerHull());
+    await waitForStats(page, s => s.hullModeName === 'Cube', 'the Cube hull');
     await engine(page, e => e.dbg.cyclePlayerHull());
     await waitForStats(page, s => s.hullModeName === 'Diamond', 'the Diamond hull');
     await engine(page, e => e.dbg.cyclePlayerHull());
@@ -463,16 +481,10 @@ test.describe('the wireframe hull shapes', () => {
     await waitForStats(page, s => s.hullModeName === 'Rhombic', 'the Rhombic hull');
     await engine(page, e => e.dbg.cyclePlayerHull());
     await waitForStats(page, s => s.hullModeName === 'Tri', 'the Tri dart ship');
-    // 'Sheet' is the pre-rendered-art hull (render/shipSprites.ts); banked
-    // here like the wireframes, so this walk covers its blit path too.
-    await engine(page, e => e.dbg.cyclePlayerHull());
-    await waitForStats(page, s => s.hullModeName === 'Sheet', 'the tilt-sheet hull');
 
     await engine(page, e => e.input.keys.delete('KeyS'));
     await engine(page, e => e.dbg.cyclePlayerHull());
-    await waitForStats(page, s => s.hullModeName === 'Ship', 'the sprite A/B');
-    await engine(page, e => e.dbg.cyclePlayerHull());
-    await waitForStats(page, s => s.hullModeName === 'Cube', 'back to the cube');
+    await waitForStats(page, s => s.hullModeName === 'Ship', 'wrapping back to the default');
 
     watch.assertClean();
   });
@@ -482,6 +494,7 @@ test.describe('the rotation-damping cycle', () => {
   test('one multiplier scales the spring frequency, keeping its character', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     /** One tick into a full strafe from level, at the current damping —
      *  the first-tick delta IS the effective attack rate. */
@@ -519,6 +532,7 @@ test.describe('tilt inertia rides ship weight', () => {
   test('a heavier ship tilts more ponderously — an exact first-tick ratio', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // ω divides by √(mass ratio), so the first-tick step (∝ ω²) divides
     // by the ratio itself.  The lean start's mass IS the reference mass,
@@ -540,6 +554,7 @@ test.describe('the tumble tilt mode — thrust drives continuous roll', () => {
   test('held thrust keeps the hull rolling; cutting it freezes mid-roll', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     const r = await engine(page, e => {
       e.dbg.cycleTiltMode(); // Lean → Tumble
@@ -612,6 +627,7 @@ test.describe('the lean-direction A/B', () => {
   test('Reversed mirrors both axes exactly; Tumble keeps its own direction', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // One tick into a diagonal (both axes firing) at each direction — the
     // reversal is ONE sign over the whole signal vector, so each axis's
@@ -692,6 +708,7 @@ test.describe('the tilt-source A/B', () => {
   test('Velocity leans with motion: a coasting drift banks, thrust at rest is silent', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     const r = await engine(page, e => {
       const reset = () => {
@@ -786,6 +803,7 @@ test.describe('the bank happens in real flight', () => {
   test('a held strafe key banks the ship and releasing it levels off', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await enableTilt(page);
 
     // Pin the FACING via the aim pointer (the sim re-derives rotation from
     // it every step, so writing rotation directly would not stick): aim
