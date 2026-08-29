@@ -1230,6 +1230,155 @@ test.describe('only the struck piece chips (V12)', () => {
 
     watch.assertClean();
   });
+
+  // The gate is variant-AGNOSTIC by construction (one call site, one
+  // helper), but progressive fracture stopped being rock-only at V10 and
+  // "by construction" is exactly the claim that rots silently.  These two
+  // pin it for GLASS as well: once on the real glass tile, and once on
+  // BYTE-IDENTICAL geometry run as rock and then as glass, so a
+  // difference could only come from variant policy.
+  test('glass gets the same gate: struck face only, and no contact point never detaches',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const pickTile = () => ents.find((x: any) => x.active
+        && x.shardVariant === 'glass-tile' && x.mass === Infinity && !x.probed);
+      const drive = (withContact: boolean) => {
+        const t = pickTile();
+        if (!t) throw new Error('no glass tile on the field');
+        t.probed = true;
+        e.player.position.x = t.position.x + 6000;
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        t.lastImpactVelocity = { x: -9, y: 0 };
+        t.health = 1; // hold the reveal at full
+        const contactX = () => {
+          let mx = -Infinity;
+          for (const p of t.polygonPoints) {
+            if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+          }
+          return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+        };
+        const half = t.size.x * 0.5;
+        let hits = 0;
+        while (t.active && hits < 12) {
+          if (withContact) e.progressFracture(t, { x: contactX(), y: t.position.y });
+          else e.progressFracture(t);
+          hits++;
+          if (t.active) t.health = 1;
+        }
+        const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+          && x.shardVariant === 'glass-shard' && x.mass !== Infinity);
+        const sides = chips.map((c: any) => (c.position.x - t.position.x) / half);
+        return {
+          stamped: t.lastImpactLocal !== undefined,
+          cracked: (t.fractureEdges ?? []).length > 0,
+          chipCount: chips.length,
+          worstFarSide: sides.length ? Math.min(...sides) : 0,
+          alive: t.active === true,
+        };
+      };
+      return { hit: drive(true), blind: drive(false) };
+    });
+
+    // Struck face: the contact point is stamped, glass chips, and every
+    // piece came off the side the shot landed on.
+    expect(r.hit.stamped).toBe(true);
+    expect(r.hit.chipCount).toBeGreaterThan(0);
+    expect(r.hit.worstFarSide).toBeGreaterThan(-0.35);
+    // Blind hit: the pattern still highlights, nothing detaches.
+    expect(r.blind.cracked).toBe(true);
+    expect(r.blind.chipCount).toBe(0);
+    expect(r.blind.alive).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('same geometry, rock vs glass: both chip from the struck face, each in its own voice',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      // Deterministic 44px jittered polygon, so BOTH runs get identical
+      // geometry and only the variant differs.
+      const R = 22, N = 9;
+      const poly: any[] = [];
+      for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2 + Math.sin(i * 2.3) * 0.18;
+        const rr = R * (0.72 + 0.26 * ((Math.sin(i * 1.7) + 1) / 2));
+        poly.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr });
+      }
+      const pos = { x: e.player.position.x + 5000, y: e.player.position.y + 5000 };
+
+      const sounds: string[] = [];
+      const realPlay = e.audio.play.bind(e.audio);
+      e.audio.play = (id: string, opts: any) => { sounds.push(id); return realPlay(id, opts); };
+
+      const run = (variant: string, maxHp: number) => {
+        const at = sounds.length;
+        const t: any = {
+          id: 'probe-' + variant, type: 'STRUCTURE', shardVariant: variant,
+          position: { x: pos.x, y: pos.y }, velocity: { x: 0, y: 0 },
+          size: { x: R * 2, y: R * 2 }, rotation: 0,
+          polygonPoints: poly.map((p: any) => ({ x: p.x, y: p.y })),
+          health: 1, maxHealth: maxHp, active: true, mass: 5,
+          color: '#888', crackSeed: 12345,
+          lastImpactVelocity: { x: -9, y: 0 },
+        };
+        ents.push(t);
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        const contactX = () => {
+          let mx = -Infinity;
+          for (const p of t.polygonPoints) {
+            if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+          }
+          return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+        };
+        const half = t.size.x * 0.5;
+        let hits = 0;
+        while (t.active && hits < 16) {
+          e.progressFracture(t, { x: contactX(), y: t.position.y });
+          hits++;
+          if (t.active) t.health = 1;
+        }
+        const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+          && x.type === 'STRUCTURE' && x.mass !== Infinity);
+        const sides = chips.map((k: any) => (k.position.x - pos.x) / half);
+        for (const k of chips) k.active = false; // don't leak into the next run
+        return {
+          stamped: t.lastImpactLocal !== undefined,
+          chipCount: chips.length,
+          worstFarSide: sides.length ? Math.min(...sides) : 0,
+          chipSounds: sounds.slice(at).filter(id => id.startsWith('destroy.shard.')),
+        };
+      };
+
+      const rock = run('rock-shard', 8);
+      const glass = run('glass-shard', 12);
+      e.audio.play = realPlay;
+      return { rock, glass };
+    });
+
+    for (const side of [r.rock, r.glass]) {
+      expect(side.stamped).toBe(true);
+      expect(side.chipCount).toBeGreaterThan(0);
+      expect(side.worstFarSide).toBeGreaterThan(-0.35);
+    }
+    // Each chip speaks in its own material — the detach voice is derived
+    // from the variant, not hardcoded to rock (the V10 generalisation
+    // left `destroy.shard.rock` behind on the glass path).
+    expect(r.rock.chipSounds.every(id => id === 'destroy.shard.rock')).toBe(true);
+    expect(r.glass.chipSounds.every(id => id === 'destroy.shard.glass')).toBe(true);
+    expect(r.glass.chipSounds.length).toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
 });
 
 test.describe('cell regularity (V11)', () => {

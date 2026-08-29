@@ -5187,7 +5187,12 @@ export class GameEngine {
       target._occluderR = undefined;
       if (target._staticCached === true) target._staticCached = false;
       invalidateCollisionR(target);
-      this.audio.play('destroy.shard.rock', {
+      // The chip's own material, never a hardcoded one: progressive
+      // fracture stopped being rock-only at V10, and a glass piece
+      // breaking off must not crack like stone.  Same MATERIAL_SFX table
+      // `deathFx` reads, and a detached cell is always a mobile shard.
+      const chipMat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+      this.audio.play(`destroy.shard.${chipMat ?? 'rock'}`, {
           x: target.position.x, y: target.position.y });
       return true;
   }

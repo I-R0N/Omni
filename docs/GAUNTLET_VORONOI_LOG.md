@@ -1016,3 +1016,59 @@ Three new regressions — fragments must not multiply across a frame,
 `shatter` must refuse a second call, and a quiet field must never
 shatter a full-health body — and ALL THREE were verified to FAIL with
 the census sweep restored and the guard disabled.  26/26 fracture green.
+
+---
+
+## V14 — is the contact gate applied consistently to rock AND glass?
+
+**The question** (user): V12 restricted chipping to the cell a projectile
+actually touched.  Was that applied to glass as well as rock, given the
+two materials were reported to be running "the exact same voronoi
+pattern and chipping behaviour, besides having different HPs"?
+
+**The premise is half right, and the half that is wrong matters.**  The
+MODEL is shared — progressive fracture, the reveal formula, the contact
+gate, the splice, the min-remainder death — but the PATTERN is not.  Rock
+and glass carry different `fracture` parameters, so the same body
+decomposes into different cell counts:
+
+| | siteCountMin..Max | sizePerSite | radialSpeed | crack freq | HP |
+|---|---|---|---|---|---|
+| rock-tile  | 7..16 | 5  | 1.4 | 1 / hit | 9 (hit ceiling) |
+| glass-tile | 5..10 | 6  | 1.2 | 1 / 4 dmg | 20 |
+| rock-shard | 3..30 | 22 | 1.0 | 1 / hit | 8 |
+| glass-shard| 2..6  | 8  | 1.0 | 1 / 4 dmg | 12 |
+
+`impactBias` is 0.75 on all four, and all four set `progressive: true`.
+On one BYTE-IDENTICAL 44px polygon the site mapping alone produces 2 rock
+cells against 3 glass cells — so "same pattern" is not true, and the
+difference is deliberate (`sizePerSite` is the density dial per
+material).
+
+**The gate itself is shared, and now measured to be.**  There is ONE call
+site (`spawnDamageText`, gated on `isProgressiveFracture`) and ONE helper
+(`progressFracture`); neither branches on variant.  `isRockChipper` at
+that call site gates only the LEGACY `releaseRockChip` fallback, which
+glass has no equivalent of.  Probed on the real engine:
+
+- glass tile — contact point stamped, chips only from the struck face
+  (worst piece at +0.10 half-widths, i.e. the struck side), and a hit
+  with NO contact point cracks but never detaches.  Identical to rock.
+- real projectile through `PhysicsSystem.resolveCollision`: rock 9→8 HP
+  (dent, 1/hit), glass 20→16 (full weapon damage), BOTH stamping
+  `lastImpactLocal` at x = +22.1 on an 18px half-width — the struck face.
+- same-geometry A/B: rock 1 chip at +0.36, glass 3 chips worst +0.02.
+  Both struck-side only.
+
+**One real inconsistency found, and fixed.**  `progressFracture` played
+`destroy.shard.rock` HARDCODED.  That was correct when V8 shipped the
+mechanic for rock alone; V10 generalised it to glass and left the voice
+behind, so a glass chip cracked like stone.  It now derives from the same
+`GameEngine.MATERIAL_SFX` table `deathFx` reads.  Pinned by a test that
+records the ids through `audio.play` and was verified to FAIL with the
+hardcode restored.
+
+**Coverage.**  The shipped V12 tests covered rock-tile only.  Added two:
+the glass mirror (struck-face + blind-hit), and the same-geometry rock vs
+glass A/B, which also asserts each material's own chip voice.  28/28
+fracture green.
