@@ -1713,6 +1713,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).
+- **A COLOUR MUST NEVER PARSE TO NaN.**  `hexToRgb` (render/drawUtils) feeds
+  its channels straight back into `rgb()`/`rgba()` strings for gradient
+  stops, and `addColorStop` THROWS on a colour it cannot parse — inside the
+  draw loop, where GameEngine's try/catch turns the throw into a LOST FRAME.
+  So one malformed colour anywhere in the world blanks the screen for as long
+  as it is on it.  Two ways in are closed: 3-digit CSS shorthand (`#fff`,
+  which parsed as `['ff','f','']` → `[255, 15, NaN]`) is expanded, and
+  anything else unparseable falls back to white — a wrong colour is a
+  cosmetic bug, a dropped frame is not.  Keep that guarantee if you touch the
+  helper; `rgbToHex` will happily format NaN back out as `#ff0fNaN`.
 - **A world-space health bar is a HIT REACTION, not a label** (gauntlet 5d,
   U5).  `renderHealthBar` draws an enemy's bar only while
   `GameEntity.healthBarTimer > 0`, fading over the last

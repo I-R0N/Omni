@@ -218,6 +218,26 @@ export async function startRun(page: Page, mapType?: string) {
   await waitForStats(page, s => s.gameState === 'PLAYING', 'game to reach PLAYING');
 }
 
+/** Wait out the portal ARRIVAL BEAT (PORTAL_CONSTANTS.WARP).
+ *
+ *  A transit freezes the sim for the length of the flight-through animation,
+ *  the same way the stage-clear screen does — so a suite that calls
+ *  `transitionToMap` and immediately pokes the world is racing it.  That is
+ *  not a harness quirk to route around: a PLAYER cannot act during the beat
+ *  either, so a test that acts is testing a state the game never presents.
+ *
+ *  The specific bite, which cost a full-suite run: boss phases are stamped by
+ *  `updateBosses`, which does not run while the sim is held.  A test that
+ *  transitted, zeroed the boss's shield and fired found its shield back —
+ *  the phase landed after the freeze lifted and re-stamped it.
+ *
+ *  Cheap when the beat is off (DBG "Transit fx: off"): the timer is already 0
+ *  and this returns on the first poll. */
+export async function waitForTransit(page: Page, timeoutMs = 15_000) {
+  await waitForEngine(page, e => (e.portalWarpTimer ?? 0) === 0,
+    'the portal arrival beat to finish', timeoutMs);
+}
+
 /** Put the player next to a station of `kind` and dock.  Flies nothing —
  *  "can the ship reach it" is not what any suite using this is testing.
  *

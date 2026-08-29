@@ -19,7 +19,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForStats, waitForEngine, waitForTransit } from './helpers';
 
 /** Drop the boss to `frac` health and WAIT for the phase machine to stamp the
  *  matching phase.
@@ -51,6 +51,7 @@ async function dropToPhase(page: any, targetId: string, frac: number, phase: num
 async function spawnBoss(page: any, id: string) {
   await startRun(page);
   await engine(page, e => e.transitionToMap('arena_universe'));
+  await waitForTransit(page);
   await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
   await engine(page, (e, bid: string) => e.debugSpawnBoss(bid), id);
   await waitForStats(page, s => !!s.boss, 'the boss to warp in');

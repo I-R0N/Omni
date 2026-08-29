@@ -15,7 +15,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats, waitForEngine, dockAtStation, advanceSim } from './helpers';
+import { boot, engine, stats, startRun, waitForStats, waitForEngine, dockAtStation, advanceSim, waitForTransit } from './helpers';
 
 const STAGE_WAVE_COUNT = 6;
 
@@ -148,6 +148,7 @@ test.describe('the run', () => {
     expect(hubPortal!.target).toMatch(/^arena_/);
 
     await engine(page, (e, tid: string) => e.transitionToMap(tid), hubPortal!.target);
+    await waitForTransit(page);
     const inArena = await waitForStats(page, s => s.currentMapType !== 'OVERWORLD', 'the arena');
 
     const afterPortal = await engine(page, e => ({
@@ -258,6 +259,7 @@ test.describe('the run', () => {
       inv: [...e.inventory], ship: [...e.shipSlots],
     }));
     await engine(page, (e, tid: string) => e.transitionToMap(tid), returnPortal!);
+    await waitForTransit(page);
     const home = await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
 
     const afterHome = await engine(page, e => ({
@@ -306,6 +308,7 @@ test.describe('the run', () => {
     const watch = await boot(page);
     await startRun(page);
     await engine(page, e => e.transitionToMap('arena_universe'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
 
     // Wave INDEX is 0-based; the capstone is index 5 (the 6th wave), which is
@@ -340,6 +343,7 @@ test.describe('the run', () => {
     const watch = await boot(page);
     await startRun(page);
     await engine(page, e => e.transitionToMap('arena_universe'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
     await waitForStats(page, s => (s.waveNumber ?? 0) >= 1, 'wave 1');
 

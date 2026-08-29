@@ -25,7 +25,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats, waitForEngine } from './helpers';
+import { boot, engine, stats, startRun, waitForStats, waitForEngine, waitForTransit } from './helpers';
 
 /** `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`, hard-coded rather than imported
  *  (harness rule 7 — a test that imports the value it checks asserts that a
@@ -40,6 +40,7 @@ const SHOW_DURATION = 2.2;
 async function parkedBoss(page: any, id = 'BOSS_SCATTER') {
   await startRun(page);
   await engine(page, e => e.transitionToMap('arena_universe'));
+  await waitForTransit(page);
   await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
   await engine(page, (e, bid: string) => e.debugSpawnBoss(bid), id);
   await waitForStats(page, s => !!s.boss, 'the boss to warp in');

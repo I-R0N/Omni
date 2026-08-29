@@ -17,18 +17,35 @@ import { densityTintMultiplier } from '../../../constants';
 import type { ShardVariantId } from '../ShardSystem.types';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT } from '../../toroidal';
 
-// Converts a 6-digit hex color string to an [r, g, b] tuple.
+// Converts a hex colour string to an [r, g, b] tuple.
 // Results are cached to avoid per-frame string parsing.
+//
+// IT MUST NEVER RETURN NaN, and that is a hard rule rather than tidiness.
+// These channels are formatted straight back into `rgb()` / `rgba()` strings
+// for gradient stops, and `addColorStop` THROWS on a colour it cannot parse —
+// inside the draw loop, where the throw is caught by GameEngine's try/catch
+// and costs the WHOLE FRAME.  One malformed colour anywhere in the world
+// therefore used to blank the screen for as long as it was on it.
+//
+// Two ways in, both now closed:
+//   - 3-digit CSS shorthand ('#fff'), which is perfectly legal colour syntax
+//     and parsed as ['ff', 'f', ''] -> [255, 15, NaN].  It is expanded.
+//   - anything else unparseable, which falls back to white: a wrong colour is
+//     a cosmetic bug, a lost frame is not.
 export const _rgbCache = new Map<string, [number, number, number]>();
 export function hexToRgb(hex: string): [number, number, number] {
     let cached = _rgbCache.get(hex);
     if (!cached) {
         const h = hex.replace('#', '');
-        cached = [
-            parseInt(h.substring(0, 2), 16),
-            parseInt(h.substring(2, 4), 16),
-            parseInt(h.substring(4, 6), 16),
-        ];
+        const full = h.length === 3
+            ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+            : h;
+        const r = parseInt(full.substring(0, 2), 16);
+        const g = parseInt(full.substring(2, 4), 16);
+        const b = parseInt(full.substring(4, 6), 16);
+        cached = (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b))
+            ? [255, 255, 255]
+            : [r, g, b];
         _rgbCache.set(hex, cached);
     }
     return cached;
