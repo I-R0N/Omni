@@ -4,7 +4,7 @@ import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
   getActiveStarBands, resolveStarParallax, PORTAL_CONSTANTS,
-  getPortalSizeMult, getPortalLensMult, getPortalLensSpinMult,
+  getPortalLensMult, getPortalLensSpinMult, portalHorizonRadius,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -140,6 +140,9 @@ export class BackgroundManager {
   private _lensDevY: number[] = [];
   private _lensDevR: number[] = [];
   private _lensDevR2: number[] = [];
+  /** Radial push at the throat, per lens, in device px — a fraction of that
+   *  lens's own radius, so the warp is self-similar at every rift size. */
+  private _lensDevPush: number[] = [];
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -194,6 +197,12 @@ export class BackgroundManager {
   private applyLensing(x: number, y: number): void {
     let outX = x;
     let outY = y;
+    // Like the star warp, the puff push is a FRACTION of this lens's own
+    // radius rather than a fixed 120 px, so it holds its shape as the rift's
+    // horizon scales with its destination — and it obeys the DBG Lens knob,
+    // so turning the lens down bends the whole backdrop less rather than
+    // only the stars.
+    const lensMult = getPortalLensMult();
     for (let i = 0; i < this._lensN; i++) {
         const adx = outX - this._lensCX[i];
         const ady = outY - this._lensCY[i];
@@ -203,7 +212,8 @@ export class BackgroundManager {
             const dist = Math.sqrt(distSq);
             const factor = (radius - dist) / radius;
             if (factor > 0) {
-              const push = factor * factor * factor * 120;
+              const push = factor * factor * factor
+                  * radius * PORTAL_CONSTANTS.LENS.PUFF_PUSH_FRAC * lensMult;
               outX += (adx / dist) * push;
               outY += (ady / dist) * push;
             }
@@ -218,21 +228,27 @@ export class BackgroundManager {
    *  the per-puff and per-star loops only ever see lenses that can matter. */
   private buildLensList(cameraPos: Vector2, attractors: GameEntity[],
                         width: number, height: number, zoom: number): void {
-    // DBG portal tuning: SIZE scales the lens radius with the rift it belongs
-    // to, and LENS scales the warp's strength (0 = no lens at all, which is
-    // why an empty list is the honest way to express it — the star loop then
-    // takes its original untouched fast path).
+    // The lens is anchored on the rift's HORIZON — the black disc the
+    // renderer draws — so the warped patch of sky HUGS the hole and inherits
+    // its destination-span scaling (user call).  It used to be a multiple of
+    // the entity's `size`, which left a 600-unit void standing off a 52-unit
+    // hole: two dark shapes reading as one, and the disc invisible inside it.
+    // A non-portal attractor (a future planet) keeps its own half-size.
+    //
+    // DBG LENS scales the warp's strength; 0 empties the list, which is the
+    // honest way to express "no lens" — the star loop then takes its original
+    // untouched fast path.
     const lensMult = getPortalLensMult();
-    const sizeMult = getPortalSizeMult();
+    const L = PORTAL_CONSTANTS.LENS;
     let n = 0;
     for (let i = 0; i < attractors.length && lensMult > 0; i++) {
         const attr = attractors[i];
         if (!attr.active) continue;
         const sx = width / 2 + wrapDeltaX(cameraPos.x, attr.position.x) * zoom;
         const sy = height / 2 + wrapDeltaY(cameraPos.y, attr.position.y) * zoom;
-        const scaled = attr.size.x * (attr.isPortal ? sizeMult : 1);
-        const starR = scaled * PORTAL_CONSTANTS.LENS.RADIUS_MULT * zoom;
-        const puffR = scaled * 8 * zoom;
+        const anchor = attr.isPortal ? portalHorizonRadius(attr) : attr.size.x / 2;
+        const starR = anchor * L.RADIUS_MULT * zoom;
+        const puffR = anchor * L.PUFF_RADIUS_MULT * zoom;
         const maxR = Math.max(starR, puffR);
         if (sx < -maxR || sx > width + maxR || sy < -maxR || sy > height + maxR) continue;
         this._lensCX[n] = sx;
@@ -768,29 +784,36 @@ public setMapType(type: MapType) {
     // Mirror the frame's lens list (CSS px, built in `render`) into device
     // px, the space the star coordinates live in.  Reused arrays, read up
     // to lensN — no allocation.  The warp displaces stars radially outward
-    // (evacuating the throat into an Einstein-ring pile-up) and rotates
-    // them around the centre by a swirl that strengthens toward the mouth
-    // and ADVANCES over time, so near-field stars orbit with differential
-    // speed.  Displaced positions stay fractional — that is already the
-    // rule here — and sizes stay integral, so nothing is resampled.
+    // (evacuating the throat into an Einstein-ring pile-up) and SHEARS them
+    // around the centre, both on a quadratic falloff to zero at the rim.
+    // Displaced positions stay fractional — that is already the rule here —
+    // and sizes stay integral, so nothing is resampled.
     const lensN = this._lensN;
+    const lensMultLocal = getPortalLensMult();
     const ldx = this._lensDevX, ldy = this._lensDevY;
     const lr = this._lensDevR, lr2 = this._lensDevR2;
+    const lpush = this._lensDevPush;
     for (let l = 0; l < lensN; l++) {
         ldx[l] = this._lensCX[l] * dpr;
         ldy[l] = this._lensCY[l] * dpr;
         lr[l] = this._lensStarR[l] * dpr;
         lr2[l] = lr[l] * lr[l];
+        // Push is a FRACTION of each lens's own radius, so the warp keeps
+        // its shape whatever the destination sizes the rift to.
+        lpush[l] = lr[l] * PORTAL_CONSTANTS.LENS.PUSH_FRAC * lensMultLocal;
     }
-    // DBG: LENS scales how far the warp displaces (push AND the standing
-    // twist); LENS SPIN scales only the TIME advance, so the swirl can be
-    // frozen without flattening the warp.  The two are separate knobs
-    // because the reported dizziness is about MOTION, not displacement.
-    const lensMult = getPortalLensMult();
+    // The total shear is CAPPED below one full turn, so the field can never
+    // wind into bands (see PORTAL_CONSTANTS.LENS).  Time BREATHES that
+    // bounded shear instead of accumulating it: SPIN scales the breathing
+    // rate, and at 0 the sine is frozen at phase 0, leaving the standing
+    // TWIST — a static bend.  LENS scales the amplitude of both the push and
+    // the twist, so turning it down genuinely flattens the distortion rather
+    // than re-scaling an angle that was already many turns deep.
     const spinMult = getPortalLensSpinMult();
-    const pushDev = PORTAL_CONSTANTS.LENS.PUSH * dpr * lensMult;
-    const swirlNow = (PORTAL_CONSTANTS.LENS.SWIRL_WIND
-        + performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE * spinMult) * lensMult;
+    const twistNow = (PORTAL_CONSTANTS.LENS.TWIST
+        + PORTAL_CONSTANTS.LENS.TWIST_SWING
+          * Math.sin(performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE * spinMult))
+        * lensMultLocal;
 
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
@@ -830,10 +853,10 @@ public setMapType(type: MapType) {
                     const d = Math.sqrt(d2);
                     const f = 1 - d / lr[l];
                     const f2 = f * f;
-                    const scale = (d + f2 * pushDev) / d;
+                    const scale = (d + f2 * lpush[l]) / d;
                     const nx = dx0 * scale;
                     const ny = dy0 * scale;
-                    const ang = f2 * swirlNow;
+                    const ang = f2 * twistNow;
                     const ca = Math.cos(ang);
                     const sa = Math.sin(ang);
                     x = ldx[l] + nx * ca - ny * sa;

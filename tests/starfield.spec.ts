@@ -691,3 +691,114 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 });
+
+test.describe('the wormhole star lens', () => {
+  /** The DBG Lens knob has to CHANGE something, and this is the test that
+   *  says so — because the shipped lens failed exactly that.
+   *
+   *  Its shear was `f^2 x (WIND + elapsed x RATE)`: an angle that grew without
+   *  bound with wall-clock time.  Every 2*PI of accumulated twist is one
+   *  visible band of stars, so the field wound itself into ~4 bands a minute
+   *  in and ~10 after three, and scaling a 60-radian twist by 0.25 still left
+   *  ~15 radians — far past 2*PI, so the knob could not change the band COUNT
+   *  and read as doing nothing.  The shear is capped below one turn now and
+   *  BREATHES rather than accumulating, which makes the knob linear in what
+   *  the eye actually reads.
+   *
+   *  Measured off the PIXELS, the exception this suite already makes for the
+   *  star field (harness rule 3 — read the sim unless the thing exists only
+   *  as pixels).  There is no sim-side number for "how bent the sky looks".
+   *
+   *  The metric is ONE scalar: the star coverage where the lens PILES stars
+   *  up, minus the coverage where it EVACUATES them.  Both halves move the
+   *  same way as strength rises, so the difference doubles the signal and
+   *  cancels whatever the sky happened to be doing.  Sampled in the UPPER
+   *  half only, which is what keeps the destination label and the ship — both
+   *  drawn below the rift — out of the numbers. */
+  test('the Lens knob monotonically changes the warp, and only near the rift', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Park beside the hub's Deep Space rift: the biggest horizon, so the
+    // warped region is comfortably wider than the sampling bands.
+    await engine(page, e => {
+      const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
+      e.player.position.x = p.position.x;
+      e.player.position.y = p.position.y + 300;
+      e.player.velocity.x = 0;
+      e.player.velocity.y = 0;
+    });
+    await page.waitForTimeout(800);
+
+    /** Star coverage (% lit) in 20-CSS-px annuli above the rift's centre. */
+    const bands = async (): Promise<number[]> => {
+      await page.waitForTimeout(500);
+      return page.evaluate(() => {
+        const e = (window as any).__omniEngine;
+        const cv = document.querySelector('canvas') as HTMLCanvasElement;
+        const ctx = cv.getContext('2d')!;
+        const dpr = cv.width / cv.clientWidth;
+        const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
+        const cam = e.camera;
+        const sx = (cv.clientWidth / 2 + (p.position.x - cam.position.x) * cam.zoom) * dpr;
+        const sy = (cv.clientHeight / 2 + (p.position.y - cam.position.y) * cam.zoom) * dpr;
+        const R = Math.round(280 * dpr);
+        const x0 = Math.max(0, Math.round(sx - R)), y0 = Math.max(0, Math.round(sy - R));
+        const w = Math.min(cv.width - x0, 2 * R), h = Math.min(cv.height - y0, 2 * R);
+        const img = ctx.getImageData(x0, y0, w, h).data;
+        const BANDS = 14, bandPx = 20 * dpr;
+        const lit = new Array(BANDS).fill(0), tot = new Array(BANDS).fill(0);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const dy = (y0 + y) - sy;
+            if (dy > 0) continue;                       // upper half only
+            const b = Math.floor(Math.hypot((x0 + x) - sx, dy) / bandPx);
+            if (b >= BANDS) continue;
+            const i = (y * w + x) * 4;
+            tot[b]++;
+            if (img[i] + img[i + 1] + img[i + 2] > 90) lit[b]++;
+          }
+        }
+        return lit.map((v, i) => (v / Math.max(1, tot[i])) * 100);
+      });
+    };
+
+    // Band 2 (40-60px) is where the throat is emptied; band 4 (80-100px) is
+    // where those stars land.  Band 0 is inside the black disc and band 1
+    // straddles its edge, so neither says anything.
+    const warp = (b: number[]) => b[4] - b[2];
+
+    const full = warp(await bands());                                  // 1.00x
+    await engine(page, e => e.dbg.cyclePortalLens());
+    const half = warp(await bands());                                  // 0.50x
+    await engine(page, e => e.dbg.cyclePortalLens());
+    const quarter = warp(await bands());                               // 0.25x
+    await engine(page, e => e.dbg.cyclePortalLens());
+    const offBands = await bands();                                    // off
+    const off = warp(offBands);
+
+    // Every step down flattens the sky, and by a margin no sampling wobble
+    // covers.  Measured 3.1 / 1.4 / 0.3 / -0.4, so each gap has >=0.3 of
+    // headroom over the 0.4 asserted here.
+    expect(full, `full ${full} vs half ${half}`).toBeGreaterThan(half + 0.4);
+    expect(half, `half ${half} vs quarter ${quarter}`).toBeGreaterThan(quarter + 0.4);
+    expect(quarter, `quarter ${quarter} vs off ${off}`).toBeGreaterThan(off + 0.2);
+    // With the lens off there is no warp at all — the field is flat, which is
+    // what makes the readings above differences in the LENS and not in the sky.
+    expect(Math.abs(off)).toBeLessThan(1);
+
+    // The warp is LOCAL: past the lens radius the field is untouched at every
+    // setting.  Without this the test would also pass on a lens that merely
+    // dimmed the whole sky.
+    const fullBands = await (async () => {
+      await engine(page, e => e.dbg.cyclePortalLens());   // back round to 1.00x
+      return bands();
+    })();
+    for (const b of [9, 11, 13]) {
+      expect(Math.abs(fullBands[b] - offBands[b]),
+        `far band ${b}: ${fullBands[b]} vs ${offBands[b]}`).toBeLessThan(1);
+    }
+
+    watch.assertClean();
+  });
+});

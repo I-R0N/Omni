@@ -5644,19 +5644,47 @@ export const PORTAL_CONSTANTS = {
     MAX_SCALE: 1.35,
   },
   // ── Background star lensing (BackgroundManager.renderStars) ───────
-  // Screen-space warp around each on-screen attractor: stars inside
-  // RADIUS_MULT × SIZE (world px) are pushed radially outward (the
-  // Einstein-ring evacuation of the throat) and rotated around the centre
-  // by a swirl that grows toward the mouth.  SWIRL_RATE advances that
-  // rotation over time, so the near-field stars visibly ORBIT the throat
-  // with differential speed — the vortex reads in motion, not just in
-  // displacement.  Falloff is quadratic, so the outer half of the radius
-  // is subliminal.  PUSH is in CSS px (scaled by dpr at the call site).
+  // Screen-space warp around each on-screen attractor: stars inside the
+  // lens radius are pushed radially outward (the Einstein-ring evacuation
+  // of the throat) and SHEARED around the centre, both easing to zero at
+  // the rim on a quadratic falloff so the warp joins the untouched sky
+  // with no seam.
+  //
+  // EVERYTHING HERE IS RELATIVE, so the whole lens is self-similar across
+  // destinations and DBG Size steps.  The radius is a multiple of the
+  // rift's HORIZON (`portalHorizonRadius`) rather than of its entity size,
+  // so the void HUGS the hole (user call) instead of standing off it by a
+  // fixed 600 units — and it inherits the destination-span scaling, so a
+  // Pocket rift warps a small patch of sky and a Deep Space rift a wide
+  // one.  PUSH is likewise a FRACTION of that radius: an absolute pixel
+  // push would be a gentle nudge inside the biggest lens and a violent
+  // ring inside the smallest.
+  //
+  // TWIST IS BOUNDED, AND THAT IS THE WHOLE POINT (user report: "multiple
+  // bands of stars, each alternating rotational direction going outward",
+  // and the DBG Lens knob barely changing them).  The shear used to be
+  // `f² × (WIND + elapsed × RATE)` — an angle that GREW WITHOUT BOUND with
+  // wall-clock time, which is what a real accretion disk does and exactly
+  // what a picture must not: every 2π of accumulated twist is one visible
+  // band, so the field wound itself into ~4 bands a minute in and ~10 after
+  // three, and scaling a 60-radian twist by 0.25 still left 15 radians —
+  // far past 2π, so the knob could not change the band COUNT and appeared
+  // to do nothing.  The total shear is now capped below one full turn
+  // (TWIST + TWIST_SWING < 2π), which makes banding impossible BY
+  // CONSTRUCTION rather than by tuning, and makes the knob linear in the
+  // thing the eye actually reads: how bent the sky is.  Motion comes from
+  // BREATHING that bounded shear (a sine at SWIRL_RATE) rather than from
+  // accumulating it, so the warp still lives without ever winding up.
   LENS: {
-    RADIUS_MULT: 3.0,
-    PUSH: 60,
-    SWIRL_WIND: 1.6,
-    SWIRL_RATE: 0.35,
+    RADIUS_MULT: 4.0,      // × the horizon radius
+    PUSH_FRAC: 0.28,       // radial push at the throat, × the lens radius
+    TWIST: 0.55,           // radians of shear at the throat (MUST stay < 2π)
+    TWIST_SWING: 0.18,     // how much of that shear breathes
+    SWIRL_RATE: 0.35,      // breathing rate (rad/s of the sine's phase)
+    // The nebula-puff layer takes the same treatment at its own scale —
+    // a wider, softer bend, since the puffs are the far backdrop.
+    PUFF_RADIUS_MULT: 7.0,
+    PUFF_PUSH_FRAC: 0.22,
   },
   // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
   // for a rift on the far side of the map is noise, not navigation — the

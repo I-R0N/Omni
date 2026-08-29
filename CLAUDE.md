@@ -1888,12 +1888,30 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (0.62 × r, silently — no damage popup, no shatter; the count-based
   asteroid keeper replenishes the belt away from portals), and
   RenderSystem's attractor bucket (`gravityStrength > 500`) feeds
-  `BackgroundManager`'s star lensing: background stars inside
-  `PORTAL_CONSTANTS.LENS` radius are pushed off the throat and swirled
-  around it with a time-advancing differential rotation (screen-space,
+  `BackgroundManager`'s star lensing: background stars inside the lens
+  radius are pushed off the throat and SHEARED around it (screen-space,
   applied per star in `renderStars`; the no-lens path is the original
   untouched loop, and positions stay fractional / sizes integral so the
-  S3 no-resampling invariant holds).  HOW STRONG all of that is is a
+  S3 no-resampling invariant holds).  THE LENS IS RELATIVE TO THE HOLE:
+  its radius is `LENS.RADIUS_MULT × portalHorizonRadius` and its push is
+  `PUSH_FRAC ×` that radius, so the warped patch HUGS the disc, inherits
+  the destination-span scaling, and keeps its shape at every rift size —
+  it used to be a multiple of the entity's `size` with an absolute pixel
+  push, which left a 600-unit void standing off a 52-unit hole.  **The
+  twist is BOUNDED, and that is load-bearing**: it was
+  `f² × (WIND + elapsed × SWIRL_RATE)`, an angle growing without bound
+  with wall-clock time, and since every 2π of accumulated twist is one
+  visible BAND of stars the field wound itself into ~4 bands a minute in
+  and ~10 after three — and scaling a 60-radian twist by 0.25 still left
+  ~15 radians, far past 2π, so the DBG Lens knob could not change the
+  band count and read as doing nothing (user report).  Total shear is
+  now capped below one turn (`TWIST + TWIST_SWING < 2π`), which makes
+  banding impossible BY CONSTRUCTION, and time BREATHES that bounded
+  shear (a sine at `SWIRL_RATE`) instead of accumulating it, so the warp
+  still lives without winding up.  `tests/starfield.spec.ts` pins the
+  knob's monotonic response off the pixels — the star coverage where the
+  lens piles stars up minus where it evacuates them, sampled ABOVE the
+  rift so the label and ship stay out of it.  HOW STRONG all of that is is a
   live A/B (user report: the rift reads as too powerful, and strafing it
   is dizzying) — DBG ▸ **Portals** carries five multipliers: rift SIZE,
   gravity STRENGTH and RANGE, and the star lens split into AMOUNT and
