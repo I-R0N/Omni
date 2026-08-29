@@ -357,6 +357,8 @@ export interface GameEntity {
   gravityStrength?: number; // Force multiplier (G * Mass)
   gravityPlayerScale?: number; // Attractor-side scale on the pull the PLAYER feels
                                // (portals: a tug, never a trap — see PORTAL_CONSTANTS)
+  portalGraceTimer?: number;   // Portal-gravity immunity window on freshly-emerged
+                               // transit debris, so the exit well can't re-swallow it
 
   // AI
   enemySubtype?: EnemySubtype;

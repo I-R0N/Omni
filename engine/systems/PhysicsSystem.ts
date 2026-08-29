@@ -838,10 +838,23 @@ export class PhysicsSystem {
         // tile case while letting mobile shards participate.
         if (!entity.active || entity.isExploding || entity.mass === Infinity || entity.type === EntityType.PARTICLE) continue;
 
+        // Portal-transit grace: debris the exit rift just spat out is immune
+        // to PORTAL gravity (pull and swallow both) until the timer runs
+        // out, or the well that ejected it would recapture most of it —
+        // escape speed from the mouth is ~8 px/tick against ejection speeds
+        // of ~2-6.  Ticked here because this loop is the only per-substep
+        // walk that cares; planets (non-portal attractors) still pull.
+        let graced = false;
+        if (entity.portalGraceTimer !== undefined && entity.portalGraceTimer > 0) {
+            entity.portalGraceTimer -= timeScale / 60;
+            graced = true;
+        }
+
         for (let j = 0; j < attractors.length; j++) {
             const attractor = attractors[j];
             if (!attractor.active) continue;
             if (entity === attractor) continue;
+            if (graced && attractor.isPortal) continue;
 
             const dx = wrapDeltaX(entity.position.x, attractor.position.x);
             const dy = wrapDeltaY(entity.position.y, attractor.position.y);

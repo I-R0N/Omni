@@ -340,6 +340,17 @@ is now reachable only through that dropdown.
   placement changes).  Coming home used to dump the player at their base
   station across the hub, throwing the trip away.  No matching rift — a
   descent into a fresh arena, or a new run — falls back to `playerSpawn`.
+  DEBRIS TRAVELS WITH YOU (user call): mobile shards + collectible drops
+  within `PORTAL_CONSTANTS.TRANSIT.RADIUS` of the ship are captured out
+  of the departing map (nearest win the `MAX_ENTITIES` cap; enemies stay
+  behind — the portal clears the fight) and re-emerge from the exit
+  rift's mouth AFTER the player via the `portalTransit` queue
+  (`updatePortalTransit`, sim-time stagger over `DELAY_MIN..MAX`), each
+  flung on a random heading at a random speed with `GRACE_SEC` of
+  portal-gravity immunity (`portalGraceTimer`) so the exit well can't
+  re-swallow it.  Queued entities live NOWHERE but the queue;
+  `loadMapFresh` clears it, so a restart or second hop mid-drain means
+  the wormhole kept the stragglers.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
   Wave progress is FRESH per entry — `WaveSystem.init` zeroes
   `waveIndex`, so leaving an arena abandons the ladder; there is NO

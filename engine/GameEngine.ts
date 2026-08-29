@@ -450,6 +450,14 @@ export class GameEngine {
   // on any step and the affordance always names the action it will take.
   portals: GameEntity[] = [];
   private nearestPortal: GameEntity | null = null; // nearest in use range this step
+  // Debris-transit queue (PORTAL_CONSTANTS.TRANSIT): loose entities captured
+  // around the player at portal entry, waiting out their stagger delay before
+  // emerging from the exit rift.  Queued entities exist NOWHERE else — they
+  // join currentMap.entities only when updatePortalTransit releases them.
+  // Cleared by loadMapFresh, so a second hop (or a restart) before the queue
+  // drains means the wormhole simply kept the stragglers.
+  private portalTransit: { entity: GameEntity; delay: number }[] = [];
+  private portalTransitExit: Vector2 = { x: 0, y: 0 };
   // Overworld roaming dragon — first spawn shortly after run start, then a
   // fresh rift a while after the previous dragon dies or leaves.
   private overworldDragonTimer: number = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
@@ -1114,6 +1122,7 @@ export class GameEngine {
       this.shards.reset();
       this.perfController.reset();
       this.activeDrops = [];
+      this.portalTransit.length = 0;
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
@@ -1282,6 +1291,37 @@ export class GameEngine {
       // used below to put them at the matching rift MOUTH on arrival.
       const fromId = descriptorForMapType(this.currentMap?.type)?.id;
 
+      // DEBRIS TRAVELS WITH YOU (user call): everything loose within
+      // TRANSIT.RADIUS of the ship — mobile shards and collectible drops,
+      // exactly the stuff the wormhole's own gravity has been herding toward
+      // the mouth — is captured out of the departing map here and re-emerges
+      // from the exit rift after the player (updatePortalTransit), each on
+      // its own stagger delay with a random heading and speed.  Nearest win
+      // the cap, so a transit from a dense field takes the debris actually
+      // AROUND the ship.  Enemies deliberately stay behind: the portal
+      // clears the fight (decision #39d), and the hub is wave-free by
+      // design.  The old map is discarded whole (buildMap constructs fresh
+      // instances), so captured entities need no removal from it.
+      const transitCfg = PORTAL_CONSTANTS.TRANSIT;
+      const captured: { e: GameEntity; d2: number }[] = [];
+      if (this.currentMap) {
+          const rSq = transitCfg.RADIUS * transitCfg.RADIUS;
+          for (const e of this.currentMap.entities) {
+              if (!e.active || e.isExploding) continue;
+              const isMobileShard = e.type === EntityType.STRUCTURE
+                  && e.mass !== Infinity && e.dragonSegment !== true;
+              if (!isMobileShard && !isCollectibleDrop(e)) continue;
+              const dx = wrapDeltaX(this.player.position.x, e.position.x);
+              const dy = wrapDeltaY(this.player.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 <= rSq) captured.push({ e, d2 });
+          }
+          captured.sort((a, b) => a.d2 - b.d2);
+          if (captured.length > transitCfg.MAX_ENTITIES) {
+              captured.length = transitCfg.MAX_ENTITIES;
+          }
+      }
+
       if (opts?.descend) this.stageIndex++;
       else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
       // The stage-clear screen belongs to the arena being left.
@@ -1306,6 +1346,31 @@ export class GameEngine {
       this.player.shieldHitFlash = 0;
       this.player.statusEffects = [];
       this.playerMessages = [];
+
+      // Queue the captured debris on the EXIT rift's mouth — the rift
+      // pointing back where we came from (the same one arrivalBesideRift
+      // read), falling back to the player's own arrival point when there is
+      // no matching rift.  loadMapFresh cleared the queue above, so this
+      // hop's cargo is all it holds.  Stagger delays are rolled here;
+      // headings and speeds are rolled at emergence.
+      if (captured.length > 0) {
+          const mouth = this.portals.find(p => p.portalTargetId === fromId);
+          const exit = mouth ? mouth.position : this.player.position;
+          this.portalTransitExit.x = exit.x;
+          this.portalTransitExit.y = exit.y;
+          for (const { e } of captured) {
+              e.velocity.x = 0;
+              e.velocity.y = 0;
+              e.hitFlash = 0;
+              if (e.healthBarTimer !== undefined) e.healthBarTimer = 0;
+              if (e.trail) e.trail.length = 0;
+              this.portalTransit.push({
+                  entity: e,
+                  delay: transitCfg.DELAY_MIN
+                      + Math.random() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
+              });
+          }
+      }
 
       // Waves per the DESTINATION descriptor — enabled in an arena, off in
       // the hub — and the always-present ambient fauna for the new map.
@@ -3123,6 +3188,7 @@ export class GameEngine {
     // in place from here; everything below re-reads `currentMap`, so the
     // rest of this step runs against the destination.
     this.updateInteractables();
+    this.updatePortalTransit(dt);
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
     // leaves (the timer re-arms while a dragon is up).
@@ -5109,6 +5175,53 @@ export class GameEngine {
       };
       wrapPosition(pos);
       return pos;
+  }
+
+  /** Drain the debris-transit queue: each captured entity emerges from the
+   *  exit rift's mouth once its stagger delay expires — random heading,
+   *  random speed, a pinch of positional scatter so a big load doesn't
+   *  stack on one point, and a portal-gravity grace window
+   *  (portalGraceTimer) so the well that just spat it out can't swallow it
+   *  straight back.  Runs on sim time, so pause / dock hold the stream
+   *  mid-flow; the reverse splice-walk is event-frequency work (a few
+   *  dozen items once per transit), not a hot path. */
+  private updatePortalTransit(dt: number) {
+      if (this.portalTransit.length === 0 || !this.currentMap) return;
+      const cfg = PORTAL_CONSTANTS.TRANSIT;
+      for (let i = this.portalTransit.length - 1; i >= 0; i--) {
+          const item = this.portalTransit[i];
+          item.delay -= dt;
+          if (item.delay > 0) continue;
+          this.portalTransit.splice(i, 1);
+          const e = item.entity;
+          const scatterA = Math.random() * Math.PI * 2;
+          const scatterR = Math.random() * cfg.SCATTER;
+          e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
+          e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
+          wrapPosition(e.position);
+          const heading = Math.random() * Math.PI * 2;
+          const speed = cfg.SPEED_MIN + Math.random() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
+          e.velocity.x = Math.cos(heading) * speed;
+          e.velocity.y = Math.sin(heading) * speed;
+          if (e.rotationSpeed !== undefined) {
+              e.rotationSpeed += (Math.random() - 0.5) * 1.5;
+          }
+          e.portalGraceTimer = cfg.GRACE_SEC;
+          e.active = true;
+          // A drop that spent its lifetime nearly out gets a top-up: a
+          // pickup that travelled the wormhole with you should be
+          // collectible on the other side, not fade on arrival.
+          if (e.lifetime !== undefined && e.lifetime < 10) e.lifetime = 10;
+          this.currentMap.entities.push(e);
+          if (isCollectibleDrop(e)) this.activeDrops.push(e);
+          // A small pop of rift-coloured sparks sells the spit without a
+          // full openPortal burst per shard.
+          this.spawnParticles(e.position, 3, PORTAL_CONSTANTS.COLOR, {
+              speedMin: 0.5, speedMax: 2,
+              sizeMin: 1, sizeMax: 2.5,
+              lifetimeMin: 0.2, lifetimeMax: 0.5,
+          });
+      }
   }
 
   /** DBG: warp a boss in near the player, phases and all.  `id` is an

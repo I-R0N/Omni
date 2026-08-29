@@ -5486,6 +5486,30 @@ export const PORTAL_CONSTANTS = {
   // commitment: at its strongest the tug is 0.4 × 0.12 = 0.048/step,
   // comfortably under the 0.085/step thrust — a felt lean, never a trap.
   GRAVITY_PLAYER_SCALE: 0.12,
+  // ── Debris transit (GameEngine.transitionToMap) ───────────────────
+  // Everything loose around the player travels WITH them: mobile shards
+  // and collectible drops within RADIUS of the ship are captured before
+  // the map swap and re-emerge from the exit rift's mouth AFTER the
+  // player, staggered over DELAY_MIN..MAX seconds, each flung in a random
+  // direction at a random SPEED (px per 60 Hz tick; ambient drift is ~1,
+  // so the top of the range reads as an energetic spit).  MAX_ENTITIES
+  // caps a transit from the middle of a dense field (nearest win).
+  // GRACE_SEC of portal-gravity immunity (portalGraceTimer) lets the
+  // ejecta actually LEAVE — without it the well that just spat them out
+  // (escape speed ~8 from the mouth) would swallow most of them back.
+  // Enemies deliberately do NOT travel: combat leftovers stay behind
+  // (decision #39d — a portal clears the fight), and the hub is wave-free
+  // by design.
+  TRANSIT: {
+    RADIUS: 450,
+    MAX_ENTITIES: 36,
+    DELAY_MIN: 0.25,
+    DELAY_MAX: 1.6,
+    SPEED_MIN: 1.5,
+    SPEED_MAX: 5.5,
+    SCATTER: 70,
+    GRACE_SEC: 2.5,
+  },
   // ── Background star lensing (BackgroundManager.renderStars) ───────
   // Screen-space warp around each on-screen attractor: stars inside
   // RADIUS_MULT × SIZE (world px) are pushed radially outward (the
