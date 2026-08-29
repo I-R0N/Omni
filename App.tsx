@@ -17,7 +17,7 @@ import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
 import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
          isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
-         subtractBoundaryCell, pointToPolygonDistance2,
+         subtractBoundaryCell, pointToPolygonDistance2, unionOfCells,
        } from './engine/systems/fracture';
 
 const App: React.FC = () => {
@@ -94,7 +94,7 @@ const App: React.FC = () => {
     (window as any).__omniFracture = {
       mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
       isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
-      subtractBoundaryCell, pointToPolygonDistance2,
+      subtractBoundaryCell, pointToPolygonDistance2, unionOfCells,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
@@ -386,6 +386,10 @@ const App: React.FC = () => {
 
   const handleCycleFractureBias = () => {
       if (engineRef.current) engineRef.current.dbg.cycleFractureBias();
+  };
+
+  const handleCycleBoundaryStrength = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleBoundaryStrength();
   };
 
   const handleCycleNebulaWakeSpin = () => {
@@ -905,6 +909,7 @@ const App: React.FC = () => {
         onCycleFractureSeparation={handleCycleFractureSeparation}
         onCycleFractureSiteScale={handleCycleFractureSiteScale}
         onCycleFractureBias={handleCycleFractureBias}
+        onCycleBoundaryStrength={handleCycleBoundaryStrength}
         onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}

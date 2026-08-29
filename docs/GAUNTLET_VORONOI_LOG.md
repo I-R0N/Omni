@@ -1072,3 +1072,130 @@ hardcode restored.
 the glass mirror (struck-face + blind-hit), and the same-geometry rock vs
 glass A/B, which also asserts each material's own chip voice.  28/28
 fracture green.
+
+---
+
+## V15 — grain boundaries: damage on the seams, HP derived from the pattern
+
+**The ask** (user): "make tiles only chip by requiring all boundaries of a
+voronoi pattern sub shape to be filled before the chip breaks off. Then we
+can adjust the relative strengths of different materials by adjusting how
+much damage it takes to fill boundaries... This should result in a derived
+HP for each tile based on its respective pattern and boundary strength.
+Additionally, the final result will be tiles that no longer 'shatter' after
+reaching an arbitrary limit, they take damage at grain boundaries like real
+materials and break at these boundaries as well."
+
+### What changed
+
+Damage no longer ticks down a hand-authored HP pool.  It ACCUMULATES ON THE
+BOUNDARIES of the entity's own decomposition — nearest the contact first —
+and a grain leaves exactly when every boundary still binding it has been
+broken through.  `SHARD_VARIANTS[..].fracture.boundaryStrength` is the one
+number per material: damage per PIXEL of grain boundary.
+
+Two properties then FALL OUT rather than being declared, which is the
+point of the model:
+
+1. **HP is derived.**  A body's health is `Σ (edge length × strength)` over
+   its own pattern, computed the first time it is damaged.  A tile that
+   decomposed into more or longer boundaries is genuinely tougher, and no
+   HP is authored anywhere.
+2. **Nothing ends at a limit.**  Total damage to break every boundary IS
+   the derived HP, so "health reached zero" and "the last boundary broke"
+   are the same event by construction.  `FRACTURE_DETACH.MIN_REMAINDER_FRAC`
+   — the 10%-area floor that used to end a body mid-pattern — is gone for
+   grain materials.  It was exactly the arbitrary limit the ask named.
+
+Spill is what keeps (2) exact: damage that finishes a boundary flows to the
+next unbroken one, so no fraction of a hit is lost and the health readout
+cannot drift from the boundary state.
+
+### Calibration (measured, not guessed)
+
+`boundaryStrength` is absolute damage per pixel, deliberately NOT
+normalised by body size.  Normalising cancels scale and would force
+separate numbers for tiles and shards of the same material — the opposite
+of "one number per material".  Absolute length makes a bigger body tougher
+for free.
+
+Measured total interior boundary length at strength 1, then solved for
+today's feel:
+
+| variant | size | Σ boundary | strength | derived HP | Blaster hits |
+|---|---|---|---|---|---|
+| rock-tile | 36px | ~133px | 0.27 | 35–37 | 9 |
+| glass-tile | 36px | ~128px | 0.16 | 19–21 | 5 |
+| rock-shard | 15px | ~23px | 0.27 | ~6 | 2 |
+| glass-shard | 15px | ~15px | 0.16 | ~2 | 1 |
+
+The derived HP VARIES tile to tile (glass measured 18.7–21.4 across five
+map-spawned panes) because each has its own pattern.  That variance is the
+feature.  Small chips getting brittle is the honest consequence of one
+material number plus absolute length; the DBG master multiplier (**Bnd
+strength**, pause ▸ Debug Menu ▸ Visual) scales every material at once for
+judging that on a device.
+
+### Two things had to be fixed to make it read as erosion
+
+**The spend order.**  A flat nearest-EDGE sort spreads damage across many
+cells and completes almost none until the end — the V10 lesson, restated in
+the damage layer.  Measured that way a rock tile shed 3 pieces over its life
+and dumped 5 at death.  Spending a grain's whole ring before moving outward
+fixed the shape of it.
+
+**The remainder outline.**  `subtractBoundaryCell` splices one cell off an
+arc, which is exact where it applies and refuses once a survivor's whole
+outline lies on the boundary — precisely the tail.  Instrumented: every
+boundary broken, all four remaining cells loose, and *none of them able to
+leave*.  `unionOfCells` replaces it for grain materials: the cells TILE the
+original polygon, so an edge shared by two survivors is interior and
+everything else is boundary — walk it and the outline falls out with no arc
+bookkeeping and no tail case.  It refuses a non-ring (two grains touching
+at a point), and the arc splice remains the fallback.
+
+Net effect on a real 36px rock tile, driven by real Blaster bolts through
+`PhysicsSystem.resolveCollision`:
+
+| | pieces shed while alive | separating at the end |
+|---|---|---|
+| before V15 | 3 of 8 | 5 |
+| after the spend-order fix | 3 of 8 | 5 |
+| after the union outline | 5 of 8 | 3 |
+| plus "cohesion lost → end now" | **6 of 8** | 2 |
+
+The remaining 2 are the last grains, which are held together only by
+boundaries they share with each other; they separate the instant those
+break.  That IS a boundary break, not a shatter at a limit.
+
+### Consequences worth knowing
+
+- **Every player damage path feeds the boundaries** — projectile, lightning
+  chain, shockwave ring — each stamping its own contact point, so splash
+  and chain damage erode from where they arrived.  Physical smashes (a
+  boulder crash, the pressure trigger) still take the whole body: they
+  meter boulders, not weapons.
+- **`authoredMaxHealth`** keeps the spawned HP after the model rewrites
+  `maxHealth`.  Tile destruction score reads it — paying per DERIVED HP
+  would price a tile by how finely it happened to decompose.
+- **Cracks are now partial.**  `drawFractureCracks` takes a per-edge break
+  fraction and draws a boundary growing from the impact end, so the player
+  can read how close a piece is to coming loose, not just that it is
+  cracked.
+
+### Gates
+
+typecheck ✓ · build ✓ · fracture suite 32/32.  simbench, measured against
+HEAD **on the same machine** (the logged V0 baselines were taken on a
+faster day and are not comparable): hub-idle 1.162 vs 1.332, asteroid-6k
+2.159 vs 2.491, glass-field 0.967 vs 0.915, roamer-stack 2.490 vs 2.267 —
+the two fracture-heavy scenes are FASTER (the dent pull and the early-break
+roll both stand down), the other two inside the V2 noise band.
+
+Five existing tests pinned the old model and were rewritten rather than
+loosened — the two V4 progression tests now drive real bolts instead of
+setting `health` (which no longer drives anything), the min-remainder test
+became "a body ends when its last boundary breaks — never at an area
+floor", and the two glass tests assert the derived-HP semantics with
+`authoredMaxHealth` preserved.  Four new tests pin V15's own claims, and
+the boundary-gating one was verified to FAIL with the rule disabled.

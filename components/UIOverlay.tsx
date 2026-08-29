@@ -113,6 +113,7 @@ interface UIOverlayProps {
   onCycleFractureSeparation?: () => void;
   onCycleFractureSiteScale?: () => void;
   onCycleFractureBias?: () => void;
+  onCycleBoundaryStrength?: () => void;
   onCycleNebulaWakeSpin?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -428,6 +429,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFractureSeparation,
   onCycleFractureSiteScale,
   onCycleFractureBias,
+  onCycleBoundaryStrength,
   onCycleNebulaWakeSpin,
   onToggleRumble,
   onSetControlScheme,
@@ -1813,6 +1815,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Frac relax', onCycleFractureRelax,
                   stats.fractureRelaxName ?? '2',
                   'LLOYD RELAXATION rounds on the fracture pattern - the REGULARITY dial. Each round moves every Voronoi site to its own cell\'s centroid, which evens the piece SIZES out and pulls the shapes toward convex, near-hexagonal chunks. 0 is raw Poisson Voronoi (ragged, some slivers, wildly uneven); 2 (default) measured a cell-area coefficient of variation of 0.28 and roundness 0.77 against 0.53 / 0.69 at zero rounds; 4 is close to a honeycomb. Effectively free - relaxation also stops the sliver-retirement pass re-running. Takes effect on the next hit (cached patterns rebuild).')}
+                {ctrlRow('Bnd strength', onCycleBoundaryStrength,
+                  stats.boundaryStrengthName ?? 'x1',
+                  'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which puts a 36px rock tile at 9 Blaster hits and a glass pane at 5. Takes effect on the next hit (cached patterns rebuild).')}
                 {ctrlRow('Frac sep', onCycleFractureSeparation,
                   stats.fractureSeparationName ?? '0.45',
                   'Minimum spacing between fracture sites, as a fraction of the mean cell radius - blue-noise placement BEFORE relaxation. Higher means sites refuse to bunch, so cells start out more even. Matters most at Frac relax 0; relaxation largely supersedes it.')}

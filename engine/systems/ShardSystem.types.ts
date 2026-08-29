@@ -381,6 +381,22 @@ export interface ShardFracturePolicy {
    *  voronoi mode — the pattern must stay stable, and the highlight IS
    *  the damage read.  Today: rock-tile + rock-shard. */
   progressive?: boolean;
+  /** GRAIN BOUNDARIES (V15 — the user's model).  When set, damage is
+   *  no longer a countdown on a hand-authored HP pool: it ACCUMULATES
+   *  ON THE BOUNDARIES of the decomposition, nearest the impact first,
+   *  and a cell breaks off exactly when every boundary binding it has
+   *  been broken through.  This number is the damage needed to break a
+   *  boundary AS LONG AS THE BODY IS WIDE, so each edge costs
+   *  `boundaryStrength × (edgeLength / bodySize)` and a material's
+   *  toughness is ONE number.
+   *
+   *  The entity's HP is then DERIVED — `Σ edge strengths`, computed
+   *  from its own pattern the first time it is damaged — rather than
+   *  declared, so a body with more or longer internal boundaries is
+   *  genuinely tougher and nothing "shatters at an arbitrary limit":
+   *  health reaching zero and the last boundary breaking are the same
+   *  event by construction.  Requires `progressive`. */
+  boundaryStrength?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────

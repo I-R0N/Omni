@@ -1318,6 +1318,22 @@ export interface GameEntity {
   // GameEngine.progressFracture, read by fractureCache to bias the
   // pattern toward the real hit and to decide which cell was struck.
   lastImpactLocal?: Vector2;
+  // GRAIN BOUNDARIES (V15).  Damage absorbed by each interior boundary
+  // of the cached decomposition, parallel to `fractureEdges`; an edge is
+  // BROKEN once its entry reaches its strength, and a cell leaves when
+  // every edge still binding it is broken.  `fractureBoundaryHp` is the
+  // pattern's DERIVED total (Σ edge strengths) — the entity's real HP
+  // once the model has taken over, which is why it is cached beside the
+  // fills rather than recomputed.
+  fractureEdgeFill?: number[];
+  fractureBoundaryHp?: number;
+  // The HP the entity was SPAWNED with, kept when the grain model
+  // rewrites `maxHealth` to the derived total.  Score and any other
+  // consumer that means "how substantial is this body" must read this,
+  // not the derived number: derived HP is in DAMAGE units over the
+  // body's own boundary set, so scoring off it would pay out on how
+  // finely a tile happened to decompose.
+  authoredMaxHealth?: number;
 
   // The fracture SHAPE-KNOB generation this entity's cached pattern was
   // built under (V11).  A DBG cycle bumps the global counter, so a stale
@@ -1835,6 +1851,7 @@ export interface EngineStats {
   /** DBG (V11) — the four fracture SHAPE knobs: Lloyd relaxation rounds,
    *  site min-separation, site-count multiplier, impact-bias override. */
   fractureRelaxName?: string;
+  boundaryStrengthName?: string;
   fractureSeparationName?: string;
   fractureSiteScaleName?: string;
   fractureBiasName?: string;

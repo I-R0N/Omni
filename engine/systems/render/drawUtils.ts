@@ -217,16 +217,28 @@ export function drawFractureCracks(
     r: number,
     dmgFrac: number,
     s: CrackStyle,
+    /** GRAIN BOUNDARIES (V15): 0..1 per edge, how far through breaking
+     *  that boundary is.  A partly-broken boundary is drawn as a PARTIAL
+     *  CRACK growing from the end nearest the impact, so the player can
+     *  read how close a piece is to coming loose rather than only that it
+     *  is cracked at all.  Absent → the legacy binary reveal by `upTo`. */
+    breakFrac?: (i: number) => number,
 ): void {
     ctx.fillStyle = `rgba(${s.scorchRgb},${s.scorchBase + s.scorchGain * dmgFrac})`;
     ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
     ctx.lineCap = 'round';
-    const n = Math.min(upTo, edges.length);
+    const n = breakFrac ? edges.length : Math.min(upTo, edges.length);
     for (let i = 0; i < n; i++) {
         const e = edges[i];
+        let bx = e.bx, by = e.by;
+        if (breakFrac) {
+            const t = breakFrac(i);
+            if (t <= 0) continue;
+            if (t < 1) { bx = e.ax + (e.bx - e.ax) * t; by = e.ay + (e.by - e.ay) * t; }
+        }
         ctx.beginPath();
         ctx.moveTo(e.ax, e.ay);
-        ctx.lineTo(e.bx, e.by);
+        ctx.lineTo(bx, by);
         ctx.strokeStyle = s.crackColor;
         ctx.lineWidth = s.crackWidth;
         ctx.stroke();

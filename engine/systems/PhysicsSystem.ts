@@ -2,6 +2,7 @@
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture } from '../../constants';
+import { applyBoundaryDamage, stampLocalImpact } from './fractureCache';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -3511,7 +3512,16 @@ export class PhysicsSystem {
               const isHitCounted = isDentEntity
                   || target.shardVariant === 'rock-shard';
               if (!isIndestructibleTile) {
-                  target.health -= isHitCounted ? 1 : projDmg;
+                  // GRAIN BOUNDARIES (V15): a body running the boundary model
+                  // has no HP pool to decrement — the damage goes into its
+                  // boundaries and `health` is the unbroken budget left, kept
+                  // exact by applyBoundaryDamage.  Stamp the contact point
+                  // FIRST so the pattern is biased by, and the damage poured
+                  // from, where the shot actually landed.
+                  stampLocalImpact(target, proj.position);
+                  if (!applyBoundaryDamage(target, projDmg)) {
+                      target.health -= isHitCounted ? 1 : projDmg;
+                  }
                   // Dent-policy entities deform on every damage event,
                   // even the killing blow — the spawned mobile shard
                   // inherits the dented polygon at the post-deformation

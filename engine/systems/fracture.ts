@@ -782,3 +782,75 @@ export function collectInteriorEdges(
   }
   return out;
 }
+
+/**
+ * The outline of a set of cells taken TOGETHER — the shape a partly
+ * eroded body still has (V15).
+ *
+ * `subtractBoundaryCell` removes one cell by splicing an arc, which needs
+ * the cell to meet the current remainder along exactly one contiguous
+ * run.  That holds early and fails at the tail: once a body is mostly
+ * eaten, a surviving cell's whole outline lies on the remainder boundary
+ * and there is no interior chain to close through, so the splice refuses
+ * and the last grains stay welded on until death.  Measured on a real
+ * rock tile: every boundary broken, all four remaining cells loose, and
+ * none of them able to leave.
+ *
+ * Taking the union instead makes the question trivial, because the cells
+ * TILE the original polygon: an edge shared by two surviving cells is
+ * interior and an edge shared with a departed cell (or with the original
+ * outline) is boundary.  Walk the boundary edges and the outline falls
+ * out, with no arc bookkeeping and no tail case.
+ *
+ * Returns null when the survivors do not form ONE simple closed ring —
+ * a body eroded into two islands, or a hole punched through the middle.
+ * The caller keeps the old shape and the piece stays attached, which is
+ * the safe answer: SAT needs a single simple polygon.
+ */
+export function unionOfCells(
+  cells: ReadonlyArray<{ points: ReadonlyArray<FracturePoint> }>,
+  eps: number,
+): FracturePoint[] | null {
+  if (cells.length === 0) return null;
+  if (cells.length === 1) return cells[0].points.map(p => ({ x: p.x, y: p.y }));
+  const inv = 1 / Math.max(1e-9, eps);
+  const key = (p: FracturePoint) =>
+    `${Math.round(p.x * inv)},${Math.round(p.y * inv)}`;
+
+  // Directed edges, all cells wound the same way, so an interior edge
+  // appears exactly twice — once in each direction.
+  const dir = new Map<string, { a: FracturePoint; b: FracturePoint }>();
+  for (const c of cells) {
+    const pts = polygonSignedArea(c.points) < 0
+      ? c.points.slice().reverse() : c.points;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const ka = key(a), kb = key(b);
+      if (ka === kb) continue; // degenerate
+      dir.set(`${ka}>${kb}`, { a, b });
+    }
+  }
+  const boundary = new Map<string, FracturePoint>();
+  for (const [k, e] of dir) {
+    const [ka, kb] = k.split('>');
+    if (dir.has(`${kb}>${ka}`)) continue; // shared with another survivor
+    if (boundary.has(ka)) return null;    // a vertex leaving twice: not a ring
+    boundary.set(ka, e.b);
+  }
+  if (boundary.size < 3) return null;
+
+  // Walk it: one closed ring that visits every boundary edge, or nothing.
+  const startK = boundary.keys().next().value as string;
+  const out: FracturePoint[] = [];
+  let k = startK;
+  for (let guard = 0; guard <= boundary.size; guard++) {
+    const next = boundary.get(k);
+    if (next === undefined) return null;
+    out.push({ x: next.x, y: next.y });
+    k = key(next);
+    if (k === startK) break;
+  }
+  if (out.length !== boundary.size) return null; // stranded island(s)
+  if (out.length < 3 || !isSimplePolygon(out)) return null;
+  return polygonSignedArea(out) < 0 ? out.reverse() : out;
+}

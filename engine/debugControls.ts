@@ -36,6 +36,7 @@ import {
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
+    cycleBoundaryStrength,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
     toggleWorldLights, toggleDepthAmbient,
@@ -375,6 +376,16 @@ export class DebugControls {
    *  for a debug knob). */
   cycleFractureRelax() {
     cycleFractureRelax();
+  }
+
+  /** DBG (Visual): master multiplier on every material's GRAIN-BOUNDARY
+   *  STRENGTH (V15) — how much damage it takes to break through a
+   *  boundary, and therefore, since HP is derived from the pattern, how
+   *  tough terrain is overall.  Relative material strengths stay the
+   *  variant table's job; this is the master.  Bumps the tuning
+   *  generation like the shape knobs, so it lands on the next hit. */
+  cycleBoundaryStrength() {
+    cycleBoundaryStrength();
   }
 
   /** DBG (Visual): minimum fracture-site separation (blue noise before

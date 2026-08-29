@@ -3050,6 +3050,28 @@ export function cycleFractureBias(): number {
   return activeFractureBiasIndex;
 }
 
+/** GRAIN-BOUNDARY STRENGTH multiplier (V15) — scales every material's
+ *  `fracture.boundaryStrength` at once, so "how tough is terrain in
+ *  general" can be judged on a device without re-deriving each
+ *  material's own number.  Relative material strengths are the variant
+ *  table's job; this is the master.  Cycling it invalidates cached
+ *  patterns (the fills are sized to the pattern), so a change lands on
+ *  the next hit rather than only on fresh terrain. */
+export const BOUNDARY_STRENGTH_CYCLE: ReadonlyArray<number> = [1, 1.5, 2, 3, 0.25, 0.5, 0.75] as const;
+let activeBoundaryStrengthIndex = 0;
+export function getBoundaryStrengthScale(): number {
+  return BOUNDARY_STRENGTH_CYCLE[activeBoundaryStrengthIndex];
+}
+export function getBoundaryStrengthName(): string {
+  return `x${BOUNDARY_STRENGTH_CYCLE[activeBoundaryStrengthIndex]}`;
+}
+export function cycleBoundaryStrength(): number {
+  activeBoundaryStrengthIndex =
+    (activeBoundaryStrengthIndex + 1) % BOUNDARY_STRENGTH_CYCLE.length;
+  fractureTuningGen++;
+  return activeBoundaryStrengthIndex;
+}
+
 /** True when this variant is running the PROGRESSIVE fracture model
  *  right now — a `fracture.progressive` variant whose shatter routes
  *  through the cells, with the DBG A/B on 'voronoi'.  The ONE predicate
@@ -8232,6 +8254,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // boundaries complete, instead of the pane surviving whole until
       // one final full break.
       progressive: true,
+      // V15 grain boundaries: damage to break a boundary as long as
+      // the body is wide.  The entity's HP is DERIVED from this over
+      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // V15: glass is the brittler material — 0.16 against rock's 0.27,
+      // so a 36px pane is ~20 damage (5 Blaster hits, its V9 HP).
+      boundaryStrength: 0.16,
     },
     shatter: {
       kind: 'voronoi',
@@ -8445,6 +8473,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // remainder.  The gentle dent pull is skipped under voronoi (the
       // pattern must stay stable; the highlight is the damage read).
       progressive: true,
+      // V15 grain boundaries: damage to break a boundary as long as
+      // the body is wide.  The entity's HP is DERIVED from this over
+      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // V15: damage per PIXEL of grain boundary — one number for the
+      // material, tile and shard alike; a bigger body has more boundary
+      // and is tougher for free.  0.27 puts a 36px tile at ~36 damage
+      // (9 Blaster hits, its old hit ceiling) and a 15px chip at ~6.
+      boundaryStrength: 0.27,
     },
     shatter: {
       kind: 'voronoi',
@@ -8560,6 +8596,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // highlight with each hit and a fully-highlighted piece breaks
       // off.  See ShardFracturePolicy.progressive.
       progressive: true,
+      // V15 grain boundaries: damage to break a boundary as long as
+      // the body is wide.  The entity's HP is DERIVED from this over
+      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // The same rock: strength is a material property, not a per-entity
+      // HP.  ~6 damage on a 15px chip, rising with size and merge history.
+      boundaryStrength: 0.27,
     },
     shatter: {
       kind: 'voronoi',
@@ -8622,7 +8664,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       sizePerSite: 8,
       impactBias: 0.75,
       radialSpeed: 1.0,
-      progressive: true,   // V10 — as the tile
+      progressive: true,
+      // V15 grain boundaries: damage to break a boundary as long as
+      // the body is wide.  The entity's HP is DERIVED from this over
+      // its own pattern — see ShardFracturePolicy.boundaryStrength.
+      // The same glass; a small chip is ~2 damage, i.e. one bolt.
+      boundaryStrength: 0.16,
     },
     shatter: {
       kind: 'voronoi',

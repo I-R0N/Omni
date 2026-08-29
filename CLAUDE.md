@@ -257,14 +257,19 @@ engine/
     fracture.ts           PURE seeded Voronoi fracture core (voronoi
                           gauntlet) — mulberry32, site placement, cell
                           decomposition via robust polygon-line
-                          splitting, boundary-cell subtraction, interior
+                          splitting, boundary-cell subtraction, the
+                          union-of-surviving-cells outline, interior
                           edges.  Zero engine imports; pinned by
                           tests/fracture.spec.ts via __omniFracture
     fractureCache.ts      The entity-facing cache policy over fracture.ts
                           — ensureFractureCells / ensureFractureEdges,
                           shared by the SIM (shatter consumes cells at
                           death) and the RENDER layer (cracks draw the
-                          interior edges), so the two cannot disagree
+                          interior edges), so the two cannot disagree.
+                          Also the GRAIN-BOUNDARY damage model (V15):
+                          stampLocalImpact / ensureBoundaryModel /
+                          applyBoundaryDamage / edgeBreakFraction — damage
+                          spent on boundaries, HP derived from them (§8)
     NebulaSystem.ts       Slim nebula adapter: neighbour-count refresh,
                           shard→tile transmutation, regen-completion hook,
                           salvage-drop roll
@@ -706,7 +711,13 @@ Notable existing field categories on `GameEntity`:
   computed lazily at first damage/death by
   `fractureCache.ensureFractureCells`), `fractureEdges` (its interior
   edges, impact-sorted, each knowing the cells it binds — the cracks),
-  `fractureOriginalArea` (the min-remainder death baseline).  For
+  `fractureOriginalArea` (the min-remainder death baseline, now only
+  read by LEGACY progressive variants — see the GRAIN BOUNDARY note in
+  §8).  GRAIN BOUNDARIES (V15): `fractureEdgeFill` (damage absorbed per
+  interior boundary, parallel to `fractureEdges`), `fractureBoundaryHp`
+  (Σ boundary strengths — the DERIVED HP) and `authoredMaxHealth` (the
+  HP the body spawned with, kept when the model rewrites `maxHealth`;
+  tile-destruction score reads it).  For
   PROGRESSIVE variants (rock) the pattern is applied ONCE and FIXED:
   a detach removes its cell from the cache and the survivors persist
   (V8) — only compose/merge invalidates (and the dent pull stands down
@@ -984,7 +995,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   a live cohesion bond is DRAWN (today: plastic-shard; see §8).
   The `fracture` block
   (voronoi gauntlet) + `shatter.kind: 'voronoi'` opt a variant into the
-  SEEDED VORONOI CELL DECOMPOSITION of its own polygon: the cells are
+  SEEDED VORONOI CELL DECOMPOSITION of its own polygon, and its
+  `boundaryStrength` (V15) additionally opts it into the GRAIN-BOUNDARY
+  damage model — damage per PIXEL of interior boundary, from which the
+  body's HP is DERIVED rather than authored (see §8): the cells are
   the fragments at death, the interior cell edges are the cracks it
   shows as HP falls, and for rock a qualifying hit DETACHES the cell
   nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
@@ -1990,6 +2004,58 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   fracture-cache invalidation on the killing blow (health is
   decremented before the dent), so the shatter consumes exactly the
   decomposition whose edges were last drawn.
+- **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
+  user call).  A variant carrying `fracture.boundaryStrength` does not have
+  an HP pool that damage counts down.  Damage ACCUMULATES ON THE INTERIOR
+  BOUNDARIES of its cached decomposition — grain by grain, nearest the
+  contact first — and a cell breaks off exactly when every boundary still
+  binding it has been broken through.  `boundaryStrength` is damage per
+  PIXEL of boundary: ONE number per material (rock 0.27, glass 0.16), and
+  deliberately NOT normalised by body size, because normalising cancels
+  scale and would force separate numbers for a material's tiles and its
+  shards.  Absolute length makes a bigger body tougher for free.
+  Two properties FALL OUT of this rather than being written, and both are
+  the reason to prefer it:
+  (1) **HP is derived** — `maxHealth` becomes `Σ (edge length × strength)`
+  over the body's OWN pattern at first damage, so a tile that decomposed
+  into more boundary is genuinely tougher and the number varies tile to
+  tile (a 36px glass pane measured 18.7–21.4).  The SPAWNED value is kept
+  as `authoredMaxHealth`, and anything meaning "how substantial is this
+  body" must read THAT — tile-destruction score does, since paying per
+  derived HP would price a tile by how finely it happened to decompose.
+  (2) **Nothing ends at a limit** — the damage needed to break every
+  boundary IS the derived HP, so "health hit zero" and "the last boundary
+  broke" are the same event by construction.  `FRACTURE_DETACH
+  .MIN_REMAINDER_FRAC` is skipped entirely for grain materials; it was the
+  arbitrary floor this model replaces.  A body also ends the moment
+  NOTHING BINDS ANYTHING (its last grains are held only by boundaries they
+  share with each other) — an ending, not another detach, because two
+  grains touching at a point are not a polygon SAT can carry.
+  Three things are load-bearing and easy to undo by accident:
+  - **SPILL.**  Damage finishing a boundary flows to the next unbroken
+    one.  Without it a hit's remainder is lost and the health readout
+    drifts from the boundary state, which breaks (2).
+  - **SPEND ORDER IS CELL BY CELL**, nearest the contact first — never a
+    flat nearest-EDGE sort.  This is the V10 reveal-order lesson restated
+    in the damage layer: a flat sort spreads damage over many cells and
+    completes almost none until the end (measured: 3 pieces shed over a
+    rock tile's life, 5 dumped at death).
+  - **THE REMAINDER IS `unionOfCells`, not the arc splice.**
+    `subtractBoundaryCell` is exact where it applies but refuses once a
+    survivor's whole outline lies on the parent boundary — precisely the
+    tail, where instrumenting showed every boundary broken, every
+    remaining cell loose, and none of them able to leave.  Since the cells
+    TILE the original polygon, an edge shared by two survivors is interior
+    and everything else is boundary: walking that gives the outline with
+    no arc bookkeeping and no tail case.  It returns null for a non-ring
+    (an eroded body split into islands) and the arc splice stays the
+    fallback.
+  Every PLAYER damage path feeds the boundaries — projectile, lightning
+  chain, shockwave ring — each stamping its own contact point via the
+  shared `stampLocalImpact`, so splash and chain damage erode from where
+  they arrived.  PHYSICAL smashes (a boulder crash, the pressure trigger)
+  still take the whole body: they meter boulders, not weapons.  DBG ▸
+  Visual ▸ "Bnd strength" is the master multiplier over every material.
 - **Progressive fracture IS the rock damage model under voronoi** (V8 —
   the boundary-highlight rework).  The decomposition is applied ONCE at
   first damage and FIXED; each hit reveals more of the impact-sorted

@@ -42,7 +42,7 @@ import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01,
          CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, roundedPolyPath, drawFractureCracks, GLASS_CRACK_STYLE } from './drawUtils';
-import { ensureFractureEdges, fractureRevealedEdgeCount } from '../fractureCache';
+import { ensureFractureEdges, fractureRevealedEdgeCount, boundaryStrengthFor, edgeBreakFraction } from '../fractureCache';
 
 /**
  * PAuto automata colour for a plastic-shard: the active palette's
@@ -392,8 +392,16 @@ export function overlayMaterialCracks(
         // No max(1, …) floor: the helper's count IS the truth the sim
         // detaches by, and an early hit on a small pattern legitimately
         // reveals zero edges — the scorch still reads as damage.
-        const upTo = fractureRevealedEdgeCount(entity, fractured.length, cfg.freq);
-        drawFractureCracks(ctx, fractured, upTo, r, dmgFrac, style);
+        // V15: under the grain model each boundary carries its own break
+        // progress, so the overlay draws PARTIAL cracks and a boundary the
+        // player sees complete is exactly one that no longer binds.  The
+        // legacy HP-paced reveal stays for variants without a
+        // `boundaryStrength` (and for the legacy fracture A/B).
+        const grain = boundaryStrengthFor(entity) !== null;
+        const upTo = grain ? fractured.length
+            : fractureRevealedEdgeCount(entity, fractured.length, cfg.freq);
+        drawFractureCracks(ctx, fractured, upTo, r, dmgFrac, style,
+            grain ? (i: number) => edgeBreakFraction(entity, i) : undefined);
     } else {
         drawDamageCracks(ctx, r, crackSeedFor(entity), count, dmgFrac, style);
     }

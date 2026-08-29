@@ -485,6 +485,22 @@ test.describe('partial fracture (V4)', () => {
       // The struck point: on the +x face, matching the -x impact
       // velocity.  V12 gates detachment on the piece this point touches.
       const hitAt = { x: tile.position.x + w * 0.5, y: tile.position.y };
+      // A real player bolt into that face — V15 moved the damage into the
+      // boundaries, so a test that sets `health` directly is no longer
+      // driving anything.  This is the same path the game runs.
+      let shotN = 0;
+      const shoot = (dmg: number) => {
+        e.physics.resolveCollision(
+          {
+            id: 'v8_bolt_' + (shotN++), type: 'PROJECTILE',
+            position: { x: hitAt.x + 4, y: hitAt.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: dmg, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+        );
+      };
       // Undamaged: the pattern is applied but NOTHING detaches.
       e.progressFracture(tile, hitAt);
       const initialCells = tile.fractureCells.length;
@@ -499,12 +515,11 @@ test.describe('partial fracture (V4)', () => {
       // Step the damage down; each step highlights more boundaries and
       // detaches every piece whose boundary completed.
       const steps: any[] = [];
-      for (const hp of [80, 60, 40, 20, 1]) {
+      for (let step = 0; step < 12; step++) {
         if (!tile.active) break;
-        tile.health = hp;
-        e.progressFracture(tile, hitAt);
+        shoot(4);
         steps.push({
-          hp,
+          hp: tile.active ? tile.health : 0,
           alive: tile.active === true,
           cellsLeft: tile.active ? tile.fractureCells.length : 0,
           chips: chips().length,
@@ -560,7 +575,7 @@ test.describe('partial fracture (V4)', () => {
     watch.assertClean();
   });
 
-  test('the min-remainder rule routes the last pieces through the real death path', async ({ page }) => {
+  test('a body ends when its last boundary breaks — never at an area floor (V15)', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
@@ -578,24 +593,81 @@ test.describe('partial fracture (V4)', () => {
         id: 'v8_tile_b', type: 'STRUCTURE', shardVariant: 'rock-tile',
         position: { x: 4600, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
         size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
-        health: 1, maxHealth: 100, polygonPoints: pts,
+        health: 9, maxHealth: 9, polygonPoints: pts,
       };
       ents.push(tile);
       tile.lastImpactVelocity = { x: -9, y: 0 };
-      // A recorded original area far above the polygon puts ANY splice
-      // under the min-remainder floor, so the first completed boundary
-      // routes the whole entity through the death path deterministically.
-      // x12 against the V10 floor of 0.10 (was x5 against 0.25).
+      // The OLD trip: an original area far above the polygon put every
+      // splice under MIN_REMAINDER_FRAC, so the first completed boundary
+      // killed the tile outright.  V15 removed that floor for grain
+      // materials — it is exactly the arbitrary limit the model replaces —
+      // so the same setup must NOT end the body early any more.
       tile.fractureOriginalArea = fr.polygonArea(pts) * 12;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      e.progressFracture(tile, { x: tile.position.x + w * 0.5, y: tile.position.y });
+      const hitAt = { x: tile.position.x + w * 0.5, y: tile.position.y };
+      let shotN = 0;
+      const shoot = () => {
+        e.physics.resolveCollision(
+          {
+            id: 'v15_bolt_' + (shotN++), type: 'PROJECTILE',
+            position: { x: hitAt.x + 4, y: hitAt.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+        );
+      };
+      // Watch every hit: the body must never end while a boundary it
+      // still needs is unbroken.
+      let diedWithBoundaryLeft = false;
+      let hits = 0;
+      let unbrokenAtDeath = -1;
+      while (tile.active && hits < 20) {
+        shoot();
+        hits++;
+        if (!tile.active) {
+          // Count boundaries still binding a surviving cell.
+          const edges = tile.fractureEdges ?? [];
+          const fill = tile.fractureEdgeFill ?? [];
+          const living = new Set((tile.fractureCells ?? []).map((c: any) => c.siteIndex));
+          let unbroken = 0;
+          for (let k = 0; k < edges.length; k++) {
+            const ed = edges[k];
+            let binds = ed.cells.length === 1;
+            if (!binds) for (const st of ed.cells) if (living.has(st)) { binds = true; break; }
+            if (binds && (fill[k] ?? 0) < 1e9 && (fill[k] ?? 0) + 1e-6 < edgeNeed(tile, ed)) unbroken++;
+          }
+          unbrokenAtDeath = unbroken;
+          if (unbroken > 0 && (tile.health ?? 0) > 1e-6) diedWithBoundaryLeft = true;
+        }
+      }
+      function edgeNeed(t: any, ed: any) {
+        const len = Math.hypot(ed.bx - ed.ax, ed.by - ed.ay);
+        // rock's shipped boundaryStrength; the assertion below only needs
+        // the ORDER of magnitude, so a drift in the constant cannot make
+        // this pass falsely.
+        return Math.max(0.05, 0.27 * len);
+      }
       const debris = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
-      return { died: tile.active === false, debrisCount: debris.length };
+      return {
+        died: tile.active === false, hits, debrisCount: debris.length,
+        diedWithBoundaryLeft, unbrokenAtDeath,
+        finalHealth: tile.active ? tile.health : 0,
+      };
     });
 
+    // It still dies, and still leaves its pattern behind as pieces.
     expect(r.died).toBe(true);
     expect(r.debrisCount).toBeGreaterThanOrEqual(2);
+    // But it took a real beating to get there — the old floor ended it on
+    // the FIRST completed boundary, so anything above a couple of hits
+    // proves the floor is not what is ending it.
+    expect(r.hits).toBeGreaterThan(3);
+    // And the ending is the boundaries, not a limit: no hit ever ended the
+    // body while it still had an unbroken boundary and health to spare.
+    expect(r.diedWithBoundaryLeft).toBe(false);
 
     watch.assertClean();
   });
@@ -648,7 +720,7 @@ test.describe('partial fracture (V4)', () => {
 });
 
 test.describe('death is dispatched once (V9 regression)', () => {
-  test('a mid-hit min-remainder death does not double-shatter into duplicate fragments', async ({ page }) => {
+  test('a mid-hit fracture death does not double-shatter into duplicate fragments', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
@@ -662,13 +734,13 @@ test.describe('death is dispatched once (V9 regression)', () => {
         const a = (i / 6) * Math.PI * 2;
         pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
       }
-      // Full health, 2-hit ceiling: the FIRST hit never triggers the
-      // probabilistic rock break (its chance is 0 at one hit taken), so
-      // the kill can only come from progressFracture's min-remainder
-      // death INSIDE the damage hook — the exact mid-hit shape the
-      // double-dispatch bug needs (verified: with the guard disabled
-      // this scenario yields 2 dispatches and an exact duplicate of
-      // every fragment).
+      // The kill must land INSIDE the damage hook — the exact mid-hit
+      // shape the double-dispatch bug needs (verified: with the guard
+      // disabled this scenario yields 2 dispatches and an exact duplicate
+      // of every fragment).  V15 gets there by breaking EVERY boundary in
+      // one oversized hit, so the body loses cohesion and ends from
+      // inside progressFracture — where the removed min-remainder floor
+      // used to put it.
       const tile: any = {
         id: 'v9_dup_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
         position: { x: 4200, y: 2600 }, velocity: { x: 0, y: 0 }, rotation: 0,
@@ -677,8 +749,7 @@ test.describe('death is dispatched once (V9 regression)', () => {
       };
       ents.push(tile);
       tile.lastImpactVelocity = { x: -9, y: 0 };
-      // The min-remainder trip: any splice lands under the floor.
-      tile.fractureOriginalArea = fr.polygonArea(pts) * 12;
+      tile.fractureOriginalArea = fr.polygonArea(pts);
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       // REAL projectile kill path: onDamage (progressFracture -> death)
       // runs BEFORE the outer health<=0 block — the exact double-dispatch
@@ -689,7 +760,7 @@ test.describe('death is dispatched once (V9 regression)', () => {
           position: { x: tile.position.x + w * 0.5 + 4, y: tile.position.y },
           velocity: { x: -900, y: 0 }, rotation: Math.PI,
           size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-          damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          damage: 9999, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
         },
         tile, { x: 0, y: 0 },
         // The REAL damage-feedback hook — the chip/progressFracture site
@@ -848,9 +919,13 @@ test.describe('the glass damage layer (V9)', () => {
           t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
         );
       };
-      const maxHp = t.maxHealth;
+      const maxHp = t.maxHealth;              // AUTHORED, before the model
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       shoot(4); // one base blaster hit
+      // V15: the first hit builds the grain model, which rewrites maxHealth
+      // to the DERIVED boundary total and keeps the authored value aside.
+      const derived = t.maxHealth;
+      const authored = t.authoredMaxHealth;
       const afterOne = { alive: t.active === true, health: t.health };
       shoot(4);
       const afterTwo = { alive: t.active === true, health: t.health };
@@ -862,21 +937,31 @@ test.describe('the glass damage layer (V9)', () => {
       const children = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'glass-shard' && x.mass !== Infinity);
       return {
-        maxHp, afterOne, afterTwo, dead,
+        maxHp, derived, authored, afterOne, afterTwo, dead,
+        edgeFills: (t.fractureEdgeFill ?? []).length,
         childCount: children.length,
         childHp: children.map((c: any) => c.maxHealth),
       };
     });
 
-    // The MAP-SPAWNED tile carries the damage layer (V9: 12 HP; V10: 20,
-    // five base blaster hits, so the progressive reveal has room to shed
-    // pieces on the way down).
+    // The MAP-SPAWNED tile is authored at 20 (V9's damage layer), and V15
+    // keeps that number as `authoredMaxHealth` while HP itself becomes
+    // DERIVED from the tile's own grain boundaries — close to 20 by
+    // calibration, but a property of the pattern rather than a constant,
+    // so it varies tile to tile.  Both facts are pinned: the authored
+    // value survives (score reads it), and the live HP is the derived one.
     expect(r.maxHp).toBe(20);
-    // It survives base blaster hits and loses exactly the weapon damage.
+    expect(r.authored).toBe(20);
+    expect(r.derived).toBeGreaterThan(14);
+    expect(r.derived).toBeLessThan(28);
+    expect(r.edgeFills).toBeGreaterThan(0);
+    // It survives base blaster hits, and each one costs exactly the weapon
+    // damage — spent on boundaries now, but the arithmetic is unchanged
+    // because health mirrors the unbroken boundary budget exactly.
     expect(r.afterOne.alive).toBe(true);
-    expect(r.afterOne.health).toBe(16);
+    expect(r.afterOne.health).toBeCloseTo(r.derived - 4, 6);
     expect(r.afterTwo.alive).toBe(true);
-    expect(r.afterTwo.health).toBe(12);
+    expect(r.afterTwo.health).toBeCloseTo(r.derived - 8, 6);
     // And it does eventually go, leaving its cells behind.
     expect(r.dead).toBe(true);
     expect(r.childCount).toBeGreaterThanOrEqual(2);
@@ -1046,19 +1131,25 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
         }
       }
       return {
-        maxHp: t.maxHealth, hits, died: !t.active,
+        authored: t.authoredMaxHealth, hits, died: !t.active,
         debrisWhileAlive, totalDebris: debris(),
         shrank: areaWhileAlive < area0 * 0.999,
       };
     });
 
-    expect(r.maxHp).toBe(20);
+    // V15: HP is derived, so the authored 20 lives on `authoredMaxHealth`
+    // and `maxHealth` is the tile's own boundary total.
+    expect(r.authored).toBe(20);
     expect(r.died).toBe(true);
-    // THE ASK: glass now takes rock's breaking behaviour — pieces detach
+    // THE ASK: glass takes rock's breaking behaviour — pieces detach
     // mid-life and the pane's own polygon loses their area.
     expect(r.debrisWhileAlive).toBeGreaterThanOrEqual(1);
     expect(r.shrank).toBe(true);
     expect(r.totalDebris).toBeGreaterThan(r.debrisWhileAlive);
+    // And under the grain model MOST of the pane leaves while it is still
+    // standing — the terminal separation is the last couple of grains
+    // losing their shared boundary, not a shatter dumping the remainder.
+    expect(r.debrisWhileAlive / r.totalDebris).toBeGreaterThan(0.4);
 
     watch.assertClean();
   });
@@ -1376,6 +1467,256 @@ test.describe('only the struck piece chips (V12)', () => {
     expect(r.rock.chipSounds.every(id => id === 'destroy.shard.rock')).toBe(true);
     expect(r.glass.chipSounds.every(id => id === 'destroy.shard.glass')).toBe(true);
     expect(r.glass.chipSounds.length).toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('grain boundaries (V15)', () => {
+  // The model: damage accumulates ON THE BOUNDARIES of the pattern and a
+  // grain leaves when every boundary binding it has been broken through.
+  // Two properties follow rather than being declared, and both are what
+  // these tests exist to hold:
+  //   - HP is DERIVED (Σ boundary strengths over the body's OWN pattern),
+  //   - nothing ends at a limit: "health reached zero" and "the last
+  //     boundary broke" are the same event.
+
+  const SHOOT_SRC = `
+    function makeShoot(e, t, dmg) {
+      let n = 0;
+      const contactX = () => {
+        let mx = -Infinity;
+        for (const p of t.polygonPoints) {
+          if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+        }
+        return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+      };
+      return () => {
+        e.physics.resolveCollision(
+          { id: 'v15_' + (n++) + '_' + Math.random(), type: 'PROJECTILE',
+            position: { x: contactX() + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: dmg, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+        );
+      };
+    }`;
+
+  test('HP is derived from the body\'s own boundaries, and every unit of damage lands on one',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any, src: any) => {
+      // eslint-disable-next-line no-new-func
+      const makeShoot = new Function('return (' + src.shoot + ')')();
+      const ents = e.currentMap.entities;
+      const rows: any[] = [];
+      const tiles = ents.filter((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity).slice(0, 4);
+      for (const t of tiles) {
+        e.player.position.x = t.position.x + 6000;
+        const shoot = makeShoot(e, t, 4);
+        shoot();                       // first hit builds the model
+        const edges = t.fractureEdges ?? [];
+        // Σ strengths, recomputed here from the edge geometry and the
+        // shipped constant — so this pins the DEFINITION, not a snapshot.
+        let sum = 0;
+        for (const ed of edges) {
+          sum += Math.max(0.05, 0.27 * Math.hypot(ed.bx - ed.ax, ed.by - ed.ay));
+        }
+        const hpAfterOne = t.health;
+        rows.push({
+          derived: t.maxHealth, sum, authored: t.authoredMaxHealth,
+          boundaryHp: t.fractureBoundaryHp,
+          spent: t.maxHealth - hpAfterOne,
+          fills: (t.fractureEdgeFill ?? []).reduce((a: number, b: number) => a + b, 0),
+        });
+      }
+      return rows;
+    }, { shoot: SHOOT_SRC });
+
+    for (const row of r) {
+      // Derived HP IS the sum of the pattern's boundary strengths.
+      expect(row.derived).toBeCloseTo(row.sum, 5);
+      expect(row.boundaryHp).toBeCloseTo(row.sum, 5);
+      // The authored number survives for the consumers that mean "how
+      // substantial is this body" (score reads it).
+      expect(row.authored).toBe(9);
+      // Nothing is lost: a 4-damage hit removes exactly 4 from the
+      // unbroken budget and puts exactly 4 onto boundaries.  This is what
+      // makes "health hit zero" and "the last boundary broke" the same
+      // event instead of two rules that can disagree.
+      expect(row.spent).toBeCloseTo(4, 6);
+      expect(row.fills).toBeCloseTo(4, 6);
+    }
+
+    watch.assertClean();
+  });
+
+  test('a grain leaves only once every boundary binding it is broken', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any, src: any) => {
+      // eslint-disable-next-line no-new-func
+      const makeShoot = new Function('return (' + src.shoot + ')')();
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity);
+      e.player.position.x = t.position.x + 6000;
+      const shoot = makeShoot(e, t, 4);
+      const need = (ed: any) => Math.max(0.05, 0.27 * Math.hypot(ed.bx - ed.ax, ed.by - ed.ay));
+
+      let prematureDetach = false;   // a cell left with a boundary intact
+      let sheds = 0, hits = 0, dumped = 0;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const chips = () => ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity).length;
+      shoot(); hits++;
+      let prevCells = (t.fractureCells ?? []).map((c: any) => c.siteIndex);
+      while (t.active && hits < 30) {
+        // Snapshot which cells are LOOSE before the hit lands.
+        const edges = t.fractureEdges ?? [], fill = t.fractureEdgeFill ?? [];
+        shoot(); hits++;
+        if (!t.active) break;
+        const now = (t.fractureCells ?? []).map((c: any) => c.siteIndex);
+        for (const site of prevCells) {
+          if (now.includes(site)) continue;
+          // This cell left on this hit.  Every boundary that bound it
+          // must have been broken through by the time it did.
+          for (let k = 0; k < edges.length; k++) {
+            const ed = edges[k];
+            if (!ed.cells.includes(site)) continue;
+            const partnerAlive = ed.cells.some((sx: number) => sx !== site && now.includes(sx));
+            if (!partnerAlive && ed.cells.length > 1) continue; // no longer binding
+            if ((fill[k] ?? 0) + 1e-6 < need(ed)) prematureDetach = true;
+          }
+        }
+        prevCells = now;
+        sheds = chips();
+      }
+      const total = chips();
+      dumped = total - sheds;
+      return { prematureDetach, sheds, total, dumped, hits, died: !t.active };
+    }, { shoot: SHOOT_SRC });
+
+    expect(r.died).toBe(true);
+    expect(r.total).toBeGreaterThan(2);
+    // THE RULE: no piece ever came off with a boundary still holding it.
+    expect(r.prematureDetach).toBe(false);
+    // And the body is eaten progressively rather than dumped: MOST of it
+    // leaves while it is still standing.  The tail is the last grains
+    // losing the boundaries they shared with each other, which is an
+    // ending, not a shatter at a limit.
+    expect(r.sheds / r.total).toBeGreaterThan(0.4);
+
+    watch.assertClean();
+  });
+
+  test('material strength is one number, and it scales what the body can take',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    // Rock ships 0.27 and glass 0.16 per pixel of boundary, so on
+    // comparable patterns rock takes measurably more damage to consume.
+    // Measured through the DBG master multiplier, which must scale the
+    // whole thing linearly — that is what makes it a usable tuning dial.
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const derivedFor = () => {
+        const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+          && x.mass === Infinity && !x.probed);
+        t.probed = true;
+        // Force the model without damaging anything else.
+        t.lastImpactLocal = { x: t.size.x * 0.5, y: 0 };
+        t.fractureCells = undefined; t.fractureEdges = undefined;
+        t.fractureEdgeFill = undefined; t.authoredMaxHealth = undefined;
+        t.health = 9; t.maxHealth = 9;
+        e.physics.resolveCollision(
+          { id: 'v15_scale_' + Math.random(), type: 'PROJECTILE',
+            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: 0.001, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+        );
+        // Normalise by the pattern's own boundary length, so the two
+        // readings are comparable even though the tiles differ.
+        let len = 0;
+        for (const ed of (t.fractureEdges ?? [])) len += Math.hypot(ed.bx - ed.ax, ed.by - ed.ay);
+        return { perPx: (t.maxHealth ?? 0) / Math.max(1, len) };
+      };
+      const base = derivedFor();
+      e.dbg.cycleBoundaryStrength();            // x1 -> x1.5
+      const scaled = derivedFor();
+      const name = e.dbg ? null : null;
+      e.dbg.cycleBoundaryStrength();            // x1.5 -> x2
+      const scaled2 = derivedFor();
+      for (let i = 0; i < 5; i++) e.dbg.cycleBoundaryStrength(); // back to x1
+      const restored = derivedFor();
+      return { base: base.perPx, scaled: scaled.perPx, scaled2: scaled2.perPx,
+        restored: restored.perPx, name };
+    });
+
+    // Rock's shipped strength, read off a real tile.
+    expect(r.base).toBeCloseTo(0.27, 2);
+    // The master multiplier scales it linearly...
+    expect(r.scaled).toBeCloseTo(0.27 * 1.5, 2);
+    expect(r.scaled2).toBeCloseTo(0.27 * 2, 2);
+    // ...and the cycle returns to where it started.
+    expect(r.restored).toBeCloseTo(0.27, 2);
+
+    watch.assertClean();
+  });
+
+  test('the union outline expresses a remainder the arc splice cannot', async ({ page }) => {
+    const watch = await boot(page);
+
+    const r = await page.evaluate(`(() => {
+      const fr = window.__omniFracture;
+      // A square cut into four quadrant cells.
+      const cells = [
+        { points: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}] },
+        { points: [{x:1,y:0},{x:2,y:0},{x:2,y:1},{x:1,y:1}] },
+        { points: [{x:1,y:1},{x:2,y:1},{x:2,y:2},{x:1,y:2}] },
+        { points: [{x:0,y:1},{x:1,y:1},{x:1,y:2},{x:0,y:2}] },
+      ];
+      const all = fr.unionOfCells(cells, 1e-4);
+      const three = fr.unionOfCells(cells.slice(0, 3), 1e-4);
+      // Two cells meeting only at a corner: not a ring, must be refused.
+      const diagonal = fr.unionOfCells([cells[0], cells[2]], 1e-4);
+      const area = (p) => {
+        if (!p) return null;
+        let a = 0;
+        for (let i = 0; i < p.length; i++) {
+          const q = p[i], n = p[(i + 1) % p.length];
+          a += q.x * n.y - n.x * q.y;
+        }
+        return Math.abs(a / 2);
+      };
+      return {
+        allArea: area(all), allSimple: all ? fr.isSimplePolygon(all) : false,
+        threeArea: area(three), threeSimple: three ? fr.isSimplePolygon(three) : false,
+        diagonal: diagonal === null,
+      };
+    })()`) as any;
+
+    // The whole tiling comes back as the square...
+    expect(r.allArea).toBeCloseTo(4, 6);
+    expect(r.allSimple).toBe(true);
+    // ...and three quadrants as the L, which is exactly the shape the arc
+    // splice refuses once a survivor's outline lies wholly on the boundary.
+    expect(r.threeArea).toBeCloseTo(3, 6);
+    expect(r.threeSimple).toBe(true);
+    // Two grains touching only at a point are not one body: refused, so
+    // the caller keeps the old shape rather than handing SAT a bowtie.
+    expect(r.diagonal).toBe(true);
 
     watch.assertClean();
   });
