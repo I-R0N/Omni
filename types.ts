@@ -384,6 +384,20 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
+  /** DIRECTIONAL TILT (player only today) — the ROLL half.  Signed lateral
+   *  tilt angle in radians, eased toward the strafe + turn signal each step
+   *  (`GameEngine.tickPlayerRoll`, tuning in `PLAYER_ROLL_CONSTANTS`).
+   *  Purely presentational — RenderSystem combines it with `visualPitch`
+   *  into one tilt toward the acceleration and foreshortens the hull along
+   *  that direction by cos(tilt); physics/collision never read it. */
+  visualRoll?: number;
+  /** DIRECTIONAL TILT — the PITCH half.  Signed longitudinal tilt angle in
+   *  radians, driven by CHANGES in thrust along the nose (a washout
+   *  filter): punching the throttle pitches, cruising settles level,
+   *  cutting thrust dips.  The top-down projection cannot show nose-up vs
+   *  nose-down (both foreshorten the same), so the sign exists only to keep
+   *  the easing continuous through reversals. */
+  visualPitch?: number;
   /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
    *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
    *  while it is positive and fades over the last `FADE_DURATION`.  A
@@ -1844,6 +1858,26 @@ export interface EngineStats {
   controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
+  rollFeelName?: string;
+  // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default —
+  // "Diamond", "Sphere", "Dodeca", "Rhombic", "Tri", or "Ship").
+  hullModeName?: string;
+  // DBG rotation-damping preset name (PLAYER_ROLL_DAMPING_CYCLE, e.g.
+  // "Default").
+  rollDampName?: string;
+  // DBG tilt-mode name (TILT_MODE_CYCLE: "Lean" — the default — or
+  // "Tumble", the continuous-roll test mode).
+  tiltModeName?: string;
+  // DBG lean-direction A/B name (LEAN_DIR_CYCLE: "Default" — tilt into
+  // the acceleration — or "Reversed").
+  leanDirName?: string;
+  // DBG tilt-source A/B name (TILT_SOURCE_CYCLE: "Thrust" — the input
+  // drives the tilt, the default — or "Velocity", the ship's motion).
+  tiltSourceName?: string;
+  // DBG velocity-gain step name (VEL_GAIN_CYCLE, e.g. "1×") — the
+  // Velocity tilt source's sensitivity multiplier.
+  velGainName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   /** DBG: active simulation rate label ('120Hz' / '60Hz'). */

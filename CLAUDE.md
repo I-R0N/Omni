@@ -49,17 +49,21 @@ playwright.config.ts      Test harness: one 390×844 project (the DESIGN
                           that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
+scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
+                          authoring angle table, --placeholder renders
+                          stand-in cells from the wireframe hull
 
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
                           plus input / help / minimap / maps (step 5),
-                          viewports / healthbars (5d), lighting (the
+                          viewports / healthbars (5d), starfield,
+                          lighting (the
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
-                          flashlight / nebulaspin,
+                          flashlight / nebulaspin / roll / shipsprites,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  222 tests.  All run at
+                          anti-flake rules).  257 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -203,6 +207,13 @@ engine/
                           debris) and the proximity-interactable POIs
                           (station, portal, snitch).  Like enemyShapes,
                           takes no engine and no renderer
+      shipSprites.ts      SHIP TILT SHEETS — the player hull as
+                          PRE-RENDERED art, one authored pose per (tilt
+                          magnitude, tilt-axis azimuth).  The grid, the
+                          nearest-pose resolver, the mirror fold and the
+                          cell order.  Takes no engine and no renderer;
+                          docs/SHIP_SPRITE_SHEETS.md is GENERATED from
+                          its own `enumerateCells`
       hud.ts              The SCREEN-SPACE layer: minimap + its static
                           layer + its flow-streamline layer, off-screen
                           indicators, loadout strip, player messages,
@@ -712,6 +723,147 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
+- `PLAYER_ROLL_CONSTANTS` — the DIRECTIONAL TILT: the player ship
+  pitches and rolls into changing acceleration, full 360°.
+  `GameEngine.tickPlayerRoll` eases `player.visualRoll` +
+  `player.visualPitch` toward a tilt signal whose ROLL half has two
+  terms — the STRAFE term (the thrust input's component perpendicular
+  to the FACING axis) plus the TURN term (the smoothed rate the nose is
+  swinging × throttle, sign chosen so the terms agree; it exists
+  because the aim-locked schemes — touch / joystick / gamepad, where
+  the ship aims where it flies — put thrust along the nose by
+  construction, so a strafe-only signal never fired there (user
+  report)).  TWO PHYSICS TERMS refine the roll: the turn gate is
+  CENTRIPETAL — bank in a real turn is tan(bank) ∝ v·ω, so it scales
+  with measured speed, floored at `TURN_SPEED_FLOOR` so a standing
+  pivot still reads — and a SLIP term (`SLIP_GAIN`) reads the
+  velocity's lateral drift off the nose under power, so a hard turn
+  stays banked through its slide until the path catches up (throttle-
+  gated, keeping the "no input, no tilt" rule).  The PITCH half is
+  nose-line thrust DIRECTLY (the washout filter was removed — user
+  call): a held throttle holds the lean, cutting it settles level,
+  reverse thrust leans the other way (the cube hull shows the sign;
+  the sprite squash cannot).  Full signal is a full tilt (`MAX_ANGLE`; full
+  turn rate = 1/`YAW_GAIN` rad/s), the signal VECTOR is
+  magnitude-clamped so a diagonal cannot out-tilt the maximum, and no
+  signal settles back to a literal 0.  EASING IS A SECOND-ORDER SPRING
+  (user call): each component carries an angular velocity
+  (semi-implicit Euler, `SPRING_OMEGA`/`SPRING_ZETA`), underdamped on
+  purpose so a step overshoots ~13% and settles with one wobble — the
+  read of a hull with inertia — and the frequency divides by
+  √(player.mass / PLAYER_MASS), so a full outfit (~3× the lean mass)
+  tilts ~1.7× more ponderously with the same wobble character
+  (`MAX_TILT` caps the combined angle under π/2 so the cos-projection
+  can never mirror the sprite).  TUMBLE (DBG Ship Tilt ▸ "Tilt mode",
+  Lean/Tumble — a TEST mode, user call) turns the clamped signal into
+  angular RATE (`TUMBLE_RATE`, NEGATED so the hull rolls WITH its
+  travel — user call): the hull rolls CONTINUOUSLY about the axis
+  perpendicular to the thrust — end-over-end under throttle, a barrel
+  roll under strafe — and freezes where it stopped when thrust drops;
+  angles wrap ±π, the "Roll feel" presets scale the rate (Off stops
+  it), and the sprite squash clamps its tilt locally so tumble angles
+  cannot mirror it.  While tumbling the wireframe hides its white aim
+  marker (a face spinning with the hull reads as noise) and a small
+  fixed CHEVRON RETICLE ahead of the hull carries the aim instead —
+  drawn in the yaw frame, so it ignores the tumble.  Purely presentational:
+  RenderSystem combines both halves into ONE tilt toward the
+  acceleration and foreshortens the hull ALONG that direction by
+  cos(tilt), composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ)
+  × R(art offset) inside the player's single setTransform (φ = the
+  tilt direction in the ship frame; pure roll reduces it to the
+  scale(1, cos roll) it shipped with) — the squash sits BETWEEN the
+  facing rotation and the art-alignment offset because it is the ship
+  that tilts, not the sprite art's axes.  Physics, collision and aim
+  never read it.  Works on every input device for free, since the
+  signal is the shared movement vector.
+  `PLAYER_ROLL_CYCLE` is the DBG feel knob (Ship Tilt ▸ "Roll feel"):
+  named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
+  from the pause debug menu; `tickPlayerRoll` reads the active angle, so
+  Off levels out through the same easing rather than a separate branch.
+  THE WHOLE TILT SHIPS OFF (user call): `PLAYER_ROLL_CYCLE` defaults to
+  'Off' and `PLAYER_HULL_CYCLE` to 'Ship', so an untouched build renders
+  EXACTLY as it did before any of this existed — the legacy sprite, no
+  tilt, the renderer's plain-rotation path.  Off is a max angle of 0
+  rather than a bypass, so nothing is dead code: the signal is computed
+  and eased as always and simply converges on literal level.  Turning it
+  on is the first TWO rows of the debug menu's SHIP TILT section —
+  "Roll feel" onto a preset and "Hull" onto its next step — which is why the hull cycle is ordered
+  'Ship', 'Sheet', then the wireframes: the pre-rendered art is one step
+  from the default and the experimental shapes sit behind it.
+  THE PLAYER'S WIREFRAME HULLS (`PLAYER_HULL_CYCLE` /
+  `getActivePlayerHullMode` — DBG Ship Tilt ▸ "Hull"): `render/playerCube.ts` draws a 3D wire cube rotating FOR
+  REAL in the three axes the player rotates in — yaw stays on the
+  canvas transform (a Z-rotation commutes with the projection),
+  pitch/roll are real rotations inside the draw, and the projection is
+  ORTHOGRAPHIC (no perspective — user call).  The hulls are a SHAPE
+  TABLE (`HullDef`: unit-radius vertices + edge list + nose-marker
+  flags + per-shape scale), so a new shape is a table entry, never a
+  new draw path.  SIX wireframes today: 'Cube' (axis-aligned, so at
+  rest it is a FLAT SQUARE with the NOSE FACE
+  edge-on as the forward edge), 'Diamond' (the cube stood on a corner:
+  one corner straight up at the viewer, the adjacent corner's
+  projection dead forward — exact up AND exact forward is impossible,
+  adjacent cube corners subtend ~70.5° — a gem-cut hexagonal
+  silhouette with a point at the aim), 'Sphere' (three great circles +
+  a small nose RING around the forward pole — a sphere has no edges,
+  so the ring is what makes its spin readable), 'Dodeca' (a regular
+  dodecahedron rotated so a pentagonal FACE aims forward; its five
+  edges are the marker), and 'Rhombic' (the rhombic dodecahedron with
+  a degree-4 axis VERTEX forward — at rest a diamond silhouette; the
+  four edges meeting at that vertex are the marker), and 'Tri' (the
+  triangular DART ship — the one shape that is a ship rather than a
+  solid: nose far forward, two swept wingtips, a dorsal peak + ventral
+  keel for 3D depth; the four nose edges are the marker).  The aim marker
+  draws last in white; depth is cued by edge alpha.  'Sheet' is the
+  SPRITE answer to the same problem (see the tilt-sheet note in §8), and
+  the 'Ship' step
+  restores the sprite +
+  the cos-tilt squash as the A/B — the squash path is sprite-mode
+  only.  The shield/charge rings restore the plain rotation matrix
+  (art offset included, which the wireframe frame omits) before
+  drawing in EVERY mode.  `PLAYER_ROLL_DAMPING_CYCLE` (DBG Ship Tilt ▸
+  "Roll damp": Floaty ½× / Default / Stiff 2× / Snappy 4×) is one
+  multiplier over the spring's natural frequency, so every step keeps
+  the same overshoot-and-wobble character.  `LEAN_DIR_CYCLE` (DBG
+  Ship Tilt ▸ "Lean dir": Default / Reversed) is the direction A/B for
+  LEAN mode — one sign over both spring targets, so Reversed tips the
+  hull AWAY from the acceleration (nose rising under throttle) with
+  the same signal, easing and clamps; deliberately lean-only, since
+  Tumble's roll-with-the-travel sign was its own user call.  Under
+  Reversed the wireframe hulls also RE-BASE NOSE-UP (user call): the
+  nose feature faces the VIEWER at rest instead of the aim — a +90°
+  pitch of the geometry alone inside `drawPlayerCube`, applied before
+  the dynamic roll/pitch so both keep acting in the travel frame.
+  `TILT_SOURCE_CYCLE` (DBG Ship Tilt ▸ "Tilt src": Thrust / Velocity /
+  Average / Sum) chooses the SOURCE, and it reaches BOTH tilt modes:
+  Thrust (default)
+  reads the input vector — no input, no tilt — while Velocity reads
+  the ship's actual velocity normalised by the CRUISE speed — the real
+  terminal speed under held thrust (acc·f/(1−f), ~a third of the cap;
+  `lastCruiseSpeed`, cached in the movement block) — so a coasting
+  drift holds its lean, a wall bounce reads on the hull, and a tumble
+  rolls as long as the ship moves.  The slip term and the centripetal
+  gate read the SAME cruise normaliser: dividing velocity by the cap
+  ran all three ~3× weak in real flight (user report), since the cap
+  exists for knockback overshoot and level flight never nears it.  One
+  substitution at the top of `tickPlayerRoll`; every term downstream
+  is unchanged.  AVERAGE and SUM run BOTH sources and blend the
+  resulting ROTATION EFFECTS rather than the two input vectors (user
+  call) — the meaningful reading, since each source runs its own
+  throttle gate and slip weighting, and blending the vectors first
+  would gate both halves by one merged throttle and lose exactly the
+  difference the A/B exists to show.  `tiltSignalFrom` is the extracted
+  per-source pipeline both calls; Average is their midpoint and Sum
+  their total (so exactly 2× Average pre-clamp), which means Sum banks
+  SOONER and — because the magnitude clamp still applies once, after
+  the blend — never deeper.  `VEL_GAIN_CYCLE` (DBG Ship Tilt ▸ "Vel gain": 1× / 2× /
+  4× / 10×) is the Velocity source's SENSITIVITY step — the gain
+  multiplies the cruise-normalised vector BEFORE the magnitude clamp,
+  so each step moves WHERE the tilt saturates (2× = full at half
+  cruise; 10× = almost any motion reads full), never past the authored
+  maximum.  Thrust mode never reads it.
+  `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
+  hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy
@@ -2075,11 +2227,47 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   engine internals (`runTimeSec`, `waves.waveOffset`) and call private
   methods (`physics.resolveCollision`) straight off the handle.  That is
   intended, and is what lets a test measure damage arithmetic in situ
-  instead of reimplementing it.  `__omniHid` is the same idea with a sharper
+  instead of reimplementing it.  `__omniShip` (the tilt-sheet grid) joins them on identical terms: a cell
+  order that disagrees with the authoring guide, or a mirror that folds the
+  wrong half of the azimuth circle, draws a perfectly plausible ship in the
+  WRONG pose — nothing throws and nothing logs.  Exposing the pure
+  resolver also lets `scripts/gen-ship-sheet.mjs` render placeholder art
+  against the very table the engine indexes.
+  `__omniHid` is the same idea with a sharper
   motive: those builders are the one place in the input layer that can be
   wrong with NO symptom to read (a pad discards a malformed report in
   silence), and they are pure with a published CRC test vector, so they are
   pinnable without hardware.
+- **SHIP TILT SHEETS: yaw is FREE, pitch and roll are the art**
+  (`engine/systems/render/shipSprites.ts`, DBG Ship Tilt ▸ Hull ▸ 'Sheet').
+  The player hull can draw as PRE-RENDERED poses instead of the cos(tilt)
+  squash, and the whole design is one decomposition that is easy to get
+  expensively wrong: YAW is a rotation about the VIEW axis, so it commutes
+  with the orthographic projection and `ctx.rotate` reproduces it EXACTLY
+  — baking headings into art buys nothing but pixel crispness and costs
+  ×N cells plus a snapping reticle.  PITCH and ROLL are rotations about
+  IN-PLANE axes: they rotate depth into view, no 2D transform can produce
+  them, and they are the entire reason art exists here.  So a sheet is a
+  2D grid over the TILT ONLY.  It is POLAR — `theta` = tilt magnitude,
+  `psi` = tilt-axis azimuth measured in the deck plane from the nose —
+  because `tickPlayerRoll` magnitude-clamps the tilt VECTOR, so the
+  reachable set is a DISC and a square grid would spend cells on corners
+  that can never draw.  Azimuth counts GROW with the ring (the lean
+  direction only matters in proportion to sin(theta)), and a hull
+  symmetric about its nose axis authors only `psi` in [-90°, +90°] and
+  flips for the rest — a reflection maps azimuth `psi` to `180° - psi`,
+  making the two pure PITCHES the fixed points.  That is 35 authored cells
+  for the standard grid, 57 unmirrored.  Poses SNAP to the nearest cell
+  rather than cross-fading: a crossfade ghosts on a held lean, while a
+  snap is only ever half a grid step wrong in an angle the player has no
+  reference for.  A PARTIAL sheet is legal — a missing cell falls back to
+  the nearest authored pose, and a sheet with no art at all falls back to
+  the legacy squash, so the mode can never blank the ship.
+  `docs/SHIP_SPRITE_SHEETS.md` is the authoring guide and is GENERATED
+  from the module's own `enumerateCells` (`scripts/gen-ship-sheet.mjs
+  --table`), so the table an artist works from cannot drift from the table
+  the engine indexes; `--placeholder` renders stand-in cells from the
+  wireframe hull, which is what lets CI exercise the real blit path.
 - **The `ui` column in any PerfRecorder capture taken before
   2026-08-16 is INVALID — it measured scheduling, not rendering.**  It was
   fed `GameEngine.lastStatsPushMs`, a bracket around the `onStatsUpdate`

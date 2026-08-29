@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -697,6 +697,62 @@ export class DebugControls {
    *  playtesting which catch mode feels better. */
   toggleSnitchCatchMode() {
     this.g.snitchCatchMode = this.g.snitchCatchMode === 'collide' ? 'shoot' : 'collide';
+  }
+
+  /** Cycle the DBG banking-roll feel preset (PLAYER_ROLL_CYCLE) — steps the
+   *  bank's max angle live (Off / Subtle / Default / Deep) so how deep the
+   *  roll reads can be A/B'd in flight. */
+  cyclePlayerRoll() {
+    cyclePlayerRoll();
+  }
+
+  /** Cycle the player HULL (PLAYER_HULL_CYCLE): the flat wireframe cube
+   *  (the shipped default — real 3D rotation in yaw/pitch/roll), the
+   *  corner-up DIAMOND orientation, or the ship sprite + cos-tilt squash
+   *  kept as the A/B. */
+  cyclePlayerHull() {
+    cyclePlayerHull();
+  }
+
+  /** Cycle the DBG rotation-damping preset (PLAYER_ROLL_DAMPING_CYCLE):
+   *  one multiplier over both tilt ease rates — Floaty / Default / Stiff /
+   *  Snappy — so how tightly the hull tracks the hand can be A/B'd in
+   *  flight. */
+  cycleRollDamping() {
+    cycleRollDamping();
+  }
+
+  /** Cycle the DBG tilt mode (TILT_MODE_CYCLE): Lean (the default —
+   *  tilt toward the acceleration and settle back) vs Tumble (the
+   *  continuous-roll test mode: thrust drives roll RATE, so the hull
+   *  keeps rolling about the axis perpendicular to the thrust). */
+  cycleTiltMode() {
+    cycleTiltMode();
+  }
+
+  /** Cycle the DBG lean direction A/B (LEAN_DIR_CYCLE): Default (tilt
+   *  INTO the acceleration) vs Reversed (one sign over both spring
+   *  targets, so the hull tips away — nose rising under throttle).
+   *  Lean-mode only; Tumble's direction is its own call. */
+  cycleLeanDir() {
+    cycleLeanDir();
+  }
+
+  /** Cycle the DBG tilt source A/B (TILT_SOURCE_CYCLE): Thrust (the
+   *  input drives the tilt — no input, no tilt) vs Velocity (the ship's
+   *  actual motion drives it — a coasting drift holds its lean).
+   *  Reaches BOTH tilt modes; the substitution is at the signal source. */
+  cycleTiltSource() {
+    cycleTiltSource();
+  }
+
+  /** Cycle the DBG velocity-gain step (VEL_GAIN_CYCLE): sensitivity of
+   *  the Velocity tilt source — the gain multiplies the cruise-normalised
+   *  signal before its clamp, so higher steps saturate the tilt at ever
+   *  lower speeds (10× = any motion reads as full).  Velocity-source
+   *  only; Thrust mode never reads it. */
+  cycleVelGain() {
+    cycleVelGain();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
