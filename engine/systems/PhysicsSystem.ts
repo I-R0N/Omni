@@ -849,17 +849,36 @@ export class PhysicsSystem {
             const rangeSq = attractor.gravityRange! ** 2;
 
             // Mobile shard-family entities get the close-attractor crush
-            // (mobile shards = STRUCTURE with finite mass).
-            const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
-            if (distSq < (attractor.size.x / 2)**2 && isMobileShard) {
+            // (mobile shards = STRUCTURE with finite mass).  A wormhole
+            // portal SWALLOWS instead: the radius is the visual event
+            // horizon (0.62 × r, the dark disc dropShapes draws), so the
+            // shard disappears while covered by it, and there is no damage
+            // popup — matter falling past a horizon is silent, and a crush
+            // number over the rift would be pure noise.
+            // Dragon body segments are exempt: they are chain-snapped to the
+            // head's path every frame (velocity is moot) and dying any way
+            // but a SHOT must go through the sever machinery, not a silent
+            // deactivate that would leave a gap the DragonInstance still
+            // references.
+            const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity
+                && entity.dragonSegment !== true;
+            const crushR = attractor.isPortal ? attractor.size.x * 0.31 : attractor.size.x / 2;
+            if (distSq < crushR * crushR && isMobileShard) {
                 entity.active = false;
-                if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
-                continue; 
+                if (onDamage && !attractor.isPortal) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
+                continue;
             }
 
             if (distSq < rangeSq) {
-                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
+                let force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
                 const maxAccel = entity.type === EntityType.PLAYER ? 0.2 : 5.0;
+                // Attractor-side player scaling (portals): shards and enemies
+                // take the full well, the player only a fraction of it, so a
+                // wormhole's mouth pulls debris in without trapping a pilot
+                // who only flew close (thrust must always win).
+                if (entity.type === EntityType.PLAYER && attractor.gravityPlayerScale !== undefined) {
+                    force *= attractor.gravityPlayerScale;
+                }
 
                 // Scale force by time step so higher framerates don't increase gravity strength
                 const clampedForce = Math.min(force, maxAccel) * timeScale;

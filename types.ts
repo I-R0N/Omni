@@ -355,6 +355,8 @@ export interface GameEntity {
   friction?: number; // Per-entity friction override
   gravityRange?: number; // Radius of gravitational influence
   gravityStrength?: number; // Force multiplier (G * Mass)
+  gravityPlayerScale?: number; // Attractor-side scale on the pull the PLAYER feels
+                               // (portals: a tug, never a trap — see PORTAL_CONSTANTS)
 
   // AI
   enemySubtype?: EnemySubtype;

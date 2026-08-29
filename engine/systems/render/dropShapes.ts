@@ -273,6 +273,46 @@ export function drawDropShape(
         ctx.fillStyle = bloom;
         ctx.fill();
 
+        // Inspiral arms — matter streaming into the mouth.  Three
+        // logarithmic spirals winding from a faint outer tail down to
+        // white-hot at the rim, drawn BEFORE the horizon disc so their
+        // inner ends vanish under it: the stream falls in.  A radial-
+        // gradient stroke does the tail→mouth fade for free (one
+        // gradient, no per-segment alpha).
+        const armOuter = r * 1.55;
+        const armInner = r * 0.30;
+        const armGrad = ctx.createRadialGradient(0, 0, armInner, 0, 0, armOuter);
+        armGrad.addColorStop(0, '#ffffff');
+        armGrad.addColorStop(0.3, entity.color);
+        armGrad.addColorStop(1, `rgba(${pr}, ${pg}, ${pb}, 0)`);
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = armGrad;
+        ctx.lineWidth = 3;
+        const ARMS = 3, ARM_STEPS = 26, ARM_WIND = 3.4;
+        for (let a = 0; a < ARMS; a++) {
+            ctx.beginPath();
+            for (let s = 0; s <= ARM_STEPS; s++) {
+                const t = s / ARM_STEPS;                    // 0 tail → 1 mouth
+                const rad = armOuter * Math.pow(armInner / armOuter, t);
+                const ang = (a / ARMS) * Math.PI * 2 + spin * 2 + t * ARM_WIND;
+                const px = Math.cos(ang) * rad, py = Math.sin(ang) * rad;
+                if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+        }
+
+        // Outer energy ring — broken arcs counter-rotating against the
+        // arms, so the vortex reads even when the arms blur at speed.
+        ctx.strokeStyle = entity.color;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.55;
+        for (let i = 0; i < 3; i++) {
+            const a0 = -spin + (i / 3) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, r, a0, a0 + Math.PI * 0.44);
+            ctx.stroke();
+        }
+
         // Event horizon — a dark disc so the rift reads as a hole,
         // not a light source.
         ctx.globalAlpha = 0.92;
@@ -280,6 +320,15 @@ export function drawDropShape(
         ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
         ctx.fillStyle = '#0b0616';
         ctx.fill();
+
+        // Photon ring — a thin white halo hugging the horizon, the
+        // lensing highlight where infalling light piles up.
+        ctx.globalAlpha = 0.35 + 0.25 * breathe;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.67, 0, Math.PI * 2);
+        ctx.stroke();
 
         // Rim of the event horizon — a hard bright edge so the hole
         // reads against a busy nebula backdrop.
@@ -290,37 +339,30 @@ export function drawDropShape(
         ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Counter-rotating arc rings — three broken arcs per ring,
-        // spinning opposite ways, which reads as a vortex.  The
-        // inner ring gets a white highlight pass so the swirl stays
-        // legible at gameplay zoom.
-        for (let ring = 0; ring < 2; ring++) {
-            const rr = r * (ring === 0 ? 0.78 : 1.0);
-            const dir = ring === 0 ? 1 : -1;
-            for (let i = 0; i < 3; i++) {
-                const a0 = spin * dir + (i / 3) * Math.PI * 2;
-                const a1 = a0 + Math.PI * 0.44;
-                ctx.globalAlpha = ring === 0 ? 1.0 : 0.7;
-                ctx.strokeStyle = entity.color;
-                ctx.lineWidth = ring === 0 ? 6 : 3.5;
+        // Funnel throat — receding broken rings inside the horizon,
+        // shrinking toward the centre with deeper rings spinning FASTER
+        // (frame dragging), alternating direction ring to ring, dimming
+        // and thinning with depth.  This is what turns the flat disc
+        // into a tunnel.
+        for (let k = 0; k < 4; k++) {
+            const depth = (k + 1) / 5;                     // 0.2 .. 0.8
+            const ringR = r * 0.62 * Math.pow(1 - depth, 0.85);
+            const twist = spin * (1 + depth * 2.5) * (k % 2 === 0 ? 1 : -1);
+            ctx.globalAlpha = 0.62 * (1 - depth) + 0.08;
+            ctx.strokeStyle = entity.color;
+            ctx.lineWidth = 2 - depth;
+            for (let i = 0; i < 2; i++) {
+                const a0 = twist + i * Math.PI;
                 ctx.beginPath();
-                ctx.arc(0, 0, rr, a0, a1);
+                ctx.arc(0, 0, ringR, a0, a0 + Math.PI * 0.8);
                 ctx.stroke();
-                if (ring === 0) {
-                    ctx.globalAlpha = 0.85;
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 1.6;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, rr, a0, a1);
-                    ctx.stroke();
-                }
             }
         }
 
-        // Hot core — the throat of the rift, breathing.
+        // Hot core — the far end of the throat, breathing.
         ctx.globalAlpha = 0.55 + 0.35 * breathe;
         ctx.beginPath();
-        ctx.arc(0, 0, r * 0.2 * breathe, 0, Math.PI * 2);
+        ctx.arc(0, 0, r * 0.14 * breathe, 0, Math.PI * 2);
         ctx.fillStyle = '#ffffff';
         ctx.fill();
 

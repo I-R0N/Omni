@@ -3,7 +3,7 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, resolveStarParallax,
+  getActiveStarBands, resolveStarParallax, PORTAL_CONSTANTS,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
@@ -124,6 +124,21 @@ export class BackgroundManager {
   // Reusable output for applyLensing — avoids a heap allocation per puff
   private _lensedX: number = 0;
   private _lensedY: number = 0;
+  // Per-frame lens list — the on-screen attractors (wormhole portals),
+  // projected ONCE per frame into screen space (CSS px, zoom applied) and
+  // shared by the puff lensing and the star warp.  Index-filled and read up
+  // to `_lensN` only, so a shrink never reallocates (refill idiom).
+  private _lensCX: number[] = [];
+  private _lensCY: number[] = [];
+  private _lensStarR: number[] = [];
+  private _lensPuffR: number[] = [];
+  private _lensN: number = 0;
+  // Device-px mirrors of the list above, filled by renderStars (star
+  // positions live in device space).
+  private _lensDevX: number[] = [];
+  private _lensDevY: number[] = [];
+  private _lensDevR: number[] = [];
+  private _lensDevR2: number[] = [];
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -171,18 +186,19 @@ export class BackgroundManager {
     this.initialized = false;
   }
 
-  private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): void {
+  /** Displace a screen-space point (CSS px) away from every lens centre —
+   *  the soft outward shove the nebula puffs take.  Reads the per-frame lens
+   *  list built in `render` (centres already zoom-projected there, so a puff
+   *  and the portal it bends around agree on where the portal is). */
+  private applyLensing(x: number, y: number): void {
     let outX = x;
     let outY = y;
-    for (let i = 0; i < attractors.length; i++) {
-        const attr = attractors[i];
-        const ax = wrapDeltaX(cameraPos.x, attr.position.x) + halfW;
-        const ay = wrapDeltaY(cameraPos.y, attr.position.y) + halfH;
-        const adx = outX - ax;
-        const ady = outY - ay;
+    for (let i = 0; i < this._lensN; i++) {
+        const adx = outX - this._lensCX[i];
+        const ady = outY - this._lensCY[i];
         const distSq = adx*adx + ady*ady;
-        const radius = attr.size.x * 8;
-        if (distSq < radius * radius) {
+        const radius = this._lensPuffR[i];
+        if (distSq < radius * radius && distSq > 1e-6) {
             const dist = Math.sqrt(distSq);
             const factor = (radius - dist) / radius;
             if (factor > 0) {
@@ -194,6 +210,30 @@ export class BackgroundManager {
     }
     this._lensedX = outX;
     this._lensedY = outY;
+  }
+
+  /** Project the attractors into screen space once per frame.  Off-screen
+   *  attractors (beyond their own largest lens radius) are dropped here, so
+   *  the per-puff and per-star loops only ever see lenses that can matter. */
+  private buildLensList(cameraPos: Vector2, attractors: GameEntity[],
+                        width: number, height: number, zoom: number): void {
+    let n = 0;
+    for (let i = 0; i < attractors.length; i++) {
+        const attr = attractors[i];
+        if (!attr.active) continue;
+        const sx = width / 2 + wrapDeltaX(cameraPos.x, attr.position.x) * zoom;
+        const sy = height / 2 + wrapDeltaY(cameraPos.y, attr.position.y) * zoom;
+        const starR = attr.size.x * PORTAL_CONSTANTS.LENS.RADIUS_MULT * zoom;
+        const puffR = attr.size.x * 8 * zoom;
+        const maxR = Math.max(starR, puffR);
+        if (sx < -maxR || sx > width + maxR || sy < -maxR || sy > height + maxR) continue;
+        this._lensCX[n] = sx;
+        this._lensCY[n] = sy;
+        this._lensStarR[n] = starR;
+        this._lensPuffR[n] = puffR;
+        n++;
+    }
+    this._lensN = n;
   }
 
 public setMapType(type: MapType) {
@@ -594,8 +634,11 @@ public setMapType(type: MapType) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
 
-    const hasAttractors = attractors.length > 0;
-    
+    // Project attractors to screen space once — both the puff lensing and
+    // the star warp read this list.
+    this.buildLensList(cameraPos, attractors, width, height, zoom);
+    const hasAttractors = this._lensN > 0;
+
     // RENDER NEBULAE
     // x/y are world-space coordinates. Project to screen via parallax depth so
     // nebulae are distributed across the world and discovered as the camera moves.
@@ -631,7 +674,7 @@ public setMapType(type: MapType) {
         if (!drawable) return;
 
         if (hasAttractors) {
-           this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
+           this.applyLensing(drawX, drawY);
            drawX = this._lensedX;
            drawY = this._lensedY;
         }
@@ -713,6 +756,28 @@ public setMapType(type: MapType) {
     const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
     const groups = this.starGroups;
 
+    // ── Wormhole star warp ─────────────────────────────────────────────
+    // Mirror the frame's lens list (CSS px, built in `render`) into device
+    // px, the space the star coordinates live in.  Reused arrays, read up
+    // to lensN — no allocation.  The warp displaces stars radially outward
+    // (evacuating the throat into an Einstein-ring pile-up) and rotates
+    // them around the centre by a swirl that strengthens toward the mouth
+    // and ADVANCES over time, so near-field stars orbit with differential
+    // speed.  Displaced positions stay fractional — that is already the
+    // rule here — and sizes stay integral, so nothing is resampled.
+    const lensN = this._lensN;
+    const ldx = this._lensDevX, ldy = this._lensDevY;
+    const lr = this._lensDevR, lr2 = this._lensDevR2;
+    for (let l = 0; l < lensN; l++) {
+        ldx[l] = this._lensCX[l] * dpr;
+        ldy[l] = this._lensCY[l] * dpr;
+        lr[l] = this._lensStarR[l] * dpr;
+        lr2[l] = lr[l] * lr[l];
+    }
+    const pushDev = PORTAL_CONSTANTS.LENS.PUSH * dpr;
+    const swirlNow = PORTAL_CONSTANTS.LENS.SWIRL_WIND
+        + performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE;
+
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
         ctx.fillStyle = grp.fill;
@@ -723,14 +788,46 @@ public setMapType(type: MapType) {
         // which is analytic and consistent across engines, unlike the
         // drawImage resampling filter this gauntlet began by removing (and
         // which S4 deleted from this path).
-        for (let i = grp.start; i < end; i++) {
-            const b = B[i];
-            let x = X[i] + bofx[b];
-            if (x >= pw) x -= pw;
-            let y = Y[i] + bofy[b];
-            if (y >= ph) y -= ph;
-            const sz = S[i];
-            ctx.fillRect(x, y, sz, sz);
+        if (lensN === 0) {
+            // No lens on screen: the original tight loop, untouched.
+            for (let i = grp.start; i < end; i++) {
+                const b = B[i];
+                let x = X[i] + bofx[b];
+                if (x >= pw) x -= pw;
+                let y = Y[i] + bofy[b];
+                if (y >= ph) y -= ph;
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
+            }
+        } else {
+            for (let i = grp.start; i < end; i++) {
+                const b = B[i];
+                let x = X[i] + bofx[b];
+                if (x >= pw) x -= pw;
+                let y = Y[i] + bofy[b];
+                if (y >= ph) y -= ph;
+                for (let l = 0; l < lensN; l++) {
+                    const dx0 = x - ldx[l];
+                    const dy0 = y - ldy[l];
+                    const d2 = dx0 * dx0 + dy0 * dy0;
+                    // Quadratic falloff: outside the radius nothing moves;
+                    // the sqrt + sin/cos below run only for stars inside it.
+                    if (d2 >= lr2[l] || d2 < 1e-6) continue;
+                    const d = Math.sqrt(d2);
+                    const f = 1 - d / lr[l];
+                    const f2 = f * f;
+                    const scale = (d + f2 * pushDev) / d;
+                    const nx = dx0 * scale;
+                    const ny = dy0 * scale;
+                    const ang = f2 * swirlNow;
+                    const ca = Math.cos(ang);
+                    const sa = Math.sin(ang);
+                    x = ldx[l] + nx * ca - ny * sa;
+                    y = ldy[l] + nx * sa + ny * ca;
+                }
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
+            }
         }
     }
   }

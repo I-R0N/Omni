@@ -5464,6 +5464,43 @@ export const PORTAL_CONSTANTS = {
   // portal costs no particles until it's actually used.
   BURST_RADIUS: 320,
   BURST_DURATION: 0.75,
+  // ── Wormhole gravity well ─────────────────────────────────────────
+  // Portals declare gravityRange/gravityStrength on their entity, so the
+  // existing attractor machinery does everything: PhysicsSystem's
+  // applyGravity pulls every finite-mass dynamic (shards, enemies, drops,
+  // even projectiles curve), the close-attractor crush branch SWALLOWS a
+  // mobile shard that reaches the mouth (radius SIZE/2 — it vanishes into
+  // the horizon rather than shattering), and RenderSystem's attractor
+  // bucket (gravityStrength > 500) feeds the background star lensing.
+  //
+  // Calibration (velocity units are px per 60 Hz tick; ambient shard drift
+  // is ~1): force = STRENGTH / max(distSq, 1e4).  At the range edge the
+  // kick is ~0.008/step (a slow drift-in), at 150 px it is ~0.18/step
+  // (a visible inspiral), and the near-mouth clamp region tops out at
+  // 0.4/step — decisive, but far below the 5.0 solver cap so nothing gets
+  // flung.
+  GRAVITY_RANGE: 700,
+  GRAVITY_STRENGTH: 4000,
+  // The PLAYER feels only this fraction of the well (gravityPlayerScale).
+  // Entering a portal is a deliberate E/tap, so proximity must never be
+  // commitment: at its strongest the tug is 0.4 × 0.12 = 0.048/step,
+  // comfortably under the 0.085/step thrust — a felt lean, never a trap.
+  GRAVITY_PLAYER_SCALE: 0.12,
+  // ── Background star lensing (BackgroundManager.renderStars) ───────
+  // Screen-space warp around each on-screen attractor: stars inside
+  // RADIUS_MULT × SIZE (world px) are pushed radially outward (the
+  // Einstein-ring evacuation of the throat) and rotated around the centre
+  // by a swirl that grows toward the mouth.  SWIRL_RATE advances that
+  // rotation over time, so the near-field stars visibly ORBIT the throat
+  // with differential speed — the vortex reads in motion, not just in
+  // displacement.  Falloff is quadratic, so the outer half of the radius
+  // is subliminal.  PUSH is in CSS px (scaled by dpr at the call site).
+  LENS: {
+    RADIUS_MULT: 3.0,
+    PUSH: 60,
+    SWIRL_WIND: 1.6,
+    SWIRL_RATE: 0.35,
+  },
   // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
   // for a rift on the far side of the map is noise, not navigation — the
   // arrow only appears once the player is close enough for that rift to be

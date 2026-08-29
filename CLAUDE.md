@@ -1234,7 +1234,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
   map portals (roadmap step (k)): rift size / colours (violet out, sky
   home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
-  burst.  `HUB_PORTAL_SITES` places one rift per full-game arena on the
+  burst — plus the WORMHOLE block: `GRAVITY_RANGE` / `GRAVITY_STRENGTH` /
+  `GRAVITY_PLAYER_SCALE` (the gravity well stamped onto every portal
+  entity by `addPortal`) and `LENS` (the background star warp — see the
+  portal-POI note in §8).  `HUB_PORTAL_SITES` places one rift per full-game arena on the
   Overworld (targets are DESCRIPTOR IDS, and the map's existing
   clearance filter drops terrain seeded on top of them);
   `RETURN_PORTAL_OFFSET` places each arena's single return rift relative
@@ -1864,7 +1867,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   included) zeroes the level in `applyModuleEffects`.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
-  portal doesn't also fire a shot.  There is NO HUD dock/enter button —
+  portal doesn't also fire a shot.  A portal is also a WORMHOLE GRAVITY
+  WELL: `addPortal` stamps `gravityRange`/`gravityStrength` (plus
+  `gravityPlayerScale` — the player feels only a fraction, so the mouth
+  is a tug, never a trap), and the EXISTING attractor machinery does the
+  rest — `initializeAttractors` caches it at map load, `applyGravity`
+  spirals shards/enemies/drops (and curves projectiles) in, the
+  close-attractor crush SWALLOWS a mobile shard under the visual horizon
+  (0.62 × r, silently — no damage popup, no shatter; the count-based
+  asteroid keeper replenishes the belt away from portals), and
+  RenderSystem's attractor bucket (`gravityStrength > 500`) feeds
+  `BackgroundManager`'s star lensing: background stars inside
+  `PORTAL_CONSTANTS.LENS` radius are pushed off the throat and swirled
+  around it with a time-advancing differential rotation (screen-space,
+  applied per star in `renderStars`; the no-lens path is the original
+  untouched loop, and positions stay fractional / sizes integral so the
+  S3 no-resampling invariant holds).  There is NO HUD dock/enter button —
   the ship prompt is the whole affordance (a pill on top of it was
   redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
   intended path and is deliberately NOT wired here — Pair C (c2) owns the

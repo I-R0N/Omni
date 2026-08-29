@@ -146,6 +146,14 @@ export abstract class BaseMapLayer {
       health: 1,
       maxHealth: 1,
       mass: Infinity,
+      // Wormhole gravity well: picked up by PhysicsSystem.initializeAttractors
+      // at map load (shards/enemies/drops spiral in; a shard reaching the
+      // mouth is swallowed by the close-attractor crush) and by RenderSystem's
+      // attractor bucket, which feeds the background star lensing.  The
+      // player feels only GRAVITY_PLAYER_SCALE of it — a tug, never a trap.
+      gravityRange: PORTAL_CONSTANTS.GRAVITY_RANGE,
+      gravityStrength: PORTAL_CONSTANTS.GRAVITY_STRENGTH,
+      gravityPlayerScale: PORTAL_CONSTANTS.GRAVITY_PLAYER_SCALE,
     });
   }
 
