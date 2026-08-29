@@ -330,14 +330,54 @@ dimple reads too weakly.
 
 1. **Metal composite retirement** (§3.3) — confirmed as intended; the
    spec assumes the union outline replaces per-cell colliders.
-2. **Does a formed bond survive a body becoming static?**  Tile snap
-   currently discards 75% of merged area as debris.  Under a unified
-   model a body could instead become a static tile that KEEPS its grain
-   structure — which would mean a player-assembled tile breaks along the
-   seams they built it from.  Attractive, and a scope increase.
-3. **Do grains inherit damage across a break?**  A grain that leaves a
-   body carrying half-broken bonds could spawn pre-damaged.  Physically
-   right, and it makes chips progressively easier to destroy.
+2. ~~**Does a formed bond survive a body becoming static?**~~
+   **WITHDRAWN — it does not survive contact with the hex grid.**  A
+   tile is a FIXED hex at a grid coordinate (`position === hexCoord` is
+   the invariant regen, neighbour counts and transmutation all assume —
+   CLAUDE.md §8), while an assembled body is arbitrary-shaped and ~4× a
+   tile's area, which is why tile snap already discards ~75% as debris.
+   Becoming a tile therefore RE-SHAPES the body to a hex, the assembled
+   grains no longer tile that outline, and the hex has to be
+   re-decomposed — so what the player would get is a FRESH pattern, not
+   the seams they built it from.  The idea was under-thought.
+
+   Three coherent variants, none worth taking now:
+   - **inherit statistics, not geometry** — the new hex pattern's grain
+     count and bond strengths derive from what was assembled (mixed
+     materials → mixed strengths).  Cheap, but it only MEANS anything
+     once per-grain materials exist, so it is a Tier C footnote;
+   - **drop the hex constraint** for assembled bodies — breaks the
+     `position === hexCoord` invariant across three systems;
+   - **clip the assembled grains to the hex** — geometrically doable
+     with the polygon splitter already in `fracture.ts`, but which 75%
+     is discarded is arbitrary.
+3. **Do grains inherit damage across a break?**  **RESOLVED: YES**
+   (user call), and MEASURED so the mechanism is grounded.  Over 34 real
+   detaches on rock tiles, a departing grain's own boundary was 60%
+   fully broken, 28% on PARTIALLY filled edges and 11% untouched,
+   carrying an average **0.132** of its total boundary strength as
+   unfinished damage (max 0.36; 30 of 34 detaches carried >1%).
+
+   That figure is not obvious and the intuition runs the wrong way: it
+   looks like cell-by-cell spending must complete a grain's ring exactly,
+   leaving nothing partial.  It does not, because an edge stops BINDING
+   the moment its partner departs — so a grain can leave with part of its
+   own boundary only half broken — and spill deposits partial damage on
+   neighbours continuously.
+
+   **Mechanism:** carry `Σ partial fills / Σ that grain's boundary
+   strength` as a damage FRACTION and spawn the child at
+   `health = maxHealth × (1 − carried)`.  A geometric carry is
+   meaningless (the child re-decomposes into its own pattern), and the
+   fraction needs no new plumbing: `ensureBoundaryModel` already has the
+   `damagedFrac` path that preserves an existing damage fraction when a
+   body meets the model mid-life.
+
+   **Consequence worth naming:** a battered body sheds weaker chips, and
+   the chips off the IMPACT FACE come out weakest, since that is where
+   the spill went.  Sustained fire on one spot yields debris that is
+   already half dead.  Small and self-contained — it belongs in A2
+   beside `bondSpread`.
 4. **`bondSpread` before or with Tier C?**  It delivers most of the
    visual variety of composites at a fraction of the cost.
 
@@ -353,7 +393,7 @@ dimple reads too weakly.
   rock/glass/plastic tiles and shards, so the capability landed with zero
   behaviour change; the measured dial runs cell-area CV 0.404 → 0.185 →
   0.093 and roundness 0.650 → 0.779 → 0.790 across regularity 0 → 0.5 → 1.
-- **A2** `sizeSpread` placement + `bondSpread`
+- **A2** `sizeSpread` placement + `bondSpread` + carried damage (§6.3)
 - **A3** metal + plastic rows, tuned and measured like V15 was
 - **B1** per-grain dent, outer-vertices-only (§5.3 option 1)
 - **B2** retire the metal composite lattice onto the union outline
