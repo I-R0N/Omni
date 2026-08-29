@@ -534,6 +534,27 @@ export function computeFracture(
   return { cells, sites: sites as FracturePoint[], totalArea: total, retiredSites: retired };
 }
 
+/** Squared distance from a point to a polygon — ZERO when the point is
+ *  inside it (V12).  This is the "which piece did the projectile
+ *  actually touch" test: a shot stops at the surface, so the contact
+ *  point is usually just OUTSIDE the hull and a centroid comparison
+ *  would happily nominate a cell buried on the far side.  Measuring to
+ *  the cell's own outline instead makes the nearest cell the one whose
+ *  face was struck, by construction. */
+export function pointToPolygonDistance2(
+  px: number, py: number,
+  pts: ReadonlyArray<FracturePoint>,
+): number {
+  if (pointInPolygon(px, py, pts)) return 0;
+  let best = Infinity;
+  for (let i = 0, n = pts.length; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    const d = distToSegment2(px, py, a.x, a.y, b.x, b.y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 // ── Cell subtraction (partial fracture, V4) ─────────────────────────
 
 interface BoundaryLoc { e: number; t: number; pt: FracturePoint }

@@ -30,10 +30,13 @@ import {
   FractureCell, FractureEdge,
 } from './fracture';
 
-/** The impact point in entity-LOCAL coords, derived from
- *  `lastImpactVelocity`: the hit landed on the side the impactor came
- *  FROM.  Null when no usable impact is stamped. */
+/** The impact point in entity-LOCAL coords.  Prefers the REAL contact
+ *  position stamped by the damage path (V12); falls back to the old
+ *  direction proxy derived from `lastImpactVelocity` (the hit landed on
+ *  the side the impactor came from) for damage sources that carry no
+ *  contact point.  Null when neither is available. */
 function localImpactPoint(e: GameEntity): { x: number; y: number } | null {
+  if (e.lastImpactLocal !== undefined) return e.lastImpactLocal;
   const iv = e.lastImpactVelocity;
   if (iv === undefined) return null;
   const s = Math.hypot(iv.x, iv.y);

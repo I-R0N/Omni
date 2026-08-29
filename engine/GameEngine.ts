@@ -30,7 +30,8 @@ import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount } from './systems/fractureCache';
-import { subtractBoundaryCell, polygonArea as fracturePolygonArea } from './systems/fracture';
+import { subtractBoundaryCell, polygonArea as fracturePolygonArea,
+         pointToPolygonDistance2 } from './systems/fracture';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import type { FlowSampler } from './systems/FlowFieldGrid';
@@ -4928,7 +4929,7 @@ export class GameEngine {
               const isRockChipper = target.shardVariant === 'rock-tile'
                   || target.shardVariant === 'rock-shard';
               if (isProgressiveFracture(target.shardVariant)) {
-                  if (!this.progressFracture(target) && isRockChipper) {
+                  if (!this.progressFracture(target, impactWorldPos) && isRockChipper) {
                       this.releaseRockChip(target, impactWorldPos);
                   }
               } else if (isRockChipper) {
@@ -5045,9 +5046,19 @@ export class GameEngine {
    * puff; true means the hit was handled, including the quiet ticks
    * where boundaries merely highlighted further.
    */
-  private progressFracture(target: GameEntity): boolean {
+  private progressFracture(target: GameEntity, impactWorldPos?: Vector2): boolean {
       if (!this.currentMap) return true;
       if (!target.active || (target.health ?? 0) <= 0) return true;
+      // Stamp the REAL contact point in entity-local coords BEFORE the
+      // pattern is built (V12), so the site bias crowds toward where the
+      // shot actually landed rather than toward a direction proxy, and
+      // so the contact test below has something honest to measure.
+      if (impactWorldPos !== undefined) {
+          const dx = wrapDeltaX(target.position.x, impactWorldPos.x);
+          const dy = wrapDeltaY(target.position.y, impactWorldPos.y);
+          const cs = Math.cos(-target.rotation), sn = Math.sin(-target.rotation);
+          target.lastImpactLocal = { x: dx * cs - dy * sn, y: dx * sn + dy * cs };
+      }
       const cells = ensureFractureCells(target);
       if (cells === null || cells.length === 0) return false;
       const edges = ensureFractureEdges(target);
@@ -5071,79 +5082,114 @@ export class GameEngine {
       const living = new Set<number>();
       for (const c of cells) living.add(c.siteIndex);
 
-      // Detach every completed cell; repeat because a departure can
-      // complete a neighbour (its shared seam stops binding).
-      let guard = 0;
-      let detachedAny = true;
-      while (detachedAny && guard++ <= edges.length + 2) {
-          detachedAny = false;
-          for (let i = 0; i < cells.length; i++) {
-              const c = cells[i];
-              // Only UNREVEALED edges can still bind (the edges array is
-              // the reveal order, so indexes < revealed are highlighted).
-              let complete = true;
-              for (let k = revealed; k < edges.length; k++) {
-                  const ed = edges[k];
-                  if (!ed.cells.includes(c.siteIndex)) continue;
-                  let binds = ed.cells.length === 1;
-                  if (!binds) {
-                      for (const site of ed.cells) {
-                          if (site !== c.siteIndex && living.has(site)) { binds = true; break; }
-                      }
-                  }
-                  if (binds) { complete = false; break; }
-              }
-              if (!complete) continue;
+      // WHICH PIECE DID THE SHOT TOUCH? (V12, user call: "shards that
+      // chip off are only shards that are contacted by a projectile ...
+      // to avoid shards chipping from internal to a cluster or shard".)
+      // Distance is measured to each cell's OWN OUTLINE, not its
+      // centroid: a projectile stops at the surface, so the contact point
+      // sits just outside the hull, and a centroid comparison on a large
+      // body would happily nominate a piece buried on the far side.  A
+      // contact point inside a cell scores zero, so the struck piece wins
+      // outright; once earlier chips have opened a bay, a shot into that
+      // bay picks the newly exposed neighbour, and chipping eats inward
+      // from where the player is actually shooting.
+      const local = target.lastImpactLocal;
+      // No usable contact point (a damage source that carries none) — the
+      // pattern still highlights, nothing detaches, and the hit-ceiling
+      // or min-remainder rules still end the body.
+      if (local === undefined) return true;
 
-              const pts = target.polygonPoints;
-              if (!pts || pts.length < 3) return true;
-              const polyArea = fracturePolygonArea(pts);
-              const remainder = cells.length <= 1
-                  ? null
-                  : subtractBoundaryCell(pts, c.points);
-              const remainderArea = remainder !== null
-                  ? fracturePolygonArea(remainder) : 0;
-
-              if (cells.length <= 1
-                  || (remainder !== null
-                      && remainderArea < FRACTURE_DETACH.MIN_REMAINDER_FRAC * original)) {
-                  // The last pieces: the whole entity goes through the
-                  // normal death path, and the shatter consumes exactly
-                  // the surviving cells of this pattern.  killedByPlayer
-                  // was already stamped by the damage path.
-                  target.health = 0;
-                  target.active = false;
-                  if (target.mass === Infinity) this.physics.removeStaticEntity(target);
-                  this.handleEntityDeath(target);
-                  return true;
-              }
-              if (remainder === null) continue; // boundary-complete but not
-              // spliceable yet — it leaves once a neighbour frees its arc.
-
-              // Fragment first (it reads the pre-mutation parent), then
-              // splice.  refArea is the ORIGINAL polygon area so every
-              // piece of the pattern comes out area-true to the shape it
-              // was cut from.
-              this.shards.spawnDetachedCell(target, c, original, this.currentMap.entities);
-              target.polygonPoints = remainder;
-              if (target.mass !== Infinity && polyArea > 0) {
-                  target.mass *= remainderArea / polyArea;
-              }
-              // The PATTERN persists — surviving cells + edges stay so the
-              // rest of the decomposition breaks off later; only the
-              // derived collision/render caches die.
-              cells.splice(i, 1);
-              living.delete(c.siteIndex);
-              target._satCacheAxes = undefined;
-              target._occluderR = undefined;
-              if (target._staticCached === true) target._staticCached = false;
-              invalidateCollisionR(target);
-              this.audio.play('destroy.shard.rock', {
-                  x: target.position.x, y: target.position.y });
-              detachedAny = true;
-              i--;
-          }
+      // Candidates in order of distance FROM THE CONTACT, and only those
+      // within CONTACT_RADIUS_FRAC of the body's size.  The struck cell
+      // scores 0 and leads; the radius exists because that cell can be
+      // boundary-complete yet not spliceable off the current remainder
+      // (subtractBoundaryCell needs one contiguous boundary run, which a
+      // piece flanking an earlier bay may not have) — in that case the
+      // search may walk to a neighbour ON THE SAME FACE, never across the
+      // body.  A piece on the far side is more than one radius away by
+      // construction, so it cannot be chipped by a hit it never received.
+      const reach = Math.max(target.size.x, target.size.y)
+          * FRACTURE_DETACH.CONTACT_RADIUS_FRAC;
+      const reach2 = reach * reach;
+      const near: Array<{ i: number; d: number }> = [];
+      for (let i = 0; i < cells.length; i++) {
+          const d = pointToPolygonDistance2(local.x, local.y, cells[i].points);
+          if (d <= reach2) near.push({ i, d });
       }
+      if (near.length === 0) return true;
+      near.sort((a, b) => a.d - b.d);
+
+      const pts = target.polygonPoints;
+      if (!pts || pts.length < 3) return true;
+      const polyArea = fracturePolygonArea(pts);
+
+      let hitIdx = -1;
+      let c: (typeof cells)[number] | undefined;
+      let remainder: { x: number; y: number }[] | null = null;
+      let remainderArea = 0;
+      for (const cand of near) {
+          const cc = cells[cand.i];
+          // Its boundary must ALSO be fully highlighted — contact says
+          // WHICH piece, the reveal says WHETHER it is loose yet.  Only
+          // UNREVEALED edges can still bind (the edge array is the reveal
+          // order), and an edge whose partner has departed binds nothing.
+          let bound = false;
+          for (let k = revealed; k < edges.length && !bound; k++) {
+              const ed = edges[k];
+              if (!ed.cells.includes(cc.siteIndex)) continue;
+              let binds = ed.cells.length === 1;
+              if (!binds) {
+                  for (const site of ed.cells) {
+                      if (site !== cc.siteIndex && living.has(site)) { binds = true; break; }
+                  }
+              }
+              if (binds) bound = true;
+          }
+          if (bound) continue; // still attached — this hit only cracks it
+          if (cells.length <= 1) { hitIdx = cand.i; c = cc; break; }
+          const rem = subtractBoundaryCell(pts, cc.points);
+          if (rem === null) continue; // not spliceable off this remainder
+          hitIdx = cand.i; c = cc; remainder = rem;
+          remainderArea = fracturePolygonArea(rem);
+          break;
+      }
+      if (hitIdx < 0 || c === undefined) return true;
+
+      if (cells.length <= 1
+          || (remainder !== null
+              && remainderArea < FRACTURE_DETACH.MIN_REMAINDER_FRAC * original)) {
+          // The last pieces: the whole entity goes through the normal
+          // death path, and the shatter consumes exactly the surviving
+          // cells of this pattern.  killedByPlayer was already stamped by
+          // the damage path.
+          target.health = 0;
+          target.active = false;
+          if (target.mass === Infinity) this.physics.removeStaticEntity(target);
+          this.handleEntityDeath(target);
+          return true;
+      }
+      // Boundary-complete and contacted, but not spliceable from the
+      // current remainder yet — it leaves once a neighbour frees its arc.
+      if (remainder === null) return true;
+
+      // Fragment first (it reads the pre-mutation parent), then splice.
+      // refArea is the ORIGINAL polygon area so every piece of the
+      // pattern comes out area-true to the shape it was cut from.
+      this.shards.spawnDetachedCell(target, c, original, this.currentMap.entities);
+      target.polygonPoints = remainder;
+      if (target.mass !== Infinity && polyArea > 0) {
+          target.mass *= remainderArea / polyArea;
+      }
+      // The PATTERN persists — surviving cells + edges stay so the rest
+      // of the decomposition breaks off later; only the derived
+      // collision/render caches die.
+      cells.splice(hitIdx, 1);
+      target._satCacheAxes = undefined;
+      target._occluderR = undefined;
+      if (target._staticCached === true) target._staticCached = false;
+      invalidateCollisionR(target);
+      this.audio.play('destroy.shard.rock', {
+          x: target.position.x, y: target.position.y });
       return true;
   }
 

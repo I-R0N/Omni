@@ -890,3 +890,75 @@ false failure).  Verified with `--repeat-each 6`.
 `tests/input.spec.ts` "the charge ring reads the pad hold" also failed
 once in the same 14-minute run and passes on re-run; it is timing-
 sensitive and untouched by this work, so it is noted rather than chased.
+
+---
+
+## V12 — Only the struck piece chips (2026-08-29, user request)
+
+> "Ensure that shards that chip off are only shards that are contacted
+> by a projectile.  This is intended to avoid shards chipping from
+> internal to a cluster or shard."
+
+**The impact point was never the impact point.**  Root cause, and it had
+been there since V3: `fractureCache.localImpactPoint` SYNTHESISED a
+contact position from `lastImpactVelocity` — a unit direction pushed out
+to 0.4 × size — even though the damage path has the projectile's actual
+position and was already passing it to `spawnDamageText`.  So the
+pattern's site bias, the crack reveal order and (from V8) the detach
+order were all anchored on a guess about where the shot came FROM rather
+than where it landed.  `progressFracture` now takes the contact point,
+converts it to entity-local (torus-safe, un-rotated) and stamps
+`GameEntity.lastImpactLocal` BEFORE the pattern is built;
+`localImpactPoint` prefers it and keeps the old proxy only for damage
+sources that carry no contact point.
+
+**The rule.**  A cell may detach only if the contact point touches it.
+Distance is measured to each cell's OWN OUTLINE
+(`fracture.pointToPolygonDistance2`, zero inside), not its centroid: a
+projectile stops at the surface, so the contact sits just outside the
+hull and a centroid comparison on a large body happily nominates a piece
+on the far side — which is exactly the reported defect.  The struck cell
+scores zero and wins outright.
+
+**One relaxation, bounded.**  The struck cell can be boundary-complete
+yet not spliceable off the current remainder (`subtractBoundaryCell`
+needs one contiguous boundary run, which a piece flanking an earlier bay
+may lack).  Measured: with a strict single-candidate rule, one rock tile
+in five shed NOTHING before its final break.  So the search may walk to
+the next-nearest candidate, but only within
+`FRACTURE_DETACH.CONTACT_RADIUS_FRAC` (0.45 of the body's max dimension)
+of the contact — far enough to reach a neighbour on the struck face,
+never far enough to cross the body.  Truly interior cells were already
+unreachable: `subtractBoundaryCell` refuses a cell that does not touch
+the outer boundary, so "internal" in the strict sense was never
+chippable; what this milestone removes is FAR-SIDE chipping.
+
+**Measured** (real rock tiles, real projectile path, five samples):
+2-4 pieces shed mid-life of 8 total — the V10 range (2-5), with every
+chip now at the impact.
+
+**Two harness corrections, both honest rather than convenient.**  The
+chip-depth tests fired from a FIXED point outside the tile; a real
+projectile travels until it overlaps the live polygon, so as pieces chip
+away the contact follows the receding face inward.  The fixed point kept
+testing a spot the tile no longer occupied, which under the new rule
+reads as "no contact" — an artefact of the harness, not the game.  They
+now track the surface.  Separately, the call-site edit that passes the
+contact point silently no-opped on its first application (the search
+string omitted a trailing clause); the instrumented probe caught it
+immediately because `lastImpactLocal` came back undefined.
+
+**Tests.**  Two new pins: shooting one face repeatedly with the pattern
+held FULLY revealed — so the contact rule is the only thing standing
+between a far-side piece and detachment — must leave every chip on the
+struck side (verified against the regression: widening
+CONTACT_RADIUS_FRAC to 5.0 fails it at -0.47 of a half-width, i.e. a
+far-side piece); and a hit carrying no contact point cracks the body but
+never detaches.  23/23 fracture green.
+
+Full suite: 259 passed, 1 failed — `tests/shake.spec.ts` "a head-on hit
+lurches the camera along the shove", which passes 3/3 on re-run and sits
+in code this milestone does not touch.  Logged as a load flake in the
+14-minute run, alongside the `input.spec` charge-ring one noted at V10;
+neither is chased here, but two different timing-sensitive suites
+flaking under full-run load is worth a dedicated pass if it recurs.

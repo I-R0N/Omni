@@ -482,8 +482,11 @@ test.describe('partial fracture (V4)', () => {
       const chips = () => ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
 
+      // The struck point: on the +x face, matching the -x impact
+      // velocity.  V12 gates detachment on the piece this point touches.
+      const hitAt = { x: tile.position.x + w * 0.5, y: tile.position.y };
       // Undamaged: the pattern is applied but NOTHING detaches.
-      e.progressFracture(tile);
+      e.progressFracture(tile, hitAt);
       const initialCells = tile.fractureCells.length;
       const initialCentroids = tile.fractureCells.map((c: any) =>
         Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10));
@@ -499,7 +502,7 @@ test.describe('partial fracture (V4)', () => {
       for (const hp of [80, 60, 40, 20, 1]) {
         if (!tile.active) break;
         tile.health = hp;
-        e.progressFracture(tile);
+        e.progressFracture(tile, hitAt);
         steps.push({
           hp,
           alive: tile.active === true,
@@ -585,7 +588,7 @@ test.describe('partial fracture (V4)', () => {
       // x12 against the V10 floor of 0.10 (was x5 against 0.25).
       tile.fractureOriginalArea = fr.polygonArea(pts) * 12;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      e.progressFracture(tile);
+      e.progressFracture(tile, { x: tile.position.x + w * 0.5, y: tile.position.y });
       const debris = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
       return { died: tile.active === false, debrisCount: debris.length };
@@ -846,11 +849,23 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
       const ceiling = t.maxHealth;
       let hits = 0;
       let debrisWhileAlive = 0;
+      // A real shot travels until it overlaps the tile's LIVE polygon, so
+      // as pieces chip away the contact point follows the receding face
+      // inward.  Firing from a fixed point instead would keep testing a
+      // spot the tile no longer occupies — an artefact of the harness,
+      // not of the game (V12 gates detachment on that contact point).
+      const contactX = () => {
+        let mx = -Infinity;
+        for (const p of t.polygonPoints) {
+          if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+        }
+        return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+      };
       while (t.active && hits < 40) {
         e.physics.resolveCollision(
           {
             id: 'v10_shot_' + hits, type: 'PROJECTILE',
-            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            position: { x: contactX(), y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
             size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
             damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
@@ -902,11 +917,18 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
       };
       const area0 = areaOf(t.polygonPoints);
       let hits = 0, debrisWhileAlive = 0, areaWhileAlive = area0;
+      const contactX = () => {
+        let mx = -Infinity;
+        for (const p of t.polygonPoints) {
+          if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+        }
+        return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+      };
       while (t.active && hits < 12) {
         e.physics.resolveCollision(
           {
             id: 'v10_glass_' + hits, type: 'PROJECTILE',
-            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            position: { x: contactX(), y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
             size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
             damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
@@ -1013,6 +1035,99 @@ test.describe('materials through the cells (V5)', () => {
   });
 });
 
+test.describe('only the struck piece chips (V12)', () => {
+  test('shooting one face never pops a piece off the far side', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no rock tile on the field');
+      e.player.position.x = t.position.x + 6000;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+
+      // Drive the pattern to FULLY revealed, so every piece in it is
+      // boundary-complete and the ONLY thing standing between a far-side
+      // piece and detachment is the contact rule under test.
+      t.lastImpactVelocity = { x: -9, y: 0 };
+      t.health = 1;
+
+      // Always shoot the +x face.  Track the receding surface the way a
+      // real projectile does.
+      const contactX = () => {
+        let mx = -Infinity;
+        for (const p of t.polygonPoints) {
+          if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+        }
+        return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+      };
+      const half = t.size.x * 0.5;
+      let hits = 0;
+      while (t.active && hits < 12) {
+        e.progressFracture(t, { x: contactX(), y: t.position.y });
+        hits++;
+        if (t.active) t.health = 1; // hold the reveal at full
+      }
+      const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      // Local x of each chip relative to the tile centre, in half-widths:
+      // +1 is the struck face, -1 the far one.
+      const sides = chips.map((c: any) => (c.position.x - t.position.x) / half);
+      return {
+        chipCount: chips.length,
+        sides,
+        worstFarSide: sides.length ? Math.min(...sides) : 0,
+        died: !t.active,
+      };
+    });
+
+    // It did chip — otherwise the assertion below would pass vacuously.
+    expect(r.chipCount).toBeGreaterThan(0);
+    // And every piece came off the struck side.  The tolerance admits a
+    // cell straddling the centre line (its centroid can sit slightly
+    // past it); a far-side piece would land near -1.
+    expect(r.worstFarSide).toBeGreaterThan(-0.35);
+
+    watch.assertClean();
+  });
+
+  test('a hit with no contact point cracks but never detaches', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no rock tile on the field');
+      e.player.position.x = t.position.x + 6000;
+      t.lastImpactVelocity = { x: -9, y: 0 };
+      t.health = 1; // fully revealed
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      for (let i = 0; i < 6; i++) {
+        e.progressFracture(t); // no contact point supplied
+        if (t.active) t.health = 1;
+      }
+      const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      return { chipCount: chips.length, alive: t.active === true, cracked: (t.fractureEdges ?? []).length > 0 };
+    });
+
+    // The pattern still builds and shows, but nothing is contacted, so
+    // nothing breaks off — the hit-ceiling and min-remainder rules stay
+    // the only other ways a body ends.
+    expect(r.cracked).toBe(true);
+    expect(r.chipCount).toBe(0);
+    expect(r.alive).toBe(true);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('cell regularity (V11)', () => {
   test('Lloyd relaxation makes the chunks measurably more regular, and stays deterministic', async ({ page }) => {
     const watch = await boot(page);
@@ -1108,13 +1223,14 @@ test.describe('cell regularity (V11)', () => {
       if (!t) throw new Error('no rock tile on the field');
       t.lastImpactVelocity = { x: -9, y: 0 };
       // Build a pattern under the current knobs...
-      e.progressFracture(t);
+      const at = { x: t.position.x + t.size.x * 0.5, y: t.position.y };
+      e.progressFracture(t, at);
       const before = t.fractureCells.map((c: any) =>
         Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10)).join('|');
       const genBefore = t.fractureGen;
       // ...turn the site-count multiplier, and read it back.
       e.dbg.cycleFractureSiteScale();
-      e.progressFracture(t);
+      e.progressFracture(t, at);
       const after = t.fractureCells.map((c: any) =>
         Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10)).join('|');
       const genAfter = t.fractureGen;

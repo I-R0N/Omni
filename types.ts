@@ -1307,6 +1307,12 @@ export interface GameEntity {
   // object, so a revived tile must be killable again).
   deathDispatched?: boolean;
 
+  // The last damaging CONTACT POINT in entity-LOCAL coords (V12) — the
+  // projectile's own position, not a direction proxy.  Stamped by
+  // GameEngine.progressFracture, read by fractureCache to bias the
+  // pattern toward the real hit and to decide which cell was struck.
+  lastImpactLocal?: Vector2;
+
   // The fracture SHAPE-KNOB generation this entity's cached pattern was
   // built under (V11).  A DBG cycle bumps the global counter, so a stale
   // value here forces one recompute; untouched in normal play.

@@ -1996,7 +1996,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   up as neighbours leave.  There is NO chip-chance roll — the highlight
   completing is the trigger — and progressive variants skip the dent
   pull under voronoi (the pattern must stay stable; the highlight is
-  the damage read).  Below `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%)
+  the damage read).  ONLY THE STRUCK PIECE LEAVES (V12, user call): the
+  damage path stamps the projectile's real contact point in entity-local
+  coords (`lastImpactLocal` — it also biases the pattern, replacing a
+  direction proxy), and a cell may detach only if it is the one that
+  point touches, measured to each cell's OWN OUTLINE (a shot stops at the
+  surface, so a centroid comparison would nominate a piece buried on the
+  far side).  When the struck cell is boundary-complete but not
+  spliceable off the current remainder, the search may walk to a
+  neighbour within `FRACTURE_DETACH.CONTACT_RADIUS_FRAC` (0.45 of the
+  body's size) — never across it, so a piece internal to a shard or
+  buried in a cluster cannot pop off a hit it never received.  Below
+  `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%)
   of the original area — or at the hit ceiling — the remaining cells
   break through the normal death path.  `releaseRockChip` survives as
   the DBG legacy path and as the fallback for degenerate polygons.

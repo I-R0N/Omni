@@ -4005,6 +4005,16 @@ export const FRACTURE_DETACH = {
   // one, which is what "chip more before it shatters" means; the
   // min-remainder rule then takes whatever sliver is left.
   REVEAL_COMPLETE_FRAC: 0.55,
+  // How far from the projectile's contact point a piece may be and still
+  // count as "the piece that was hit" (V12), as a fraction of the body's
+  // max dimension.  The struck cell itself scores 0 and always wins; this
+  // radius only decides how far the search may walk when that cell is
+  // boundary-complete but not yet spliceable off the current remainder.
+  // It must stay well under 1.0: at 0.45 a hit on one face cannot reach
+  // a piece on the opposite face, which is the whole point — pieces
+  // internal to a shard or buried in a cluster never pop off a hit they
+  // never received.
+  CONTACT_RADIUS_FRAC: 0.45,
 } as const;
 
 // ── Material damage cracks ─────────────────────────────────────────────────
