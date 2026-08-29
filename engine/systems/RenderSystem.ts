@@ -22,6 +22,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
+import { renderPortalWarp } from './render/portalWarp';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
@@ -380,6 +381,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   private _trailEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particleBuffer: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
+  /** Transit-warp progress 0->1, pushed per frame by GameEngine.draw; null
+   *  when no transit is in flight.  A number rather than a timer because the
+   *  beat is a pure function of progress — see render/portalWarp.ts. */
+  portalWarp: number | null = null;
   private _attractors: GameEntity[] = [];
 
   // Object pools backing the {entity,rx,ry} render buckets above.  The
@@ -1086,6 +1091,15 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // follow it, and still precede the HUD: the fog darkens the world, never
     // the interface.
     renderFogLayer(this, ctx, width, height, playerPos, camera);
+
+    // 5b'''. THE TRANSIT WARP (Screen Space).
+    //
+    // After the world and its light/fog layers, so it veils everything the
+    // player has arrived into, and BEFORE the HUD, which stays legible
+    // throughout — the chrome is not inside the wormhole.
+    if (this.portalWarp !== null) {
+        renderPortalWarp(ctx, width, height, this.portalWarp);
+    }
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

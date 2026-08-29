@@ -1854,6 +1854,7 @@ export interface EngineStats {
   snitchSpeedName?: string;
   // DBG portal tuning (pause ▸ Debug Menu ▸ Portals) — five live multipliers
   // over PORTAL_CONSTANTS, plus a readout of what they resolve to.
+  portalWarpName?: string;
   portalSizeName?: string;
   portalGravityName?: string;
   portalGravityRangeName?: string;

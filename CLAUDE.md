@@ -351,6 +351,23 @@ is now reachable only through that dropdown.
   arrived beside is not an arrival.  `exitMouthFor(fromId)` is the ONE
   definition of "the rift you came out of" — where you land, which way
   you are thrown and where your debris re-emerges must agree on it.
+  THE FLIGHT THROUGH is a short screen-space beat
+  (`PORTAL_CONSTANTS.WARP`, `engine/systems/render/portalWarp.ts`) armed
+  LAST in `transitionToMap`, once the destination is fully built — so it
+  is pure presentation over a world that is already correct, and the DBG
+  "off" step changes nothing but the look.  It reuses the STAGE-CLEAR
+  FREEZE (`portalWarpTimer > 0` short-circuits `loop`, and breaks the
+  substep drain when a transit is raised mid-frame): nothing may shoot
+  the player inside the tunnel, and a frozen sim is exactly what leaves
+  the WALL CLOCK free to drive the beat.  The tunnel is a real
+  perspective projection — a point at depth z draws at `NEAR_R/z`, so
+  flying forward sweeps points outward the way motion does rather than
+  the uniform spread a scale-up gives — with concentric depth rings plus
+  a SMITH-CHART family of circles all tangent at the vanishing point
+  (that tangency is what makes the mouth read as a funnel converging on
+  where the ship is going).  The renderer owns no timer: `draw` pushes a
+  plain 0..1 `RenderSystem.portalWarp` and the whole effect is a pure
+  function of it, drawn after the fog and BEFORE the HUD.
   DEBRIS TRAVELS WITH YOU (user call): mobile shards + collectible drops
   within `PORTAL_CONSTANTS.TRANSIT.RADIUS` of the ship are captured out
   of the departing map (nearest win the `MAX_ENTITIES` cap; enemies stay

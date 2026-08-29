@@ -497,6 +497,9 @@ const App: React.FC = () => {
   // wormhole's strength and size; every one re-tunes the portals already in
   // the world, so the comparison is one keypress away from the rift you are
   // flying past.
+  const handleCyclePortalWarp = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalWarp();
+  };
   const handleCyclePortalSize = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePortalSize();
   };
@@ -813,6 +816,7 @@ const App: React.FC = () => {
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCyclePortalWarp={handleCyclePortalWarp}
         onCyclePortalSize={handleCyclePortalSize}
         onCyclePortalGravity={handleCyclePortalGravity}
         onCyclePortalGravityRange={handleCyclePortalGravityRange}

@@ -143,6 +143,21 @@ export class BackgroundManager {
   /** Radial push at the throat, per lens, in device px — a fraction of that
    *  lens's own radius, so the warp is self-similar at every rift size. */
   private _lensDevPush: number[] = [];
+  // ── What the warp actually applied last frame ────────────────────────────
+  // The two numbers that ARE the distortion: the shear angle at the throat
+  // (radians) and the radial push (device px) of the first live lens.  Public
+  // and written once per frame so `tests/starfield.spec.ts` can read the real
+  // values out of the real render path.
+  //
+  // Pixel-sampling was tried first and abandoned: measuring "how bent does the
+  // sky look" off the canvas turned out to depend on the fog and light layers
+  // and on where the camera had settled, so it measured the scene as much as
+  // the lens.  These are the inputs the bug lived in — an unbounded twist —
+  // and `lastLensTwist` is the only place the "never wind past one turn"
+  // invariant can be checked at all, since a wound field looks similar in any
+  // single frame.
+  lastLensTwist: number = 0;
+  lastLensPush: number = 0;
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -814,6 +829,8 @@ public setMapType(type: MapType) {
         + PORTAL_CONSTANTS.LENS.TWIST_SWING
           * Math.sin(performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE * spinMult))
         * lensMultLocal;
+    this.lastLensTwist = lensN > 0 ? twistNow : 0;
+    this.lastLensPush = lensN > 0 ? lpush[0] : 0;
 
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];

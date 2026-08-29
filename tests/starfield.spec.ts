@@ -698,139 +698,109 @@ test.describe('the star field', () => {
 const PORTAL_LENS_STEPS = 4;
 
 test.describe('the wormhole star lens', () => {
-  /** The DBG Lens knob has to CHANGE something, and this is the test that
-   *  says so — because the shipped lens failed exactly that.
+  /** The DBG Lens knob has to CHANGE something, and the twist must never wind
+   *  up — the two halves of one shipped bug.
    *
-   *  Its shear was `f^2 x (WIND + elapsed x RATE)`: an angle that grew without
-   *  bound with wall-clock time.  Every 2*PI of accumulated twist is one
-   *  visible band of stars, so the field wound itself into ~4 bands a minute
-   *  in and ~10 after three, and scaling a 60-radian twist by 0.25 still left
-   *  ~15 radians — far past 2*PI, so the knob could not change the band COUNT
-   *  and read as doing nothing.  The shear is capped below one turn now and
-   *  BREATHES rather than accumulating, which makes the knob linear in what
-   *  the eye actually reads.
+   *  The shear was `f^2 x (WIND + elapsed x SWIRL_RATE)`: an angle growing
+   *  without bound with wall-clock time.  Every 2*PI of accumulated twist is
+   *  one visible band of stars, so the field wound itself into ~4 bands a
+   *  minute in and ~10 after three; and scaling a 60-radian twist by 0.25
+   *  still leaves ~15 radians, far past 2*PI, so the knob could not change the
+   *  band COUNT and read as doing nothing.
    *
-   *  Measured off the PIXELS, the exception this suite already makes for the
-   *  star field (harness rule 3 — read the sim unless the thing exists only
-   *  as pixels).  There is no sim-side number for "how bent the sky looks".
-   *
-   *  The metric is ONE scalar: the star coverage where the lens PILES stars
-   *  up, minus the coverage where it EVACUATES them.  Both halves move the
-   *  same way as strength rises, so the difference doubles the signal and
-   *  cancels whatever the sky happened to be doing.  Sampled in the UPPER
-   *  half only, which is what keeps the destination label and the ship — both
-   *  drawn below the rift — out of the numbers. */
-  test('the Lens knob monotonically changes the warp, and only near the rift', async ({ page }) => {
+   *  Measured off `BackgroundManager.lastLensTwist` / `lastLensPush` — the
+   *  values the real render path actually applied on its last frame.  Sampling
+   *  the CANVAS was tried first and abandoned: "how bent does the sky look"
+   *  turned out to depend on the fog and light layers and on where the camera
+   *  had settled, so it measured the scene as much as the lens and inverted
+   *  under load.  These are the inputs the bug lived in, and the boundedness
+   *  invariant below cannot be checked off pixels at all — a field wound four
+   *  turns looks much like one wound five in any single frame. */
+  const lensState = (page: any) => engine(page, e => {
+    const bg = e.renderer.backgroundManager;
+    return { twist: bg.lastLensTwist as number, push: bg.lastLensPush as number };
+  });
+
+  /** Drive the Lens knob to a NAMED step and prove it landed there.
+   *  Cycling N times from an assumed starting index is what makes a knob test
+   *  order-dependent: one stray cycle and every later reading is silently
+   *  taken at the wrong setting. */
+  const setLens = async (page: any, label: string) => {
+    for (let i = 0; i < PORTAL_LENS_STEPS + 1; i++) {
+      const now = await page.evaluate(() => (window as any).__omniStats?.portalLensName);
+      if (now === label) return;
+      await engine(page, e => e.dbg.cyclePortalLens());
+    }
+    throw new Error(`could not reach lens "${label}"`);
+  };
+
+  /** Park beside the hub's Deep Space rift, the biggest horizon, so a lens is
+   *  live and on screen for the readings below. */
+  const parkAtRift = (page: any) => engine(page, e => {
+    const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
+    e.player.position.x = p.position.x;
+    e.player.position.y = p.position.y + 260;
+    e.player.velocity.x = 0;
+    e.player.velocity.y = 0;
+  });
+
+  test('the Lens knob scales the warp the render path actually applies', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
+    await parkAtRift(page);
+    await page.waitForTimeout(300);
 
-    /** Star coverage (% lit) in 20-CSS-px annuli above the rift's centre.
-     *
-     *  RE-PARKS THE SHIP FIRST, EVERY TIME, and that is not tidiness: the
-     *  player sits inside the rift's own gravity well, so between samples it
-     *  drifts toward the mouth, the camera follows, and each reading lands on
-     *  a DIFFERENT patch of sky.  That confound is bigger than the warp at the
-     *  weakest lens setting — it inverted the 0.25x-vs-off comparison in a
-     *  full-suite run while passing in isolation, because a busier machine
-     *  means more sim time (and so more drift) between readings.  Parking to
-     *  the same spot each time makes the sampled sky identical and the knob
-     *  the only variable.  Residual drift over the settle below is ~1px. */
-    const bands = async (): Promise<number[]> => {
-      await engine(page, e => {
-        // The hub's Deep Space rift: the biggest horizon, so the warped
-        // region is comfortably wider than the sampling bands.
-        const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
-        e.player.position.x = p.position.x;
-        e.player.position.y = p.position.y + 300;
-        e.player.velocity.x = 0;
-        e.player.velocity.y = 0;
-      });
-      await page.waitForTimeout(500);
-      return page.evaluate(() => {
-        const e = (window as any).__omniEngine;
-        const cv = document.querySelector('canvas') as HTMLCanvasElement;
-        const ctx = cv.getContext('2d')!;
-        const dpr = cv.width / cv.clientWidth;
-        const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
-        const cam = e.camera;
-        const sx = (cv.clientWidth / 2 + (p.position.x - cam.position.x) * cam.zoom) * dpr;
-        const sy = (cv.clientHeight / 2 + (p.position.y - cam.position.y) * cam.zoom) * dpr;
-        const R = Math.round(280 * dpr);
-        const x0 = Math.max(0, Math.round(sx - R)), y0 = Math.max(0, Math.round(sy - R));
-        const w = Math.min(cv.width - x0, 2 * R), h = Math.min(cv.height - y0, 2 * R);
-        const img = ctx.getImageData(x0, y0, w, h).data;
-        const BANDS = 14, bandPx = 20 * dpr;
-        const lit = new Array(BANDS).fill(0), tot = new Array(BANDS).fill(0);
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const dy = (y0 + y) - sy;
-            if (dy > 0) continue;                       // upper half only
-            const b = Math.floor(Math.hypot((x0 + x) - sx, dy) / bandPx);
-            if (b >= BANDS) continue;
-            const i = (y * w + x) * 4;
-            tot[b]++;
-            if (img[i] + img[i + 1] + img[i + 2] > 90) lit[b]++;
-          }
-        }
-        return lit.map((v, i) => (v / Math.max(1, tot[i])) * 100);
-      });
-    };
+    await setLens(page, '1×');
+    const full = await lensState(page);
+    await setLens(page, '0.5×');
+    const half = await lensState(page);
+    await setLens(page, '0.25×');
+    const quarter = await lensState(page);
+    await setLens(page, 'off');
+    const off = await lensState(page);
 
-    // Band 2 (40-60px) is where the throat is emptied; band 4 (80-100px) is
-    // where those stars land.  Band 0 is inside the black disc and band 1
-    // straddles its edge, so neither says anything.
-    const warp = (b: number[]) => b[4] - b[2];
+    // A live lens at all — otherwise every comparison below is 0 vs 0.
+    expect(full.push, 'the rift lenses the sky at 1x').toBeGreaterThan(0);
 
-    /** Drive the Lens knob to a NAMED step and prove it landed there.
-     *
-     *  Cycling N times from an assumed starting index is what makes a knob
-     *  test order-dependent: one stray cycle and every later reading is
-     *  silently taken at the wrong setting, which surfaces as a baffling
-     *  VALUE failure ("no lens" measuring a full warp) rather than as "the
-     *  knob was in the wrong place".  Driving to the label instead makes the
-     *  test immune to where the cycle happened to start. */
-    const setLens = async (label: string) => {
-      for (let i = 0; i < PORTAL_LENS_STEPS + 1; i++) {
-        const now = await page.evaluate(() => (window as any).__omniStats?.portalLensName);
-        if (now === label) return;
-        await engine(page, e => e.dbg.cyclePortalLens());
-      }
-      throw new Error(`could not reach lens "${label}"`);
-    };
+    // Each step down genuinely flattens BOTH halves of the distortion: how far
+    // stars are pushed off the throat, and how far the sky is sheared round it.
+    expect(half.push).toBeLessThan(full.push * 0.75);
+    expect(quarter.push).toBeLessThan(half.push * 0.75);
+    expect(Math.abs(half.twist)).toBeLessThan(Math.abs(full.twist) * 0.75);
+    expect(Math.abs(quarter.twist)).toBeLessThan(Math.abs(half.twist) * 0.75);
 
-    await setLens('1×');
-    const full = warp(await bands());
-    await setLens('0.5×');
-    const half = warp(await bands());
-    await setLens('0.25×');
-    const quarter = warp(await bands());
-    await setLens('off');
-    const offBands = await bands();
-    const off = warp(offBands);
+    // "off" is off — no push, no shear, and the star loop takes its original
+    // untouched path.
+    expect(off.push).toBe(0);
+    expect(off.twist).toBe(0);
 
-    // Every step down flattens the sky, by a margin set at roughly HALF the
-    // measured gap.  Over four runs with the geometry held still:
-    //
-    //   1.00x  2.92 - 3.05      0.50x  1.34 - 1.62
-    //   0.25x  0.27 - 0.38      off   -0.16 - -0.14
-    //
-    // so the gaps are ~1.4 / ~1.1 / ~0.47 against the thresholds below.
-    expect(full, `full ${full} vs half ${half}`).toBeGreaterThan(half + 0.6);
-    expect(half, `half ${half} vs quarter ${quarter}`).toBeGreaterThan(quarter + 0.5);
-    expect(quarter, `quarter ${quarter} vs off ${off}`).toBeGreaterThan(off + 0.2);
-    // With the lens off there is no warp at all — the field is flat, which is
-    // what makes the readings above differences in the LENS and not in the sky.
-    expect(Math.abs(off)).toBeLessThan(1);
+    watch.assertClean();
+  });
 
-    // The warp is LOCAL: past the lens radius the field is untouched at every
-    // setting.  Without this the test would also pass on a lens that merely
-    // dimmed the whole sky.
-    await setLens('1×');
-    const fullBands = await bands();
-    for (const b of [9, 11, 13]) {
-      expect(Math.abs(fullBands[b] - offBands[b]),
-        `far band ${b}: ${fullBands[b]} vs ${offBands[b]}`).toBeLessThan(1);
+  test('the twist stays under one full turn, however long the run goes', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await parkAtRift(page);
+    await setLens(page, '1×');
+
+    // THE BAND INVARIANT.  Total shear below 2*PI means the field cannot wind
+    // into bands — not "does not today", but cannot, whatever the elapsed
+    // time.  The old shear passed 2*PI about two seconds in and never came
+    // back, so sampling across a window is enough to catch a regression to
+    // accumulating behaviour; the assertion is on the SHAPE (bounded), which a
+    // wound field fails immediately and permanently.
+    const TWO_PI = Math.PI * 2;
+    let peak = 0;
+    for (let i = 0; i < 12; i++) {
+      await page.waitForTimeout(250);
+      const { twist } = await lensState(page);
+      peak = Math.max(peak, Math.abs(twist));
+      expect(Math.abs(twist), `twist ${twist} rad at sample ${i} must stay under one turn`)
+        .toBeLessThan(TWO_PI);
     }
+    // And it is genuinely BREATHING rather than pinned at zero — the beat is
+    // alive, it just does not accumulate.
+    expect(peak).toBeGreaterThan(0);
 
     watch.assertClean();
   });

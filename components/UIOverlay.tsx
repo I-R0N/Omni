@@ -135,6 +135,7 @@ interface UIOverlayProps {
   onToggleAsteroidFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
+  onCyclePortalWarp?: () => void;
   onCyclePortalSize?: () => void;
   onCyclePortalGravity?: () => void;
   onCyclePortalGravityRange?: () => void;
@@ -434,6 +435,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleAsteroidFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
+  onCyclePortalWarp,
   onCyclePortalSize,
   onCyclePortalGravity,
   onCyclePortalGravityRange,
@@ -1615,6 +1617,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   the SHIPPED value, so the first click is always the A/B. */}
               {renderSectionHeader('portal', 'Portals')}
               {!collapsed.portal && (<>
+                {ctrlRow('Transit fx', onCyclePortalWarp, stats.portalWarpName ?? '0.9s',
+                  'Length of the flight-THROUGH beat played on arrival (0.9 / 0.6 / 1.4s / off) — the tunnel that unrolls the lens into radial streaks, streams the sky outward and decelerates onto the destination. The sim is FROZEN for its duration (the stage-clear pattern), so nothing can shoot you inside the tunnel and the beat costs no simulation; "off" transitions instantly, exactly as before it existed. Takes effect on the next transit.')}
                 {ctrlRow('Size', onCyclePortalSize, stats.portalSizeName ?? '1×',
                   'Rift SIZE multiplier (1 / 0.75 / 0.5 / 0.35 / 1.25×) — scales the drawn mouth, the horizon that swallows shards, and the star-lens radius together, live on the portals already placed. Deliberately does NOT change how close you must be to ENTER (USE_RANGE): that is an interaction rule, not a look, and moving it would make the other comparisons unreadable.')}
                 {ctrlRow('Gravity', onCyclePortalGravity, stats.portalGravityName ?? '1×',

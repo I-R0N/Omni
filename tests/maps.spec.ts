@@ -239,6 +239,99 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
   });
 });
 
+test.describe('the transit warp — the flight through the wormhole', () => {
+  /** Arrival plays a short screen-space beat (PORTAL_CONSTANTS.WARP): the lens
+   *  unrolls into radial streaks, the sky streams outward, and the tunnel
+   *  decelerates onto the destination.  It reuses the STAGE-CLEAR freeze, and
+   *  that is the part worth pinning — the look is a picture, but "nothing can
+   *  shoot you while you are inside the tunnel" is a rule.
+   *
+   *  So this asserts the freeze holds, that it releases ON ITS OWN (a beat
+   *  that can strand the sim is worse than no beat), and that the DBG "off"
+   *  step transitions instantly, exactly as before the effect existed. */
+  test('holds the sim for the beat, then releases it', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const armed = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
+      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+      if (!rift) return null;
+      e.player.position.x = rift.position.x + 300;
+      e.player.position.y = rift.position.y;
+      if (!e.transitionToMap(rift.portalTargetId)) return null;
+      return {
+        timer: e.portalWarpTimer,
+        x: e.player.position.x,
+        y: e.player.position.y,
+        speed: Math.hypot(e.player.velocity.x, e.player.velocity.y),
+      };
+    });
+
+    expect(armed, 'an arena rift on the hub').not.toBeNull();
+    expect(armed!.timer).toBeGreaterThan(0);
+    // The ship was EJECTED, so it carries real speed into the freeze — which
+    // is what makes the next assertion meaningful rather than vacuous.
+    expect(armed!.speed).toBeGreaterThan(5);
+
+    // FROZEN: several frames later the world has not moved, despite that
+    // speed.  (A running sim would have carried the ship metres by now.)
+    await page.waitForTimeout(180);
+    const during = await engine(page, e => ({
+      timer: e.portalWarpTimer,
+      x: e.player.position.x,
+      y: e.player.position.y,
+    }));
+    expect(during.timer, 'the beat is still running').toBeGreaterThan(0);
+    expect(Math.hypot(during.x - armed!.x, during.y - armed!.y)).toBeLessThan(0.001);
+    // …and it is a beat, not a stall: the timer is counting down on wall clock.
+    expect(during.timer).toBeLessThan(armed!.timer);
+
+    // RELEASES ITSELF.  Poll rather than time it — the point is that nothing
+    // outside has to end it.
+    await waitForEngine(page, e => e.portalWarpTimer === 0, 'the warp to release', 10_000);
+
+    // …and the world is LIVE again, not merely un-frozen: the ejected ship is
+    // travelling once more.  Measured as movement between two samples rather
+    // than as a flag, so a freeze that released without resuming the sim
+    // would still fail here.
+    const resumed = await page.evaluate(async () => {
+      const e = (window as any).__omniEngine;
+      const at = () => ({ x: e.player.position.x, y: e.player.position.y });
+      const a = at();
+      await new Promise(r => setTimeout(r, 250));
+      const b = at();
+      return Math.hypot(b.x - a.x, b.y - a.y);
+    });
+    expect(resumed, 'the ship is moving again after the beat').toBeGreaterThan(1);
+
+    watch.assertClean();
+  });
+
+  test('the DBG "off" step transitions instantly, as before the beat existed', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Drive the cycle to "off" by NAME rather than by counting clicks.
+    for (let i = 0; i < 6; i++) {
+      const now = await page.evaluate(() => (window as any).__omniStats?.portalWarpName);
+      if (now === 'off') break;
+      await engine(page, e => e.dbg.cyclePortalWarp());
+    }
+    expect(await page.evaluate(() => (window as any).__omniStats?.portalWarpName)).toBe('off');
+
+    const t = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
+      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+      e.transitionToMap(rift.portalTargetId);
+      return e.portalWarpTimer;
+    });
+    expect(t).toBe(0);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('debris transit — the wormhole takes what is around you', () => {
   /** Loose entities near the ship travel through a portal and re-emerge from
    *  the EXIT rift after the player, flung out at random headings/speeds

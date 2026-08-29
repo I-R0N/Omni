@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -457,6 +457,14 @@ export class GameEngine {
   // Cleared by loadMapFresh, so a second hop (or a restart) before the queue
   // drains means the wormhole simply kept the stragglers.
   private portalTransit: { entity: GameEntity; delay: number }[] = [];
+  // Transit warp — the flight THROUGH the wormhole (PORTAL_CONSTANTS.WARP).
+  // Wall-clock seconds remaining, and the length it started at, so the render
+  // side can be handed a plain 0->1 progress.  Non-zero FREEZES the sim, the
+  // stage-clear pattern: nothing may shoot the player while they are inside
+  // the tunnel, and a frozen sim is what leaves the wall clock free to drive
+  // the beat.
+  private portalWarpTimer: number = 0;
+  private portalWarpDuration: number = 0;
   private portalTransitExit: Vector2 = { x: 0, y: 0 };
   // Overworld roaming dragon — first spawn shortly after run start, then a
   // fresh rift a while after the previous dragon dies or leaves.
@@ -1050,6 +1058,7 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      portalWarpName: getPortalWarpName(),
       portalSizeName: getPortalSizeName(),
       portalGravityName: getPortalGravityName(),
       portalGravityRangeName: getPortalGravityRangeName(),
@@ -1410,6 +1419,14 @@ export class GameEngine {
           duration: PORTAL_CONSTANTS.BURST_DURATION,
       });
       this.pushPlayerMessage(dest.name.toUpperCase(), PORTAL_CONSTANTS.COLOR);
+
+      // …and fly through it.  Started LAST, once the destination is fully
+      // built and the player placed in it, so the beat is pure presentation
+      // over a world that is already correct — nothing about the arrival is
+      // waiting on the animation, and cutting it short (DBG "Transit fx" off)
+      // changes nothing but the look.
+      this.portalWarpDuration = getPortalWarpDuration();
+      this.portalWarpTimer = this.portalWarpDuration;
 
       this.prepareFrameEntities();
       // Accumulator hygiene — the map load is wall-clock work; don't
@@ -1894,6 +1911,7 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      portalWarpName: getPortalWarpName(),
       portalSizeName: getPortalSizeName(),
       portalGravityName: getPortalGravityName(),
       portalGravityRangeName: getPortalGravityRangeName(),
@@ -1996,6 +2014,18 @@ export class GameEngine {
         return;
     }
 
+    // In transit: the sim is HELD while the player flies up the wormhole, so
+    // nothing shoots them inside the tunnel and the beat costs no simulation.
+    // The timer runs on WALL CLOCK — exactly what a frozen sim leaves
+    // available — and the frame still draws, which is what animates it.
+    if (this.portalWarpTimer > 0) {
+        this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
     // NOTE — deliberately NO `deathPending` short-circuit here.  Death is the
     // one full-screen overlay that does NOT freeze the sim (user call): the
     // field keeps moving behind the semi-transparent summary, so the player
@@ -2045,6 +2075,10 @@ export class GameEngine {
         // rather than a few substeps later.  (Death is NOT here — it no longer
         // freezes the sim.)
         if (this.stageClearPending) { this.simAccumulator = 0; break; }
+        // A portal entry swaps the map IN PLACE mid-substep and arms the
+        // transit warp; the rest of this frame's substeps would otherwise
+        // simulate the destination while the player is still in the tunnel.
+        if (this.portalWarpTimer > 0) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -5662,6 +5696,13 @@ export class GameEngine {
       // where the frame is drawn rather than read out of the DOM.
       this.renderer.bossBarActive =
           !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+
+      // Transit warp — hand the renderer a plain 0->1 progress, so the beat
+      // stays a pure function of one number and the render side owns no
+      // timer of its own.  Null when no transit is in flight.
+      this.renderer.portalWarp = this.portalWarpTimer > 0 && this.portalWarpDuration > 0
+          ? 1 - this.portalWarpTimer / this.portalWarpDuration
+          : null;
 
       // A7 — hand the renderer the run's depth.  One field write per frame;
       // the fog folds it into its dark level (deeper = darker).

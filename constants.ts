@@ -5228,6 +5228,22 @@ export function cyclePortalLens(): number {
   activePortalLensIndex = (activePortalLensIndex + 1) % PORTAL_LENS_CYCLE.length;
   return activePortalLensIndex;
 }
+/** DBG transit-warp duration (seconds), 0 = the beat OFF.  Index 0 is the
+ *  shipped value, like every other Portals row, so the first click is the A/B.
+ *  Cycling it takes effect on the NEXT transit — the beat reads its length
+ *  once, at the moment it starts. */
+export const PORTAL_WARP_CYCLE: ReadonlyArray<number> = [0.9, 0.6, 1.4, 0] as const;
+let activePortalWarpIndex = 0;
+export function getPortalWarpDuration(): number { return PORTAL_WARP_CYCLE[activePortalWarpIndex]; }
+export function getPortalWarpName(): string {
+  const v = PORTAL_WARP_CYCLE[activePortalWarpIndex];
+  return v === 0 ? 'off' : `${v}s`;
+}
+export function cyclePortalWarp(): number {
+  activePortalWarpIndex = (activePortalWarpIndex + 1) % PORTAL_WARP_CYCLE.length;
+  return activePortalWarpIndex;
+}
+
 export function cyclePortalLensSpin(): number {
   activePortalLensSpinIndex = (activePortalLensSpinIndex + 1) % PORTAL_LENS_SPIN_CYCLE.length;
   return activePortalLensSpinIndex;
@@ -5630,6 +5646,42 @@ export const PORTAL_CONSTANTS = {
     // the escape is decisive at every difficulty and hull weight — mass does
     // not enter, since gravity is applied as an acceleration.
     PLAYER_EJECT_SPEED: 12,
+  },
+  // ── Transit warp (the flight THROUGH the wormhole) ────────────────
+  // A short screen-space beat played on ARRIVAL, over the destination map,
+  // which is already loaded and waiting behind it.  Sequence: the lens
+  // distortion UNROLLS into radial lines, the sky streams outward past the
+  // ship as it flies up the throat, then the whole thing decelerates and the
+  // arena is revealed.
+  //
+  // Structurally it is the STAGE-CLEAR freeze reused: the sim is held for the
+  // duration (the loop's short-circuit), so nothing shoots the player while
+  // they are inside the tunnel and the beat costs no simulation at all.  The
+  // animation runs off WALL CLOCK, which is exactly what a frozen sim leaves
+  // available, and draws no particles and allocates nothing — it is one veil
+  // rect, a few dozen stroked arcs and a batched path of star streaks.
+  //
+  // The tunnel is a proper perspective projection, not a scale-up: a point at
+  // depth z draws at radius NEAR_R/z, so travelling forward (z shrinking)
+  // sweeps points outward the way real motion does — slow near the vanishing
+  // point, accelerating as they pass the ship.  TRAVEL is total depth covered,
+  // eased so the arrival decelerates rather than cutting.
+  WARP: {
+    DURATION: 0.9,
+    TRAVEL: 3.4,            // depth units covered over the whole beat
+    NEAR_R: 0.055,          // screen radius (× the half-diagonal) at depth 1
+    STARS: 200,
+    STREAK: 0.22,           // streak length as a fraction of a star's radius
+    RINGS: 9,               // concentric depth rings — the tunnel's walls
+    // SMITH-CHART ARCS: circles that all pass through the vanishing point,
+    // centred out along their own bearing.  A Smith chart's constant-reactance
+    // family is exactly this — circles tangent at one point — and tangency at
+    // the throat is what makes the mouth read as a funnel converging to where
+    // the ship is going, rather than as flat concentric rings.
+    ARCS: 10,
+    VEIL: 0.93,             // how far the world is dimmed at full tunnel
+    VEIL_IN: 0.16,          // fraction of the beat spent dimming
+    VEIL_OUT: 0.38,         // fraction spent revealing the arena
   },
   // ── The event horizon (user call) ─────────────────────────────────
   // The rift's WORLD ART is now exactly one thing: a black disc.  Every

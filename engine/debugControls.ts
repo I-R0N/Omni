@@ -31,7 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
-    cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
+    cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
@@ -712,6 +712,12 @@ export class DebugControls {
   // re-tune the portals already in the world — no map reload, and the entity
   // keeps the shipped numbers as its base.  See the cycle tables in
   // constants.ts for what each one covers.
+
+  /** Transit-warp DURATION, 0 = the flight-through beat off entirely.
+   *  Takes effect on the next transit; the beat reads its length once. */
+  cyclePortalWarp() {
+    cyclePortalWarp();
+  }
 
   /** Rift SIZE — the drawn mouth, its swallow horizon and its lens radius.
    *  Deliberately not the entry range: that is an interaction rule. */
