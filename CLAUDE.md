@@ -359,13 +359,23 @@ is now reachable only through that dropdown.
   FREEZE (`portalWarpTimer > 0` short-circuits `loop`, and breaks the
   substep drain when a transit is raised mid-frame): nothing may shoot
   the player inside the tunnel, and a frozen sim is exactly what leaves
-  the WALL CLOCK free to drive the beat.  The tunnel is a real
-  perspective projection — a point at depth z draws at `NEAR_R/z`, so
-  flying forward sweeps points outward the way motion does rather than
-  the uniform spread a scale-up gives — with concentric depth rings plus
-  a SMITH-CHART family of circles all tangent at the vanishing point
-  (that tangency is what makes the mouth read as a funnel converging on
-  where the ship is going).  The renderer owns no timer: `draw` pushes a
+  the WALL CLOCK free to drive the beat.  The tunnel IS THE REAL SKY (user call):
+  `BackgroundManager.renderWarpStars` sweeps the LIVE star field outward
+  — the same stars, bearings, colours and sizes already on screen, each
+  star's radius scaled 1 → `WARP.EXPAND` — so the opening frame is
+  structurally identical to the sky the player was looking at, and outer
+  stars move fastest (dr = r × dE), which is the forward-motion cue.
+  There are deliberately NO rings or arcs: a synthetic ring set drew a
+  tunnel the sky was not part of.  A depth model over the real stars was
+  tried and thrown away — mapping radius to depth and wrapping it as the
+  ship advanced made the wrapped depths converge and drew the whole
+  field as one solid disc.  Travel is a SMOOTHERSTEP, so the beat rolls
+  in slowly (user call: opening at full speed reads as a cut) and eases
+  out onto the arena, and streak length follows the derivative so the
+  acceleration is legible in the marks.  The PLAYER's own hull is
+  re-drawn above the veil through the real entity path
+  (`RenderSystem._playerDraw`), so the flight has something to hold onto
+  rather than reading as a cutaway.  The renderer owns no timer: `draw` pushes a
   plain 0..1 `RenderSystem.portalWarp` and the whole effect is a pure
   function of it, drawn after the fog and BEFORE the HUD.
   DEBRIS TRAVELS WITH YOU (user call): mobile shards + collectible drops

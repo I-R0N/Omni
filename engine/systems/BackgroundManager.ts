@@ -4,12 +4,13 @@ import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
   getActiveStarBands, resolveStarParallax, PORTAL_CONSTANTS,
-  getPortalLensMult, getPortalLensSpinMult, portalHorizonRadius,
+  getPortalLensMult, getPortalLensSpinMult, getPortalLensRadiusMult, portalHorizonRadius,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import { hexToRgb } from './render/drawUtils';
+import { warpExpansion, warpSpeed, warpFade } from './render/portalWarp';
 
 /** A run of stars sharing one `fillStyle`, so the draw loop sets canvas state
  *  once per group instead of once per star.  Colour AND opacity are baked into
@@ -262,7 +263,7 @@ export class BackgroundManager {
         const sx = width / 2 + wrapDeltaX(cameraPos.x, attr.position.x) * zoom;
         const sy = height / 2 + wrapDeltaY(cameraPos.y, attr.position.y) * zoom;
         const anchor = attr.isPortal ? portalHorizonRadius(attr) : attr.size.x / 2;
-        const starR = anchor * L.RADIUS_MULT * zoom;
+        const starR = anchor * getPortalLensRadiusMult() * zoom;
         const puffR = anchor * L.PUFF_RADIUS_MULT * zoom;
         const maxR = Math.max(starR, puffR);
         if (sx < -maxR || sx > width + maxR || sy < -maxR || sy > height + maxR) continue;
@@ -929,6 +930,85 @@ public setMapType(type: MapType) {
           velocity: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
           alpha: 1.0, length: 20
       });
+  }
+
+  /** THE TRANSIT WARP'S SKY — the real star field, swept outward.
+   *
+   *  Drawn ON TOP of the warp's veil (RenderSystem), so during a wormhole
+   *  flight the player sees their own sky streaming past rather than a
+   *  stand-in: every streak here is one of the stars already on screen, at
+   *  its own bearing, in its own colour and size.  That is the whole point of
+   *  putting this in BackgroundManager instead of in the warp module — the
+   *  star data lives here, and copying it somewhere else to draw a lookalike
+   *  is what the previous synthetic version did.
+   *
+   *  THE FIELD IS SWEPT, NOT REPLACED.  Each star keeps its bearing and simply
+   *  moves outward, its distance from the vanishing point scaled by
+   *  `warpExpansion`.  At the start that factor is 1, so the first frame of
+   *  the beat is EXACTLY the sky already on screen — the continuity is
+   *  structural rather than approximate — and because outer stars move
+   *  fastest (dr = r x dE) the sweep reads as forward motion rather than as a
+   *  uniform zoom.  A depth model was tried first, mapping each star's radius
+   *  to a depth and wrapping it as the ship advanced: the wrapped depths
+   *  converged and drew the whole field as one solid disc of streaks.
+   *
+   *  One batched path per draw group, so ~6 000 streaks cost one canvas state
+   *  change per colour rather than one per star — the same trick the ordinary
+   *  star pass uses, and the reason this is affordable at all.  Runs only
+   *  while a transit is in flight. */
+  public renderWarpStars(ctx: CanvasRenderingContext2D, p: number, dpr: number) {
+    const fade = warpFade(p);
+    if (fade <= 0.01) return;
+    const pw = this.bandPixelWidth, ph = this.bandPixelHeight;
+    if (pw <= 0 || ph <= 0) return;
+
+    const cx = pw / 2, cy = ph / 2;
+    const half = Math.hypot(pw, ph) / 2;
+    const expand = warpExpansion(p);
+    // Streaks follow SPEED, so at rest they are the dots the field already
+    // draws and the opening frame is indistinguishable from the live sky.
+    const streakK = PORTAL_CONSTANTS.WARP.STREAK * warpSpeed(p);
+    const cull = half * 1.5;
+
+    const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
+    const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
+    const groups = this.starGroups;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.lineCap = 'round';
+    for (let g = 0; g < groups.length; g++) {
+      const grp = groups[g];
+      const end = grp.start + grp.count;
+      // Star size doubles as line width, so the field keeps its depth
+      // ordering while streaking: the faint haze stays hairline, the few
+      // foreground stars draw as real streaks.
+      ctx.strokeStyle = grp.fill;
+      ctx.globalAlpha = fade;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = grp.start; i < end; i++) {
+        const b = B[i];
+        let x = X[i] + bofx[b];
+        if (x >= pw) x -= pw;
+        let y = Y[i] + bofy[b];
+        if (y >= ph) y -= ph;
+        // The star's own bearing and distance, as it sits on screen now —
+        // then simply pushed outward along that bearing.
+        const dx = x - cx, dy = y - cy;
+        const r0 = Math.hypot(dx, dy);
+        if (r0 < 1e-3) continue;
+        const r = r0 * expand;
+        if (r > cull) continue;
+        const inv = 1 / r0;
+        const ca = dx * inv, sa = dy * inv;
+        const tail = Math.max(S[i], r * streakK);
+        ctx.moveTo(cx + ca * r, cy + sa * r);
+        ctx.lineTo(cx + ca * (r + tail), cy + sa * (r + tail));
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'butt';
   }
 
   private renderGrid(ctx: CanvasRenderingContext2D, width: number, height: number, cameraPos: Vector2) {

@@ -1860,6 +1860,7 @@ export interface EngineStats {
   portalGravityRangeName?: string;
   portalLensName?: string;
   portalLensSpinName?: string;
+  portalLensRadiusName?: string;
   portalTuningInfo?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;

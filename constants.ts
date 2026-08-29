@@ -5172,7 +5172,29 @@ export function portalHorizonRadius(e: GameEntity): number {
 export const PORTAL_SIZE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 0.35, 1.25] as const;
 export const PORTAL_GRAVITY_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 1.5] as const;
 export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 1.5] as const;
-export const PORTAL_LENS_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0] as const;
+// Strengths ABOVE 1 are here because "how far can this be pushed" is a real
+// question to ask of a look, and the shipped value is only the current answer.
+// Nothing clamps them: the twist stays bounded by construction (TWIST +
+// TWIST_SWING < 2*PI at 1x, so 3x is still under two turns and cannot band),
+// and the push is a fraction of the lens radius, so it scales without ever
+// out-reaching the region it belongs to.
+export const PORTAL_LENS_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0] as const;
+/** Lens RADIUS as a multiple of the rift's horizon — how much sky the warp
+ *  covers, separate from how hard it bends it.  Index 0 is LENS.RADIUS_MULT,
+ *  the shipped value; the steps above it are what "hug the hole" looks like
+ *  when it is loosened back off. */
+export const PORTAL_LENS_RADIUS_CYCLE: ReadonlyArray<number> = [4, 6, 9, 14, 2.5] as const;
+let activePortalLensRadiusIndex = 0;
+export function getPortalLensRadiusMult(): number {
+  return PORTAL_LENS_RADIUS_CYCLE[activePortalLensRadiusIndex];
+}
+export function getPortalLensRadiusName(): string {
+  return `${PORTAL_LENS_RADIUS_CYCLE[activePortalLensRadiusIndex]}×`;
+}
+export function cyclePortalLensRadius(): number {
+  activePortalLensRadiusIndex = (activePortalLensRadiusIndex + 1) % PORTAL_LENS_RADIUS_CYCLE.length;
+  return activePortalLensRadiusIndex;
+}
 export const PORTAL_LENS_SPIN_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 2.0] as const;
 // Index 0 of every cycle is the SHIPPED value, so the panel opens on what the
 // player just flew through and the first click is always the A/B.
@@ -5661,26 +5683,39 @@ export const PORTAL_CONSTANTS = {
   // available, and draws no particles and allocates nothing — it is one veil
   // rect, a few dozen stroked arcs and a batched path of star streaks.
   //
-  // The tunnel is a proper perspective projection, not a scale-up: a point at
-  // depth z draws at radius NEAR_R/z, so travelling forward (z shrinking)
-  // sweeps points outward the way real motion does — slow near the vanishing
-  // point, accelerating as they pass the ship.  TRAVEL is total depth covered,
-  // eased so the arrival decelerates rather than cutting.
+  // A star field is effectively at infinity, so "flying forward" through one
+  // is a convention rather than a projection — what sells it is that outer
+  // stars sweep fastest and everything accelerates then eases.  Scaling each
+  // star's radius gives exactly that (dr = r x dE) while keeping the field
+  // recognisably the one already on screen, where a depth model fitted onto
+  // real stars bunched them into a solid disc as their wrapped depths
+  // converged.
+  //
+  // The tunnel is drawn as the REAL STAR FIELD streaking outward
+  // (BackgroundManager.renderWarpStars) — the same stars, bearings, colours
+  // and sizes already on screen.  There are deliberately NO rings or arcs any
+  // more (user call): a synthetic ring set drew a tunnel that the sky was not
+  // part of, and the streaks alone carry the motion.
   WARP: {
-    DURATION: 0.9,
-    TRAVEL: 3.4,            // depth units covered over the whole beat
-    NEAR_R: 0.055,          // screen radius (× the half-diagonal) at depth 1
-    STARS: 200,
-    STREAK: 0.22,           // streak length as a fraction of a star's radius
-    RINGS: 9,               // concentric depth rings — the tunnel's walls
-    // SMITH-CHART ARCS: circles that all pass through the vanishing point,
-    // centred out along their own bearing.  A Smith chart's constant-reactance
-    // family is exactly this — circles tangent at one point — and tangency at
-    // the throat is what makes the mouth read as a funnel converging to where
-    // the ship is going, rather than as flat concentric rings.
-    ARCS: 10,
+    DURATION: 1.1,
+    // How far the sky is swept outward over the beat: every star's distance
+    // from the vanishing point is multiplied by 1 -> EXPAND.  At 1 the field
+    // is EXACTLY the sky already on screen, which is what makes the opening
+    // continuous; by the end it has spread over EXPAND^2 times the area, so
+    // the streaks thin out on their own instead of piling into a solid mass.
+    // Outer stars therefore move fastest (dr = r x dE) — the perspective cue,
+    // without needing a depth model the real star field does not have.
+    EXPAND: 7,
+    STREAK: 0.26,           // streak length as a fraction of a star's radius
     VEIL: 0.93,             // how far the world is dimmed at full tunnel
-    VEIL_IN: 0.16,          // fraction of the beat spent dimming
+    // The dim is QUICKER than the acceleration, and deliberately so.  The
+    // destination map is already loaded when the beat starts, so whatever the
+    // veil has not yet covered is the arena the player is about to be shown —
+    // a slow dim gives them a clear look at it, then takes it away and gives
+    // it back, which reads as a glitch rather than as travel.  The MOTION
+    // still rolls in slowly (see `curve` in render/portalWarp.ts); it is only
+    // the covering that is prompt.
+    VEIL_IN: 0.12,          // fraction of the beat spent dimming
     VEIL_OUT: 0.38,         // fraction spent revealing the arena
   },
   // ── The event horizon (user call) ─────────────────────────────────

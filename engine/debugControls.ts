@@ -32,7 +32,7 @@ import {
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cycleSnitchSpeed, cycleEnemyScale,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
-    cyclePortalLens, cyclePortalLensSpin,
+    cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
@@ -738,6 +738,13 @@ export class DebugControls {
   /** Star-lens strength — how far the warp displaces the background. */
   cyclePortalLens() {
     cyclePortalLens();
+  }
+
+  /** Star-lens RADIUS — how much sky the warp covers, as a multiple of the
+   *  rift's horizon.  Separate from strength: how WIDE the bend reaches and
+   *  how HARD it bends are different questions about the same lens. */
+  cyclePortalLensRadius() {
+    cyclePortalLensRadius();
   }
 
   /** Star-lens SPIN — the swirl's time advance only, so the warp can be

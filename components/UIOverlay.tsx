@@ -140,6 +140,7 @@ interface UIOverlayProps {
   onCyclePortalGravity?: () => void;
   onCyclePortalGravityRange?: () => void;
   onCyclePortalLens?: () => void;
+  onCyclePortalLensRadius?: () => void;
   onCyclePortalLensSpin?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
@@ -440,6 +441,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePortalGravity,
   onCyclePortalGravityRange,
   onCyclePortalLens,
+  onCyclePortalLensRadius,
   onCyclePortalLensSpin,
   onCycleEnemyScale,
   onCycleSimRate,
@@ -1626,7 +1628,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('  ↳ range', onCyclePortalGravityRange, stats.portalGravityRangeName ?? '1×',
                   'How far the pull REACHES (1 / 0.75 / 0.5 / 1.5× of GRAVITY_RANGE). Separate from strength because a well can be too WIDE without being too strong — a short, firm well reads as a mouth, a long faint one as the whole area sagging.')}
                 {ctrlRow('Lens', onCyclePortalLens, stats.portalLensName ?? '1×',
-                  'Background star-warp strength (1 / 0.5 / 0.25 / off). Scales the radial push off the throat AND the twist, both of which are bounded, so each step visibly flattens the distortion. At "off" the star field takes its original untouched draw path — the cheapest possible A/B against the warp existing at all. The warped region hugs the black disc (4× its radius), so it also shrinks with Size and with a smaller destination.')}
+                  'Background star-warp strength (1 / 0.5 / 0.25 / off / 1.5 / 2 / 3×). Scales the radial push off the throat AND the twist, both of which are bounded, so each step visibly flattens the distortion. At "off" the star field takes its original untouched draw path — the cheapest possible A/B against the warp existing at all. The warped region hugs the black disc (4× its radius), so it also shrinks with Size and with a smaller destination.')}
+                {ctrlRow('  ↳ radius', onCyclePortalLensRadius, stats.portalLensRadiusName ?? '4×',
+                  'How much SKY the warp covers, as a multiple of the rift\'s black-disc radius (4 / 6 / 9 / 14 / 2.5×) — separate from Lens, because how WIDE the bend reaches and how HARD it bends are different questions. It rides the disc, so it also inherits the destination-span scaling and the Size knob: a Pocket rift warps a small patch, Deep Space a wide one.')}
                 {ctrlRow('  ↳ spin', onCyclePortalLensSpin, stats.portalLensSpinName ?? '1×',
                   'Star-lens SPIN (1 / 0.5 / 0.25 / frozen / 2×) — the rate the bounded twist BREATHES, nothing else. The twist no longer accumulates over time (that is what used to wind the field into bands), so this changes only how fast the bend swells and relaxes; "frozen" holds it at its standing value for a completely static warp.')}
                 {statRow('  ↳ live', stats.portalTuningInfo ?? '—', 'text-slate-400')}

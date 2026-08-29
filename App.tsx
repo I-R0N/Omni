@@ -512,6 +512,9 @@ const App: React.FC = () => {
   const handleCyclePortalLens = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePortalLens();
   };
+  const handleCyclePortalLensRadius = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalLensRadius();
+  };
   const handleCyclePortalLensSpin = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePortalLensSpin();
   };
@@ -821,6 +824,7 @@ const App: React.FC = () => {
         onCyclePortalGravity={handleCyclePortalGravity}
         onCyclePortalGravityRange={handleCyclePortalGravityRange}
         onCyclePortalLens={handleCyclePortalLens}
+        onCyclePortalLensRadius={handleCyclePortalLensRadius}
         onCyclePortalLensSpin={handleCyclePortalLensSpin}
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSimRate={handleCycleSimRate}
