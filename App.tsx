@@ -7,6 +7,7 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
+import { buildFilletPath, blendAttachRadius } from './engine/systems/render/shardBlend';
 import { installMenuNav, pickNext } from './components/menuNav';
 import {
   enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
@@ -96,6 +97,15 @@ const App: React.FC = () => {
     (window as any).__omniShip = {
       enumerateCells, resolveTiltCell, cellIndex, cellMatrix, drawPlayerCube, SHIP_SHEETS,
     };
+
+    // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
+    // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
+    // REPORTS.  Every failure mode of a metaball connector is silent — a
+    // degenerate pair traces no path, an out-of-domain acos yields NaN
+    // coordinates that Canvas2D discards without a word, and an attach
+    // radius outside the hull leaves a seam nobody can see at one zoom
+    // level.  None of that throws or logs.  Nothing in the game reads this.
+    (window as any).__omniBlend = { buildFilletPath, blendAttachRadius };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -249,6 +259,10 @@ const App: React.FC = () => {
 
   const handleToggleShardGravity = () => {
       if (engineRef.current) engineRef.current.dbg.toggleShardGravity();
+  };
+
+  const handleToggleShardBlend = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardBlend();
   };
 
   const handleToggleShardBonding = () => {
@@ -780,6 +794,7 @@ const App: React.FC = () => {
         onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
         onTogglePerfAuto={handleTogglePerfAuto}
         onToggleShardGravity={handleToggleShardGravity}
+        onToggleShardBlend={handleToggleShardBlend}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}

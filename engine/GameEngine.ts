@@ -758,6 +758,10 @@ export class GameEngine {
     // Wire the variant-specific completion hook for the
     // neighbourhood-blend regen path (today: nebula-tile only).
     this.shards.setRegenAdapter(this.nebulas);
+    // The renderer's bonded-pair blend pass reads the live bond list —
+    // presentation only, and the only thing in the renderer that knows
+    // ShardSystem exists.
+    this.renderer.setShards(this.shards);
     this.entityIndex = new EntityIndex();
     // Wire the EntityIndex into ShardSystem so the large-shard-collapse
     // pass can prefer offscreen candidates (graceful cleanup — never
@@ -1017,6 +1021,8 @@ export class GameEngine {
       rockPaletteName: getActiveRockPaletteName(),
       nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
+      shardBlendEnabled: this.renderer.shardBlendEnabled,
+      shardBlendCount: this.renderer.lastShardBlendCount,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -2016,6 +2022,8 @@ export class GameEngine {
       rockPaletteName: getActiveRockPaletteName(),
       nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
+      shardBlendEnabled: this.renderer.shardBlendEnabled,
+      shardBlendCount: this.renderer.lastShardBlendCount,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,

@@ -182,7 +182,7 @@ function localDensityBoost(cellCount: number): number {
  * partners use a higher cohesion blend rate and a larger break
  * factor (slower to detach).
  */
-interface BondEntry {
+export interface ShardBond {
   a: GameEntity;
   b: GameEntity;
   timer: number;
@@ -254,6 +254,33 @@ function metalConvexHull(points: Vector2[]): Vector2[] {
   return lower.concat(upper);
 }
 
+/**
+ * Evaluate a VariantSelector against a target variant id.  Pure
+ * function; no allocation.  Module-level rather than a method because
+ * `render/shardBlend.ts` resolves `blend.appliesTo` with it — one
+ * grammar, evaluated the same way by the sim and by the draw pass.
+ */
+export function selectsVariant(
+  selector: VariantSelector,
+  targetId: ShardVariantId,
+  selfId: ShardVariantId,
+): boolean {
+  if (selector === 'none') return false;
+  if (selector === 'all')  return true;
+  if (selector === 'self') return targetId === selfId;
+  if ('include' in selector) {
+    for (let i = 0; i < selector.include.length; i++) {
+      if (selector.include[i] === targetId) return true;
+    }
+    return false;
+  }
+  // exclude form
+  for (let i = 0; i < selector.exclude.length; i++) {
+    if (selector.exclude[i] === targetId) return false;
+  }
+  return true;
+}
+
 export class ShardSystem {
   /**
    * Regen queue — replaces the two separate queues that lived on
@@ -304,7 +331,17 @@ export class ShardSystem {
    * accumulates a contact timer; when timer >= threshold the pair
    * composes.
    */
-  private bonds: BondEntry[] = [];
+  private bonds: ShardBond[] = [];
+
+  /**
+   * Read-only view of the live bonds, for the render layer's blend
+   * pass (`render/shardBlend.ts`).  Returns the internal array by
+   * reference — a per-frame copy of a few hundred entries is exactly
+   * the kind of allocation CLAUDE.md §8 warns about — so callers must
+   * treat it as a same-frame snapshot and never hold or mutate it.
+   * `tickBonds` compacts this array in place every sim step.
+   */
+  public get liveBonds(): readonly ShardBond[] { return this.bonds; }
   // Peak per-bond local merge-rate multiplier applied last tickBonds —
   // exposed for the DBG "merge rate" readout (replaces the old global
   // count-driven multiplier).  1.0 = no local acceleration this frame.
@@ -1204,24 +1241,13 @@ export class ShardSystem {
   // ── Merge dispatch ────────────────────────────────────────────────
 
   /**
-   * Evaluate a VariantSelector against a target variant id.  Pure
-   * function; no allocation.
+   * Evaluate a VariantSelector against a target variant id.  Delegates
+   * to the module-level `selectsVariant` so the render layer's blend
+   * pass (which reads `blend.appliesTo`) evaluates the same grammar
+   * rather than re-deriving it.
    */
   private selects(selector: VariantSelector, targetId: ShardVariantId, selfId: ShardVariantId): boolean {
-    if (selector === 'none') return false;
-    if (selector === 'all')  return true;
-    if (selector === 'self') return targetId === selfId;
-    if ('include' in selector) {
-      for (let i = 0; i < selector.include.length; i++) {
-        if (selector.include[i] === targetId) return true;
-      }
-      return false;
-    }
-    // exclude form
-    for (let i = 0; i < selector.exclude.length; i++) {
-      if (selector.exclude[i] === targetId) return false;
-    }
-    return true;
+    return selectsVariant(selector, targetId, selfId);
   }
 
   /**

@@ -1770,6 +1770,11 @@ export interface EngineStats {
   // When true, plastic-shards render in the active palette's constant
   // base shade, brightness-scaled by their plastic-shard contact
   // count (PAuto automata).  Default true.
+  /** DBG "Goo bond" — the bonded-pair blend pass (render/shardBlend.ts). */
+  shardBlendEnabled?: boolean;
+  /** Bridges drawn last frame, post-cull.  Shown beside the toggle so
+   *  "is it doing anything right now" is answerable from the menu. */
+  shardBlendCount?: number;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.

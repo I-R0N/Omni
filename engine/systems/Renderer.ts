@@ -9,13 +9,16 @@
  * This file contains **no behaviour**. It is the coupling that already exists,
  * written down. `RenderSystem` implements it unchanged.
  *
- * ── NINE MEMBERS, AND WHY IT IS EXACTLY THESE ────────────────────────────
+ * ── TEN MEMBERS, AND WHY IT IS EXACTLY THESE ─────────────────────────────
  *   1. LIFECYCLE + FRAME (7) — `setContext`, the per-map builders, `render`,
  *      and `worldToScreen`. The genuine renderer API.
- *   2. WIRING (2) — `setPhysics` / `setFlowField`, which hand the renderer
- *      live references to two SIM systems so the debug overlays can draw
- *      them. A real coupling from the renderer back into the simulation; a
- *      second implementation must accept both even if it ignores them.
+ *   2. WIRING (3) — `setPhysics` / `setFlowField` / `setShards`, which hand
+ *      the renderer live references to three SIM systems it draws FROM. A
+ *      real coupling from the renderer back into the simulation; a second
+ *      implementation must accept all three even if it ignores them. Note
+ *      these are not debug-only: the material-tile branch reads the static
+ *      grid through `setPhysics` to suppress interior edge strokes, and the
+ *      bonded-pair blend pass reads the live bond list through `setShards`.
  *
  * ── WHAT IS DELIBERATELY *NOT* HERE ──────────────────────────────────────
  * Debug flags and perf counters live in `RendererDiagnostics.ts`, and the
@@ -38,6 +41,7 @@ import type {
   WaveAnnouncement, JoystickHUDState, FireButtonHUDState,
 } from '../../types';
 import type { FlowOverlayState } from './RenderSystem';
+import type { ShardSystem } from './ShardSystem';
 import type { PhysicsSystem } from './PhysicsSystem';
 import type { FlowFieldGrid } from './FlowFieldGrid';
 
@@ -77,4 +81,5 @@ export interface Renderer {
   // ── 2. Wiring back into the sim (for debug overlays) ─────────────────────
   setPhysics(p: PhysicsSystem): void;
   setFlowField(f: FlowFieldGrid): void;
+  setShards(sh: ShardSystem): void;
 }

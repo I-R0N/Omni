@@ -210,6 +210,17 @@ export class DebugControls {
   }
 
   /**
+   * Toggle the bonded-pair blend pass — the "goo" layer that draws a
+   * live cohesion bond as one smooth-min blob instead of two hulls in
+   * contact (render/shardBlend.ts).  PRESENTATION ONLY: bonds form,
+   * cohere and break identically either way, so this is a pure A/B on
+   * the look.
+   */
+  toggleShardBlend() {
+    this.g.renderer.shardBlendEnabled = !this.g.renderer.shardBlendEnabled;
+  }
+
+  /**
    * Toggle shard ↔ shard bond formation + cohesion.  When off, any
    * existing bonds drop on the next ShardSystem.update() tick and
    * no new bonds form.  Nebula self-compose (which fires via the

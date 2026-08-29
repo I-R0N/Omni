@@ -72,7 +72,7 @@ function plasticAutomataHex(neighborCount: number): string {
  * with any nebula-specific fade (handled inside the nebula render
  * branch already).
  */
-function shardMergeFadeAlpha(entity: GameEntity): number {
+export function shardMergeFadeAlpha(entity: GameEntity): number {
     const t = entity.mergeFadeTimer;
     if (t === undefined || t <= 0) return 1.0;
     const dur = entity.mergeFadeDuration;
@@ -244,6 +244,22 @@ export function renderProximityBloom(
  * automata.  Metal's tier is stable after formation, so the brightened
  * hex is cached on materialAutomataCachedColor like the automata path.
  */
+/** The fill a MOBILE shard is drawn in — the rocky-asteroid branch's own
+ *  colour chain, lifted out so `render/shardBlend.ts` can paint a bonded
+ *  pair's bridge in it.  Two shades feed it: the plastic-shard automata
+ *  (DBG "Pl shade", neighbour-count brightness over a constant palette)
+ *  when it is on for a plastic shard, otherwise the per-instance /
+ *  material-automata base — and either way the density tier darkens it
+ *  last.  Bodies and bridges MUST share this: a bridge that computed its
+ *  own shade would drift the moment a DBG shade row was touched. */
+export function mobileShardFillColor(rs: RenderSystem, entity: GameEntity): string {
+    const baseColor = (rs.plasticAutomataEnabled
+                       && entity.shardVariant === 'plastic-shard')
+        ? plasticAutomataHex(entity.plasticNeighborCount ?? 0)
+        : materialAutomataColor(rs, entity);
+    return densityTintForRender(entity, baseColor);
+}
+
 export function tileFillColor(rs: RenderSystem, entity: GameEntity): string {
   if (entity.shardVariant !== 'metal-tile') return materialAutomataColor(rs, entity);
   const f = metalDensityBrightness(entity.densityTier ?? 1);
@@ -979,11 +995,7 @@ export function drawTileShape(
             //    (materialAutomataColor — a no-op for mobile shards
             //    and non-automata variants, so rock-/metal-shards
             //    are untouched).
-            const baseColor = (rs.plasticAutomataEnabled
-                               && entity.shardVariant === 'plastic-shard')
-                ? plasticAutomataHex(entity.plasticNeighborCount ?? 0)
-                : materialAutomataColor(rs, entity);
-            const densityHex = densityTintForRender(entity, baseColor);
+            const densityHex = mobileShardFillColor(rs, entity);
             const fadeAlpha = shardMergeFadeAlpha(entity);
             const flashColor = entity.shardVariant === 'metal-shard'
                 ? '#cbd5e1'

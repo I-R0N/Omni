@@ -33,6 +33,7 @@ import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadou
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
 import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
 import { renderFogLayer, resetFogMemory } from './render/fog';
+import { renderShardBlends } from './render/shardBlend';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -320,6 +321,23 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // neighbour data available" → fall back to drawing the full outline.
   physics: import('./PhysicsSystem').PhysicsSystem | null = null;
   public setPhysics(p: import('./PhysicsSystem').PhysicsSystem) { this.physics = p; }
+
+  // Optional ShardSystem reference — read by the bonded-pair blend pass
+  // (render/shardBlend.ts) for its live bond list, and by nothing else.
+  // Null until GameEngine wires it, which is what keeps the pass a no-op
+  // in any headless context that builds a renderer without a sim.
+  shards: import('./ShardSystem').ShardSystem | null = null;
+  public setShards(sh: import('./ShardSystem').ShardSystem) { this.shards = sh; }
+
+  /** DBG "Goo bond" — gates the bonded-pair blend pass.  Off restores
+   *  the pre-blend look (two hulls in contact); the bonds themselves are
+   *  untouched either way, since this is presentation only.  The A/B for
+   *  a purely visual feature, in the shape of every other Visual row. */
+  public shardBlendEnabled: boolean = true;
+  /** Bridges actually drawn last frame (post-cull, post-span-gate).
+   *  Surfaced on the DBG row so "is it doing anything" is answerable
+   *  without staring at a shard field. */
+  public lastShardBlendCount: number = 0;
 
   // Optional FlowFieldGrid reference — wired by GameEngine once on
   // construction.  Null until then; the DBG asteroid/shard FF overlays
@@ -1075,6 +1093,12 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // double-paint a same-frame transition would otherwise produce.
     prepareStaticTileCacheForFrame(this, playerPos);
     blitStaticTileLayer(this, ctx);
+
+    // 4a'. Bonded-pair blend ("goo") layer.  Between the static blit and
+    // the entity pass on purpose: the bridge must sit UNDER the mobile
+    // hulls, which cover the ends it attaches at, and OVER a static tile
+    // it is stuck to, where it reads as goo spilling onto the face.
+    renderShardBlends(this, ctx, camera, width, height);
 
     // 4a. Render Entities (Culling logic added).  Stage 6: dragon body segments
     // are real tile-variant STRUCTURE entities, so they render here like any

@@ -209,6 +209,52 @@ export interface BondPartnerConfig {
   strength?: 'strong' | 'default';
 }
 
+// ── Bonded-pair blend policy ────────────────────────────────────────
+// Purely PRESENTATIONAL: how a live cohesion bond is DRAWN.  Nothing in
+// the sim reads it — bonds form, cohere, mature and break exactly as
+// they did before, and turning the whole thing off changes no physics.
+//
+// 'fillet' draws the smooth-min union of the two bonded hulls the cheap
+// way: ONE metaball connector (two cubic curves waisted between the
+// bodies) filled UNDER both of them, so a stuck pair reads as one blob
+// of goo rather than two polygons touching.  It is a PAIRWISE
+// approximation of an SDF union rather than a sampled distance field —
+// which is exact here rather than a compromise, because bond formation
+// is a MATCHING: both formation sites skip any entity already bonded,
+// so a bond is never one edge of a larger cluster.
+
+export interface ShardBlendPolicy {
+  kind: 'fillet';
+  /** Which bond partners get a bridge.  Same selector grammar as
+   *  merge.bondsWith — a partner this does not select renders
+   *  unblended, exactly as it does today. */
+  appliesTo: VariantSelector;
+  /** Where on each body the bridge attaches, as a fraction of how far
+   *  that hull reaches TOWARD its partner.  1 anchors it exactly on the
+   *  facing surface, which can leave a hairline where the hull curves
+   *  away from the join; below 1 buries the join under the body drawn
+   *  over it.  A fixed radius is what this deliberately is NOT — plastic
+   *  shards are 4-gons with vertex radii jittered 0.65..1.10 of the
+   *  base, so one face stands nearly twice as far off the centroid as
+   *  another, and any single circle is wrong for most of them.  Default
+   *  0.9. */
+  attachFraction?: number;
+  /** Largest centre-to-centre gap that still draws, as a multiple of
+   *  the summed attach radii.  Past it the goo has stretched too thin
+   *  to read, and the bridge is dropped rather than drawn as a
+   *  filament — bonds stretch to 1.5× (6× on a 'strong' pair) of
+   *  contact distance before they snap, so a bond being live is not by
+   *  itself evidence the pair still looks joined.  Default 1.35. */
+  maxSpan?: number;
+  /** Waist softness, 0..1 — how far around each body the bridge wraps
+   *  before it necks in.  0 is a taut string between two tangent
+   *  points, 1 a nearly straight-sided weld.  Default 0.5. */
+  softness?: number;
+  /** Fill alpha for the bridge.  Default 1 (the goo is as solid as the
+   *  shard it belongs to). */
+  alpha?: number;
+}
+
 // ── Shatter policy ──────────────────────────────────────────────────
 
 export interface ShardShatterPolicy {
@@ -355,6 +401,10 @@ export interface ShardVariantDef {
    *  Only consulted while the DBG "Emissive" toggle is on, and it is a
    *  SECOND light rather than a brighter body — see `renderLightLayer`. */
   emits?: number;
+  /** Bonded-pair blend policy — how a live cohesion bond between this
+   *  variant and a partner is DRAWN.  Absent means today's behaviour:
+   *  two hulls that happen to be touching.  Today: plastic-shard. */
+  blend?: ShardBlendPolicy;
   /** Render fast-path opt-in.  Today only nebula-tile populates the
    *  per-entity tinted-canvas cache (`nebulaCachedTinted`); the
    *  RenderSystem fast-path gating flips from EntityType-keyed to

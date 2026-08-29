@@ -7841,6 +7841,25 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       ],
       defaultOutcome: 'compose',
     },
+    // Bonded pairs draw as ONE blob of goo rather than two polygons in
+    // contact — a metaball connector filled under both hulls (see
+    // ShardBlendPolicy).  Plastic is the variant this exists for: its
+    // cross-material bonds are cohesionOnly, so a stuck pair stays two
+    // bodies FOREVER and never composes into the single re-polygonised
+    // entity every other variant's bond resolves to.  Selector mirrors
+    // bondsWith so a bond that can form can always be drawn; nebula is
+    // excluded on both, so no bond with one ever reaches here.
+    // attachFraction sits just inside the facing surface so the shard
+    // drawn over the bridge covers the join; maxSpan drops the bridge
+    // once a stretching pair is half again its contact distance apart,
+    // short of the 1.5×/6× a bond itself survives to.
+    blend: {
+      kind: 'fillet',
+      appliesTo: { exclude: ['nebula-tile', 'nebula-shard'] },
+      attachFraction: 0.9,
+      maxSpan: 1.35,
+      softness: 0.5,
+    },
     // Plastic-shards take the standard rock/metal-style shatter on
     // death.  No per-size count override and no fractional child
     // sizing — the asteroid power-law over parent area + MIN_SIZE

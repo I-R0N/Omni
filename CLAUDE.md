@@ -60,10 +60,11 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           lighting (the
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
-                          flashlight / nebulaspin / roll / shipsprites,
+                          flashlight / nebulaspin / roll / shipsprites /
+                          shardblend,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  257 tests.  All run at
+                          anti-flake rules).  262 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -221,6 +222,11 @@ engine/
                           joystick, fitFontPx
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
+      shardBlend.ts   The bonded-pair "goo" layer: one metaball
+                      connector per live cohesion bond, filled
+                      UNDER both hulls so a stuck pair reads as
+                      one blob instead of two polygons touching.
+                      Presentation only — see §8
       staticTileCache.ts  The pre-rendered immovable-terrain layer —
                           budgeted stamping, per-tile erase, single-draw
                           blit
@@ -880,7 +886,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   supports per-partner `bondPartners` config (`cohesionOnly` flag +
   `strength: 'strong' | 'default'` tier); the `automata` block
   (`maxNeighbors` + `saturationBrightness` / `saturationOpacity`)
-  drives the aggregation-coloring rules.  See
+  drives the aggregation-coloring rules.  The optional `blend` block
+  (`ShardBlendPolicy`) is the one PRESENTATION entry in the table — how
+  a live cohesion bond is DRAWN (today: plastic-shard; see §8).  See
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/SHARD_SYSTEM.md` for the design rationale.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
@@ -1813,6 +1821,43 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).
+- **A BONDED PAIR DRAWS AS ONE BLOB, and only draws** (`render/shardBlend.ts`).
+  A cohesion bond holds two bodies together, and for plastic that bond is
+  `cohesionOnly` — it NEVER matures into the single re-polygonised entity
+  every other variant's bond resolves to, so the pair stays two polygons
+  touching for as long as it lives.  The blend pass fills ONE metaball
+  connector per live bond underneath both hulls, so it reads as goo
+  instead.  Five things to know before touching it:
+  (1) **It is a PAIRWISE smooth-min, and that is exact rather than a
+  compromise** — bond formation is a MATCHING (both formation sites in
+  ShardSystem skip an entity that is already bonded), so a bond is never
+  one edge of a larger cluster and there is no third body a real sampled
+  distance field would blend in.  Cost is one path + one fill per visible
+  bond: no per-pixel work, no offscreen surface, no allocation.
+  (2) **PRESENTATION ONLY.**  Physics still resolves the two hulls as two
+  polygons; the sim never reads `blend`.  DBG ▸ Visual ▸ "Goo bond" takes
+  the drawing away and leaves the bond, which is the property the suite
+  pins.
+  (3) **The attach point is DIRECTIONAL, not a radius.**  A plastic shard
+  is a 4-gon with vertex radii jittered 0.65..1.10 of its base, so one
+  face stands nearly twice as far off the centroid as another; the first
+  draft anchored on a fixed radius and its bridges hung in open space.
+  `blendAttachRadius` ray-casts the hull along the line to the partner
+  (in the body's LOCAL frame — polygon points are stored unrotated), so
+  the goo starts at the face actually pointed at the partner, biased a
+  little inward so the body drawn over it covers the join.
+  (4) **The SPAN GATE is measured against the circumradii**, the same
+  quantity ShardSystem's contact test uses, so it means a multiple of
+  contact distance.  Against the attach radii it would drift with
+  `attachFraction` and drop pairs that had only just bonded.
+  (5) **ORDER IS THE WHOLE DESIGN**: the pass runs after the static-tile
+  blit and before `renderEntities`, so a bridge sits UNDER the mobile
+  hulls (which hide its ends) and OVER a static tile it is stuck to
+  (where it reads as goo on the face).  It also draws in WORLD space
+  outside `renderEntities`' per-entity `setTransform` — a two-body shape
+  has no single entity frame — and places the partner by `wrapDelta` from
+  the source rather than shifting each end on its own, since a bond can
+  straddle the seam and independent shifts draw a bridge across the map.
 - **A world-space health bar is a HIT REACTION, not a label** (gauntlet 5d,
   U5).  `renderHealthBar` draws an enemy's bar only while
   `GameEntity.healthBarTimer > 0`, fading over the last

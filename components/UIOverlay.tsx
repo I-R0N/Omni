@@ -115,6 +115,7 @@ interface UIOverlayProps {
   onCycleTriggerEncoding?: () => void;
   onTestTriggerLink?: () => void;
   onToggleRepelPush?: () => void;
+  onToggleShardBlend?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -416,6 +417,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleTriggerEncoding,
   onTestTriggerLink,
   onToggleRepelPush,
+  onToggleShardBlend,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -1820,6 +1822,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}
+                {ctrlRow('Goo bond', onToggleShardBlend,
+                  stats.shardBlendEnabled === false
+                    ? 'Off'
+                    : `On · ${stats.shardBlendCount ?? 0}`,
+                  'Bonded-pair blend. On: a live cohesion bond draws as ONE blob — a metaball connector filled under both hulls, so a plastic shard stuck to a tile or another shard reads as goo rather than two polygons touching. Off restores the un-blended look. Presentation only: the bond itself forms, coheres and breaks the same either way. The number is how many bridges were drawn last frame (visible bonds whose pair has not stretched past the span gate), so a 0 with plastic on screen means nothing is bonded rather than that the pass is broken.')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}
