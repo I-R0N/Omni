@@ -431,6 +431,21 @@ export interface GrainSpec {
    *  pair matrix.  Derived HP stays exactly Σ boundary strengths because
    *  the same function produces both. */
   bondSpread?: number;
+  /** PER-GRAIN DEFORMATION (B1) — inward pull applied to the STRUCK
+   *  grain's own outline on each hit, as a fraction of that grain's
+   *  radius.  This is what makes a material read as ductile: a plastic
+   *  panel visibly warps where it is being shot before anything breaks
+   *  off, while rock and glass (which leave it unset) do not.
+   *
+   *  It replaces `dent` for grain materials — the old whole-body
+   *  `applyDentStep` pulls the entity's outline and stands down under
+   *  progressive fracture, so before B1 a material could be grained or
+   *  dentable but not both.
+   *
+   *  Only vertices ON THE BODY'S OUTLINE move, and they move in EVERY
+   *  grain that shares them, so the grains still tile the body exactly —
+   *  which is the invariant `unionOfCells` depends on. */
+  grainDent?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────

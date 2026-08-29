@@ -786,7 +786,7 @@ function distToSegment2(
   return qx * qx + qy * qy;
 }
 
-function onParentBoundary(
+export function onParentBoundary(
   x: number, y: number,
   parent: ReadonlyArray<FracturePoint>, eps2: number,
 ): boolean {

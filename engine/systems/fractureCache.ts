@@ -30,6 +30,7 @@ import {
 } from '../../constants';
 import {
   computeFracture, collectInteriorEdges, seedFromEntityId, mulberry32,
+  unionOfCells, onParentBoundary, pointToPolygonDistance2,
   FractureCell, FractureEdge,
 } from './fracture';
 
@@ -226,7 +227,14 @@ export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
  *  length a big body has more boundary to break and is therefore tougher
  *  for free, and `bondStrength` reads as a real material property:
  *  damage per pixel of grain boundary. */
-function edgeStrength(
+/** Derive one boundary's strength.  Called ONCE per boundary, at model
+ *  build; every later read goes through `edgeNeed`.  That split is what
+ *  makes per-grain DEFORMATION safe (B1): denting moves a boundary's
+ *  endpoints, so a strength derived from its live length would drift the
+ *  body's derived HP every time it was dented — health would stop
+ *  mirroring the unbroken budget and the "health zero == last boundary
+ *  broken" invariant would quietly fail. */
+function computeEdgeNeed(
   e: GameEntity, edge: FractureEdge, strength: number, index = -1,
 ): number {
   const len = Math.hypot(edge.bx - edge.ax, edge.by - edge.ay);
@@ -293,10 +301,16 @@ export function ensureBoundaryModel(
 
   // The edge array is rebuilt whenever the pattern is (a DBG knob, a
   // merge): re-seed the fills to match rather than index a stale array.
-  if (e.fractureEdgeFill === undefined || e.fractureEdgeFill.length !== edges.length) {
+  if (e.fractureEdgeFill === undefined || e.fractureEdgeFill.length !== edges.length
+      || e.fractureEdgeNeed === undefined || e.fractureEdgeNeed.length !== edges.length) {
     const fill = new Array<number>(edges.length).fill(0);
+    const needs = new Array<number>(edges.length);
     let total = 0;
-    for (let i = 0; i < edges.length; i++) total += edgeStrength(e, edges[i], strength, i);
+    for (let i = 0; i < edges.length; i++) {
+      needs[i] = computeEdgeNeed(e, edges[i], strength, i);
+      total += needs[i];
+    }
+    e.fractureEdgeNeed = needs;
     const prevMax = e.maxHealth ?? 0;
     const prevHp = e.health ?? prevMax;
     const damagedFrac = prevMax > 0 ? Math.min(1, Math.max(0, 1 - prevHp / prevMax)) : 0;
@@ -354,7 +368,7 @@ function spendOnBoundaries(
   };
   const order: number[] = [];
   for (let i = 0; i < edges.length; i++) {
-    if (fill[i] < edgeStrength(e, edges[i], strength, i)) order.push(i);
+    if (fill[i] < edgeNeed(e, i, strength)) order.push(i);
   }
   order.sort((a, b) => {
     const ka = cellKey(edges[a]), kb = cellKey(edges[b]);
@@ -366,7 +380,7 @@ function spendOnBoundaries(
   let left = damage;
   for (const i of order) {
     if (left <= 0) break;
-    const need = edgeStrength(e, edges[i], strength, i) - fill[i];
+    const need = edgeNeed(e, i, strength) - fill[i];
     const put = Math.min(need, left);
     fill[i] += put;
     left -= put;
@@ -388,10 +402,20 @@ export function applyBoundaryDamage(e: GameEntity, damage: number): boolean {
   spendOnBoundaries(e, model.edges, model.fill, model.strength, Math.max(0, damage));
   let remaining = 0;
   for (let i = 0; i < model.edges.length; i++) {
-    remaining += Math.max(0, edgeStrength(e, model.edges[i], model.strength, i) - model.fill[i]);
+    remaining += Math.max(0, edgeNeed(e, i, model.strength) - model.fill[i]);
   }
   e.health = remaining;
   return true;
+}
+
+/** A boundary's strength, as fixed at model build.  Falls back to a live
+ *  derivation only if the cached array is missing (a body mid-migration). */
+function edgeNeed(e: GameEntity, index: number, strength: number): number {
+  const cached = e.fractureEdgeNeed;
+  if (cached !== undefined && index >= 0 && index < cached.length) return cached[index];
+  const edges = e.fractureEdges;
+  if (edges === undefined || index < 0 || index >= edges.length) return 0;
+  return computeEdgeNeed(e, edges[index], strength, index);
 }
 
 /** How far through breaking this boundary is, 0..1 — the ONE number the
@@ -403,11 +427,130 @@ export function edgeBreakFraction(e: GameEntity, index: number): number {
   const fill = e.fractureEdgeFill;
   if (strength === null || edges === undefined || fill === undefined) return 0;
   if (index < 0 || index >= edges.length || index >= fill.length) return 0;
-  const need = edgeStrength(e, edges[index], strength, index);
+  const need = edgeNeed(e, index, strength);
   return need <= 0 ? 1 : Math.min(1, fill[index] / need);
 }
 
 /** True once this boundary has been broken all the way through. */
 export function edgeIsBroken(e: GameEntity, index: number): boolean {
   return edgeBreakFraction(e, index) >= 1;
+}
+
+// ── PER-GRAIN DEFORMATION (B1) ────────────────────────────────────────
+
+/** Most dent steps one grain will take before it stops deforming.  A cap
+ *  is needed because damage keeps arriving at the same face: without it a
+ *  grain under sustained fire is pulled through its own centroid and the
+ *  body's outline self-intersects. */
+const GRAIN_DENT_MAX_STEPS = 6;
+/** Position quantisation for deciding that two grains share a vertex, as
+ *  a fraction of the body's size.  Cells are cut from one polygon by
+ *  exact line splits, so shared vertices agree to floating-point noise;
+ *  this only has to be larger than that noise and much smaller than a
+ *  grain. */
+const VERTEX_WELD_FRAC = 0.01;
+
+/** Dent the grain the shot landed on (B1).
+ *
+ *  THE CONSTRAINT that shapes this: grains must keep TILING the body
+ *  exactly, because `unionOfCells` identifies an interior boundary by two
+ *  surviving grains sharing an edge.  Deform a grain's copy of a shared
+ *  vertex and its neighbour's copy no longer matches, the shared edge
+ *  stops being recognised as interior, and the body's outline silently
+ *  falls back to the arc splice or fails outright.
+ *
+ *  So the displacement is applied to the SHARED VERTEX SET: vertices are
+ *  welded by position, only those ON THE BODY'S OUTLINE move (an interior
+ *  vertex moving would change the pattern under the damage already
+ *  recorded against it), and each one moves identically in every grain
+ *  that references it.  The tiling is preserved by construction, and the
+ *  visible result is a dimple in the silhouette where the shot landed.
+ *
+ *  Returns true when the body's outline changed. */
+export function dentStruckGrain(e: GameEntity): boolean {
+  const strength = bondStrengthFor(e);
+  if (strength === null) return false;
+  const spec = e.shardVariant !== undefined
+    ? SHARD_VARIANTS[e.shardVariant].grain : undefined;
+  const depth = spec?.grainDent ?? 0;
+  if (depth <= 0) return false;
+
+  const cells = e.fractureCells;
+  const pts = e.polygonPoints;
+  const local = e.lastImpactLocal;
+  if (cells === undefined || cells.length === 0 || pts === undefined || local === undefined) {
+    return false;
+  }
+
+  // The struck grain: nearest to the contact by its OWN outline, the same
+  // rule the detach search uses, so the piece that dents is the piece
+  // that would come off.
+  let hit = -1, best = Infinity;
+  for (let i = 0; i < cells.length; i++) {
+    const d = pointToPolygonDistance2(local.x, local.y, cells[i].points);
+    if (d < best) { best = d; hit = i; }
+  }
+  if (hit < 0) return false;
+
+  const site = cells[hit].siteIndex;
+  const dents = e.fractureGrainDents ?? (e.fractureGrainDents = []);
+  if ((dents[site] ?? 0) >= GRAIN_DENT_MAX_STEPS) return false;
+
+  const span = Math.max(1, Math.max(e.size.x, e.size.y));
+  const weld = span * VERTEX_WELD_FRAC;
+  const eps2 = weld * weld;
+  const key = (x: number, y: number) =>
+    `${Math.round(x / weld)},${Math.round(y / weld)}`;
+
+  // Which of the struck grain's vertices sit on the body's outline —
+  // those are the only ones a dimple may move.
+  const c = cells[hit];
+  const moves = new Map<string, { dx: number; dy: number }>();
+  const pull = depth * Math.sqrt(Math.abs(c.area) / Math.PI);
+  for (const v of c.points) {
+    if (!onParentBoundary(v.x, v.y, pts, eps2)) continue;
+    const dx = c.centroid.x - v.x, dy = c.centroid.y - v.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) continue;
+    moves.set(key(v.x, v.y), { dx: (dx / len) * pull, dy: (dy / len) * pull });
+  }
+  if (moves.size === 0) return false;
+
+  // Apply to EVERY grain that shares each moved vertex.
+  const moved: FractureCell[] = cells.map(cell => {
+    let touched = false;
+    const nextPts = cell.points.map(v => {
+      const m = moves.get(key(v.x, v.y));
+      if (m === undefined) return v;
+      touched = true;
+      return { x: v.x + m.dx, y: v.y + m.dy };
+    });
+    return touched ? { ...cell, points: nextPts } : cell;
+  });
+
+  const outline = unionOfCells(moved, weld);
+  // A dent that would break the body into islands, or produce a
+  // self-intersecting outline SAT cannot carry, is simply not applied.
+  if (outline === null || outline.length < 3) return false;
+
+  e.fractureCells = moved;
+  e.polygonPoints = outline;
+  dents[site] = (dents[site] ?? 0) + 1;
+
+  // The boundary GEOMETRY moved, so the cracks must be redrawn from the
+  // new endpoints — but their STRENGTHS and their absorbed damage must
+  // not move with them, which is why `fractureEdgeNeed` is cached and
+  // `fractureEdgeFill` is left exactly as it was.
+  const edges = e.fractureEdges;
+  if (edges !== undefined) {
+    for (const ed of edges) {
+      const ma = moves.get(key(ed.ax, ed.ay));
+      if (ma !== undefined) { ed.ax += ma.dx; ed.ay += ma.dy; }
+      const mb = moves.get(key(ed.bx, ed.by));
+      if (mb !== undefined) { ed.bx += mb.dx; ed.by += mb.dy; }
+      ed.mx = (ed.ax + ed.bx) / 2;
+      ed.my = (ed.ay + ed.by) / 2;
+    }
+  }
+  return true;
 }

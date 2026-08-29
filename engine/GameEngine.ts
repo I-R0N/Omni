@@ -29,7 +29,7 @@ import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLA
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
-import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage } from './systems/fractureCache';
+import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
 import { subtractBoundaryCell, polygonArea as fracturePolygonArea,
          pointToPolygonDistance2 , unionOfCells } from './systems/fracture';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -5079,6 +5079,17 @@ export class GameEngine {
       // with no `bondStrength` (and the legacy A/B) keep the old
       // HP-paced reveal, so this is additive rather than a fork.
       const grain = ensureBoundaryModel(target);
+      // PER-GRAIN DEFORMATION (B1): the struck grain dimples before
+      // anything comes off, so a ductile material visibly warps where it
+      // is being shot.  Inert for a material with no `grainDent` (rock,
+      // glass), and it must run BEFORE the harvest below so the piece
+      // that leaves carries the shape the player was just shown.
+      if (grain !== null && dentStruckGrain(target)) {
+          target._satCacheAxes = undefined;
+          target._occluderR = undefined;
+          if (target._staticCached === true) target._staticCached = false;
+          invalidateCollisionR(target);
+      }
       let revealed = 0;
       if (grain === null) {
           const cfg = crackConfigForVariant(target.shardVariant);

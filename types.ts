@@ -1326,6 +1326,14 @@ export interface GameEntity {
   // once the model has taken over, which is why it is cached beside the
   // fills rather than recomputed.
   fractureEdgeFill?: number[];
+  // Each boundary's STRENGTH, fixed at model build and parallel to
+  // `fractureEdges`.  Cached rather than derived on read because
+  // per-grain denting (B1) moves boundary endpoints: a strength taken
+  // from the live length would drift the body's derived HP every dent.
+  fractureEdgeNeed?: number[];
+  // Dent steps applied per grain, indexed by the cell's siteIndex, so a
+  // single grain cannot be pulled into itself by sustained fire.
+  fractureGrainDents?: number[];
   fractureBoundaryHp?: number;
   // The HP the entity was SPAWNED with, kept when the grain model
   // rewrites `maxHealth` to the derived total.  Score and any other
