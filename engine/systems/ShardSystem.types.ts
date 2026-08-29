@@ -378,6 +378,11 @@ export interface GrainSpec {
    *  rounds, 0.45 separation) exactly, which is why the shipped
    *  materials carry it and why A1 changes no behaviour. */
   regularity: number;
+  /** GRAIN SIZE SPREAD (A2) — 0 = every grain the same size, 1 = a wide
+   *  mix of coarse and fine grains in ONE body.  Varies the spread
+   *  around the mean, never the mean itself (that is `grainSize`).
+   *  Optional: absent = 0 = the pre-A2 single-separation placement. */
+  sizeSpread?: number;
   /** Outward fling along each cell's centroid direction at shatter, so
    *  the pattern visibly flies apart along its own seams (added on top
    *  of the shared impact-scatter term). */
@@ -415,6 +420,17 @@ export interface GrainSpec {
    *  health reaching zero and the last boundary breaking are the same
    *  event by construction.  Requires `progressive`. */
   bondStrength?: number;
+  /** BOND STRENGTH SPREAD (A2) — 0..1 seeded per-BOUNDARY variance
+   *  around `bondStrength`, so within one material some grains come away
+   *  early and some hold on.  Deterministic per (body seed, boundary
+   *  index), so a body's weak seams are a fixed property of that body
+   *  rather than re-rolled every hit.
+   *
+   *  This is the cheap 80% of per-grain composite materials: varied
+   *  breaking WITHIN a material, with no per-grain material id and no
+   *  pair matrix.  Derived HP stays exactly Σ boundary strengths because
+   *  the same function produces both. */
+  bondSpread?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────

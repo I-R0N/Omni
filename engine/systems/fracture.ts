@@ -82,6 +82,8 @@ export interface FractureOptions {
    *  (`sqrt(area / count)`).  Higher = blue-noise-ish placement = more
    *  even cells before relaxation even runs.  Default 0.35. */
   minSeparation?: number;
+  /** Grain SIZE SPREAD, 0..1 — see placeFractureSites. */
+  sizeSpread?: number;
 }
 
 export interface FractureResult {
@@ -409,11 +411,54 @@ function normalizeWinding(pts: FracturePoint[]): FracturePoint[] {
   return polygonSignedArea(pts) < 0 ? pts.slice().reverse() : pts;
 }
 
+/** Peak additive site weight at `sizeSpread` 1, as a multiple of the
+ *  MEAN CELL AREA — weights are in squared-length units, so this is the
+ *  natural scale.
+ *
+ *  0.25 is measured, not guessed.  The constraint is that `sizeSpread`
+ *  must widen the size DISTRIBUTION without changing the grain COUNT
+ *  (that is `grainSize`'s job, and conflating the two makes both
+ *  useless).  Swept on a 12-grain body: gain 0.7 drove the count from 12
+ *  to 7.5 at spread 1, because the fine cells fell under the sliver
+ *  threshold and their sites were retired — which also TRUNCATED the
+ *  distribution, so cv went back DOWN (0.570 at spread 0.5 against 0.488
+ *  at spread 1).  0.5 and 0.35 were still non-monotonic.  At 0.25 the
+ *  count holds (12 → 12 → 11.3) and cv rises monotonically 0.228 →
+ *  0.383 → 0.552, largest/smallest grain ratio 2.2 → 4.5 → 8.7. */
+const SPREAD_WEIGHT_GAIN = 0.25;
+
+/** Per-site additive weights implementing GRAIN SIZE SPREAD (A2).
+ *
+ *  A first attempt varied each site's minimum SEPARATION instead, and it
+ *  was measured to do almost nothing (cell-area CV 0.425 → 0.423 at
+ *  relaxation 0): a bigger exclusion radius does not reliably give a
+ *  site a bigger CELL, because the neighbours it pushes away simply pack
+ *  elsewhere and the bisectors end up where they always were.
+ *
+ *  Weights are the mechanism that actually controls area.  They turn the
+ *  plain Voronoi diagram into a POWER diagram: the divider between two
+ *  sites moves off the midpoint by `(wi - wj) / 2d`, so a heavier site
+ *  claims more room directly rather than by hoping for it.  Alternating
+ *  the sign by index gives the even mix of coarse and fine grains the
+ *  spec asks for; at spread 0 every weight is 0 and the divider is the
+ *  midpoint again — bit for bit the pre-A2 diagram. */
+function siteWeightsFor(
+  count: number, meanCellArea: number, sizeSpread: number,
+): Float64Array | null {
+  const spread = Math.max(0, Math.min(1, sizeSpread));
+  if (spread <= 0 || count < 2) return null;
+  const w = new Float64Array(count);
+  const peak = SPREAD_WEIGHT_GAIN * meanCellArea * spread;
+  for (let i = 0; i < count; i++) w[i] = (i % 2 === 0 ? 1 : -1) * peak;
+  return w;
+}
+
 function buildCells(
   parent: ReadonlyArray<FracturePoint>,
   sites: ReadonlyArray<FracturePoint>,
   lineEps: number,
   tinyArea: number,
+  weights: Float64Array | null = null,
 ): FractureCell[] {
   const cells: FractureCell[] = [];
   for (let i = 0; i < sites.length; i++) {
@@ -427,10 +472,20 @@ function buildCells(
     for (let j = 0; j < sites.length && pieces.length > 0; j++) {
       if (j === i) continue;
       const sj = sites[j];
-      const mx = (si.x + sj.x) / 2, my = (si.y + sj.y) / 2;
+      let mx = (si.x + sj.x) / 2, my = (si.y + sj.y) / 2;
       const nx = sj.x - si.x, ny = sj.y - si.y;
       // Normalise so lineEps means a distance, not distance × |n|.
-      const invLen = 1 / Math.max(Math.hypot(nx, ny), 1e-12);
+      const d = Math.max(Math.hypot(nx, ny), 1e-12);
+      const invLen = 1 / d;
+      if (weights !== null) {
+        // POWER DIAGRAM (A2 sizeSpread): shift the divider off the
+        // midpoint by (wi - wj) / 2d along the axis, so a heavier site
+        // takes more of the gap.  Weight 0 everywhere → the midpoint,
+        // i.e. the ordinary Voronoi bisector.
+        const shift = (weights[i] - weights[j]) / (2 * d);
+        mx += nx * invLen * shift;
+        my += ny * invLen * shift;
+      }
       const next: FracturePoint[][] = [];
       for (const piece of pieces) {
         const parts = splitPolygonKeepNeg(piece, mx, my, nx * invLen, ny * invLen, lineEps);
@@ -475,6 +530,11 @@ export function computeFracture(
 
   const rand = mulberry32(opts.seed);
   let sites = placeFractureSites(parent, count, rand, opts.impact, opts.minSeparation);
+  // GRAIN SIZE SPREAD (A2): additive site weights turn the diagram into a
+  // POWER diagram, which is what actually controls cell AREA.  Null at
+  // spread 0, and every buildCells call below then takes the ordinary
+  // Voronoi path.
+  const weights = siteWeightsFor(count, parentArea / count, opts.sizeSpread ?? 0);
 
   // LLOYD RELAXATION (V11).  Each round decomposes, then moves every site
   // to the AREA-WEIGHTED centroid of its own cell — the fixed point of
@@ -485,7 +545,7 @@ export function computeFracture(
   // Deterministic: no PRNG use here, so the seed still fixes the result.
   const relax = Math.max(0, Math.min(8, Math.floor(opts.relaxIterations ?? 0)));
   for (let it = 0; it < relax; it++) {
-    const cells = buildCells(parent, sites, lineEps, tinyArea);
+    const cells = buildCells(parent, sites, lineEps, tinyArea, weights);
     if (cells.length === 0) break;
     const sumX = new Float64Array(sites.length);
     const sumY = new Float64Array(sites.length);
@@ -509,7 +569,7 @@ export function computeFracture(
   let cells: FractureCell[] = [];
   let retired = 0;
   for (let attempt = 0; attempt <= count; attempt++) {
-    cells = buildCells(parent, sites, lineEps, tinyArea);
+    cells = buildCells(parent, sites, lineEps, tinyArea, weights);
     if (sites.length <= 2) break;
     // Worst sliver retires its whole site (all its loops go with it).
     let worstIdx = -1, worstArea = minArea;

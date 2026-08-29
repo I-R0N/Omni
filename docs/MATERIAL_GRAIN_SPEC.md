@@ -351,33 +351,34 @@ dimple reads too weakly.
    - **clip the assembled grains to the hex** — geometrically doable
      with the polygon splitter already in `fracture.ts`, but which 75%
      is discarded is arbitrary.
-3. **Do grains inherit damage across a break?**  **RESOLVED: YES**
-   (user call), and MEASURED so the mechanism is grounded.  Over 34 real
-   detaches on rock tiles, a departing grain's own boundary was 60%
-   fully broken, 28% on PARTIALLY filled edges and 11% untouched,
-   carrying an average **0.132** of its total boundary strength as
-   unfinished damage (max 0.36; 30 of 34 detaches carried >1%).
+3. ~~**Do grains inherit damage across a break?**~~  **RESOLVED: THERE
+   IS NOTHING TO INHERIT.**  The decision was yes (user call, and right
+   in principle) — but implementing it at A2 showed the quantity is
+   exactly zero, and structurally so.
 
-   That figure is not obvious and the intuition runs the wrong way: it
-   looks like cell-by-cell spending must complete a grain's ring exactly,
-   leaving nothing partial.  It does not, because an edge stops BINDING
-   the moment its partner departs — so a grain can leave with part of its
-   own boundary only half broken — and spill deposits partial damage on
-   neighbours continuously.
+   A first measurement said otherwise (0.132 of a departing grain's
+   boundary strength carried on average, 30 of 34 detaches) and that
+   number is WRONG for this question: it snapshotted the boundary fills
+   BEFORE the hit that freed the grain, which measures what was
+   unfinished when the hit landed, not what is unfinished when the grain
+   leaves.  Measured at the moment of detach, partial is **0 on every
+   grain, every time**.
 
-   **Mechanism:** carry `Σ partial fills / Σ that grain's boundary
-   strength` as a damage FRACTION and spawn the child at
-   `health = maxHealth × (1 − carried)`.  A geometric carry is
-   meaningless (the child re-decomposes into its own pattern), and the
-   fraction needs no new plumbing: `ensureBoundaryModel` already has the
-   `damagedFrac` path that preserves an existing damage fraction when a
-   body meets the model mid-life.
+   It has to be.  A grain leaves only once every boundary BINDING it is
+   broken; its non-binding boundaries were broken too, because that is
+   how the neighbour on the other side left.  So its whole boundary is
+   spent as it comes away, and a cleanly-detached grain is undamaged —
+   which is also what a grain popping out of a real surface is.
 
-   **Consequence worth naming:** a battered body sheds weaker chips, and
-   the chips off the IMPACT FACE come out weakest, since that is where
-   the spill went.  Sustained fire on one spot yields debris that is
-   already half dead.  Small and self-contained — it belongs in A2
-   beside `bondSpread`.
+   The code was written and then removed rather than kept with an
+   invented number.  The property is pinned by a test, so if the spend
+   order or the detach rule ever changes such that partial boundaries do
+   survive a detach, this decision reopens loudly instead of silently.
+   A separate INTERIOR grain stress (damage to a grain's body rather
+   than its boundaries) would deliver the original intent, but it is a
+   second damage pool competing with the derived-HP invariant and wants
+   its own decision.
+
 4. **`bondSpread` before or with Tier C?**  It delivers most of the
    visual variety of composites at a fraction of the cost.
 
@@ -393,7 +394,17 @@ dimple reads too weakly.
   rock/glass/plastic tiles and shards, so the capability landed with zero
   behaviour change; the measured dial runs cell-area CV 0.404 → 0.185 →
   0.093 and roundness 0.650 → 0.779 → 0.790 across regularity 0 → 0.5 → 1.
-- **A2** `sizeSpread` placement + `bondSpread` + carried damage (§6.3)
+- **A2** `sizeSpread` placement + `bondSpread` — **DONE.**  `sizeSpread`
+  is a POWER DIAGRAM (additive site weights shifting each bisector), not
+  the per-site separation a first attempt used: separation was measured
+  to do almost nothing (cell-area CV 0.425 → 0.423), because a bigger
+  exclusion radius does not give a site a bigger CELL — the neighbours
+  it pushes away just pack elsewhere.  Weight gain 0.25 swept against the
+  constraint that spread must widen the size distribution WITHOUT
+  thinning the grain count: cv 0.228 → 0.383 → 0.552 and coarse/fine
+  ratio 2.2 → 4.5 → 8.7 across spread 0 → 0.5 → 1, with the count holding
+  at 12 → 12 → 11.3.  `bondSpread` is a pure, exported, unbiased ±60%
+  law, exactly 1 at spread 0.  Carried damage was cut — see §6.3.
 - **A3** metal + plastic rows, tuned and measured like V15 was
 - **B1** per-grain dent, outer-vertices-only (§5.3 option 1)
 - **B2** retire the metal composite lattice onto the union outline

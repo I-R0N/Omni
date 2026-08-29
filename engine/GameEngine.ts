@@ -5197,6 +5197,13 @@ export class GameEngine {
           // Fragment first (it reads the pre-mutation parent), then splice.
           // refArea is the ORIGINAL polygon area so every piece of the
           // pattern comes out area-true to the shape it was cut from.
+          // NOTE (A2): a departing grain carries NO damage, and that is a
+          // property of the model rather than an omission.  It leaves
+          // only once every boundary binding it is broken, and its
+          // non-binding boundaries were broken too — that is how the
+          // neighbour on the other side left.  So its whole boundary is
+          // spent at the moment it comes away, measured 0 partial on
+          // every detach.  See docs/MATERIAL_GRAIN_SPEC.md §6.3.
           this.shards.spawnDetachedCell(target, c, original, this.currentMap.entities);
           target.polygonPoints = remainder;
           if (target.mass !== Infinity && polyArea > 0) {

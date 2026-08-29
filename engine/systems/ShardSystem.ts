@@ -977,14 +977,14 @@ export class ShardSystem {
     cell: { points: ReadonlyArray<Vector2>; centroid: Vector2; area: number },
     refArea: number,
     entities: GameEntity[],
-  ): void {
+  ): GameEntity | null {
     const variantId = shardVariantOf(parent);
-    if (variantId === null) return;
+    if (variantId === null) return null;
     const parentVariant = SHARD_VARIANTS[variantId];
     const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
     const childSpawn = childVariant.spawn;
     const f = parentVariant.grain;
-    if (f === undefined || refArea <= 0) return;
+    if (f === undefined || refArea <= 0) return null;
 
     const newSize = Math.max(6, parent.size.x * Math.sqrt(cell.area / refArea));
     const densityTier = parent.densityTier;
@@ -1035,7 +1035,7 @@ export class ShardSystem {
     }
 
     const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
-    entities.push({
+    const child: GameEntity = {
       id:            nextId('shard'),
       type:          EntityType.STRUCTURE,
       shardVariant:  childVariant.id,
@@ -1057,7 +1057,9 @@ export class ShardSystem {
       restSpeed:      childSpawn.restSpeed,
       restSpin:       childSpawn.restSpin,
       collapseGraceTimer: getActiveShatterGraceDelay(),
-    });
+    };
+    entities.push(child);
+    return child;
   }
 
   /** The variant-driven dust/debris burst shared by the powerlaw and

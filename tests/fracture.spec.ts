@@ -1857,6 +1857,175 @@ test.describe('per-material grain regularity (A1)', () => {
   });
 });
 
+test.describe('grain size and bond spread (A2)', () => {
+
+  test('sizeSpread widens the grain-size distribution without changing the count',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await waitForEngine(page, () => true, 'the engine handle');
+
+    const r = await page.evaluate(`(() => {
+      const fr = window.__omniFracture;
+      const w = 60, pts = [];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
+      }
+      const measure = (sp) => {
+        const rows = [];
+        for (let seed = 1; seed <= 24; seed++) {
+          const cells = fr.computeFracture(pts, {
+            siteCount: 12, seed, relaxIterations: 2, minSeparation: 0.45, sizeSpread: sp,
+          }).cells;
+          const areas = cells.map(c => Math.abs(c.area));
+          const mean = areas.reduce((a, b) => a + b, 0) / areas.length;
+          const sd = Math.sqrt(areas.reduce((a, b) => a + (b - mean) ** 2, 0) / areas.length);
+          rows.push({ cv: sd / mean, n: cells.length,
+                      ratio: Math.max(...areas) / Math.min(...areas),
+                      total: areas.reduce((a, b) => a + b, 0) });
+        }
+        const avg = k => rows.reduce((a, b) => a + b[k], 0) / rows.length;
+        return { cv: avg('cv'), n: avg('n'), ratio: avg('ratio'), total: avg('total') };
+      };
+      return { at0: measure(0), at05: measure(0.5), at1: measure(1) };
+    })()`) as any;
+
+    // The distribution widens, monotonically.
+    expect(r.at05.cv).toBeGreaterThan(r.at0.cv * 1.4);
+    expect(r.at1.cv).toBeGreaterThan(r.at05.cv);
+    // Biggest-to-smallest grain ratio opens up: an even mix of coarse and
+    // fine in one body, which is the point of the axis.
+    expect(r.at1.ratio).toBeGreaterThan(r.at0.ratio * 2.5);
+    // ...but the COUNT is preserved.  Grain count is `grainSize`'s job;
+    // a spread that also thins the pattern conflates the two axes and
+    // makes both useless.  This is what the weight gain was tuned to.
+    expect(r.at1.n).toBeGreaterThan(r.at0.n * 0.9);
+    // And the cells still tile the parent — a power diagram partitions
+    // exactly as a Voronoi one does.
+    expect(r.at1.total).toBeCloseTo(r.at0.total, 0);
+
+    console.log('[A2 sizeSpread] cv', r.at0.cv.toFixed(3), '->', r.at05.cv.toFixed(3),
+      '->', r.at1.cv.toFixed(3), '| ratio', r.at0.ratio.toFixed(2), '->',
+      r.at1.ratio.toFixed(2), '| n', r.at0.n.toFixed(1), '->', r.at1.n.toFixed(1));
+
+    watch.assertClean();
+  });
+
+  test('bondSpread is inert at 0, deterministic, bounded and unbiased', async ({ page }) => {
+    const watch = await boot(page);
+    await waitForEngine(page, () => true, 'the engine handle');
+
+    const r = await page.evaluate(`(() => {
+      const g = window.__omniGrain;
+      const at = (sp) => {
+        const vals = [];
+        for (let i = 0; i < 600; i++) vals.push(g.bondVariance(12345, i, sp));
+        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        return { min: Math.min(...vals), max: Math.max(...vals), mean,
+                 allOne: vals.every(v => v === 1) };
+      };
+      return {
+        off: at(0), half: at(0.5), full: at(1),
+        range: g.BOND_SPREAD_RANGE,
+        // Same (seed, index) must give the same answer every time — a
+        // body's weak seams are a property of the body, not of the hit.
+        stable: g.bondVariance(999, 7, 1) === g.bondVariance(999, 7, 1),
+        // ...and different bodies get different seams.
+        differs: g.bondVariance(999, 7, 1) !== g.bondVariance(1000, 7, 1),
+      };
+    })()`) as any;
+
+    // Inert until a material opts in — this is what let A2 ship the
+    // mechanism without moving any material's balance.
+    expect(r.off.allOne).toBe(true);
+    // Bounded by the declared range, at both settings.
+    expect(r.full.min).toBeGreaterThanOrEqual(1 - r.range - 1e-9);
+    expect(r.full.max).toBeLessThanOrEqual(1 + r.range + 1e-9);
+    expect(r.half.min).toBeGreaterThanOrEqual(1 - r.range / 2 - 1e-9);
+    expect(r.half.max).toBeLessThanOrEqual(1 + r.range / 2 + 1e-9);
+    // Unbiased: spread must vary a material's seams, not secretly buff or
+    // nerf it.  Derived HP is Σ strengths, so a biased multiplier would
+    // silently retune every material that adopts it.
+    expect(r.full.mean).toBeGreaterThan(0.95);
+    expect(r.full.mean).toBeLessThan(1.05);
+    expect(r.stable).toBe(true);
+    expect(r.differs).toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('a detaching grain has nothing left to carry — its whole boundary is spent',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    // Spec §6.3 asked whether a grain should carry half-broken bonds out
+    // as pre-existing damage.  It should — but measured at the moment of
+    // DETACH there are none, and that is structural rather than a
+    // tuning accident: a grain leaves only once every boundary BINDING it
+    // is broken, and its non-binding boundaries were broken too, since
+    // that is how the neighbour on the other side left.  This test pins
+    // the property, so if the spend order or the detach rule ever changes
+    // such that partial boundaries survive a detach, §6.3 reopens here
+    // rather than silently.
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const need = (ed: any) => Math.max(0.05, 0.27 * Math.hypot(ed.bx - ed.ax, ed.by - ed.ay));
+      const rows: any[] = [];
+      const tiles = ents.filter((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity).slice(0, 5);
+      for (const t of tiles) {
+        e.player.position.x = t.position.x + 6000;
+        const contactX = () => {
+          let mx = -Infinity;
+          for (const p of t.polygonPoints) if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+          return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
+        };
+        let hits = 0;
+        while (t.active && hits < 30) {
+          const cellsBefore = (t.fractureCells ?? []).map((c: any) => c.siteIndex);
+          e.physics.resolveCollision(
+            { id: 'a2c_' + Math.random(), type: 'PROJECTILE',
+              position: { x: contactX() + 4, y: t.position.y },
+              velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+              mass: 0.1, active: true, color: '#fff', damage: 4,
+              ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+            t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+          hits++;
+          if (!t.active) break;
+          const now = (t.fractureCells ?? []).map((c: any) => c.siteIndex);
+          const edges = t.fractureEdges ?? [], fill = t.fractureEdgeFill ?? [];
+          for (const site of cellsBefore) {
+            if (now.includes(site)) continue;
+            // This grain left on this hit.  Classify its own boundary AT
+            // THE MOMENT IT WENT — not before the hit, which is a
+            // different question and gives a different (misleading) answer.
+            let needSum = 0, partial = 0;
+            for (let k = 0; k < edges.length; k++) {
+              if (!edges[k].cells.includes(site)) continue;
+              const n = need(edges[k]); needSum += n;
+              const f = fill[k] ?? 0;
+              if (f + 1e-6 < n) partial += f;
+            }
+            rows.push({ frac: needSum > 0 ? partial / needSum : 0 });
+          }
+        }
+      }
+      return {
+        detaches: rows.length,
+        worst: rows.reduce((a, b) => Math.max(a, b.frac), 0),
+      };
+    });
+
+    expect(r.detaches).toBeGreaterThan(5);
+    // Nothing unfinished on any departing grain's boundary, ever.
+    expect(r.worst).toBeLessThan(1e-6);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('cell regularity (V11)', () => {
   test('Lloyd relaxation makes the chunks measurably more regular, and stays deterministic', async ({ page }) => {
     const watch = await boot(page);

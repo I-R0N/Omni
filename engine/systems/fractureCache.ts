@@ -29,7 +29,7 @@ import {
   isProgressiveFracture, getBoundaryStrengthScale,
 } from '../../constants';
 import {
-  computeFracture, collectInteriorEdges, seedFromEntityId,
+  computeFracture, collectInteriorEdges, seedFromEntityId, mulberry32,
   FractureCell, FractureEdge,
 } from './fracture';
 
@@ -114,6 +114,7 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
     // "metal regular, plastic ragged" could not be said at all.
     relaxIterations: getFractureRelaxOverride() ?? grainRelaxFor(f.regularity),
     minSeparation: getFractureSeparationOverride() ?? grainSeparationFor(f.regularity),
+    sizeSpread: f.sizeSpread ?? 0,
   }).cells;
   return e.fractureCells;
 }
@@ -225,9 +226,41 @@ export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
  *  length a big body has more boundary to break and is therefore tougher
  *  for free, and `bondStrength` reads as a real material property:
  *  damage per pixel of grain boundary. */
-function edgeStrength(_e: GameEntity, edge: FractureEdge, strength: number): number {
+function edgeStrength(
+  e: GameEntity, edge: FractureEdge, strength: number, index = -1,
+): number {
   const len = Math.hypot(edge.bx - edge.ax, edge.by - edge.ay);
-  return Math.max(0.05, strength * len);
+  let s = strength;
+  // BOND SPREAD (A2): a seeded per-boundary wobble around the material's
+  // strength, so one material still breaks unevenly — some seams give
+  // early, some hold.  Keyed on (body seed, boundary index) rather than
+  // rolled per hit, so a body's weak seams are a FIXED property of that
+  // body; a boundary that looked stubborn stays stubborn.
+  const spread = e.shardVariant !== undefined
+    ? SHARD_VARIANTS[e.shardVariant].grain?.bondSpread ?? 0 : 0;
+  if (index >= 0) s *= bondVariance(e.crackSeed ?? 1, index, spread);
+  return Math.max(0.05, s * len);
+}
+
+/** Widest swing `bondSpread` 1 can apply: ±60%, so the weakest seam in a
+ *  body is ~4× easier than the strongest.  Beyond that a material stops
+ *  reading as one material. */
+export const BOND_SPREAD_RANGE = 0.6;
+
+/** The BOND SPREAD law (A2), pure and exported so it can be pinned
+ *  without a material having to carry a nonzero spread.
+ *
+ *  Returns the multiplier on a boundary's strength for a given body seed
+ *  and boundary index.  Exactly 1 at spread 0 — which is what makes the
+ *  feature inert until a material opts in — deterministic in
+ *  (seed, index) so a body's weak seams are fixed rather than re-rolled
+ *  per hit, and bounded to 1 ± BOND_SPREAD_RANGE × spread. */
+export function bondVariance(seed: number, index: number, spread: number): number {
+  const sp = Math.max(0, Math.min(1, spread));
+  if (sp <= 0) return 1;
+  const s = ((seed | 0) ^ ((index + 1) * 0x9e3779b1)) >>> 0;
+  const u = mulberry32(s)();            // 0..1, deterministic
+  return 1 + (u * 2 - 1) * sp * BOND_SPREAD_RANGE;
 }
 
 /** The variant's boundary strength under the live DBG multiplier, or
@@ -263,7 +296,7 @@ export function ensureBoundaryModel(
   if (e.fractureEdgeFill === undefined || e.fractureEdgeFill.length !== edges.length) {
     const fill = new Array<number>(edges.length).fill(0);
     let total = 0;
-    for (const ed of edges) total += edgeStrength(e, ed, strength);
+    for (let i = 0; i < edges.length; i++) total += edgeStrength(e, edges[i], strength, i);
     const prevMax = e.maxHealth ?? 0;
     const prevHp = e.health ?? prevMax;
     const damagedFrac = prevMax > 0 ? Math.min(1, Math.max(0, 1 - prevHp / prevMax)) : 0;
@@ -321,7 +354,7 @@ function spendOnBoundaries(
   };
   const order: number[] = [];
   for (let i = 0; i < edges.length; i++) {
-    if (fill[i] < edgeStrength(e, edges[i], strength)) order.push(i);
+    if (fill[i] < edgeStrength(e, edges[i], strength, i)) order.push(i);
   }
   order.sort((a, b) => {
     const ka = cellKey(edges[a]), kb = cellKey(edges[b]);
@@ -333,7 +366,7 @@ function spendOnBoundaries(
   let left = damage;
   for (const i of order) {
     if (left <= 0) break;
-    const need = edgeStrength(e, edges[i], strength) - fill[i];
+    const need = edgeStrength(e, edges[i], strength, i) - fill[i];
     const put = Math.min(need, left);
     fill[i] += put;
     left -= put;
@@ -355,7 +388,7 @@ export function applyBoundaryDamage(e: GameEntity, damage: number): boolean {
   spendOnBoundaries(e, model.edges, model.fill, model.strength, Math.max(0, damage));
   let remaining = 0;
   for (let i = 0; i < model.edges.length; i++) {
-    remaining += Math.max(0, edgeStrength(e, model.edges[i], model.strength) - model.fill[i]);
+    remaining += Math.max(0, edgeStrength(e, model.edges[i], model.strength, i) - model.fill[i]);
   }
   e.health = remaining;
   return true;
@@ -370,7 +403,7 @@ export function edgeBreakFraction(e: GameEntity, index: number): number {
   const fill = e.fractureEdgeFill;
   if (strength === null || edges === undefined || fill === undefined) return 0;
   if (index < 0 || index >= edges.length || index >= fill.length) return 0;
-  const need = edgeStrength(e, edges[index], strength);
+  const need = edgeStrength(e, edges[index], strength, index);
   return need <= 0 ? 1 : Math.min(1, fill[index] / need);
 }
 

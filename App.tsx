@@ -10,6 +10,7 @@ import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './e
 import { fitFontPx } from './engine/systems/render/hud';
 import { buildFilletPath, blendAttachRadius, coatMargin } from './engine/systems/render/shardBlend';
 import { roundedPolyPath } from './engine/systems/render/drawUtils';
+import { bondVariance, BOND_SPREAD_RANGE } from './engine/systems/fractureCache';
 import { installMenuNav, pickNext } from './components/menuNav';
 import {
   enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
@@ -105,6 +106,7 @@ const App: React.FC = () => {
     // against a number rather than against a screenshot.
     (window as any).__omniGrain = {
       GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
+      bondVariance, BOND_SPREAD_RANGE,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
