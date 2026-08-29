@@ -56,13 +56,14 @@ scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
 tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
                           plus input / help / minimap / maps (step 5),
-                          viewports / healthbars (5d), lighting (the
+                          viewports / healthbars (5d), starfield,
+                          lighting (the
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
                           flashlight / nebulaspin / roll / shipsprites,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  242 tests.  All run at
+                          anti-flake rules).  257 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
