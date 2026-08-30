@@ -7859,6 +7859,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       attachFraction: 0.9,
       maxSpan: 1.35,
       softness: 0.5,
+      // The coat: 18% of each shard's circumradius, so a bonded pair
+      // reads as one enveloped mass rather than two hulls sharing a
+      // weld.  Scaled per body, so it sits right across the 20..200
+      // diameter range plastic shards actually span.
+      envelope: 0.18,
     },
     // Plastic-shards take the standard rock/metal-style shatter on
     // death.  No per-size count override and no fractional child

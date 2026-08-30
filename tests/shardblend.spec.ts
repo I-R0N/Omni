@@ -162,6 +162,39 @@ test.describe('the connector geometry', () => {
 
     watch.assertClean();
   });
+
+  test('only the GOO side of a bond is coated', async ({ page }) => {
+    const watch = await boot(page);
+
+    // The coat envelops each bonded body in its own hull grown outward.
+    // Which bodies get one is the claim: a body wears a coat on its OWN
+    // variant's policy, never on its partner's. Coating the partner would
+    // repaint a glass tile's face in plastic green — saying the tile is
+    // goo, when it is the thing the goo is stuck to.
+    const r = await page.evaluate(() => {
+      const f = (window as any).__omniBlend.coatMargin;
+      return {
+        // Plastic ↔ plastic: both sides are goo, both coated.
+        plasticSelf:  f('plastic-shard', 'plastic-shard', 100),
+        // Plastic ↔ glass tile: the plastic is coated…
+        plasticOnGlass: f('plastic-shard', 'glass-tile', 100),
+        // …and the tile is not, though it is half of the same bond.
+        glassUnderPlastic: f('glass-tile', 'plastic-shard', 100),
+        // A pair with no blend policy on either side wears nothing.
+        rockOnRock: f('rock-shard', 'rock-shard', 100),
+        // Thickness scales with the body, so one number fits the 20..200
+        // diameter range plastic shards really span.
+        small: f('plastic-shard', 'plastic-shard', 10),
+      };
+    });
+    expect(r.plasticSelf, 'plastic is goo').toBeGreaterThan(0);
+    expect(r.plasticOnGlass, 'plastic stuck to glass is still goo').toBeGreaterThan(0);
+    expect(r.glassUnderPlastic, 'the TILE is not goo').toBe(0);
+    expect(r.rockOnRock, 'rock declares no blend').toBe(0);
+    expect(r.small).toBeCloseTo(r.plasticSelf / 10, 6);
+
+    watch.assertClean();
+  });
 });
 
 test.describe('a bond in the sim reaches the draw pass', () => {

@@ -4,9 +4,16 @@
  *  plastic that bond is `cohesionOnly`: the pair NEVER matures into the
  *  single re-polygonised entity every other variant's bond resolves to,
  *  so it stays two polygons touching for as long as it lives.  This pass
- *  draws the smooth-min union of those two hulls — one metaball
- *  connector per bond, filled UNDERNEATH both of them, so the pair reads
- *  as one blob rather than two shapes in contact.
+ *  draws the smooth-min union of those two hulls UNDERNEATH them, so the
+ *  pair reads as one mass rather than two shapes in contact.
+ *
+ *  Two parts, and the policy can ask for either or both.  The COAT
+ *  (`envelope`) envelops each bonded body in a rounded outward offset of
+ *  its own hull, so the goo has a skin.  The BRIDGE is one metaball
+ *  connector spanning the gap between those skins, waisted the way a
+ *  smooth-min union of two circles is.  Bridge alone reads as two bodies
+ *  welded at a joint; with the coat they read as one coated mass, which
+ *  is the difference between "stuck together" and "in the same blob".
  *
  *  It is a PAIRWISE approximation of an SDF union rather than a sampled
  *  distance field, and that is exact here rather than a compromise: bond
@@ -52,6 +59,27 @@ function blendFor(selfId: ShardVariantId, partnerId: ShardVariantId): ShardBlend
     const bl = SHARD_VARIANTS[selfId]?.blend;
     if (!bl) return null;
     return selectsVariant(bl.appliesTo, partnerId, selfId) ? bl : null;
+}
+
+/**
+ * How thick a coat of goo `selfId` wears in a bond with `partnerId`, in
+ * world units, for a body of that circumradius.  Zero when this side is
+ * not goo — which is the rule that matters: a body is coated on its OWN
+ * variant's policy, never on its partner's, so plastic stuck to a glass
+ * tile coats the plastic and leaves the tile a tile.
+ *
+ * Pure, and exported for that reason: "did we repaint the tile" is not a
+ * question the sim or the stats payload can answer, and a screenshot of
+ * one green shard on a green tile cannot answer it either.
+ */
+export function coatMargin(
+    selfId: ShardVariantId,
+    partnerId: ShardVariantId,
+    circumradius: number,
+): number {
+    const bl = blendFor(selfId, partnerId);
+    if (!bl) return 0;
+    return circumradius * (bl.envelope ?? 0);
 }
 
 /**
@@ -115,6 +143,54 @@ export function blendAttachRadius(
     }
     if (reach <= 0) return circum * fraction;
     return Math.min(reach, circum) * fraction;
+}
+
+/**
+ * Draw the goo COAT around one body: its own hull, grown outward by
+ * `margin`.
+ *
+ * The offset is done the cheap exact way — fill the hull, then stroke it
+ * at twice the margin with ROUND joins, which is precisely the Minkowski
+ * sum of the polygon with a disc of that radius.  Growing the polygon by
+ * scaling it about its centroid instead would be wrong on these hulls:
+ * a plastic shard's vertex radii span 0.65..1.10 of its base, so a
+ * radial scale thickens the far corners and starves the near faces,
+ * where a real coat is even all the way round.
+ *
+ * Drawn in the BODY's frame — polygon points are stored unrotated — and
+ * under the hull, so the shard's own fill and outline land on top and
+ * only the margin shows as a rim.  A body with no polygon coats as a
+ * disc, which is what it is.
+ */
+function drawEnvelope(
+    ctx: CanvasRenderingContext2D,
+    e: GameEntity,
+    x: number,
+    y: number,
+    margin: number,
+    fill: string,
+): void {
+    if (!(margin > 0)) return;
+    const pts = e.polygonPoints;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(e.rotation ?? 0);
+    ctx.beginPath();
+    if (pts && pts.length >= 3) {
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+    } else {
+        ctx.arc(0, 0, Math.max(e.size.x, e.size.y) * 0.5, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = margin * 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
 }
 
 /**
@@ -234,11 +310,17 @@ export function renderShardBlends(
         const bv = b.shardVariant;
         if (av === undefined || bv === undefined) continue;
 
-        // Which side is the goo?  Both can be (a plastic↔plastic bond),
-        // in which case the LARGER body wins — it dominates the
-        // silhouette, so its shade is the one the join should match.
+        // Which side is the goo?  BOTH can be (a plastic↔plastic bond),
+        // and the question is asked per body rather than per bond: each
+        // one is coated only if ITS OWN variant declares a policy that
+        // selects the partner.  That is what keeps a plastic shard stuck
+        // to a glass tile from repainting the tile's face in plastic —
+        // the tile is what the goo is stuck TO, not goo.
         const aPolicy = blendFor(av, bv);
         const bPolicy = blendFor(bv, av);
+        // The BRIDGE has to pick one shade, so the larger body wins: it
+        // dominates the silhouette, so its shade is the one the join
+        // should match.
         let src: GameEntity;
         let dst: GameEntity;
         let policy: ShardBlendPolicy;
@@ -253,6 +335,8 @@ export function renderShardBlends(
         } else {
             continue;
         }
+        const srcVariant = src === a ? av : bv;
+        const dstVariant = src === a ? bv : av;
 
         // Torus: shift the source into the camera's wrap zone, then place
         // the partner RELATIVE to it.  A bond can straddle the seam, and
@@ -269,6 +353,14 @@ export function renderShardBlends(
         const gapY = dy - sy;
         const span = Math.sqrt(gapX * gapX + gapY * gapY);
 
+        // Coat thickness, per body and from that body's OWN policy — a
+        // fraction of its circumradius, so the skin scales with a shard
+        // instead of swamping a 20px one and vanishing on a 200px one.
+        const srcCircum = Math.max(src.size.x, src.size.y) * 0.5;
+        const dstCircum = Math.max(dst.size.x, dst.size.y) * 0.5;
+        const srcMargin = coatMargin(srcVariant, dstVariant, srcCircum);
+        const dstMargin = coatMargin(dstVariant, srcVariant, dstCircum);
+
         // Span gate.  Measured against the two CIRCUMRADII — the same
         // quantity ShardSystem's contact test uses — so the gate is a
         // multiple of contact distance and means what it says.  (Against
@@ -276,21 +368,36 @@ export function renderShardBlends(
         // pairs that had only just bonded.)  A bond itself survives to
         // 1.5× contact, and 6× on a 'strong' pair: well past the point
         // where the goo still reads as joined, so the bridge is dropped
-        // rather than drawn as a thread across open space.
-        const contact = (Math.max(src.size.x, src.size.y)
-                       + Math.max(dst.size.x, dst.size.y)) * 0.5;
-        if (span > contact * (policy.maxSpan ?? 1.35)) continue;
-
-        const frac = policy.attachFraction ?? 0.9;
-        const sr = blendAttachRadius(src, frac, gapX, gapY);
-        const dr = blendAttachRadius(dst, frac, -gapX, -gapY);
-
-        if (!buildFilletPath(ctx, sx, sy, sr, dx, dy, dr, policy.softness ?? 0.5)) continue;
+        // rather than drawn as a thread across open space.  The coats are
+        // added on top because two skins that still touch are still one
+        // mass, whatever the hulls under them are doing.
+        const contact = srcCircum + dstCircum;
+        if (span > contact * (policy.maxSpan ?? 1.35) + srcMargin + dstMargin) continue;
 
         ctx.globalAlpha = (policy.alpha ?? 1) * shardMergeFadeAlpha(src);
-        ctx.fillStyle = blendFillColor(r, src);
-        ctx.fill();
-        r.lastShardBlendCount++;
+
+        // The COAT — each goo body enveloped in its own shade, so a
+        // plastic pair of two different shades stays two shades.
+        const srcFill = blendFillColor(r, src);
+        drawEnvelope(ctx, src, sx, sy, srcMargin, srcFill);
+        if (dstMargin > 0) drawEnvelope(ctx, dst, dx, dy, dstMargin, blendFillColor(r, dst));
+
+        // The BRIDGE, attached at the OUTSIDE of each coat so it runs
+        // into the skin rather than emerging from under it.
+        const frac = policy.attachFraction ?? 0.9;
+        const sr = blendAttachRadius(src, frac, gapX, gapY) + srcMargin;
+        const dr = blendAttachRadius(dst, frac, -gapX, -gapY) + dstMargin;
+
+        let drew = srcMargin > 0 || dstMargin > 0;
+        if (buildFilletPath(ctx, sx, sy, sr, dx, dy, dr, policy.softness ?? 0.5)) {
+            ctx.fillStyle = srcFill;
+            ctx.fill();
+            drew = true;
+        }
+        // Counted only when something actually landed: a pair whose coats
+        // have swallowed each other draws no bridge, and a policy with no
+        // coat and a refused bridge draws nothing at all.
+        if (drew) r.lastShardBlendCount++;
     }
     ctx.globalAlpha = prevAlpha;
 }

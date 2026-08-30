@@ -64,7 +64,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           shardblend,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  262 tests.  All run at
+                          anti-flake rules).  263 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1825,9 +1825,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   A cohesion bond holds two bodies together, and for plastic that bond is
   `cohesionOnly` — it NEVER matures into the single re-polygonised entity
   every other variant's bond resolves to, so the pair stays two polygons
-  touching for as long as it lives.  The blend pass fills ONE metaball
-  connector per live bond underneath both hulls, so it reads as goo
-  instead.  Five things to know before touching it:
+  touching for as long as it lives.  The blend pass draws their union
+  underneath both hulls, so it reads as goo instead.  TWO PARTS, and the
+  policy asks for either or both: the COAT (`envelope`) envelops each goo
+  body in a rounded outward offset of its OWN hull — the polygon filled
+  and then stroked at twice the margin with round joins, which is exactly
+  the Minkowski sum with a disc, where scaling the polygon about its
+  centroid would thicken the far corners and starve the near faces — and
+  the BRIDGE is one metaball connector between those skins.  Bridge alone
+  reads as two bodies welded at a joint; with the coat they read as one
+  coated mass.  Six things to know before touching it:
   (1) **It is a PAIRWISE smooth-min, and that is exact rather than a
   compromise** — bond formation is a MATCHING (both formation sites in
   ShardSystem skip an entity that is already bonded), so a bond is never
@@ -1838,7 +1845,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   polygons; the sim never reads `blend`.  DBG ▸ Visual ▸ "Goo bond" takes
   the drawing away and leaves the bond, which is the property the suite
   pins.
-  (3) **The attach point is DIRECTIONAL, not a radius.**  A plastic shard
+  (3) **A body is coated on ITS OWN policy, never its partner's**
+  (`coatMargin`, pure and exported for exactly this).  Plastic stuck to a
+  glass tile coats the plastic and leaves the tile alone; coating the
+  partner would repaint the tile's whole face in plastic green, which
+  says the tile is goo when it is the thing the goo is stuck to.  Each
+  body also wears its own SHADE, so a two-shade plastic pair stays two
+  shades; only the bridge has to pick one, and the larger body wins it.
+  (4) **The attach point is DIRECTIONAL, not a radius.**  A plastic shard
   is a 4-gon with vertex radii jittered 0.65..1.10 of its base, so one
   face stands nearly twice as far off the centroid as another; the first
   draft anchored on a fixed radius and its bridges hung in open space.
@@ -1846,11 +1860,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (in the body's LOCAL frame — polygon points are stored unrotated), so
   the goo starts at the face actually pointed at the partner, biased a
   little inward so the body drawn over it covers the join.
-  (4) **The SPAN GATE is measured against the circumradii**, the same
+  (5) **The SPAN GATE is measured against the circumradii**, the same
   quantity ShardSystem's contact test uses, so it means a multiple of
   contact distance.  Against the attach radii it would drift with
   `attachFraction` and drop pairs that had only just bonded.
-  (5) **ORDER IS THE WHOLE DESIGN**: the pass runs after the static-tile
+  (6) **ORDER IS THE WHOLE DESIGN**: the pass runs after the static-tile
   blit and before `renderEntities`, so a bridge sits UNDER the mobile
   hulls (which hide its ends) and OVER a static tile it is stuck to
   (where it reads as goo on the face).  It also draws in WORLD space

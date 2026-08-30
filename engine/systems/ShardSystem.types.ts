@@ -250,8 +250,29 @@ export interface ShardBlendPolicy {
    *  before it necks in.  0 is a taut string between two tangent
    *  points, 1 a nearly straight-sided weld.  Default 0.5. */
   softness?: number;
-  /** Fill alpha for the bridge.  Default 1 (the goo is as solid as the
-   *  shard it belongs to). */
+  /** How far the goo COAT extends past a hull, as a fraction of that
+   *  body's circumradius.  0 or absent draws the bridge alone, and the
+   *  pair still reads as two bodies welded at a joint; above 0 each
+   *  bonded body is also enveloped in a skin of goo that the bridge runs
+   *  into, so the pair reads as one coated mass.
+   *
+   *  The coat is a true rounded OUTWARD OFFSET of the hull (its polygon
+   *  filled, then stroked at twice the margin with round joins), not a
+   *  circle around it: a circumscribed disc would swallow a jittered
+   *  4-gon's silhouette entirely, and the shard's outline is what says
+   *  which material the goo is holding.
+   *
+   *  A body is coated only if ITS OWN variant declares a blend policy
+   *  selecting the partner — so plastic stuck to a glass tile coats the
+   *  plastic and leaves the tile alone.  Coating the partner would
+   *  repaint a tile's whole face in plastic, which says the tile is goo
+   *  when it is the thing the goo is stuck to. */
+  envelope?: number;
+  /** Fill alpha for the bridge and coat.  Default 1 (the goo is as solid
+   *  as the shard it belongs to).  Below 1 the coat's own overlaps — its
+   *  fill against its stroke, and both against the bridge — stop being
+   *  invisible and show as darker seams, so a translucent goo wants
+   *  `envelope` left at 0. */
   alpha?: number;
 }
 

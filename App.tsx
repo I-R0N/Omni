@@ -7,7 +7,7 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
-import { buildFilletPath, blendAttachRadius } from './engine/systems/render/shardBlend';
+import { buildFilletPath, blendAttachRadius, coatMargin } from './engine/systems/render/shardBlend';
 import { installMenuNav, pickNext } from './components/menuNav';
 import {
   enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
@@ -105,7 +105,7 @@ const App: React.FC = () => {
     // coordinates that Canvas2D discards without a word, and an attach
     // radius outside the hull leaves a seam nobody can see at one zoom
     // level.  None of that throws or logs.  Nothing in the game reads this.
-    (window as any).__omniBlend = { buildFilletPath, blendAttachRadius };
+    (window as any).__omniBlend = { buildFilletPath, blendAttachRadius, coatMargin };
 
     const handleResize = () => {
       if (canvasRef.current) {
