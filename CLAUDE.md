@@ -2015,6 +2015,46 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   fracture-cache invalidation on the killing blow (health is
   decremented before the dent), so the shatter consumes exactly the
   decomposition whose edges were last drawn.
+- **GRAIN REGULARITY IS A MATERIAL PROPERTY** (material grain spec, A1).
+  A pattern's regularity comes from two knobs — Lloyd relaxation rounds
+  and blue-noise minimum site separation — and both used to be read from
+  GLOBAL DBG accessors, so every material on the map shared whatever the
+  debug knob said and "metal near-honeycomb, plastic ragged" could not be
+  expressed at all.  `GrainSpec.regularity` (0..1) is now the source and
+  the DBG cycles are OVERRIDES: their first entry, `material`, is the
+  default and defers to the table; the numbered entries force one value
+  everywhere so a setting can still be judged across a whole field.
+  `grainRelaxFor` / `grainSeparationFor` are the mapping, calibrated so
+  **regularity 0.5 reproduces the old globals exactly** (2 rounds, 0.45)
+  — which is why A1 was verified to generate BYTE-FOR-BYTE identical
+  patterns to the commit before it, and why rock and glass still carry
+  0.5.  A2 added `sizeSpread` (a POWER DIAGRAM — additive site weights
+  shifting each bisector, because varying a site's SEPARATION was
+  measured to barely move cell areas) and `bondSpread` (a seeded,
+  unbiased ±60% per-boundary wobble).  A3 is the first thing to USE the
+  axes: metal 0.95, plastic 0.55.
+  Vocabulary, since the words are close: a GRAIN is an internal cell of a
+  body's pattern, a SHARD is a mobile entity, and a grain BECOMES a shard
+  when it detaches — grains did not replace shards, and the spec applies
+  to tile and shard variants alike.
+- **A SHARD'S LOD BLOB MUST BE SILHOUETTE-NEUTRAL.**  `SHARD_LOD_CONSTANTS`
+  collapses tiny mobile shards to a cached bitmap instead of a polygon
+  path.  METAL may use a triangle there because a metal-shard's spawn
+  polygon genuinely IS an equilateral triangle; ROCK gets a DISC, and the
+  distinction is not cosmetic.  Rock blitted metal's triangle for a
+  while, so a tile shattering into 8 grains at once read as 8 identical
+  equilateral chips — the exact Voronoi silhouette the fracture model
+  exists to show, replaced by another material's authored shape.  The sim
+  was correct throughout, which is why no simulation test caught it; the
+  regression test is a RENDER test that counts uses of the triangle
+  bitmap while rock debris is on screen.
+  `CHIP_LOD_RADIUS_PX` is 3, not the old 6, for a related reason: the 6
+  was tuned when small rock-shards were the occasional conservation chip,
+  and V15 makes EVERY tile break produce `size/√cells` fragments — a 36px
+  tile's grains are ~12.7 units, i.e. ~4px apparent at the default 0.65
+  zoom, so the old gate collapsed all of them.  Anything that raises this
+  threshold, or points rock at an authored bitmap again, undoes the
+  fracture work at the last step.
 - **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
   user call).  A variant carrying `grain.bondStrength` does not have
   an HP pool that damage counts down.  Damage ACCUMULATES ON THE INTERIOR
