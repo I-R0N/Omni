@@ -214,20 +214,33 @@ test.describe('shake direction follows the impact vector', () => {
      *  and what "directional" means — is that the excursion along the axis
      *  dwarfs the off-axis jitter, and that it swings to the shove side at
      *  some point rather than only away from it. */
-    const samples: { x: number; y: number }[] = [];
+    // Sampled IN THE PAGE across consecutive rAF frames, not by a dozen
+    // round-trips.  Each round-trip costs a few milliseconds of latency, so
+    // twelve of them skip most of the decay and land on whichever twelve
+    // moments the harness happened to catch — on a loaded CI runner that
+    // lottery put the axis ratio at 1.87 against the 2.0 asserted below, from
+    // a shake that was behaving perfectly.  Reading every frame of the window
+    // measures the excursion the assertion is actually about.
     await impact(page, null, 20);
-    for (let i = 0; i < 12; i++) {
-      samples.push(await engine(page, e => ({
-        x: e.camera.shakeOffset.x, y: e.camera.shakeOffset.y,
-      })));
-    }
-    const maxAbsX = Math.max(...samples.map(s => Math.abs(s.x)));
-    const maxAbsY = Math.max(...samples.map(s => Math.abs(s.y)));
+    const { maxAbsX, maxAbsY, minX } = await page.evaluate(() => new Promise<{
+      maxAbsX: number; maxAbsY: number; minX: number;
+    }>(resolve => {
+      const e = (window as any).__omniEngine;
+      let maxAbsX = 0, maxAbsY = 0, minX = Infinity, frames = 0;
+      const tick = () => {
+        const o = e.camera.shakeOffset;
+        maxAbsX = Math.max(maxAbsX, Math.abs(o.x));
+        maxAbsY = Math.max(maxAbsY, Math.abs(o.y));
+        minX = Math.min(minX, o.x);
+        if (++frames >= 24) resolve({ maxAbsX, maxAbsY, minX });
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }));
     expect(maxAbsX, 'the camera moved at all').toBeGreaterThan(0);
     expect(maxAbsX, 'displacement is along the impact axis, not across it')
       .toBeGreaterThan(maxAbsY * 2);
-    expect(Math.min(...samples.map(s => s.x)), 'it swings the way the ship was shoved')
-      .toBeLessThan(0);
+    expect(minX, 'it swings the way the ship was shoved').toBeLessThan(0);
 
     watch.assertClean();
   });
