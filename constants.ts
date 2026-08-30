@@ -293,6 +293,37 @@ export function cyclePlasticGlowBrightness(): number {
 }
 
 
+// ── Bonded-pair goo COAT thickness cycle (DBG-only) ─────────────────
+// Multiplies the `envelope` each variant's ShardBlendPolicy authors, so
+// the variant table stays the source of truth for how thick that
+// material's goo is and this only scales it — the same relationship
+// MATERIAL_GLOW_BRIGHTNESS_CYCLE has with a variant's glow.peakAlpha.
+//
+// Starts at the authored value and cycles UP, because the question this
+// exists to answer is "how much thicker should it be" (user report: the
+// shipped 0.18 reads thin).  At 6× a plastic shard's coat is about as
+// deep as its own radius, which is past useful and deliberately
+// reachable — a range whose top is not too far cannot tell you where too
+// far is.  The 'Goo bond' toggle already provides the off case, so there
+// is no 0 step here.
+export const SHARD_COAT_CYCLE: ReadonlyArray<number> = [
+  1, 1.5, 2, 3, 4, 6,
+] as const;
+
+let activeShardCoatIndex = 0; // 1× — the authored envelope
+
+export function getActiveShardCoat(): number {
+  return SHARD_COAT_CYCLE[activeShardCoatIndex];
+}
+export function getActiveShardCoatName(): string {
+  return `${getActiveShardCoat()}x`;
+}
+export function cycleShardCoat(): number {
+  activeShardCoatIndex = (activeShardCoatIndex + 1) % SHARD_COAT_CYCLE.length;
+  return activeShardCoatIndex;
+}
+
+
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
 // The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
 // .glow.color (#a5f3fc); the cycle adds warm + diverse families so we

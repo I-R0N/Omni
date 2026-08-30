@@ -35,7 +35,7 @@
  */
 
 import type { CameraState, GameEntity } from '../../../types';
-import { SHARD_VARIANTS, CAMERA_CONSTANTS } from '../../../constants';
+import { SHARD_VARIANTS, CAMERA_CONSTANTS, getActiveShardCoat } from '../../../constants';
 import type { ShardBlendPolicy, ShardVariantId } from '../ShardSystem.types';
 import { selectsVariant } from '../ShardSystem';
 import type { RenderSystem } from '../RenderSystem';
@@ -68,9 +68,14 @@ function blendFor(selfId: ShardVariantId, partnerId: ShardVariantId): ShardBlend
  * variant's policy, never on its partner's, so plastic stuck to a glass
  * tile coats the plastic and leaves the tile a tile.
  *
- * Pure, and exported for that reason: "did we repaint the tile" is not a
- * question the sim or the stats payload can answer, and a screenshot of
- * one green shard on a green tile cannot answer it either.
+ * Exported because "did we repaint the tile" is not a question the sim or
+ * the stats payload can answer, and a screenshot of one green shard on a
+ * green tile cannot answer it either.
+ *
+ * Scaled by the DBG "Goo coat" cycle, which multiplies whatever the
+ * variant authored rather than replacing it — so a variant's own
+ * `envelope` stays the statement of how thick that material's goo is,
+ * and the knob only asks "more or less than that".
  */
 export function coatMargin(
     selfId: ShardVariantId,
@@ -79,7 +84,7 @@ export function coatMargin(
 ): number {
     const bl = blendFor(selfId, partnerId);
     if (!bl) return 0;
-    return circumradius * (bl.envelope ?? 0);
+    return circumradius * (bl.envelope ?? 0) * getActiveShardCoat();
 }
 
 /**

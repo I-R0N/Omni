@@ -39,7 +39,7 @@ import {
     cycleEmitShadowTier, cycleEmitFade, cycleCausticFade, cycleFlashlight, cycleLightColor, cycleTintMix, cycleFog,
     cycleShatterGrace, randomPlasticShade, randomPlasticShardShade,
     cycleStarDensity, cycleStarSize, cycleStarBands, cycleCollapseMode,
-    cycleStarParallax,
+    cycleStarParallax, cycleShardCoat,
 } from '../constants';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -218,6 +218,16 @@ export class DebugControls {
    */
   toggleShardBlend() {
     this.g.renderer.shardBlendEnabled = !this.g.renderer.shardBlendEnabled;
+  }
+
+  /**
+   * Cycle the bonded-pair goo COAT thickness (DBG "Goo coat").  A
+   * multiplier over each variant's authored `envelope`, so the variant
+   * table keeps saying how thick that material's goo is and this only
+   * scales it.  Presentation only, like the blend pass itself.
+   */
+  cycleShardCoat() {
+    cycleShardCoat();
   }
 
   /**

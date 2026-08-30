@@ -116,6 +116,7 @@ interface UIOverlayProps {
   onTestTriggerLink?: () => void;
   onToggleRepelPush?: () => void;
   onToggleShardBlend?: () => void;
+  onCycleShardCoat?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -418,6 +419,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onTestTriggerLink,
   onToggleRepelPush,
   onToggleShardBlend,
+  onCycleShardCoat,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -1827,6 +1829,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     ? 'Off'
                     : `On · ${stats.shardBlendCount ?? 0}`,
                   'Bonded-pair blend. On: a live cohesion bond draws as ONE blob — each goo body enveloped in a skin of its own hull grown outward, joined by a waisted metaball bridge, all filled under the hulls so a plastic shard stuck to a tile or another shard reads as goo rather than two polygons touching. Only the GOO side is coated: plastic on a glass tile coats the plastic, never the tile. Off restores the un-blended look. Presentation only: the bond itself forms, coheres and breaks the same either way. The number is how many bonds drew something last frame, so a 0 with plastic on screen means nothing is bonded rather than that the pass is broken.')}
+                {ctrlRow('Goo coat', onCycleShardCoat,
+                  stats.shardCoatName ?? '1x',
+                  'Thickness of the goo COAT around each bonded body, as a multiplier over the envelope its variant authors (plastic ships 0.18 of the shard\'s circumradius). Only has an effect while Goo bond is On. Cycles UP from the shipped value because the question it exists to answer is how much thicker it should be; at 6x a shard\'s coat is about as deep as its own radius, which is past useful on purpose — a range whose top is not too far cannot show you where too far is. The variant table stays the statement of how thick that material\'s goo is; this only scales it.')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}

@@ -195,6 +195,43 @@ test.describe('the connector geometry', () => {
 
     watch.assertClean();
   });
+
+  test('the DBG coat cycle scales the authored envelope and wraps', async ({ page }) => {
+    const watch = await boot(page);
+
+    // The knob multiplies what the variant authored rather than replacing
+    // it, so the variant table stays the statement of how thick that
+    // material's goo is. Pinned by walking the whole cycle and coming
+    // back to the start — a cycle that does not wrap is a one-way trip.
+    const seen = await engine(page, e => {
+      const margin = () =>
+        (window as any).__omniBlend.coatMargin('plastic-shard', 'plastic-shard', 100);
+      const out = [margin()];
+      for (let i = 0; i < 8; i++) { e.dbg.cycleShardCoat(); out.push(margin()); }
+      return out;
+    }) as number[];
+
+    const start = seen[0];
+    expect(start, 'the authored value is where it starts').toBeGreaterThan(0);
+    expect(seen[1], 'the first step goes UP').toBeGreaterThan(start);
+    expect(Math.max(...seen), 'several levels higher are reachable')
+      .toBeGreaterThanOrEqual(start * 4);
+    // SHARD_COAT_CYCLE has 6 entries, so the 6th step lands back on the
+    // first — and the walk above runs past that to prove it keeps going.
+    expect(seen[6], 'the cycle wraps').toBeCloseTo(start, 6);
+    expect(seen[7]).toBeCloseTo(seen[1], 6);
+
+    // Leave the cycle where the suite found it: this is module-level
+    // state on a shared page, and a later test reading a coat margin
+    // would otherwise inherit whatever step this one stopped on.
+    await engine(page, e => { for (let i = 0; i < 4; i++) e.dbg.cycleShardCoat(); });
+    expect(await engine(page, () =>
+      (window as any).__omniBlend.coatMargin('plastic-shard', 'plastic-shard', 100),
+    )).toBeCloseTo(start, 6);
+
+    watch.assertClean();
+  });
+
 });
 
 test.describe('a bond in the sim reaches the draw pass', () => {

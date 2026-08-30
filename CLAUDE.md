@@ -64,7 +64,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           shardblend,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  263 tests.  All run at
+                          anti-flake rules).  264 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1441,6 +1441,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `METAL_AGGREGATION_BRIGHT_CEIL`, `METAL_BREAK_SHARDS_PER_TIER`
 - `PLASTIC_PALETTES`, `PLASTIC_SHARD_AUTOMATA`,
   `PLASTIC_DENT_RECOVERY`, `MATERIAL_GLOW_BRIGHTNESS_CYCLE`,
+  `SHARD_COAT_CYCLE`,
   `GLASS_GLOW_COLORS`
 
 Difficulty is a single `0..3` index that feeds both `DIFFICULTY_SCALES`
@@ -1852,6 +1853,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   says the tile is goo when it is the thing the goo is stuck to.  Each
   body also wears its own SHADE, so a two-shade plastic pair stays two
   shades; only the bridge has to pick one, and the larger body wins it.
+  `SHARD_COAT_CYCLE` (DBG Visual ▸ "Goo coat": 1× / 1.5× / 2× / 3× / 4× /
+  6×) MULTIPLIES the authored `envelope` rather than replacing it, so the
+  variant table stays the statement of how thick that material's goo is —
+  the same relationship `MATERIAL_GLOW_BRIGHTNESS_CYCLE` has with a
+  variant's `glow.peakAlpha`.  It cycles UP from the shipped value, and
+  its top step is past useful on purpose: a range whose top is not too
+  far cannot show where too far is.
   (4) **The attach point is DIRECTIONAL, not a radius.**  A plastic shard
   is a 4-gon with vertex radii jittered 0.65..1.10 of its base, so one
   face stands nearly twice as far off the centroid as another; the first

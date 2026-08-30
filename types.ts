@@ -1775,6 +1775,8 @@ export interface EngineStats {
   /** Bridges drawn last frame, post-cull.  Shown beside the toggle so
    *  "is it doing anything right now" is answerable from the menu. */
   shardBlendCount?: number;
+  /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
+  shardCoatName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
