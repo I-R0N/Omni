@@ -5173,11 +5173,44 @@ export class GameEngine {
               // where "the last pieces dump at death" comes from.
               const survivors = cells.filter((_, i) => i !== cand.i);
               const eps = Math.max(0.01, Math.max(target.size.x, target.size.y) * 0.01);
-              const rem = (grain !== null ? unionOfCells(survivors, eps) : null)
-                  ?? subtractBoundaryCell(pts, cc.points);
+              // For a grain material the body's outline IS the union of
+              // its surviving grains, and that is what makes the break
+              // CONSERVE: the area the parent loses is exactly the area
+              // the fragment carries away.  The arc splice is NOT an
+              // acceptable fallback here — it reconstructs the remainder
+              // from the cell's outline instead, and once grains have
+              // been DEFORMED that outline no longer matches the body's
+              // boundary, so the remainder comes out wrong.  Measured
+              // with the splice still in place: a tile that GREW by 6.7
+              // while shedding a 157-area shard (worst gap 164 over 22
+              // detaches).  If the union cannot express the remainder,
+              // the piece simply stays attached until it can.
+              const rem = grain !== null
+                  ? unionOfCells(survivors, eps)
+                  : subtractBoundaryCell(pts, cc.points);
               if (rem === null) continue; // not expressible off this remainder
+              const remArea = fracturePolygonArea(rem);
+              // CONSERVATION, enforced rather than assumed.  The area the
+              // body loses must equal the area the fragment carries away.
+              // Several geometric cases break that quietly — an interior
+              // grain leaving would punch a hole the outline cannot
+              // express, so the walk traces the outer ring, the body
+              // keeps its area and a full-size shard appears out of
+              // nothing (measured: a tile GROWING by 9.5 while shedding
+              // 164).  Rather than enumerate those cases, check the
+              // invariant here and refuse the detach when it fails; the
+              // piece leaves on a later hit, or at death.
+              if (grain !== null) {
+                  // The remainder must be SMALLER than the body was (a
+                  // break never adds area) and must lose exactly what the
+                  // fragment carries.  Tolerance is a floating-point
+                  // allowance, not a licence: 0.2% of the body.
+                  const expect = polyArea - cc.area;
+                  if (remArea > polyArea + 1e-6) continue;
+                  if (Math.abs(remArea - expect) > Math.max(0.5, polyArea * 0.002)) continue;
+              }
               hitIdx = cand.i; c = cc; remainder = rem;
-              remainderArea = fracturePolygonArea(rem);
+              remainderArea = remArea;
               break;
           }
           // Nothing more is loose (or nothing loose is spliceable yet — it

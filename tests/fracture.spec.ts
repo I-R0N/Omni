@@ -2417,6 +2417,210 @@ test.describe('a fragment is drawn as its own shape (LOD)', () => {
   });
 });
 
+test.describe('deformation is bounded, conserving and elastic', () => {
+
+  test('a break CONSERVES: the body loses exactly what the fragment carries',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'PLASTIC_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'PLASTIC_FIELD', 'the plastic field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const area = (p: any[]) => { let a = 0;
+        for (let i = 0; i < p.length; i++) { const q = p[i], n = p[(i + 1) % p.length];
+          a += q.x * n.y - n.x * q.y; } return Math.abs(a / 2); };
+      let worstGap = 0, worstStale = 1, minShrink = 1, detaches = 0, maxPerHit = 0;
+      for (const t of ents.filter((x: any) => x.active
+          && x.shardVariant === 'plastic-tile' && x.mass === Infinity).slice(0, 8)) {
+        e.player.position.x = t.position.x + 6000;
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        const contactX = () => { let mx = -Infinity;
+          for (const p of t.polygonPoints) if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+          return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1; };
+        let hits = 0;
+        while (t.active && hits < 40) {
+          const tileBefore = area(t.polygonPoints);
+          const nBefore = ents.filter((x: any) => x.active && !before.has(x.id)
+            && x.shardVariant === 'plastic-shard').length;
+          e.physics.resolveCollision(
+            { id: 'cons_' + Math.random(), type: 'PROJECTILE',
+              position: { x: contactX() + 4, y: t.position.y },
+              velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+              mass: 0.1, active: true, color: '#fff', damage: 4,
+              ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+            t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+          hits++;
+          if (!t.active) break;
+          const now = ents.filter((x: any) => x.active && !before.has(x.id)
+            && x.shardVariant === 'plastic-shard');
+          const spawned = now.length - nBefore;
+          maxPerHit = Math.max(maxPerHit, spawned);
+          if (spawned > 0) {
+            detaches += spawned;
+            const gained = now.slice(nBefore)
+              .reduce((a: number, sh: any) => a + area(sh.polygonPoints), 0);
+            worstGap = Math.max(worstGap, gained - (tileBefore - area(t.polygonPoints)));
+          }
+          for (const c of (t.fractureCells ?? [])) {
+            worstStale = Math.max(worstStale, c.area / Math.max(0.01, area(c.points)));
+            minShrink = Math.min(minShrink, c.area / Math.max(0.01, c.area0));
+          }
+        }
+      }
+      return { worstGap, worstStale, minShrink, detaches, maxPerHit };
+    });
+
+    expect(r.detaches).toBeGreaterThan(8);
+    // A grain's reported area is its LIVE area.  Carrying the cut-time
+    // value across a deformation is what let a shrivelled grain spawn a
+    // full-size shard (measured 2.06x before the fix).
+    expect(r.worstStale).toBeLessThan(1.001);
+    // Deformation is FLOORED at two thirds of the area the grain was cut
+    // at (user call), so a grain can never be pulled away to nothing.
+    expect(r.minShrink).toBeGreaterThan(0.66);
+    // And the break conserves: no shard area appears that the body did
+    // not give up.  Before this, a hit could shed a 157-area shard while
+    // the tile GREW by 6.7 — mass from nothing.
+    expect(r.worstGap).toBeLessThan(1);
+
+    console.log('[conserve] detaches', r.detaches, 'worst gap', r.worstGap.toFixed(2),
+      'worst stale', r.worstStale.toFixed(3), 'min grain shrink', r.minShrink.toFixed(3),
+      'max shards/hit', r.maxPerHit);
+
+    watch.assertClean();
+  });
+
+  test('a plastic fragment breaks off deformed and springs back to its cut shape',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'PLASTIC_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'PLASTIC_FIELD', 'the plastic field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const area = (p: any[]) => { let a = 0;
+        for (let i = 0; i < p.length; i++) { const q = p[i], n = p[(i + 1) % p.length];
+          a += q.x * n.y - n.x * q.y; } return Math.abs(a / 2); };
+      const out: any[] = [];
+      for (const t of ents.filter((x: any) => x.active
+          && x.shardVariant === 'plastic-tile' && x.mass === Infinity).slice(0, 8)) {
+        e.player.position.x = t.position.x + 6000;
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        const contactX = () => { let mx = -Infinity;
+          for (const p of t.polygonPoints) if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
+          return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1; };
+        let hits = 0;
+        while (t.active && hits < 40) {
+          e.physics.resolveCollision(
+            { id: 'el_' + Math.random(), type: 'PROJECTILE',
+              position: { x: contactX() + 4, y: t.position.y },
+              velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+              mass: 0.1, active: true, color: '#fff', damage: 4,
+              ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+            t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+          hits++;
+          const fresh = ents.filter((x: any) => x.active && !before.has(x.id)
+            && x.shardVariant === 'plastic-shard' && x.dentRecoverTimer !== undefined);
+          if (fresh.length > 0) {
+            const c = fresh[0];
+            const atBreak = area(c.polygonPoints);
+            const rest = area(c.dentRestPolygon);
+            const samples: number[] = [];
+            for (let i = 0; i < 200; i++) {
+              e.shards.update(ents, 1 / 60, e.physics, false);
+              if (i === 30 || i === 90) samples.push(area(c.polygonPoints));
+            }
+            out.push({ atBreak, rest, mid: samples,
+              after: area(c.polygonPoints), done: c.dentRecoverTimer === undefined });
+            break;
+          }
+          if (!t.active) break;
+        }
+        if (out.length >= 3) break;
+      }
+      return out;
+    });
+
+    expect(r.length).toBeGreaterThan(0);
+    for (const row of r) {
+      // It came away DEFORMED — smaller than the shape its grain was cut
+      // at.  Before this the fragment was spawned at the cut size no
+      // matter how squashed the grain was.
+      expect(row.atBreak).toBeLessThan(row.rest * 0.99);
+      // ...and relaxes back, monotonically and in time order...
+      expect(row.mid[0]).toBeGreaterThan(row.atBreak);
+      expect(row.mid[1]).toBeGreaterThan(row.mid[0]);
+      // ...arriving exactly at the cut shape, and finishing.  The lerp is
+      // LINEAR in time: stepping a fraction of the REMAINING distance
+      // each tick compounds into an exponential approach that reaches
+      // rest long before the timer, making dentRecoverSeconds a lie.
+      expect(row.after).toBeCloseTo(row.rest, 3);
+      expect(row.done).toBe(true);
+    }
+
+    console.log('[elastic] ' + r.map((x: any) =>
+      `${x.atBreak.toFixed(0)} -> ${x.mid[0].toFixed(0)} -> ${x.mid[1].toFixed(0)} -> ${x.rest.toFixed(0)}`).join('  |  '));
+
+    watch.assertClean();
+  });
+
+  test('metal and plastic shards carry real HP, and metal shards fracture like everything else',
+    async ({ page }) => {
+    const watch = await boot(page);
+
+    const read = async (map: string, tile: string, child: string) => {
+      await startRun(page, map);
+      const onMap = new Function('s', `return s.currentMapType === '${map}'`) as (s: any) => boolean;
+      await waitForStats(page, onMap, map);
+      return engine<any[], { tile: string; child: string }>(page, (e: any, arg: any) => {
+        const ents = e.currentMap.entities;
+        for (const t of ents.filter((x: any) => x.active
+            && x.shardVariant === arg.tile && x.mass === Infinity).slice(0, 4)) {
+          t.health = 0; t.active = false;
+          e.physics.removeStaticEntity(t); e.handleEntityDeath(t);
+        }
+        const rows: any[] = [];
+        for (const sh of ents.filter((x: any) => x.active && x.shardVariant === arg.child
+            && x.mass !== Infinity).sort((a: any, b: any) => b.size.x - a.size.x).slice(0, 6)) {
+          sh.lastImpactLocal = { x: sh.size.x * 0.5, y: 0 };
+          e.physics.resolveCollision(
+            { id: 'shp_' + Math.random(), type: 'PROJECTILE',
+              position: { x: sh.position.x + sh.size.x * 0.5 + 4, y: sh.position.y },
+              velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+              mass: 0.1, active: true, color: '#fff', damage: 0.001,
+              ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+            sh, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+          rows.push({ size: sh.size.x, cells: (sh.fractureCells ?? []).length,
+            derived: sh.maxHealth ?? 0 });
+        }
+        return rows;
+      }, { tile, child });
+    };
+
+    const plastic = await read('PLASTIC_FIELD', 'plastic-tile', 'plastic-shard');
+    const metal = await read('METAL_FIELD', 'metal-tile', 'metal-shard');
+
+    const avg = (rows: any[], k: string) => rows.reduce((a, b) => a + b[k], 0) / rows.length;
+    for (const [name, rows] of [['plastic', plastic], ['metal', metal]] as any[]) {
+      expect(rows.length, name).toBeGreaterThan(2);
+      // Every shard now decomposes — metal shards had NO grain block at
+      // all and broke on a single hit.
+      expect(avg(rows, 'cells'), name).toBeGreaterThanOrEqual(3);
+      // ...and carries enough internal boundary to survive a few Blaster
+      // hits.  Derived HP IS the total internal boundary, so a shard with
+      // two grains and one short seam between them dies instantly.
+      expect(avg(rows, 'derived'), name).toBeGreaterThan(12);
+    }
+
+    console.log('[shard hp] plastic', avg(plastic, 'derived').toFixed(1),
+      `(${avg(plastic, 'cells').toFixed(1)} grains) | metal`,
+      avg(metal, 'derived').toFixed(1), `(${avg(metal, 'cells').toFixed(1)} grains)`);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('cell regularity (V11)', () => {
   test('Lloyd relaxation makes the chunks measurably more regular, and stays deterministic', async ({ page }) => {
     const watch = await boot(page);

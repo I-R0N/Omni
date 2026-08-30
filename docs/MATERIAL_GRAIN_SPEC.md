@@ -437,6 +437,21 @@ dimple reads too weakly.
   before A3 (they broke via `dent.breakShards`, which the voronoi gates
   stand down); they now break into their cells like every other grain
   material.  metal-SHARD composites are untouched — that is B2.
+- **A3 follow-up** (user report) — **DONE.**  Metal SHARDS joined the
+  grain model (they had no `grain` block and died on one hit), both
+  shards' grains were made finer so they carry real internal boundary and
+  therefore real derived HP (plastic ~27, metal ~17, against a couple of
+  damage before), and three defects in per-grain deformation were fixed:
+  a deformed grain reported its CUT area and centroid rather than its
+  live ones (so a shrivelled grain spawned a full-size fragment — 2.06x
+  measured); deformation had no floor (now two thirds of the cut area or
+  an absolute minimum, whichever is greater); and a break did not
+  CONSERVE (a hit could shed a 157-area shard while the tile GREW by 6.7
+  — the invariant is now enforced at the detach seam rather than assumed,
+  after chasing two wrong geometric explanations for it).  A fragment now
+  breaks off carrying its deformed shape, and plastic — being elastic —
+  springs linearly back to the shape its grain was cut at over
+  `dentRecoverSeconds`, while metal keeps its dent.
 - **B2** retire the metal composite lattice onto the union outline
 - **C** per-grain materials + pair function, behind a render cache
 

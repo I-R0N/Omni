@@ -446,6 +446,11 @@ export interface GrainSpec {
    *  grain that shares them, so the grains still tile the body exactly —
    *  which is the invariant `unionOfCells` depends on. */
   grainDent?: number;
+  /** Seconds for a fragment that broke off DEFORMED to relax back to the
+   *  shape its grain was cut at (user call: plastic is elastic and
+   *  should spring back slowly; metal keeps its dent).  Absent → the
+   *  deformation is permanent. */
+  dentRecoverSeconds?: number;
   /** DENSITY COUPLING (A3) — grain size and bond strength tracking the
    *  entity's `densityTier`, which is also what drives its BRIGHTNESS.
    *  Metal uses both, so how a plate looks IS the readout of its grain

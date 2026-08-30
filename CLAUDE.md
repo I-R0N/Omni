@@ -2037,6 +2037,33 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   body's pattern, a SHARD is a mobile entity, and a grain BECOMES a shard
   when it detaches — grains did not replace shards, and the spec applies
   to tile and shard variants alike.
+- **A BREAK CONSERVES, AND THE INVARIANT IS ENFORCED, NOT ASSUMED.**  When
+  a grain detaches, the area the body loses must equal the area the
+  fragment carries away.  `progressFracture` CHECKS that before
+  committing a detach (`|remainderArea − (polyArea − cell.area)|` against
+  a 2% tolerance) and refuses the piece when it fails — it leaves on a
+  later hit, or at death.  This is a check rather than a proof because
+  several geometric cases break conservation quietly and enumerating them
+  was tried twice and failed: an interior grain leaving would punch a
+  hole the outline cannot express, so the union walk traces the outer
+  ring, the body keeps its area, and a full-size shard appears from
+  nothing (measured: a tile GROWING by 9.5 while shedding 164).  Two
+  related rules hold it up: for a grain material the remainder is
+  `unionOfCells` ONLY (the arc splice reconstructs from the cell's
+  outline, which stops matching the body's boundary once grains deform),
+  and a deformed grain must report its LIVE area and centroid — carrying
+  the cut-time values across a dent is what let a shrivelled grain spawn
+  a full-size fragment (2.06× measured).
+- **DEFORMATION IS FLOORED, AND ELASTIC MATERIALS SPRING BACK** (user
+  call).  A grain deforms to no less than `GRAIN_DENT_MIN_AREA_FRAC`
+  (two thirds) of the area it was cut at, or `GRAIN_DENT_MIN_AREA_PX2`,
+  whichever is greater.  A fragment breaks off CARRYING its deformed
+  outline; a material with `grain.dentRecoverSeconds` (plastic) then
+  relaxes back to the shape its grain was cut at, while one without it
+  (metal) keeps the dent for good.  The relaxation must be LINEAR IN TIME
+  — stepping a fraction of the REMAINING distance each tick compounds
+  into an exponential approach that reaches rest long before the timer,
+  making the authored duration a lie.
 - **A SHARD'S LOD BLOB MUST BE SILHOUETTE-NEUTRAL.**  `SHARD_LOD_CONSTANTS`
   collapses tiny mobile shards to a cached bitmap instead of a polygon
   path.  METAL may use a triangle there because a metal-shard's spawn

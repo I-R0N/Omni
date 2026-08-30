@@ -1334,6 +1334,14 @@ export interface GameEntity {
   // Dent steps applied per grain, indexed by the cell's siteIndex, so a
   // single grain cannot be pulled into itself by sustained fire.
   fractureGrainDents?: number[];
+  // ELASTIC RECOVERY (user call).  A grain that breaks off DEFORMED keeps
+  // its dented outline — and for an elastic material it then relaxes back
+  // toward `dentRestPolygon` (the shape the grain was cut at, recentred)
+  // over `dentRecoverTimer` seconds.  Absent on rigid materials, which
+  // keep the dent permanently.
+  dentRestPolygon?: Vector2[];
+  dentRecoverTimer?: number;
+  dentRecoverDuration?: number;
   fractureBoundaryHp?: number;
   // The HP the entity was SPAWNED with, kept when the grain model
   // rewrites `maxHealth` to the derived total.  Score and any other

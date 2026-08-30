@@ -475,6 +475,52 @@ export class ShardSystem {
    * candidates that were just merged this frame don't get double-
    * processed.
    */
+  /** ELASTIC RECOVERY (user call): a fragment that broke off DEFORMED
+   *  springs slowly back toward the shape its grain was cut at.  Plastic
+   *  opts in via `grain.dentRecoverSeconds`; metal does not, so a metal
+   *  chip keeps its dent for good.
+   *
+   *  The lerp runs on the polygon rather than on a scale factor because
+   *  the dent is not uniform — only the vertices that were on the body's
+   *  outline moved, so springing back has to restore exactly those.
+   *  Collision caches are invalidated as it goes, since SAT reads the
+   *  polygon. */
+  private tickDentRecovery(entities: GameEntity[], dt: number): void {
+    for (const e of entities) {
+      if (e.dentRecoverTimer === undefined || !e.active) continue;
+      const rest = e.dentRestPolygon;
+      const pts = e.polygonPoints;
+      if (rest === undefined || pts === undefined || rest.length !== pts.length) {
+        e.dentRecoverTimer = undefined;
+        continue;
+      }
+      // LINEAR in time.  Moving a fraction `1 - timer/total` of the
+      // REMAINING distance each tick compounds into an exponential
+      // approach that reaches rest long before the timer expires, which
+      // makes `dentRecoverSeconds` mean nothing; stepping by
+      // dt/remaining covers the remaining distance at a constant rate.
+      const k = Math.max(0, Math.min(1, dt / Math.max(dt, e.dentRecoverTimer)));
+      e.dentRecoverTimer -= dt;
+      let moved = false;
+      for (let i = 0; i < pts.length; i++) {
+        const nx = pts[i].x + (rest[i].x - pts[i].x) * k;
+        const ny = pts[i].y + (rest[i].y - pts[i].y) * k;
+        if (nx !== pts[i].x || ny !== pts[i].y) moved = true;
+        pts[i].x = nx; pts[i].y = ny;
+      }
+      if (moved) {
+        e._satCacheAxes = undefined;
+        e._occluderR = undefined;
+        invalidateCollisionR(e);
+      }
+      if (e.dentRecoverTimer <= 0) {
+        e.dentRecoverTimer = undefined;
+        e.dentRestPolygon = undefined;
+        e.dentRecoverDuration = undefined;
+      }
+    }
+  }
+
   public update(
     entities: GameEntity[],
     dt: number,
@@ -482,6 +528,7 @@ export class ShardSystem {
     runMergePass: boolean = true,
   ): void {
     const t0 = performance.now();
+    this.tickDentRecovery(entities, dt);
     // DBG bonding toggle is destructive — when off, any bonds left
     // over from the previous frame are dropped here so cohesion
     // stops dragging shards together as soon as the user flips it.
@@ -974,7 +1021,8 @@ export class ShardSystem {
    */
   public spawnDetachedCell(
     parent: GameEntity,
-    cell: { points: ReadonlyArray<Vector2>; centroid: Vector2; area: number },
+    cell: { points: ReadonlyArray<Vector2>; centroid: Vector2; area: number;
+            area0?: number; points0?: ReadonlyArray<Vector2> },
     refArea: number,
     entities: GameEntity[],
   ): GameEntity | null {
@@ -1026,12 +1074,36 @@ export class ShardSystem {
       }
     }
 
+    // The fragment carries the grain's CURRENT outline — deformed if it
+    // was dented before it came away (user call).  `cell.centroid` and
+    // `cell.area` are live values maintained by the dent, so the piece is
+    // both sized and centred on what it actually looks like.
     const points: Vector2[] = new Array(cell.points.length);
     for (let i = 0; i < cell.points.length; i++) {
       points[i] = {
         x: cell.points[i].x - cell.centroid.x,
         y: cell.points[i].y - cell.centroid.y,
       };
+    }
+    // ELASTIC materials additionally remember the shape the grain was CUT
+    // at, scaled into the child's own frame, and spring back toward it.
+    const recover = parentVariant.grain?.dentRecoverSeconds;
+    let restPoly: Vector2[] | undefined;
+    if (recover !== undefined && recover > 0 && cell.points0 !== undefined
+        && (cell.area0 ?? 0) > 0 && Math.abs((cell.area0 ?? 0) - cell.area) > 1e-6) {
+      // points0 is the cell's outline in the PARENT's frame at the cut;
+      // recentre it on its own centroid so the rest shape shares the
+      // child's origin.  NO scaling: the child's live polygon is the
+      // deformed cell at 1:1, so the rest shape is the cut cell at 1:1
+      // and the piece springs from its squashed area back to its cut
+      // area — which is what elastic deformation MEANS.  (Scaling by
+      // sqrt(area/area0) here was wrong in both magnitude and direction:
+      // it nearly doubled the rest shape, 319 -> 630 instead of the
+      // intended 0.67 -> 1.0.)
+      let cx = 0, cy = 0;
+      for (const p of cell.points0) { cx += p.x; cy += p.y; }
+      cx /= cell.points0.length; cy /= cell.points0.length;
+      restPoly = cell.points0.map(p => ({ x: p.x - cx, y: p.y - cy }));
     }
 
     const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
@@ -1057,6 +1129,9 @@ export class ShardSystem {
       restSpeed:      childSpawn.restSpeed,
       restSpin:       childSpawn.restSpin,
       collapseGraceTimer: getActiveShatterGraceDelay(),
+      dentRestPolygon: restPoly,
+      dentRecoverTimer: restPoly !== undefined ? recover : undefined,
+      dentRecoverDuration: restPoly !== undefined ? recover : undefined,
     };
     entities.push(child);
     return child;

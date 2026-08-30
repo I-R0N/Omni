@@ -8389,6 +8389,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       sizeSpread: 0.6,
       bondSpread: 0.25,
       grainDent: 0.10,
+      // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
+      // springs slowly back to the shape its grain was cut at.  Metal
+      // deliberately has no recovery — its dent is permanent.
+      dentRecoverSeconds: 2.5,
       progressive: true,
       // 2.3x rock, but far FEWER boundaries than metal because the
       // grains are large — so plastic is tough per seam and moderate
@@ -8915,15 +8919,26 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // recursion terminates the same way (children below the spawn
     // floor die clean via the mobile-parent guard).
     grain: {
-      grainCountMin: 2,
-      grainCountMax: 5,
-      grainSize: 16,
+      // Shards were dying to almost nothing (user report).  A shard's
+      // derived HP is the total length of its INTERNAL boundary, and at
+      // grainSize 16 a 20px shard decomposed into ~2 grains with one
+      // short seam between them — a couple of damage.  Finer grains give
+      // a shard real internal structure to break through, without
+      // touching the material's bondStrength (which must stay one number
+      // per material, tile and shard alike).
+      grainCountMin: 3,
+      grainCountMax: 8,
+      grainSize: 6,
       impactBias: 0.5,
       // The same plastic, at shard scale.
       regularity: 0.55,
       sizeSpread: 0.6,
       bondSpread: 0.25,
       grainDent: 0.10,
+      // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
+      // springs slowly back to the shape its grain was cut at.  Metal
+      // deliberately has no recovery — its dent is permanent.
+      dentRecoverSeconds: 2.5,
       progressive: true,
       // 2.3x rock, but far FEWER boundaries than metal because the
       // grains are large — so plastic is tough per seam and moderate
@@ -9007,14 +9022,38 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     // Metal shards are dent-driven: deform per hit, destroyed cleanly
     // on health = 0 with drops + particles.  No recursive sub-shards.
+    // A3 follow-up (user call): metal shards get the SAME Voronoi
+    // fracture as the tiles and as rock/glass — one break model for every
+    // breakable material.  Same bondStrength as the tile (a material
+    // property, not a per-entity number) and the same density coupling,
+    // so a dense chip is fine-grained and hard exactly as a dense plate
+    // is.  A shard's grains must be FINE or it has almost no internal
+    // boundary and therefore almost no derived HP, which is what made
+    // metal chips die instantly.
+    grain: {
+      grainCountMin: 3,
+      grainCountMax: 12,
+      grainSize: 5,
+      impactBias: 0.35,
+      regularity: 0.95,
+      sizeSpread: 0.1,
+      bondSpread: 0.15,
+      grainDent: 0.05,
+      progressive: true,
+      bondStrength: 0.85,
+      densityCouplesGrainSize: 0.25,
+      densityCouplesStrength: 0.20,
+      radialSpeed: 1.0,
+    },
     shatter: {
-      kind: 'none',
+      kind: 'voronoi',
       style: 'scatter',
-      countMin: 0, countMax: 0,
+      countMin: 3, countMax: 8,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'metal-shard',
-      forwardDrag: 0, perpScatter: 0,
-      scatterHalfCone: 0,
+      forwardDrag: 0.35,
+      perpScatter: 0.5,
+      scatterHalfCone: 0.8,
     },
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },

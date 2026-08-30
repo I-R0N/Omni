@@ -44,7 +44,16 @@ export interface FractureCell {
   /** Index of the owning site in the FINAL (post-retirement) site list. */
   siteIndex: number;
   centroid: FracturePoint;
+  /** LIVE area — recomputed when the cell is deformed (per-grain dent),
+   *  so anything sizing a fragment from a grain gets the grain's real
+   *  size rather than the one it was cut at. */
   area: number;
+  /** The area and outline the cell was CUT at, before any deformation.
+   *  `area0` is what the dent cap is measured against; `points0` is the
+   *  rest shape an elastic material relaxes back toward after a piece
+   *  breaks off deformed. */
+  area0: number;
+  points0: FracturePoint[];
 }
 
 export interface FractureImpact {
@@ -503,6 +512,8 @@ function buildCells(
         siteIndex: i,
         centroid: polygonCentroid(points),
         area,
+        area0: area,
+        points0: points.map(p => ({ x: p.x, y: p.y })),
       });
     }
   }

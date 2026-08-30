@@ -31,6 +31,7 @@ import {
 import {
   computeFracture, collectInteriorEdges, seedFromEntityId, mulberry32,
   unionOfCells, onParentBoundary, pointToPolygonDistance2,
+  polygonArea, polygonCentroid,
   FractureCell, FractureEdge,
 } from './fracture';
 
@@ -450,6 +451,16 @@ export function edgeIsBroken(e: GameEntity, index: number): boolean {
  *  grain under sustained fire is pulled through its own centroid and the
  *  body's outline self-intersects. */
 const GRAIN_DENT_MAX_STEPS = 6;
+/** A grain may deform to no less than this fraction of the area it was
+ *  CUT at (user call: two thirds).  Without a floor a grain under
+ *  sustained fire is pulled down to almost nothing while still counting
+ *  as a whole piece, and the body then sheds full-size shards that its
+ *  own outline never loses — which is unsound, not just ugly. */
+const GRAIN_DENT_MIN_AREA_FRAC = 0.67;
+/** ...or this absolute area, whichever is GREATER, so small grains do
+ *  not deform down to specks even though two thirds of very little is
+ *  still very little.  ~= a radius-3 disc. */
+const GRAIN_DENT_MIN_AREA_PX2 = 28;
 /** Position quantisation for deciding that two grains share a vertex, as
  *  a fraction of the body's size.  Cells are cut from one polygon by
  *  exact line splits, so shared vertices agree to floating-point noise;
@@ -502,6 +513,12 @@ export function dentStruckGrain(e: GameEntity): boolean {
   const site = cells[hit].siteIndex;
   const dents = e.fractureGrainDents ?? (e.fractureGrainDents = []);
   if ((dents[site] ?? 0) >= GRAIN_DENT_MAX_STEPS) return false;
+  // A grain may not be deformed away.  Below this floor a further dent is
+  // simply refused — see GRAIN_DENT_MIN_AREA_FRAC for why an unbounded
+  // pull was not merely ugly but unsound.
+  const floorFor = (c: FractureCell) => Math.max(
+    (c.area0 ?? c.area) * GRAIN_DENT_MIN_AREA_FRAC, GRAIN_DENT_MIN_AREA_PX2);
+  if (cells[hit].area <= floorFor(cells[hit])) return false;
 
   const span = Math.max(1, Math.max(e.size.x, e.size.y));
   const weld = span * VERTEX_WELD_FRAC;
@@ -532,13 +549,35 @@ export function dentStruckGrain(e: GameEntity): boolean {
       touched = true;
       return { x: v.x + m.dx, y: v.y + m.dy };
     });
-    return touched ? { ...cell, points: nextPts } : cell;
+    if (!touched) return cell;
+    // RECOMPUTE area and centroid.  Carrying the cut-time values across a
+    // deformation is what made a shrivelled grain spawn a full-size
+    // shard: `spawnDetachedCell` sizes the fragment from `cell.area` and
+    // recentres its polygon on `cell.centroid`.  Measured on a plastic
+    // tile before this: a grain reporting 2.06x its real area, and a hit
+    // that shed 225 units of shard while the tile's own outline lost 2.3
+    // — mass created from nothing.
+    return { ...cell, points: nextPts,
+      area: polygonArea(nextPts), centroid: polygonCentroid(nextPts) };
   });
+  // Refuse the whole step if it would push ANY grain under its floor —
+  // the pull moves shared vertices, so neighbours deform too.
+  for (const cell of moved) {
+    if (cell.area < floorFor(cell)) return false;
+  }
 
   const outline = unionOfCells(moved, weld);
   // A dent that would break the body into islands, or produce a
   // self-intersecting outline SAT cannot carry, is simply not applied.
   if (outline === null || outline.length < 3) return false;
+  // A DENT MAY NEVER ADD AREA.  The body's outline and the union of its
+  // grains can drift apart (measured: a tile's polygon at 997.6 against
+  // its own cells' union at 1126), and assigning the union then makes
+  // the body GROW — a hit that spawned nothing and put 130 area back on
+  // the tile.  Conservation must not depend on those two staying in
+  // perfect agreement, so the dent simply refuses to hand back a bigger
+  // body than it was given.
+  if (polygonArea(outline) > polygonArea(pts) + 1e-6) return false;
 
   e.fractureCells = moved;
   e.polygonPoints = outline;
