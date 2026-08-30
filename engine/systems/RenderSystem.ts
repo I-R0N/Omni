@@ -551,6 +551,33 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // Bounded like the tinted-sprite cache — the metal palette + density-
   // tier darkening yields only a handful of distinct colours in practice.
   private _solidTriangleBitmaps: Map<string, HTMLCanvasElement> = new Map();
+  private _solidDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  /** Silhouette-NEUTRAL LOD blob, for materials whose real outline is
+   *  irregular.  A disc says "something small here" and nothing about
+   *  shape; the triangle beside it says "this is a triangle", which is a
+   *  claim only metal may make.  Rock blitted the triangle for a while
+   *  and a shattered tile read as a set of identical equilateral chips —
+   *  the exact silhouette the Voronoi fracture exists to show. */
+  getSolidDiscBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._solidDiscBitmaps.get(hex);
+      if (cached) return cached;
+      const size = SHARD_LOD_CONSTANTS.DISC_BITMAP_SIZE;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const cx = c.getContext('2d')!;
+      const center = size / 2;
+      cx.fillStyle = hex;
+      cx.beginPath();
+      cx.arc(center, center, center - 1, 0, Math.PI * 2);
+      cx.fill();
+      if (this._solidDiscBitmaps.size >= 64) {
+          const firstKey = this._solidDiscBitmaps.keys().next().value;
+          if (firstKey !== undefined) this._solidDiscBitmaps.delete(firstKey);
+      }
+      this._solidDiscBitmaps.set(hex, c);
+      return c;
+  }
 
   getSolidTriangleBitmap(hex: string): HTMLCanvasElement {
       const cached = this._solidTriangleBitmaps.get(hex);

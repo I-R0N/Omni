@@ -979,9 +979,11 @@ export function drawTileShape(
         // per-vertex lineTo + fill + stroke).  The cached bitmap is a
         // triangle (NOT a disc) so the silhouette stays faithful —
         // metal shards read as triangles, and a circle here was a
-        // mis-render.  Restricted to metal-shard; rock (irregular
-        // 5-9-gon) and glass (sharp splinter) are EXCLUDED — their
-        // silhouette is part of the material's identity.  Also
+        // mis-render.  Restricted to metal-shard, whose spawn polygon
+        // genuinely IS an equilateral triangle; glass (sharp splinter) is
+        // excluded entirely and rock takes the DISC branch below, because
+        // an irregular silhouette must never be replaced by an authored
+        // one — that is a different material, not a cheaper draw.  Also
         // excluded: hit-flashing and power-up-glowing shards (cues
         // must read).  Reset globalAlpha before the early return so a
         // following fast-path tile blit isn't faded.
@@ -999,18 +1001,26 @@ export function drawTileShape(
             rs.lastLodShardCount++;
             return;
         }
-        // Rock chips: the conservation-chip system spawns many small
-        // rock-shards, so collapse the tiniest ones (below the
-        // chip-LOD radius, smaller than the metal threshold) to the
-        // same cached solid blob — skips the full polygon + density
-        // tint + (already LOD-gated) crack render.  Their jagged
-        // silhouette is imperceptible at this apparent size.
+        // Rock chips: a shattering tile spawns many small rock-shards, so
+        // collapse the tiniest ones (below the chip-LOD radius, well
+        // under the metal threshold) to a cached solid DISC — skips the
+        // full polygon + density tint + (already LOD-gated) crack render.
+        //
+        // A DISC, not the triangle above.  This branch blitted metal's
+        // equilateral triangle for a while, so every rock fragment took
+        // metal's authored silhouette; a tile shattering into 8 grains at
+        // once read as 8 identical triangles, which is precisely the
+        // Voronoi shape the fracture model exists to show.  A disc is
+        // silhouette-NEUTRAL: at a few pixels it says "small rock" and
+        // nothing about shape.  The threshold is deliberately small
+        // enough (see CHIP_LOD_RADIUS_PX) that a tile's own grains draw
+        // their real polygons and only genuine dust takes this path.
         if (rs.shardLodEnabled
             && entity.shardVariant === 'rock-shard'
             && !isFlash
             && glowColor === undefined
             && lodR * camera.zoom < SHARD_LOD_CONSTANTS.CHIP_LOD_RADIUS_PX) {
-            const blob = rs.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
+            const blob = rs.getSolidDiscBitmap(densityTintForRender(entity, entity.color));
             ctx.globalAlpha = shardMergeFadeAlpha(entity);
             ctx.drawImage(blob, -lodR, -lodR, lodR * 2, lodR * 2);
             ctx.globalAlpha = 1.0;

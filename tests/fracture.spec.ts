@@ -2300,6 +2300,123 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
   });
 });
 
+test.describe('a fragment is drawn as its own shape (LOD)', () => {
+  // The Voronoi work is only visible if the RENDERER shows the cells.  It
+  // did not: the rock chip-LOD branch blitted the cached bitmap built for
+  // METAL, a perfect equilateral triangle, so a tile shattering into 8
+  // grains at once read as 8 identical triangles.  The sim was correct
+  // throughout — the fragments really were Voronoi cells — which is why
+  // no simulation test caught it, and why this one is a render test.
+
+  test('a shattered rock tile does NOT take metal\'s authored silhouette',
+    async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities;
+      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
+        && x.mass === Infinity);
+      if (!t) throw new Error('no rock tile');
+      // Park the camera ON the tile at the DEFAULT zoom, which is the
+      // condition the bug lived at.  Set camera.position DIRECTLY, not
+      // via the player: the camera follows with smoothing, so moving the
+      // ship and drawing one frame leaves the debris off-screen and the
+      // LOD counter reads 0 for the wrong reason (this test passed
+      // vacuously that way, including with the bug restored).
+      e.player.position.x = t.position.x;
+      e.player.position.y = t.position.y;
+      e.camera.position.x = t.position.x;
+      e.camera.position.y = t.position.y;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      // One big hit: the whole pattern arrives in a single frame, which is
+      // what made the uniformity unmistakable in the first place.
+      e.physics.resolveCollision(
+        { id: 'lod_' + Math.random(), type: 'PROJECTILE',
+          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+          velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+          mass: 0.1, active: true, color: '#fff', damage: 500,
+          ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+
+      const debris = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      // Draw a frame so the LOD counter reflects this debris.  TWO things
+      // are load-bearing and each of them made an earlier draft of this
+      // test pass VACUOUSLY (0 blits with the bug fully restored):
+      //  - prepareFrameEntities() first.  draw() renders `frameEntities`,
+      //    which the sim loop rebuilds; freshly spawned debris is not in
+      //    it yet, so the renderer never sees these shards at all.
+      //  - the camera pinned DIRECTLY.  It follows the player with
+      //    smoothing, so moving the ship and drawing once leaves the
+      //    debris off-screen.
+      // draw() zeroes lastLodShardCount at the top of the frame, so read
+      // it afterwards.
+      e.prepareFrameEntities();
+      e.camera.position.x = t.position.x;
+      e.camera.position.y = t.position.y;
+      // Count any use of METAL's cached silhouette while rock debris is
+      // on screen.  This is the bug itself, stated directly: rock must
+      // never be drawn as a triangle, whatever the LOD decides.
+      let triangleBlits = 0;
+      const realTri = e.renderer.getSolidTriangleBitmap.bind(e.renderer);
+      e.renderer.getSolidTriangleBitmap = (hex: string) => {
+        triangleBlits++; return realTri(hex);
+      };
+      e.draw();
+      e.renderer.getSolidTriangleBitmap = realTri;
+
+      const shapes = debris.map((d: any) => {
+        const p = d.polygonPoints ?? [];
+        let lo = Infinity, hi = 0;
+        for (let i = 0; i < p.length; i++) {
+          const a = p[i], b = p[(i + 1) % p.length];
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          lo = Math.min(lo, len); hi = Math.max(hi, len);
+        }
+        return { n: p.length, ratio: lo > 0 ? hi / lo : Infinity,
+          apparent: d.size.x * 0.5 * e.camera.zoom };
+      });
+      return {
+        count: debris.length,
+        zoom: e.camera.zoom,
+        lodBlitted: e.renderer.lastLodShardCount,
+        lodEnabled: e.renderer.shardLodEnabled === true,
+        triangleBlits,
+        equilateral: shapes.filter((s: any) => s.n === 3 && s.ratio < 1.05).length,
+        minVerts: Math.min(...shapes.map((s: any) => s.n)),
+        minApparent: Math.min(...shapes.map((s: any) => s.apparent)),
+      };
+    });
+
+    expect(r.count).toBeGreaterThan(3);
+    // The LOD path must be LIVE, or the assertion below is vacuous — the
+    // first draft of this test asserted 0 blits while the debris was
+    // simply off-screen, and passed with the bug restored.
+    expect(r.lodEnabled).toBe(true);
+    // The SIM was always right: no fragment is an equilateral triangle.
+    expect(r.equilateral).toBe(0);
+    expect(r.minVerts).toBeGreaterThanOrEqual(3);
+    // THE BUG, stated directly: no rock fragment may borrow metal's
+    // authored equilateral silhouette.  Rock's LOD blob is a DISC —
+    // silhouette-neutral, so a few-pixel speck reads as "small rock" and
+    // makes no claim about shape.
+    expect(r.triangleBlits).toBe(0);
+    // And most of a tile's grains are now drawn as THEMSELVES.  Before the
+    // fix all 8 were collapsed to the cached blob at the default zoom, so
+    // a rock tile could never show its Voronoi pattern; the smallest one
+    // or two are genuine sub-3px dust and may still blit.
+    expect(r.lodBlitted).toBeLessThan(r.count / 2);
+
+    console.log('[LOD] debris', r.count, 'zoom', r.zoom.toFixed(2),
+      'min apparent radius', r.minApparent.toFixed(2), 'px, blitted', r.lodBlitted,
+      'triangle blits', r.triangleBlits);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('cell regularity (V11)', () => {
   test('Lloyd relaxation makes the chunks measurably more regular, and stays deterministic', async ({ page }) => {
     const watch = await boot(page);

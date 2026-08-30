@@ -2589,12 +2589,21 @@ export const SHARD_SLEEP_CONSTANTS = {
 export const SHARD_LOD_CONSTANTS = {
   MIN_APPARENT_RADIUS_PX: 9,
   // Rock chips below THIS apparent radius collapse to a cached solid-disc
-  // blit (full polygon + tint render skipped).  Smaller than the metal
-  // threshold above so a rock keeps its jagged silhouette until it's only a
-  // few screen pixels — by then the shape is imperceptible anyway.
-  CHIP_LOD_RADIUS_PX: 6,
-  // Offscreen disc bitmap resolution.  Blitted downscaled to a handful
-  // of pixels, so 48² is ample and keeps each cached colour tiny.
+  // blit (full polygon + tint render skipped).  Much smaller than the metal
+  // threshold above so a rock keeps its jagged silhouette until it is only
+  // a few screen pixels.
+  //
+  // 6 -> 3 with the grain model.  The 6 was tuned when small rock-shards
+  // were the OCCASIONAL conservation chip; V15 makes every tile break
+  // produce size/sqrt(cells) fragments, so a 36px tile's 8 grains are
+  // ~12.7 units each — apparent radius 4.1px at the default 0.65 zoom,
+  // i.e. UNDER the old gate.  Rock-tile debris could therefore never show
+  // its Voronoi silhouette at default zoom, which is the whole feature.
+  // At 3 only genuine dust (under ~9 world units) takes the blit.
+  CHIP_LOD_RADIUS_PX: 3,
+  // Offscreen LOD bitmap resolution, shared by the disc (rock) and
+  // triangle (metal) caches.  Blitted downscaled to a handful of pixels,
+  // so 48² is ample and keeps each cached colour tiny.
   DISC_BITMAP_SIZE: 48,
 };
 
