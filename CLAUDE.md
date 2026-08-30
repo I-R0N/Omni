@@ -1008,10 +1008,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the fragments at death, the interior cell edges are the cracks it
   shows as HP falls, and for rock a qualifying hit DETACHES the cell
   nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
-  holds the min-remainder death rule).  Opted in today: rock-tile /
-  rock-shard AND glass-tile / glass-shard (full + PROGRESSIVE — V10, user
-  call: glass takes rock's breaking behaviour), plastic-tile /
-  plastic-shard (full break only).  GLASS also carries a
+  holds the min-remainder death rule).  Opted in today: ALL FOUR
+  breakable materials — rock-tile / rock-shard and glass-tile /
+  glass-shard (V10, user call: glass takes rock's breaking behaviour),
+  plus metal-tile and plastic-tile / plastic-shard (A3).  Metal is the
+  fine-grained, near-honeycomb, hardest material and its grain size AND
+  bond strength both track `densityTier`, so a plate's brightness reads
+  its toughness; plastic is large-grained, loosely regular and DEFORMS
+  (`grainDent`, B1) before it breaks.  metal-SHARD keeps its composite
+  lattice for now (spec B2).  GLASS also carries a
   DAMAGE LAYER (V9, user call): 20-HP tiles / `GLASS_SHARD_HP` (12)
   shards — five / three base Blaster hits — webbing with BRIGHT
   hairline cracks (`GLASS_CRACK_STYLE`, `MATERIAL_DAMAGE_CRACKS.glass`)

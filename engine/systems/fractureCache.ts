@@ -89,7 +89,11 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   }
 
   const size = Math.max(e.size.x, e.size.y);
-  let sites = Math.round((size / f.grainSize) * getFractureSiteScale());
+  // DENSITY COUPLING (A3): a denser body is FINER grained, so its
+  // brightness reads as its grain structure.  Absent → tier is ignored.
+  const tier = e.densityTier ?? 0;
+  const finer = 1 + (f.densityCouplesGrainSize ?? 0) * tier;
+  let sites = Math.round((size / (f.grainSize / finer)) * getFractureSiteScale());
   const merges = e.mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
   sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
@@ -280,7 +284,10 @@ export function bondStrengthFor(e: GameEntity): number | null {
   const f = SHARD_VARIANTS[e.shardVariant].grain;
   const s = f?.bondStrength;
   if (s === undefined) return null;
-  return s * getBoundaryStrengthScale();
+  // ...and a denser body's boundaries are individually stronger too, so
+  // the two couplings pull the same way instead of cancelling.
+  const harder = 1 + (f.densityCouplesStrength ?? 0) * (e.densityTier ?? 0);
+  return s * harder * getBoundaryStrengthScale();
 }
 
 /** Build (or return) the entity's boundary model, converting its HP to

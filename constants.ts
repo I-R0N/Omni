@@ -8364,13 +8364,28 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // override shatterVoronoiStyle reads from `dent`.  breakShards
     // stays as the DBG 'legacy' path until V7.
     grain: {
-      grainCountMin: 6,
-      grainCountMax: 12,
-      grainSize: 5,
+      // LARGE grains (user call): a panel comes apart into a few big
+      // irregular pieces, not gravel.  grainSize 5 -> 11 takes a 36px
+      // tile from ~7 grains to ~3.
+      grainCountMin: 3,
+      grainCountMax: 6,
+      grainSize: 11,
       impactBias: 0.5,
-      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
-      // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
+      // A3: PLASTIC — large grains, only loosely regular, with a wide
+      // size mix, so a panel breaks into a few big irregular pieces
+      // rather than gravel.  Tough per boundary but it DEFORMS first:
+      // grainDent is what makes it read as plastic rather than as a
+      // softer rock.
+      regularity: 0.55,
+      sizeSpread: 0.6,
+      bondSpread: 0.25,
+      grainDent: 0.10,
+      progressive: true,
+      // 2.3x rock, but far FEWER boundaries than metal because the
+      // grains are large — so plastic is tough per seam and moderate
+      // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
+      // the old 8.
+      bondStrength: 0.62,
       radialSpeed: 1.5,
     },
     shatter: {
@@ -8431,6 +8446,46 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // on detach it releases a single shard matching the deformed
     // tile's silhouette exactly (see breakShards below).
     regen: { kind: 'none' },
+    // A3: METAL — FINE, highly regular grains and by far the
+    // strongest boundaries in the game.  The grain structure tracks
+    // `densityTier`, which is also what drives a plate's brightness, so
+    // the way a plate LOOKS is the readout of how hard it will be to
+    // break: a pale tier-0 plate is coarse and comes apart, a bright
+    // dense one is fine-grained and very hard.
+    grain: {
+      grainCountMin: 6,
+      grainCountMax: 22,
+      grainSize: 7,
+      impactBias: 0.35,     // metal cracks less radially than glass
+      regularity: 0.95,     // near-honeycomb: the look the lattice had
+      sizeSpread: 0.1,      // uniform grains — that IS what regular means
+      bondSpread: 0.15,
+      grainDent: 0.05,      // it deforms, but barely
+      progressive: true,
+      // The hardest boundaries in the game — 3.1x rock, 5.3x glass —
+      // on top of having the most boundary per body.  Solved from a
+      // measured 143px of boundary at tier 2: ~173 damage, or 43 base
+      // Blaster hits, against the 48 the old flat HP gave.  A tier-5
+      // plate reaches ~314 (78 hits), so density is felt.
+      bondStrength: 0.85,
+      // Denser plates are finer-grained AND individually harder.
+      densityCouplesGrainSize: 0.25,
+      densityCouplesStrength: 0.20,
+      radialSpeed: 1.1,
+    },
+    shatter: {
+      // Metal tiles had NO shatter policy before A3 — they broke through
+      // `dent.breakShards`, which the voronoi gates stand down.  The
+      // cells are the pieces now, like every other grain material.
+      kind: 'voronoi',
+      style: 'scatter',
+      countMin: 4, countMax: 10,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'metal-shard',
+      forwardDrag: 0.35,
+      perpScatter: 0.5,
+      scatterHalfCone: 0.8,
+    },
     dent: {
       vertexJitter: 0.13,
       // On detach the tile breaks into 5-6 equilateral triangle shards
@@ -8855,9 +8910,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       grainCountMax: 5,
       grainSize: 16,
       impactBias: 0.5,
-      // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
-      // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
+      // The same plastic, at shard scale.
+      regularity: 0.55,
+      sizeSpread: 0.6,
+      bondSpread: 0.25,
+      grainDent: 0.10,
+      progressive: true,
+      // 2.3x rock, but far FEWER boundaries than metal because the
+      // grains are large — so plastic is tough per seam and moderate
+      // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
+      // the old 8.
+      bondStrength: 0.62,
       radialSpeed: 0.8,
     },
     shatter: {

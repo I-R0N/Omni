@@ -446,6 +446,22 @@ export interface GrainSpec {
    *  grain that shares them, so the grains still tile the body exactly —
    *  which is the invariant `unionOfCells` depends on. */
   grainDent?: number;
+  /** DENSITY COUPLING (A3) — grain size and bond strength tracking the
+   *  entity's `densityTier`, which is also what drives its BRIGHTNESS.
+   *  Metal uses both, so how a plate looks IS the readout of its grain
+   *  structure: a pale low-tier plate is coarse-grained and comes apart
+   *  readily, a bright dense one is fine-grained and very hard, and the
+   *  player can tell before firing a shot.
+   *
+   *  Finer-with-denser is the physical direction (Hall-Petch: smaller
+   *  grains, stronger metal), and it is also the one that makes the two
+   *  couplings agree rather than fight — more boundary AND a higher
+   *  strength per pixel both make the dense plate tougher.
+   *
+   *  `grainSize` is DIVIDED by (1 + coupling × tier); `bondStrength` is
+   *  MULTIPLIED by (1 + coupling × tier). */
+  densityCouplesGrainSize?: number;
+  densityCouplesStrength?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────

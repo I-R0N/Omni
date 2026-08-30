@@ -406,7 +406,37 @@ dimple reads too weakly.
   at 12 → 12 → 11.3.  `bondSpread` is a pure, exported, unbiased ±60%
   law, exactly 1 at spread 0.  Carried damage was cut — see §6.3.
 - **A3** metal + plastic rows, tuned and measured like V15 was
-- **B1** per-grain dent, outer-vertices-only (§5.3 option 1)
+- **B1** per-grain dent, outer-vertices-only (§5.3 option 1) — **DONE.**
+  Shipped inert (no material carried `grainDent` until A3) and sequenced
+  BEFORE A3 deliberately: opting metal and plastic into the grain model
+  without it would have taken their deformation away, since
+  `applyDentStep` stands down under progressive fracture.  Option 1 held
+  — displacement goes to the SHARED VERTEX SET (welded by position, only
+  outline vertices move, identically in every grain that references
+  them), so the tiling `unionOfCells` needs is preserved by
+  construction.  Verified on rock with a temporary `grainDent`: 25 hits
+  dented with nothing detaching, 45.6% of body area lost to denting
+  alone, and critically ZERO outline self-intersections and ZERO
+  derived-HP drift.  Required caching boundary STRENGTHS at model build
+  (`fractureEdgeNeed`): denting moves endpoints, so a strength taken
+  from the live length would drift derived HP on every dent.
+- **A3** metal + plastic rows — **DONE.**  Measured, then solved:
+
+  | | grains on a 36px tile | regularity | bondStrength | Blaster hits |
+  |---|---|---|---|---|
+  | glass | 7 | 0.5 | 0.16 | 5 |
+  | rock | 8 | 0.5 | 0.27 | 9 |
+  | plastic | 4 (large) | 0.55 + sizeSpread 0.6 | 0.62 | 12–13 |
+  | metal | 7–15 by tier | 0.95 | 0.85 | 45–95 by tier |
+
+  Metal's DENSITY COUPLING is the piece worth keeping in view: grain size
+  and bond strength both track `densityTier`, which is also what drives a
+  plate's brightness — so how a plate LOOKS is the readout of how hard it
+  will be to break.  Measured t1: 7 grains / 123 hp → t6: 15 grains / 384
+  hp, monotonic throughout.  Metal tiles had no `shatter` policy at all
+  before A3 (they broke via `dent.breakShards`, which the voronoi gates
+  stand down); they now break into their cells like every other grain
+  material.  metal-SHARD composites are untouched — that is B2.
 - **B2** retire the metal composite lattice onto the union outline
 - **C** per-grain materials + pair function, behind a render cache
 
