@@ -2181,17 +2181,21 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     watch.assertClean();
   });
 
-  test('a denser metal plate is finer-grained and harder — its colour reads its grain',
-    async ({ page }) => {
+  test('a metal plate\'s toughness does NOT depend on its density tier', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
     await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
 
+    // DENSITY IS NOT A GRAIN PARAMETER (user call).  It was briefly one:
+    // grain size and bond strength each scaled with `densityTier`, so a
+    // bright plate was finer-grained and harder.  That inverted the
+    // model — density is a RESULT of grain size, count and regularity,
+    // not an input to them — and it made one material behave like
+    // several.  A plate's toughness now comes from its material alone.
     const r = await engine(page, (e: any) => {
-      const ents = e.currentMap.entities;
-      const byTier = new Map<number, { cells: number[]; derived: number[] }>();
-      for (const t of ents.filter((x: any) => x.active && x.shardVariant === 'metal-tile'
-          && x.mass === Infinity).slice(0, 40)) {
+      const byTier = new Map<number, number[]>();
+      for (const t of e.currentMap.entities.filter((x: any) => x.active
+          && x.shardVariant === 'metal-tile' && x.mass === Infinity).slice(0, 40)) {
         t.lastImpactLocal = { x: t.size.x * 0.5, y: 0 };
         e.physics.resolveCollision(
           { id: 'd_' + Math.random(), type: 'PROJECTILE',
@@ -2201,29 +2205,23 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         const tier = t.densityTier ?? 0;
-        if (!byTier.has(tier)) byTier.set(tier, { cells: [], derived: [] });
-        byTier.get(tier)!.cells.push((t.fractureCells ?? []).length);
-        byTier.get(tier)!.derived.push(t.maxHealth);
+        if (!byTier.has(tier)) byTier.set(tier, []);
+        byTier.get(tier)!.push(t.maxHealth);
       }
-      const out: any[] = [];
-      for (const [tier, v] of byTier) {
-        out.push({ tier,
-          cells: v.cells.reduce((a, b) => a + b, 0) / v.cells.length,
-          derived: v.derived.reduce((a, b) => a + b, 0) / v.derived.length });
-      }
-      return out.sort((a, b) => a.tier - b.tier);
+      return [...byTier.entries()]
+        .map(([tier, hp]) => ({ tier, hp: hp.reduce((a, b) => a + b, 0) / hp.length }))
+        .sort((a, b) => a.tier - b.tier);
     });
 
     expect(r.length).toBeGreaterThan(1);
     const lo = r[0], hi = r[r.length - 1];
-    // Denser plate: MORE grains (finer) and MORE total strength.  Both
-    // couplings pull the same way, so the brightness that already tracks
-    // densityTier now reads as "this will be hard to break".
-    expect(hi.cells).toBeGreaterThan(lo.cells);
-    expect(hi.derived).toBeGreaterThan(lo.derived * 1.3);
+    // Same material, same toughness, whatever the tier.  A little spread
+    // survives because each tile decomposes into its own pattern — that
+    // variance is the derived-HP model working, not density leaking back.
+    expect(Math.abs(hi.hp - lo.hp) / lo.hp).toBeLessThan(0.15);
 
-    console.log('[A3 density] ' + r.map((x: any) =>
-      `t${x.tier}: ${x.cells.toFixed(1)} grains / ${x.derived.toFixed(0)} hp`).join('  '));
+    console.log('[no density] ' + r.map((x: any) =>
+      `t${x.tier}: ${x.hp.toFixed(0)} hp`).join('  '));
 
     watch.assertClean();
   });
@@ -2604,9 +2602,13 @@ test.describe('deformation is bounded, conserving and elastic', () => {
     const avg = (rows: any[], k: string) => rows.reduce((a, b) => a + b[k], 0) / rows.length;
     for (const [name, rows] of [['plastic', plastic], ['metal', metal]] as any[]) {
       expect(rows.length, name).toBeGreaterThan(2);
-      // Every shard now decomposes — metal shards had NO grain block at
-      // all and broke on a single hit.
-      expect(avg(rows, 'cells'), name).toBeGreaterThanOrEqual(3);
+      // Every shard decomposes — metal shards had NO grain block at all
+      // and broke on a single hit.  The bar is 2 rather than 3 because a
+      // material's grainSize is now SHARED with its tile: a shard is
+      // simply a smaller body of the same stuff, so it gets whatever
+      // grain count its size implies (plastic averages 2.8) rather than
+      // a finer grain authored just for shards.
+      expect(avg(rows, 'cells'), name).toBeGreaterThanOrEqual(2);
       // ...and carries enough internal boundary to survive a few Blaster
       // hits.  Derived HP IS the total internal boundary, so a shard with
       // two grains and one short seam between them dies instantly.

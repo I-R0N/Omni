@@ -8299,7 +8299,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // which is the radial look.  The legacy fan survives as the DBG
     // 'legacy' path until V7.
     grain: {
-      grainCountMin: 5,
+      grainCountMin: 3,
       grainCountMax: 10,
       grainSize: 6,
       impactBias: 0.75,
@@ -8377,7 +8377,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // irregular pieces, not gravel.  grainSize 5 -> 11 takes a 36px
       // tile from ~7 grains to ~3.
       grainCountMin: 3,
-      grainCountMax: 6,
+      grainCountMax: 8,
       grainSize: 11,
       impactBias: 0.5,
       // A3: PLASTIC — large grains, only loosely regular, with a wide
@@ -8466,9 +8466,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // break: a pale tier-0 plate is coarse and comes apart, a bright
     // dense one is fine-grained and very hard.
     grain: {
-      grainCountMin: 6,
+      grainCountMin: 3,
       grainCountMax: 22,
-      grainSize: 7,
+      grainSize: 4,
       impactBias: 0.35,     // metal cracks less radially than glass
       regularity: 0.95,     // near-honeycomb: the look the lattice had
       sizeSpread: 0.1,      // uniform grains — that IS what regular means
@@ -8481,9 +8481,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // Blaster hits, against the 48 the old flat HP gave.  A tier-5
       // plate reaches ~314 (78 hits), so density is felt.
       bondStrength: 0.85,
-      // Denser plates are finer-grained AND individually harder.
-      densityCouplesGrainSize: 0.25,
-      densityCouplesStrength: 0.20,
       radialSpeed: 1.1,
     },
     shatter: {
@@ -8583,7 +8580,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     grain: {
       // V9: the glass-like radial pattern (user call) — more cells,
       // crowded toward the impact.
-      grainCountMin: 7,
+      grainCountMin: 3,
       grainCountMax: 16,
       grainSize: 5,
       impactBias: 0.75,
@@ -8711,8 +8708,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // toward the impact.  grainSize 40 → 22 also gives mid-size
       // rocks enough edges for the progressive chip-off to read.
       grainCountMin: 3,
-      grainCountMax: 30,
-      grainSize: 22,
+      grainCountMax: 16,
+      grainSize: 5,
       impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
@@ -8785,9 +8782,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // defect this gauntlet exists to remove.  Powerlaw fields stay as
     // the DBG legacy path.
     grain: {
-      grainCountMin: 2,
-      grainCountMax: 6,
-      grainSize: 8,
+      grainCountMin: 3,
+      grainCountMax: 10,
+      grainSize: 6,
       impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
@@ -8928,7 +8925,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // per material, tile and shard alike).
       grainCountMin: 3,
       grainCountMax: 8,
-      grainSize: 6,
+      grainSize: 11,
       impactBias: 0.5,
       // The same plastic, at shard scale.
       regularity: 0.55,
@@ -9032,8 +9029,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // metal chips die instantly.
     grain: {
       grainCountMin: 3,
-      grainCountMax: 12,
-      grainSize: 5,
+      grainCountMax: 22,
+      grainSize: 4,
       impactBias: 0.35,
       regularity: 0.95,
       sizeSpread: 0.1,
@@ -9041,8 +9038,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       grainDent: 0.05,
       progressive: true,
       bondStrength: 0.85,
-      densityCouplesGrainSize: 0.25,
-      densityCouplesStrength: 0.20,
       radialSpeed: 1.0,
     },
     shatter: {
