@@ -7616,6 +7616,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    // No rim line: the brittle dent silhouette reads cleaner against the
+    // slate fill when nothing traces every notch.  (Was a hardcoded
+    // `!== 'rock-tile'` in the draw branch; it is variant policy now, so
+    // plastic can make the same call for its own reason.)
+    outline: false,
     // Neighbour-count brightness automata (DBG "Tile shade").  Rock
     // DARKENS dense interiors (saturationBrightness < 1, the nebula
     // rule) so the centre of a slab recedes into shadow and the broken
@@ -7884,6 +7889,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // drawn over the bridge covers the join; maxSpan drops the bridge
     // once a stretching pair is half again its contact distance apart,
     // short of the 1.5×/6× a bond itself survives to.
+    // Plastic reads as GOO, so its silhouette is soft: no rim line, and
+    // corners rounded most of the way to the maximum.  Both are draw-time
+    // only — the SAT hull stays the sharp 4-gon underneath.
+    outline: false,
+    cornerRounding: 0.85,
     blend: {
       kind: 'fillet',
       appliesTo: { exclude: ['nebula-tile', 'nebula-shard'] },

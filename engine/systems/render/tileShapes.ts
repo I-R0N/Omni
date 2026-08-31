@@ -42,7 +42,7 @@ import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01,
          CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE,
-         METAL_CRACK_STYLE } from './drawUtils';
+         METAL_CRACK_STYLE, roundedPolyPath } from './drawUtils';
 
 /**
  * PAuto automata colour for a plastic-shard: the active palette's
@@ -447,10 +447,20 @@ export function drawTileShape(
     camera: CameraState,
 ): void {
 
+    // How soft this material's silhouette is, per SHARD_VARIANTS.  Both
+    // are draw-time only — nothing here is written back to
+    // `polygonPoints`, so the SAT hull stays the polygon it was.
+    const variantDef = entity.shardVariant ? SHARD_VARIANTS[entity.shardVariant] : undefined;
+    const cornerRounding = variantDef?.cornerRounding ?? 0;
+
     // Build polygon path (shared by asteroid and tile)
     const buildPath = () => {
-        ctx.beginPath();
         if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+            if (cornerRounding > 0) {
+                roundedPolyPath(ctx, entity.polygonPoints, cornerRounding);
+                return;
+            }
+            ctx.beginPath();
             const p0 = entity.polygonPoints[0];
             if (Number.isFinite(p0.x) && Number.isFinite(p0.y)) {
                 ctx.moveTo(p0.x, p0.y);
@@ -460,6 +470,7 @@ export function drawTileShape(
                 }
             }
         } else {
+            ctx.beginPath();
             const r = entity.size.x / 2;
             if (Number.isFinite(r) && r > 0) ctx.arc(0, 0, r, 0, Math.PI * 2);
         }
@@ -1029,13 +1040,11 @@ export function drawTileShape(
             }
 
             ctx.globalAlpha = 1.0 * fadeAlpha;
-            // Rock-tile renders without an outline — the brittle
-            // dent silhouette reads cleaner against the slate
-            // fill when there's no rim line tracing every
-            // notch.  Rock-shards, plastic-shards, and metal-
-            // shards keep theirs (matches the per-material
-            // tile/shard parity we set earlier).
-            if (entity.shardVariant !== 'rock-tile') {
+            // The rim line is per-variant (SHARD_VARIANTS `outline`,
+            // default on).  Off for the two SOFT silhouettes: rock-tile,
+            // whose brittle dent outline reads cleaner unlined, and
+            // plastic-shard, where a hard rim fights the goo.
+            if (variantDef?.outline !== false) {
                 ctx.strokeStyle = 'rgba(0,0,0,0.3)';
                 ctx.lineWidth   = 2;
                 ctx.stroke();

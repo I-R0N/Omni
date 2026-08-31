@@ -39,7 +39,7 @@ import { SHARD_VARIANTS, CAMERA_CONSTANTS, getActiveShardCoat } from '../../../c
 import type { ShardBlendPolicy, ShardVariantId } from '../ShardSystem.types';
 import { selectsVariant } from '../ShardSystem';
 import type { RenderSystem } from '../RenderSystem';
-import { shiftX, shiftY } from './drawUtils';
+import { shiftX, shiftY, roundedPolyPath } from './drawUtils';
 import { mobileShardFillColor, tileFillColor, shardMergeFadeAlpha } from './tileShapes';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 
@@ -177,15 +177,18 @@ function drawEnvelope(
 ): void {
     if (!(margin > 0)) return;
     const pts = e.polygonPoints;
+    // Same corner rounding the body itself is drawn with, so the coat
+    // hugs the silhouette instead of poking hard corners out past a
+    // rounded hull.
+    const rounding = e.shardVariant
+        ? (SHARD_VARIANTS[e.shardVariant]?.cornerRounding ?? 0) : 0;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(e.rotation ?? 0);
-    ctx.beginPath();
     if (pts && pts.length >= 3) {
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.closePath();
+        roundedPolyPath(ctx, pts, rounding);
     } else {
+        ctx.beginPath();
         ctx.arc(0, 0, Math.max(e.size.x, e.size.y) * 0.5, 0, Math.PI * 2);
     }
     ctx.fillStyle = fill;

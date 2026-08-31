@@ -426,6 +426,28 @@ export interface ShardVariantDef {
    *  variant and a partner is DRAWN.  Absent means today's behaviour:
    *  two hulls that happen to be touching.  Today: plastic-shard. */
   blend?: ShardBlendPolicy;
+  /** Draw the body's dark rim line.  Absent means true — the outline
+   *  every material has worn since the shard family existed.  False
+   *  drops it, which is what a SOFT material wants: a rim line traces
+   *  every notch and reads as a hard edge, so plastic (goo) and
+   *  rock-tile (whose brittle dent silhouette is cleaner unlined) turn
+   *  it off.  Read by the asteroid / mobile-shard branch, which is the
+   *  one that draws the rim; the material-tile and glass-family
+   *  branches have their own outline rules. */
+  outline?: boolean;
+  /** Corner rounding of the drawn silhouette, 0..1 — 0 (or absent) is
+   *  the hard-cornered polygon it has always been, 1 trims every corner
+   *  back to the midpoint of its shorter adjacent edge.  A FRACTION
+   *  rather than a radius because these hulls span a 20..200 diameter
+   *  range, and a fixed radius would round a big shard's corner subtly
+   *  while swallowing a small one whole.
+   *
+   *  PRESENTATION ONLY: the rounding is traced at draw time and never
+   *  written back into `polygonPoints`, so the SAT hull the physics
+   *  solver sees is the same sharp polygon it always was.  Rounding the
+   *  collision shape too would be a different (and much larger)
+   *  change. */
+  cornerRounding?: number;
   /** Render fast-path opt-in.  Today only nebula-tile populates the
    *  per-entity tinted-canvas cache (`nebulaCachedTinted`); the
    *  RenderSystem fast-path gating flips from EntityType-keyed to

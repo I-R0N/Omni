@@ -232,6 +232,92 @@ test.describe('the connector geometry', () => {
     watch.assertClean();
   });
 
+
+  test('rounded corners cut the polygon IN, never out', async ({ page }) => {
+    const watch = await boot(page);
+
+    // Plastic is drawn as goo: no rim line and heavily rounded corners
+    // (SHARD_VARIANTS `outline` / `cornerRounding`). The rounding is a
+    // draw-time trace, so its failure mode is silent — a fillet that
+    // overshoots its edge turns the polygon inside out and Canvas2D
+    // fills the result without complaint.
+    const r = await page.evaluate(() => {
+      // A unit square: edges of length 2, so the maximum trim is 1.
+      const sq = [{ x: -1, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 1 }, { x: -1, y: 1 }];
+      const trace = (rounding: number) => {
+        const ops: any[] = [];
+        const ctx: any = {
+          beginPath() { ops.push(['begin']); },
+          moveTo(x: number, y: number) { ops.push(['move', x, y]); },
+          lineTo(x: number, y: number) { ops.push(['line', x, y]); },
+          quadraticCurveTo(cx: number, cy: number, x: number, y: number) {
+            ops.push(['quad', cx, cy, x, y]);
+          },
+          closePath() { ops.push(['close']); },
+        };
+        (window as any).__omniBlend.roundedPolyPath(ctx, sq, rounding);
+        return ops;
+      };
+      const summarise = (ops: any[]) => ({
+        kinds: ops.map(o => o[0]),
+        quads: ops.filter(o => o[0] === 'quad'),
+        pts: ops.filter(o => o[0] === 'move' || o[0] === 'line')
+                .map(o => [o[1], o[2]]),
+      });
+      return {
+        hard: summarise(trace(0)),
+        soft: summarise(trace(0.5)),
+        max: summarise(trace(1)),
+        degenerate: trace(0.5 as number).length > 0 &&
+          (() => { // fewer than 3 points must still draw something sane
+            const ops: any[] = [];
+            const ctx: any = {
+              beginPath() {}, moveTo() { ops.push('m'); }, lineTo() { ops.push('l'); },
+              quadraticCurveTo() { ops.push('q'); }, closePath() {},
+            };
+            (window as any).__omniBlend.roundedPolyPath(ctx, [{ x: 0, y: 0 }], 0.5);
+            return ops.length;
+          })(),
+      };
+    });
+
+    // Rounding 0 is the polygon it always was — four corners, no curves.
+    expect(r.hard.kinds).toEqual(['begin', 'move', 'line', 'line', 'line', 'close']);
+    expect(r.hard.quads.length).toBe(0);
+
+    // Rounded: one fillet per corner, and each fillet's CONTROL POINT is
+    // the original vertex — that is what keeps the corner's own angle
+    // instead of machining every corner to a constant arc.
+    expect(r.soft.quads.length).toBe(4);
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    for (const [cx, cy] of r.soft.quads.map((q: any) => [q[1], q[2]])) {
+      expect(corners.some(([x, y]) => Math.abs(x - cx) < 1e-9 && Math.abs(y - cy) < 1e-9)).toBe(true);
+    }
+
+    // Every traced point stays INSIDE the original hull: corners are cut
+    // away, never bulged past the edge they sit on.
+    const all = [...r.soft.pts, ...r.soft.quads.map((q: any) => [q[3], q[4]])];
+    for (const [x, y] of all) {
+      expect(Math.abs(x)).toBeLessThanOrEqual(1 + 1e-9);
+      expect(Math.abs(y)).toBeLessThanOrEqual(1 + 1e-9);
+    }
+
+    // At the maximum, each corner is trimmed to the midpoint of its
+    // adjacent edges — adjacent fillets exactly meet and none overlaps,
+    // so the shape stays a shape.
+    const maxEnds = r.max.quads.map((q: any) => [q[3], q[4]]);
+    for (const [x, y] of maxEnds) {
+      const onMidpoint = (Math.abs(Math.abs(x) - 1) < 1e-9 && Math.abs(y) < 1e-9)
+                      || (Math.abs(Math.abs(y) - 1) < 1e-9 && Math.abs(x) < 1e-9);
+      expect(onMidpoint, `fillet ends on an edge midpoint, not past it: ${x},${y}`).toBe(true);
+    }
+
+    // A polygon too small to have corners still draws rather than
+    // throwing or dropping out.
+    expect(r.degenerate).toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
 });
 
 test.describe('a bond in the sim reaches the draw pass', () => {
