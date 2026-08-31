@@ -2037,6 +2037,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   body's pattern, a SHARD is a mobile entity, and a grain BECOMES a shard
   when it detaches — grains did not replace shards, and the spec applies
   to tile and shard variants alike.
+- **DENSITY IS NOT A GRAIN PARAMETER, AND A MATERIAL'S GRAIN GEOMETRY IS
+  SHARED BY ITS TILE AND SHARD** (user call).  Grain size and bond
+  strength were briefly coupled to `densityTier`, so a bright metal plate
+  was finer-grained and harder.  That inverts the model: density is a
+  RESULT of grain size, grain count and regularity, not an input to them,
+  and coupling it made one material behave like several (metal ranged
+  123–384 HP by tier; it is 133 flat now).  Nothing in `GrainSpec` may
+  read `densityTier`.
+  For the same reason a material has ONE grain geometry — `grainSize`,
+  the count clamps, `regularity`, `sizeSpread`, `impactBias` — shared by
+  its tile and its shard rows: a shard is a smaller body of the same
+  stuff, not a different material.  `radialSpeed` is the one deliberate
+  exception (how fast pieces fly apart is about being mobile, not about
+  the grain), and any other divergence needs a comment saying why.
 - **A BREAK CONSERVES, AND THE INVARIANT IS ENFORCED, NOT ASSUMED.**  When
   a grain detaches, the area the body loses must equal the area the
   fragment carries away.  `progressFracture` CHECKS that before
