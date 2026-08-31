@@ -160,6 +160,29 @@ the same number means the colour IS the readout of the grain structure.
 A pale, low-tier plate has coarse grains and breaks up easily; a bright,
 dense one is fine-grained and very hard — visible before you shoot it.
 
+### 2.4a Parameter reference
+
+What each knob means, in one line, and which way to turn it.
+
+| parameter | what it controls | turn it UP to get |
+|---|---|---|
+| `grainSize` | the DIAMETER of one grain, world units.  Count is `bodyArea / (π·(grainSize/2)²)`, so this is the material's coarseness at every body size | fewer, bigger grains — and LESS total boundary, so a WEAKER body |
+| `grainCountMin` | floor on grain count | small bodies keep internal structure (below it, grains are FINER than `grainSize` says) |
+| `grainCountMax` | ceiling on grain count — a performance guard, since decomposition is superlinear in sites | large bodies keep true grain size (below it, grains are COARSER than `grainSize` says) |
+| `regularity` | 0..1 — how even and hexagon-like the grains are.  Drives Lloyd relaxation rounds and blue-noise spacing together | tidy, near-honeycomb grains (machined); down for ragged, uneven ones (natural) |
+| `sizeSpread` | 0..1 — how MIXED grain sizes are within one body.  Does not move the count or the mean | coarse and fine grains side by side; 0 is uniform |
+| `bondSpread` | 0..1 — seeded per-boundary variation in strength.  Unbiased, so it does not change total HP | uneven breaking — some seams give early, some hold |
+| `impactBias` | 0..1 — fraction of grains crowded toward the hit | the radial "glass star"; pulls AGAINST regularity by construction |
+| `bondStrength` | damage per PIXEL of grain boundary — the material's toughness | a tougher material.  HP is DERIVED: `Σ (boundary length × strength)` |
+| `grainDent` | how far the struck grain dimples inward per hit, as a fraction of its radius | ductile, visibly warping; absent means brittle |
+| `dentRecoverSeconds` | time for a fragment that broke off dented to spring back to its cut shape | slower spring-back; absent means the dent is permanent |
+| `radialSpeed` | how fast pieces fly apart along their own centroid direction | a more explosive break.  The one parameter allowed to differ between a material's tile and shard |
+| `minAreaFraction` | optional override of the sliver-retirement threshold | (unused by every material today) |
+
+The two that set TOUGHNESS are `grainSize` and `bondStrength`, and they
+multiply: finer grains mean more boundary, and strength is charged per
+pixel of it.  Everything else is look and feel.
+
 ### 2.5 The archetype table
 
 The point of the axes is that materials are positions in the space, not
