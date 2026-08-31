@@ -356,7 +356,12 @@ export interface GrainSpec {
    *  the entity's mergeCount when it was composed from more pieces. */
   grainCountMin: number;
   grainCountMax: number;
-  /** Pixels of entity diameter per Voronoi site. */
+  /** The GRAIN's own diameter, in world units.  Site count is
+   *  `bodyArea / (pi * (grainSize/2)^2)`, i.e. proportional to AREA, so a
+   *  material's grains are the same size in a tile and in a shard.  (It
+   *  used to be pixels of body diameter per site, which made count linear
+   *  in size and therefore made grains GROW with the body.)  Bounded by
+   *  grainCountMin/Max — see the floor and ceiling in fractureCache. */
   grainSize: number;
   /** Fraction of sites biased toward the impact point (0..1). */
   impactBias: number;

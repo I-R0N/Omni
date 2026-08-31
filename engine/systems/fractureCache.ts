@@ -89,10 +89,25 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
     e.fractureEdges = undefined;
   }
 
-  const size = Math.max(e.size.x, e.size.y);
-  let sites = Math.round((size / f.grainSize) * getFractureSiteScale());
+  // GRAIN COUNT IS PROPORTIONAL TO AREA (user call), so `grainSize` is
+  // the grain's own DIAMETER and a material's grains are the same size
+  // whatever body they are in.  Counting by DIAMETER instead (the old
+  // `size / grainSize`) made count linear in size, so grain area grew
+  // with the body: a rock tile's grains measured ~12.7 units across
+  // while the same material's shard had ~8.4 — a shard was quietly a
+  // finer-grained material than its own tile.
+  const bodyArea = polygonArea(e.polygonPoints);
+  const grainArea = Math.PI * (f.grainSize * 0.5) ** 2;
+  let sites = Math.round((bodyArea / Math.max(1e-6, grainArea)) * getFractureSiteScale());
   const merges = e.mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
+  // The FLOOR is the documented exception to constant grain size: a body
+  // small enough to be one or two grains has almost no internal boundary
+  // and so almost no derived HP, and would die to a single shot.  Below
+  // it, grains are finer than the material's own — deliberately.  The
+  // CEILING is a performance guard: decomposition is superlinear in site
+  // count, so a very large body gets coarser grains rather than hundreds
+  // of cells.  Constant grain size holds BETWEEN the two.
   sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));

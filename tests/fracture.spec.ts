@@ -2623,6 +2623,65 @@ test.describe('deformation is bounded, conserving and elastic', () => {
   });
 });
 
+test.describe('grain size is a material constant', () => {
+  test('a body\'s grains are the material\'s size, between the floor and the ceiling',
+    async ({ page }) => {
+    const watch = await boot(page);
+
+    // Grain COUNT is proportional to AREA, so `grainSize` is the grain's
+    // own diameter and a material's grains are the same size whatever
+    // body they are in.  Counting by DIAMETER made count linear in size,
+    // so grains GREW with the body — a rock tile's measured ~12.7 units
+    // across against ~8.4 in the same material's shard, i.e. a shard was
+    // quietly a finer-grained material than its own tile.
+    const cases = [
+      { map: 'ROCK_FIELD', variant: 'rock-tile', authored: 14 },
+      { map: 'GLASS_FIELD', variant: 'glass-tile', authored: 15 },
+      { map: 'PLASTIC_FIELD', variant: 'plastic-tile', authored: 20 },
+      { map: 'METAL_FIELD', variant: 'metal-tile', authored: 13 },
+    ];
+    const out: any[] = [];
+    for (const c of cases) {
+      await startRun(page, c.map);
+      const onMap = new Function('s', `return s.currentMapType === '${c.map}'`) as (s: any) => boolean;
+      await waitForStats(page, onMap, c.map);
+      const r = await engine(page, (e: any, arg: any) => {
+        const area = (p: any[]) => { let a = 0;
+          for (let i = 0; i < p.length; i++) { const q = p[i], n = p[(i + 1) % p.length];
+            a += q.x * n.y - n.x * q.y; } return Math.abs(a / 2); };
+        const dias: number[] = [];
+        for (const t of e.currentMap.entities.filter((x: any) => x.active
+            && x.shardVariant === arg.variant && x.mass === Infinity).slice(0, 8)) {
+          t.lastImpactLocal = { x: t.size.x * 0.5, y: 0 };
+          e.physics.resolveCollision(
+            { id: 'gs_' + Math.random(), type: 'PROJECTILE',
+              position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+              velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+              mass: 0.1, active: true, color: '#fff', damage: 0.001,
+              ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+            t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+          const n = (t.fractureCells ?? []).length;
+          if (n > 0) dias.push(2 * Math.sqrt((area(t.polygonPoints) / n) / Math.PI));
+        }
+        return dias.reduce((a, b) => a + b, 0) / Math.max(1, dias.length);
+      }, c);
+      out.push({ variant: c.variant, authored: c.authored, measured: r });
+    }
+
+    for (const row of out) {
+      // A tile is comfortably above the grain-count floor, so its grains
+      // come out at the material's authored size.
+      expect(row.measured, row.variant).toBeGreaterThan(row.authored * 0.85);
+      expect(row.measured, row.variant).toBeLessThan(row.authored * 1.15);
+    }
+
+    console.log('[grain size] ' + out.map((x: any) =>
+      `${x.variant.replace('-tile', '')} ${x.measured.toFixed(1)}/${x.authored}`).join('  '));
+
+    watch.assertClean();
+  });
+});
+
 test.describe('cell regularity (V11)', () => {
   test('Lloyd relaxation makes the chunks measurably more regular, and stays deterministic', async ({ page }) => {
     const watch = await boot(page);

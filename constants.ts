@@ -8301,7 +8301,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     grain: {
       grainCountMin: 3,
       grainCountMax: 10,
-      grainSize: 6,
+      grainSize: 15,
       impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
@@ -8378,7 +8378,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // tile from ~7 grains to ~3.
       grainCountMin: 3,
       grainCountMax: 8,
-      grainSize: 11,
+      grainSize: 20,
       impactBias: 0.5,
       // A3: PLASTIC — large grains, only loosely regular, with a wide
       // size mix, so a panel breaks into a few big irregular pieces
@@ -8468,7 +8468,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     grain: {
       grainCountMin: 3,
       grainCountMax: 22,
-      grainSize: 4,
+      grainSize: 13,
       impactBias: 0.35,     // metal cracks less radially than glass
       regularity: 0.95,     // near-honeycomb: the look the lattice had
       sizeSpread: 0.1,      // uniform grains — that IS what regular means
@@ -8582,7 +8582,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // crowded toward the impact.
       grainCountMin: 3,
       grainCountMax: 16,
-      grainSize: 5,
+      grainSize: 14,
       impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
@@ -8709,7 +8709,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // rocks enough edges for the progressive chip-off to read.
       grainCountMin: 3,
       grainCountMax: 16,
-      grainSize: 5,
+      grainSize: 14,
       impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
@@ -8784,7 +8784,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     grain: {
       grainCountMin: 3,
       grainCountMax: 10,
-      grainSize: 6,
+      grainSize: 15,
       impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
@@ -8925,7 +8925,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // per material, tile and shard alike).
       grainCountMin: 3,
       grainCountMax: 8,
-      grainSize: 11,
+      grainSize: 20,
       impactBias: 0.5,
       // The same plastic, at shard scale.
       regularity: 0.55,
@@ -9030,7 +9030,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     grain: {
       grainCountMin: 3,
       grainCountMax: 22,
-      grainSize: 4,
+      grainSize: 13,
       impactBias: 0.35,
       regularity: 0.95,
       sizeSpread: 0.1,

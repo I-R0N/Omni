@@ -2048,7 +2048,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   For the same reason a material has ONE grain geometry — `grainSize`,
   the count clamps, `regularity`, `sizeSpread`, `impactBias` — shared by
   its tile and its shard rows: a shard is a smaller body of the same
-  stuff, not a different material.  `radialSpeed` is the one deliberate
+  stuff, not a different material.  `grainSize` is the GRAIN'S OWN
+  DIAMETER and the site count is `bodyArea / (π·(grainSize/2)²)`, i.e.
+  proportional to AREA.  Counting by DIAMETER instead makes count linear
+  in size, so grains GROW with the body: measured that way a rock tile's
+  grains were ~12.7 units across while the same material's shard had
+  ~8.4 — a shard was quietly a finer-grained material than its own tile.
+  Two documented exceptions bracket it: `grainCountMin` is a FLOOR,
+  because a body small enough to be one or two grains has almost no
+  internal boundary and so almost no derived HP, and `grainCountMax` is
+  a performance CEILING, because decomposition is superlinear in site
+  count.  Constant grain size holds BETWEEN them.  `radialSpeed` is the one deliberate
   exception (how fast pieces fly apart is about being mobile, not about
   the grain), and any other divergence needs a comment saying why.
 - **A BREAK CONSERVES, AND THE INVARIANT IS ENFORCED, NOT ASSUMED.**  When
