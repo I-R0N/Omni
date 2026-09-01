@@ -185,55 +185,137 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
    *  The assertion is the REQUIREMENT, not the mechanism: let the sim run and
    *  check the ship actually ends up beyond GRAVITY_RANGE, still moving away.
    *  Testing "velocity was set" would pass just as happily on a shove too weak
-   *  to escape, which is the whole thing being fixed. */
+   *  to escape, which is the whole thing being fixed.
+   *
+   *  Two things are measured in SIM quantities rather than wall clock — the
+   *  distance at the crossing and the speed the ship still carries there — so
+   *  a slow runner changes how long the test takes and nothing about what it
+   *  asserts.  And the corridor out is CLEARED first: terrain in the flight
+   *  path is a real hazard but it is not this mechanism, and leaving it in is
+   *  what made an earlier version of this test pass ten times locally and fail
+   *  in CI (the ship clipped a rock, lost most of its speed, and crawled the
+   *  rest of the way out over eight seconds).  The margin the shove carries is
+   *  exactly what that flake was reporting, so it is now asserted directly. */
+  const escapeProbe = () => {
+    const e = (window as any).__omniEngine;
+    const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+    if (!rift) return null;
+    e.player.position.x = rift.position.x + 180;
+    e.player.position.y = rift.position.y;
+    if (!e.transitionToMap(rift.portalTargetId)) return null;
+    const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+    if (!exit) return null;
+    const range = exit.gravityRange as number;
+    const d = () => Math.hypot(e.player.position.x - exit.position.x,
+                               e.player.position.y - exit.position.y);
+    const launch = { speed: Math.hypot(e.player.velocity.x, e.player.velocity.y), dist: d(), range };
+    // Clear the corridor — see the note above.  Structures AND enemies: the
+    // arena runs waves, and a rammer arriving mid-flight is the same confound
+    // wearing a different hat.  Identified by the role fields rather than by
+    // an EntityType number, which is not in scope in the page and would be a
+    // silent no-op if the enum were ever reordered.
+    let cleared = 0;
+    const inTheWay = (ent: any) => ent.shardVariant !== undefined
+      || ent.enemySubtype !== undefined || ent.isRival === true;
+    for (const ent of e.currentMap.entities) {
+      if (!ent.active || !inTheWay(ent)) continue;
+      const dx = ent.position.x - exit.position.x, dy = ent.position.y - exit.position.y;
+      if (dx * dx + dy * dy >= (range + 400) * (range + 400)) continue;
+      ent.active = false;
+      // A static tile also lives in the physics static grid, which is built
+      // once at map load — clearing `active` alone leaves the ship bouncing
+      // off a tile that is no longer drawn.
+      if (ent.mass === Infinity) e.physics.removeStaticEntity(ent);
+      cleared++;
+    }
+    return { launch, cleared, exitId: exit.id };
+  };
+
+  /** Run the flight and report what the ship was doing when it crossed the
+   *  rim.  Wall clock is only the give-up budget; every number returned is
+   *  read off the sim. */
+  const flight = async (budgetMs: number) => {
+    const e = (window as any).__omniEngine;
+    const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+    const d = () => Math.hypot(e.player.position.x - exit.position.x,
+                               e.player.position.y - exit.position.y);
+    const t0 = performance.now();
+    let last = d();
+    while (performance.now() - t0 < budgetMs) {
+      await new Promise(r => requestAnimationFrame(() => r(null)));
+      const now = d();
+      if (now > exit.gravityRange) {
+        return { escaped: true, speedAtRim: Math.hypot(e.player.velocity.x, e.player.velocity.y),
+                 growing: now > last };
+      }
+      last = now;
+    }
+    return { escaped: false, speedAtRim: 0, growing: false, stuckAt: last, range: exit.gravityRange };
+  };
+
   test('the player is ejected hard enough to leave the exit rift behind', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    const arrived = await page.evaluate(() => {
-      const e = (window as any).__omniEngine;
-      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
-      if (!rift) return null;
-      e.player.position.x = rift.position.x + 180;
-      e.player.position.y = rift.position.y;
-      if (!e.transitionToMap(rift.portalTargetId)) return null;
-      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
-      return {
-        speed: Math.hypot(e.player.velocity.x, e.player.velocity.y),
-        dist: Math.hypot(e.player.position.x - exit.position.x,
-                         e.player.position.y - exit.position.y),
-        range: exit.gravityRange,
-      };
-    });
-
+    const arrived = await page.evaluate(escapeProbe);
     expect(arrived, 'an arena rift and a way home').not.toBeNull();
     // Thrown, not deposited — and outward, so the first thing the ship does is
     // leave rather than drift back through the door.
-    expect(arrived!.speed).toBeGreaterThan(5);
-    expect(arrived!.dist).toBeLessThan(arrived!.range);   // starts INSIDE the well
+    expect(arrived!.launch.speed).toBeGreaterThan(5);
+    expect(arrived!.launch.dist).toBeLessThan(arrived!.launch.range);   // starts INSIDE
 
-    // Now let the well do its worst.  The escape takes well under a second at
-    // the shipped speed; poll for it rather than waiting a fixed time, and let
-    // the timeout be the failure if the ship never gets out.
-    await waitForEngine(page, e => {
-      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
-      if (!exit) return false;
-      return Math.hypot(e.player.position.x - exit.position.x,
-                        e.player.position.y - exit.position.y) > exit.gravityRange;
-    }, 'the ship to climb out of the exit rift\'s gravity well', 20_000);
+    const out = await page.evaluate(flight, 15_000);
+    expect(out.escaped, 'the ship climbs out of the exit rift\'s gravity well').toBe(true);
+    // …and it is still LEAVING at the rim: escaped, not lobbed to the edge and
+    // caught.  This floor is the MARGIN — the shove is solved to arrive at the
+    // rim doing ~18, and the version that had to be fixed arrived doing ~2.
+    expect(out.speedAtRim).toBeGreaterThan(8);
+    expect(out.growing).toBe(true);
 
-    // And it is still LEAVING at the boundary — escaped, not lobbed to the
-    // edge and caught.  Sampled as a distance that keeps growing.
-    const escaping = await page.evaluate(async () => {
+    watch.assertClean();
+  });
+
+  /** The shove is SOLVED against the well (`playerEjectSpeed`), not tuned
+   *  beside it, so deepening the well must deepen the throw with it.  Dial the
+   *  DBG gravity knobs to their strongest and the way home still works — which
+   *  is the whole point of solving rather than writing a number down, and is
+   *  the failure mode this replaced (the literal was sized against a narrower
+   *  well and left standing when the well grew). */
+  test('a stronger well throws harder — the escape is solved, not remembered', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const knobs = await page.evaluate(async () => {
       const e = (window as any).__omniEngine;
-      const exit = e.portals.find((p: any) => p.portalTargetId === 'overworld');
-      const d = () => Math.hypot(e.player.position.x - exit.position.x,
-                                 e.player.position.y - exit.position.y);
-      const before = d();
-      await new Promise(r => setTimeout(r, 600));
-      return { before, after: d() };
+      const name = (k: string) => (window as any).__omniStats?.[k];
+      // Cycle by NAME rather than by an assumed index — the cycles grow.  The
+      // name only refreshes on the engine's stats push, so wait a frame after
+      // each click rather than reading a snapshot that cannot have changed yet.
+      const dial = async (click: () => void, key: string, target: string) => {
+        for (let i = 0; i < 16 && name(key) !== target; i++) {
+          click();
+          for (let f = 0; f < 4 && name(key) !== target; f++) {
+            await new Promise(r => requestAnimationFrame(() => r(null)));
+          }
+        }
+        return name(key);
+      };
+      const g = await dial(() => e.dbg.cyclePortalGravity(), 'portalGravityName', '1.5×');
+      const r = await dial(() => e.dbg.cyclePortalGravityRange(), 'portalGravityRangeName', '1.5×');
+      return { g, r };
     });
-    expect(escaping.after).toBeGreaterThan(escaping.before);
+    expect(knobs.g, 'the gravity knob reaches its strongest step').toBe('1.5×');
+    expect(knobs.r, 'the range knob reaches its widest step').toBe('1.5×');
+
+    const arrived = await page.evaluate(escapeProbe);
+    expect(arrived, 'an arena rift and a way home').not.toBeNull();
+    // A wider well is a longer climb, so the solve must have thrown harder
+    // than the shipped ~20.7 rather than reusing it.
+    expect(arrived!.launch.speed).toBeGreaterThan(21);
+
+    const out = await page.evaluate(flight, 15_000);
+    expect(out.escaped, 'the ship climbs out of the DEEPENED well too').toBe(true);
+    expect(out.growing).toBe(true);
 
     watch.assertClean();
   });

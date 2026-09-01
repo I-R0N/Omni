@@ -148,14 +148,20 @@ test.describe('the run', () => {
     expect(hubPortal!.target).toMatch(/^arena_/);
 
     await engine(page, (e, tid: string) => e.transitionToMap(tid), hubPortal!.target);
-    await waitForTransit(page);
-    const inArena = await waitForStats(page, s => s.currentMapType !== 'OVERWORLD', 'the arena');
-
+    // Read the carry AT THE SEAM.  `transitionToMap` builds the destination
+    // and arms the arrival beat before it returns, so the sim is frozen right
+    // here and this is the arrival state itself.  Sampling after the beat
+    // released would measure the arrival PLUS however many frames of arena
+    // flight the harness took to notice it — and the ship arrives moving (it
+    // is thrown clear of the exit rift), so what it flew into on the way out
+    // would land on `health`.  That is gameplay, not a seam.
     const afterPortal = await engine(page, e => ({
       credits: e.credits, score: e.score, health: e.player.health,
       ship: [...e.shipSlots], weapon: [...e.weaponSlots], inv: [...e.inventory],
       equipped: [...e.equippedWeapons],
     }));
+    await waitForTransit(page);
+    const inArena = await waitForStats(page, s => s.currentMapType !== 'OVERWORLD', 'the arena');
     // EVERYTHING carries.  This is the whole assertion.
     expect(afterPortal).toEqual(beforePortal);
     // And the arena runs waves, read off the destination descriptor.

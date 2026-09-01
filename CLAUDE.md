@@ -343,10 +343,26 @@ is now reachable only through that dropdown.
   AND THE PLAYER IS THROWN CLEAR (user call): `placePlayerAtSpawn` lands
   the ship dead-stopped, which left it at rest INSIDE the exit rift's own
   well, so the hole it had just come out of pulled it back in.  The
-  arrival now carries an outward velocity along the mouth→ship axis
-  (`TRANSIT.PLAYER_EJECT_SPEED`, sized from the escape arithmetic rather
-  than for feel — 12 px/step clears `GRAVITY_RANGE` in ~0.75 s still
-  doing ~10.8, against the ~3 that merely crawls out).  RADIAL, unlike
+  arrival now carries an outward velocity along the mouth→ship axis,
+  and that speed is SOLVED against the well rather than tuned beside it
+  (`playerEjectSpeed` in `constants.ts`).  It WAS a literal, and a
+  literal is what goes stale: retuning `GRAVITY_STRENGTH`/`RANGE` left
+  the old 12 px/step climbing a well half again as wide, which still
+  escaped on a clear run but reached the rim with almost nothing left,
+  so one clip of terrain on the way out stranded the ship in the throat.
+  What is written down now is the SPEC — `TRANSIT.PLAYER_CLEAR_SEC`, be
+  outside `GRAVITY_RANGE` within 0.75 s, capped at
+  `PLAYER_EJECT_CRUISE_FRAC` of the ship's own cruise so it can never
+  read as a launch — and the solve reads the DBG gravity knobs like
+  every other portal consumer, so an A/B on the well's strength carries
+  the way out with it.  A closed form is not available: a purely
+  ballistic escape needs only ~3.7 px/step and crawls out over seconds,
+  so FRICTION is what actually decides the trip, which makes the
+  criterion transcendental.  Forty bisection steps over a ~45-step
+  forward integration of the sim's own gravity arithmetic, once per
+  transit, is free at that call rate; at the shipped well it lands on
+  20.7 px/step, reaching the rim still doing ~18.7 against a ~42.5
+  cruise.  RADIAL, unlike
   the debris' random headings: being spat sideways into the terrain you
   arrived beside is not an arrival.  `exitMouthFor(fromId)` is the ONE
   definition of "the rift you came out of" — where you land, which way

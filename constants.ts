@@ -5234,6 +5234,80 @@ export function getPortalGravityRangeMult(): number { return PORTAL_GRAVITY_RANG
 export function getPortalLensMult(): number { return PORTAL_LENS_CYCLE[activePortalLensIndex]; }
 export function getPortalLensSpinMult(): number { return PORTAL_LENS_SPIN_CYCLE[activePortalLensSpinIndex]; }
 
+/** The outward speed the arrival is thrown at, SOLVED against the exit rift's
+ *  well rather than tuned beside it.
+ *
+ *  This is a number that has to agree with four others — GRAVITY_STRENGTH,
+ *  GRAVITY_PLAYER_SCALE, GRAVITY_RANGE and ARRIVAL_OFFSET — and it stopped
+ *  agreeing the moment the well was retuned: the literal it replaced was
+ *  sized against a 700-unit well and left standing when the well grew to
+ *  1050, which still escaped on a clear run but reached the rim with almost
+ *  nothing left, so one clip of terrain on the way out left the ship stuck
+ *  in the throat.  Solving makes the agreement structural: the well can be
+ *  retuned, or the DBG knobs dialled, and the arrival is re-sized to match
+ *  with nothing to remember.
+ *
+ *  The model is the sim's own arithmetic, not an approximation of it — the
+ *  player-side gravity read from `PhysicsSystem.applyGravity` (including its
+ *  0.2 acceleration clamp and the `max(distSq, 1e4)` near-field floor) and
+ *  the integrate-then-damp order from the same file's integration step, at
+ *  the 60 Hz reference the velocity units are quoted in.  A closed form was
+ *  not usable: friction is what actually decides the trip (a purely
+ *  ballistic escape needs only ~3.7 px/step, which crawls out over several
+ *  seconds and reads as being let go rather than thrown), so the criterion
+ *  has to be "outside the range within CLEAR_SEC", which the drag term makes
+ *  transcendental.  Forty bisection steps over a ~45-step forward integration
+ *  is a few microseconds, once per transit — free at this call rate.
+ *
+ *  Reads the DBG gravity knobs, like every other portal consumer, so an A/B
+ *  on the well's strength carries the escape with it instead of quietly
+ *  breaking the way home. */
+export function playerEjectSpeed(mapType: MapType): number {
+  const P = PORTAL_CONSTANTS;
+  const T = P.TRANSIT;
+  const move = PLAYER_MOVEMENT_CONFIG[mapType];
+  const friction = move.friction;
+  // What the PLAYER feels: the well's strength times its player fraction,
+  // times the DBG knob.  Mass never enters — gravity is applied as an
+  // acceleration — so hull weight cannot change the escape.
+  const pull = P.GRAVITY_STRENGTH * P.GRAVITY_PLAYER_SCALE * getPortalGravityMult();
+  const range = P.GRAVITY_RANGE * getPortalGravityRangeMult();
+  const budget = Math.max(1, Math.round(T.PLAYER_CLEAR_SEC * 60));
+
+  // Does an arrival at v0 get outside `range` within the budget?
+  const clears = (v0: number): boolean => {
+    let d = P.ARRIVAL_OFFSET, v = v0;
+    for (let i = 0; i < budget; i++) {
+      v -= Math.min(pull / Math.max(d * d, 1e4), 0.2);
+      d += v;
+      v *= friction;
+      if (d >= range) return true;
+      if (d <= 1) return false;          // fell back through the mouth
+    }
+    return false;
+  };
+
+  // Cruise is the friction-limited top speed the ship reaches under its own
+  // thrust; the shove is capped as a fraction of it so it can never read as
+  // a launch.  Note the spec is stated against GRAVITY_RANGE, not against the
+  // pull, so a well switched OFF at the DBG knob still spits the player the
+  // same distance clear of the door rather than parking them in it.
+  const cruise = move.acceleration / Math.max(1e-6, 1 - friction);
+  const ceiling = cruise * T.PLAYER_EJECT_CRUISE_FRAC;
+  // Degenerate config guard: an arrival already outside the range needs no
+  // shove at all.  (Not the gravity-knob-off case — with the pull switched
+  // off a resting ship still never crosses the rim, so that one solves for
+  // the speed that simply covers the distance.)
+  if (clears(0)) return 0;
+  let lo = 0, hi = ceiling;
+  if (!clears(hi)) return hi;            // deeper than CLEAR_SEC allows — cap wins
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (clears(mid)) hi = mid; else lo = mid;
+  }
+  return hi;
+}
+
 export function getPortalSizeName(): string { return `${PORTAL_SIZE_CYCLE[activePortalSizeIndex]}×`; }
 export function getPortalGravityName(): string {
   const v = PORTAL_GRAVITY_CYCLE[activePortalGravityIndex];
@@ -5692,16 +5766,25 @@ export const PORTAL_CONSTANTS = {
     // so the arrival carries an outward velocity sized to LEAVE THE WELL
     // OUTRIGHT rather than merely to look energetic.
     //
-    // The arithmetic, in px per 60 Hz step (cruise is ~42, so this reads as a
-    // firm shove rather than a launch).  The player feels
-    // GRAVITY_STRENGTH × GRAVITY_PLAYER_SCALE = 480, so a(d) = 480/max(d²,1e4).
-    // Climbing from ARRIVAL_OFFSET (165) to the edge of GRAVITY_RANGE (700)
-    // costs ∫480/d² dd ÷ v = 480 × (1/165 − 1/700) / v = 2.22/v of speed, and
-    // the trip also pays friction (0.998 per step).  At v = 3 the ship barely
-    // crawls out; at 12 it clears the range in ~0.75 s still doing ~10.8, so
-    // the escape is decisive at every difficulty and hull weight — mass does
-    // not enter, since gravity is applied as an acceleration.
-    PLAYER_EJECT_SPEED: 12,
+    // That speed is SOLVED against the well rather than hand-set beside it
+    // (see playerEjectSpeed).  It used to be a literal, and a literal is
+    // exactly what goes stale: retuning GRAVITY_STRENGTH/RANGE left the old
+    // number climbing a well half again as wide, which still escaped but
+    // arrived at the rim with nothing left — so a single knock into terrain
+    // on the way out stranded the ship in the throat.  The SPEC is what
+    // survives a retune, so the spec is what is written down here.
+    //
+    // CLEAR_SEC is that spec: the arrival must be outside GRAVITY_RANGE this
+    // many seconds after it starts, which is what makes the escape read as
+    // decisive rather than as a slow crawl that happens to end outside.
+    PLAYER_CLEAR_SEC: 0.75,
+    // …and never faster than this fraction of the ship's own cruise, so the
+    // shove can never read as a launch however the well is retuned.  At the
+    // shipped well the solve lands at ~20.7 px/step against a ~42.5 cruise,
+    // comfortably inside the cap; the cap is what catches a future well so
+    // deep that leaving it in CLEAR_SEC would mean firing the player out of
+    // the arena.
+    PLAYER_EJECT_CRUISE_FRAC: 0.8,
   },
   // ── Transit warp (the flight THROUGH the wormhole) ────────────────
   // A short screen-space beat played on ARRIVAL, over the destination map,

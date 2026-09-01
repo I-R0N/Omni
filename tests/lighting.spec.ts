@@ -458,8 +458,29 @@ test.describe('occluder collection', () => {
       e.player.position.x = 0; e.player.position.y = 0;
       e.player.velocity.x = 0; e.player.velocity.y = 0;
 
+      // The field is EMPTIED BY PARKING, not by deactivating.  Deactivating a
+      // rock-shard is exactly what the engine reads as "an asteroid just
+      // died": it shatters the corpse into fresh fragments AND the
+      // count-based keeper tops the belt back up, so a scene cleared that way
+      // quietly rebuilds itself while the settle window runs — measured at up
+      // to seven occluders this test never placed, scattered 100–280 units
+      // out, which is what made the occluder counts here load-dependent.
+      // Parking moves everything unwanted far outside the light's reach and
+      // leaves it ALIVE, so there is nothing to shatter and nothing to
+      // replace.
+      const park = (keep: Set<any>, ax: number, ay: number) => {
+        let i = 0;
+        for (const t of e.currentMap.entities) {
+          if (t.type !== 'STRUCTURE' || keep.has(t)) continue;
+          t.active = true;
+          const a = i++ * 0.37;
+          t.position.x = ax + 3800 + Math.cos(a) * 600;
+          t.position.y = ay + 3800 + Math.sin(a) * 600;
+          t.velocity.x = 0; t.velocity.y = 0;
+        }
+      };
       const all = e.currentMap.entities.filter((t: any) => t.type === 'STRUCTURE');
-      for (const t of all) t.active = false;
+      park(new Set(), 0, 0);
       const tiles = all.filter((t: any) => t.mass === Infinity
                                         && String(t.shardVariant).indexOf('nebula') < 0);
       const shards = all.filter((t: any) => t.mass !== Infinity
@@ -485,12 +506,17 @@ test.describe('occluder collection', () => {
       e.renderer.setLighting('unified');
       if (!e.renderer.getShardShadows()) e.renderer.toggleShardShadows();
 
-      // Hold the player at the origin while the dynamic grid refills.
+      // Hold the player at the origin while the dynamic grid refills — and
+      // re-park anything the engine put back (see `park`).
+      const built = new Set<any>();
+      for (let i = 0; i < NT && i < tiles.length; i++) built.add(tiles[i]);
+      for (let i = 0; i < NS && i < shards.length; i++) built.add(shards[i]);
       await new Promise<void>(res => {
         let k = 0;
         const t = () => {
           e.player.position.x = 0; e.player.position.y = 0;
           e.player.velocity.x = 0; e.player.velocity.y = 0;
+          park(built, 0, 0);
           if (++k < 30) requestAnimationFrame(t); else res();
         };
         requestAnimationFrame(t);
@@ -527,8 +553,21 @@ test.describe('occluder collection', () => {
     //   FAT    — a regular hexagon, over the floor either way.  The control:
     //            if the scene itself failed to build, both vanish together.
     const r = await engine(page, async (e) => {
+      // Same parking trick as 'debris cannot blank out the terrain shadows' —
+      // see the comment there for why an emptied field refills itself.
+      const park = (keep: Set<any>, ax: number, ay: number) => {
+        let i = 0;
+        for (const t of e.currentMap.entities) {
+          if (t.type !== 'STRUCTURE' || keep.has(t)) continue;
+          t.active = true;
+          const a = i++ * 0.37;
+          t.position.x = ax + 3800 + Math.cos(a) * 600;
+          t.position.y = ay + 3800 + Math.sin(a) * 600;
+          t.velocity.x = 0; t.velocity.y = 0;
+        }
+      };
       const all = e.currentMap.entities.filter((t: any) => t.type === 'STRUCTURE');
-      for (const t of all) t.active = false;
+      park(new Set(), e.player.position.x, e.player.position.y);
       const shards = all.filter((t: any) => t.mass !== Infinity
                                          && String(t.shardVariant).indexOf('nebula') < 0);
       if (shards.length < 2) return { built: false } as any;
@@ -574,6 +613,7 @@ test.describe('occluder collection', () => {
           e.player.velocity.x = 0; e.player.velocity.y = 0;
           place(shards[0], px + 90, py, shards[0].polygonPoints, 10);
           place(shards[1], px, py + 90, shards[1].polygonPoints, 10);
+          park(new Set([shards[0], shards[1]]), px, py);
           if (++k < 30) requestAnimationFrame(t); else res();
         };
         requestAnimationFrame(t);
@@ -591,7 +631,10 @@ test.describe('occluder collection', () => {
     });
 
     expect(r.built).toBe(true);
-    expect(r.n).toBe(2);
+    // Carry the collected set into the message: "expected 2, got 3" on its own
+    // says nothing about WHICH third body crept into a scene this test built
+    // itself, which is the only thing worth knowing when it fails.
+    expect(r.n, `occluders: ${JSON.stringify(r.occ)}`).toBe(2);
     const sliver = r.occ.find((o: any) => Math.abs(o.dx - 90) < 2 && Math.abs(o.dy) < 2);
     const fat = r.occ.find((o: any) => Math.abs(o.dy - 90) < 2 && Math.abs(o.dx) < 2);
     expect(fat).toBeTruthy();
