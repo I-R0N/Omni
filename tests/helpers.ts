@@ -238,6 +238,39 @@ export async function waitForTransit(page: Page, timeoutMs = 15_000) {
     'the portal arrival beat to finish', timeoutMs);
 }
 
+/** Stop the world from repopulating itself under a measurement.
+ *
+ *  A pixel-sampling test builds its scene and then reads colour SHIFTS across
+ *  knob positions over several settle windows — a second or more of wall clock
+ *  on a slow runner.  Everything that MOVES in that window is noise added to
+ *  the very quantity being read: wave enemies drift through the sample points,
+ *  light the scene themselves, and get steered around by a rift's avoidance
+ *  push.  Clearing them once is not enough, because the engine puts them back
+ *  — the ladder keeps spawning and the ambient bubble keeper tops its own
+ *  population up on a timer.
+ *
+ *  So both sources are stopped rather than swept: `haltForBoss` ends the
+ *  ladder AND drops the spawns already queued behind it (nothing but a map
+ *  load restarts it), and an infinite keeper timer never counts down.  Then
+ *  the movers already out there are cleared once, which is now durable.
+ *
+ *  Only for tests that do not NEED movers — a test about a bubble lighting up
+ *  obviously must not call this. */
+export async function quietScene(page: Page) {
+  await engine(page, e => {
+    const g = e as unknown as {
+      waves: { haltForBoss: () => void };
+      ambientBubbleTimer: number;
+      currentMap: { entities: Array<{ type: string; isSnitch?: boolean; active: boolean }> };
+    };
+    g.waves.haltForBoss();
+    g.ambientBubbleTimer = Number.POSITIVE_INFINITY;
+    for (const t of g.currentMap.entities) {
+      if (t.type === 'ENEMY' || t.isSnitch === true) t.active = false;
+    }
+  });
+}
+
 /** Drive a DBG cycle knob to a NAMED step, and prove it landed there.
  *
  *  Two hazards, both of which have bitten this suite:

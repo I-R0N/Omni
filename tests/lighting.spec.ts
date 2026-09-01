@@ -34,7 +34,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, quietScene } from './helpers';
 
 /** Park the player in the densest static-tile cluster on the current map and
  *  hold it there, so a light actually has occluders around it.  Returns the
@@ -708,6 +708,8 @@ test.describe('occluder collection', () => {
   test('refraction: OFF by default, and ON it MOVES the light rather than adding it', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // SHIPS ON as of A5h (user call, after device testing).  It was off while
     // the question the prototype exists to ask — is a caustic legible at a
@@ -830,6 +832,8 @@ test.describe('occluder collection', () => {
   test('the brightness cycle really dims the light, and the tier cycle does not', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // The distinction this pins is the one that was reported from the
     // device: "I'm at the lowest setting and it still feels very bright".
@@ -920,6 +924,8 @@ test.describe('occluder collection', () => {
   test('emissive: lit metal re-radiates, and only when asked to', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // SHIPS ON as of A5h (user call, after device testing) — it is what metal
     // and glass do with light now that the contact-driven glow is deleted.
@@ -1053,6 +1059,8 @@ test.describe('occluder collection', () => {
     expect(d.tier).toBe('std');
 
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // The ladder itself, walked once.  Its rungs must MOVE TOGETHER — the
     // cost of a shadowing emitter is almost entirely its own occluder
@@ -1210,23 +1218,36 @@ test.describe('occluder collection', () => {
                  occ: e.renderer._lightOccluderCount,
                  lights: e.renderer.lastLightingLights };
       };
+      // EACH MEASUREMENT CARRIES ITS OWN CONTROL.  The colour assertions are
+      // differences of differences a couple of units wide, and the two lit
+      // samples are taken seconds apart in a live scene — so a single
+      // emissive-off baseline taken at the start is a baseline that has since
+      // moved (the fog memory keeps accumulating, the backdrop keeps
+      // animating), and the drift lands directly on the margin.  Taking the
+      // control ADJACENT to its measurement makes the pair a true A/B: with
+      // emission off there is no emitter at all, so the control reads the
+      // scene as it is right now and nothing else.
       const mix = async (name: string) => {
         for (let i = 0; i < 8 && e.renderer.getTintMix() !== name; i++) {
           e.renderer.cycleTintMix();
         }
-        return sample(true);
+        const base = await sample(false);
+        const lit = await sample(true);
+        return { base, lit };
       };
       // The COLOUR assertions run at the ends of the tint-mix knob, because
       // at the shipped default an emitter is deliberately half the body's
       // colour and half the light's — so "it emits red" is only the whole
       // truth at `full`, and `off` is where the old behaviour lives.
       const off = await sample(false);
-      const on = await mix('full');
-      const asLight = await mix('off');
+      const onPair = await mix('full');
+      const asLightPair = await mix('off');
+      const on = onPair.lit, asLight = asLightPair.lit;
       for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'off'; i++) {
         e.renderer.cycleTintMix();
       }
-      return { built: true, off, on, asLight, tint: pick._emitTint };
+      return { built: true, off, on, asLight, tint: pick._emitTint,
+               onBase: onPair.base, asLightBase: asLightPair.base };
     });
 
     expect(r.built).toBe(true);
@@ -1244,16 +1265,17 @@ test.describe('occluder collection', () => {
     // belongs to the alpha, so a dark surface still radiates a bright light
     // of its own hue.
     expect(r.tint).toBe('255, 0, 0');
-    const d = r.on.rgb.map((v: number, i: number) => v - r.off.rgb[i]);
+    const d = r.on.rgb.map((v: number, i: number) => v - r.onBase.rgb[i]);
     expect(d[0]).toBeGreaterThan(1);          // it lit something...
     expect(d[0]).toBeGreaterThan(d[1]);       // ...in RED, not in the
     expect(d[0]).toBeGreaterThan(d[2]);       // player light's blue-green.
     // ...and at the other end of the knob the same body emits in the LIGHT's
     // colour instead, which is what makes the mix a mix rather than a label.
-    // Asserted as a SHIFT rather than against an absolute baseline: the two
-    // samples are taken at different moments in a live scene, so what is
-    // stable is the direction the knob moves the colour, not the level.
-    const l = r.asLight.rgb.map((v: number, i: number) => v - r.off.rgb[i]);
+    // Asserted as a SHIFT rather than against an absolute baseline, and each
+    // shift is measured against its OWN adjacent emissive-off control (see
+    // `mix`): what is stable across a live scene is the direction the knob
+    // moves the colour, not the level.
+    const l = r.asLight.rgb.map((v: number, i: number) => v - r.asLightBase.rgb[i]);
     expect(l[2] - l[0]).toBeGreaterThan(d[2] - d[0]);
     expect(l[1] - l[0]).toBeGreaterThan(d[1] - d[0]);
     watch.assertClean();
@@ -1262,6 +1284,8 @@ test.describe('occluder collection', () => {
   test('emitters FADE rather than pop, and `off` restores the pop', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     const r = await engine(page, async (e) => {
       const tiles = e.currentMap.entities.filter(
@@ -1795,6 +1819,8 @@ test.describe('occluder collection', () => {
   test('the material colour rides the light it passes on', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // SHIPS OFF: real, subtle, and not free — see TINT_MIX_CYCLE.  The test
     // drives the knob to both ends itself, so the default it asserts is only
@@ -2261,6 +2287,8 @@ test.describe('occluder collection', () => {
   test('A6: shots are world lights — budgeted, culled, and their own colour', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     const r = await engine(page, async (e) => {
       // EMPTY DARK SCENE, radial light pinned: the shot's own light is the
@@ -2362,6 +2390,8 @@ test.describe('occluder collection', () => {
   test('A7: depth darkens the world through the fog, and the hub never does', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     const r = await engine(page, async (e) => {
       e.renderer.setLighting('unified');
