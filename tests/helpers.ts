@@ -238,6 +238,45 @@ export async function waitForTransit(page: Page, timeoutMs = 15_000) {
     'the portal arrival beat to finish', timeoutMs);
 }
 
+/** Drive a DBG cycle knob to a NAMED step, and prove it landed there.
+ *
+ *  Two hazards, both of which have bitten this suite:
+ *
+ *  1. Counting clicks from an assumed starting index makes a knob test
+ *     ORDER-DEPENDENT — one stray cycle and every later reading is silently
+ *     taken at the wrong setting.  So the target is a NAME.
+ *  2. The name is only republished on the engine's stats push, so a read
+ *     taken straight after a click can still be the PREVIOUS step.  A loop
+ *     that compares a stale name steps past its target every single time and
+ *     wraps the whole cycle without ever seeing it — which is how a lens test
+ *     passed locally and failed on a slower CI runner.  So each click waits
+ *     for the name to CHANGE, which is bounded and assumes nothing about how
+ *     many frames a push takes.
+ *
+ *  `steps` is the cycle's length; the loop is given one extra so a full lap
+ *  is always possible from wherever the knob happens to be sitting. */
+export async function dialByName(
+  page: Page,
+  statsKey: string,
+  label: string,
+  click: (e: Engine) => void,
+  steps: number,
+): Promise<void> {
+  const read = () => page.evaluate(
+    k => (window as unknown as { __omniStats?: Record<string, unknown> }).__omniStats?.[k],
+    statsKey) as Promise<unknown>;
+  for (let i = 0; i <= steps; i++) {
+    const now = await read();
+    if (now === label) return;
+    await engine(page, click as (e: Engine) => void);
+    for (let f = 0; f < 40; f++) {
+      if (await read() !== now) break;
+      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r(null))));
+    }
+  }
+  throw new Error(`could not reach ${statsKey} "${label}"`);
+}
+
 /** Put the player next to a station of `kind` and dock.  Flies nothing —
  *  "can the ship reach it" is not what any suite using this is testing.
  *

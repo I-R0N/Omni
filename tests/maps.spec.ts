@@ -25,7 +25,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, dialByName } from './helpers';
 
 /** Rebuild `map` `runs` times and return per-variant min/max/mean. */
 function populations(page: any, runs = 4) {
@@ -176,6 +176,11 @@ test.describe('map composition — MAP_POPULATION is the authority', () => {
   });
 });
 
+/** Lengths of the two portal-gravity DBG cycles, for `dialByName`'s lap
+ *  budget (PORTAL_GRAVITY_CYCLE / PORTAL_GRAVITY_RANGE_CYCLE). */
+const PORTAL_GRAVITY_STEPS = 5;
+const PORTAL_GRAVITY_RANGE_STEPS = 4;
+
 test.describe('portal arrival — the wormhole throws you clear', () => {
   /** Arriving used to land the ship DEAD-STOPPED at ARRIVAL_OFFSET (165) from
    *  the exit mouth — which is inside that rift's own gravity well, so the
@@ -209,11 +214,20 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
     const d = () => Math.hypot(e.player.position.x - exit.position.x,
                                e.player.position.y - exit.position.y);
     const launch = { speed: Math.hypot(e.player.velocity.x, e.player.velocity.y), dist: d(), range };
-    // Clear the corridor — see the note above.  Structures AND enemies: the
+    // Clear the corridor — see the note above.  Structures AND movers: the
     // arena runs waves, and a rammer arriving mid-flight is the same confound
     // wearing a different hat.  Identified by the role fields rather than by
     // an EntityType number, which is not in scope in the page and would be a
     // silent no-op if the enum were ever reordered.
+    //
+    // MOVED, not deactivated.  Deactivating a rock-shard is what the engine
+    // reads as "an asteroid just died": it shatters the corpse into fresh
+    // fragments and the count-based keeper tops the belt back up, so clearing
+    // the corridor that way FILLS it — which is exactly how a first version of
+    // this ended up measuring a ship that crossed the rim at 0.56 px/step.
+    // Deactivating a wave enemy is the same mistake in the other system: the
+    // ladder reads it as dead and starts the next wave.  Everything unwanted
+    // is parked far away and left alive, so nothing is created to replace it.
     let cleared = 0;
     const inTheWay = (ent: any) => ent.shardVariant !== undefined
       || ent.enemySubtype !== undefined || ent.isRival === true;
@@ -221,11 +235,14 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
       if (!ent.active || !inTheWay(ent)) continue;
       const dx = ent.position.x - exit.position.x, dy = ent.position.y - exit.position.y;
       if (dx * dx + dy * dy >= (range + 400) * (range + 400)) continue;
-      ent.active = false;
-      // A static tile also lives in the physics static grid, which is built
-      // once at map load — clearing `active` alone leaves the ship bouncing
-      // off a tile that is no longer drawn.
+      // A static tile lives in the physics static grid, which is built once
+      // at map load — moving it without dropping the entry leaves the ship
+      // bouncing off a wall that is no longer there.
       if (ent.mass === Infinity) e.physics.removeStaticEntity(ent);
+      const a = cleared * 0.37;
+      ent.position.x = exit.position.x + 4200 + Math.cos(a) * 700;
+      ent.position.y = exit.position.y + 4200 + Math.sin(a) * 700;
+      ent.velocity.x = 0; ent.velocity.y = 0;
       cleared++;
     }
     return { launch, cleared, exitId: exit.id };
@@ -285,27 +302,11 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
     const watch = await boot(page);
     await startRun(page);
 
-    const knobs = await page.evaluate(async () => {
-      const e = (window as any).__omniEngine;
-      const name = (k: string) => (window as any).__omniStats?.[k];
-      // Cycle by NAME rather than by an assumed index — the cycles grow.  The
-      // name only refreshes on the engine's stats push, so wait a frame after
-      // each click rather than reading a snapshot that cannot have changed yet.
-      const dial = async (click: () => void, key: string, target: string) => {
-        for (let i = 0; i < 16 && name(key) !== target; i++) {
-          click();
-          for (let f = 0; f < 4 && name(key) !== target; f++) {
-            await new Promise(r => requestAnimationFrame(() => r(null)));
-          }
-        }
-        return name(key);
-      };
-      const g = await dial(() => e.dbg.cyclePortalGravity(), 'portalGravityName', '1.5×');
-      const r = await dial(() => e.dbg.cyclePortalGravityRange(), 'portalGravityRangeName', '1.5×');
-      return { g, r };
-    });
-    expect(knobs.g, 'the gravity knob reaches its strongest step').toBe('1.5×');
-    expect(knobs.r, 'the range knob reaches its widest step').toBe('1.5×');
+    // Both knobs to their strongest step, by NAME, through the shared dialler.
+    await dialByName(page, 'portalGravityName', '1.5×',
+      e => (e as any).dbg.cyclePortalGravity(), PORTAL_GRAVITY_STEPS);
+    await dialByName(page, 'portalGravityRangeName', '1.5×',
+      e => (e as any).dbg.cyclePortalGravityRange(), PORTAL_GRAVITY_RANGE_STEPS);
 
     const arrived = await page.evaluate(escapeProbe);
     expect(arrived, 'an arena rift and a way home').not.toBeNull();
@@ -550,14 +551,11 @@ test.describe('the transit warp — the flight through the wormhole', () => {
     const watch = await boot(page);
     await startRun(page);
 
-    // Drive the cycle to "off" by NAME rather than by counting clicks — and
-    // give the loop room for the whole cycle, which grew when the longer and
-    // extreme durations were added (PORTAL_WARP_CYCLE).
-    for (let i = 0; i < PORTAL_WARP_STEPS + 1; i++) {
-      const now = await page.evaluate(() => (window as any).__omniStats?.portalWarpName);
-      if (now === 'off') break;
-      await engine(page, e => e.dbg.cyclePortalWarp());
-    }
+    // Drive the cycle to "off" by NAME rather than by counting clicks, and
+    // through the shared dialler, which also waits for each click to reach
+    // the published stats (see `dialByName`).
+    await dialByName(page, 'portalWarpName', 'off',
+      e => (e as any).dbg.cyclePortalWarp(), PORTAL_WARP_STEPS);
     expect(await page.evaluate(() => (window as any).__omniStats?.portalWarpName)).toBe('off');
 
     const t = await page.evaluate(() => {

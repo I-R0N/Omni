@@ -19,7 +19,7 @@
  *  file, which is the alarm working.
  */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, dialByName } from './helpers';
 
 /** Default step of `STAR_DENSITY_CYCLE` — stars per 10 000 CSS px². */
 const DEFAULT_DENSITY = 729;
@@ -725,14 +725,9 @@ test.describe('the wormhole star lens', () => {
    *  Cycling N times from an assumed starting index is what makes a knob test
    *  order-dependent: one stray cycle and every later reading is silently
    *  taken at the wrong setting. */
-  const setLens = async (page: any, label: string) => {
-    for (let i = 0; i < PORTAL_LENS_STEPS + 1; i++) {
-      const now = await page.evaluate(() => (window as any).__omniStats?.portalLensName);
-      if (now === label) return;
-      await engine(page, e => e.dbg.cyclePortalLens());
-    }
-    throw new Error(`could not reach lens "${label}"`);
-  };
+  const setLens = (page: any, label: string) =>
+    dialByName(page, 'portalLensName', label,
+      e => (e as any).dbg.cyclePortalLens(), PORTAL_LENS_STEPS);
 
   /** Park beside the hub's Deep Space rift, the biggest horizon, so a lens is
    *  live and on screen for the readings below. */

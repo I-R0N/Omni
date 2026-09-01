@@ -1137,18 +1137,30 @@ test.describe('occluder collection', () => {
         (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
       for (const t of e.currentMap.entities) {
         if (t.type === 'STRUCTURE') t.active = false;
-        // QUIET THE SCENE.  The structures were already cleared; the MOVERS
-        // were not, and this map's spawn sits ~300 units from its return
-        // rift, so wave enemies drift, light the scene and are steered
-        // around by the rift's own avoidance push — all of it between the
-        // three samples below.  The measurement compares colour SHIFTS
-        // across knob positions, so anything moving is noise added to the
-        // very quantity being read.  Measured: leaving them in put the blue
-        // margin anywhere from +10.0 to -1.0 against a threshold of 0 (one
-        // failure in eight, and the failure CI caught); taking them out
-        // holds it in a +8.25..+10.0 band over ten runs.
-        if (t.type === 'ENEMY') t.active = false;
       }
+      // QUIET THE SCENE, AND KEEP IT QUIET.  The structures are cleared
+      // above; the MOVERS are the problem, and this map's spawn sits ~300
+      // units from its return rift, so wave enemies drift, light the scene
+      // and are steered around by the rift's own avoidance push — all of it
+      // between the three samples below.  The measurement compares colour
+      // SHIFTS across knob positions, so anything moving is noise added to
+      // the very quantity being read.  Measured: leaving them in put the blue
+      // margin anywhere from +10.0 to -1.0 against a threshold of 0.
+      //
+      // Clearing them ONCE was not enough, because the field refills itself:
+      // the wave ladder keeps spawning and the ambient bubble keeper tops its
+      // own population back up, and the three settle windows are over a
+      // second of wall clock between them — longer on a slow runner, which is
+      // where this last surfaced.  So halt the ladder outright and sweep the
+      // movers every settle frame instead.
+      e.waves.halted = true;
+      const quiet = () => {
+        for (const t of e.currentMap.entities) {
+          if (!t.active) continue;
+          if (t.type === 'ENEMY' || t.isSnitch === true) t.active = false;
+        }
+      };
+      quiet();
       const pick = tiles.find((t: any) => t.shardVariant === 'nebula-tile');
       if (!pick) return { built: false } as any;
       pick.active = true;
@@ -1169,6 +1181,7 @@ test.describe('occluder collection', () => {
         let n = 0;
         const t = () => { e.player.position.x = 0; e.player.position.y = 0;
           e.player.velocity.x = 0; e.player.velocity.y = 0;
+          quiet();
           if (++n < 25) requestAnimationFrame(t); else res(); };
         requestAnimationFrame(t);
       });
