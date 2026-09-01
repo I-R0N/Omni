@@ -1870,11 +1870,14 @@ test.describe('occluder collection', () => {
         };
         requestAnimationFrame(t);
       });
+      let lastOff = 0;
+      let lastGeom: { w: number; h: number; zoom: number } = { w: 0, h: 0, zoom: 0 };
       // Mean gain over a small box INSIDE the umbra, where the transmitted
       // light is — one pixel of a 5-luminance signal is noise.
       const umbra = async () => {
         const read = () => {
           const cv = document.querySelector('canvas') as HTMLCanvasElement;
+          let offCanvas = 0;
           const g = cv.getContext('2d')!;
           const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
           const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
@@ -1885,18 +1888,33 @@ test.describe('occluder collection', () => {
           let rr = 0, gg = 0, bb = 0, n = 0;
           for (const [wx, wy] of [[180, 0], [200, 0], [220, 0], [200, 10], [200, -10]]) {
             const [x, y] = sx(wx, wy);
+            // EVERY PROBE MUST BE ON THE CANVAS.  `getImageData` outside it
+            // reads zeros, which is indistinguishable from "no light here" —
+            // so an off-screen sample silently drags a mean down instead of
+            // failing.  The umbra ring reaches x = 220 world units, which is
+            // only inside a 390-wide viewport once the camera zoom says so,
+            // and zoom is run state.  Record it rather than assume it.
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) offCanvas++;
             const d = g.getImageData(x, y, 1, 1).data;
             rr += d[0]; gg += d[1]; bb += d[2]; n++;
           }
           // OPEN SPACE at the same distance, off the shadow axis: the light
           // that ARRIVED, against which the transmitted light is bounded.
-          let o = 0, on2 = 0;
+          // Its GREEN is carried alongside the luminance, because the bound
+          // has to compare like with like: the light is blue-green (125, 211,
+          // 252), so its green sits 7.7% above its own mean and "umbra green
+          // < open-space MEAN" is a materially tighter claim than the
+          // physical one it is written to make.
+          let o = 0, og = 0, on2 = 0;
           for (const [wx, wy] of [[0, 200], [0, -200], [140, 140]]) {
             const [x, y] = sx(wx, wy);
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) offCanvas++;
             const d = g.getImageData(x, y, 1, 1).data;
-            o += (d[0] + d[1] + d[2]) / 3; on2++;
+            o += (d[0] + d[1] + d[2]) / 3; og += d[1]; on2++;
           }
-          return [rr / n, gg / n, bb / n, o / on2];
+          lastOff = offCanvas;
+          lastGeom = { w: cv.width, h: cv.height, zoom: e.camera.zoom };
+          return [rr / n, gg / n, bb / n, o / on2, og / on2];
         };
         e.renderer.setLighting('unified'); await frames(20);
         const on = read();
@@ -1928,7 +1946,8 @@ test.describe('occluder collection', () => {
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== beam0; i++) {
         e.renderer.cycleFlashlight();
       }
-      return { built: true, none, full, cyc, back: e.renderer.getTintMix() };
+      return { built: true, none, full, cyc, back: e.renderer.getTintMix(),
+               offCanvas: lastOff, geom: lastGeom };
     });
 
     expect(r.built).toBe(true);
@@ -1951,8 +1970,16 @@ test.describe('occluder collection', () => {
     // unerased (which is what lets it carry a colour at all), so the bound
     // that matters is the physical one — a body passes light on, it does not
     // make any — measured against open space at the same distance.
-    expect(r.full[1]).toBeLessThan(r.full[3]);
-    expect(r.none[1]).toBeLessThan(r.none[3]);
+    // Compared GREEN to GREEN (index 4), not green to a luminance mean — see
+    // `read`.  And the probe geometry rides along in the message: a sample
+    // that fell off the canvas reads as zero light rather than as an error,
+    // so a failure here has to be able to say whether it measured the scene
+    // or measured nothing.
+    const where = `offCanvas=${r.offCanvas} geom=${JSON.stringify(r.geom)} `
+      + `none=${JSON.stringify(r.none)} full=${JSON.stringify(r.full)}`;
+    expect(r.offCanvas, where).toBe(0);
+    expect(r.full[1], where).toBeLessThan(r.full[4]);
+    expect(r.none[1], where).toBeLessThan(r.none[4]);
     watch.assertClean();
   });
 
