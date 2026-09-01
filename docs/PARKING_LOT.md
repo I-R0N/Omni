@@ -1714,3 +1714,37 @@ light is blue-green (125, 211, 252), so its green sits 7.7% above its own
 mean and the comparison was tighter than the physical claim it is written to
 make.  It compares green to green now.  That is weaker by exactly that 7.7%,
 and it is the comparison the sentence above it describes.
+
+## Grain `sizeSpread` and `bondSpread` — parked at 0 (user call)
+
+Both axes are implemented, tested and wired end to end; every material is
+authored at **0**, which is the exact identity in both cases
+(`siteWeightsFor` returns null, `bondVariance` returns 1), so the game
+today behaves as if neither existed.
+
+- **`sizeSpread`** varies grain AREA within one body, via a POWER DIAGRAM:
+  each site carries an additive weight and the divider between two sites
+  slides off the midpoint by `(wi - wj) / 2d`.  Alternating the sign by
+  index gives an even mix of coarse and fine.  Measured on a 10-grain
+  body: area CV 0.192 → 0.435 → 0.539 and biggest/smallest 1.97 → 4.99 →
+  7.68 across spread 0 → 0.6 → 1, with the MEAN grain diameter pinned at
+  18 throughout.
+- **`bondSpread`** varies boundary STRENGTH, via a seeded per-boundary
+  multiplier `1 ± 0.6 × spread` keyed on `(bodySeed, boundaryIndex)`.
+  Unbiased, so derived HP is unchanged on average; fixed per body, so a
+  stubborn seam stays stubborn.
+
+**Why parked:** metal and plastic carried non-zero values while rock and
+glass sat at 0, which put the *machined* materials on the varied end and
+the *natural* ones on the uniform end — backwards from the physical
+story, and inconsistent as a rule.  Rather than extend half-considered
+values to rock and glass, both were zeroed pending a deliberate pass.
+
+**To revisit:** the ordering that would make sense is rock most
+heterogeneous → plastic → metal → glass most uniform (a suggestion, not a
+measurement: rock ~0.50/0.35, glass ~0.15/0.10).  This is also the axis
+most likely to fix "rock and glass look too similar at the same
+grainSize", since it is the one built for that distinction.  The piping
+is deliberately retained — the tests
+(`tests/fracture.spec.ts`, "grain size and bond spread (A2)") still pin
+both laws, so the mechanism cannot rot while parked.

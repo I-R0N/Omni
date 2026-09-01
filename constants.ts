@@ -8386,8 +8386,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // grainDent is what makes it read as plastic rather than as a
       // softer rock.
       regularity: 0.55,
-      sizeSpread: 0.6,
-      bondSpread: 0.25,
+      sizeSpread: 0,     // parked — see PARKING_LOT
+      bondSpread: 0,     // parked — see PARKING_LOT
       grainDent: 0.10,
       // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
       // springs slowly back to the shape its grain was cut at.  Metal
@@ -8471,8 +8471,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       grainSize: 13,
       impactBias: 0.35,     // metal cracks less radially than glass
       regularity: 0.95,     // near-honeycomb: the look the lattice had
-      sizeSpread: 0.1,      // uniform grains — that IS what regular means
-      bondSpread: 0.15,
+      sizeSpread: 0,     // parked — see PARKING_LOT
+      bondSpread: 0,     // parked — see PARKING_LOT
       grainDent: 0.05,      // it deforms, but barely
       progressive: true,
       // The hardest boundaries in the game — 3.1x rock, 5.3x glass —
@@ -8929,8 +8929,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       impactBias: 0.5,
       // The same plastic, at shard scale.
       regularity: 0.55,
-      sizeSpread: 0.6,
-      bondSpread: 0.25,
+      sizeSpread: 0,     // parked — see PARKING_LOT
+      bondSpread: 0,     // parked — see PARKING_LOT
       grainDent: 0.10,
       // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
       // springs slowly back to the shape its grain was cut at.  Metal
@@ -9033,8 +9033,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       grainSize: 13,
       impactBias: 0.35,
       regularity: 0.95,
-      sizeSpread: 0.1,
-      bondSpread: 0.15,
+      sizeSpread: 0,     // parked — see PARKING_LOT
+      bondSpread: 0,     // parked — see PARKING_LOT
       grainDent: 0.05,
       progressive: true,
       bondStrength: 0.85,
