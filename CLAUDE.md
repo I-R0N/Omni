@@ -1951,6 +1951,38 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   absorbing shards as invisible `metalExcessCells`; its `densityTier`
   (1 tier = 6 shards) drives brightness, HP (×tier), and break count
   (`METAL_BREAK_SHARDS_PER_TIER` × tier — deliberately lossy).
+- **THE LATTICE IS HOW METAL JOINS, NOT HOW METAL BREAKS.**  Metal is the
+  one material whose shards RE-BOND after a break, and under voronoi that
+  made it the last path still putting AUTHORED shapes into the world:
+  `decomposeMetalComposite` handed back one equilateral triangle per
+  lattice cell, so a field that shattered into true grains was a field of
+  identical triangles seconds later (measured on METAL_FIELD: 54 grains at
+  t=0, 6 triangles at t=10).  A dying composite now fractures its own
+  convex hull like any other body; the triangles survive only as the
+  internal look of an ASSEMBLED composite, and `decomposeMetalComposite`
+  stays as the legacy A/B.  Two things are load-bearing: the composite
+  route passes `skipSizeGate`, because a 2-cell composite measures ~30px
+  against the 28.3px mobile-parent floor and would otherwise vanish
+  without debris; and the tell for a regression is that the children are
+  a PATTERN rather than N copies of one template — counting three-sided
+  polygons fails on correct output (at metal's 0.95 regularity triangular
+  Voronoi cells are ordinary) and matching an absolute lattice size fails
+  too, since the lattice pitch scales with the shards that fused.
+- **ONE SPAWN-HP LADDER, AND METAL WAS NOT IN IT.**
+  `ShardSystem.spawnShardHealth` is the single ladder behind all three
+  fracture-spawn sites (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  `shatterPowerlawStyle`).  It existed as three near-copies and metal fell
+  through every one onto the `size > 30 ? 2 : 1` default — a value nothing
+  chose.  That is invisible through a gun and fatal everywhere else: the
+  grain model rewrites `maxHealth` to the DERIVED boundary total at first
+  WEAPON damage (measured spawned/derived/blaster-hits — rock 8/5.3/2,
+  glass 12/3.2/2, plastic 24/17.0/6, metal 1/16.2/6), but the crash and
+  tile-pressure paths in PhysicsSystem decrement `health` DIRECTLY rather
+  than spending on boundaries, so a 1-HP metal grain shrugged off six
+  blaster bolts and died to a single bump.  `METAL_SHARD_HP` is set to the
+  measured derived figure so the authored and derived numbers agree.
+  Glass's authored 12 against its derived 3.2 is a live BALANCE question,
+  not a missing branch — left as shipped.
 - **`mergeCount` drives shatter.** `composeEntities` accumulates
   `mergeCount` on every merge path; the asteroid-style shatter breaks
   a merged parent into ~`mergeCount` fragments (rock additionally
@@ -2611,7 +2643,41 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   **Joystick** (Touch / Forced — the widget is touch-only by design, so
   this is the only way to check its layout on a desktop), **Minimap mat**
   (Flow / Dots / Off) and **Rock palette** (mixed / slate / rust /
-  mineral).
+  mineral).  The fracture / grain rows have their OWN section — **Grain &
+  Fracture** — rather than living at the bottom of Visual's ~60 rows: it
+  holds the five GLOBAL knobs (Fracture A/B, Frac relax, Bnd strength,
+  Frac sep, Frac sites, Frac bias) and, under them, the PER-MATERIAL
+  block described below.
+- **PER-MATERIAL GRAIN KNOBS ARE A SELECTOR PLUS FIVE ROWS, NOT TWENTY
+  ROWS.**  Five knobs across four materials is twenty values, and twenty
+  rows would wreck a panel that already runs ~90.  Instead **Grain mat**
+  picks the material and the five `↳` rows below it read and write
+  whichever one is selected — so the surface is six rows and the existing
+  `ctrlRow` idiom is unchanged.  Four rules hold it up:
+  (1) **The key is the MATERIAL, not the variant.**  Writing `rock` moves
+  rock-tile and rock-shard together, because a material's grain geometry
+  is shared by its tile and its shard (see the grain-geometry rule above)
+  — a tile and its own debris decomposing from different patterns is not
+  one material, and is not a setting anyone can judge.
+  (2) **Overrides COMPOSE with the global knobs**, never replace them.
+  `Frac sites` still scales whatever count they produce and `Bnd
+  strength` still multiplies whatever strength they set, so a global
+  sweep keeps working while one material is being tuned.
+  (3) **Index 0 of every ladder is `null` = "use the variant table"**, and
+  the readout says `table` rather than a number that only coincidentally
+  matches — otherwise there is no way to tell a default from a value
+  someone left set.  `↳ reset all` drops all twenty and shows how many
+  are currently off the table.
+  (4) **`grainSpecFor(variantId)` is the ONE seam** every read of a
+  `grain` block goes through — `ensureFractureCells`, `bondStrengthFor`,
+  the bond-variance read, the dent read.  Reaching into
+  `SHARD_VARIANTS[..].grain` directly would let an override be honoured
+  by one reader and ignored by another, which for this model means cracks
+  drawn from one pattern and a break taken from a different one.  It
+  returns the table object itself when nothing is overridden, so normal
+  play allocates nothing.  Every knob bumps the fracture tuning
+  GENERATION, so a change shows on the next hit rather than only on
+  terrain that spawns afterwards.
 - **The menus carry a CONTROLS & BASICS panel** (`renderHelpPanel`, Pair C
   c1) — one function, hosted by both the main menu and the pause menu with
   separate collapse keys, describing touch, keyboard/mouse, gamepad and the

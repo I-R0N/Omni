@@ -2942,3 +2942,104 @@ test.describe('metal composite — breaks into grains, not lattice triangles', (
     watch.assertClean();
   });
 });
+
+test.describe('per-material grain overrides (DBG)', () => {
+  test('a knob moves one material — its tile AND its shard — and no other', async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+
+    // The four global knobs beside these force one value across EVERY
+    // material at once: right for judging a setting, useless for tuning
+    // one material against another.  These are the per-material half, and
+    // the two properties worth pinning are the ones a global knob cannot
+    // hold — moving rock must not move glass, and moving rock must move
+    // rock-TILE and rock-SHARD together (a shard is a smaller body of the
+    // same stuff, so a material whose tile and debris decompose from
+    // different patterns is not one material).
+    const spec = (variant: string) => page.evaluate(
+      v => {
+        const g = (window as any).__omniGrain.grainSpecFor(v);
+        return { grainSize: g.grainSize, bondStrength: g.bondStrength };
+      }, variant);
+
+    const before = {
+      rockTile:  await spec('rock-tile'),
+      rockShard: await spec('rock-shard'),
+      glassTile: await spec('glass-tile'),
+    };
+
+    // Step ROCK's grain size one rung off the table.
+    await engine(page, (e: any) => {
+      let guard = 0;
+      while ((window as any).__omniStats?.grainMaterialName !== 'rock' && guard++ < 8) {
+        e.dbg.cycleGrainMaterial();
+      }
+      e.dbg.cycleGrainKnob('grainSize');
+    });
+
+    const after = {
+      rockTile:  await spec('rock-tile'),
+      rockShard: await spec('rock-shard'),
+      glassTile: await spec('glass-tile'),
+    };
+
+    expect(after.rockTile.grainSize).not.toBe(before.rockTile.grainSize);
+    // Tile and shard move together...
+    expect(after.rockShard.grainSize).toBe(after.rockTile.grainSize);
+    // ...and nothing else moves, including the knob that was not touched.
+    expect(after.glassTile.grainSize).toBe(before.glassTile.grainSize);
+    expect(after.rockTile.bondStrength).toBe(before.rockTile.bondStrength);
+
+    // The override has to reach the DECOMPOSITION, not just the table.
+    // Site count is bodyArea / (π·(size/2)²), so forcing the grain to the
+    // COARSEST rung must produce measurably fewer cells on a real tile.
+    const cells = async () => engine(page, (e: any) => {
+      const t = (e.currentMap.entities as any[]).find((x: any) =>
+        x.active && x.shardVariant === 'rock-tile' && x.polygonPoints);
+      if (!t) return -1;
+      t.fractureCells = undefined;
+      t.fractureEdges = undefined;
+      // Read through the same accessor the sim and the crack overlay use,
+      // via a damage event rather than a direct call — an override honoured
+      // by one reader and not the other is the failure this guards.
+      e.physics.resolveCollision(
+        { id: 'grainknob_' + Math.random(), type: 'PROJECTILE',
+          position: { x: t.position.x + t.size.x * 0.5, y: t.position.y },
+          velocity: { x: -900, y: 0 }, rotation: Math.PI,
+          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+          damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+      );
+      return t.fractureCells ? t.fractureCells.length : -1;
+    });
+
+    await engine(page, (e: any) => { e.dbg.resetGrainOverrides(); });
+    const onTable = await cells();
+    expect(onTable).toBeGreaterThan(1);
+
+    await engine(page, (e: any) => {
+      let guard = 0;
+      while ((window as any).__omniStats?.grainMaterialName !== 'rock' && guard++ < 8) {
+        e.dbg.cycleGrainMaterial();
+      }
+      // Walk to the coarsest rung (the ladder's last entry).
+      for (let i = 0; i < 8; i++) e.dbg.cycleGrainKnob('grainSize');
+    });
+    const coarse = await cells();
+
+    console.log(`[grain override] rock cells: table=${onTable} coarsest=${coarse}`);
+    expect(coarse).toBeGreaterThan(0);
+    expect(coarse).toBeLessThan(onTable);
+
+    // And the count of live overrides is honest — the panel shows it
+    // beside Reset precisely so "is this the shipped tuning?" is answerable.
+    // POLL rather than read: the stats payload is built on the next rAF
+    // push, so a synchronous read straight after a cycle returns the
+    // PREVIOUS frame's snapshot and reads 0 however correct the counter is.
+    await waitForStats(page, s => s.grainOverrideCount === 1,
+      'the DBG override count to reach the stats payload');
+
+    watch.assertClean();
+  });
+});

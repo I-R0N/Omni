@@ -4,7 +4,8 @@ import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
-         GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf } from './constants';
+         GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
+         grainSpecFor, type GrainKnob } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -107,6 +108,11 @@ const App: React.FC = () => {
     (window as any).__omniGrain = {
       GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
       bondVariance, BOND_SPREAD_RANGE,
+      // The per-material DBG override resolver.  Pure, and wrong in a way
+      // nothing reports: an override that lands in the table but never
+      // reaches this resolver reads back perfectly from the panel and
+      // changes nothing on screen.
+      grainSpecFor,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
@@ -398,6 +404,18 @@ const App: React.FC = () => {
 
   const handleCycleFractureBias = () => {
       if (engineRef.current) engineRef.current.dbg.cycleFractureBias();
+  };
+
+  const handleCycleGrainMaterial = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleGrainMaterial();
+  };
+
+  const handleCycleGrainKnob = (knob: GrainKnob) => {
+      if (engineRef.current) engineRef.current.dbg.cycleGrainKnob(knob);
+  };
+
+  const handleResetGrainOverrides = () => {
+      if (engineRef.current) engineRef.current.dbg.resetGrainOverrides();
   };
 
   const handleCycleBoundaryStrength = () => {
@@ -921,6 +939,9 @@ const App: React.FC = () => {
         onCycleFractureSeparation={handleCycleFractureSeparation}
         onCycleFractureSiteScale={handleCycleFractureSiteScale}
         onCycleFractureBias={handleCycleFractureBias}
+        onCycleGrainMaterial={handleCycleGrainMaterial}
+        onCycleGrainKnob={handleCycleGrainKnob}
+        onResetGrainOverrides={handleResetGrainOverrides}
         onCycleBoundaryStrength={handleCycleBoundaryStrength}
         onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}

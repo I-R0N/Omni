@@ -26,7 +26,7 @@ import {
   getFractureRelaxOverride, getFractureSeparationOverride, getFractureSiteScale,
   grainRelaxFor, grainSeparationFor,
   getFractureBiasOverride, getFractureTuningGen,
-  isProgressiveFracture, getBoundaryStrengthScale,
+  isProgressiveFracture, getBoundaryStrengthScale, grainSpecFor,
 } from '../../constants';
 import {
   computeFracture, collectInteriorEdges, seedFromEntityId, mulberry32,
@@ -75,7 +75,7 @@ function localImpactPoint(e: GameEntity): { x: number; y: number } | null {
  *  GrainSpec). */
 export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   if (e.shardVariant === undefined) return null;
-  const f = SHARD_VARIANTS[e.shardVariant].grain;
+  const f = grainSpecFor(e.shardVariant);
   if (f === undefined) return null;
   if (e.polygonPoints === undefined || e.polygonPoints.length < 3) return null;
   // A DBG shape knob moved since this pattern was built (V11): drop it so
@@ -261,7 +261,7 @@ function computeEdgeNeed(
   // rolled per hit, so a body's weak seams are a FIXED property of that
   // body; a boundary that looked stubborn stays stubborn.
   const spread = e.shardVariant !== undefined
-    ? SHARD_VARIANTS[e.shardVariant].grain?.bondSpread ?? 0 : 0;
+    ? grainSpecFor(e.shardVariant)?.bondSpread ?? 0 : 0;
   if (index >= 0) s *= bondVariance(e.crackSeed ?? 1, index, spread);
   return Math.max(0.05, s * len);
 }
@@ -293,7 +293,7 @@ export function bondVariance(seed: number, index: number, spread: number): numbe
 export function bondStrengthFor(e: GameEntity): number | null {
   if (e.shardVariant === undefined) return null;
   if (!isProgressiveFracture(e.shardVariant)) return null;
-  const f = SHARD_VARIANTS[e.shardVariant].grain;
+  const f = grainSpecFor(e.shardVariant);
   const s = f?.bondStrength;
   if (s === undefined) return null;
   return s * getBoundaryStrengthScale();
@@ -497,7 +497,7 @@ export function dentStruckGrain(e: GameEntity): boolean {
   const strength = bondStrengthFor(e);
   if (strength === null) return false;
   const spec = e.shardVariant !== undefined
-    ? SHARD_VARIANTS[e.shardVariant].grain : undefined;
+    ? grainSpecFor(e.shardVariant) : undefined;
   const depth = spec?.grainDent ?? 0;
   if (depth <= 0) return false;
 

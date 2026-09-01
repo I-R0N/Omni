@@ -1870,6 +1870,12 @@ export interface EngineStats {
   boundaryStrengthName?: string;
   fractureSeparationName?: string;
   fractureSiteScaleName?: string;
+  /** DBG (Grain) per-material overrides: the selected material, and each
+   *  of the five knobs' live value on it ('table' = defer to the variant
+   *  table).  Paused-only, like every other DBG readout. */
+  grainMaterialName?: string;
+  grainKnobNames?: Record<string, string>;
+  grainOverrideCount?: number;
   fractureBiasName?: string;
   nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove

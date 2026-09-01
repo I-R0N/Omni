@@ -36,6 +36,7 @@ import {
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
     cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
+    cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
     cycleBoundaryStrength,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
@@ -407,6 +408,30 @@ export class DebugControls {
   cycleFractureBias() {
     cycleFractureBias();
   }
+  /** DBG (Grain): which MATERIAL the five per-material knob rows read and
+   *  write.  The selector lives here rather than in the overlay so a knob
+   *  handler knows its target without the UI threading it through five
+   *  callbacks — and so a knob row is one argument-free method like every
+   *  other DBG row. */
+  cycleGrainMaterial() {
+    cycleGrainMaterial();
+  }
+
+  /** DBG (Grain): step one knob on the SELECTED material.  Index 0 of
+   *  every ladder is "use the variant table", so the shipped values stay
+   *  the default and a readout of `table` means exactly that rather than a
+   *  number that happens to match. */
+  cycleGrainKnob(knob: GrainKnob) {
+    cycleGrainKnob(knob);
+  }
+
+  /** DBG (Grain): drop every per-material override at once.  Tuning four
+   *  materials across five knobs leaves no way to tell which of twenty
+   *  values are still off the table; this is the way back. */
+  resetGrainOverrides() {
+    resetGrainOverrides();
+  }
+
 
   /** DBG (Visual): the fracture A/B (voronoi gauntlet) — voronoi
    *  (default: variants break along their seeded Voronoi cell

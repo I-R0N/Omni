@@ -4,6 +4,7 @@ import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType,
 import {
   ShardVariantId,
   ShardVariantDef,
+  GrainSpec,
   PerMapVariantSpawn,
 } from './engine/systems/ShardSystem.types';
 import { ASSETS } from './assets';
@@ -3088,6 +3089,122 @@ export function cycleFractureSiteScale(): number {
   activeFractureSiteScaleIndex = (activeFractureSiteScaleIndex + 1) % FRACTURE_SITE_SCALE_CYCLE.length;
   fractureTuningGen++;
   return activeFractureSiteScaleIndex;
+}
+
+// ── Per-material grain overrides (DBG) ──────────────────────────────
+// The four knobs above are GLOBAL: they force one value across every
+// material at once, which is what you want for judging a setting and
+// exactly wrong for tuning one material against another.  These are the
+// per-material counterpart — a live override of the variant table's own
+// `grain` block, so rock can be made coarser without touching glass.
+//
+// The key is the MATERIAL, not the variant id, because a material's
+// grain geometry is shared by its tile and its shard (CLAUDE.md §8: a
+// shard is a smaller body of the same stuff, not a different material).
+// Writing `rock` moves rock-tile and rock-shard together, which is the
+// only setting that can be judged — a tile and its own debris drawn from
+// two different patterns is not a material.
+//
+// Overrides COMPOSE with the global knobs rather than replacing them:
+// `Frac sites` still scales whatever count these produce, and
+// `Bnd strength` still multiplies whatever strength they set, so a
+// global sweep keeps working while one material is being tuned.
+export const GRAIN_MATERIALS = ['rock', 'glass', 'plastic', 'metal'] as const;
+export type GrainMaterial = typeof GRAIN_MATERIALS[number];
+
+/** The material a shard-family variant belongs to, or null for the ones
+ *  with no grain model (nebula, indestructible). */
+export function grainMaterialOf(variantId: ShardVariantId): GrainMaterial | null {
+  const dash = variantId.indexOf('-');
+  const head = dash < 0 ? variantId : variantId.slice(0, dash);
+  return (GRAIN_MATERIALS as ReadonlyArray<string>).includes(head)
+    ? head as GrainMaterial : null;
+}
+
+/** The five per-material knobs, in the order the DBG rows show them.
+ *  Each carries its own ladder; index 0 is always `null` = "use the
+ *  variant table", so the shipped values stay the default and the
+ *  readout says so rather than showing a number that only coincidentally
+ *  matches. */
+export const GRAIN_KNOBS = {
+  grainSize:     [null, 6, 8, 10, 13, 15, 18, 22, 28, 36] as ReadonlyArray<number | null>,
+  grainCountMin: [null, 1, 2, 3, 4, 6, 8, 12] as ReadonlyArray<number | null>,
+  grainCountMax: [null, 4, 6, 8, 12, 16, 22, 30, 48] as ReadonlyArray<number | null>,
+  regularity:    [null, 0, 0.25, 0.5, 0.75, 0.95, 1] as ReadonlyArray<number | null>,
+  bondStrength:  [null, 0.05, 0.1, 0.16, 0.27, 0.4, 0.62, 0.85, 1.2, 1.8] as ReadonlyArray<number | null>,
+} as const;
+export type GrainKnob = keyof typeof GRAIN_KNOBS;
+export const GRAIN_KNOB_LIST = Object.keys(GRAIN_KNOBS) as ReadonlyArray<GrainKnob>;
+
+type GrainKnobIndices = Record<GrainKnob, number>;
+const emptyKnobIndices = (): GrainKnobIndices =>
+  ({ grainSize: 0, grainCountMin: 0, grainCountMax: 0, regularity: 0, bondStrength: 0 });
+
+const grainOverrideIdx: Record<GrainMaterial, GrainKnobIndices> = {
+  rock: emptyKnobIndices(), glass: emptyKnobIndices(),
+  plastic: emptyKnobIndices(), metal: emptyKnobIndices(),
+};
+
+/** Which material the five knob rows read and write.  Engine-side rather
+ *  than UI-side so a cycle handler knows its target without the overlay
+ *  having to thread it through every callback. */
+let activeGrainMaterialIndex = 0;
+export function getGrainMaterial(): GrainMaterial {
+  return GRAIN_MATERIALS[activeGrainMaterialIndex];
+}
+export function cycleGrainMaterial(): number {
+  activeGrainMaterialIndex = (activeGrainMaterialIndex + 1) % GRAIN_MATERIALS.length;
+  return activeGrainMaterialIndex; // no generation bump: selecting changes nothing
+}
+
+/** The live override for one knob on one material, or null to defer. */
+export function getGrainOverride(mat: GrainMaterial, knob: GrainKnob): number | null {
+  return GRAIN_KNOBS[knob][grainOverrideIdx[mat][knob]] ?? null;
+}
+export function getGrainKnobName(knob: GrainKnob): string {
+  const v = getGrainOverride(getGrainMaterial(), knob);
+  return v === null ? 'table' : String(v);
+}
+export function cycleGrainKnob(knob: GrainKnob): number {
+  const mat = getGrainMaterial();
+  const ladder = GRAIN_KNOBS[knob];
+  const next = (grainOverrideIdx[mat][knob] + 1) % ladder.length;
+  grainOverrideIdx[mat][knob] = next;
+  // Every knob here is a PATTERN input (count, size, regularity) or the
+  // strength the derived HP is summed from, so a change must invalidate
+  // cached decompositions the same way the global knobs do — otherwise it
+  // shows only on terrain that spawns after the tap.
+  fractureTuningGen++;
+  return next;
+}
+export function resetGrainOverrides(): void {
+  for (const m of GRAIN_MATERIALS) grainOverrideIdx[m] = emptyKnobIndices();
+  fractureTuningGen++;
+}
+
+/** A variant's grain spec with the live per-material DBG overrides
+ *  applied.  EVERY read of a `grain` block goes through this rather than
+ *  reaching into SHARD_VARIANTS, so an override cannot be honoured in
+ *  one place and ignored in another — which for this model would mean
+ *  cracks drawn from one pattern and a break taken from a different one.
+ *
+ *  Returns the table object itself (not a copy) when nothing is
+ *  overridden, so normal play allocates nothing on the hot path. */
+export function grainSpecFor(variantId: ShardVariantId): GrainSpec | undefined {
+  const base = SHARD_VARIANTS[variantId].grain;
+  if (base === undefined) return undefined;
+  const mat = grainMaterialOf(variantId);
+  if (mat === null) return base;
+  const idx = grainOverrideIdx[mat];
+  let out: GrainSpec | undefined = undefined;
+  for (const knob of GRAIN_KNOB_LIST) {
+    if (idx[knob] === 0) continue;
+    const v = GRAIN_KNOBS[knob][idx[knob]];
+    if (v === null || v === undefined) continue;
+    if (out === undefined) out = { ...base };
+    (out as unknown as Record<string, number>)[knob] = v;
+  }
+  return out ?? base;
 }
 
 /** null → the variant's own impactBias. */
