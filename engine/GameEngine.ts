@@ -2396,7 +2396,8 @@ export class GameEngine {
         this.spawnDamageText,
         this.handleEntityDeath,
         this.handleScreenShake,
-        this.handleProjectileHit
+        this.handleProjectileHit,
+        this.handlePortalEject
       );
 
       // Indexed loop, not `forEach(e => …)`: the callback would be a fresh
@@ -2983,6 +2984,32 @@ export class GameEngine {
       // (above), so we skip the generic drops path for them.
       if (!entity.suppressDrops && !isNebula) {
           this.spawnDrops(entity);
+      }
+  };
+
+  /** Something too big to fit crossed a rift's centre and was flung back out
+   *  (PhysicsSystem.applyGravity).  The physics is done by the time this
+   *  runs; this is only the BANG — a rift-coloured spray along the way it
+   *  went, and a shake scaled by how big the thing was, so a boulder
+   *  ploughing through reads as heavier than a shard clipping the edge.
+   *
+   *  Shake is distance-gated by the existing camera falloff rather than by a
+   *  check here: `handleScreenShake` is the one funnel every impact in the
+   *  game already goes through with magnitudes tuned against each other, so
+   *  this joins it rather than inventing a second scale. */
+  private handlePortalEject = (entity: GameEntity, portal: GameEntity) => {
+      const radius = Math.max(entity.size.x, entity.size.y) * 0.5;
+      this.spawnParticles(entity.position, 6, portal.color || PORTAL_CONSTANTS.COLOR, {
+          speedMin: 1.5, speedMax: 5,
+          sizeMin: 1.5, sizeMax: 3.5,
+          lifetimeMin: 0.25, lifetimeMax: 0.6,
+      });
+      // Only worth a lurch if it happened near enough to see; the camera's
+      // own falloff does the rest.
+      const dx = wrapDeltaX(this.player.position.x, entity.position.x);
+      const dy = wrapDeltaY(this.player.position.y, entity.position.y);
+      if (dx * dx + dy * dy < 900 * 900) {
+          this.handleScreenShake(Math.min(6, radius * 0.12));
       }
   };
 

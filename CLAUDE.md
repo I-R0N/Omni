@@ -1974,7 +1974,31 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   — "frozen" keeps the warp's shape while stopping its rotation, which
   is what separates displacement from spin as the cause.  Index 0 of
   every cycle is the shipped value, so the first click is always the
-  A/B.  There is NO HUD dock/enter button —
+  A/B.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
+  object whose own radius reaches `EJECT.SIZE_FRACTION` of the horizon is
+  NOT swallowed — crossing the centre FLINGS it out along its own heading
+  at `EJECT.SPEED` (above the ~10.7 escape from the mouth) with
+  `GRACE_SEC` of immunity, so a boulder ploughs through a rift while
+  gravel still vanishes down it.  Sizing the rule against the HORIZON is
+  what makes it physics rather than a threshold — the same rock shoots
+  through Pocket's 18 and disappears into Deep Space's 52 — and it
+  inherits destination scaling and the DBG Size knob for free.  The
+  PLAYER and PROJECTILES are exempt (a ship enters on purpose and has its
+  own transit; a shot is not an object being thrown).  ANYTHING THAT
+  STEERS ITSELF STEERS CLEAR: `avoidsPortals(e)` in `constants.ts` is the
+  ONE predicate — defaulting by TYPE (every ENEMY, which is what a
+  bubble, a dragon head and a rival all are, plus the snitch) so a future
+  roamer is covered the day it exists, overridable per entity via
+  `GameEntity.avoidsPortals` — and `applyGravity` gives those an outward
+  push inside `AVOID.RANGE`.  It lives there rather than in the AISystem
+  strategies, the dragon, the rivals and the bubbles, which are four
+  different movement machineries that would each have needed their own
+  copy.  The pull is deliberately NOT cancelled: they still drift in from
+  across the arena, the push just wins closer in (0.9 peak against a pull
+  clamped at 0.4 balances ~215 units out), so they hold off and slide
+  around the rift and a determined chaser can still push through.
+  Measured: with the rule off, an enemy dropped on a rift's centre sits
+  1.7 units from it indefinitely.  There is NO HUD dock/enter button —
   the ship prompt is the whole affordance (a pill on top of it was
   redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
   intended path and is deliberately NOT wired here — Pair C (c2) owns the

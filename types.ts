@@ -359,6 +359,11 @@ export interface GameEntity {
                                // (portals: a tug, never a trap — see PORTAL_CONSTANTS)
   portalGraceTimer?: number;   // Portal-gravity immunity window on freshly-emerged
                                // transit debris, so the exit well can't re-swallow it
+  /** Whether this entity STEERS ITSELF around portals rather than being
+   *  captured by them.  Defaults by type (every ENEMY and the snitch do),
+   *  so a future roamer is covered without touching the physics; set it
+   *  explicitly only to opt something else in, or an enemy out. */
+  avoidsPortals?: boolean;
   portalDestSpan?: number;     // The DESTINATION map's span (world units), stamped by
                                // addPortal.  A rift is a window onto the arena at the
                                // other end, so its horizon is sized from this — see

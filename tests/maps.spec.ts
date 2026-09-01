@@ -239,6 +239,107 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
   });
 });
 
+test.describe('a rift can only eat what fits in its mouth', () => {
+  /** Two rules, both asked for after play-testing:
+   *   - a LARGE object crossing the centre is flung out along its own
+   *     heading instead of being swallowed,
+   *   - anything that steers itself is held off the throat so it cannot be
+   *     captured and parked there.
+   *
+   *  Both are asserted as OUTCOMES over live sim time — did it get out, did
+   *  it stay out — rather than by reading the impulse back, because "a
+   *  velocity was written" would pass on a shove the well then reels in. */
+  test('a boulder crossing the centre is flung through, not swallowed', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    const planted = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
+      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+      const big = e.currentMap.entities.find((x: any) => x.active && x.mass !== Infinity
+        && x.shardVariant === 'rock-shard' && Math.max(x.size.x, x.size.y) >= 60);
+      if (!rift || !big) return null;
+      // Drop it ON the centre, moving, so this frame's gravity pass sees it
+      // crossing rather than approaching.
+      big.position.x = rift.position.x;
+      big.position.y = rift.position.y;
+      big.velocity.x = 3; big.velocity.y = 0;
+      big.portalGraceTimer = 0;
+      return { id: big.id, size: Math.max(big.size.x, big.size.y),
+               riftX: rift.position.x, riftY: rift.position.y,
+               range: rift.gravityRange };
+    });
+    expect(planted, 'a rock big enough to test the rule').not.toBeNull();
+
+    // It SURVIVES — the swallow is what this rule replaces — and it leaves.
+    await waitForEngine(page, (e, ) => true, 'a frame', 5_000);
+    const out = await page.evaluate(async (p: any) => {
+      const e = (window as any).__omniEngine;
+      const find = () => e.currentMap.entities.find((x: any) => x.id === p.id);
+      await new Promise(r => setTimeout(r, 1200));
+      const en = find();
+      if (!en) return null;
+      const dx = en.position.x - p.riftX, dy = en.position.y - p.riftY;
+      return {
+        active: en.active,
+        dist: Math.hypot(dx, dy),
+        speed: Math.hypot(en.velocity.x, en.velocity.y),
+        // Flung the way it was ALREADY going (+x), not bounced back.
+        vx: en.velocity.x,
+      };
+    }, planted);
+
+    expect(out, 'the boulder still exists — it was not swallowed').not.toBeNull();
+    expect(out!.active).toBe(true);
+    // Thrown clear of the throat, and still travelling.
+    expect(out!.dist).toBeGreaterThan(120);
+    expect(out!.speed).toBeGreaterThan(3);
+    // Along its own velocity vector: it entered heading +x and left heading +x.
+    expect(out!.vx).toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
+
+  test('things that steer themselves are held off the throat', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // Park an enemy right on a rift's centre with no speed of its own — the
+    // worst case, and exactly the "trapped in the gravity" the rule is for.
+    const planted = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
+      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+      if (!rift) return null;
+      const ctx = e.waveContext ? e.waveContext() : null;
+      if (!ctx) return null;
+      const foe = e.waves.spawnAt('RAMMER_1', { x: rift.position.x, y: rift.position.y }, ctx, true);
+      if (!foe) return null;
+      foe.velocity.x = 0; foe.velocity.y = 0;
+      // Keep the player far away so its own chase steering is not the thing
+      // pulling it clear — the portal rule has to do this on its own.
+      e.player.position.x = rift.position.x + 4000;
+      e.player.position.y = rift.position.y + 4000;
+      return { id: foe.id, riftX: rift.position.x, riftY: rift.position.y };
+    });
+    expect(planted, 'an enemy spawned on the rift').not.toBeNull();
+
+    // Give it real sim time to be either captured or pushed clear.
+    const result = await page.evaluate(async (p: any) => {
+      const e = (window as any).__omniEngine;
+      await new Promise(r => setTimeout(r, 2500));
+      const en = e.currentMap.entities.find((x: any) => x.id === p.id);
+      if (!en || !en.active) return null;
+      return { dist: Math.hypot(en.position.x - p.riftX, en.position.y - p.riftY) };
+    }, planted);
+
+    expect(result, 'the enemy is still alive — a rift must not eat it').not.toBeNull();
+    // Well clear of the horizon (42 at this rift) rather than sitting in it.
+    expect(result!.dist).toBeGreaterThan(120);
+
+    watch.assertClean();
+  });
+});
+
 test.describe('the transit warp — the flight through the wormhole', () => {
   /** Arrival plays a short screen-space beat (PORTAL_CONSTANTS.WARP): the lens
    *  unrolls into radial streaks, the sky streams outward, and the tunnel

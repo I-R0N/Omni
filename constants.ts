@@ -5129,6 +5129,25 @@ export function cycleSnitchSpeed(): number {
   return activeSnitchSpeedIndex;
 }
 
+/** Does this entity STEER ITSELF around portals rather than being captured?
+ *
+ *  ONE predicate, so "aware of the rift" is a property of the world rather
+ *  than a behaviour each mover re-implements.  The default is by TYPE — every
+ *  ENEMY (which is what a bubble, a dragon head and a rival all are) plus the
+ *  snitch — so a future roamer built on those types is covered the day it
+ *  exists, with no physics change and nothing to remember.  `avoidsPortals`
+ *  on the entity overrides it in either direction: opt something else in, or
+ *  opt a specific enemy out so a rift can eat it.
+ *
+ *  The PLAYER is deliberately not included: a human is already aware of the
+ *  hole, and taking their steering away is the one thing the tug must never
+ *  do.  Loose matter is not included either — shards and drops spiralling in
+ *  is the effect, not a bug. */
+export function avoidsPortals(e: GameEntity): boolean {
+  if (e.avoidsPortals !== undefined) return e.avoidsPortals;
+  return e.type === EntityType.ENEMY || e.isSnitch === true;
+}
+
 /** The portal's event-horizon radius in WORLD units — the black disc the
  *  renderer draws AND the radius at which the well swallows a shard.
  *
@@ -5717,6 +5736,64 @@ export const PORTAL_CONSTANTS = {
     // the covering that is prompt.
     VEIL_IN: 0.12,          // fraction of the beat spent dimming
     VEIL_OUT: 0.38,         // fraction spent revealing the arena
+  },
+  // ── Too big to swallow (user call) ────────────────────────────────
+  // A hole can only eat what fits in its mouth.  An object whose OWN radius
+  // reaches SIZE_FRACTION of the horizon does not fall in: it crosses the
+  // centre and is FLUNG out along its own heading, the way a collision would
+  // throw it — so a boulder ploughs straight through a rift and keeps going,
+  // while gravel still disappears down it.
+  //
+  // Sizing the rule against the HORIZON rather than an absolute number is
+  // what makes it read as physics instead of as a threshold: the same rock
+  // that shoots through a Pocket rift (horizon 18) is small enough to vanish
+  // into Deep Space's (52).  Destination scaling and the DBG Size knob come
+  // along for free, because both already move the horizon.
+  //
+  // SPEED must clear the well outright or the eject is a stutter rather than
+  // an exit.  Escape from the mouth is ~10.7 px/step (0.4/step out to 100,
+  // then 4000/d² to the 700 range edge), so 17 leaves margin at every rift
+  // size, and GRACE_SEC of immunity covers the rest — the same trick the
+  // transit debris uses, and for the same reason.
+  //
+  // The PLAYER is deliberately exempt.  Its radius (10) sits right at the
+  // threshold for a mid-sized rift, so the rule would fire on some
+  // destinations and not others; and a ship is the one thing here that
+  // enters a portal ON PURPOSE, with its own transit and its own arrival
+  // ejection.  Being punted while lining that up would fight the
+  // interaction rather than serve it.  Projectiles are exempt too: a shot
+  // is not an object being thrown around.
+  EJECT: {
+    SIZE_FRACTION: 0.55,
+    SPEED: 17,
+    BOOST: 1.6,       // or this multiple of its own speed, whichever is more
+    SPIN: 2.5,        // random tumble added on the way out
+    GRACE_SEC: 2.0,
+  },
+  // ── Steering clear (user call) ────────────────────────────────────
+  // Anything that steers ITSELF — enemies, bubbles, dragons, rivals, the
+  // snitch, and whatever comes next — gets an outward push near a rift, so
+  // nothing with a mind of its own can be captured and parked in the throat.
+  //
+  // It is ONE rule in ONE place (PhysicsSystem.applyGravity, which already
+  // walks every dynamic against every attractor) rather than avoidance code
+  // in five different AI routines: the dragon, the rivals, the bubbles and
+  // the AISystem strategies all move by different machinery, and a future
+  // roamer would have had to remember to add a sixth copy.  `avoidsPortals`
+  // (types.ts) overrides the default for anything that is not an ENEMY.
+  //
+  // The pull is deliberately NOT cancelled — being drawn toward a rift from
+  // across the arena is the flavour worth keeping.  The push simply WINS
+  // closer in: at 0.9 peak against a pull clamped at 0.4, the two balance
+  // around 215 units out, which is five times the hub rift's horizon.  So
+  // they drift in, then hold off and slide around it, and a determined
+  // chaser can still push through toward the player rather than hitting a
+  // wall.  RANGE has a floor because a small rift's horizon would otherwise
+  // put the standoff inside the pull's own clamp radius.
+  AVOID: {
+    RANGE_MULT: 5,
+    RANGE_MIN: 240,
+    ACCEL: 0.9,
   },
   // ── The event horizon (user call) ─────────────────────────────────
   // The rift's WORLD ART is now exactly one thing: a black disc.  Every
