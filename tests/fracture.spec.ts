@@ -2838,3 +2838,107 @@ test.describe('fracture core — cost', () => {
     watch.assertClean();
   });
 });
+
+test.describe('metal composite — breaks into grains, not lattice triangles', () => {
+  test('a dying composite sheds Voronoi cells, and no shard spawns at 1 HP', async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+
+    // Metal is the one material whose shards RE-BOND after a break: the
+    // assembly pass fuses loose shards onto a triangular lattice
+    // (ShardSystem.tickMetalAssembly).  That is how metal joins, and it
+    // used to be how metal BROKE too — decomposeMetalComposite handed
+    // back one authored equilateral triangle per lattice cell, so a
+    // field that shattered into true grains was a field of identical
+    // triangles a few seconds later.  Under voronoi the composite now
+    // fractures its own outline like any other body.
+    //
+    // The tell is that the children are a PATTERN rather than N copies of
+    // one template.  Two weaker tells were tried and rejected: counting
+    // three-sided polygons fails on correct output (at metal's 0.95
+    // regularity the pattern is near-honeycomb, so triangular Voronoi
+    // cells are ordinary), and matching an absolute lattice size fails
+    // too — the lattice pitch scales with the shards that fused, so a
+    // composite grown from ~12px grains sheds 11.1px triangles, not the
+    // 25.40px a full-size HEX_SIZE/√3 lattice would give.  Measured on the
+    // pre-fix build: 3 children, all exactly 11.10.
+
+    const broke = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities as any[];
+      const tiles = ents.filter((x: any) => x.active && x.shardVariant === 'metal-tile').slice(0, 8);
+      for (const t of tiles) {
+        t.lastImpactVelocity = { x: 40, y: 0 };
+        t.lastImpactDamage = 4;
+        t.health = 0; t.active = false;
+        e.handleEntityDeath(t);
+      }
+      return tiles.length;
+    });
+    expect(broke).toBeGreaterThan(0);
+
+    // Every fresh grain must carry a real authored HP.  Metal had no
+    // branch in any of the three fracture-spawn ladders and so spawned on
+    // the `size > 30 ? 2 : 1` fall-through — 1 HP, which the crash and
+    // tile-pressure paths (they decrement `health` directly, they do not
+    // spend on grain boundaries) killed in a single bump.
+    const spawned = await engine(page, (e: any) => {
+      const loose = (e.currentMap.entities as any[])
+        .filter((x: any) => x.active && x.shardVariant === 'metal-shard' && !x.metalCells);
+      return { n: loose.length, minMax: Math.min(...loose.map((x: any) => x.maxHealth)) };
+    });
+    expect(spawned.n).toBeGreaterThan(0);
+    expect(spawned.minMax).toBeGreaterThan(4);
+
+    // Let the assembly pass build composites, then kill one and read its
+    // children.  Poll rather than sleep — sim seconds are not wall seconds.
+    await waitForEngine(
+      page,
+      (e: any) => (e.currentMap.entities as any[])
+        .some((x: any) => x.active && x.shardVariant === 'metal-shard'
+          && x.metalCells !== undefined && x.metalCells.length >= 2),
+      'a metal composite to assemble',
+    );
+
+    const kids = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities as any[];
+      const comp = ents.find((x: any) => x.active && x.shardVariant === 'metal-shard'
+        && x.metalCells !== undefined && x.metalCells.length >= 2);
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      comp.lastImpactVelocity = { x: 30, y: 0 };
+      comp.lastImpactDamage = 3;
+      comp.health = 0; comp.active = false;
+      e.handleEntityDeath(comp);
+      const fresh = ents.filter((x: any) => x.active
+        && x.shardVariant === 'metal-shard' && !before.has(x.id));
+      const equilateral = (x: any) => {
+        const p = x.polygonPoints || [];
+        if (p.length !== 3) return false;
+        const L = [0, 1, 2].map(i =>
+          Math.hypot(p[(i + 1) % 3].x - p[i].x, p[(i + 1) % 3].y - p[i].y));
+        return Math.abs(L[0] - L[1]) < L[0] * 0.03 && Math.abs(L[1] - L[2]) < L[1] * 0.03;
+      };
+      return {
+        cells: comp.metalCells.length,
+        n: fresh.length,
+        allEquilateral: fresh.length > 0 && fresh.every(equilateral),
+        sizes: fresh.map((x: any) => +x.size.x.toFixed(2)),
+        distinctSizes: new Set(fresh.map((x: any) => x.size.x.toFixed(3))).size,
+      };
+    });
+
+    // The composite must actually have produced debris — a silent vanish
+    // would pass the shape assertions vacuously, and the mobile-parent
+    // size gate is exactly what would cause one (a 2-cell composite
+    // measures ~30px against a 28.3px floor, which is why the composite
+    // route passes `skipSizeGate`).
+    expect(kids.n).toBeGreaterThan(1);
+    // Cell areas vary, so the fragment sizes must too.  This is the
+    // assertion that fails on the pre-fix build (distinctSizes 1).
+    expect(kids.distinctSizes).toBeGreaterThan(1);
+    // And they are not one authored shape stamped N times.
+    expect(kids.allEquilateral).toBe(false);
+
+    watch.assertClean();
+  });
+});

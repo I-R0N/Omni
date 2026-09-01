@@ -4138,6 +4138,22 @@ export function crackConfigForVariant(
 // STRUCTURE_VARIANTS.glass.health.
 export const GLASS_SHARD_HP = 12;
 
+// Metal-shard durability.  Metal had NO entry in any of the three
+// fracture-spawn HP ladders, so every metal grain spawned on the
+// `newSize > 30 ? 2 : 1` fall-through — i.e. at 1 HP.  That is not a
+// brittle metal, it is a missing branch: the crash and tile-pressure
+// paths in PhysicsSystem decrement `health` DIRECTLY rather than
+// spending on grain boundaries, so a 1-HP shard died to a single
+// physical bump while surviving six blaster bolts.
+//
+// For a grain material this is only the AUTHORED value — the boundary
+// model rewrites maxHealth to the derived Σ(edge length × bondStrength)
+// at first weapon damage.  16 is that derived figure, measured on
+// METAL_FIELD (16.2 median over 8 grains of a broken metal tile), so
+// the authored and derived numbers agree instead of the authored one
+// being a placeholder that the first hit contradicts.
+export const METAL_SHARD_HP = 16;
+
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
 // pass-through debris: players and enemies drift through them, shattering

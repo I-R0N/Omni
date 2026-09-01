@@ -36,6 +36,7 @@ import {
   getActiveShatterGraceDelay,
   getActiveFractureMode,
   GLASS_SHARD_HP,
+  METAL_SHARD_HP,
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
   NEBULA_CONDENSE_STALL_BONDS,
@@ -815,6 +816,26 @@ export class ShardSystem {
     if (parent.shardVariant === 'metal-shard'
      && parent.metalCells !== undefined
      && parent.metalCells.length >= 2) {
+      // Under voronoi the composite breaks into the GRAINS of its own
+      // outline, not back into the lattice triangles it was assembled
+      // from.  The lattice is how metal BONDS; it is not how metal
+      // BREAKS, and emitting equilateral triangles here was the one
+      // path still putting authored shapes into the world — measured on
+      // METAL_FIELD, a field that shattered into 54 true voronoi grains
+      // was 6 equilateral triangles ten seconds later, because assembly
+      // re-triangulated them and this call handed the triangles back.
+      // The composite's convex hull (metalRecomputeBounds) is an
+      // ordinary polygon, so it decomposes like any other body.
+      // `skipSizeGate`: a composite is ≥ 2 cells of material by
+      // definition, so the mobile-parent minimum that protects tiny
+      // chips from spawning sub-minimum debris must not apply — a
+      // 2-cell composite measures ~30px against a 28.3px floor and
+      // would vanish on the wrong side of a coin flip.
+      if (variant.shatter.kind === 'voronoi' && getActiveFractureMode() === 'voronoi'
+       && parent.polygonPoints !== undefined && parent.polygonPoints.length >= 3) {
+        this.shatterVoronoiStyle(parent, variant, entities, true);
+        return;
+      }
       this.decomposeMetalComposite(parent, entities);
       return;
     }
@@ -845,6 +866,43 @@ export class ShardSystem {
   }
 
   /**
+   * Authored spawn HP for one fresh shard — the ONE ladder behind all
+   * three fracture-spawn sites (shatterVoronoiStyle, spawnDetachedCell,
+   * shatterPowerlawStyle).
+   *
+   * It lived as three near-copies, and metal fell through every one of
+   * them onto the `newSize > 30 ? 2 : 1` default.  That default is not a
+   * chosen value for metal: it is what a variant with no branch gets.
+   * The consequence is invisible through a gun and fatal everywhere
+   * else, which is why it survived — the grain model rewrites maxHealth
+   * to the DERIVED boundary total at first WEAPON damage (measured:
+   * metal 16.2, plastic 17.0, rock 5.3, glass 3.2), but the crash and
+   * tile-pressure paths in PhysicsSystem decrement `health` directly, so
+   * a 1-HP metal grain shrugged off six blaster bolts and died to one
+   * bump.
+   *
+   * `dentOverride` is the parent variant's `dent.shardHealth` where the
+   * caller has one — the released-shard durability the dent contract
+   * declares — and wins over the family default.  `densityTier` is
+   * rock-only; every other family leaves it undefined.
+   */
+  private static spawnShardHealth(
+    childVariantId: ShardVariantId,
+    newSize: number,
+    densityTier: number | undefined,
+    dentOverride?: number,
+  ): number {
+    if (childVariantId === 'rock-shard') return rockHitCeiling(newSize, densityTier);
+    if (dentOverride !== undefined) return dentOverride;
+    if (childVariantId === 'glass-shard') return GLASS_SHARD_HP;
+    if (childVariantId === 'metal-shard') return METAL_SHARD_HP;
+    const baseHp = newSize > 30 ? 2 : 1;
+    return densityTier !== undefined
+      ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
+      : baseHp;
+  }
+
+  /**
    * Voronoi shatter (V2): the cached decomposition becomes the children —
    * each cell is a fragment carrying the CELL's polygon (translated to
    * the cell centroid, rotated with the parent), an area-proportional
@@ -858,6 +916,7 @@ export class ShardSystem {
     parent: GameEntity,
     parentVariant: ShardVariantDef,
     entities: GameEntity[],
+    skipSizeGate = false,
   ): void {
     const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
     const childSpawn = childVariant.spawn;
@@ -868,7 +927,7 @@ export class ShardSystem {
     // as the legacy dent path spawned its breakShards with no size gate
     // (a 42px hex is smaller than two 30px rock minimums, and gating it
     // here made rock-tiles vanish without debris).
-    if (parent.mass !== Infinity
+    if (!skipSizeGate && parent.mass !== Infinity
       && parent.size.x * parent.size.x < MIN_SIZE * MIN_SIZE * 2) return;
 
     const cells = ensureFractureCells(parent);
@@ -915,22 +974,11 @@ export class ShardSystem {
         densityTier = Math.max(0, Math.min(maxTier, parentTier + offset));
         childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
       }
-      let hp: number;
-      if (childVariant.id === 'rock-shard') {
-        hp = rockHitCeiling(newSize, densityTier);
-      } else if (parentVariant.dent?.shardHealth !== undefined) {
-        // The dent contract's released-shard durability survives the
-        // voronoi routing (V5: plastic-tile children keep their 24-HP
-        // dent life, decoupled from the tile's brittle face).
-        hp = parentVariant.dent.shardHealth;
-      } else if (childVariant.id === 'glass-shard') {
-        hp = GLASS_SHARD_HP; // V9 damage layer — 2 blaster hits
-      } else {
-        const baseHp = newSize > 30 ? 2 : 1;
-        hp = densityTier !== undefined
-          ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
-          : baseHp;
-      }
+      // The dent contract's released-shard durability survives the
+      // voronoi routing (V5: plastic-tile children keep their 24-HP dent
+      // life, decoupled from the tile's brittle face).
+      const hp = ShardSystem.spawnShardHealth(
+        childVariant.id, newSize, densityTier, parentVariant.dent?.shardHealth);
 
       // World-space cell centroid: rotate the local centroid with the
       // parent so the fragment sits exactly where its cell rendered.
@@ -1041,11 +1089,7 @@ export class ShardSystem {
       childMass *= ROCK_CONDENSE.DENSITY_MULT[
         Math.min(densityTier, ROCK_CONDENSE.DENSITY_MULT.length - 1)];
     }
-    const hp = childVariant.id === 'rock-shard'
-      ? rockHitCeiling(newSize, densityTier)
-      : childVariant.id === 'glass-shard'
-        ? GLASS_SHARD_HP
-        : (newSize > 30 ? 2 : 1);
+    const hp = ShardSystem.spawnShardHealth(childVariant.id, newSize, densityTier);
 
     const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
     const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
@@ -1368,7 +1412,6 @@ export class ShardSystem {
 
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
-      const isRockChild = childVariant.id === 'rock-shard';
       // Density-aware mass: dense fragments feel heavy on impact and resist
       // push.  HP is resolved per-family below.
       let childMass = childSpawn.sizeToMass(newSize);
@@ -1377,27 +1420,13 @@ export class ShardSystem {
         densityTier = childDensityTiers[i];
         childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
       }
-      let hp: number;
-      if (isRockChild) {
-        // Rock children follow the same probabilistic crack→break model as
-        // free-spawn asteroids and rock tiles: maxHealth is the size/density
-        // hit ceiling (ROCK_BREAK), not a flat HP.
-        hp = rockHitCeiling(newSize, densityTier);
-      } else {
-        // plastic / metal debris keep the original brittle 1-2 HP,
-        // gently scaled by density (sqrt) when condensed; glass carries
-        // the V9 damage layer in BOTH fracture modes (it is tile/shard
-        // durability, not fracture geometry, so it is not part of the
-        // A/B).
-        if (childVariant.id === 'glass-shard') {
-          hp = GLASS_SHARD_HP;
-        } else {
-          const baseHp = newSize > 30 ? 2 : 1;
-          hp = densityTier !== undefined
-            ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
-            : baseHp;
-        }
-      }
+      // Rock children follow the same probabilistic crack→break model as
+      // free-spawn asteroids and rock tiles (maxHealth is the size/density
+      // hit ceiling, not a flat HP); glass and metal carry their family
+      // durability in BOTH fracture modes, since that is tile/shard
+      // toughness rather than fracture geometry and so is not part of the
+      // A/B.
+      const hp = ShardSystem.spawnShardHealth(childVariant.id, newSize, densityTier);
 
       let scatterAngle: number;
       let scatterSpeed: number;
