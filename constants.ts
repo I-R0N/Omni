@@ -5197,12 +5197,17 @@ export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5
 // TWIST_SWING < 2*PI at 1x, so 3x is still under two turns and cannot band),
 // and the push is a fraction of the lens radius, so it scales without ever
 // out-reaching the region it belongs to.
-export const PORTAL_LENS_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0] as const;
+// Index 0 is what ships.  The high end runs well past plausible on purpose:
+// the twist is CLAMPED below one turn at the read (BackgroundManager), so
+// even 12× cannot bring the banding back — it only drives the radial push
+// harder, which is the half of the warp that has no failure mode.
+export const PORTAL_LENS_CYCLE: ReadonlyArray<number> =
+  [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0] as const;
 /** Lens RADIUS as a multiple of the rift's horizon — how much sky the warp
  *  covers, separate from how hard it bends it.  Index 0 is LENS.RADIUS_MULT,
  *  the shipped value; the steps above it are what "hug the hole" looks like
  *  when it is loosened back off. */
-export const PORTAL_LENS_RADIUS_CYCLE: ReadonlyArray<number> = [4, 6, 9, 14, 2.5] as const;
+export const PORTAL_LENS_RADIUS_CYCLE: ReadonlyArray<number> = [14, 4, 6, 9, 20, 30, 2.5] as const;
 let activePortalLensRadiusIndex = 0;
 export function getPortalLensRadiusMult(): number {
   return PORTAL_LENS_RADIUS_CYCLE[activePortalLensRadiusIndex];
@@ -5214,7 +5219,7 @@ export function cyclePortalLensRadius(): number {
   activePortalLensRadiusIndex = (activePortalLensRadiusIndex + 1) % PORTAL_LENS_RADIUS_CYCLE.length;
   return activePortalLensRadiusIndex;
 }
-export const PORTAL_LENS_SPIN_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 2.0] as const;
+export const PORTAL_LENS_SPIN_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 2.0, 4.0] as const;
 // Index 0 of every cycle is the SHIPPED value, so the panel opens on what the
 // player just flew through and the first click is always the A/B.
 let activePortalSizeIndex = 0;
@@ -5273,7 +5278,12 @@ export function cyclePortalLens(): number {
  *  shipped value, like every other Portals row, so the first click is the A/B.
  *  Cycling it takes effect on the NEXT transit — the beat reads its length
  *  once, at the moment it starts. */
-export const PORTAL_WARP_CYCLE: ReadonlyArray<number> = [0.9, 0.6, 1.4, 0] as const;
+// Index 0 is what ships.  The long tail is deliberately silly at the top —
+// "extreme" is a legitimate thing to want to SEE once, and a beat you can
+// stretch to six seconds is how you inspect a frame of it without a
+// screenshot harness.
+export const PORTAL_WARP_CYCLE: ReadonlyArray<number> =
+  [1.4, 0.9, 0.6, 2.2, 3.5, 6.0, 10.0, 0] as const;
 let activePortalWarpIndex = 0;
 export function getPortalWarpDuration(): number { return PORTAL_WARP_CYCLE[activePortalWarpIndex]; }
 export function getPortalWarpName(): string {
@@ -5598,7 +5608,12 @@ export const OVERWORLD_CONSTANTS = {
 // dot and an off-screen chevron for free.  Destinations are MAP-DESCRIPTOR
 // IDS (engine/maps/MapDescriptors.ts), never bare MapType values.
 export const PORTAL_CONSTANTS = {
-  SIZE: 200,                 // world-unit diameter of the rift mouth (reads as
+  // Rift SIZE, GRAVITY_STRENGTH and GRAVITY_RANGE below are the values a
+  // play-testing pass settled on (user call): a much smaller mouth with a
+  // stronger, wider well than the first draft shipped.  They are BAKED here
+  // rather than left as a standing DBG multiplier, so `1×` on every knob
+  // still means "what ships" and the live readout reports the real numbers.
+  SIZE: 70,                 // world-unit diameter of the rift mouth (reads as
                              // a landmark at gameplay zoom, like the station)
   COLOR: '#a855f7',          // violet — the established rift language (dragon/rival warps)
   RETURN_COLOR: '#38bdf8',   // sky — return rifts match the hub/station palette
@@ -5640,8 +5655,8 @@ export const PORTAL_CONSTANTS = {
   // (a visible inspiral), and the near-mouth clamp region tops out at
   // 0.4/step — decisive, but far below the 5.0 solver cap so nothing gets
   // flung.
-  GRAVITY_RANGE: 700,
-  GRAVITY_STRENGTH: 4000,
+  GRAVITY_RANGE: 1050,
+  GRAVITY_STRENGTH: 6000,
   // The PLAYER feels only this fraction of the well (gravityPlayerScale).
   // Entering a portal is a deliberate E/tap, so proximity must never be
   // commitment: at its strongest the tug is 0.4 × 0.12 = 0.048/step,
@@ -5726,15 +5741,15 @@ export const PORTAL_CONSTANTS = {
     // without needing a depth model the real star field does not have.
     EXPAND: 7,
     STREAK: 0.26,           // streak length as a fraction of a star's radius
-    VEIL: 0.93,             // how far the world is dimmed at full tunnel
-    // The dim is QUICKER than the acceleration, and deliberately so.  The
-    // destination map is already loaded when the beat starts, so whatever the
-    // veil has not yet covered is the arena the player is about to be shown —
-    // a slow dim gives them a clear look at it, then takes it away and gives
-    // it back, which reads as a glitch rather than as travel.  The MOTION
-    // still rolls in slowly (see `curve` in render/portalWarp.ts); it is only
-    // the covering that is prompt.
-    VEIL_IN: 0.12,          // fraction of the beat spent dimming
+    // FULLY OPAQUE, and there is no dim-in at all (user report: the
+    // destination flashed before the beat).  The map swaps synchronously
+    // when the transit fires, so anything the veil lets through is the
+    // arena this beat exists to reveal — 0.93 let 7% of it through, and a
+    // ramp-in let all of it through on the transit's own frame.  The ship
+    // and the streaking sky are drawn ABOVE this, so opaque costs nothing
+    // that matters: what the player sees mid-tunnel is their own hull and
+    // the stars, which is the whole intent.
+    VEIL: 1.0,
     VEIL_OUT: 0.38,         // fraction spent revealing the arena
   },
   // ── Too big to swallow (user call) ────────────────────────────────
@@ -5751,12 +5766,14 @@ export const PORTAL_CONSTANTS = {
   // along for free, because both already move the horizon.
   //
   // SPEED must clear the well outright or the eject is a stutter rather than
-  // an exit.  Escape from the mouth is ~10.7 px/step (0.4/step out to 100,
-  // then 4000/d² to the 700 range edge), so 17 leaves margin at every rift
-  // size, and GRACE_SEC of immunity covers the rest — the same trick the
+  // an exit.  Against the shipped well (g6000 out to 1050, clamped at 0.6/step
+  // inside 100) escape from a hub mouth costs ~105/v of speed — 0.6 × 85 from
+  // the 14.7 horizon out to the clamp, then 6000 × (1/100 − 1/1050) beyond it
+  // — so the escape speed is ~14.5 px/step.  20 leaves real margin at every
+  // rift size, and GRACE_SEC of immunity covers the rest: the same trick the
   // transit debris uses, and for the same reason.
   //
-  // The PLAYER is deliberately exempt.  Its radius (10) sits right at the
+  // The PLAYER is deliberately exempt.  Its radius (10) sits near the
   // threshold for a mid-sized rift, so the rule would fire on some
   // destinations and not others; and a ship is the one thing here that
   // enters a portal ON PURPOSE, with its own transit and its own arrival
@@ -5765,7 +5782,7 @@ export const PORTAL_CONSTANTS = {
   // is not an object being thrown around.
   EJECT: {
     SIZE_FRACTION: 0.55,
-    SPEED: 17,
+    SPEED: 20,
     BOOST: 1.6,       // or this multiple of its own speed, whichever is more
     SPIN: 2.5,        // random tumble added on the way out
     GRACE_SEC: 2.0,
@@ -5784,8 +5801,8 @@ export const PORTAL_CONSTANTS = {
   //
   // The pull is deliberately NOT cancelled — being drawn toward a rift from
   // across the arena is the flavour worth keeping.  The push simply WINS
-  // closer in: at 0.9 peak against a pull clamped at 0.4, the two balance
-  // around 215 units out, which is five times the hub rift's horizon.  So
+  // closer in: at 1.4 peak against a pull clamped at 0.6, the two balance
+  // around 215 units out, which is many times the hub rift's horizon.  So
   // they drift in, then hold off and slide around it, and a determined
   // chaser can still push through toward the player rather than hitting a
   // wall.  RANGE has a floor because a small rift's horizon would otherwise
@@ -5793,7 +5810,7 @@ export const PORTAL_CONSTANTS = {
   AVOID: {
     RANGE_MULT: 5,
     RANGE_MIN: 240,
-    ACCEL: 0.9,
+    ACCEL: 1.4,
   },
   // ── The event horizon (user call) ─────────────────────────────────
   // The rift's WORLD ART is now exactly one thing: a black disc.  Every
@@ -5858,13 +5875,13 @@ export const PORTAL_CONSTANTS = {
   // accumulating it, so the warp still lives without ever winding up.
   LENS: {
     RADIUS_MULT: 4.0,      // × the horizon radius
-    PUSH_FRAC: 0.28,       // radial push at the throat, × the lens radius
-    TWIST: 0.55,           // radians of shear at the throat (MUST stay < 2π)
-    TWIST_SWING: 0.18,     // how much of that shear breathes
-    SWIRL_RATE: 0.35,      // breathing rate (rad/s of the sine's phase)
+    PUSH_FRAC: 0.42,       // radial push at the throat, × the lens radius
+    TWIST: 0.825,          // radians of shear at the throat (see the clamp below)
+    TWIST_SWING: 0.27,     // how much of that shear breathes
+    SWIRL_RATE: 0.70,      // breathing rate (rad/s of the sine's phase)
     // The nebula-puff layer takes the same treatment at its own scale —
     // a wider, softer bend, since the puffs are the far backdrop.
-    PUFF_RADIUS_MULT: 7.0,
+    PUFF_RADIUS_MULT: 24.0,
     PUFF_PUSH_FRAC: 0.22,
   },
   // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron

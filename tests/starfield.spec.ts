@@ -695,7 +695,7 @@ test.describe('the star field', () => {
 /** PORTAL_LENS_CYCLE's length — how many clicks can be needed to reach any
  *  step from any other.  Kept here rather than imported: the suites drive the
  *  built app through its debug handles, never the source constants. */
-const PORTAL_LENS_STEPS = 7;
+const PORTAL_LENS_STEPS = 10;
 
 test.describe('the wormhole star lens', () => {
   /** The DBG Lens knob has to CHANGE something, and the twist must never wind

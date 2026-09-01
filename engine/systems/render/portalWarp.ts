@@ -50,28 +50,54 @@ export function warpSpeed(p: number): number {
 }
 
 /** How present the beat is, 0..1 — the veil's own level, normalised.  The
- *  streak layer rides this, so the tunnel arrives and leaves WITH the
- *  darkness rather than hanging over the revealed arena. */
+ *  streak layer rides this, so the tunnel leaves WITH the darkness rather
+ *  than hanging over the revealed arena.
+ *
+ *  IT OPENS AT FULL, and that is the fix for a real bug rather than a taste
+ *  call (user report: "the destination arena appears briefly before the warp
+ *  animation").  The map is swapped SYNCHRONOUSLY when the transit is
+ *  triggered, so from that instant the world behind this veil is the
+ *  DESTINATION.  Any ramp-in at all is therefore a window onto the place the
+ *  beat exists to reveal — and the window was widest at the worst moment:
+ *  the frame the transit happens in draws at p EXACTLY 0, where a fade-in is
+ *  zero and the arena was fully visible for a frame, more if that frame was
+ *  slow.  A fade cannot be made short enough to fix that; only starting at
+ *  full can, which is why VEIL_IN is gone rather than merely small. */
 export function warpFade(p: number): number {
-  let v: number;
-  if (p < W.VEIL_IN) v = p / W.VEIL_IN;
-  else if (p > 1 - W.VEIL_OUT) v = (1 - p) / W.VEIL_OUT;
-  else v = 1;
-  return Math.max(0, Math.min(1, v));
+  if (p > 1 - W.VEIL_OUT) return Math.max(0, Math.min(1, (1 - p) / W.VEIL_OUT));
+  return 1;
+}
+
+/** The veil's actual alpha for this progress — what the renderer paints, and
+ *  what `tests/maps.spec.ts` reads back to prove the destination cannot show
+ *  through at any point before the reveal. */
+export function warpVeilAlpha(p: number): number {
+  return warpFade(p) * W.VEIL;
 }
 
 /** The veil: takes the world away, and gives it back.  Drawn over the world
  *  and UNDER the streaking sky, so what the player sees mid-beat is stars and
  *  their own hull, with the arena waiting behind it. */
+/** Returns the alpha it ACTUALLY painted — 0 when it drew nothing.  The
+ *  caller publishes that (RenderSystem.lastWarpVeilAlpha) so a test reads
+ *  what reached the screen rather than what the maths says it should have:
+ *  the bug this replaced was a guard that SKIPPED the draw, which a
+ *  recomputed alpha would have reported as covered. */
 export function renderPortalWarpVeil(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   p: number,
-): void {
-  if (!(p > 0) || p >= 1) return;
-  ctx.globalAlpha = warpFade(p) * W.VEIL;
+): number {
+  // p === 0 IS a drawn frame — the transit's own frame.  Skipping it (the
+  // old `!(p > 0)` guard) is precisely how the destination flashed before
+  // the beat: the swap is synchronous, so that frame already shows the
+  // arena, and it was the one frame the veil declined to paint.
+  if (p < 0 || p >= 1) return 0;
+  const a = warpVeilAlpha(p);
+  ctx.globalAlpha = a;
   ctx.fillStyle = '#05030c';
   ctx.fillRect(0, 0, w, h);
   ctx.globalAlpha = 1;
+  return a;
 }

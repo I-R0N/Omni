@@ -45,6 +45,8 @@ export interface RendererDiagnostics {
   /** Transit-warp progress 0->1 while a wormhole flight is in flight; null
    *  otherwise.  Pushed per frame by GameEngine.draw. */
   portalWarp: number | null;
+  /** Veil alpha painted on the last transit frame; 0 when not in transit. */
+  lastWarpVeilAlpha: number;
   stageDepth: number;
   playerLightToolHalfDeg: number | null;
   /** Discard generated background content so the next frame rebuilds it.

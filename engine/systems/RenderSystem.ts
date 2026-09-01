@@ -385,6 +385,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  when no transit is in flight.  A number rather than a timer because the
    *  beat is a pure function of progress — see render/portalWarp.ts. */
   portalWarp: number | null = null;
+  /** The veil alpha actually painted on the last frame of a transit, 0 when
+   *  no transit is in flight.  Published because "the destination is not
+   *  visible yet" is a RULE, and the only honest way to check it is to read
+   *  what the render path put on the screen — see tests/maps.spec.ts. */
+  lastWarpVeilAlpha: number = 0;
   private _attractors: GameEntity[] = [];
 
   // Object pools backing the {entity,rx,ry} render buckets above.  The
@@ -1111,8 +1116,9 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // After the world and its light/fog layers, so it veils everything the
     // player has arrived into, and BEFORE the HUD, which stays legible
     // throughout — the chrome is not inside the wormhole.
+    if (this.portalWarp === null) this.lastWarpVeilAlpha = 0;
     if (this.portalWarp !== null) {
-        renderPortalWarpVeil(ctx, width, height, this.portalWarp);
+        this.lastWarpVeilAlpha = renderPortalWarpVeil(ctx, width, height, this.portalWarp);
         // The tunnel IS the real sky: the same stars the player was looking
         // at, swept outward (BackgroundManager owns the star data, so it
         // draws them).  Above the veil, below the ship.

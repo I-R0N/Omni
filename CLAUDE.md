@@ -1974,10 +1974,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   — "frozen" keeps the warp's shape while stopping its rotation, which
   is what separates displacement from spin as the cause.  Index 0 of
   every cycle is the shipped value, so the first click is always the
-  A/B.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
+  A/B — and when a tuning pass settles somewhere, that value is BAKED into
+  `PORTAL_CONSTANTS` and the knob returns to 1× rather than shipping a
+  standing multiplier: `1×` has to keep meaning "what ships", or the base
+  constants describe a rift nobody plays and every derivation written
+  against them (escape speeds, standoff radii) quietly goes wrong.  The
+  shipped well is `SIZE` 70 / `g6000` / range 1050, which is what the
+  panel's live readout shows at defaults.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
   object whose own radius reaches `EJECT.SIZE_FRACTION` of the horizon is
   NOT swallowed — crossing the centre FLINGS it out along its own heading
-  at `EJECT.SPEED` (above the ~10.7 escape from the mouth) with
+  at `EJECT.SPEED` (above the ~14.5 escape from the mouth) with
   `GRACE_SEC` of immunity, so a boulder ploughs through a rift while
   gravel still vanishes down it.  Sizing the rule against the HORIZON is
   what makes it physics rather than a threshold — the same rock shoots
@@ -1994,8 +2000,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   strategies, the dragon, the rivals and the bubbles, which are four
   different movement machineries that would each have needed their own
   copy.  The pull is deliberately NOT cancelled: they still drift in from
-  across the arena, the push just wins closer in (0.9 peak against a pull
-  clamped at 0.4 balances ~215 units out), so they hold off and slide
+  across the arena, the push just wins closer in (1.4 peak against a pull
+  clamped at 0.6 balances ~215 units out), so they hold off and slide
   around the rift and a determined chaser can still push through.
   Measured: with the rule off, an enemy dropped on a rift's centre sits
   1.7 units from it indefinitely.  There is NO HUD dock/enter button —
@@ -2019,8 +2025,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `addPortal` stamps `portalDestSpan` from `MAP_SPANS` (built off the
   map classes' own statics in `MapClasses.ts`, so there is no second
   copy of a map's size) and the disc grows with it.  Every destination
-  draws SMALLER than the old fixed 0.62 disc: Pocket 4k → 18, showcase
-  6k → 25, hub / Ring / Seven Rings 12k → 42, Deep Space 16k → 52.
+  draws SMALLER than the old fixed 0.62 disc, and a play-testing pass then
+  settled the shipped rift at a much smaller mouth again (`SIZE` 70, baked —
+  see below): Pocket 4k → 6, showcase 6k → 9, hub / Ring / Seven Rings
+  12k → 15, Deep Space 16k → 18.
   The span is passed as DATA rather than looked up in `constants`
   because the map classes import that module — a lookup there would be
   an import cycle.  Note the LENS radius is still keyed to the entity's

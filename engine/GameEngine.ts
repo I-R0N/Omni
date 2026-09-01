@@ -1702,7 +1702,16 @@ export class GameEngine {
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
-    const frameTime = (time - this.lastTime) / 1000;
+    // NEVER NEGATIVE.  `time` is the rAF frame timestamp, which is the moment
+    // the frame STARTED — so any code that stamps `lastTime` from
+    // `performance.now()` mid-frame (transitionToMap does, to keep the map
+    // load out of the sim clock) can leave lastTime AHEAD of the next frame's
+    // timestamp.  The delta then comes back negative, and everything
+    // downstream that subtracts it runs BACKWARDS: measured -0.16s, which
+    // drove the transit beat's timer UP past its own duration and its
+    // progress to -0.11, where the veil declined to paint and the destination
+    // arena showed through — the second, subtler half of that bug.
+    const frameTime = Math.max(0, (time - this.lastTime) / 1000);
     this.lastTime = time;
 
     this.pollGamepad();
@@ -5729,8 +5738,14 @@ export class GameEngine {
       // Transit warp — hand the renderer a plain 0->1 progress, so the beat
       // stays a pure function of one number and the render side owns no
       // timer of its own.  Null when no transit is in flight.
+      // CLAMPED to [0, 1).  The frame-delta guard above is the fix for the
+      // negative case, but this is the one the RULE depends on: the beat's
+      // progress is what decides whether the world is covered, and a value
+      // outside the range would hand the renderer a frame it does not know
+      // how to veil.  Cheap, and it makes "the destination cannot show" a
+      // property of the number rather than of the clock behaving.
       this.renderer.portalWarp = this.portalWarpTimer > 0 && this.portalWarpDuration > 0
-          ? 1 - this.portalWarpTimer / this.portalWarpDuration
+          ? Math.max(0, Math.min(0.999999, 1 - this.portalWarpTimer / this.portalWarpDuration))
           : null;
 
       // A7 — hand the renderer the run's depth.  One field write per frame;

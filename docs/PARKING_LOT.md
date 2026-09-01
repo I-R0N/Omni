@@ -635,6 +635,48 @@ retaliate against the player. First pass is intentionally lean; revisit:
 
 ---
 
+## Entity ↔ portal awareness — real AI, not just a shove (parked 2026-09-01)
+
+Sits with the other entity-AI items below (roster balance, swarm/bubble feel,
+rival polish): this is the AI half of the portal work, deliberately deferred
+while the physics half ships.
+
+**What exists now.**  `avoidsPortals(e)` in `constants.ts` plus an outward
+push in `PhysicsSystem.applyGravity`.  One predicate, defaulting by TYPE
+(every `ENEMY`, plus the snitch), so bubbles, dragons, rivals and any future
+roamer are covered the day they exist.  The pull is not cancelled — they
+drift in from range and are held off at a standoff of roughly 215 units.
+
+**Why that is a stopgap.**  It is a FORCE, not a decision.  Nothing in the
+game *knows* a rift is there; it is simply pushed away from one, which means:
+
+- an enemy chasing the player across a rift takes a curved path it never
+  chose, and a determined chaser pushes through anyway — correct as physics,
+  but it reads as drag rather than as piloting;
+- nothing can use the standoff tactically (no baiting the player toward a
+  mouth, no refusing to follow through one);
+- the four movement machineries — the AISystem strategies, the dragon's
+  flow-weave, the rivals' strafe, the bubbles' drift — still have no concept
+  of a hazard, so the same problem returns in its own shape for the next
+  hazard that is not a portal;
+- the standoff radius is one global number rather than something an
+  archetype could weigh against what it is doing.
+
+**What a real pass looks like.**  A shared HAZARD AWARENESS input the
+strategies can read — "there is a thing at X with radius R you should not
+enter" — with each archetype deciding what to do about it, and portals as the
+first hazard rather than a special case.  That is the same shape the flow
+field already has (a sampled field every mover can consult), so the natural
+home is probably a hazard layer beside it rather than a portal-specific API.
+
+**Do this when** a second hazard exists (a boss's zone, a hostile region), or
+when a roamer's pathing around rifts starts reading as broken rather than as
+cautious.  Not before: one hazard does not justify a hazard system, and the
+push already satisfies the requirement it was written for — nothing gets
+trapped.
+
+---
+
 ## Exotic-enemy roster (Stages 0–7) — balance / tuning pass
 
 **Context:** The exotic enemy roster shipped across Stages 0–7 (PR #67:

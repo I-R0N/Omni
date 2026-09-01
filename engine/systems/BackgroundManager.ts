@@ -826,10 +826,20 @@ public setMapType(type: MapType) {
     // the twist, so turning it down genuinely flattens the distortion rather
     // than re-scaling an angle that was already many turns deep.
     const spinMult = getPortalLensSpinMult();
-    const twistNow = (PORTAL_CONSTANTS.LENS.TWIST
+    // CLAMPED BELOW ONE TURN, whatever the knob says.  Total shear under 2*PI
+    // is what makes banding impossible (see PORTAL_CONSTANTS.LENS), and the
+    // Lens knob now reaches 12x — enough to push the shipped 1.095 rad past a
+    // full turn and wind the field into the very bands that knob was added to
+    // investigate.  Clamping here keeps the guarantee true at EVERY setting
+    // and costs nothing at sane ones: the strength knob simply stops adding
+    // twist once the sky is bent as far as it can be without repeating, and
+    // goes on driving the radial push, which has no such failure mode.
+    const TWIST_CEIL = Math.PI * 2 * 0.98;
+    const twistRaw = (PORTAL_CONSTANTS.LENS.TWIST
         + PORTAL_CONSTANTS.LENS.TWIST_SWING
           * Math.sin(performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE * spinMult))
         * lensMultLocal;
+    const twistNow = Math.max(-TWIST_CEIL, Math.min(TWIST_CEIL, twistRaw));
     this.lastLensTwist = lensN > 0 ? twistNow : 0;
     this.lastLensPush = lensN > 0 ? lpush[0] : 0;
 

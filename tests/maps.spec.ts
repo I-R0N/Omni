@@ -340,6 +340,11 @@ test.describe('a rift can only eat what fits in its mouth', () => {
   });
 });
 
+/** PORTAL_WARP_CYCLE's length — how many clicks can be needed to reach any
+ *  step from any other.  Kept here rather than imported: the suites drive the
+ *  built app through its debug handles, never the source constants. */
+const PORTAL_WARP_STEPS = 8;
+
 test.describe('the transit warp — the flight through the wormhole', () => {
   /** Arrival plays a short screen-space beat (PORTAL_CONSTANTS.WARP): the lens
    *  unrolls into radial streaks, the sky streams outward, and the tunnel
@@ -409,12 +414,64 @@ test.describe('the transit warp — the flight through the wormhole', () => {
     watch.assertClean();
   });
 
+  test('the destination is never visible before the reveal', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+
+    // The map swaps SYNCHRONOUSLY when a transit fires, so from that instant
+    // the world behind the veil is the destination.  The bug this pins: the
+    // transit's own frame draws at progress EXACTLY 0, and the veil used to
+    // skip that frame — one clear look at the arena before the beat, more
+    // when that frame was slow.  So the check is the FIRST frame, not a
+    // sampled middle one.
+    const first = await page.evaluate(async () => {
+      const e = (window as any).__omniEngine;
+      const rift = e.portals.find((p: any) => String(p.portalTargetId).startsWith('arena_'));
+      if (!rift) return null;
+      if (!e.transitionToMap(rift.portalTargetId)) return null;
+      // One rendered frame, which is the frame the swap happened in.
+      await new Promise(r => requestAnimationFrame(() => r(null)));
+      return { veil: e.renderer.lastWarpVeilAlpha, progress: e.renderer.portalWarp };
+    });
+
+    expect(first, 'an arena rift on the hub').not.toBeNull();
+    // Opaque — not merely dark.  Anything under 1 is a window onto the arena.
+    expect(first!.veil).toBe(1);
+
+    // …and it STAYS opaque for the whole covered phase, only lifting at the
+    // reveal.  Sampled across the beat rather than at one instant, because
+    // "it covered at the start and blinked later" would pass a single read.
+    const samples = await page.evaluate(async () => {
+      const e = (window as any).__omniEngine;
+      const out: { p: number; veil: number }[] = [];
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => requestAnimationFrame(() => r(null)));
+        if (e.renderer.portalWarp === null) break;
+        out.push({ p: e.renderer.portalWarp, veil: e.renderer.lastWarpVeilAlpha });
+      }
+      return out;
+    });
+
+    expect(samples.length, 'the beat ran for several frames').toBeGreaterThan(3);
+    for (const s of samples) {
+      // Full cover everywhere before the reveal window opens; inside it the
+      // veil may fall, which IS the reveal.
+      if (s.p < 0.6) {
+        expect(s.veil, `veil ${s.veil} at progress ${s.p} must still be opaque`).toBe(1);
+      }
+    }
+
+    watch.assertClean();
+  });
+
   test('the DBG "off" step transitions instantly, as before the beat existed', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    // Drive the cycle to "off" by NAME rather than by counting clicks.
-    for (let i = 0; i < 6; i++) {
+    // Drive the cycle to "off" by NAME rather than by counting clicks — and
+    // give the loop room for the whole cycle, which grew when the longer and
+    // extreme durations were added (PORTAL_WARP_CYCLE).
+    for (let i = 0; i < PORTAL_WARP_STEPS + 1; i++) {
       const now = await page.evaluate(() => (window as any).__omniStats?.portalWarpName);
       if (now === 'off') break;
       await engine(page, e => e.dbg.cyclePortalWarp());
