@@ -1094,6 +1094,17 @@ test.describe('occluder collection', () => {
         (t: any) => t.type === 'STRUCTURE' && t.mass === Infinity);
       for (const t of e.currentMap.entities) {
         if (t.type === 'STRUCTURE') t.active = false;
+        // QUIET THE SCENE.  The structures were already cleared; the MOVERS
+        // were not, and this map's spawn sits ~300 units from its return
+        // rift, so wave enemies drift, light the scene and are steered
+        // around by the rift's own avoidance push — all of it between the
+        // three samples below.  The measurement compares colour SHIFTS
+        // across knob positions, so anything moving is noise added to the
+        // very quantity being read.  Measured: leaving them in put the blue
+        // margin anywhere from +10.0 to -1.0 against a threshold of 0 (one
+        // failure in eight, and the failure CI caught); taking them out
+        // holds it in a +8.25..+10.0 band over ten runs.
+        if (t.type === 'ENEMY') t.active = false;
       }
       const pick = tiles.find((t: any) => t.shardVariant === 'nebula-tile');
       if (!pick) return { built: false } as any;
