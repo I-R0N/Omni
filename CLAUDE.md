@@ -2006,7 +2006,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   through Pocket's 18 and disappears into Deep Space's 52 — and it
   inherits destination scaling and the DBG Size knob for free.  The
   PLAYER and PROJECTILES are exempt (a ship enters on purpose and has its
-  own transit; a shot is not an object being thrown).  ANYTHING THAT
+  own transit; a shot is not an object being thrown).  The throw carries
+  a shake scaled by the object's size and NO SPARKS (user call):
+  `handlePortalEject` used to spray rift-coloured particles, which is the
+  vocabulary of a COLLISION, and nothing collided — the rock never
+  touched anything, it was too big to fit down the hole and the well
+  threw it back.  Debris flying off it says it hit something solid, which
+  is the one reading a wormhole must not give.  Same argument as
+  stripping the idle rift to a bare disc.  ANYTHING THAT
   STEERS ITSELF STEERS CLEAR: `avoidsPortals(e)` in `constants.ts` is the
   ONE predicate — defaulting by TYPE (every ENEMY, which is what a
   bubble, a dragon head and a rival all are, plus the snitch) so a future

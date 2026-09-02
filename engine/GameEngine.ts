@@ -2999,21 +2999,24 @@ export class GameEngine {
 
   /** Something too big to fit crossed a rift's centre and was flung back out
    *  (PhysicsSystem.applyGravity).  The physics is done by the time this
-   *  runs; this is only the BANG — a rift-coloured spray along the way it
-   *  went, and a shake scaled by how big the thing was, so a boulder
-   *  ploughing through reads as heavier than a shard clipping the edge.
+   *  runs; this is only the WEIGHT of it — a shake scaled by how big the
+   *  thing was, so a boulder ploughing through reads as heavier than a shard
+   *  clipping the edge.
+   *
+   *  There are deliberately NO SPARKS (user call).  It fired a rift-coloured
+   *  spray, which is the vocabulary of a COLLISION — and nothing collided:
+   *  the rock never touched anything, it was too big to fit down the hole and
+   *  the well threw it back.  Debris flying off it says it hit something
+   *  solid, which is the one reading a wormhole must not give.  Same argument
+   *  as stripping the idle rift to a bare disc: the ornament was saying
+   *  something the mechanic does not mean.
    *
    *  Shake is distance-gated by the existing camera falloff rather than by a
    *  check here: `handleScreenShake` is the one funnel every impact in the
    *  game already goes through with magnitudes tuned against each other, so
    *  this joins it rather than inventing a second scale. */
-  private handlePortalEject = (entity: GameEntity, portal: GameEntity) => {
+  private handlePortalEject = (entity: GameEntity) => {
       const radius = Math.max(entity.size.x, entity.size.y) * 0.5;
-      this.spawnParticles(entity.position, 6, portal.color || PORTAL_CONSTANTS.COLOR, {
-          speedMin: 1.5, speedMax: 5,
-          sizeMin: 1.5, sizeMax: 3.5,
-          lifetimeMin: 0.25, lifetimeMax: 0.6,
-      });
       // Only worth a lurch if it happened near enough to see; the camera's
       // own falloff does the rest.
       const dx = wrapDeltaX(this.player.position.x, entity.position.x);
