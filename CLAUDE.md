@@ -361,8 +361,9 @@ is now reachable only through that dropdown.
   criterion transcendental.  Forty bisection steps over a ~45-step
   forward integration of the sim's own gravity arithmetic, once per
   transit, is free at that call rate; at the shipped well it lands on
-  20.7 px/step, reaching the rim still doing ~18.7 against a ~42.5
-  cruise.  RADIAL, unlike
+  8.4 px/step, reaching the rim still doing ~7.6 against a ~42.5
+  cruise — and it RE-DERIVED itself when the well was tuned down (it was
+  20.7 against the old g6000/1050), which is the whole point of solving.  RADIAL, unlike
   the debris' random headings: being spat sideways into the terrain you
   arrived beside is not an arrival.  `exitMouthFor(fromId)` is the ONE
   definition of "the rift you came out of" — where you land, which way
@@ -1995,11 +1996,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   standing multiplier: `1×` has to keep meaning "what ships", or the base
   constants describe a rift nobody plays and every derivation written
   against them (escape speeds, standoff radii) quietly goes wrong.  The
-  shipped well is `SIZE` 70 / `g6000` / range 1050, which is what the
-  panel's live readout shows at defaults.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
+  shipped well is `SIZE` 70 / `g1500` / range 525, which is what the
+  panel's live readout shows at defaults — play-tested DOWN from g6000 /
+  1050 (user call: too strong), A/B'd through the knobs at 0.25× strength
+  and 0.5× range and then baked, with both cycles re-centred so 1× still
+  means what ships and 4×/2× reproduces the old rift for comparison.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
   object whose own radius reaches `EJECT.SIZE_FRACTION` of the horizon is
   NOT swallowed — crossing the centre FLINGS it out along its own heading
-  at `EJECT.SPEED` (above the ~14.5 escape from the mouth) with
+  at `EJECT.SPEED` (20, against a ~7.1 escape from the mouth — kept
+  unchanged through the well's retune, since the throw's absolute speed is
+  what it FEELS like and only its margin over escape moved) with
   `GRACE_SEC` of immunity, so a boulder ploughs through a rift while
   gravel still vanishes down it.  Sizing the rule against the HORIZON is
   what makes it physics rather than a threshold — the same rock shoots

@@ -25,7 +25,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine, dialByName } from './helpers';
+import { boot, engine, startRun, waitForEngine, dialByName, waitForTransit } from './helpers';
 
 /** Rebuild `map` `runs` times and return per-variant min/max/mean. */
 function populations(page: any, runs = 4) {
@@ -178,8 +178,8 @@ test.describe('map composition — MAP_POPULATION is the authority', () => {
 
 /** Lengths of the two portal-gravity DBG cycles, for `dialByName`'s lap
  *  budget (PORTAL_GRAVITY_CYCLE / PORTAL_GRAVITY_RANGE_CYCLE). */
-const PORTAL_GRAVITY_STEPS = 5;
-const PORTAL_GRAVITY_RANGE_STEPS = 4;
+const PORTAL_GRAVITY_STEPS = 8;
+const PORTAL_GRAVITY_RANGE_STEPS = 6;
 
 test.describe('portal arrival — the wormhole throws you clear', () => {
   /** Arriving used to land the ship DEAD-STOPPED at ARRIVAL_OFFSET (165) from
@@ -284,39 +284,59 @@ test.describe('portal arrival — the wormhole throws you clear', () => {
     const out = await page.evaluate(flight, 15_000);
     expect(out.escaped, 'the ship climbs out of the exit rift\'s gravity well').toBe(true);
     // …and it is still LEAVING at the rim: escaped, not lobbed to the edge and
-    // caught.  This floor is the MARGIN — the shove is solved to arrive at the
-    // rim doing ~18, and the version that had to be fixed arrived doing ~2.
-    expect(out.speedAtRim).toBeGreaterThan(8);
+    // caught.  The MARGIN is asserted as a FRACTION of the launch rather than
+    // as a px/step floor, because an absolute floor is sized against one well
+    // and goes stale the moment the well is retuned — which is the exact bug
+    // this whole test exists for.  The fraction does not: a clean climb keeps
+    // ~90% of its launch speed at the rim whether the well is the shipped one
+    // (8.4 -> 7.6) or the four-times-deeper one it replaced (20.7 -> 18.7).
+    // The versions that had to be fixed kept 17% and 2.7%.
+    expect(out.speedAtRim).toBeGreaterThan(arrived!.launch.speed * 0.6);
     expect(out.growing).toBe(true);
 
     watch.assertClean();
   });
 
   /** The shove is SOLVED against the well (`playerEjectSpeed`), not tuned
-   *  beside it, so deepening the well must deepen the throw with it.  Dial the
-   *  DBG gravity knobs to their strongest and the way home still works — which
-   *  is the whole point of solving rather than writing a number down, and is
-   *  the failure mode this replaced (the literal was sized against a narrower
-   *  well and left standing when the well grew). */
-  test('a stronger well throws harder — the escape is solved, not remembered', async ({ page }) => {
+   *  beside it, so deepening the well must deepen the throw with it.
+   *
+   *  Measured as a TWO-TRANSIT A/B inside one run — hub to arena at the
+   *  shipped well, then arena back to hub with the gravity knobs dialled up —
+   *  so the claim is "this well throws harder than that one" rather than
+   *  "harder than 21 px/step".  A number would be sized against whatever the
+   *  well happened to be the day it was written, which is precisely the
+   *  failure this test exists to prevent: the literal it replaced was sized
+   *  against a narrower well and left standing when the well grew. */
+  test('a deeper well throws harder — the escape is solved, not remembered', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    // Both knobs to their strongest step, by NAME, through the shared dialler.
-    await dialByName(page, 'portalGravityName', '1.5×',
+    // A: out to the arena at the shipped well.
+    const shipped = await page.evaluate(escapeProbe);
+    expect(shipped, 'an arena rift and a way home').not.toBeNull();
+    await waitForTransit(page);
+
+    // Deepen it, then B: home again through the rift we arrived beside.  Both
+    // arrivals surface at the same ARRIVAL_OFFSET and every map shares the
+    // same friction and thrust, so the two launches are directly comparable.
+    await dialByName(page, 'portalGravityName', '3×',
       e => (e as any).dbg.cyclePortalGravity(), PORTAL_GRAVITY_STEPS);
-    await dialByName(page, 'portalGravityRangeName', '1.5×',
+    await dialByName(page, 'portalGravityRangeName', '3×',
       e => (e as any).dbg.cyclePortalGravityRange(), PORTAL_GRAVITY_RANGE_STEPS);
 
-    const arrived = await page.evaluate(escapeProbe);
-    expect(arrived, 'an arena rift and a way home').not.toBeNull();
-    // A wider well is a longer climb, so the solve must have thrown harder
-    // than the shipped ~20.7 rather than reusing it.
-    expect(arrived!.launch.speed).toBeGreaterThan(21);
+    const deep = await page.evaluate(() => {
+      const e = (window as any).__omniEngine;
+      const home = e.portals.find((p: any) => p.portalTargetId === 'overworld');
+      if (!home) return null;
+      if (!e.transitionToMap('overworld')) return null;
+      return { speed: Math.hypot(e.player.velocity.x, e.player.velocity.y) };
+    });
+    expect(deep, 'the way home').not.toBeNull();
 
-    const out = await page.evaluate(flight, 15_000);
-    expect(out.escaped, 'the ship climbs out of the DEEPENED well too').toBe(true);
-    expect(out.growing).toBe(true);
+    // The solve re-read the deeper well rather than reusing the number it
+    // arrived with.  (Range dominates here — the climb got three times longer
+    // — which is itself the point: nothing about the throw is remembered.)
+    expect(deep!.speed).toBeGreaterThan(shipped!.launch.speed * 1.5);
 
     watch.assertClean();
   });

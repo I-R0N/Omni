@@ -5189,8 +5189,14 @@ export function portalHorizonRadius(e: GameEntity): number {
 // USE_RANGE: how close you must be to ENTER is an interaction rule, not a look,
 // and a knob that quietly moved it would make every other A/B unreadable.
 export const PORTAL_SIZE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 0.35, 1.25] as const;
-export const PORTAL_GRAVITY_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 1.5] as const;
-export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 1.5] as const;
+// The well was tuned DOWN to 0.25x strength / 0.5x range and baked, so both
+// cycles now run well ABOVE 1x as well as below it: 4x strength and 2x range
+// together reproduce the old g6000/1050 rift exactly, which is what makes the
+// change itself re-testable from inside the game rather than only in git.
+export const PORTAL_GRAVITY_CYCLE: ReadonlyArray<number> =
+  [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0, 4.0] as const;
+export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> =
+  [1.0, 0.75, 0.5, 1.5, 2.0, 3.0] as const;
 // Strengths ABOVE 1 are here because "how far can this be pushed" is a real
 // question to ask of a look, and the shipped value is only the current answer.
 // Nothing clamps them: the twist stays bounded by construction (TWIST +
@@ -5725,12 +5731,19 @@ export const PORTAL_CONSTANTS = {
   //
   // Calibration (velocity units are px per 60 Hz tick; ambient shard drift
   // is ~1): force = STRENGTH / max(distSq, 1e4).  At the range edge the
-  // kick is ~0.008/step (a slow drift-in), at 150 px it is ~0.18/step
-  // (a visible inspiral), and the near-mouth clamp region tops out at
-  // 0.4/step — decisive, but far below the 5.0 solver cap so nothing gets
-  // flung.
-  GRAVITY_RANGE: 1050,
-  GRAVITY_STRENGTH: 6000,
+  // kick is ~0.005/step (a slow drift-in), at 150 px it is ~0.067/step,
+  // and the near-mouth clamp region tops out at 0.15/step — a current you
+  // notice rather than a hazard you fight, and far below the 5.0 solver cap
+  // so nothing gets flung.
+  //
+  // These are the play-tested values (user call): the well was g6000 out to
+  // 1050 and read as far too strong, so it was A/B'd down through the DBG
+  // knobs to 0.25× strength and 0.5× range and BAKED here.  The knobs
+  // return to 1× accordingly — "1×" has to keep meaning "what ships", or
+  // every escape speed and standoff radius derived from these numbers is
+  // quietly describing a rift nobody plays.
+  GRAVITY_RANGE: 525,
+  GRAVITY_STRENGTH: 1500,
   // The PLAYER feels only this fraction of the well (gravityPlayerScale).
   // Entering a portal is a deliberate E/tap, so proximity must never be
   // commitment: at its strongest the tug is 0.4 × 0.12 = 0.048/step,
@@ -5849,12 +5862,16 @@ export const PORTAL_CONSTANTS = {
   // along for free, because both already move the horizon.
   //
   // SPEED must clear the well outright or the eject is a stutter rather than
-  // an exit.  Against the shipped well (g6000 out to 1050, clamped at 0.6/step
-  // inside 100) escape from a hub mouth costs ~105/v of speed — 0.6 × 85 from
-  // the 14.7 horizon out to the clamp, then 6000 × (1/100 − 1/1050) beyond it
-  // — so the escape speed is ~14.5 px/step.  20 leaves real margin at every
-  // rift size, and GRACE_SEC of immunity covers the rest: the same trick the
-  // transit debris uses, and for the same reason.
+  // an exit.  Against the shipped well (g1500 out to 525, clamped at
+  // 0.15/step inside 100) escape from a hub mouth costs ~25/v of speed —
+  // 0.15 × 85 from the 14.7 horizon out to the clamp, then
+  // 1500 × (1/100 − 1/525) beyond it — so the escape speed is ~7.1 px/step.
+  // It was ~14.5 against the old, four-times-deeper well, and 20 is kept
+  // unchanged through that retune ON PURPOSE: the throw's absolute speed is
+  // what the eject FEELS like, and only its margin over escape moved (1.4× →
+  // 2.8×).  A weaker well should make a boulder ploughing through look more
+  // decisive, not less.  GRACE_SEC of immunity covers the rest: the same
+  // trick the transit debris uses, and for the same reason.
   //
   // The PLAYER is deliberately exempt.  Its radius (10) sits near the
   // threshold for a mid-sized rift, so the rule would fire on some
@@ -5884,8 +5901,10 @@ export const PORTAL_CONSTANTS = {
   //
   // The pull is deliberately NOT cancelled — being drawn toward a rift from
   // across the arena is the flavour worth keeping.  The push simply WINS
-  // closer in: at 1.4 peak against a pull clamped at 0.6, the two balance
-  // around 215 units out, which is many times the hub rift's horizon.  So
+  // closer in: at 1.4 peak against a pull now clamped at 0.15, the two
+  // balance around 236 units out (215 against the old, deeper well — the
+  // standoff drifted out slightly when the well was tuned down, and stays
+  // comfortably inside RANGE_MIN, so the shape of the rule is unchanged).  So
   // they drift in, then hold off and slide around it, and a determined
   // chaser can still push through toward the player rather than hitting a
   // wall.  RANGE has a floor because a small rift's horizon would otherwise
