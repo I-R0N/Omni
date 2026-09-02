@@ -1748,3 +1748,73 @@ grainSize", since it is the one built for that distinction.  The piping
 is deliberately retained — the tests
 (`tests/fracture.spec.ts`, "grain size and bond spread (A2)") still pin
 both laws, so the mechanism cannot rot while parked.
+
+---
+
+## Grain clusters: several grains leaving as ONE fragment (A4-B)
+
+**Status:** evaluated, deliberately parked. A4 (damage spread) shipped;
+this is its sibling and was split off from it.
+
+### The two readings of "larger groups break free"
+
+When damage spread was proposed, "allowing larger groups of shards to
+break free from some hits" turned out to have two separable meanings:
+
+- **(A) More shards per hit.** A hit frees several grains, each leaving
+  as its own fragment. This is a DAMAGE-SPEND question and shipped as
+  `grain.damageSpread` — see CLAUDE.md §8. Measured: per-hit yields of
+  2 and 4 replacing a steady dribble of 1s.
+- **(B) One BIGGER shard.** Several grains leave still bonded to each
+  other, as a single larger fragment with the union of their outlines.
+  That is what this entry is.
+
+(A) shipped because it is contained entirely inside `spendOnBoundaries`.
+(B) is a different job and is parked here.
+
+### Why (B) is not a spend-profile change
+
+Under the grain model a cell detaches the moment every boundary still
+binding it has broken, and `progressFracture` already harvests every
+freed cell in one pass. So no spend profile produces a bigger fragment:
+it produces MORE fragments, faster. Making grains leave TOGETHER means
+changing what "a piece" is.
+
+The shape of the work:
+
+1. **Connected components on the surviving-cell graph.** After the
+   boundary spend, partition the freed cells into groups that are still
+   mutually bonded (an unbroken boundary between two freed cells is what
+   keeps them together) but collectively unbound from the parent.
+2. **Union polygon per component.** The fragment's outline is
+   `unionOfCells` over the component — the function already exists and is
+   already the parent's remainder path, so this is reuse rather than new
+   geometry.
+3. **Conservation at the new seam.** `progressFracture` checks that the
+   area the body loses equals the area the fragment carries away, to a 2%
+   tolerance, and REFUSES the detach when it fails. That check has to
+   generalise to a component's total area. This is the risky part: the
+   conservation invariant has been broken twice by geometry that looked
+   obviously correct (an interior grain leaving punches a hole the
+   outline cannot express; a deformed grain reporting its cut-time area
+   spawned a 2.06x oversized fragment), which is precisely why it is
+   enforced rather than assumed.
+4. **Size/mass/HP for a composite fragment.** A component's size is not
+   `parentSize × sqrt(cellArea/refArea)` any more; it is the union's own
+   extent. `ShardSystem.spawnDetachedCell` takes one cell today.
+
+### Estimate and risk
+
+~1 day, higher risk than A4 — the conservation seam is the part that has
+bitten twice. Worth doing only after A4 has been judged in play: a wider
+spend may deliver the intended feel on its own, and if it does not, the
+tuning done on A4 tells you how big a cluster should be before this is
+built.
+
+### Do not do this first
+
+There is a tempting shortcut — detach a fixed-radius blob of cells around
+the impact as one piece. It is wrong for the same reason the arc splice
+was wrong in the tail: the piece that leaves must be the piece the
+BOUNDARIES freed, or the cracks the player was shown stop predicting the
+break, which is the whole property the grain model exists to have.

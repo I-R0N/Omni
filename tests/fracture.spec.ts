@@ -3126,3 +3126,85 @@ test.describe('metal grains are DRAWN as themselves', () => {
     watch.assertClean();
   });
 });
+
+test.describe('damage spread (A4)', () => {
+  test('off is a needle, on is a splash, and both conserve exactly', async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+
+    // The shipped spend is SEQUENTIAL: damage fills the nearest boundary
+    // to completion, spills into the next, and repeats — so exactly ONE
+    // boundary carries partial damage at any instant, for the body's
+    // whole life.  That is the measured baseline, and it is why grains
+    // come away one at a time.  `damageSpread` makes the spend a
+    // distance-weighted water-fill instead, so a hit pre-charges a whole
+    // ring and several grains can come free together.
+    const drill = (e: any, n: number) => {
+      for (let i = 0; i < n; i++) e.dbg.cycleDamageSpread();
+      const ents = e.currentMap.entities as any[];
+      const t = ents.find((x: any) => x.active
+        && x.shardVariant === 'rock-tile' && x.mass === Infinity);
+      if (!t) return null;
+      const partials: number[] = [];
+      const drops: number[] = [];
+      let hits = 0;
+      while (t.active && hits < 60) {
+        const hpBefore = t.health;
+        const built = t.fractureEdgeFill !== undefined;
+        e.physics.resolveCollision(
+          { id: 'a4_' + Math.random(), type: 'PROJECTILE',
+            position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+            mass: 0.1, active: true, color: '#fff', damage: 3,
+            ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+        hits++;
+        // CONSERVATION.  Skip the model-BUILD hit: that one rewrites
+        // maxHealth from the authored value to the derived boundary total,
+        // so its health delta is the conversion, not the damage.
+        if (built && t.active && hpBefore !== undefined) {
+          drops.push(+(hpBefore - t.health).toFixed(4));
+        }
+        if (t.active && t.fractureEdgeFill) {
+          let p = 0;
+          for (let k = 0; k < t.fractureEdgeFill.length; k++) {
+            const f = t.fractureEdgeFill[k], need = t.fractureEdgeNeed[k];
+            if (f > 1e-6 && f < need - 1e-6) p++;
+          }
+          partials.push(p);
+        }
+      }
+      return { hits, maxPartial: Math.max(...partials, 0), drops };
+    };
+
+    // Index 1 of the ladder is a FORCED 0 — the shipped sequential spend,
+    // asserted explicitly rather than relying on every material shipping 0.
+    const off = await engine(page, drill, 1);
+    expect(off).not.toBeNull();
+    expect(off!.maxPartial).toBe(1);
+
+    // Index 3 = 0.2, a small spread in the useful band.
+    const on = await engine(page, drill, 2);
+    expect(on).not.toBeNull();
+    // BREADTH: damage now reaches most of the pattern at once, where the
+    // sequential spend never touches more than one boundary.
+    expect(on!.maxPartial).toBeGreaterThan(4);
+
+    // CONSERVATION, in BOTH modes: a 3-damage hit removes exactly 3 HP.
+    // The weights are normalised and the surplus from a saturating
+    // boundary is redistributed, so the knob changes WHERE damage lands
+    // and never how much.  Without that, every material's effective
+    // toughness would silently ride the knob and `health = Σ remaining`
+    // would drift away from the boundary state.
+    for (const r of [off!, on!]) {
+      expect(r.drops.length).toBeGreaterThan(3);
+      for (const d of r.drops) expect(Math.abs(d - 3)).toBeLessThan(1e-3);
+    }
+
+    console.log(`[A4] partial boundaries — off ${off!.maxPartial}, spread ${on!.maxPartial};`
+      + ` hits to break ${off!.hits} vs ${on!.hits}`);
+
+    watch.assertClean();
+  });
+});

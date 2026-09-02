@@ -113,6 +113,7 @@ interface UIOverlayProps {
   onCycleFractureSeparation?: () => void;
   onCycleFractureSiteScale?: () => void;
   onCycleFractureBias?: () => void;
+  onCycleDamageSpread?: () => void;
   onCycleGrainMaterial?: () => void;
   onCycleGrainKnob?: (knob: GrainKnob) => void;
   onResetGrainOverrides?: () => void;
@@ -432,6 +433,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFractureSeparation,
   onCycleFractureSiteScale,
   onCycleFractureBias,
+  onCycleDamageSpread,
   onCycleGrainMaterial,
   onCycleGrainKnob,
   onResetGrainOverrides,
@@ -1785,6 +1787,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Bnd strength', onCycleBoundaryStrength,
                   stats.boundaryStrengthName ?? 'x1',
                   'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which puts a 36px rock tile at 9 Blaster hits and a glass pane at 5. Takes effect on the next hit (cached patterns rebuild).')}
+                {ctrlRow('Dmg spread', onCycleDamageSpread,
+                  stats.damageSpreadName ?? 'material',
+                  'How DEEP a hit\u0027s damage reaches into the pattern, forced across every material. OFF (the shipped behaviour) is a SEQUENTIAL spend: damage fills the nearest boundary to completion, spills into the next, and repeats - so only ever ONE boundary carries partial damage, a hit is a needle, and grains come away one at a time. A number is a WEIGHTED spend instead, as a fraction of the body\u0027s width: every unbroken boundary takes a share falling off with distance from the contact, so a hit pre-charges a whole ring and several grains can come free together. Conserving by construction - the weights are normalised and the spend is a water-fill, so the same total damage lands wherever it goes and derived HP is untouched. Small values are the useful ones: a LARGE value approaches the uniform spread V10 measured as the failure mode, where damage spread over every cell completes almost none of them. MATERIAL defers to each material\u0027s own value.')}
                 {ctrlRow('Frac sep', onCycleFractureSeparation,
                   stats.fractureSeparationName ?? 'material',
                   'Minimum spacing between fracture sites, as a fraction of the mean cell radius - blue-noise placement BEFORE relaxation. MATERIAL (default) defers to each material\'s own `regularity`; the numbered entries force one value everywhere. Higher means sites refuse to bunch, so cells start out more even. Matters most at Frac relax 0; relaxation largely supersedes it.')}
@@ -1812,6 +1817,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('  ↳ bond str', () => onCycleGrainKnob?.('bondStrength'),
                   stats.grainKnobNames?.bondStrength ?? 'table',
                   'Damage to break through ONE PIXEL of grain boundary, for this material alone. Under the grain model a body has no authored HP: its health is DERIVED as the sum of (edge length × strength) over its own pattern, so raising this makes the material tougher AND makes each grain harder to pop off, and a bigger body is tougher for free because it has more boundary. Deliberately NOT normalised by size, which is what lets one number serve a material\u0027s tiles and its shards. Shipped: rock 0.27, glass 0.16, plastic 0.62, metal 0.85. Bnd strength above multiplies whatever this sets.')}
+                {ctrlRow('  ↳ dmg spread', () => onCycleGrainKnob?.('damageSpread'),
+                  stats.grainKnobNames?.damageSpread ?? 'table',
+                  'Damage spread for the selected material alone - see Dmg spread above for what it does. TABLE defers to the variant, and every material ships 0 (sequential), so this is the row to turn up first when judging the effect. Dmg spread above OVERRIDES this when it is not on MATERIAL, the same way Frac relax and Frac sep override regularity. Changing it does NOT rebuild cached patterns: it changes how damage is spent, not how the pattern is built, so a half-broken body keeps the boundaries it has already earned.')}
                 {ctrlRow('  ↳ reset all', onResetGrainOverrides,
                   `${stats.grainOverrideCount ?? 0} off table`,
                   'Drop every per-material override at once and go back to the variant table. The readout counts how many of the twenty values (four materials × five knobs) are currently overridden - with a panel this size there is otherwise no way to tell whether what you are looking at is the shipped tuning or something left set three sessions ago.')}

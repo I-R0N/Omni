@@ -37,6 +37,7 @@ import {
     cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
     cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
+    cycleDamageSpread,
     cycleBoundaryStrength,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
@@ -413,6 +414,14 @@ export class DebugControls {
    *  handler knows its target without the UI threading it through five
    *  callbacks — and so a knob row is one argument-free method like every
    *  other DBG row. */
+  /** DBG (Grain): how deep a hit's damage reaches into the pattern,
+   *  forced across every material.  'material' defers to each one's own
+   *  `damageSpread`; 'off' is the shipped sequential spend, and 0 is a
+   *  real forced value here rather than "unset". */
+  cycleDamageSpread() {
+    cycleDamageSpread();
+  }
+
   cycleGrainMaterial() {
     cycleGrainMaterial();
   }

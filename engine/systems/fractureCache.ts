@@ -27,6 +27,7 @@ import {
   grainRelaxFor, grainSeparationFor,
   getFractureBiasOverride, getFractureTuningGen,
   isProgressiveFracture, getBoundaryStrengthScale, grainSpecFor,
+  getDamageSpreadOverride,
 } from '../../constants';
 import {
   computeFracture, collectInteriorEdges, seedFromEntityId, mulberry32,
@@ -386,6 +387,19 @@ function spendOnBoundaries(
   for (let i = 0; i < edges.length; i++) {
     if (fill[i] < edgeNeed(e, i, strength)) order.push(i);
   }
+  if (order.length === 0) return 0;
+
+  // DAMAGE SPREAD (A4).  With a `damageSpread` set the spend stops being
+  // sequential and becomes a distance-weighted WATER-FILL: every unbroken
+  // boundary takes a share, near ones far more than far ones, so a hit
+  // pre-charges a whole annulus instead of drilling one boundary at a
+  // time.  That is what lets several grains come away together — the ring
+  // of boundaries holding them completes at once rather than in series.
+  const spread = damageSpreadFor(e);
+  if (spread > 0) {
+    return spendSpread(e, edges, fill, strength, damage, order, cellKey, spread);
+  }
+
   order.sort((a, b) => {
     const ka = cellKey(edges[a]), kb = cellKey(edges[b]);
     if (ka !== kb) return ka - kb;
@@ -402,6 +416,100 @@ function spendOnBoundaries(
     left -= put;
   }
   return damage - left;
+}
+
+/** The live damage-spread setting for this entity: the material's own
+ *  `damageSpread` unless the global DBG cycle overrides it.  0 → the
+ *  sequential spend above. */
+function damageSpreadFor(e: GameEntity): number {
+  const override = getDamageSpreadOverride();
+  if (override !== null) return override;
+  if (e.shardVariant === undefined) return 0;
+  return grainSpecFor(e.shardVariant)?.damageSpread ?? 0;
+}
+
+/** Distance-weighted WATER-FILL of `damage` across the unbroken
+ *  boundaries in `order`.
+ *
+ *  Weight is `exp(-d / (spread × bodyWidth))` with `d` the distance from
+ *  the contact to the nearest CELL the boundary binds — cell distance,
+ *  not edge-midpoint distance, so every boundary of one grain fills at
+ *  the same rate and a grain's ring completes together.  That is the V10
+ *  cell-grouping lesson carried into the weights: weighting per EDGE
+ *  would fill each grain's near side long before its far side and
+ *  complete almost nothing.
+ *
+ *  Two properties are load-bearing:
+ *   - CONSERVATION.  Weights are normalised and surplus from a boundary
+ *     that saturates is redistributed over the rest, so the total
+ *     absorbed is exactly `damage` (up to the budget actually left in the
+ *     body).  Without it every material's effective HP would silently
+ *     rescale with the knob, and `health = Σ remaining` would drift.
+ *   - TERMINATION.  Each round saturates at least one boundary or spends
+ *     the whole remainder, so the loop runs at most `order.length` times
+ *     — typically one or two on the ~13-22 boundaries a body carries. */
+function spendSpread(
+  e: GameEntity,
+  edges: FractureEdge[],
+  fill: number[],
+  strength: number,
+  damage: number,
+  order: number[],
+  cellKey: (ed: FractureEdge) => number,
+  spread: number,
+): number {
+  const width = Math.max(1e-3, Math.max(e.size.x, e.size.y));
+  const lambda = Math.max(1e-3, spread * width);
+
+  // Bucket the weights once; `order` doubles as the active set and is
+  // compacted in place as boundaries saturate.
+  const w = new Array<number>(order.length);
+  for (let k = 0; k < order.length; k++) {
+    const d2 = cellKey(edges[order[k]]);
+    const d = d2 === Infinity ? width : Math.sqrt(d2);
+    w[k] = Math.exp(-d / lambda);
+  }
+
+  let left = damage;
+  let n = order.length;
+  const EPS = 1e-9;
+  for (let round = 0; round < order.length && left > EPS && n > 0; round++) {
+    let totalW = 0;
+    for (let k = 0; k < n; k++) totalW += w[k];
+    if (totalW <= EPS) break;
+    const scale = left / totalW;
+
+    // Which boundaries saturate at this scale?  Saturate only those, then
+    // re-derive the scale over what is left — the standard water-fill, and
+    // the reason a single pass would over- or under-spend.
+    let anySaturated = false;
+    for (let k = 0; k < n; k++) {
+      if (w[k] * scale >= edgeNeed(e, order[k], strength) - fill[order[k]]) {
+        anySaturated = true;
+        break;
+      }
+    }
+    if (!anySaturated) {
+      for (let k = 0; k < n; k++) fill[order[k]] += w[k] * scale;
+      left = 0;
+      break;
+    }
+    let write = 0;
+    for (let k = 0; k < n; k++) {
+      const i = order[k];
+      const capacity = edgeNeed(e, i, strength) - fill[i];
+      if (w[k] * scale >= capacity) {
+        fill[i] = edgeNeed(e, i, strength);
+        left -= capacity;
+      } else {
+        order[write] = i;
+        w[write] = w[k];
+        write++;
+      }
+    }
+    n = write;
+  }
+  return damage - Math.max(0, left);
 }
 
 /** Apply a damage event to the entity's grain boundaries.  Returns true

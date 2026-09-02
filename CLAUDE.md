@@ -2183,6 +2183,34 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   - **SPILL.**  Damage finishing a boundary flows to the next unbroken
     one.  Without it a hit's remainder is lost and the health readout
     drifts from the boundary state, which breaks (2).
+  - **HOW WIDE THE SPEND IS, IS A MATERIAL PROPERTY** (A4).
+    `grain.damageSpread` picks between two spends.  0 (every material's
+    shipped value) is SEQUENTIAL: fill the nearest boundary, spill into
+    the next, repeat — so exactly ONE boundary carries partial damage at
+    any instant (measured, pinned at 1 for a body's whole life on both
+    rock and glass), a hit is a needle, and grains leave one at a time.
+    Set, it is a distance-weighted WATER-FILL: every unbroken boundary
+    takes a share `exp(-d / (damageSpread × bodyWidth))`, so a hit
+    pre-charges a whole annulus and the ring holding a group of grains
+    completes at once (measured at 0.2: partial boundaries 1 → 14, and
+    per-hit yields of 2 and 4 replacing a dribble of 1s).  Three things
+    hold it up.  The weight uses CELL distance, not edge-midpoint
+    distance, so every boundary of one grain fills at the same rate —
+    that is the V10 cell-grouping lesson carried into the weights.  The
+    weights are NORMALISED and surplus from a saturating boundary is
+    redistributed, so total absorbed is exactly the damage dealt and
+    derived HP is untouched — a single-pass allocation without
+    redistribution leaks (measured 0.275 HP per hit) and is what the
+    regression test's conservation assertion catches.  And the knob spans
+    a known-good end and a known-BAD one: large values approach the
+    uniform spread V10 measured as the failure mode, visible as pieces
+    arriving later and more of them dumping at death (at 0.8, five of
+    eight came off at death against two at 0.2).  Small values are the
+    useful ones.  DBG ▸ Grain & Fracture ▸ "Dmg spread" forces it
+    globally; "↳ dmg spread" sets one material.  Neither bumps the
+    fracture generation — this changes how damage is SPENT, not how the
+    pattern is BUILT, so a half-broken body keeps the boundaries it has
+    already earned.
   - **SPEND ORDER IS CELL BY CELL**, nearest the contact first — never a
     flat nearest-EDGE sort.  This is the V10 reveal-order lesson restated
     in the damage layer: a flat sort spreads damage over many cells and

@@ -406,6 +406,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleFractureBias();
   };
 
+  const handleCycleDamageSpread = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleDamageSpread();
+  };
+
   const handleCycleGrainMaterial = () => {
       if (engineRef.current) engineRef.current.dbg.cycleGrainMaterial();
   };
@@ -939,6 +943,7 @@ const App: React.FC = () => {
         onCycleFractureSeparation={handleCycleFractureSeparation}
         onCycleFractureSiteScale={handleCycleFractureSiteScale}
         onCycleFractureBias={handleCycleFractureBias}
+        onCycleDamageSpread={handleCycleDamageSpread}
         onCycleGrainMaterial={handleCycleGrainMaterial}
         onCycleGrainKnob={handleCycleGrainKnob}
         onResetGrainOverrides={handleResetGrainOverrides}

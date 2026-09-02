@@ -1873,6 +1873,7 @@ export interface EngineStats {
   /** DBG (Grain) per-material overrides: the selected material, and each
    *  of the five knobs' live value on it ('table' = defer to the variant
    *  table).  Paused-only, like every other DBG readout. */
+  damageSpreadName?: string;
   grainMaterialName?: string;
   grainKnobNames?: Record<string, string>;
   grainOverrideCount?: number;

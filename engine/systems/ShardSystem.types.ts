@@ -436,6 +436,34 @@ export interface GrainSpec {
    *  pair matrix.  Derived HP stays exactly Σ boundary strengths because
    *  the same function produces both. */
   bondSpread?: number;
+  /** DAMAGE SPREAD (A4) — how deep a hit's damage reaches into the
+   *  pattern, as a fraction of the body's width.
+   *
+   *  Absent or 0 is SEQUENTIAL spend: damage fills the nearest boundary
+   *  to completion, spills into the next, and repeats, so only ever ONE
+   *  boundary carries partial damage (measured on both rock and glass:
+   *  the partial count is pinned at 1 for the body's whole life).  A hit
+   *  is a needle, and pieces come away one at a time.
+   *
+   *  Set, it becomes a WEIGHTED spend: every unbroken boundary takes a
+   *  share weighted `exp(-d / (damageSpread × bodyWidth))`, where `d` is
+   *  the distance from the contact to the nearest cell the boundary
+   *  binds.  Near boundaries still break first, but far ones accumulate,
+   *  so a whole annulus completes at once and a hit can free several
+   *  grains together.
+   *
+   *  The weights are NORMALISED and the spend is a water-fill, so the
+   *  total damage absorbed is exactly the damage dealt whatever the
+   *  value — this changes WHERE damage lands, never how much.  Derived
+   *  HP is therefore untouched.
+   *
+   *  The knob spans a known-good end and a known-bad one, which is why
+   *  it is a knob: 0 is the shipped behaviour, and a very LARGE value
+   *  approaches the uniform spread that V10 measured as the failure mode
+   *  (damage spread over every cell completes almost none of them, so a
+   *  rock tile shed 3 pieces over its life and dumped 5 at death).  The
+   *  useful settings are small. */
+  damageSpread?: number;
   /** PER-GRAIN DEFORMATION (B1) — inward pull applied to the STRUCK
    *  grain's own outline on each hit, as a fraction of that grain's
    *  radius.  This is what makes a material read as ductile: a plastic

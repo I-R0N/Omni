@@ -3091,6 +3091,31 @@ export function cycleFractureSiteScale(): number {
   return activeFractureSiteScaleIndex;
 }
 
+/** DAMAGE SPREAD override (A4).  -1 defers to each material's own
+ *  `damageSpread`; the rest force one value everywhere so the setting can
+ *  be judged across a whole field.  0 IS a meaningful forced value — it
+ *  is the shipped sequential spend — so this ladder deliberately carries
+ *  it rather than treating 0 as "unset". */
+export const DAMAGE_SPREAD_CYCLE: ReadonlyArray<number> = [-1, 0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2] as const;
+let activeDamageSpreadIndex = 0; // material
+
+/** null → defer to the material's own `damageSpread`. */
+export function getDamageSpreadOverride(): number | null {
+  const v = DAMAGE_SPREAD_CYCLE[activeDamageSpreadIndex];
+  return v < 0 ? null : v;
+}
+export function getDamageSpreadName(): string {
+  const v = DAMAGE_SPREAD_CYCLE[activeDamageSpreadIndex];
+  return v < 0 ? 'material' : (v === 0 ? 'off' : v.toFixed(2));
+}
+export function cycleDamageSpread(): number {
+  activeDamageSpreadIndex = (activeDamageSpreadIndex + 1) % DAMAGE_SPREAD_CYCLE.length;
+  // No fracture-generation bump: this changes how damage is SPENT, not
+  // how the pattern is BUILT, so cached decompositions stay valid and a
+  // half-damaged body keeps the boundaries it has already broken.
+  return activeDamageSpreadIndex;
+}
+
 // ── Per-material grain overrides (DBG) ──────────────────────────────
 // The four knobs above are GLOBAL: they force one value across every
 // material at once, which is what you want for judging a setting and
@@ -3132,13 +3157,15 @@ export const GRAIN_KNOBS = {
   grainCountMax: [null, 4, 6, 8, 12, 16, 22, 30, 48] as ReadonlyArray<number | null>,
   regularity:    [null, 0, 0.25, 0.5, 0.75, 0.95, 1] as ReadonlyArray<number | null>,
   bondStrength:  [null, 0.05, 0.1, 0.16, 0.27, 0.4, 0.62, 0.85, 1.2, 1.8] as ReadonlyArray<number | null>,
+  damageSpread:  [null, 0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2] as ReadonlyArray<number | null>,
 } as const;
 export type GrainKnob = keyof typeof GRAIN_KNOBS;
 export const GRAIN_KNOB_LIST = Object.keys(GRAIN_KNOBS) as ReadonlyArray<GrainKnob>;
 
 type GrainKnobIndices = Record<GrainKnob, number>;
 const emptyKnobIndices = (): GrainKnobIndices =>
-  ({ grainSize: 0, grainCountMin: 0, grainCountMax: 0, regularity: 0, bondStrength: 0 });
+  ({ grainSize: 0, grainCountMin: 0, grainCountMax: 0, regularity: 0, bondStrength: 0,
+     damageSpread: 0 });
 
 const grainOverrideIdx: Record<GrainMaterial, GrainKnobIndices> = {
   rock: emptyKnobIndices(), glass: emptyKnobIndices(),
@@ -3170,11 +3197,14 @@ export function cycleGrainKnob(knob: GrainKnob): number {
   const ladder = GRAIN_KNOBS[knob];
   const next = (grainOverrideIdx[mat][knob] + 1) % ladder.length;
   grainOverrideIdx[mat][knob] = next;
-  // Every knob here is a PATTERN input (count, size, regularity) or the
+  // Most knobs here are a PATTERN input (count, size, regularity) or the
   // strength the derived HP is summed from, so a change must invalidate
   // cached decompositions the same way the global knobs do — otherwise it
-  // shows only on terrain that spawns after the tap.
-  fractureTuningGen++;
+  // shows only on terrain that spawns after the tap.  `damageSpread` is
+  // the exception: it changes how damage is SPENT, not how the pattern is
+  // BUILT, so invalidating would throw away the boundaries a half-broken
+  // body has already earned and reset it to full health.
+  if (knob !== 'damageSpread') fractureTuningGen++;
   return next;
 }
 export function resetGrainOverrides(): void {
