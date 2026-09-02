@@ -23,7 +23,7 @@
  *
  *  What did NOT travel: `materialAutomataAlpha` (the glass fast path and
  *  `staticTileCache.ts` also call it) and the sprite / bitmap caches
- *  (`getSolidTriangleBitmap`, `getSpecularBitmap`) — CLAUDE.md §2 files those
+ *  (`getSolidDiscBitmap`, `getSpecularBitmap`) — CLAUDE.md §2 files those
  *  on `RenderSystem`, so they are reached through `rs`.
  *
  *  NAMING: the renderer parameter is `rs`, not the `r` the other `render/`
@@ -971,52 +971,31 @@ export function drawTileShape(
         const isTileShard = entity.shardVariant === 'glass-shard';
         const glowColor = entity.powerupGlowColor;
 
-        // ── LOD: tiny metal shards → cached solid triangle ─────────
-        // Below MIN_APPARENT_RADIUS_PX the equilateral-triangle metal
-        // shard's edge stroke and bloom are sub-pixel, so a flat
-        // filled triangle is indistinguishable from the full render at
-        // a fraction of the cost (one drawImage vs beginPath +
-        // per-vertex lineTo + fill + stroke).  The cached bitmap is a
-        // triangle (NOT a disc) so the silhouette stays faithful —
-        // metal shards read as triangles, and a circle here was a
-        // mis-render.  Restricted to metal-shard, whose spawn polygon
-        // genuinely IS an equilateral triangle; glass (sharp splinter) is
-        // excluded entirely and rock takes the DISC branch below, because
-        // an irregular silhouette must never be replaced by an authored
-        // one — that is a different material, not a cheaper draw.  Also
-        // excluded: hit-flashing and power-up-glowing shards (cues
-        // must read).  Reset globalAlpha before the early return so a
-        // following fast-path tile blit isn't faded.
         const lodR = entity.size.x * 0.5;
-        if (rs.shardLodEnabled
-            && entity.shardVariant === 'metal-shard'
-            && !isFlash
-            && glowColor === undefined
-            && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
-            const tri = rs.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
-            ctx.globalAlpha = shardMergeFadeAlpha(entity);
-            ctx.drawImage(tri, -lodR, -lodR, lodR * 2, lodR * 2);
-            ctx.globalAlpha = 1.0;
-            drawMetalDebugOutline(rs, ctx, entity);
-            rs.lastLodShardCount++;
-            return;
-        }
-        // Rock chips: a shattering tile spawns many small rock-shards, so
-        // collapse the tiniest ones (below the chip-LOD radius, well
-        // under the metal threshold) to a cached solid DISC — skips the
-        // full polygon + density tint + (already LOD-gated) crack render.
+        // GRAIN CHIPS → a cached solid DISC.  A shattering tile spawns
+        // many small fragments, so the tiniest ones collapse to one
+        // drawImage, skipping the full polygon + density tint + (already
+        // LOD-gated) crack render.
         //
-        // A DISC, not the triangle above.  This branch blitted metal's
-        // equilateral triangle for a while, so every rock fragment took
-        // metal's authored silhouette; a tile shattering into 8 grains at
-        // once read as 8 identical triangles, which is precisely the
-        // Voronoi shape the fracture model exists to show.  A disc is
-        // silhouette-NEUTRAL: at a few pixels it says "small rock" and
-        // nothing about shape.  The threshold is deliberately small
-        // enough (see CHIP_LOD_RADIUS_PX) that a tile's own grains draw
-        // their real polygons and only genuine dust takes this path.
+        // A DISC, and the SAME small threshold for every grain material.
+        // This is the silhouette-neutrality rule, learned twice:
+        //   - rock blitted METAL's equilateral triangle for a while, so a
+        //     tile shattering into 8 grains read as 8 identical triangles
+        //     — precisely the Voronoi shape the fracture model exists to
+        //     show;
+        //   - metal then kept a triangle branch of its own at the MUCH
+        //     larger MIN_APPARENT_RADIUS_PX (9px), justified by its shards
+        //     genuinely being lattice triangles.  A3 gave metal Voronoi
+        //     fracture and that stopped being true, but the branch stayed:
+        //     measured on METAL_FIELD, a broken tile's 9 grains (real 4-,
+        //     5- and 6-gons) sat at 3.5-4.5px apparent and took 9 triangle
+        //     blits — every grain on screen wearing an authored shape.
+        // A disc says "small fragment" and nothing about shape, and
+        // CHIP_LOD_RADIUS_PX is deliberately small enough that a tile's
+        // own grains draw their real polygons and only genuine dust takes
+        // this path.  Glass (sharp splinter) stays excluded entirely.
         if (rs.shardLodEnabled
-            && entity.shardVariant === 'rock-shard'
+            && (entity.shardVariant === 'rock-shard' || entity.shardVariant === 'metal-shard')
             && !isFlash
             && glowColor === undefined
             && lodR * camera.zoom < SHARD_LOD_CONSTANTS.CHIP_LOD_RADIUS_PX) {

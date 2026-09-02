@@ -2354,16 +2354,20 @@ test.describe('a fragment is drawn as its own shape (LOD)', () => {
       e.prepareFrameEntities();
       e.camera.position.x = t.position.x;
       e.camera.position.y = t.position.y;
-      // Count any use of METAL's cached silhouette while rock debris is
-      // on screen.  This is the bug itself, stated directly: rock must
-      // never be drawn as a triangle, whatever the LOD decides.
-      let triangleBlits = 0;
-      const realTri = e.renderer.getSolidTriangleBitmap.bind(e.renderer);
-      e.renderer.getSolidTriangleBitmap = (hex: string) => {
-        triangleBlits++; return realTri(hex);
+      // Count uses of the cached LOD silhouette while rock debris is on
+      // screen.  The equilateral-triangle blob this once counted has been
+      // DELETED — rock borrowed it and read as identical chips, and once
+      // metal took Voronoi fracture the claim failed for metal too — so
+      // the disc is the only cached silhouette left, and it is
+      // shape-free by construction.  What remains worth asserting is that
+      // a tile's grains are drawn as THEMSELVES rather than collapsed.
+      let blobBlits = 0;
+      const realDisc = e.renderer.getSolidDiscBitmap.bind(e.renderer);
+      e.renderer.getSolidDiscBitmap = (hex: string) => {
+        blobBlits++; return realDisc(hex);
       };
       e.draw();
-      e.renderer.getSolidTriangleBitmap = realTri;
+      e.renderer.getSolidDiscBitmap = realDisc;
 
       const shapes = debris.map((d: any) => {
         const p = d.polygonPoints ?? [];
@@ -2381,7 +2385,7 @@ test.describe('a fragment is drawn as its own shape (LOD)', () => {
         zoom: e.camera.zoom,
         lodBlitted: e.renderer.lastLodShardCount,
         lodEnabled: e.renderer.shardLodEnabled === true,
-        triangleBlits,
+        blobBlits,
         equilateral: shapes.filter((s: any) => s.n === 3 && s.ratio < 1.05).length,
         minVerts: Math.min(...shapes.map((s: any) => s.n)),
         minApparent: Math.min(...shapes.map((s: any) => s.apparent)),
@@ -2396,20 +2400,15 @@ test.describe('a fragment is drawn as its own shape (LOD)', () => {
     // The SIM was always right: no fragment is an equilateral triangle.
     expect(r.equilateral).toBe(0);
     expect(r.minVerts).toBeGreaterThanOrEqual(3);
-    // THE BUG, stated directly: no rock fragment may borrow metal's
-    // authored equilateral silhouette.  Rock's LOD blob is a DISC —
-    // silhouette-neutral, so a few-pixel speck reads as "small rock" and
-    // makes no claim about shape.
-    expect(r.triangleBlits).toBe(0);
-    // And most of a tile's grains are now drawn as THEMSELVES.  Before the
-    // fix all 8 were collapsed to the cached blob at the default zoom, so
-    // a rock tile could never show its Voronoi pattern; the smallest one
-    // or two are genuine sub-3px dust and may still blit.
+    // THE BUG, stated directly: a tile's grains are drawn as THEMSELVES.
+    // Before the fix all 8 were collapsed to a cached blob at the default
+    // zoom, so a rock tile could never show its Voronoi pattern; the
+    // smallest one or two are genuine sub-3px dust and may still blit.
     expect(r.lodBlitted).toBeLessThan(r.count / 2);
+    expect(r.blobBlits).toBe(r.lodBlitted);
 
     console.log('[LOD] debris', r.count, 'zoom', r.zoom.toFixed(2),
-      'min apparent radius', r.minApparent.toFixed(2), 'px, blitted', r.lodBlitted,
-      'triangle blits', r.triangleBlits);
+      'min apparent radius', r.minApparent.toFixed(2), 'px, blitted', r.lodBlitted);
 
     watch.assertClean();
   });
@@ -3039,6 +3038,90 @@ test.describe('per-material grain overrides (DBG)', () => {
     // PREVIOUS frame's snapshot and reads 0 however correct the counter is.
     await waitForStats(page, s => s.grainOverrideCount === 1,
       'the DBG override count to reach the stats payload');
+
+    watch.assertClean();
+  });
+});
+
+test.describe('metal grains are DRAWN as themselves', () => {
+  test('a broken metal tile shows its Voronoi grains, not cached blobs', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'METAL_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
+
+    // The silhouette-neutrality rule, second occurrence.  Metal kept an
+    // equilateral-triangle LOD branch of its own at MIN_APPARENT_RADIUS_PX
+    // (9px) — three times rock's chip threshold — justified by a metal
+    // shard's spawn polygon genuinely BEING a lattice triangle.  Voronoi
+    // fracture made that false and the branch stayed, so every grain of a
+    // broken tile wore an authored triangle: measured 9 grains, 9 triangle
+    // blits, apparent radii 3.5-4.5px, all of them real 4-, 5- and 6-gons
+    // in the sim.  Fixing the SIM path (a dying composite fractures its
+    // own hull) did not touch this, which is why the triangles survived a
+    // round of "fixed".
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities as any[];
+      const t = ents.find((x: any) => x.active
+        && x.shardVariant === 'metal-tile' && x.mass === Infinity);
+      if (!t) throw new Error('no metal tile');
+      // Camera pinned DIRECTLY on the tile at default zoom — it follows
+      // the player with smoothing, so moving the ship and drawing one
+      // frame leaves the debris off-screen and every counter reads 0 for
+      // the wrong reason (the rock version of this test passed vacuously
+      // that way, twice).
+      e.player.position.x = t.position.x; e.player.position.y = t.position.y;
+      e.camera.position.x = t.position.x; e.camera.position.y = t.position.y;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      e.physics.resolveCollision(
+        { id: 'metallod_' + Math.random(), type: 'PROJECTILE',
+          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+          velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+          mass: 0.1, active: true, color: '#fff', damage: 500,
+          ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+
+      const debris = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'metal-shard' && x.mass !== Infinity);
+      // prepareFrameEntities FIRST: draw() renders `frameEntities`, which
+      // the sim loop rebuilds, and fresh debris is not in it yet.
+      e.prepareFrameEntities();
+      e.camera.position.x = t.position.x; e.camera.position.y = t.position.y;
+      let blobBlits = 0;
+      const realDisc = e.renderer.getSolidDiscBitmap.bind(e.renderer);
+      e.renderer.getSolidDiscBitmap = (hex: string) => { blobBlits++; return realDisc(hex); };
+      e.draw();
+      e.renderer.getSolidDiscBitmap = realDisc;
+
+      const apparent = debris.map((d: any) => d.size.x * 0.5 * e.camera.zoom);
+      return {
+        count: debris.length,
+        zoom: e.camera.zoom,
+        lodEnabled: e.renderer.shardLodEnabled === true,
+        lodBlitted: e.renderer.lastLodShardCount,
+        blobBlits,
+        hasTriangleBitmap: typeof e.renderer.getSolidTriangleBitmap === 'function',
+        minVerts: Math.min(...debris.map((d: any) => (d.polygonPoints ?? []).length)),
+        minApparent: Math.min(...apparent),
+        maxApparent: Math.max(...apparent),
+      };
+    });
+
+    expect(r.count).toBeGreaterThan(3);
+    // The LOD path must be LIVE or every assertion below is vacuous.
+    expect(r.lodEnabled).toBe(true);
+    // The grains sit in exactly the band the deleted branch covered:
+    // under metal's old 9px gate, at or above rock's 3px chip gate.
+    expect(r.maxApparent).toBeLessThan(9);
+    // THE BUG: at these sizes the grains must draw their real polygons.
+    expect(r.lodBlitted).toBeLessThan(r.count / 2);
+    expect(r.blobBlits).toBe(r.lodBlitted);
+    // The authored triangle silhouette is gone from the renderer entirely,
+    // so no material can borrow it again.
+    expect(r.hasTriangleBitmap).toBe(false);
+
+    console.log('[metal LOD] grains', r.count, 'apparent radius',
+      r.minApparent.toFixed(2), '-', r.maxApparent.toFixed(2),
+      'px, blitted', r.lodBlitted);
 
     watch.assertClean();
   });

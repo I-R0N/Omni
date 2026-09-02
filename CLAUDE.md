@@ -2120,24 +2120,38 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   — stepping a fraction of the REMAINING distance each tick compounds
   into an exponential approach that reaches rest long before the timer,
   making the authored duration a lie.
-- **A SHARD'S LOD BLOB MUST BE SILHOUETTE-NEUTRAL.**  `SHARD_LOD_CONSTANTS`
-  collapses tiny mobile shards to a cached bitmap instead of a polygon
-  path.  METAL may use a triangle there because a metal-shard's spawn
-  polygon genuinely IS an equilateral triangle; ROCK gets a DISC, and the
-  distinction is not cosmetic.  Rock blitted metal's triangle for a
-  while, so a tile shattering into 8 grains at once read as 8 identical
-  equilateral chips — the exact Voronoi silhouette the fracture model
-  exists to show, replaced by another material's authored shape.  The sim
-  was correct throughout, which is why no simulation test caught it; the
-  regression test is a RENDER test that counts uses of the triangle
-  bitmap while rock debris is on screen.
-  `CHIP_LOD_RADIUS_PX` is 3, not the old 6, for a related reason: the 6
-  was tuned when small rock-shards were the occasional conservation chip,
-  and V15 makes EVERY tile break produce `size/√cells` fragments — a 36px
-  tile's grains are ~12.7 units, i.e. ~4px apparent at the default 0.65
-  zoom, so the old gate collapsed all of them.  Anything that raises this
-  threshold, or points rock at an authored bitmap again, undoes the
-  fracture work at the last step.
+- **A SHARD'S LOD BLOB MUST BE SILHOUETTE-NEUTRAL, AND THERE IS ONLY ONE
+  BLOB.**  `SHARD_LOD_CONSTANTS` collapses tiny mobile shards to a cached
+  bitmap instead of a polygon path, and that bitmap is a DISC — the only
+  cached shard silhouette there is.  It says "something small here" and
+  nothing about shape, which is the only honest thing to say at a few
+  pixels.  The rule was learned TWICE, from the same authored
+  equilateral-triangle bitmap:
+  (1) ROCK blitted it, so a tile shattering into 8 grains read as 8
+  identical equilateral chips — the exact Voronoi silhouette the fracture
+  model exists to show, replaced by another material's authored shape.
+  (2) METAL then kept a triangle branch of its own, at
+  `MIN_APPARENT_RADIUS_PX` (9px — THREE TIMES rock's chip gate), on the
+  grounds that a metal shard's spawn polygon genuinely WAS a lattice
+  triangle.  A3 gave metal Voronoi fracture and that stopped being true;
+  the branch stayed.  Measured on METAL_FIELD: a broken tile's 9 grains,
+  real 4-, 5- and 6-gons in the sim, sat at 3.5–4.5px apparent and took 9
+  triangle blits — every grain on screen wearing an authored shape.
+  Fixing the SIM path (a dying composite fractures its own hull, above)
+  did not touch this, which is why the triangles survived a round of
+  "fixed": the sim was correct throughout in BOTH cases, which is also
+  why no simulation test caught either.  The triangle bitmap is now
+  DELETED rather than restricted, so no material can borrow it again, and
+  both regression tests are RENDER tests asserting that a broken tile's
+  grains draw their real polygons rather than a cached blob.
+  `CHIP_LOD_RADIUS_PX` is 3, not the old 6, and is now the ONE threshold
+  for every grain material: the 6 was tuned when small rock-shards were
+  the occasional conservation chip, and V15 makes EVERY tile break
+  produce `size/√cells` fragments — a 36px tile's grains are ~12.7 units,
+  i.e. ~4px apparent at the default 0.65 zoom, so the old gate collapsed
+  all of them.  Anything that raises this threshold, or points a grain
+  material at an authored bitmap again, undoes the fracture work at the
+  last step.
 - **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
   user call).  A variant carrying `grain.bondStrength` does not have
   an HP pool that damage counts down.  Damage ACCUMULATES ON THE INTERIOR
