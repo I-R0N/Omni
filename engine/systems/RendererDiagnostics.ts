@@ -38,6 +38,7 @@ export interface RendererDiagnostics {
   tileOutlinesEnabled: boolean;
   shardLodEnabled: boolean;
   plasticAutomataEnabled: boolean;
+  shardBlendEnabled: boolean;
   materialAutomataEnabled: boolean;
   chevronsOffscreenOnly: boolean;
   damageTriggeredBars: boolean;
@@ -83,6 +84,7 @@ export interface RendererDiagnostics {
   lastTintMs: number;
   lastTintMisses: number;
   lastLodShardCount: number;
+  lastShardBlendCount: number;
   lastLightingMs: number;
   lastLightingLights: number;
   lastFogMs: number;

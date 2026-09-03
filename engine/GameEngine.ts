@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -774,6 +774,10 @@ export class GameEngine {
     // Wire the variant-specific completion hook for the
     // neighbourhood-blend regen path (today: nebula-tile only).
     this.shards.setRegenAdapter(this.nebulas);
+    // The renderer's bonded-pair blend pass reads the live bond list —
+    // presentation only, and the only thing in the renderer that knows
+    // ShardSystem exists.
+    this.renderer.setShards(this.shards);
     this.entityIndex = new EntityIndex();
     // Wire the EntityIndex into ShardSystem so the large-shard-collapse
     // pass can prefer offscreen candidates (graceful cleanup — never
@@ -1033,6 +1037,9 @@ export class GameEngine {
       rockPaletteName: getActiveRockPaletteName(),
       nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
+      shardBlendEnabled: this.renderer.shardBlendEnabled,
+      shardBlendCount: this.renderer.lastShardBlendCount,
+      shardCoatName: getActiveShardCoatName(),
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -1066,6 +1073,13 @@ export class GameEngine {
       portalLensSpinName: getPortalLensSpinName(),
       portalLensRadiusName: getPortalLensRadiusName(),
       portalTuningInfo: getPortalTuningInfo(),
+      rollFeelName: getActivePlayerRollName(),
+      hullModeName: getActivePlayerHullName(),
+      rollDampName: getActiveRollDampingName(),
+      tiltModeName: getActiveTiltModeName(),
+      leanDirName: getActiveLeanDirName(),
+      tiltSourceName: getActiveTiltSourceName(),
+      velGainName: getActiveVelGainName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
       hudRateName: getActiveHudRateName(),
@@ -1560,9 +1574,240 @@ export class GameEngine {
     const speed = Math.sqrt(v.x * v.x + v.y * v.y);
     return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastMaxSpeed)));
   }
+  /** The ship's real terminal speed under held thrust (see the movement
+   *  block for the derivation) — the tilt code's velocity normaliser. */
+  private lastCruiseSpeed: number = PHYSICS_CONSTANTS.MAX_SPEED;
+  /** How close the ship is to its CRUISE speed, 0..1 — the fraction the
+   *  tilt terms read.  Separate from `playerSpeedFraction` (the cap
+   *  fraction), which the thrust trigger's resistance still reports. */
+  private playerCruiseFraction(): number {
+    const v = this.player.velocity;
+    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastCruiseSpeed)));
+  }
 
   public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
   public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
+
+  /** DIRECTIONAL TILT — ease `player.visualRoll` + `player.visualPitch`
+   *  toward the tilt signal (PLAYER_ROLL_CONSTANTS documents every term and
+   *  why it exists; the fields are documented in types.ts).  ROLL (lateral)
+   *  is the STRAFE term — the thrust input's projection onto the facing
+   *  axis's perpendicular — plus the TURN term — the smoothed rate the
+   *  facing is swinging, scaled by throttle, the term the aim-locked
+   *  schemes (touch / joystick / gamepad, where thrust is always along the
+   *  nose) actually exercise, scaled by the CENTRIPETAL gate (bank scales
+   *  with real speed), plus the SLIP term (drift relative to the nose
+   *  holds the bank through a hard turn's slide).  PITCH (longitudinal)
+   *  is nose-line thrust directly — held throttle holds the lean, cutting
+   *  it settles level.  Components are signed so reversals swing
+   *  through level instead of teleporting across it, and the signal VECTOR
+   *  is magnitude-clamped so a diagonal cannot out-tilt the authored
+   *  maximum.  Easing is a SECOND-ORDER SPRING (user call): each component
+   *  carries an angular velocity and overshoots-and-settles rather than
+   *  lerping, its frequency divided by √(mass ratio) so a heavy outfit
+   *  tilts ponderously.  TUMBLE mode (DBG "Tilt mode") repurposes the same
+   *  velocity state as a continuous roll rate — see the constants note. */
+  private _rollPrevFacing: number | null = null;
+  private _rollYawRate = 0;
+  /** Tilt spring state: the angular velocities of the two eased
+   *  components in LEAN mode, and the continuous roll rates in TUMBLE. */
+  private _rollVel = 0;
+  private _pitchVel = 0;
+  /** The tilt spring's effective natural frequency: the authored omega ×
+   *  the DBG damping step, over √(mass ratio) — rotational inertia grows
+   *  with mass and ω ∝ 1/√I, so the same outfit that shoves slower also
+   *  tilts slower, with the wobble character (the damping RATIO)
+   *  unchanged. */
+  private tiltOmega(): number {
+    const { SPRING_OMEGA } = PLAYER_ROLL_CONSTANTS;
+    const massRatio = Math.max(1e-6, this.player.mass / PHYSICS_CONSTANTS.PLAYER_MASS);
+    return SPRING_OMEGA * getActiveRollDampingMult() / Math.sqrt(Math.max(1, massRatio));
+  }
+  /** One semi-implicit Euler step of the tilt spring for one component.
+   *  Returns the new angle; the velocity lives in `_rollVel`/`_pitchVel`
+   *  and is written back by the caller.  Semi-implicit (velocity first)
+   *  keeps it stable at every damping step. */
+  private springTilt(
+    cur: number, velKey: '_rollVel' | '_pitchVel', target: number,
+    dt: number, omega: number,
+  ): number {
+    const { SPRING_ZETA, REST_EPSILON, REST_VEL_EPSILON } = PLAYER_ROLL_CONSTANTS;
+    const k = omega * omega;
+    const c = 2 * SPRING_ZETA * omega;
+    let v = this[velKey];
+    v += (k * (target - cur) - c * v) * dt;
+    let next = cur + v * dt;
+    // Snap to true level once the settle is invisible — angle AND velocity
+    // both small — so the renderer's straight-flight path stays the plain
+    // rotation matrix.
+    if (target === 0 && Math.abs(next) < REST_EPSILON && Math.abs(v) < REST_VEL_EPSILON) {
+      next = 0;
+      v = 0;
+    }
+    this[velKey] = v;
+    return next;
+  }
+  /** The tilt signal for ONE source vector, written to the scratch pair
+   *  below (no allocation — this runs up to twice per sim step).
+   *
+   *  Everything that makes a source distinct lives here: the STRAFE term
+   *  reads the vector, and BOTH the turn gate and the slip term are scaled
+   *  by the THROTTLE derived from it.  That is why 'Average' and 'Sum'
+   *  blend the two RESULTS rather than the two input vectors — blending
+   *  the vectors first would gate both halves by one merged throttle and
+   *  lose exactly the difference the A/B exists to show. */
+  private _tiltSigLat = 0;
+  private _tiltSigLong = 0;
+  private tiltSignalFrom(mx: number, my: number, cosF: number, sinF: number) {
+    const { YAW_GAIN, PITCH_GAIN, SLIP_GAIN, TURN_SPEED_FLOOR } = PLAYER_ROLL_CONSTANTS;
+    const vel = this.player.velocity;
+    // STRAFE — perpendicular of facing (cos, sin) is (-sin, cos).
+    const lat = my * cosF - mx * sinF;
+    const throttle = Math.min(1, Math.sqrt(mx * mx + my * my));
+    // TURN gate — CENTRIPETAL (tan(bank) ∝ v·ω): the bank of a carved
+    // turn scales with actual SPEED, floored so a low-speed turn still
+    // reads, and gated by throttle so a coasting or parked nose-swing —
+    // which curves no path — stays level.  The MINUS sign below makes the
+    // turn and strafe terms agree: mid-turn, thrust not yet swung to the
+    // new nose lies on the NEGATIVE perp side of it.
+    const turnGate = throttle
+      * (TURN_SPEED_FLOOR + (1 - TURN_SPEED_FLOOR) * this.playerCruiseFraction());
+    // SLIP — the velocity's lateral component relative to the nose, under
+    // power: after a hard turn the path lags the nose and the hull stays
+    // banked into the drift until it catches up.  Same sign convention as
+    // the strafe term (thrusting and drifting the same way reinforce).
+    const vLat = (vel.y * cosF - vel.x * sinF) / Math.max(1e-6, this.lastCruiseSpeed);
+    const slip = SLIP_GAIN * Math.max(-1, Math.min(1, vLat)) * throttle;
+    this._tiltSigLat = lat + slip - YAW_GAIN * this._rollYawRate * turnGate;
+    // PITCH — nose-line thrust directly (the washout was removed, user
+    // call): holding the throttle holds the lean, cutting it settles
+    // level, reverse thrust leans the other way.
+    this._tiltSigLong = (mx * cosF + my * sinF) * PITCH_GAIN;
+  }
+  private tickPlayerRoll(dt: number, moveDir: Vector2) {
+    const { YAW_SMOOTHING, MAX_TILT } = PLAYER_ROLL_CONSTANTS;
+    const facing = this.player.rotation;
+    const cosF = Math.cos(facing);
+    const sinF = Math.sin(facing);
+    const vel = this.player.velocity;
+    // TURN tracker — the facing's angular step this tick, wrapped so aiming
+    // across the ±π seam is a small swing rather than a full spin, low-passed
+    // to cancel pointer jitter.  Null prev = first tick (or a respawn reset):
+    // measure from here, spike nothing.  Ticked ONCE per step, above the
+    // source dispatch, so a two-source blend does not advance it twice.
+    const prev = this._rollPrevFacing ?? facing;
+    this._rollPrevFacing = facing;
+    let dTheta = facing - prev;
+    if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
+    else if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
+    const rawRate = dt > 0 ? dTheta / dt : 0;
+    this._rollYawRate += (rawRate - this._rollYawRate) * Math.min(1, YAW_SMOOTHING * dt);
+
+    // The DBG "Tilt src" A/B (user call): what DRIVES the signal.  THRUST
+    // (the default) is the input vector — no input, no tilt.  VELOCITY is
+    // the ship's motion normalised by the CRUISE speed, so the hull leans
+    // with where it is actually going: a coasting drift holds its lean, a
+    // wall bounce reads on the hull, and a tumble rolls as long as the ship
+    // moves.  AVERAGE and SUM run BOTH and blend the RESULTS.  Whichever it
+    // is, the branch below reads one clamped signal, so the choice reaches
+    // both tilt modes for free.
+    const src = getActiveTiltSource();
+    // The velocity vector, cruise-normalised and gain-stepped, clamped to
+    // the same 0..1 range the thrust input already lives in so the two are
+    // commensurable before anything blends them.  The DBG "Vel gain" step
+    // rides the normaliser: it moves WHERE the signal saturates, never how
+    // deep it goes.
+    const inv = getActiveVelGainMult() / Math.max(1e-6, this.lastCruiseSpeed);
+    let vx = vel.x * inv;
+    let vy = vel.y * inv;
+    const vm = Math.sqrt(vx * vx + vy * vy);
+    if (vm > 1) { vx /= vm; vy /= vm; }
+
+    let sigLat: number;
+    let sigLong: number;
+    if (src === 'thrust' || src === 'velocity') {
+      const useVel = src === 'velocity';
+      this.tiltSignalFrom(useVel ? vx : moveDir.x, useVel ? vy : moveDir.y, cosF, sinF);
+      sigLat = this._tiltSigLat;
+      sigLong = this._tiltSigLong;
+    } else {
+      // BOTH effects, blended.  Average keeps the pair inside the range
+      // either source reaches alone (it is the midpoint); Sum lets them
+      // reinforce, so the hull banks SOONER — the magnitude clamp below is
+      // what makes that safe, exactly as it does for an extreme Vel gain.
+      // Sum is therefore 2× Average pre-clamp, and identical to it wherever
+      // the pair already saturates.
+      this.tiltSignalFrom(moveDir.x, moveDir.y, cosF, sinF);
+      const tLat = this._tiltSigLat;
+      const tLong = this._tiltSigLong;
+      this.tiltSignalFrom(vx, vy, cosF, sinF);
+      const scale = src === 'average' ? 0.5 : 1;
+      sigLat = (tLat + this._tiltSigLat) * scale;
+      sigLong = (tLong + this._tiltSigLong) * scale;
+    }
+    // Clamp the SIGNAL VECTOR's magnitude, not each component: the tilt is
+    // one direction in 360°, and clamping per-axis would let a diagonal
+    // reach √2 of the authored maximum.
+    const sigMag = Math.sqrt(sigLat * sigLat + sigLong * sigLong);
+    if (sigMag > 1) { sigLat /= sigMag; sigLong /= sigMag; }
+    // Max angle comes from the DBG feel cycle (Player ▸ "Roll feel");
+    // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
+    // levels out through this same easing rather than a separate branch.
+    const maxAngle = getActivePlayerRollAngle();
+    const omega = this.tiltOmega();
+
+    if (getActiveTiltMode() === 'tumble') {
+      // CONTINUOUS ROLL (test mode — user call): the clamped signal drives
+      // angular RATE, not angle, so the hull keeps rolling about the axis
+      // perpendicular to the thrust — end-over-end under forward
+      // throttle, a barrel roll under strafe — and freezes where it
+      // stopped when thrust drops, like a rolled object.  The velocity
+      // state doubles as the rate; the "Roll feel" presets scale the rate
+      // so Off stops the tumble; angles wrap to ±π.
+      const { TUMBLE_RATE, MAX_ANGLE, REST_EPSILON, REST_VEL_EPSILON } =
+        PLAYER_ROLL_CONSTANTS;
+      const rateScale = TUMBLE_RATE * (maxAngle / MAX_ANGLE);
+      const ease = Math.min(1, omega * dt);
+      // NEGATED signal (user call): the tumble rolls the opposite way to
+      // the lean's tilt — the read of a ball rolling WITH its travel
+      // rather than tipping against it.
+      this._rollVel += (-sigLat * rateScale - this._rollVel) * ease;
+      this._pitchVel += (-sigLong * rateScale - this._pitchVel) * ease;
+      const wrapPi = (a: number) =>
+        a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a;
+      let roll = wrapPi((this.player.visualRoll ?? 0) + this._rollVel * dt);
+      let pitch = wrapPi((this.player.visualPitch ?? 0) + this._pitchVel * dt);
+      // A stopped tumble that happens to sit near level snaps to it, so an
+      // idle ship still earns the renderer's plain path.
+      if (Math.abs(this._rollVel) < REST_VEL_EPSILON) {
+        this._rollVel = sigLat === 0 ? 0 : this._rollVel;
+        if (this._rollVel === 0 && Math.abs(roll) < REST_EPSILON) roll = 0;
+      }
+      if (Math.abs(this._pitchVel) < REST_VEL_EPSILON) {
+        this._pitchVel = sigLong === 0 ? 0 : this._pitchVel;
+        if (this._pitchVel === 0 && Math.abs(pitch) < REST_EPSILON) pitch = 0;
+      }
+      this.player.visualRoll = roll;
+      this.player.visualPitch = pitch;
+      return;
+    }
+
+    // The DBG "Lean dir" A/B (user call): one sign over both spring
+    // targets, so Reversed tips the hull AWAY from the acceleration —
+    // the same signal, easing and clamps, mirrored.
+    const dirSign = getActiveLeanDirSign();
+    let roll = this.springTilt(this.player.visualRoll ?? 0, '_rollVel', sigLat * maxAngle * dirSign, dt, omega);
+    let pitch = this.springTilt(this.player.visualPitch ?? 0, '_pitchVel', sigLong * maxAngle * dirSign, dt, omega);
+    // Combined-tilt ceiling: past π/2 the cos-foreshortening mirrors the
+    // sprite.  The spring OVERSHOOTS by design, so this also brackets a
+    // Deep-preset overshoot; a mirror is the one artefact that must never
+    // draw.
+    const tilt = Math.sqrt(roll * roll + pitch * pitch);
+    if (tilt > MAX_TILT) { const s = MAX_TILT / tilt; roll *= s; pitch *= s; }
+    this.player.visualRoll = roll;
+    this.player.visualPitch = pitch;
+  }
 
   public setDifficulty(level: number) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
@@ -1897,6 +2142,9 @@ export class GameEngine {
       rockPaletteName: getActiveRockPaletteName(),
       nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
+      shardBlendEnabled: this.renderer.shardBlendEnabled,
+      shardBlendCount: this.renderer.lastShardBlendCount,
+      shardCoatName: getActiveShardCoatName(),
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -1930,6 +2178,13 @@ export class GameEngine {
       portalLensSpinName: getPortalLensSpinName(),
       portalLensRadiusName: getPortalLensRadiusName(),
       portalTuningInfo: getPortalTuningInfo(),
+      rollFeelName: getActivePlayerRollName(),
+      hullModeName: getActivePlayerHullName(),
+      rollDampName: getActiveRollDampingName(),
+      tiltModeName: getActiveTiltModeName(),
+      leanDirName: getActiveLeanDirName(),
+      tiltSourceName: getActiveTiltSourceName(),
+      velGainName: getActiveVelGainName(),
       enemyScaleName: getActiveEnemyScaleName(),
       simRateName: getActiveSimRateName(),
       hudRateName: getActiveHudRateName(),
@@ -3331,6 +3586,16 @@ export class GameEngine {
     // ship is to its cap.  Read here rather than recomputed, so the number the
     // hand feels is the number the sim is enforcing.
     this.lastMaxSpeed = maxSpeed;
+    // The ship's actual TERMINAL speed under held thrust: each 60Hz tick the
+    // movement below adds `acc` and PhysicsSystem multiplies by the per-map
+    // friction f, so speed settles at acc·f/(1−f) — about a THIRD of the cap
+    // on the shipped tuning (the cap only matters for knockback overshoot).
+    // Cached for the tilt code, which normalises every velocity read by what
+    // the ship can actually REACH: dividing by the cap ran the slip term, the
+    // centripetal gate and the whole Velocity tilt source ~3× too weak
+    // (user report: "velocity effects are very weak or not showing").
+    const fr = moveConfig ? moveConfig.friction : PHYSICS_CONSTANTS.FRICTION;
+    this.lastCruiseSpeed = Math.min(maxSpeed, (acc * fr) / Math.max(1e-6, 1 - fr));
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -3443,6 +3708,10 @@ export class GameEngine {
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
     this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
+
+    // Banking roll — after the rotation update so the lateral decomposition
+    // reads this step's facing, not last step's.
+    this.tickPlayerRoll(dt, moveDir);
 
     const fireEvents = this.input.getFireEvents();
     fireEvents.forEach(evt => {
@@ -4821,6 +5090,12 @@ export class GameEngine {
       this.player.position = { ...spawn };
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
+      this.player.visualRoll = 0;
+      this.player.visualPitch = 0;
+      this._rollPrevFacing = null;
+      this._rollYawRate = 0;
+      this._rollVel = 0;
+      this._pitchVel = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;

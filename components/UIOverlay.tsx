@@ -115,6 +115,8 @@ interface UIOverlayProps {
   onCycleTriggerEncoding?: () => void;
   onTestTriggerLink?: () => void;
   onToggleRepelPush?: () => void;
+  onToggleShardBlend?: () => void;
+  onCycleShardCoat?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -142,6 +144,13 @@ interface UIOverlayProps {
   onCyclePortalLens?: () => void;
   onCyclePortalLensRadius?: () => void;
   onCyclePortalLensSpin?: () => void;
+  onCyclePlayerRoll?: () => void;
+  onCyclePlayerHull?: () => void;
+  onCycleRollDamping?: () => void;
+  onCycleTiltMode?: () => void;
+  onCycleLeanDir?: () => void;
+  onCycleTiltSource?: () => void;
+  onCycleVelGain?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSimRate?: () => void;
   onCycleHudRate?: () => void;
@@ -416,6 +425,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleTriggerEncoding,
   onTestTriggerLink,
   onToggleRepelPush,
+  onToggleShardBlend,
+  onCycleShardCoat,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -443,6 +454,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePortalLens,
   onCyclePortalLensRadius,
   onCyclePortalLensSpin,
+  onCyclePlayerRoll,
+  onCyclePlayerHull,
+  onCycleRollDamping,
+  onCycleTiltMode,
+  onCycleLeanDir,
+  onCycleTiltSource,
+  onCycleVelGain,
   onCycleEnemyScale,
   onCycleSimRate,
   onCycleHudRate,
@@ -502,7 +520,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, tilt: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
     portal: true,
     // Map menus — controlled (not native <details>) so the dropdown state
@@ -1524,6 +1542,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Teleport the player to the station\'s doorstep (docking-test harness). Overworld only — no-op on maps without a station.')}
               </>)}
 
+              {/* ── Ship Tilt (the directional-tilt system: what draws at
+                     the player's position and how it leans).  Its own
+                     section because these seven rows are one subsystem and
+                     they are A/B knobs for it — the Player section above is
+                     unrelated movement / input / test controls, and reading
+                     either was harder with the two interleaved.  The whole
+                     thing SHIPS OFF (Hull 'Ship' + Roll feel 'Off'), so
+                     turning it on is the first two rows here. ── */}
+              {renderSectionHeader('tilt', 'Ship Tilt')}
+              {!collapsed.tilt && (<>
+                {ctrlRow('Roll feel', onCyclePlayerRoll, stats.rollFeelName ?? 'Off',
+                  'Directional-tilt depth preset (SHIPS OFF; Off / Subtle / Default / Deep) stepping how far the hull pitches and rolls into a carved turn, lateral thrust or a throttle change — purely visual (physics, collision and aim never read it). Off levels out through the normal easing rather than snapping flat.')}
+                {ctrlRow('Hull', onCyclePlayerHull, stats.hullModeName ?? 'Ship',
+                  'What draws at the player\'s position. Ship (DEFAULT): the legacy sprite with the cos-tilt squash — an untouched build looks exactly as it always did. Sheet: PRE-RENDERED tilt art, one authored pose per lean, snapped to the nearest cell with yaw still on the canvas (see docs/SHIP_SPRITE_SHEETS.md); falls back to the squash until art exists, and needs "Roll feel" off Off to show anything. Cube: a flat wireframe cube — at rest a square with the nose face edge-on — rotating for real in yaw + the tilt pitch/roll. Diamond: the same cube stood on a corner for a gem-cut hull. Sphere: three great circles with a nose ring at the forward pole. Dodeca: a dodecahedron with a pentagonal face forward. Rhombic: the rhombic dodecahedron, axis vertex forward. Tri: a triangular dart ship — nose, swept wingtips, dorsal peak and keel.')}
+                {ctrlRow('Roll damp', onCycleRollDamping, stats.rollDampName ?? 'Default',
+                  'Rotation-damping preset (Floaty 0.5x / Default / Stiff 2x / Snappy 4x): scales the tilt spring\'s natural frequency, so the hull tracks the hand looser or tighter with the same overshoot-and-wobble character. Ship weight also slows the spring (inertia).')}
+                {ctrlRow('Tilt mode', onCycleTiltMode, stats.tiltModeName ?? 'Lean',
+                  'Lean (default): the hull tilts toward the acceleration and settles back. Tumble (test): thrust drives roll RATE instead — the hull keeps rolling with its travel about the axis perpendicular to the thrust and freezes where it stops; the white aim marker hides and a fixed chevron reticle ahead of the hull carries the aim.')}
+                {ctrlRow('Lean dir', onCycleLeanDir, stats.leanDirName ?? 'Default',
+                  'A/B for which way the hull tips in Lean mode. Default: bank INTO the acceleration, like an aircraft carving its turn. Reversed: both pitch and roll mirrored — the hull kicked back by its own thrust — and the wireframe re-bases NOSE-UP, so each shape\'s front face/vertex faces the screen at rest. Same signal, easing and clamps; Tumble is unaffected.')}
+                {ctrlRow('Tilt src', onCycleTiltSource, stats.tiltSourceName ?? 'Thrust',
+                  'What drives the tilt signal, in BOTH tilt modes. Thrust (default): the input vector — no input, no tilt. Velocity: the ship\'s actual motion, normalized by its real cruise speed — a coasting drift holds its lean, a wall bounce reads on the hull, and a tumble keeps rolling as long as the ship moves. Average / Sum: run BOTH and blend the resulting rotation effects (not the raw inputs — each source runs its own throttle gate and slip weighting first). Average is their midpoint, so it stays inside the range either reaches alone; Sum lets them reinforce, so the hull banks SOONER — the magnitude clamp keeps it from ever banking deeper.')}
+                {ctrlRow('Vel gain', onCycleVelGain, stats.velGainName ?? '1×',
+                  'Sensitivity of the Velocity tilt source (1× / 2× / 4× / 10×): multiplies the cruise-normalized velocity signal before its clamp, so higher steps reach the full tilt at ever lower speeds — 2× at half cruise, 10× on almost any motion. Saturates earlier, never tilts deeper. Thrust mode ignores it.')}
+              </>)}
+
               {/* ── Modules (DBG grants — varieties at fixed marks) ── */}
               {renderSectionHeader('modules', 'Modules')}
               {!collapsed.modules && (<>
@@ -1819,6 +1863,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Joystick', onToggleJoystickDebug,
                   stats.joystickForceVisible === true ? 'Forced' : 'Touch',
                   'Onscreen touch joystick. Touch: the widget exists only while a thumb is on the glass — the normal behaviour, and why it never ghosts onto mouse or gamepad. Forced: draw it anyway, so its size and placement can be checked on a desktop browser.')}
+                {ctrlRow('Goo bond', onToggleShardBlend,
+                  stats.shardBlendEnabled === false
+                    ? 'Off'
+                    : `On · ${stats.shardBlendCount ?? 0}`,
+                  'Bonded-pair blend. On: a live cohesion bond draws as ONE blob — each goo body enveloped in a skin of its own hull grown outward, joined by a waisted metaball bridge, all filled under the hulls so a plastic shard stuck to a tile or another shard reads as goo rather than two polygons touching. Only the GOO side is coated: plastic on a glass tile coats the plastic, never the tile. Off restores the un-blended look. Presentation only: the bond itself forms, coheres and breaks the same either way. The number is how many bonds drew something last frame, so a 0 with plastic on screen means nothing is bonded rather than that the pass is broken.')}
+                {ctrlRow('Goo coat', onCycleShardCoat,
+                  stats.shardCoatName ?? '1x',
+                  'Thickness of the goo COAT around each bonded body, as a multiplier over the envelope its variant authors (plastic ships 0.18 of the shard\'s circumradius). Only has an effect while Goo bond is On. Cycles UP from the shipped value because the question it exists to answer is how much thicker it should be; at 6x a shard\'s coat is about as deep as its own radius, which is past useful on purpose — a range whose top is not too far cannot show you where too far is. The variant table stays the statement of how thick that material\'s goo is; this only scales it.')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}

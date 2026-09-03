@@ -293,6 +293,37 @@ export function cyclePlasticGlowBrightness(): number {
 }
 
 
+// ── Bonded-pair goo COAT thickness cycle (DBG-only) ─────────────────
+// Multiplies the `envelope` each variant's ShardBlendPolicy authors, so
+// the variant table stays the source of truth for how thick that
+// material's goo is and this only scales it — the same relationship
+// MATERIAL_GLOW_BRIGHTNESS_CYCLE has with a variant's glow.peakAlpha.
+//
+// Starts at the authored value and cycles UP, because the question this
+// exists to answer is "how much thicker should it be" (user report: the
+// shipped 0.18 reads thin).  At 6× a plastic shard's coat is about as
+// deep as its own radius, which is past useful and deliberately
+// reachable — a range whose top is not too far cannot tell you where too
+// far is.  The 'Goo bond' toggle already provides the off case, so there
+// is no 0 step here.
+export const SHARD_COAT_CYCLE: ReadonlyArray<number> = [
+  1, 1.5, 2, 3, 4, 6,
+] as const;
+
+let activeShardCoatIndex = 0; // 1× — the authored envelope
+
+export function getActiveShardCoat(): number {
+  return SHARD_COAT_CYCLE[activeShardCoatIndex];
+}
+export function getActiveShardCoatName(): string {
+  return `${getActiveShardCoat()}x`;
+}
+export function cycleShardCoat(): number {
+  activeShardCoatIndex = (activeShardCoatIndex + 1) % SHARD_COAT_CYCLE.length;
+  return activeShardCoatIndex;
+}
+
+
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
 // The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
 // .glow.color (#a5f3fc); the cycle adds warm + diverse families so we
@@ -2958,6 +2989,286 @@ export const PLAYER_TRAIL_CONSTANTS = {
   LINE_WIDTH: 2.0,       // Stroke width in world units
   COLOR: '125, 211, 252',// RGB triplet (brighter cyan)
 };
+
+// BANKING ROLL — the player ship rolls into changing acceleration.  TWO
+// terms feed the bank, because one alone almost never fires in real play
+// (user report: "not noticing the roll" — under the touch / joystick /
+// gamepad schemes the ship AIMS WHERE IT FLIES, so thrust is always along
+// the nose and a lateral-thrust-only signal is zero by construction):
+//   1. STRAFE — the thrust input's component perpendicular to the facing
+//      axis.  Fires when flying across a held aim (keyboard + mouse).
+//   2. TURN — the rate the nose is SWINGING, scaled by throttle: carving a
+//      turn under thrust is changing the acceleration's direction, and it
+//      is the term every aim-locked scheme actually exercises.  Coasting
+//      nose-swings stay level — no thrust, no acceleration change.
+// The ROLL pair above is half of a full 360° DIRECTIONAL TILT: the PITCH
+// half (the PITCH_* knobs below) reads nose-line thrust, and the
+// renderer combines both into ONE tilt toward the acceleration,
+// foreshortening the hull along that direction by cos(tilt) — the top-down
+// projection of a flat ship tilting — so MAX_ANGLE is authored as a real
+// tilt angle, not a scale factor.
+export const PLAYER_ROLL_CONSTANTS = {
+  MAX_ANGLE: 0.85,     // Radians (~49°) at full signal — cos ≈ 0.66 squash
+  // SECOND-ORDER SPRING easing (user call, replacing the first-order
+  // attack/release pair): each tilt component carries an angular VELOCITY
+  // and springs toward its target — semi-implicit Euler, so it is stable
+  // at every damping step.  Underdamped on purpose: a step overshoots
+  // ~13% and settles with one visible wobble, which is what reads as a
+  // hull with INERTIA rather than a value being lerped.
+  SPRING_OMEGA: 12,    // Natural frequency, rad/s — the response speed
+  SPRING_ZETA: 0.55,   // Damping ratio; <1 = overshoot + wobble by design
+  // TILT INERTIA rides SHIP WEIGHT (user call): the spring frequency
+  // divides by √(player.mass / PLAYER_MASS) — rotational inertia grows
+  // with mass, ω ∝ 1/√I — so a full outfit (~3× the lean mass) tilts
+  // ~1.7× more ponderously with the same wobble character.
+  // TUMBLE mode (DBG Player ▸ "Tilt mode" — a TEST mode, user call): the
+  // clamped signal vector drives angular RATE instead of angle, so the
+  // hull rolls CONTINUOUSLY about the axis perpendicular to the thrust —
+  // end-over-end under forward throttle, a barrel roll under strafe —
+  // and freezes where it stopped when thrust drops, like a rolled
+  // object.  The rate reuses the tilt-velocity state and eases at the
+  // spring frequency; the "Roll feel" angle presets scale the rate
+  // (Off stops the tumble), and angles wrap to ±π.
+  TUMBLE_RATE: 4,      // rad/s of continuous roll at full signal
+  // Turn term: seconds-per-radian gain — full bank at a sustained nose
+  // swing of 1/YAW_GAIN rad/s (0.25 → 4 rad/s, a deliberate carve).  A
+  // faster flick saturates to a full-bank pulse that settles at
+  // RETURN_RATE, which reads as a snap roll rather than noise.
+  YAW_GAIN: 0.25,
+  // Per-second low-pass on the measured swing rate: pointer jitter arrives
+  // as alternating-sign single-step spikes, and averaging them toward zero
+  // is what keeps a trembling mouse from fluttering the hull.
+  YAW_SMOOTHING: 10,
+  // PITCH — the longitudinal half of the 360° directional tilt: nose-line
+  // thrust DIRECTLY (the washout filter that made a cruise settle level
+  // was removed — user call).  Holding the throttle holds the lean,
+  // cutting it settles back to level, reverse thrust leans the other way.
+  PITCH_GAIN: 1.0,
+  // SLIP — the sideslip term (physics: after a hard turn the velocity
+  // lags the nose, and the lateral airflow's side force keeps a real
+  // airframe banked INTO the drift until the path catches up).  The
+  // signal is the velocity's component perpendicular to the nose as a
+  // fraction of the speed cap, gated by throttle — a coasting drift
+  // stays level, matching the "no input, no tilt" rule everywhere else.
+  SLIP_GAIN: 0.5,
+  // TURN-rate gate — centripetal (physics: bank in a coordinated turn is
+  // tan(bank) ∝ v·ω, so it scales with actual SPEED, not stick
+  // deflection).  The turn term's gate is throttle × (FLOOR +
+  // (1−FLOOR)·speedFrac): a full-speed carve banks fully, a pivot in
+  // place banks at the floor — still readable, honestly shallower.
+  TURN_SPEED_FLOOR: 0.35,
+  // Safety ceiling on the COMBINED tilt angle √(roll² + pitch²): past π/2
+  // the cos-foreshortening goes negative and mirrors the sprite, so the
+  // eased pair is scaled back under this whatever the presets get up to
+  // (reachable only transiently, e.g. cycling Deep mid-bank).
+  MAX_TILT: 1.45,
+  // Below this angle — with no signal and the spring velocity below
+  // REST_VEL_EPSILON — a tilt component snaps to 0, so the renderer's
+  // straight-flight path stays the plain rotation matrix.
+  REST_EPSILON: 0.01,
+  REST_VEL_EPSILON: 0.06,
+};
+
+// DBG tilt-mode cycle (Player ▸ "Tilt mode"): 'Lean' (the default — tilt
+// toward the acceleration and settle back) vs 'Tumble' (the continuous-
+// roll TEST mode described above).  Its own cycle rather than a feel
+// preset because it changes what the tilt angles MEAN.
+export const TILT_MODE_CYCLE: ReadonlyArray<string> = ['Lean', 'Tumble'] as const;
+let activeTiltModeIndex = 0; // Lean — the shipped default
+export function getActiveTiltMode(): 'lean' | 'tumble' {
+  return activeTiltModeIndex === 0 ? 'lean' : 'tumble';
+}
+export function getActiveTiltModeName(): string {
+  return TILT_MODE_CYCLE[activeTiltModeIndex];
+}
+export function cycleTiltMode(): number {
+  activeTiltModeIndex = (activeTiltModeIndex + 1) % TILT_MODE_CYCLE.length;
+  return activeTiltModeIndex;
+}
+
+// DBG lean-direction cycle (Player ▸ "Lean dir"): the A/B for which way the
+// hull tips into acceleration in LEAN mode.  'Default' banks INTO the
+// acceleration (an aircraft carving its turn); 'Reversed' negates BOTH
+// components — the read of a hull kicked back by its own thrust, nose
+// rising under throttle.  One sign over the whole signal vector, so the
+// tilt stays a single direction in 360° and the magnitude clamp is
+// untouched.  LEAN-only on purpose: Tumble's direction was its own user
+// call (roll WITH the travel) and this knob must not double-negate it.
+export const LEAN_DIR_CYCLE: ReadonlyArray<string> = ['Default', 'Reversed'] as const;
+let activeLeanDirIndex = 0; // Default — the shipped direction
+export function getActiveLeanDirSign(): 1 | -1 {
+  return activeLeanDirIndex === 0 ? 1 : -1;
+}
+export function getActiveLeanDirName(): string {
+  return LEAN_DIR_CYCLE[activeLeanDirIndex];
+}
+export function cycleLeanDir(): number {
+  activeLeanDirIndex = (activeLeanDirIndex + 1) % LEAN_DIR_CYCLE.length;
+  return activeLeanDirIndex;
+}
+
+// DBG tilt-source cycle (Ship Tilt ▸ "Tilt src"): what DRIVES the tilt
+// signal, in BOTH tilt modes.  'Thrust' (default) reads the input vector
+// — no input, no tilt, the shipped rule.  'Velocity' reads the ship's
+// actual velocity normalised by the CRUISE speed: the hull leans with its
+// MOTION, so a coasting drift holds its lean, a wall bounce reads on the
+// hull, and a tumble keeps rolling as long as the ship is moving.
+// 'Average' and 'Sum' run BOTH and blend the results (see below).
+// AVERAGE and SUM combine the two ROTATION EFFECTS rather than the two
+// input vectors (user call), which is the meaningful reading: each source
+// runs the full signal pipeline — its own throttle gate, its own slip
+// weighting — and the RESULTS are then blended.  Averaging the raw vectors
+// instead would gate both halves by one blended throttle and lose exactly
+// the difference the A/B exists to show.  Average keeps the pair inside the
+// range either source reaches alone; Sum lets them reinforce, so the tilt
+// saturates earlier (the magnitude clamp is what keeps that safe — Sum can
+// bank sooner, never deeper).
+export const TILT_SOURCE_CYCLE: ReadonlyArray<string> =
+  ['Thrust', 'Velocity', 'Average', 'Sum'] as const;
+let activeTiltSourceIndex = 0; // Thrust — the shipped default
+export type TiltSource = 'thrust' | 'velocity' | 'average' | 'sum';
+const TILT_SOURCES: ReadonlyArray<TiltSource> =
+  ['thrust', 'velocity', 'average', 'sum'] as const;
+export function getActiveTiltSource(): TiltSource {
+  return TILT_SOURCES[activeTiltSourceIndex];
+}
+export function getActiveTiltSourceName(): string {
+  return TILT_SOURCE_CYCLE[activeTiltSourceIndex];
+}
+export function cycleTiltSource(): number {
+  activeTiltSourceIndex = (activeTiltSourceIndex + 1) % TILT_SOURCE_CYCLE.length;
+  return activeTiltSourceIndex;
+}
+
+// DBG velocity-gain cycle (Player ▸ "Vel gain"): sensitivity steps for the
+// VELOCITY tilt source only — the gain multiplies the cruise-normalised
+// velocity vector BEFORE the existing magnitude clamp, so 2× reaches full
+// tilt at half cruise speed and 10× saturates on almost any motion at all
+// (the extreme end, for A/B-ing how twitchy the hull should read).  The
+// clamp is what keeps every step safe: gain can only move WHERE the
+// signal saturates, never past the authored maximum.  Thrust mode never
+// reads it.
+export const VEL_GAIN_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: '1×',  mult: 1 },   // the shipped default — full tilt at cruise
+  { name: '2×',  mult: 2 },   // full tilt at half cruise
+  { name: '4×',  mult: 4 },   // full tilt at quarter cruise
+  { name: '10×', mult: 10 },  // extreme — any motion reads as full
+];
+let activeVelGainIndex = 0;
+export function getActiveVelGainMult(): number {
+  return VEL_GAIN_CYCLE[activeVelGainIndex].mult;
+}
+export function getActiveVelGainName(): string {
+  return VEL_GAIN_CYCLE[activeVelGainIndex].name;
+}
+export function cycleVelGain(): number {
+  activeVelGainIndex = (activeVelGainIndex + 1) % VEL_GAIN_CYCLE.length;
+  return activeVelGainIndex;
+}
+
+// DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
+// A/B-ing how deep the bank reads, cycled live from the pause debug menu.
+// Only the ANGLE varies — the response/return rates are the same feel at
+// every depth — and Off (angle 0) rides the normal easing path, so toggling
+// it mid-bank settles the hull out instead of snapping it flat.
+export const PLAYER_ROLL_CYCLE: ReadonlyArray<{ name: string; angle: number }> = [
+  { name: 'Off',     angle: 0 },
+  { name: 'Subtle',  angle: 0.55 },                          // cos ≈ 0.85 squash
+  { name: 'Default', angle: PLAYER_ROLL_CONSTANTS.MAX_ANGLE }, // cos ≈ 0.66
+  { name: 'Deep',    angle: 1.15 },                          // cos ≈ 0.41
+] as const;
+// OFF is the shipped default (user call): with no art in the tilt sheet
+// yet, an untouched build must render exactly as it did before any of the
+// tilt work existed.  Off sets the max angle to 0, so the signal is still
+// computed and eased but converges on literal level and the renderer keeps
+// its plain-rotation path — one preset, no dead branch.  Step this row to
+// Subtle / Default / Deep to turn the tilt on.
+let activePlayerRollIndex = 0; // Off — the shipped feel
+export function getActivePlayerRollAngle(): number {
+  return PLAYER_ROLL_CYCLE[activePlayerRollIndex].angle;
+}
+export function getActivePlayerRollName(): string {
+  return PLAYER_ROLL_CYCLE[activePlayerRollIndex].name;
+}
+export function cyclePlayerRoll(): number {
+  activePlayerRollIndex = (activePlayerRollIndex + 1) % PLAYER_ROLL_CYCLE.length;
+  return activePlayerRollIndex;
+}
+
+// PLAYER HULL — what draws at the player's position (user call): a
+// WIREFRAME hull in place of the ship sprite, rotating for real in the
+// three axes the player already rotates in — yaw (the facing) plus the
+// directional-tilt pitch and roll.  Where the sprite could only show tilt
+// as a cos foreshortening, the wireframe shows it as 3D rotation, pitch
+// SIGN included.  The projection is ORTHOGRAPHIC (no perspective — user
+// call), and the cycle carries TWO base orientations plus the sprite:
+//  'Cube'    — axis-aligned: at rest a flat square whose forward edge is
+//              the NOSE FACE edge-on;
+//  'Diamond' — the cube stood on a corner (corner straight up at the
+//              viewer, the adjacent corner's projection dead forward):
+//              a gem-cut hexagonal silhouette with a point at the aim;
+//  'Sphere'  — three orthogonal great-circle rings; the aim marker is a
+//              small white ring around the nose pole;
+//  'Dodeca'  — a regular dodecahedron, oriented so a pentagonal FACE
+//              points at the aim (its five edges draw white);
+//  'Rhombic' — a rhombic dodecahedron, its degree-4 axis vertex forward
+//              (the four edges meeting there draw white);
+//  'Tri'     — a triangular DART ship: nose far forward, two swept
+//              wingtips, and a dorsal peak + ventral keel giving the
+//              body 3D depth (the four nose edges draw white);
+//  'Sheet'   — PRE-RENDERED TILT ART: one authored pose per (tilt
+//              magnitude, tilt-axis azimuth), snapped to the nearest cell,
+//              with yaw still on the canvas transform (a Z-rotation is
+//              exact there).  Falls back to the squash until art exists.
+//              See assets.ts SHIP_SHEETS / docs/SHIP_SPRITE_SHEETS.md;
+//  'Ship'    — the legacy sprite + the cos-tilt squash: THE SHIPPED
+//              DEFAULT, so an untouched build looks exactly as it did
+//              before any of this existed.
+// ORDER IS DELIBERATE: 'Ship' is the default and 'Sheet' sits next to it,
+// so turning the pre-rendered rotation on is ONE step of this row plus one
+// of "Roll feel" — the wireframes are the experimental tail behind them.
+// The shapes live in render/playerCube.ts as vertex/edge tables — adding
+// one is a table entry, never a new draw path.  DBG Player ▸ "Hull".
+export const PLAYER_HULL_CYCLE: ReadonlyArray<string> =
+  ['Ship', 'Sheet', 'Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Tri'] as const;
+let activePlayerHullIndex = 0; // Ship — the legacy sprite, the shipped default
+export type PlayerHullMode =
+  'sprite' | 'sheet' | 'cube' | 'diamond' | 'sphere' | 'dodeca' | 'rhombic' | 'tri';
+const PLAYER_HULL_MODES: ReadonlyArray<PlayerHullMode> =
+  ['sprite', 'sheet', 'cube', 'diamond', 'sphere', 'dodeca', 'rhombic', 'tri'] as const;
+export function getActivePlayerHullMode(): PlayerHullMode {
+  return PLAYER_HULL_MODES[activePlayerHullIndex];
+}
+export function getActivePlayerHullName(): string {
+  return PLAYER_HULL_CYCLE[activePlayerHullIndex];
+}
+export function cyclePlayerHull(): number {
+  activePlayerHullIndex = (activePlayerHullIndex + 1) % PLAYER_HULL_CYCLE.length;
+  return activePlayerHullIndex;
+}
+
+// DBG rotation-damping cycle (Player ▸ "Roll damp"): one multiplier over
+// the tilt spring's natural frequency (SPRING_OMEGA — and the tumble
+// mode's rate ease).  The damping RATIO is untouched, so every step keeps
+// the same overshoot-and-wobble character: lower = floatier, the hull
+// swinging behind the hand; higher = stiffer, tracking it near-instantly.
+export const PLAYER_ROLL_DAMPING_CYCLE: ReadonlyArray<{ name: string; mult: number }> = [
+  { name: 'Floaty', mult: 0.5 },
+  { name: 'Default', mult: 1 },
+  { name: 'Stiff', mult: 2 },
+  { name: 'Snappy', mult: 4 },
+] as const;
+let activeRollDampingIndex = 1; // Default — the shipped feel
+export function getActiveRollDampingMult(): number {
+  return PLAYER_ROLL_DAMPING_CYCLE[activeRollDampingIndex].mult;
+}
+export function getActiveRollDampingName(): string {
+  return PLAYER_ROLL_DAMPING_CYCLE[activeRollDampingIndex].name;
+}
+export function cycleRollDamping(): number {
+  activeRollDampingIndex = (activeRollDampingIndex + 1) % PLAYER_ROLL_DAMPING_CYCLE.length;
+  return activeRollDampingIndex;
+}
 
 export const SHOOTING_STAR_CONSTANTS = {
   MIN_TIMER: 300,
@@ -7827,6 +8138,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    // No rim line: the brittle dent silhouette reads cleaner against the
+    // slate fill when nothing traces every notch.  (Was a hardcoded
+    // `!== 'rock-tile'` in the draw branch; it is variant policy now, so
+    // plastic can make the same call for its own reason.)
+    outline: false,
     // Neighbour-count brightness automata (DBG "Tile shade").  Rock
     // DARKENS dense interiors (saturationBrightness < 1, the nebula
     // rule) so the centre of a slab recedes into shadow and the broken
@@ -8082,6 +8398,35 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
         { partner: 'plastic-tile',        cohesionOnly: true, strength: 'default' },
       ],
       defaultOutcome: 'compose',
+    },
+    // Bonded pairs draw as ONE blob of goo rather than two polygons in
+    // contact — a metaball connector filled under both hulls (see
+    // ShardBlendPolicy).  Plastic is the variant this exists for: its
+    // cross-material bonds are cohesionOnly, so a stuck pair stays two
+    // bodies FOREVER and never composes into the single re-polygonised
+    // entity every other variant's bond resolves to.  Selector mirrors
+    // bondsWith so a bond that can form can always be drawn; nebula is
+    // excluded on both, so no bond with one ever reaches here.
+    // attachFraction sits just inside the facing surface so the shard
+    // drawn over the bridge covers the join; maxSpan drops the bridge
+    // once a stretching pair is half again its contact distance apart,
+    // short of the 1.5×/6× a bond itself survives to.
+    // Plastic reads as GOO, so its silhouette is soft: no rim line, and
+    // corners rounded most of the way to the maximum.  Both are draw-time
+    // only — the SAT hull stays the sharp 4-gon underneath.
+    outline: false,
+    cornerRounding: 0.85,
+    blend: {
+      kind: 'fillet',
+      appliesTo: { exclude: ['nebula-tile', 'nebula-shard'] },
+      attachFraction: 0.9,
+      maxSpan: 1.35,
+      softness: 0.5,
+      // The coat: 18% of each shard's circumradius, so a bonded pair
+      // reads as one enveloped mass rather than two hulls sharing a
+      // weld.  Scaled per body, so it sits right across the 20..200
+      // diameter range plastic shards actually span.
+      envelope: 0.18,
     },
     // Plastic-shards take the standard rock/metal-style shatter on
     // death.  No per-size count override and no fractional child

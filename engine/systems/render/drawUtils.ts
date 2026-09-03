@@ -218,6 +218,68 @@ export function shiftY(camY: number, wy: number): number {
     return wy;
 }
 
+/**
+ * Trace a polygon with ROUNDED corners into a fresh path.
+ *
+ * `rounding` is 0..1 rather than a distance, because these hulls span a
+ * 20..200 diameter range and a fixed radius would swallow the small ones
+ * whole: 0 is the hard-cornered polygon, 1 trims each corner back to the
+ * midpoint of its shorter adjacent edge, which is the most that can be
+ * rounded before neighbouring fillets would eat each other.
+ *
+ * The fillet is a QUADRATIC with the original vertex as its control
+ * point — the cheap corner round, one curve per vertex and no
+ * trigonometry.  It is not a true circular arc (`arcTo` would be), and
+ * that is deliberate: on a jittered polygon whose corners are all
+ * different angles, a constant-radius arc reads as machined while the
+ * quadratic keeps the corner's own character, just blunted.
+ *
+ * Draws in whatever space the caller has set up, and closes the path;
+ * the caller owns the paint.  A degenerate polygon (< 3 points, or a
+ * zero-length edge) falls back to hard corners rather than dropping out,
+ * so a body can never fail to draw because its shape was odd.
+ */
+export function roundedPolyPath(
+    ctx: CanvasRenderingContext2D,
+    pts: ReadonlyArray<{ x: number; y: number }>,
+    rounding: number,
+): void {
+    const n = pts.length;
+    ctx.beginPath();
+    if (n < 3 || !(rounding > 0)) {
+        if (n > 0) {
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.closePath();
+        }
+        return;
+    }
+    const r = rounding > 1 ? 1 : rounding;
+    let started = false;
+    for (let i = 0; i < n; i++) {
+        const v = pts[i];
+        const prev = pts[(i - 1 + n) % n];
+        const next = pts[(i + 1) % n];
+        const ax = prev.x - v.x, ay = prev.y - v.y;
+        const bx = next.x - v.x, by = next.y - v.y;
+        const la = Math.sqrt(ax * ax + ay * ay);
+        const lb = Math.sqrt(bx * bx + by * by);
+        if (la < 1e-6 || lb < 1e-6) {
+            // Coincident neighbour — no corner to round.
+            if (started) ctx.lineTo(v.x, v.y); else { ctx.moveTo(v.x, v.y); started = true; }
+            continue;
+        }
+        // Half the shorter edge is the ceiling: any further and this
+        // corner's fillet would pass the next one's.
+        const d = r * 0.5 * (la < lb ? la : lb);
+        const inX = v.x + (ax / la) * d, inY = v.y + (ay / la) * d;
+        const outX = v.x + (bx / lb) * d, outY = v.y + (by / lb) * d;
+        if (started) ctx.lineTo(inX, inY); else { ctx.moveTo(inX, inY); started = true; }
+        ctx.quadraticCurveTo(v.x, v.y, outX, outY);
+    }
+    ctx.closePath();
+}
+
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
 export function roundRectPath(

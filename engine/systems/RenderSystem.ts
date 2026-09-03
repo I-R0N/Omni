@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -13,6 +13,12 @@ import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01, Crack
          crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, shiftX,
          shiftY, roundRectPath } from './render/drawUtils';
 import { drawEnemyShape } from './render/enemyShapes';
+import { drawPlayerCube } from './render/playerCube';
+import {
+  ShipSheetCache, resolveTiltCell, cellMatrix,
+  type ShipCellRef,
+} from './render/shipSprites';
+import { SHIP_SHEETS } from '../../assets';
 import { drawDropShape } from './render/dropShapes';
 import { drawProjectileShape } from './render/projectileShapes';
 import { drawNebulaTileCached, drawNebulaEntity } from './render/nebulaTiles';
@@ -28,6 +34,7 @@ import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadou
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
 import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
 import { renderFogLayer, resetFogMemory } from './render/fog';
+import { renderShardBlends } from './render/shardBlend';
 
 /**
  * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
@@ -316,6 +323,23 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   physics: import('./PhysicsSystem').PhysicsSystem | null = null;
   public setPhysics(p: import('./PhysicsSystem').PhysicsSystem) { this.physics = p; }
 
+  // Optional ShardSystem reference — read by the bonded-pair blend pass
+  // (render/shardBlend.ts) for its live bond list, and by nothing else.
+  // Null until GameEngine wires it, which is what keeps the pass a no-op
+  // in any headless context that builds a renderer without a sim.
+  shards: import('./ShardSystem').ShardSystem | null = null;
+  public setShards(sh: import('./ShardSystem').ShardSystem) { this.shards = sh; }
+
+  /** DBG "Goo bond" — gates the bonded-pair blend pass.  Off restores
+   *  the pre-blend look (two hulls in contact); the bonds themselves are
+   *  untouched either way, since this is presentation only.  The A/B for
+   *  a purely visual feature, in the shape of every other Visual row. */
+  public shardBlendEnabled: boolean = true;
+  /** Bridges actually drawn last frame (post-cull, post-span-gate).
+   *  Surfaced on the DBG row so "is it doing anything" is answerable
+   *  without staring at a shard field. */
+  public lastShardBlendCount: number = 0;
+
   // Optional FlowFieldGrid reference — wired by GameEngine once on
   // construction.  Null until then; the DBG asteroid/shard FF overlays
   // gracefully no-op without a flow field.
@@ -349,6 +373,27 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // content's visual centre lands on the rotation pivot.  Prevents
   // sprite "orbiting" when the art isn't perfectly centred in its frame.
   private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
+
+  // SHIP TILT SHEETS (render/shipSprites.ts).  One cache per ship id,
+  // built on first use and holding only the pose table — the pixels stay
+  // in the shared image cache.  `_getImg` is bound ONCE: the draw path
+  // hands it to the sheet every frame, and a closure built per frame is
+  // the allocation pattern CLAUDE.md §8 warns about.
+  private _shipSheets: Map<string, ShipSheetCache> = new Map();
+  private _getImg = (src: string): HTMLImageElement => this.getImage(src);
+
+  /** The pose cache for a ship id, preloading its cells on first use so
+   *  nothing decodes inside a frame. */
+  shipSheet(id: string): ShipSheetCache | null {
+      const hit = this._shipSheets.get(id);
+      if (hit) return hit;
+      const def = SHIP_SHEETS[id];
+      if (!def) return null;
+      const cache = new ShipSheetCache(def);
+      cache.preload(this._getImg);
+      this._shipSheets.set(id, cache);
+      return cache;
+  }
   // Projectile glow gradient cache.  Every standard / charged shot used to
   // rebuild a createRadialGradient + 5-6 addColorStop (each parses a CSS
   // colour string) PER PROJECTILE PER FRAME — the dominant per-frame cost in
@@ -1073,6 +1118,12 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     prepareStaticTileCacheForFrame(this, playerPos);
     blitStaticTileLayer(this, ctx);
 
+    // 4a'. Bonded-pair blend ("goo") layer.  Between the static blit and
+    // the entity pass on purpose: the bridge must sit UNDER the mobile
+    // hulls, which cover the ends it attaches at, and OVER a static tile
+    // it is stuck to, where it reads as goo spilling onto the face.
+    renderShardBlends(this, ctx, camera, width, height);
+
     // 4a. Render Entities (Culling logic added).  Stage 6: dragon body segments
     // are real tile-variant STRUCTURE entities, so they render here like any
     // tile (no dedicated pass).
@@ -1523,8 +1574,27 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // ctx.save / translate / rotate / restore (4 canvas-state ops) with
       // a single matrix write — ~2-3× cheaper per slow-path entity.
       // Mirrors BackgroundManager.ts:370-374 for nebula puffs.
+      // Wireframe hull (render/playerCube.ts): the player draws as a 3D
+      // wire cube — flat or stood on its corner (diamond) — which is its
+      // OWN art: nose = local +x, so no art-alignment offset and no 2D
+      // squash (the wireframe shows tilt as real rotation).  The canvas
+      // carries only R(yaw); a Z-rotation commutes with the orthographic
+      // projection, so pitch/roll happen inside the draw.
+      const hullMode = entity.type === EntityType.PLAYER ? getActivePlayerHullMode() : 'sprite';
+      // TILT SHEET (render/shipSprites.ts): the hull as pre-rendered ART,
+      // one authored pose per (tilt magnitude, tilt-axis azimuth), with yaw
+      // still on the canvas transform.  While the sheet has NO art loaded
+      // the mode falls through to the legacy sprite + squash, so selecting
+      // it can never blank the ship and a sheet can be authored ring by
+      // ring and watched to improve.
+      const sheetCache = hullMode === 'sheet' ? this.shipSheet('base') : null;
+      const sheetHull = !!sheetCache && sheetCache.anyReady(this._getImg);
+      let sheetRef: ShipCellRef | null = null;
+      const cubeHull = hullMode !== 'sprite' && hullMode !== 'sheet';
       const rotation = entity.rotation + (
-        entity.isRival
+        cubeHull
+          ? 0
+          : entity.isRival
           ? SPRITE_CONSTANTS.RIVAL_ROTATION_OFFSET   // sprite art points up-left
           : entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
@@ -1534,11 +1604,68 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       );
       const cosR = Math.cos(rotation);
       const sinR = Math.sin(rotation);
+      // Local 2×2 (canvas [[a,c],[b,d]] layout) — plain rotation for
+      // everything…
+      let l11 = cosR, l21 = sinR, l12 = -sinR, l22 = cosR;
+      // …except a TILTING player (GameEngine.tickPlayerRoll): the roll
+      // (across the wings) and pitch (along the nose) components combine
+      // into ONE tilt toward the acceleration, and the hull foreshortens
+      // ALONG that direction by cos(tilt) — the top-down projection of a
+      // flat ship tilting about the perpendicular axis.  The squash must
+      // sit BETWEEN the facing rotation and the art-alignment offset — it
+      // is the SHIP that tilts, not the sprite art's axes — so the matrix
+      // is composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ) ×
+      // R(art offset), where φ is the tilt direction in the ship frame
+      // (pitch squashes along the nose = local x, roll across the wings =
+      // local y; pure roll reduces this to the scale(1, cos roll) it
+      // shipped with).  One entity per frame, so the extra trig is free;
+      // level flight (both components snapped to 0) keeps the plain path.
+      // (Sprite mode only — the cube shows tilt as 3D rotation instead.)
+      if (sheetHull && sheetCache) {
+          // The pose is IN the art, so the matrix only has to orient it:
+          // R(facing + artOffset), or the reflection about the nose axis
+          // when this cell is a mirrored partner.
+          sheetRef = resolveTiltCell(
+            sheetCache.sheet, entity.visualRoll ?? 0, entity.visualPitch ?? 0, entity.rotation);
+          const m = cellMatrix(sheetCache.sheet, sheetRef, entity.rotation);
+          l11 = m.l11; l12 = m.l12; l21 = m.l21; l22 = m.l22;
+      } else if (!cubeHull && entity.type === EntityType.PLAYER && (entity.visualRoll || entity.visualPitch)) {
+          const r = entity.visualRoll ?? 0;
+          const p = entity.visualPitch ?? 0;
+          // Clamped locally under π/2: in TUMBLE tilt mode the angles are
+          // unbounded (they wrap at ±π), and past π/2 the cos would
+          // mirror the sprite — the wireframe hulls show the full
+          // rotation; the sprite shows the nearest legal lean.
+          const tilt = Math.min(1.45, Math.sqrt(r * r + p * p));
+          const c = Math.cos(tilt);
+          const phi = Math.atan2(r, p);
+          const cp = Math.cos(phi);
+          const sp = Math.sin(phi);
+          // A = R(φ) × scale(c, 1) × R(−φ): the symmetric squash along the
+          // tilt direction (sign of φ vs φ+π cancels in the products,
+          // matching the projection's own sign-blindness).
+          const a11 = c * cp * cp + sp * sp;
+          const a12 = (c - 1) * cp * sp;
+          const a22 = c * sp * sp + cp * cp;
+          const ch = Math.cos(entity.rotation);
+          const sh = Math.sin(entity.rotation);
+          const co = Math.cos(SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET);
+          const so = Math.sin(SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET);
+          // B = R(facing) × A, then L = B × R(art offset).
+          const b11 = ch * a11 - sh * a12;
+          const b12 = ch * a12 - sh * a22;
+          const b21 = sh * a11 + ch * a12;
+          const b22 = sh * a12 + ch * a22;
+          l11 = b11 * co + b12 * so;
+          l12 = -b11 * so + b12 * co;
+          l21 = b21 * co + b22 * so;
+          l22 = -b21 * so + b22 * co;
+      }
       ctx.setTransform(
-        camA * cosR + camC * sinR,
-        camB * cosR + camD * sinR,
-        -camA * sinR + camC * cosR,
-        -camB * sinR + camD * cosR,
+        camA * l11 + camC * l21,
+        camB * l11 + camD * l21,
+        camA * l12 + camC * l22,
+        camB * l12 + camD * l22,
         camA * rx + camC * ry + camE,
         camB * rx + camD * ry + camF,
       );
@@ -1567,8 +1694,39 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
       let drawn = false;
 
+      // --- TILT SHEET --- (render/shipSprites.ts)
+      // One blit of the authored pose.  `nearestImage` covers a partial
+      // sheet by falling back to the closest pose that HAS art.
+      if (sheetHull && sheetCache && sheetRef) {
+          const cell = sheetCache.nearestImage(sheetRef, this._getImg);
+          if (cell) {
+              const drawSize = Math.max(entity.size.x, entity.size.y) * sheetCache.sheet.drawScale;
+              const o = -(drawSize / 2);
+              ctx.drawImage(cell.img, cell.sx, cell.sy, cell.sw, cell.sh, o, o, drawSize, drawSize);
+              // Same blow-out-toward-white hit read the sprite path gives.
+              if (entity.hitFlash && entity.hitFlash > 0) {
+                  const f = Math.min(1, entity.hitFlash * 3);
+                  ctx.save();
+                  ctx.globalAlpha = Math.min(1, 0.55 + f);
+                  ctx.filter = `brightness(${(2 + f * 6).toFixed(2)})`;
+                  ctx.drawImage(cell.img, cell.sx, cell.sy, cell.sw, cell.sh, o, o, drawSize, drawSize);
+                  ctx.filter = 'none';
+                  ctx.restore();
+              }
+              drawn = true;
+          }
+      }
+
+      // --- WIREFRAME HULL --- (render/playerCube.ts)
+      // The player's default hull (user call).  Takes the yaw-rotated
+      // local frame set above and does the pitch/roll 3D math itself.
+      if (cubeHull) {
+          drawPlayerCube(ctx, entity, hullMode, getActiveTiltMode() === 'tumble', getActiveLeanDirSign() === -1);
+          drawn = true;
+      }
+
       // --- SPRITE RENDERING ---
-      if (entity.sprite) {
+      if (!drawn && entity.sprite) {
           const img = this.getImage(entity.sprite);
 
           if (img.complete && img.naturalWidth > 0) {
@@ -1666,6 +1824,27 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // catch-all.  render/dropShapes.ts.
             drawDropShape(ctx, entity, nowSec, playerPos);
           }
+      }
+
+      // A tilting or cube-hulled player leaves its own matrix behind before
+      // the ring draws below: the shield ring is the PHYSICAL collision
+      // radius and the charge ring is HUD — neither tilts with the hull,
+      // and their `rotate(-rot)` bookkeeping assumes the plain rotation
+      // matrix WITH the art offset (which the cube frame omits, so it is
+      // recomputed here rather than reusing cosR/sinR).
+      if (entity.type === EntityType.PLAYER
+          && (cubeHull || sheetHull || entity.visualRoll || entity.visualPitch)) {
+          const ringRot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          const cRr = Math.cos(ringRot);
+          const sRr = Math.sin(ringRot);
+          ctx.setTransform(
+            camA * cRr + camC * sRr,
+            camB * cRr + camD * sRr,
+            -camA * sRr + camC * cRr,
+            -camB * sRr + camD * cRr,
+            camA * rx + camC * ry + camE,
+            camB * rx + camD * ry + camF,
+          );
       }
 
       // Shield hit ring — visible only on contact; radius matches physical collision

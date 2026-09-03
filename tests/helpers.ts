@@ -337,3 +337,16 @@ export async function dockAtStation(page: Page, kind = 'tradehub') {
   await engine(page, e => e.dockAtStation());
   await waitForStats(page, s => !!s.station, 'the station UI');
 }
+
+/** Step the DBG "Roll feel" row from its shipped OFF onto Default.
+ *
+ *  The tilt ships DISABLED (`PLAYER_ROLL_CYCLE` index 0) so an untouched
+ *  build renders exactly as it did before the tilt work existed — which
+ *  means every suite that measures a tilt has to turn it on first, or it
+ *  measures a hull that is correctly refusing to move.  Two steps: Off ->
+ *  Subtle -> Default, confirmed through the stats payload the row renders,
+ *  so this also covers the cycle itself. */
+export async function enableTilt(page: Page) {
+  await engine(page, e => { e.dbg.cyclePlayerRoll(); e.dbg.cyclePlayerRoll(); });
+  await waitForStats(page, s => s.rollFeelName === 'Default', 'the tilt enabled');
+}

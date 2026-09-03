@@ -7,7 +7,14 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
+import { buildFilletPath, blendAttachRadius, coatMargin } from './engine/systems/render/shardBlend';
+import { roundedPolyPath } from './engine/systems/render/drawUtils';
 import { installMenuNav, pickNext } from './components/menuNav';
+import {
+  enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
+} from './engine/systems/render/shipSprites';
+import { drawPlayerCube } from './engine/systems/render/playerCube';
+import { SHIP_SHEETS } from './assets';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,6 +83,34 @@ const App: React.FC = () => {
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.
     (window as any).__omniMenuNav = { pickNext };
+
+    // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
+    // above: `enumerateCells` / `resolveTiltCell` / `cellMatrix` are pure,
+    // and they are wrong in a way nothing reports — a cell order that
+    // disagrees with the authoring guide, or a mirror that folds the wrong
+    // half of the azimuth circle, draws a plausible ship in the WRONG pose,
+    // which no exception and no log will ever mention.  Exposing them lets
+    // the suite pin the contract, and lets scripts/gen-ship-sheet.mjs render
+    // placeholder art against the very table the engine indexes (which is
+    // also what keeps docs/SHIP_SPRITE_SHEETS.md honest).  `drawPlayerCube`
+    // rides along because the generator draws its placeholder poses with it.
+    // Nothing in the game reads this.
+    (window as any).__omniShip = {
+      enumerateCells, resolveTiltCell, cellIndex, cellMatrix, drawPlayerCube, SHIP_SHEETS,
+    };
+
+    // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
+    // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
+    // REPORTS.  Every failure mode of a metaball connector is silent — a
+    // degenerate pair traces no path, an out-of-domain acos yields NaN
+    // coordinates that Canvas2D discards without a word, and an attach
+    // radius outside the hull leaves a seam nobody can see at one zoom
+    // level, and a corner fillet that overshoots its edge quietly turns a
+    // polygon inside out.  None of it throws or logs.  Nothing in the game
+    // reads this.
+    (window as any).__omniBlend = {
+      buildFilletPath, blendAttachRadius, coatMargin, roundedPolyPath,
+    };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -229,6 +264,14 @@ const App: React.FC = () => {
 
   const handleToggleShardGravity = () => {
       if (engineRef.current) engineRef.current.dbg.toggleShardGravity();
+  };
+
+  const handleCycleShardCoat = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleShardCoat();
+  };
+
+  const handleToggleShardBlend = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardBlend();
   };
 
   const handleToggleShardBonding = () => {
@@ -519,6 +562,34 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePortalLensSpin();
   };
 
+  const handleCyclePlayerRoll = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePlayerRoll();
+  };
+
+  const handleCyclePlayerHull = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePlayerHull();
+  };
+
+  const handleCycleRollDamping = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleRollDamping();
+  };
+
+  const handleCycleTiltMode = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleTiltMode();
+  };
+
+  const handleCycleLeanDir = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleLeanDir();
+  };
+
+  const handleCycleTiltSource = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleTiltSource();
+  };
+
+  const handleCycleVelGain = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleVelGain();
+  };
+
   const handleCycleEnemyScale = () => {
       if (engineRef.current) engineRef.current.dbg.cycleEnemyScale();
   };
@@ -758,6 +829,8 @@ const App: React.FC = () => {
         onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
         onTogglePerfAuto={handleTogglePerfAuto}
         onToggleShardGravity={handleToggleShardGravity}
+        onToggleShardBlend={handleToggleShardBlend}
+        onCycleShardCoat={handleCycleShardCoat}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}
@@ -826,6 +899,13 @@ const App: React.FC = () => {
         onCyclePortalLens={handleCyclePortalLens}
         onCyclePortalLensRadius={handleCyclePortalLensRadius}
         onCyclePortalLensSpin={handleCyclePortalLensSpin}
+        onCyclePlayerRoll={handleCyclePlayerRoll}
+        onCyclePlayerHull={handleCyclePlayerHull}
+        onCycleRollDamping={handleCycleRollDamping}
+        onCycleTiltMode={handleCycleTiltMode}
+        onCycleLeanDir={handleCycleLeanDir}
+        onCycleTiltSource={handleCycleTiltSource}
+        onCycleVelGain={handleCycleVelGain}
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSimRate={handleCycleSimRate}
         onCycleHudRate={handleCycleHudRate}
