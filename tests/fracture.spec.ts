@@ -3349,3 +3349,65 @@ test.describe('fracture physics — recoil and re-centring', () => {
     watch.assertClean();
   });
 });
+
+test.describe('per-material knob readouts', () => {
+  test('a knob on the table shows the table\'s own number, marked (def)', async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+
+    // The rows used to read the word "table" when nothing was overridden.
+    // A number you can read is strictly more useful, and the (def) note
+    // keeps the distinction that word carried — a default and a value
+    // someone deliberately set to the SAME number still read differently,
+    // because an explicit one shows bare.
+    //
+    // Worth pinning because it is wrong in a way nothing reports: retune a
+    // material in the variant table and a desynced readout would quietly
+    // describe the old value while the sim used the new one.
+    const seen: Record<string, Record<string, string>> = {};
+    for (let i = 0; i < 4; i++) {
+      const snap = await engine(page, () => ({
+        mat: (window as any).__omniStats?.grainMaterialName as string,
+        names: (window as any).__omniStats?.grainKnobNames as Record<string, string>,
+        table: (window as any).__omniGrain.grainSpecFor(
+          `${(window as any).__omniStats?.grainMaterialName}-tile`),
+      }));
+      expect(snap.names).toBeTruthy();
+      for (const [knob, shown] of Object.entries(snap.names)) {
+        expect(shown.endsWith(' (def)')).toBe(true);
+        const num = Number(shown.slice(0, -6));
+        // damageSpread is unset on every material and falls back to 0.
+        const want = (snap.table as any)[knob] ?? 0;
+        expect(num).toBeCloseTo(want, 5);
+      }
+      seen[snap.mat] = snap.names;
+      await engine(page, (e: any) => { e.dbg.cycleGrainMaterial(); });
+      await waitForStats(page, () => true, 'the next stats push');
+      await page.waitForFunction(
+        prev => (window as any).__omniStats?.grainMaterialName !== prev,
+        snap.mat, { timeout: 10_000 });
+    }
+    // All four materials were visited and they are not all the same row.
+    expect(Object.keys(seen).sort()).toEqual(['glass', 'metal', 'plastic', 'rock']);
+    expect(seen.metal.regularity).not.toBe(seen.rock.regularity);
+
+    // An explicit value drops the note; its neighbours keep theirs.
+    await engine(page, (e: any) => {
+      let g = 0;
+      while ((window as any).__omniStats?.grainMaterialName !== 'rock' && g++ < 8) {
+        e.dbg.cycleGrainMaterial();
+      }
+      e.dbg.cycleGrainKnob('grainSize');
+    });
+    await waitForStats(page, s => !!s.grainKnobNames
+      && !(s.grainKnobNames.grainSize ?? '').includes('def'),
+      'grain size to read as an explicit value');
+    const after = await engine(page, () =>
+      (window as any).__omniStats?.grainKnobNames as Record<string, string>);
+    expect(after.grainSize).not.toContain('(def)');
+    expect(after.bondStrength).toContain('(def)');
+
+    watch.assertClean();
+  });
+});

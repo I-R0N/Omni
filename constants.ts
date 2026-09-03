@@ -3188,9 +3188,34 @@ export function cycleGrainMaterial(): number {
 export function getGrainOverride(mat: GrainMaterial, knob: GrainKnob): number | null {
   return GRAIN_KNOBS[knob][grainOverrideIdx[mat][knob]] ?? null;
 }
+/** The variant table's OWN value for a knob on a material — what the
+ *  material uses when nothing is overridden.  Grain geometry is shared by
+ *  a material's tile and its shard, so the tile row is the authority for
+ *  both.  A knob the table leaves unset reads 0, which is what the code
+ *  falls back to (`damageSpread` ships unset on every material). */
+export function grainTableValue(mat: GrainMaterial, knob: GrainKnob): number {
+  const g = SHARD_VARIANTS[`${mat}-tile` as ShardVariantId].grain;
+  const v = g === undefined ? undefined : (g as unknown as Record<string, number | undefined>)[knob];
+  return v ?? 0;
+}
+
+/** Row readout for a per-material knob.  A knob on the table shows the
+ *  table's ACTUAL number with a `(def)` note rather than the word
+ *  "table" (user call): a number you can read is strictly more useful
+ *  than a word, and the note still distinguishes a default from a value
+ *  someone set — including one deliberately set to the same number,
+ *  which shows bare. */
 export function getGrainKnobName(knob: GrainKnob): string {
-  const v = getGrainOverride(getGrainMaterial(), knob);
-  return v === null ? 'table' : String(v);
+  const mat = getGrainMaterial();
+  const v = getGrainOverride(mat, knob);
+  if (v !== null) return trimNum(v);
+  return `${trimNum(grainTableValue(mat, knob))} (def)`;
+}
+
+/** Compact number for a DBG readout: no trailing zeros, at most 3 dp, so
+ *  14 / 0.5 / 0.27 / 0 all render as themselves in a narrow row. */
+function trimNum(v: number): string {
+  return String(+v.toFixed(3));
 }
 export function cycleGrainKnob(knob: GrainKnob): number {
   const mat = getGrainMaterial();

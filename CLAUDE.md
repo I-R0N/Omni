@@ -2728,10 +2728,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   Frac sep, Frac sites, Frac bias) and, under them, the PER-MATERIAL
   block described below.
 - **PER-MATERIAL GRAIN KNOBS ARE A SELECTOR PLUS FIVE ROWS, NOT TWENTY
-  ROWS.**  Five knobs across four materials is twenty values, and twenty
+  ROWS.**  Six knobs across four materials is twenty-four values, and that many
   rows would wreck a panel that already runs ~90.  Instead **Grain mat**
-  picks the material and the five `↳` rows below it read and write
-  whichever one is selected — so the surface is six rows and the existing
+  picks the material and the `↳` rows below it read and write whichever
+  one is selected — so the surface is a handful of rows and the existing
   `ctrlRow` idiom is unchanged.  Four rules hold it up:
   (1) **The key is the MATERIAL, not the variant.**  Writing `rock` moves
   rock-tile and rock-shard together, because a material's grain geometry
@@ -2743,10 +2743,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   strength` still multiplies whatever strength they set, so a global
   sweep keeps working while one material is being tuned.
   (3) **Index 0 of every ladder is `null` = "use the variant table"**, and
-  the readout says `table` rather than a number that only coincidentally
-  matches — otherwise there is no way to tell a default from a value
-  someone left set.  `↳ reset all` drops all twenty and shows how many
-  are currently off the table.
+  the readout shows THE TABLE'S OWN NUMBER with a `(def)` note (user
+  call) — `0.27 (def)` rather than the word `table`, because a number you
+  can read beats a word.  The note is what preserves the property the
+  word carried: a default and a value someone deliberately set to the
+  same number still read differently, since an explicit one shows bare.
+  `↳ reset all` drops all twenty-four and shows how many are currently
+  off the table.
   (4) **`grainSpecFor(variantId)` is the ONE seam** every read of a
   `grain` block goes through — `ensureFractureCells`, `bondStrengthFor`,
   the bond-variance read, the dent read.  Reaching into
