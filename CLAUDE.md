@@ -2110,6 +2110,43 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   and a deformed grain must report its LIVE area and centroid — carrying
   the cut-time values across a dent is what let a shrivelled grain spawn
   a full-size fragment (2.06× measured).
+- **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
+  things happen at the seam in `progressFracture`, and two of them were
+  missing:
+  (1) **RECOIL.**  The chip's velocity used to be created from nothing
+  while the parent's MASS was scaled down and its VELOCITY left alone, so
+  a break destroyed momentum twice over.  Ejecting mass m at relative
+  velocity `(v − V)` now leaves the remainder with `−(m/M′)` of it,
+  clamped by `RECOIL_MAX_RATIO` so a nearly-eroded body shedding a large
+  final piece takes a kick rather than a launch.  STATIC bodies are
+  exempt — a tile is bolted to the map and its infinite mass says so.
+  (2) **RE-CENTRING, MOBILE BODIES ONLY.**  The remainder replaced
+  `polygonPoints` and nothing moved `position` to match, so an eroding
+  shard's centre of area walked away from its own origin (measured −5.9 →
+  −12.3 over five detaches on a 160-unit shard).  The visible symptom is
+  not the offset: it is that the body then ROTATES ABOUT THE WRONG POINT,
+  so a spinning eroded shard orbits its old origin instead of spinning in
+  place.  `recentreFracturedBody` shifts EVERY piece of local-frame state
+  together — outline, surviving cells (live AND cut-time outlines), edge
+  endpoints and midpoints, and `lastImpactLocal` — and compensates
+  `position` in world terms.  Shifting only some of them would leave the
+  pattern no longer tiling the body, which is the invariant
+  `unionOfCells` depends on.  STATIC tiles are excluded because their
+  position IS the hex coordinate the static grid, regen and neighbour
+  counts key on (the dent contract).
+  (3) **THE SHIFT IS QUANTISED TO THE UNION'S OWN EPSILON.**
+  `unionOfCells` identifies coincident vertices by keying ABSOLUTE
+  coordinates (`round(p.x / eps)`), so translating the frame by an
+  arbitrary amount re-quantises which vertices merge and hands back a
+  different ring — measured as a 23.9-area disagreement between a body's
+  outline and the union of its own cells, where the pre-fix build had
+  none.  Moving by an exact multiple of `eps` shifts every key by the same
+  integer, so vertices that keyed together still do.  The pass computes
+  `eps` ONCE and both the union and the re-centre read it, because they
+  must be the same number.  The residual offset is under one eps.
+  The regression test's tiling assertion runs over SIX bodies, not one:
+  the re-quantisation only shows when a vertex sits near a key boundary,
+  and on a single shard the negative control passed.
 - **DEFORMATION IS FLOORED, AND ELASTIC MATERIALS SPRING BACK** (user
   call).  A grain deforms to no less than `GRAIN_DENT_MIN_AREA_FRAC`
   (two thirds) of the area it was cut at, or `GRAIN_DENT_MIN_AREA_PX2`,

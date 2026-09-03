@@ -1965,86 +1965,49 @@ outline-to-outline bond rule, and a weld-strength entry in `GrainSpec`.
 
 ---
 
-## Fracture physics: detach impulse, centroid drift, erosion cascade
+## Fracture: the erosion cascade (design question)
 
-**Status:** investigated with measurements, not fixed. User report:
-"damage continues to propagate at the initiating side" and "shards are
-ejected at the initiating side and the parent is pushed toward where the
-projectile came from."
+**Status:** the three MECHANICAL defects found alongside this were fixed
+(detach recoil, centre-of-area re-centring, and the crack gate — see
+CLAUDE.md §8 "A DETACH IS A RIGID-BODY EVENT").  What remains is a design
+question, deliberately left to the user.
 
 ### What was measured
 
-A 159.9-unit mobile rock shard, velocity and spin pinned to zero, shot
-head-on six times from +x and then eight times from -x.
+A 159.9-unit mobile rock shard, velocity and spin pinned, shot six times
+from +x and then eight from -x.
 
-**The damage spend FOLLOWS the new side — symptom 1 did not reproduce as
-stated.** `lastImpactLocal` flips with the shot side every hit, and the
-boundaries taking new fill flip with it: local x -41..-25 during the +x
-phase, +46..+25.9 during the -x phase. Chips detach on the struck side
-in both phases (an earlier reading that said otherwise was a frame
-error: the impact is in the body's ROTATED frame and the chip offsets
-were world-frame, and the body's rotation was ~pi).
+The user reported that damage keeps propagating at the side first struck.
+**That did not reproduce as stated.** `lastImpactLocal` flips with the
+shot side every hit and the boundaries taking new fill flip with it:
+local x -41..-25 during the +x phase, +46..+25.9 during the -x phase.
+Chips detach on the struck side in both. (An earlier reading that said
+otherwise was a frame error — the impact is in the body's ROTATED frame
+while the chip offsets were world-frame, and the body's rotation was ~pi.)
 
-**The pattern's impact bias is NOT the explanation either.** Cells near
-the first contact are only 1.24x smaller than far cells and their
-boundaries cost 3.36 vs 3.58 — a 7% asymmetry, far too small to read as
-"damage stays on one side".
+The pattern's impact bias is not the explanation either: cells near the
+first contact are only 1.24x smaller than far cells and their boundaries
+cost 3.36 against 3.58 — a 7% asymmetry.
 
-### What IS wrong, and what it explains
+### The mechanism that IS real
 
-1. **THE EROSION CASCADE.** A boundary stops binding once the cell on its
-   other side has left. So the moment one chip comes away, its
-   neighbours need FEWER broken boundaries to come away too — and they
-   already carry damage from the first volley. The result is that the
-   first wound keeps shedding pieces even while the player is shooting
-   somewhere else. This is a real mechanism and the best explanation of
-   the report. It is arguably a design flaw rather than a bug: erosion
-   cascades at the oldest wound regardless of where damage is now
-   landing. Whether that is desirable is a design call.
+**THE EROSION CASCADE.** A boundary stops binding once the cell on its
+other side has left.  So the moment one chip comes away, its neighbours
+need FEWER broken boundaries — and they already carry damage from the
+first volley.  The first wound keeps shedding pieces even while the
+player is shooting somewhere else.
 
-2. **OLD CRACKS NEVER FADE.** The overlay draws EVERY boundary at its own
-   fill fraction, so the heavily-cracked first side stays heavily cracked
-   forever while new far-side damage adds only a few faint lines. Correct
-   behaviour that reads as "the damage is still over there".
+Related and correct-but-misleading: **old cracks never fade.**  The
+overlay draws every boundary at its own fill, so the heavily-cracked
+first side stays heavily cracked forever while new far-side damage adds
+only a few faint lines.
 
-3. **NO MOMENTUM CONSERVATION ON DETACH.** `spawnDetachedCell` gives the
-   chip a velocity (parent velocity + radial + a share of the impact) out
-   of nothing, and `progressFracture` then scales the parent's MASS down
-   (`target.mass *= remainderArea / polyArea`) while leaving its VELOCITY
-   alone. So the parent's momentum silently drops and the chip's is
-   created. Measured: a chip left at vx +0.54 with no recoil on the
-   parent. The fix is the standard one — give the parent the equal and
-   opposite impulse, `parent.v -= chip.v_rel * (chipMass / parentMass)`.
+### The question
 
-4. **CENTROID DRIFT WITH NO POSITION CORRECTION.** `progressFracture`
-   sets `target.polygonPoints = remainder` and never touches
-   `target.position`, so the body's centre of area walks away from its
-   origin as it erodes. Measured on the test shard: local centroid x
-   went 1.38 -> 2.71 -> -4.08 over two detaches. Two consequences, and
-   the second is very likely what the user is seeing as odd push:
-   - Physics (collision impulse, flow, magnetisation) acts at `position`,
-     which is no longer the centre of mass.
-   - The body ROTATES ABOUT THE WRONG POINT. A spinning eroded shard
-     orbits its old origin instead of spinning in place, which reads as
-     the body being shoved around. On a 160-unit shard a 7-unit offset is
-     clearly visible.
-   The fix is to re-centre on detach: shift `polygonPoints` by the new
-   centroid and add the same offset (rotated into world) to `position`,
-   so the body does not visually jump. NOTE this is exactly what the
-   "size and position untouched" dent contract forbids for STATIC tiles
-   (the static grid would need rebuilding) — so the correction must apply
-   to MOBILE bodies only.
-
-5. **Minor, found on the way:** `overlayMaterialCracks` early-returns on
-   `count = floor((maxHp - hp) / cfg.freq) <= 0`, a LEGACY HP-pacing gate,
-   before the grain path that ignores `count` entirely and draws each
-   boundary at its own fill. So a grain body carrying real boundary damage
-   draws NO cracks until it has lost `cfg.freq` HP. Small, self-contained.
-
-### Suggested order
-
-(4) then (3) — both are contained in `progressFracture` /
-`spawnDetachedCell` and both are ordinary rigid-body bookkeeping. (5) is
-a two-line gate fix. (1) is a DESIGN question to answer before touching:
-should a fresh wound on the far side compete with the old one, or should
-erosion keep cascading at the first break?
+Should a fresh wound on the far side COMPETE with the old one, or should
+erosion keep cascading at the first break?  Real materials do both
+depending on toughness, so either is defensible.  If competition is
+wanted, the lever is the detach rule rather than the damage spend: a cell
+could require a minimum number of ITS OWN boundaries broken (rather than
+merely all of its still-binding ones) so a freed neighbour does not hand
+it a discount.  Answer this before touching the harvest loop.

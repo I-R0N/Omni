@@ -371,8 +371,20 @@ export function overlayMaterialCracks(
     // tiny or distant damaged bodies (the proliferating rock/metal chips).
     // Pure render saving; the silhouette + base fill still draw normally.
     if (r * apparentScale < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) return;
+    // Which crack model this body uses has to be decided BEFORE the
+    // legacy pacing gate below, because that gate does not apply to the
+    // grain model.  `count` paces the seeded-spoke look off the body's
+    // HP; a grain body instead draws each boundary at its OWN absorbed
+    // damage, and used to be turned away here — so a body carrying real
+    // boundary damage drew nothing at all until it had lost a whole
+    // `cfg.freq` of HP, which is most of a small pattern's life.
+    const fractured = entity.shardVariant !== undefined
+        && SHARD_VARIANTS[entity.shardVariant].grain !== undefined
+        ? ensureFractureEdges(entity) : null;
+    const grain = fractured !== null && fractured.length > 0
+        && bondStrengthFor(entity) !== null;
     const count = Math.min(cfg.cap, Math.floor((maxHp - hp) / cfg.freq));
-    if (count <= 0) return;
+    if (!grain && count <= 0) return;
     const dmgFrac = Math.min(1, Math.max(0, 1 - hp / maxHp));
     ctx.save();
     buildPath();
@@ -385,9 +397,6 @@ export function overlayMaterialCracks(
     // boundary the player sees fully highlighted is exactly a piece
     // about to break off.  Everything else (metal, and enemy hulls via
     // enemyShapes) keeps the legacy spoke look.
-    const fractured = entity.shardVariant !== undefined
-        && SHARD_VARIANTS[entity.shardVariant].grain !== undefined
-        ? ensureFractureEdges(entity) : null;
     if (fractured !== null && fractured.length > 0) {
         // No max(1, …) floor: the helper's count IS the truth the sim
         // detaches by, and an early hit on a small pattern legitimately
@@ -397,7 +406,6 @@ export function overlayMaterialCracks(
         // player sees complete is exactly one that no longer binds.  The
         // legacy HP-paced reveal stays for variants without a
         // `bondStrength` (and for the legacy fracture A/B).
-        const grain = bondStrengthFor(entity) !== null;
         const upTo = grain ? fractured.length
             : fractureRevealedEdgeCount(entity, fractured.length, cfg.freq);
         drawFractureCracks(ctx, fractured, upTo, r, dmgFrac, style,

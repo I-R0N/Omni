@@ -1430,7 +1430,21 @@ test.describe('only the struck piece chips (V12)', () => {
         const rr = R * (0.72 + 0.26 * ((Math.sin(i * 1.7) + 1) / 2));
         poly.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr });
       }
-      const pos = { x: e.player.position.x + 5000, y: e.player.position.y + 5000 };
+      // The probe is planted far from the player so nothing else touches
+      // it — but it must land inside the CANONICAL box, which is
+      // [-HALF, HALF), not [0, SIZE).  `player + 5000` on a 6000-wide
+      // field is 5000, i.e. outside; the first code to call
+      // `wrapPosition` on the body then snapped it to -1000, and the raw
+      // subtraction below read a whole map width (measured -272.68
+      // half-widths, exactly 6000 / 22).  Nothing wrapped this entity
+      // before, so the bad position sat here harmlessly until a detach
+      // started re-centring the body.
+      const wrap = (v: number, size: number) =>
+        ((v + size / 2) % size + size) % size - size / 2;
+      const pos = {
+        x: wrap(e.player.position.x + 5000, e.currentMap.width),
+        y: wrap(e.player.position.y + 5000, e.currentMap.height),
+      };
 
       const sounds: string[] = [];
       const realPlay = e.audio.play.bind(e.audio);
@@ -3204,6 +3218,133 @@ test.describe('damage spread (A4)', () => {
 
     console.log(`[A4] partial boundaries — off ${off!.maxPartial}, spread ${on!.maxPartial};`
       + ` hits to break ${off!.hits} vs ${on!.hits}`);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('fracture physics — recoil and re-centring', () => {
+  test('a shedding body keeps its origin, its tiling, and its momentum', async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+
+    // Three defects, all in the detach seam, all measured on the same
+    // 160-unit mobile rock shard:
+    //  - the remainder replaced `polygonPoints` and never moved
+    //    `position`, so the centre of area walked away from the origin
+    //    (measured -5.9 -> -10.4 over five detaches) and the body then
+    //    ROTATED ABOUT THE WRONG POINT;
+    //  - the chip's velocity was created from nothing while the parent's
+    //    MASS was scaled down and its VELOCITY left alone;
+    //  - and the fix for the first nearly broke the second: `unionOfCells`
+    //    keys vertices by ABSOLUTE coordinates, so an arbitrary frame
+    //    shift re-quantises which vertices merge.
+    //
+    // The projectile is MASSLESS on purpose.  It still deals damage but
+    // imparts no impulse, so the parent's velocity change is PURE recoil
+    // and can be checked against the closed form instead of being teased
+    // out of the projectile's own push.
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities as any[];
+      const all = ents.filter((x: any) => x.active && x.shardVariant === 'rock-shard'
+        && x.mass !== Infinity && x.polygonPoints);
+      all.sort((a: any, b: any) => b.size.x - a.size.x);
+      // SEVERAL bodies, not one.  The re-quantisation this guards against
+      // only shows when a vertex happens to sit near a key boundary, so a
+      // single shard is a coin flip — the negative control (an unquantised
+      // shift) passed on one shard and produced a 4.45 gap on another.
+      const targets = all.slice(0, 6);
+      if (targets.length === 0) return null;
+
+      const centroid = (pts: any[]) => {
+        let cx = 0, cy = 0, a = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i], q = pts[(i + 1) % pts.length];
+          const cr = p.x * q.y - q.x * p.y;
+          a += cr; cx += (p.x + q.x) * cr; cy += (p.y + q.y) * cr;
+        }
+        a *= 0.5;
+        return Math.abs(a) < 1e-9 ? { x: 0, y: 0 } : { x: cx / (6 * a), y: cy / (6 * a) };
+      };
+
+      const detaches: any[] = [];
+      let worstCentroid = 0, worstTiling = 0, noChipMaxDV = 0;
+      let firstSize = 0;
+      for (const t of targets) {
+      t.velocity.x = 0; t.velocity.y = 0; t.rotationSpeed = 0;
+      if (firstSize === 0) firstSize = t.size.x;
+      for (let i = 0; i < 16 && t.active; i++) {
+        const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        const vBefore = t.velocity.x, mBefore = t.mass;
+        e.physics.resolveCollision(
+          { id: 'phys_' + Math.random(), type: 'PROJECTILE',
+            position: { x: t.position.x + (t.size.x * 0.5 + 4), y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+            mass: 0, active: true, color: '#fff', damage: 3,
+            ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+        if (!t.active) break;
+        const kids = ents.filter((x: any) => x.active && !before.has(x.id)
+          && x.shardVariant === 'rock-shard');
+        if (kids.length === 0) {
+          // The control INSIDE the test: a massless projectile that frees
+          // nothing must not move the body at all.  If this drifts, the
+          // recoil figures below are measuring the projectile.
+          noChipMaxDV = Math.max(noChipMaxDV, Math.abs(t.velocity.x - vBefore));
+          continue;
+        }
+        const lc = centroid(t.polygonPoints);
+        worstCentroid = Math.max(worstCentroid, Math.hypot(lc.x, lc.y));
+        // Do the surviving cells still TILE the body?  This is what the
+        // absolute-coordinate keying threatens.
+        const u = (window as any).__omniFracture.unionOfCells(
+          t.fractureCells, Math.max(0.01, t.size.x * 0.01));
+        if (u !== null) {
+          worstTiling = Math.max(worstTiling, Math.abs(
+            (window as any).__omniFracture.polygonArea(u)
+            - (window as any).__omniFracture.polygonArea(t.polygonPoints)));
+        }
+        // Closed form: ejecting mass m at relative velocity (v - V) leaves
+        // the remainder with -(m / M') of it.
+        const k = Math.min(0.6, (kids[0].mass ?? 0) / Math.max(1e-3, t.mass));
+        detaches.push({
+          expected: -k * (kids[0].velocity.x - vBefore),
+          actual: t.velocity.x - vBefore,
+          chipMass: kids[0].mass, parentMassBefore: mBefore,
+        });
+      }
+      }
+      return {
+        size: +firstSize.toFixed(1),
+        detaches, worstCentroid: +worstCentroid.toFixed(3),
+        worstTiling: +worstTiling.toFixed(3), noChipMaxDV: +noChipMaxDV.toFixed(6),
+      };
+    });
+
+    expect(r).not.toBeNull();
+    expect(r!.detaches.length).toBeGreaterThan(1);
+    // The in-test control: a massless projectile freeing nothing moves
+    // nothing, so every velocity change below is recoil.
+    expect(r!.noChipMaxDV).toBeLessThan(1e-6);
+
+    // (4) The origin STAYS on the centre of area.  The residual is the
+    // quantisation step (eps = 1% of the body, ~1.6 units here), against
+    // the 10.4 units the pre-fix build drifted to.
+    expect(r!.worstCentroid).toBeLessThan(2.5);
+    // (4b) …and the pattern still tiles the body exactly.  An unquantised
+    // shift measured 4.45 here where the pre-fix build measured 0.
+    expect(r!.worstTiling).toBeLessThan(0.001);
+    // (3) MOMENTUM: every detach matches the closed form.  Pre-fix this
+    // was 0 on every detach — the chip's momentum came from nowhere.
+    for (const d of r!.detaches) {
+      expect(Math.abs(d.actual)).toBeGreaterThan(1e-4);
+      expect(Math.abs(d.actual - d.expected)).toBeLessThan(1e-3);
+    }
+
+    console.log(`[fracture physics] detaches ${r!.detaches.length},`
+      + ` worst centroid ${r!.worstCentroid}, worst tiling gap ${r!.worstTiling},`
+      + ` recoil ${r!.detaches.map((d: any) => d.actual.toFixed(3)).join(' ')}`);
 
     watch.assertClean();
   });

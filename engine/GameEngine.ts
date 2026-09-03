@@ -31,6 +31,7 @@ import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
 import { subtractBoundaryCell, polygonArea as fracturePolygonArea,
+         polygonCentroid as fracturePolygonCentroid,
          pointToPolygonDistance2 , unionOfCells } from './systems/fracture';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -85,6 +86,80 @@ const SALVAGE_STREAK_MAX = 11;
  *  live value on the SELECTED material, or 'table' where it defers.  Built
  *  per stats push, which is paused-only for the debug panel — five string
  *  lookups, not a per-frame cost. */
+/** Cap on the recoil a parent takes when it sheds a piece, as a fraction
+ *  of the relative ejection velocity.  A nearly-eroded body shedding a
+ *  large final piece has `chipMass / remainingMass` well above 1, and the
+ *  unclamped impulse reads as a launch rather than a kick. */
+const RECOIL_MAX_RATIO = 0.6;
+
+/** Move a fractured body's local frame so its origin sits back on its
+ *  centre of area, compensating `position` so nothing visibly moves.
+ *
+ *  Every piece of local-frame state shifts TOGETHER — the outline, the
+ *  surviving cells (live outline AND the cut-time outline elastic
+ *  materials spring back to), the boundary endpoints and midpoints, and
+ *  the stamped impact point.  Shifting only some would leave the pattern
+ *  no longer tiling the body, and that tiling is exactly the invariant
+ *  `unionOfCells` relies on to build the next remainder.
+ *
+ *  A pure translation, so no area, no length and no boundary fill
+ *  changes: `fractureEdgeNeed`, and therefore derived HP, is untouched by
+ *  construction. */
+function recentreFracturedBody(e: GameEntity, remainder: Vector2[], eps: number): void {
+  const raw = fracturePolygonCentroid(remainder);
+  // THE SHIFT IS QUANTISED TO THE UNION'S OWN EPSILON, and that is not a
+  // nicety.  `unionOfCells` identifies coincident vertices by keying
+  // ABSOLUTE coordinates (`round(p.x / eps)`), so translating the frame by
+  // an arbitrary amount can change which vertices merge and hand back a
+  // slightly different ring — measured as a 4.45-area disagreement between
+  // the body's outline and the union of its own cells, where the pre-fix
+  // build had none.  Moving by an exact multiple of `eps` shifts every key
+  // by the same integer, so every vertex that keyed together still does.
+  // The residual offset is under one eps (1.6 units on a 160-unit shard)
+  // against the 12+ units of drift this exists to remove.
+  const step = Math.max(1e-6, eps);
+  const c = {
+    x: Math.round(raw.x / step) * step,
+    y: Math.round(raw.y / step) * step,
+  };
+  if (c.x === 0 && c.y === 0) return;
+
+  for (const p of remainder) { p.x -= c.x; p.y -= c.y; }
+
+  const cells = e.fractureCells;
+  if (cells !== undefined) {
+    for (const cell of cells) {
+      for (const p of cell.points) { p.x -= c.x; p.y -= c.y; }
+      cell.centroid.x -= c.x; cell.centroid.y -= c.y;
+      cell.site.x -= c.x; cell.site.y -= c.y;
+      if (cell.points0 !== undefined) {
+        for (const p of cell.points0) { p.x -= c.x; p.y -= c.y; }
+      }
+    }
+  }
+  const edges = e.fractureEdges;
+  if (edges !== undefined) {
+    for (const ed of edges) {
+      ed.ax -= c.x; ed.ay -= c.y;
+      ed.bx -= c.x; ed.by -= c.y;
+      ed.mx -= c.x; ed.my -= c.y;
+    }
+  }
+  // The damage front is a local point too: leaving it behind would make
+  // the next hit spend around where the body's origin USED to be.
+  if (e.lastImpactLocal !== undefined) {
+    e.lastImpactLocal.x -= c.x;
+    e.lastImpactLocal.y -= c.y;
+  }
+
+  // Compensate in WORLD terms so the body does not jump: the local origin
+  // moved by +c, so the world anchor moves by +c rotated into world.
+  const cs = Math.cos(e.rotation), sn = Math.sin(e.rotation);
+  e.position.x += c.x * cs - c.y * sn;
+  e.position.y += c.x * sn + c.y * cs;
+  wrapPosition(e.position);
+}
+
 function grainKnobNamesSnapshot(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of GRAIN_KNOB_LIST) out[k] = getGrainKnobName(k);
@@ -5168,6 +5243,11 @@ export class GameEngine {
           if (!pts || pts.length < 3) return true;
           const polyArea = fracturePolygonArea(pts);
 
+          // ONE epsilon for the pass: the union's vertex-merge tolerance
+          // AND the quantum the re-centre shift is snapped to.  They must
+          // be the same number or the re-centre can re-quantise the very
+          // union it is compensating for.
+          const eps = Math.max(0.01, Math.max(target.size.x, target.size.y) * 0.01);
           let hitIdx = -1;
           let c: (typeof cells)[number] | undefined;
           let remainder: { x: number; y: number }[] | null = null;
@@ -5202,7 +5282,6 @@ export class GameEngine {
               // the boundary, which is precisely the tail — and the tail is
               // where "the last pieces dump at death" comes from.
               const survivors = cells.filter((_, i) => i !== cand.i);
-              const eps = Math.max(0.01, Math.max(target.size.x, target.size.y) * 0.01);
               // For a grain material the body's outline IS the union of
               // its surviving grains, and that is what makes the break
               // CONSERVE: the area the parent loses is exactly the area
@@ -5278,8 +5357,10 @@ export class GameEngine {
           // neighbour on the other side left.  So its whole boundary is
           // spent at the moment it comes away, measured 0 partial on
           // every detach.  See docs/MATERIAL_GRAIN_SPEC.md §6.3.
-          this.shards.spawnDetachedCell(target, c, original, this.currentMap.entities);
+          const chip = this.shards.spawnDetachedCell(
+              target, c, original, this.currentMap.entities);
           target.polygonPoints = remainder;
+          const massBefore = target.mass;
           if (target.mass !== Infinity && polyArea > 0) {
               target.mass *= remainderArea / polyArea;
           }
@@ -5287,6 +5368,36 @@ export class GameEngine {
           // of the decomposition breaks off later; only the derived
           // collision/render caches die.
           cells.splice(hitIdx, 1);
+          // EJECTING A PIECE IS A RECOIL.  The chip's velocity used to be
+          // created from nothing while the parent's MASS was scaled down
+          // and its VELOCITY left alone, so a break destroyed momentum
+          // twice over (measured: a chip left at vx +0.54 with zero
+          // reaction on the parent).  Conserving it is the ordinary rocket
+          // equation — eject mass m at relative velocity (v - V) and the
+          // remainder takes -(m / M') of it.  STATIC bodies are exempt: a
+          // tile is bolted to the map, and its infinite mass says so.
+          if (chip !== null && target.mass !== Infinity && massBefore !== Infinity) {
+              const k = Math.min(RECOIL_MAX_RATIO,
+                  (chip.mass ?? 0) / Math.max(1e-3, target.mass));
+              target.velocity.x -= k * (chip.velocity.x - target.velocity.x);
+              target.velocity.y -= k * (chip.velocity.y - target.velocity.y);
+          }
+          // RE-CENTRE ON THE NEW CENTRE OF AREA (mobile bodies only).
+          // The remainder replaced `polygonPoints` and nothing moved
+          // `position` to match, so as a shard eroded its centre of area
+          // walked away from its own origin — measured -5.9 -> -12.3 over
+          // five detaches on a 160-unit shard.  Two things go wrong, and
+          // the second is the visible one: physics acts at `position`,
+          // which is no longer the centre of mass, and the body ROTATES
+          // ABOUT THE WRONG POINT, so a spinning eroded shard orbits its
+          // old origin instead of spinning in place.
+          //
+          // STATIC tiles are deliberately excluded: their position is the
+          // hex coordinate the static grid, regen and neighbour counts are
+          // all keyed on (the dent contract, CLAUDE.md §8).
+          if (target.mass !== Infinity) {
+              recentreFracturedBody(target, remainder, eps);
+          }
           target._satCacheAxes = undefined;
           target._occluderR = undefined;
           if (target._staticCached === true) target._staticCached = false;
