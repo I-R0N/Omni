@@ -1818,3 +1818,233 @@ the impact as one piece. It is wrong for the same reason the arc splice
 was wrong in the tail: the piece that leaves must be the piece the
 BOUNDARIES freed, or the cracks the player was shown stop predicting the
 break, which is the whole property the grain model exists to have.
+
+---
+
+## Polygonal face bonding for metal (replaces the triangular lattice)
+
+**Status:** designed with the user, not built. Supersedes the current
+`tickMetalAssembly` lattice. User call: give up triangular bonding for
+metal entirely.
+
+### Why the lattice has to go
+
+Metal is the one material whose shards RE-BOND after a break, and its
+assembly system is a triangular lattice: integer `(ix, iy, up)` slots at
+`R = HEX_SIZE/sqrt(3)`, six cells making a hexagon that snaps to terrain.
+It was built when a metal shard's spawn polygon genuinely WAS an
+equilateral triangle.
+
+A3 gave metal Voronoi fracture and that stopped being true. Measured:
+real grains are 10-14 units across, ~9 per tile, against a lattice
+triangle of 25.4 — so the lattice is already being stretched, and a
+composite grown from grains ends up with a pitch of ~11 rather than 25.
+The system is protecting geometry that no longer matches the material.
+
+### The design
+
+Metal joins the DEFAULT merge path the other materials use
+(`bondsWith: 'self'` + `defaultOutcome: 'compose'`, area accumulating,
+`TILE_SNAP` on diameter + rest speed), with a face-alignment step on top
+so it still feels mechanical rather than gloopy.
+
+**The payoff — bonding is the INVERSE of fracture, and reuses it.**
+A welded assembly is a body whose `fractureCells` are its member shards
+and whose `fractureEdges` are the welds. Everything falls out:
+
+- Derived HP = sum of (weld length x bond strength) — the V15 model,
+  unchanged.
+- Breaking it apart = the existing grain-boundary damage, unchanged. It
+  comes apart along the seams it was built from.
+- The cracks it shows are the welds — already how
+  `overlayMaterialCracks` works.
+- A weld can carry a LOWER strength than virgin grain boundary.
+  Physically right, and it gives a reason to prefer an intact plate.
+
+A composite's grain pattern is its assembly history. This deletes a
+special case rather than replacing it with another.
+
+### Overlap with more than two shards
+
+The rule: **always bond outline-to-outline, never member-to-member.**
+Once A and B weld, the composite has ONE outline (`unionOfCells`, which
+already exists and is already the fracture-remainder path). C snaps to a
+face of that union, which by definition has no interior — so three-way,
+n-way all work the same. Three residual cases need a runtime CHECK
+rather than a proof (the conservation-check discipline: geometry that
+looks obviously correct has broken this codebase twice):
+
+1. **Snap-into-a-third-party.** The snap transform is rigid and can move
+   C into D. SAT-check the post-snap pose against nearby bodies; refuse
+   and fall back to the soft pull.
+2. **Mismatched face lengths.** A 12-unit face onto an 8-unit face
+   leaves an overhang. Visually GOOD — it reads as a real join — it just
+   notches the union outline.
+3. **Loop closure.** A-B, B-C, then C-A will not line up exactly. Gate on
+   a tolerance; fall back to a cohesion bond with no geometric snap.
+
+### Making it "clicky"
+
+Two stages; the first is what sells it.
+
+- **Approach:** alongside the existing pull, drive `rotationSpeed` toward
+  the face-alignment error, so shards visibly TURN to present a face.
+  Rotation here is purely kinematic (`rotation += rotationSpeed * dt`,
+  no torque in the impulse solver), so this is a direct write.
+- **Capture:** inside a distance-AND-angle window, ease the rigid
+  transform to exact contact over 2-3 frames with a sound and a spark.
+
+### Stretch: magnetic poles
+
+User's idea: alternating poles, only opposite poles attract and bond.
+Two things to resolve first.
+
+**Alternating VERTICES does not produce face polarity.** With vertices
++,-,+,-, every edge joins a + to a -, so all faces are identical. FACES
+are what needs polarity — and alternating edges only works on EVEN-sided
+polygons. Measured on real metal grains, vertex counts were
+[6,5,5,5,6,5,5,6,4]: five of nine were PENTAGONS, so odd is the common
+case, not an edge case. Three ways out:
+
+- Seeded hash per face. Works on anything, loses the alternation, looks
+  the same in play (~half the faces are +).
+- Polarity from face ORIENTATION (sign of the normal's angle), so a
+  shard has a + side and a - side. Spatially coherent.
+- Accept one defect edge on odd polygons — literally a frustrated
+  antiferromagnet, which is real physics.
+
+**Two notes.** Repulsion is the cheaper half and delivers most of the
+feel: same-pole faces pushing apart is what makes shards dance and
+re-orient. And the RENDER TELL is not optional — without a visible
+polarity (a two-tone edge stroke would do) the mechanic reads as
+"bonding is randomly unreliable". With it, a composite visibly has a
+VALENCE: how many + and - faces it still exposes.
+
+### Decisions still open
+
+1. **When does a blob become terrain?** Metal snaps to a tile at 6
+   lattice cells today. Free-form bonding removes that trigger; matching
+   the other materials means diameter + rest speed (`TILE_SNAP`), which
+   is what "area-based like the others" implies — but it changes how
+   fast metal terrain regrows.
+2. **Can a composite fracture THROUGH a member, or only along welds?**
+   Welds-only is simpler and falls out of `fractureCells = members`.
+   Through-member needs nested patterns; avoid.
+
+### Effort
+
+| | |
+|---|---|
+| Face-snap bonding, lattice deleted | 2-3 days |
+| Clicky (turn-to-align + capture) | +0.5 day, rides along |
+| Poles + render tell | +1 day, separate follow-up |
+
+Recommended order: phase 1 + clicky first, poles afterwards once the base
+bonding feels right — poles change how SELECTIVE assembly is, which is
+much easier to tune against something that already feels good.
+
+### The honest trade
+
+The lattice guarantees no overlap BY CONSTRUCTION: integer slots cannot
+collide. Free-form face bonding replaces that guarantee with a runtime
+check. That is a real loss and the most likely source of a subtle bug.
+It is worth it because the guarantee currently protects geometry that no
+longer matches the material — but it is a guarantee being given up.
+
+### Code the change touches / deletes
+
+Deletes: `formMetalComposite`, `growMetalComposite`,
+`mergeMetalComposites`, `nearestMetalHexSlot`, `addCellToComposite`,
+`metalRecomputeBounds`, `decomposeMetalComposite`, `metalConvexHull`,
+`GameEntity.metalCells` / `metalExcessCells` / `metalLatticeR`,
+`METAL_HEX_CELLS`, `METAL_ASSEMBLY`, `TILE_SNAP.METAL_MAX_EXCESS_CELLS`,
+and the metal-composite branches in `tileShapes.ts`
+(`drawMetalDebugOutline`, the lattice-seam crack path).
+Adds: a face-pair search + snap transform in `ShardSystem`, the
+outline-to-outline bond rule, and a weld-strength entry in `GrainSpec`.
+
+---
+
+## Fracture physics: detach impulse, centroid drift, erosion cascade
+
+**Status:** investigated with measurements, not fixed. User report:
+"damage continues to propagate at the initiating side" and "shards are
+ejected at the initiating side and the parent is pushed toward where the
+projectile came from."
+
+### What was measured
+
+A 159.9-unit mobile rock shard, velocity and spin pinned to zero, shot
+head-on six times from +x and then eight times from -x.
+
+**The damage spend FOLLOWS the new side — symptom 1 did not reproduce as
+stated.** `lastImpactLocal` flips with the shot side every hit, and the
+boundaries taking new fill flip with it: local x -41..-25 during the +x
+phase, +46..+25.9 during the -x phase. Chips detach on the struck side
+in both phases (an earlier reading that said otherwise was a frame
+error: the impact is in the body's ROTATED frame and the chip offsets
+were world-frame, and the body's rotation was ~pi).
+
+**The pattern's impact bias is NOT the explanation either.** Cells near
+the first contact are only 1.24x smaller than far cells and their
+boundaries cost 3.36 vs 3.58 — a 7% asymmetry, far too small to read as
+"damage stays on one side".
+
+### What IS wrong, and what it explains
+
+1. **THE EROSION CASCADE.** A boundary stops binding once the cell on its
+   other side has left. So the moment one chip comes away, its
+   neighbours need FEWER broken boundaries to come away too — and they
+   already carry damage from the first volley. The result is that the
+   first wound keeps shedding pieces even while the player is shooting
+   somewhere else. This is a real mechanism and the best explanation of
+   the report. It is arguably a design flaw rather than a bug: erosion
+   cascades at the oldest wound regardless of where damage is now
+   landing. Whether that is desirable is a design call.
+
+2. **OLD CRACKS NEVER FADE.** The overlay draws EVERY boundary at its own
+   fill fraction, so the heavily-cracked first side stays heavily cracked
+   forever while new far-side damage adds only a few faint lines. Correct
+   behaviour that reads as "the damage is still over there".
+
+3. **NO MOMENTUM CONSERVATION ON DETACH.** `spawnDetachedCell` gives the
+   chip a velocity (parent velocity + radial + a share of the impact) out
+   of nothing, and `progressFracture` then scales the parent's MASS down
+   (`target.mass *= remainderArea / polyArea`) while leaving its VELOCITY
+   alone. So the parent's momentum silently drops and the chip's is
+   created. Measured: a chip left at vx +0.54 with no recoil on the
+   parent. The fix is the standard one — give the parent the equal and
+   opposite impulse, `parent.v -= chip.v_rel * (chipMass / parentMass)`.
+
+4. **CENTROID DRIFT WITH NO POSITION CORRECTION.** `progressFracture`
+   sets `target.polygonPoints = remainder` and never touches
+   `target.position`, so the body's centre of area walks away from its
+   origin as it erodes. Measured on the test shard: local centroid x
+   went 1.38 -> 2.71 -> -4.08 over two detaches. Two consequences, and
+   the second is very likely what the user is seeing as odd push:
+   - Physics (collision impulse, flow, magnetisation) acts at `position`,
+     which is no longer the centre of mass.
+   - The body ROTATES ABOUT THE WRONG POINT. A spinning eroded shard
+     orbits its old origin instead of spinning in place, which reads as
+     the body being shoved around. On a 160-unit shard a 7-unit offset is
+     clearly visible.
+   The fix is to re-centre on detach: shift `polygonPoints` by the new
+   centroid and add the same offset (rotated into world) to `position`,
+   so the body does not visually jump. NOTE this is exactly what the
+   "size and position untouched" dent contract forbids for STATIC tiles
+   (the static grid would need rebuilding) — so the correction must apply
+   to MOBILE bodies only.
+
+5. **Minor, found on the way:** `overlayMaterialCracks` early-returns on
+   `count = floor((maxHp - hp) / cfg.freq) <= 0`, a LEGACY HP-pacing gate,
+   before the grain path that ignores `count` entirely and draws each
+   boundary at its own fill. So a grain body carrying real boundary damage
+   draws NO cracks until it has lost `cfg.freq` HP. Small, self-contained.
+
+### Suggested order
+
+(4) then (3) — both are contained in `progressFracture` /
+`spawnDetachedCell` and both are ordinary rigid-body bookkeeping. (5) is
+a two-line gate fix. (1) is a DESIGN question to answer before touching:
+should a fresh wound on the far side compete with the old one, or should
+erosion keep cascading at the first break?
