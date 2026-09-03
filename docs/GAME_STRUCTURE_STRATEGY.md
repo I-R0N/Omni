@@ -96,6 +96,18 @@ dense tile simulations, thousands of shards, combat, puzzles, arenas,
 special encounters, bosses. These remain toroidal simulations for
 performance and gameplay.
 
+**Layered containment** (added 2026-09-03): the overworld is not one map but
+a nesting — universe ⊃ galaxy ⊃ solar system ⊃ planet ⊃ moon/station — where
+each layer is flown in and is populated by the bodies of the layer beneath
+it.  A run starts partway down (planet or solar system), and the layers above
+are gated behind engine tiers rather than offered at the start.  This axis is
+ORTHOGONAL to the visual-fidelity ladder (open space → planet backdrop →
+atmosphere → surface): a layer says what contains what, fidelity says how it
+is drawn, and keeping them separate is what stops the art ladder constraining
+the world graph.  Detail — including the two portal kinds that serve it — is
+in `docs/PORTAL_AND_WORLD_LAYER_PLAN.md`; phasing is in
+`docs/CONFIG_CHANGES_PHASED_PLAN.md`.
+
 **Civilizations** emerge as another ecosystem rather than a separate
 game: mining companies, researchers, scavengers, traders, military
 patrols, smugglers, conservation groups — each interacting with the same
