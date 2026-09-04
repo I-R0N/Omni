@@ -177,6 +177,16 @@ export interface ShardMergePolicy {
    *  rest = default). */
   bondPartners?: ReadonlyArray<BondPartnerConfig>;
 
+  /** Size-disparity gate on bond FORMATION.  When set (> 0), a pair
+   *  whose radii differ by less than this fraction of the larger radius
+   *  refuses to bond — forcing "smaller merges into larger" by rejecting
+   *  near-equal pairs.  Symmetric: applied regardless of which side is
+   *  the puller.  Read by ShardSystem's bond-formation pass; NO variant
+   *  sets it today (the plastic-shard use the reader's comment names was
+   *  tuned away), so the gate is inert until one does.  Declared here
+   *  rather than deleted so the lever stays available and typed. */
+  requireSizeDeltaFraction?: number;
+
   /** Per-pair outcome; falls back to defaultOutcome if no rule matches. */
   rules?: MergeRule[];
   defaultOutcome: MergeOutcome;
@@ -197,6 +207,73 @@ export interface BondPartnerConfig {
    *  break-factor (slower to detach) vs the 'default' tier.  Today:
    *  plastic-shard ↔ glass-tile / glass-shard use 'strong'. */
   strength?: 'strong' | 'default';
+}
+
+// ── Bonded-pair blend policy ────────────────────────────────────────
+// Purely PRESENTATIONAL: how a live cohesion bond is DRAWN.  Nothing in
+// the sim reads it — bonds form, cohere, mature and break exactly as
+// they did before, and turning the whole thing off changes no physics.
+//
+// 'fillet' draws the smooth-min union of the two bonded hulls the cheap
+// way: ONE metaball connector (two cubic curves waisted between the
+// bodies) filled UNDER both of them, so a stuck pair reads as one blob
+// of goo rather than two polygons touching.  It is a PAIRWISE
+// approximation of an SDF union rather than a sampled distance field —
+// which is exact here rather than a compromise, because bond formation
+// is a MATCHING: both formation sites skip any entity already bonded,
+// so a bond is never one edge of a larger cluster.
+
+export interface ShardBlendPolicy {
+  kind: 'fillet';
+  /** Which bond partners get a bridge.  Same selector grammar as
+   *  merge.bondsWith — a partner this does not select renders
+   *  unblended, exactly as it does today. */
+  appliesTo: VariantSelector;
+  /** Where on each body the bridge attaches, as a fraction of how far
+   *  that hull reaches TOWARD its partner.  1 anchors it exactly on the
+   *  facing surface, which can leave a hairline where the hull curves
+   *  away from the join; below 1 buries the join under the body drawn
+   *  over it.  A fixed radius is what this deliberately is NOT — plastic
+   *  shards are 4-gons with vertex radii jittered 0.65..1.10 of the
+   *  base, so one face stands nearly twice as far off the centroid as
+   *  another, and any single circle is wrong for most of them.  Default
+   *  0.9. */
+  attachFraction?: number;
+  /** Largest centre-to-centre gap that still draws, as a multiple of
+   *  the summed attach radii.  Past it the goo has stretched too thin
+   *  to read, and the bridge is dropped rather than drawn as a
+   *  filament — bonds stretch to 1.5× (6× on a 'strong' pair) of
+   *  contact distance before they snap, so a bond being live is not by
+   *  itself evidence the pair still looks joined.  Default 1.35. */
+  maxSpan?: number;
+  /** Waist softness, 0..1 — how far around each body the bridge wraps
+   *  before it necks in.  0 is a taut string between two tangent
+   *  points, 1 a nearly straight-sided weld.  Default 0.5. */
+  softness?: number;
+  /** How far the goo COAT extends past a hull, as a fraction of that
+   *  body's circumradius.  0 or absent draws the bridge alone, and the
+   *  pair still reads as two bodies welded at a joint; above 0 each
+   *  bonded body is also enveloped in a skin of goo that the bridge runs
+   *  into, so the pair reads as one coated mass.
+   *
+   *  The coat is a true rounded OUTWARD OFFSET of the hull (its polygon
+   *  filled, then stroked at twice the margin with round joins), not a
+   *  circle around it: a circumscribed disc would swallow a jittered
+   *  4-gon's silhouette entirely, and the shard's outline is what says
+   *  which material the goo is holding.
+   *
+   *  A body is coated only if ITS OWN variant declares a blend policy
+   *  selecting the partner — so plastic stuck to a glass tile coats the
+   *  plastic and leaves the tile alone.  Coating the partner would
+   *  repaint a tile's whole face in plastic, which says the tile is goo
+   *  when it is the thing the goo is stuck to. */
+  envelope?: number;
+  /** Fill alpha for the bridge and coat.  Default 1 (the goo is as solid
+   *  as the shard it belongs to).  Below 1 the coat's own overlaps — its
+   *  fill against its stroke, and both against the bridge — stop being
+   *  invisible and show as darker seams, so a translucent goo wants
+   *  `envelope` left at 0. */
+  alpha?: number;
 }
 
 // ── Shatter policy ──────────────────────────────────────────────────
@@ -324,6 +401,53 @@ export interface ShardVariantDef {
    *  contact; the variant still takes damage and may shatter.  Only
    *  the nebula-tile variant uses this. */
   passThrough?: boolean;
+  /** Fraction of the unified light layer's contribution that passes
+   *  THROUGH this variant instead of being withheld behind it, 0..1.
+   *  Absent or 0 means opaque — the body casts a full shadow, which is
+   *  every variant's default and the whole of the pre-existing
+   *  behaviour.  Glass is the case this exists for: it is drawn as a
+   *  translucent panel, so a solid black umbra behind it contradicts
+   *  the art.
+   *
+   *  Distinct from `passThrough`, which is about COLLISION and is
+   *  binary: a nebula tile lets a striker pass and casts no shadow at
+   *  all, where glass stops a striker dead and casts a faint one. */
+  transmit?: number;
+  /** Fraction of the unified light layer's contribution that this variant
+   *  RE-EMITS, uniformly in every direction, when light falls on it — 0..1,
+   *  absent meaning inert.  Metal and glass carry it: one is specular and
+   *  one is translucent, and both read wrong as matte bodies that swallow
+   *  everything reaching them.
+   *
+   *  Only consulted while the DBG "Emissive" toggle is on, and it is a
+   *  SECOND light rather than a brighter body — see `renderLightLayer`. */
+  emits?: number;
+  /** Bonded-pair blend policy — how a live cohesion bond between this
+   *  variant and a partner is DRAWN.  Absent means today's behaviour:
+   *  two hulls that happen to be touching.  Today: plastic-shard. */
+  blend?: ShardBlendPolicy;
+  /** Draw the body's dark rim line.  Absent means true — the outline
+   *  every material has worn since the shard family existed.  False
+   *  drops it, which is what a SOFT material wants: a rim line traces
+   *  every notch and reads as a hard edge, so plastic (goo) and
+   *  rock-tile (whose brittle dent silhouette is cleaner unlined) turn
+   *  it off.  Read by the asteroid / mobile-shard branch, which is the
+   *  one that draws the rim; the material-tile and glass-family
+   *  branches have their own outline rules. */
+  outline?: boolean;
+  /** Corner rounding of the drawn silhouette, 0..1 — 0 (or absent) is
+   *  the hard-cornered polygon it has always been, 1 trims every corner
+   *  back to the midpoint of its shorter adjacent edge.  A FRACTION
+   *  rather than a radius because these hulls span a 20..200 diameter
+   *  range, and a fixed radius would round a big shard's corner subtly
+   *  while swallowing a small one whole.
+   *
+   *  PRESENTATION ONLY: the rounding is traced at draw time and never
+   *  written back into `polygonPoints`, so the SAT hull the physics
+   *  solver sees is the same sharp polygon it always was.  Rounding the
+   *  collision shape too would be a different (and much larger)
+   *  change. */
+  cornerRounding?: number;
   /** Render fast-path opt-in.  Today only nebula-tile populates the
    *  per-entity tinted-canvas cache (`nebulaCachedTinted`); the
    *  RenderSystem fast-path gating flips from EntityType-keyed to
@@ -635,6 +759,18 @@ export interface TileClusterConfig {
 export interface PerMapVariantSpawn {
   freeSpawn?: FreeSpawnConfig;
   tileCluster?: TileClusterConfig;
+  /**
+   * Ring indices this variant occupies on a ring-shaped map (today:
+   * SevenRingsMap).  Added by gauntlet step 5 G7, when MAP_POPULATION
+   * became the authority for the natural maps' tile-variant mix: a ring
+   * map's "ratio" is not a cluster count, it is WHICH RING is made of
+   * what, and that is population data even though the geometry is not.
+   *
+   * The ring GEOMETRY (how many, how far out, how thinned) deliberately
+   * stays on the map class — that is the map's shape, not its population,
+   * and a map named Seven Rings does not get its ring count from a table.
+   */
+  tileRings?: readonly number[];
 }
 
 // ── Variant-specific completion hooks ──────────────────────────────

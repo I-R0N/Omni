@@ -182,7 +182,7 @@ function localDensityBoost(cellCount: number): number {
  * partners use a higher cohesion blend rate and a larger break
  * factor (slower to detach).
  */
-interface BondEntry {
+export interface ShardBond {
   a: GameEntity;
   b: GameEntity;
   timer: number;
@@ -254,6 +254,33 @@ function metalConvexHull(points: Vector2[]): Vector2[] {
   return lower.concat(upper);
 }
 
+/**
+ * Evaluate a VariantSelector against a target variant id.  Pure
+ * function; no allocation.  Module-level rather than a method because
+ * `render/shardBlend.ts` resolves `blend.appliesTo` with it — one
+ * grammar, evaluated the same way by the sim and by the draw pass.
+ */
+export function selectsVariant(
+  selector: VariantSelector,
+  targetId: ShardVariantId,
+  selfId: ShardVariantId,
+): boolean {
+  if (selector === 'none') return false;
+  if (selector === 'all')  return true;
+  if (selector === 'self') return targetId === selfId;
+  if ('include' in selector) {
+    for (let i = 0; i < selector.include.length; i++) {
+      if (selector.include[i] === targetId) return true;
+    }
+    return false;
+  }
+  // exclude form
+  for (let i = 0; i < selector.exclude.length; i++) {
+    if (selector.exclude[i] === targetId) return false;
+  }
+  return true;
+}
+
 export class ShardSystem {
   /**
    * Regen queue — replaces the two separate queues that lived on
@@ -304,7 +331,17 @@ export class ShardSystem {
    * accumulates a contact timer; when timer >= threshold the pair
    * composes.
    */
-  private bonds: BondEntry[] = [];
+  private bonds: ShardBond[] = [];
+
+  /**
+   * Read-only view of the live bonds, for the render layer's blend
+   * pass (`render/shardBlend.ts`).  Returns the internal array by
+   * reference — a per-frame copy of a few hundred entries is exactly
+   * the kind of allocation CLAUDE.md §8 warns about — so callers must
+   * treat it as a same-frame snapshot and never hold or mutate it.
+   * `tickBonds` compacts this array in place every sim step.
+   */
+  public get liveBonds(): readonly ShardBond[] { return this.bonds; }
   // Peak per-bond local merge-rate multiplier applied last tickBonds —
   // exposed for the DBG "merge rate" readout (replaces the old global
   // count-driven multiplier).  1.0 = no local acceleration this frame.
@@ -379,6 +416,11 @@ export class ShardSystem {
   private _polyAngle: number[] = [];
   private _polyRadius: number[] = [];
   private _polyIdx: number[] = [];
+
+  /** SFX sink (SFX_INVENTORY §6 material chatter).  Set once by
+   *  GameEngine; null in any context without audio.  Same generic shape
+   *  as PhysicsSystem.sfx — this system stays free of audio state. */
+  public sfx: ((id: string, x: number, y: number) => void) | null = null;
 
   constructor(private particles: ParticleSystem) {}
 
@@ -658,6 +700,7 @@ export class ShardSystem {
     const popBurst = variant.regen.popBurst;
     if (popBurst) {
       entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
+      this.sfx?.('move.regenpop', entity.position.x, entity.position.y);
       this.particles.spawn(entities, entity.position, popBurst.chipCount, entity.color || '#6366f1', {
         speedMin: popBurst.chipSpeedMin,
         speedMax: popBurst.chipSpeedMax,
@@ -1198,24 +1241,13 @@ export class ShardSystem {
   // ── Merge dispatch ────────────────────────────────────────────────
 
   /**
-   * Evaluate a VariantSelector against a target variant id.  Pure
-   * function; no allocation.
+   * Evaluate a VariantSelector against a target variant id.  Delegates
+   * to the module-level `selectsVariant` so the render layer's blend
+   * pass (which reads `blend.appliesTo`) evaluates the same grammar
+   * rather than re-deriving it.
    */
   private selects(selector: VariantSelector, targetId: ShardVariantId, selfId: ShardVariantId): boolean {
-    if (selector === 'none') return false;
-    if (selector === 'all')  return true;
-    if (selector === 'self') return targetId === selfId;
-    if ('include' in selector) {
-      for (let i = 0; i < selector.include.length; i++) {
-        if (selector.include[i] === targetId) return true;
-      }
-      return false;
-    }
-    // exclude form
-    for (let i = 0; i < selector.exclude.length; i++) {
-      if (selector.exclude[i] === targetId) return false;
-    }
-    return true;
+    return selectsVariant(selector, targetId, selfId);
   }
 
   /**
@@ -2176,6 +2208,7 @@ export class ShardSystem {
       }
       if (mutated) {
         e._satCacheAxes = undefined;
+        e._occluderR = undefined;   // the shadow radius is derived from the polygon
         if (e._staticCached === true) e._staticCached = false;
       }
     }
@@ -2195,6 +2228,10 @@ export class ShardSystem {
     variant: 'plastic-shard' | 'glass-shard',
     entities: GameEntity[],
   ): void {
+    // Crystallisation — fragments locking into a solid.  Fired here
+    // because every snap path releases debris, so this is the one site
+    // all of them pass through.
+    this.sfx?.('move.tilesnap', pos.x, pos.y);
     const variantDef = SHARD_VARIANTS[variant];
     const childSpawn = variantDef.spawn;
     const size = TILE_SNAP.DEBRIS_DIAMETER;
