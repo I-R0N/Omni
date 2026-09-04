@@ -29,6 +29,27 @@ plan:
 
 Element IDs (`A1`, `B2`, …) are the handles the guidance prompts should use.
 
+**Companion doc + precedence (user directive, 2026-09-03).**
+`docs/PORTAL_AND_WORLD_LAYER_PLAN.md` (from the PR #92 portal session) owns
+PORTALS and OVERWORLD LAYERING in detail — what a portal is, the layer
+model, discovery rules, topologies — and **takes precedence over this plan
+where the two overlap** (concretely: parts of G3, and the "Level-1/Level-2
+arena" framing).  This plan stays authoritative on phase order, element
+IDs, gauntlet-vs-session calls, and every system that doc does not cover.
+That doc uses this plan's element IDs; its §7 is the interface table.
+Where this plan touches portals below, it points at that doc rather than
+restating it.
+
+One axis distinction from that doc worth internalising before reading
+Phase G: this plan's **Level-1..4 arena ladder is about visual fidelity
+and player capability** (backdrop → atmosphere → surface walking).  The
+portal doc adds an orthogonal **containment hierarchy** — universe ⊃
+galaxy ⊃ solar system ⊃ planet ⊃ moon/station — which says what contains
+what, not how it is drawn.  A run starts partway down (planet or solar
+system), with layers above gated behind engine tiers (B4).  Keeping the
+two axes separate is what stops the art ladder constraining the world
+graph; nothing in this plan's phases should couple them.
+
 ---
 
 ## 1. The request list, mapped to elements
@@ -52,8 +73,11 @@ Element IDs (`A1`, `B2`, …) are the handles the guidance prompts should use.
 | Bubble hive structure (deposit growth) | E3 | E |
 | Near-indestructible slow elder bubbles + invasive storyline | E4 | E |
 | Persistence (save game state + per-node arena state) | F1–F2 | F |
-| Universe map: node/edge network of procedurally generated arenas | G1–G2 | G |
-| Level 2 arenas (planet backdrop, parallax rotation) | G3 | G |
+| Universe map: node identity + explicit edges (graph schema, no generation) | G1 | **Promoted: runs just before F** |
+| Universe map: procedurally generated arenas per node | G2 | G |
+| Level 2 arenas (planet backdrop, parallax rotation) / layer-keyed gateways | G3 | G |
+| Hidden wormholes (unlabelled leaf-node portals, found from their physics) | G4 | G |
+| Maze / labyrinth portal modes | G5 | G |
 | Level 3 arenas (atmosphere / near-orbit of station/frigate) | PARKED | — |
 | Level 4 arenas (surface landing + walking) | PARKED | — |
 | GPS-coordinate-tied shared overworld (all local players' bases) | PARKED | — |
@@ -135,6 +159,17 @@ modules; effect zeroed when adjacency-offline (the Light's
 `applyModuleEffects` pattern).  Phase D note: scanner survives the module
 rework as a catalog row.
 
+**Forward constraint (PORTAL_AND_WORLD_LAYER_PLAN §4):** the scanner is
+the designated *reveal mechanism for hidden wormholes* (G4) — its Mk III
+"portals/POIs map-wide" tier is what will flip an undiscovered wormhole to
+labelled/indicated/blipped.  A4 ships long before hidden portals exist, so
+it must NOT assume them: with no scanner installed, behaviour degrades to
+today's portal gating *exactly* (the degrade rule above, now load-bearing
+against the existing test suite).  And note for the A4 design: discovered
+state is **per node**, so when G4 lands it becomes a consumer of node
+identity (G1) and persistence (F1/F2), never a render-side flag — don't
+build A4 state anywhere that would fight that.
+
 ### A5 — Purchasable module slots (stretch, only if Phase A goes fast)
 
 The request ("stations sell new module slots, capped per ship") is really
@@ -157,7 +192,11 @@ branch to `claude/plan-completion` and proceed with the `plan-completion` →
 ## 3. Phases B–G — post-merge sequence (new guidance session)
 
 Ordered by dependency, not by excitement.  Each phase is mergeable on its
-own; later phases assume earlier ones.
+own; later phases assume earlier ones.  One deliberate out-of-letter-order
+exception: **G1 (node identity + edges) runs just before Phase F** — see
+Phase G; the ID stays stable, only the sequencing moved.
+
+Running order: **B → C → D → E → G1 → F → G2/G3/G4/G5.**
 
 ### Phase B — Mining foundation  *(GAUNTLET: "mining gauntlet")*
 
@@ -239,7 +278,14 @@ never replaces it.
   (salvage / materials / minor / major modules) inside designated arena
   descriptors.  NOTE: the removed card-choice modal (`cardChoicePending`
   loop short-circuit) is the exact UI/loop pattern this revives — check
-  git history before rebuilding it from scratch.
+  git history before rebuilding it from scratch.  Structurally a roguelike
+  descent is one *path-shaped* traversal of the same node/edge graph the
+  layer hierarchy and the maze modes use (PORTAL_AND_WORLD_LAYER_PLAN §5)
+  — D4 owns the reward loop, not a private topology.  And
+  `openDescentPortal` stays UNCALLED until G1's node identity lands (that
+  doc's §8.5): its destination today is a random arena descriptor, and the
+  layer hierarchy is about to define what "deeper" means; re-enabling is
+  the same one line afterwards.
 - **D5 — Secret/super modules.**  Mark ≥ IV variants flagged
   `discoveryOnly` — excluded from every shop catalog, granted only by
   drops/discovery (boss module grants are the existing precedent:
@@ -284,27 +330,81 @@ beyond in-memory run state" assumption is load-bearing in many places
   the run-scoped state (credits, outfit, inventory, ship, counters), to
   `localStorage` first.  Schema versioning from day one.
 - **F2 — Arena-state persistence.**  Per-node arena snapshots (destroyed
-  tiles, hive growth, station damage) — this *deliberately reverses* the
-  documented "destroyed tiles do NOT persist across re-entry" invariant,
-  so it lands only with Phase G's node identity to key on.  F2 therefore
-  interleaves with G, but F1 is independent and comes first (C's colony
+  tiles, hive growth, station damage, wormhole discovered-state) — this
+  *deliberately reverses* the documented "destroyed tiles do NOT persist
+  across re-entry" invariant, and it keys on node identity.  With **G1
+  promoted to run just before this phase** (see Phase G — accepted
+  recommendation from PORTAL_AND_WORLD_LAYER_PLAN §6), the previously
+  documented F2↔G interleave is gone: F2 has node ids to key on and runs
+  as a normal part of F.  F1 remains independent of the graph (C's colony
   progression is much stronger with F1 in hand — consider pulling F1
   forward, between C and D, if the guidance session wants saves sooner).
+  §5's node-memory decision (#8) must be answered before F2 *or G1* is
+  built.
 
-### Phase G — Universe map  *(GAUNTLET: "worldgen gauntlet")*
+### Phase G — Universe map  *(GAUNTLET: "worldgen gauntlet" — except G1)*
 
-- **G1 — Node/edge graph.**  `MAP_DESCRIPTORS` generalised: descriptors
-  become node instances (stable node id + generator params + seed) in a
-  graph; portals become edges.  The descent-target "placeholder seam for
-  procedural AREAS" called out in CLAUDE.md §3 is exactly this.
-- **G2 — Procedural Level-1 arenas.**  Seeded generation of open-space
+Portals and layering detail here is owned by
+`PORTAL_AND_WORLD_LAYER_PLAN.md` (precedence note in §0 above); this
+section says where each piece sits in the phase order and points there.
+
+- **G1 — Node identity + explicit edges.  PROMOTED: runs just before
+  Phase F, as its own bounded session, not part of the worldgen
+  gauntlet.**  This accepts the portal doc's §6 recommendation and
+  resolves the live conflict with PARKING_LOT §"A real map GRAPH" ("build
+  the graph first").  Scope is deliberately the *small* half: a schema
+  change to `MAP_DESCRIPTORS` — stable node id (already there), a
+  layer/parent relationship, and edges declared as data instead of
+  hardcoded per map class (`HUB_PORTAL_SITES`, `RETURN_PORTAL_OFFSET`,
+  `addReturnPortal()`).  **No generation.**  A refactor of what already
+  exists, over the hand-authored maps that already exist; it is what F2,
+  D4 and G4's discovered-state actually need.  `portalTargetId` being a
+  descriptor id (never a bare MapType) is the seam it builds on.  §5
+  decision #8 (does a node remember anything, and for how long) must be
+  answered first or this gets built twice.
+- **G2 — Procedural arena generation.**  Seeded generation of open-space
   arenas (population tables parameterised per node; 0–N stations; up to
   ~6 inter-node portals).  `MAP_POPULATION` becomes the generator's
-  output rather than a hand table for these.
-- **G3 — Level-2 arenas.**  Planet/celestial backdrop: a parallax body in
-  `BackgroundManager` (respect the star-field gauntlet's device-pixel and
-  blit-filter findings before drawing anything pre-rendered), portal
-  graphics restyled as planets/stations.
+  output rather than a hand table for these.  Unchanged by the portal
+  doc, and the large half of what used to be "G1+G2".
+- **G3 — Layer-keyed gateways + celestial backdrops.**  *Superseded in
+  part* by PORTAL_AND_WORLD_LAYER_PLAN §3a: the old line "portal graphics
+  restyled as planets/stations" is replaced by the **gateway taxonomy** —
+  a signposted portal is drawn as a parallax celestial body whose TYPE is
+  the layer it leads to (galaxy / solar system / star / planet / moon /
+  station / freighter), so the player reads their altitude off what they
+  can fly into.  The parallax-planet *arena backdrop* (the old "Level-2
+  arena" fidelity work) stays G3's alongside it — same BackgroundManager
+  machinery.  Hard rendering constraint from
+  `GAUNTLET_STARFIELD_LOG.md` S4: anything pre-rendered and blitted at a
+  fractional or dpr-scaled offset reintroduces the browser-dependent
+  `drawImage` filter bug that gauntlet removed — parallax layers are
+  drawn analytically or blitted on whole device pixels.  Art source is §5
+  decision #9 (recommend procedural, so G2's seeds can drive it).
+- **G4 — Hidden wormholes.**  *(New element, from the portal doc §3b/§4.)*
+  The leaf-node door: a portal with no label, no off-screen chevron and no
+  minimap blip until discovered — found from the physics the engine
+  already simulates (matter spiralling in, ejected objects flung back
+  out, the star lens, the pull).  A4's scanner is the reveal mechanism;
+  discovered-state is per node (G1 + F1/F2).  Known tension to resolve by
+  play-test, not on paper: the shipped well was retuned DOWN (SIZE 70 /
+  g1500 / range 525; peak pull 0.15 px/step) because it read as too
+  powerful, and the same subtlety makes a rift hard to spot — the portal
+  doc recommends hidden portals carry their own stronger well plus
+  slightly louder cues, A/B'd on the existing DBG Portals knobs (§5
+  decision #10).  Runs as a session with DBG A/B, after G1; can land
+  before or alongside G2.
+- **G5 — Maze / labyrinth modes.**  *(New element, from the portal doc
+  §5.)*  Once portals are edges (G1), a maze is a *generator* over the
+  same node/edge graph — many small nodes with several edges each, some
+  cyclic; a labyrinth is that plus a terminal boss/reward node.  No new
+  portal engine code.  Two things a maze needs that the hierarchy does
+  not: **more than one exit edge per node** (`addReturnPortal()` hardcodes
+  exactly one way home today — G1 should leave room for this even if G5
+  ships later) and **a way to not be lost** (§5 decision #11 — small
+  mazes, a map screen, or physical breadcrumbs; a map screen is a new UI
+  surface and must be costed before a maze mode is committed).  Sits in
+  the worldgen gauntlet after G2.
 
 ### Parked (recorded in PARKING_LOT.md when this plan is adopted)
 
@@ -332,7 +432,9 @@ beyond in-memory run state" assumption is load-bearing in many places
 | D (outfitting) | **Gauntlet** | Load-bearing system rebuild, staged milestones |
 | E (ecology) | **Gauntlet** | Behavior/feel iteration + perf A/Bs |
 | F (persistence) | **Gauntlet** | Invariant verification (round-trip correctness) |
-| G (worldgen) | **Gauntlet** | Seeded-generation iteration + perf |
+| G1 (node identity) | Session | Bounded schema refactor of what exists; no generation |
+| G2/G3/G5 (worldgen) | **Gauntlet** | Seeded-generation iteration + perf |
+| G4 (hidden wormholes) | Session + DBG A/B | Bounded feature; cue strength is a play-test on existing knobs |
 
 Every gauntlet keeps a `docs/GAUNTLET_<NAME>_LOG.md` with numbered
 milestones and decisions, per house pattern.
@@ -365,6 +467,30 @@ milestones and decisions, per house pattern.
    today as deliberately in-memory.
 7. **(PARKED) GPS overworld** — confirm parked, or commission a separate
    architecture study; it cannot ride a phase.
+
+Added from `PORTAL_AND_WORLD_LAYER_PLAN.md` §8 (that doc carries the full
+argument for each; listed here so the guidance session has one checklist):
+
+8. **(G1/F2) Node memory.**  Does a node remember anything, and for how
+   long?  Distinct from #6 (which is about the *player's* save): this one
+   shapes the graph schema itself.  Answer **before G1 is built** or it
+   gets built twice.  Existing positions: GAME_STRUCTURE_STRATEGY's
+   persistence table, PARKING_LOT §"Portal persistence" Shapes 1/2.
+9. **(G3) Gateway art source** — procedural bodies vs. authored layered
+   images.  Recommend procedural for the first cut, so G2's seeded
+   generation can drive it (and every other thing in this game is drawn,
+   not blitted).
+10. **(G4) Discovery cue strength** — own stronger well, louder cues at
+    the same pull, or scanner-first.  A/B on the DBG Portals knobs; do
+    not decide on paper.
+11. **(G5) Maze legibility** — small mazes, a map screen, or physical
+    breadcrumbs (the transit-debris trail is a candidate).  A map screen
+    is a genuinely new UI surface: cost it before committing to a maze
+    mode.
+12. **(C1/G) Starting layer** — planet overworld or solar-system
+    overworld.  Interacts with C1, which currently assumes an isolated
+    station; decide before C1's map ships a flavour the layer model has
+    to unwrite.
 
 ## 6. Naming note
 
