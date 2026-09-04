@@ -19,7 +19,7 @@
  *  file, which is the alarm working.
  */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, dialByName } from './helpers';
 
 /** Default step of `STAR_DENSITY_CYCLE` — stars per 10 000 CSS px². */
 const DEFAULT_DENSITY = 729;
@@ -687,6 +687,115 @@ test.describe('the star field', () => {
 
     // …and the spread runs the OTHER way, by construction.
     expect(sparse.spreadHi).toBeGreaterThan(dense.spreadHi * 3);
+
+    watch.assertClean();
+  });
+});
+
+/** PORTAL_LENS_CYCLE's length — how many clicks can be needed to reach any
+ *  step from any other.  Kept here rather than imported: the suites drive the
+ *  built app through its debug handles, never the source constants. */
+const PORTAL_LENS_STEPS = 10;
+
+test.describe('the wormhole star lens', () => {
+  /** The DBG Lens knob has to CHANGE something, and the twist must never wind
+   *  up — the two halves of one shipped bug.
+   *
+   *  The shear was `f^2 x (WIND + elapsed x SWIRL_RATE)`: an angle growing
+   *  without bound with wall-clock time.  Every 2*PI of accumulated twist is
+   *  one visible band of stars, so the field wound itself into ~4 bands a
+   *  minute in and ~10 after three; and scaling a 60-radian twist by 0.25
+   *  still leaves ~15 radians, far past 2*PI, so the knob could not change the
+   *  band COUNT and read as doing nothing.
+   *
+   *  Measured off `BackgroundManager.lastLensTwist` / `lastLensPush` — the
+   *  values the real render path actually applied on its last frame.  Sampling
+   *  the CANVAS was tried first and abandoned: "how bent does the sky look"
+   *  turned out to depend on the fog and light layers and on where the camera
+   *  had settled, so it measured the scene as much as the lens and inverted
+   *  under load.  These are the inputs the bug lived in, and the boundedness
+   *  invariant below cannot be checked off pixels at all — a field wound four
+   *  turns looks much like one wound five in any single frame. */
+  const lensState = (page: any) => engine(page, e => {
+    const bg = e.renderer.backgroundManager;
+    return { twist: bg.lastLensTwist as number, push: bg.lastLensPush as number };
+  });
+
+  /** Drive the Lens knob to a NAMED step and prove it landed there.
+   *  Cycling N times from an assumed starting index is what makes a knob test
+   *  order-dependent: one stray cycle and every later reading is silently
+   *  taken at the wrong setting. */
+  const setLens = (page: any, label: string) =>
+    dialByName(page, 'portalLensName', label,
+      e => (e as any).dbg.cyclePortalLens(), PORTAL_LENS_STEPS);
+
+  /** Park beside the hub's Deep Space rift, the biggest horizon, so a lens is
+   *  live and on screen for the readings below. */
+  const parkAtRift = (page: any) => engine(page, e => {
+    const p = e.portals.find((x: any) => x.portalTargetId === 'arena_universe');
+    e.player.position.x = p.position.x;
+    e.player.position.y = p.position.y + 260;
+    e.player.velocity.x = 0;
+    e.player.velocity.y = 0;
+  });
+
+  test('the Lens knob scales the warp the render path actually applies', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await parkAtRift(page);
+    await page.waitForTimeout(300);
+
+    await setLens(page, '1×');
+    const full = await lensState(page);
+    await setLens(page, '0.5×');
+    const half = await lensState(page);
+    await setLens(page, '0.25×');
+    const quarter = await lensState(page);
+    await setLens(page, 'off');
+    const off = await lensState(page);
+
+    // A live lens at all — otherwise every comparison below is 0 vs 0.
+    expect(full.push, 'the rift lenses the sky at 1x').toBeGreaterThan(0);
+
+    // Each step down genuinely flattens BOTH halves of the distortion: how far
+    // stars are pushed off the throat, and how far the sky is sheared round it.
+    expect(half.push).toBeLessThan(full.push * 0.75);
+    expect(quarter.push).toBeLessThan(half.push * 0.75);
+    expect(Math.abs(half.twist)).toBeLessThan(Math.abs(full.twist) * 0.75);
+    expect(Math.abs(quarter.twist)).toBeLessThan(Math.abs(half.twist) * 0.75);
+
+    // "off" is off — no push, no shear, and the star loop takes its original
+    // untouched path.
+    expect(off.push).toBe(0);
+    expect(off.twist).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the twist stays under one full turn, however long the run goes', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await parkAtRift(page);
+    await setLens(page, '1×');
+
+    // THE BAND INVARIANT.  Total shear below 2*PI means the field cannot wind
+    // into bands — not "does not today", but cannot, whatever the elapsed
+    // time.  The old shear passed 2*PI about two seconds in and never came
+    // back, so sampling across a window is enough to catch a regression to
+    // accumulating behaviour; the assertion is on the SHAPE (bounded), which a
+    // wound field fails immediately and permanently.
+    const TWO_PI = Math.PI * 2;
+    let peak = 0;
+    for (let i = 0; i < 12; i++) {
+      await page.waitForTimeout(250);
+      const { twist } = await lensState(page);
+      peak = Math.max(peak, Math.abs(twist));
+      expect(Math.abs(twist), `twist ${twist} rad at sample ${i} must stay under one turn`)
+        .toBeLessThan(TWO_PI);
+    }
+    // And it is genuinely BREATHING rather than pinned at zero — the beat is
+    // alive, it just does not accumulate.
+    expect(peak).toBeGreaterThan(0);
 
     watch.assertClean();
   });

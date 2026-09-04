@@ -34,7 +34,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForEngine } from './helpers';
+import { boot, engine, startRun, waitForEngine, quietScene } from './helpers';
 
 /** Park the player in the densest static-tile cluster on the current map and
  *  hold it there, so a light actually has occluders around it.  Returns the
@@ -458,8 +458,29 @@ test.describe('occluder collection', () => {
       e.player.position.x = 0; e.player.position.y = 0;
       e.player.velocity.x = 0; e.player.velocity.y = 0;
 
+      // The field is EMPTIED BY PARKING, not by deactivating.  Deactivating a
+      // rock-shard is exactly what the engine reads as "an asteroid just
+      // died": it shatters the corpse into fresh fragments AND the
+      // count-based keeper tops the belt back up, so a scene cleared that way
+      // quietly rebuilds itself while the settle window runs — measured at up
+      // to seven occluders this test never placed, scattered 100–280 units
+      // out, which is what made the occluder counts here load-dependent.
+      // Parking moves everything unwanted far outside the light's reach and
+      // leaves it ALIVE, so there is nothing to shatter and nothing to
+      // replace.
+      const park = (keep: Set<any>, ax: number, ay: number) => {
+        let i = 0;
+        for (const t of e.currentMap.entities) {
+          if (t.type !== 'STRUCTURE' || keep.has(t)) continue;
+          t.active = true;
+          const a = i++ * 0.37;
+          t.position.x = ax + 3800 + Math.cos(a) * 600;
+          t.position.y = ay + 3800 + Math.sin(a) * 600;
+          t.velocity.x = 0; t.velocity.y = 0;
+        }
+      };
       const all = e.currentMap.entities.filter((t: any) => t.type === 'STRUCTURE');
-      for (const t of all) t.active = false;
+      park(new Set(), 0, 0);
       const tiles = all.filter((t: any) => t.mass === Infinity
                                         && String(t.shardVariant).indexOf('nebula') < 0);
       const shards = all.filter((t: any) => t.mass !== Infinity
@@ -485,12 +506,17 @@ test.describe('occluder collection', () => {
       e.renderer.setLighting('unified');
       if (!e.renderer.getShardShadows()) e.renderer.toggleShardShadows();
 
-      // Hold the player at the origin while the dynamic grid refills.
+      // Hold the player at the origin while the dynamic grid refills — and
+      // re-park anything the engine put back (see `park`).
+      const built = new Set<any>();
+      for (let i = 0; i < NT && i < tiles.length; i++) built.add(tiles[i]);
+      for (let i = 0; i < NS && i < shards.length; i++) built.add(shards[i]);
       await new Promise<void>(res => {
         let k = 0;
         const t = () => {
           e.player.position.x = 0; e.player.position.y = 0;
           e.player.velocity.x = 0; e.player.velocity.y = 0;
+          park(built, 0, 0);
           if (++k < 30) requestAnimationFrame(t); else res();
         };
         requestAnimationFrame(t);
@@ -527,8 +553,21 @@ test.describe('occluder collection', () => {
     //   FAT    — a regular hexagon, over the floor either way.  The control:
     //            if the scene itself failed to build, both vanish together.
     const r = await engine(page, async (e) => {
+      // Same parking trick as 'debris cannot blank out the terrain shadows' —
+      // see the comment there for why an emptied field refills itself.
+      const park = (keep: Set<any>, ax: number, ay: number) => {
+        let i = 0;
+        for (const t of e.currentMap.entities) {
+          if (t.type !== 'STRUCTURE' || keep.has(t)) continue;
+          t.active = true;
+          const a = i++ * 0.37;
+          t.position.x = ax + 3800 + Math.cos(a) * 600;
+          t.position.y = ay + 3800 + Math.sin(a) * 600;
+          t.velocity.x = 0; t.velocity.y = 0;
+        }
+      };
       const all = e.currentMap.entities.filter((t: any) => t.type === 'STRUCTURE');
-      for (const t of all) t.active = false;
+      park(new Set(), e.player.position.x, e.player.position.y);
       const shards = all.filter((t: any) => t.mass !== Infinity
                                          && String(t.shardVariant).indexOf('nebula') < 0);
       if (shards.length < 2) return { built: false } as any;
@@ -574,6 +613,7 @@ test.describe('occluder collection', () => {
           e.player.velocity.x = 0; e.player.velocity.y = 0;
           place(shards[0], px + 90, py, shards[0].polygonPoints, 10);
           place(shards[1], px, py + 90, shards[1].polygonPoints, 10);
+          park(new Set([shards[0], shards[1]]), px, py);
           if (++k < 30) requestAnimationFrame(t); else res();
         };
         requestAnimationFrame(t);
@@ -591,7 +631,10 @@ test.describe('occluder collection', () => {
     });
 
     expect(r.built).toBe(true);
-    expect(r.n).toBe(2);
+    // Carry the collected set into the message: "expected 2, got 3" on its own
+    // says nothing about WHICH third body crept into a scene this test built
+    // itself, which is the only thing worth knowing when it fails.
+    expect(r.n, `occluders: ${JSON.stringify(r.occ)}`).toBe(2);
     const sliver = r.occ.find((o: any) => Math.abs(o.dx - 90) < 2 && Math.abs(o.dy) < 2);
     const fat = r.occ.find((o: any) => Math.abs(o.dy - 90) < 2 && Math.abs(o.dx) < 2);
     expect(fat).toBeTruthy();
@@ -665,6 +708,8 @@ test.describe('occluder collection', () => {
   test('refraction: OFF by default, and ON it MOVES the light rather than adding it', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // SHIPS ON as of A5h (user call, after device testing).  It was off while
     // the question the prototype exists to ask — is a caustic legible at a
@@ -787,6 +832,8 @@ test.describe('occluder collection', () => {
   test('the brightness cycle really dims the light, and the tier cycle does not', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // The distinction this pins is the one that was reported from the
     // device: "I'm at the lowest setting and it still feels very bright".
@@ -877,6 +924,8 @@ test.describe('occluder collection', () => {
   test('emissive: lit metal re-radiates, and only when asked to', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // SHIPS ON as of A5h (user call, after device testing) — it is what metal
     // and glass do with light now that the contact-driven glow is deleted.
@@ -1010,6 +1059,8 @@ test.describe('occluder collection', () => {
     expect(d.tier).toBe('std');
 
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // The ladder itself, walked once.  Its rungs must MOVE TOGETHER — the
     // cost of a shadowing emitter is almost entirely its own occluder
@@ -1095,6 +1146,29 @@ test.describe('occluder collection', () => {
       for (const t of e.currentMap.entities) {
         if (t.type === 'STRUCTURE') t.active = false;
       }
+      // QUIET THE SCENE, AND KEEP IT QUIET.  The structures are cleared
+      // above; the MOVERS are the problem, and this map's spawn sits ~300
+      // units from its return rift, so wave enemies drift, light the scene
+      // and are steered around by the rift's own avoidance push — all of it
+      // between the three samples below.  The measurement compares colour
+      // SHIFTS across knob positions, so anything moving is noise added to
+      // the very quantity being read.  Measured: leaving them in put the blue
+      // margin anywhere from +10.0 to -1.0 against a threshold of 0.
+      //
+      // Clearing them ONCE was not enough, because the field refills itself:
+      // the wave ladder keeps spawning and the ambient bubble keeper tops its
+      // own population back up, and the three settle windows are over a
+      // second of wall clock between them — longer on a slow runner, which is
+      // where this last surfaced.  So halt the ladder outright and sweep the
+      // movers every settle frame instead.
+      e.waves.halted = true;
+      const quiet = () => {
+        for (const t of e.currentMap.entities) {
+          if (!t.active) continue;
+          if (t.type === 'ENEMY' || t.isSnitch === true) t.active = false;
+        }
+      };
+      quiet();
       const pick = tiles.find((t: any) => t.shardVariant === 'nebula-tile');
       if (!pick) return { built: false } as any;
       pick.active = true;
@@ -1115,6 +1189,7 @@ test.describe('occluder collection', () => {
         let n = 0;
         const t = () => { e.player.position.x = 0; e.player.position.y = 0;
           e.player.velocity.x = 0; e.player.velocity.y = 0;
+          quiet();
           if (++n < 25) requestAnimationFrame(t); else res(); };
         requestAnimationFrame(t);
       });
@@ -1143,23 +1218,36 @@ test.describe('occluder collection', () => {
                  occ: e.renderer._lightOccluderCount,
                  lights: e.renderer.lastLightingLights };
       };
+      // EACH MEASUREMENT CARRIES ITS OWN CONTROL.  The colour assertions are
+      // differences of differences a couple of units wide, and the two lit
+      // samples are taken seconds apart in a live scene — so a single
+      // emissive-off baseline taken at the start is a baseline that has since
+      // moved (the fog memory keeps accumulating, the backdrop keeps
+      // animating), and the drift lands directly on the margin.  Taking the
+      // control ADJACENT to its measurement makes the pair a true A/B: with
+      // emission off there is no emitter at all, so the control reads the
+      // scene as it is right now and nothing else.
       const mix = async (name: string) => {
         for (let i = 0; i < 8 && e.renderer.getTintMix() !== name; i++) {
           e.renderer.cycleTintMix();
         }
-        return sample(true);
+        const base = await sample(false);
+        const lit = await sample(true);
+        return { base, lit };
       };
       // The COLOUR assertions run at the ends of the tint-mix knob, because
       // at the shipped default an emitter is deliberately half the body's
       // colour and half the light's — so "it emits red" is only the whole
       // truth at `full`, and `off` is where the old behaviour lives.
       const off = await sample(false);
-      const on = await mix('full');
-      const asLight = await mix('off');
+      const onPair = await mix('full');
+      const asLightPair = await mix('off');
+      const on = onPair.lit, asLight = asLightPair.lit;
       for (let i = 0; i < 8 && e.renderer.getTintMix() !== 'off'; i++) {
         e.renderer.cycleTintMix();
       }
-      return { built: true, off, on, asLight, tint: pick._emitTint };
+      return { built: true, off, on, asLight, tint: pick._emitTint,
+               onBase: onPair.base, asLightBase: asLightPair.base };
     });
 
     expect(r.built).toBe(true);
@@ -1177,16 +1265,17 @@ test.describe('occluder collection', () => {
     // belongs to the alpha, so a dark surface still radiates a bright light
     // of its own hue.
     expect(r.tint).toBe('255, 0, 0');
-    const d = r.on.rgb.map((v: number, i: number) => v - r.off.rgb[i]);
+    const d = r.on.rgb.map((v: number, i: number) => v - r.onBase.rgb[i]);
     expect(d[0]).toBeGreaterThan(1);          // it lit something...
     expect(d[0]).toBeGreaterThan(d[1]);       // ...in RED, not in the
     expect(d[0]).toBeGreaterThan(d[2]);       // player light's blue-green.
     // ...and at the other end of the knob the same body emits in the LIGHT's
     // colour instead, which is what makes the mix a mix rather than a label.
-    // Asserted as a SHIFT rather than against an absolute baseline: the two
-    // samples are taken at different moments in a live scene, so what is
-    // stable is the direction the knob moves the colour, not the level.
-    const l = r.asLight.rgb.map((v: number, i: number) => v - r.off.rgb[i]);
+    // Asserted as a SHIFT rather than against an absolute baseline, and each
+    // shift is measured against its OWN adjacent emissive-off control (see
+    // `mix`): what is stable across a live scene is the direction the knob
+    // moves the colour, not the level.
+    const l = r.asLight.rgb.map((v: number, i: number) => v - r.asLightBase.rgb[i]);
     expect(l[2] - l[0]).toBeGreaterThan(d[2] - d[0]);
     expect(l[1] - l[0]).toBeGreaterThan(d[1] - d[0]);
     watch.assertClean();
@@ -1195,6 +1284,8 @@ test.describe('occluder collection', () => {
   test('emitters FADE rather than pop, and `off` restores the pop', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     const r = await engine(page, async (e) => {
       const tiles = e.currentMap.entities.filter(
@@ -1728,6 +1819,8 @@ test.describe('occluder collection', () => {
   test('the material colour rides the light it passes on', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // SHIPS OFF: real, subtle, and not free — see TINT_MIX_CYCLE.  The test
     // drives the knob to both ends itself, so the default it asserts is only
@@ -1777,11 +1870,14 @@ test.describe('occluder collection', () => {
         };
         requestAnimationFrame(t);
       });
+      let lastOff = 0;
+      let lastGeom: { w: number; h: number; zoom: number } = { w: 0, h: 0, zoom: 0 };
       // Mean gain over a small box INSIDE the umbra, where the transmitted
       // light is — one pixel of a 5-luminance signal is noise.
       const umbra = async () => {
         const read = () => {
           const cv = document.querySelector('canvas') as HTMLCanvasElement;
+          let offCanvas = 0;
           const g = cv.getContext('2d')!;
           const dpr = cv.width / 390, W = cv.width / dpr, H = cv.height / dpr;
           const cam = e.camera, shake = cam.shakeOffset || { x: 0, y: 0 };
@@ -1792,18 +1888,33 @@ test.describe('occluder collection', () => {
           let rr = 0, gg = 0, bb = 0, n = 0;
           for (const [wx, wy] of [[180, 0], [200, 0], [220, 0], [200, 10], [200, -10]]) {
             const [x, y] = sx(wx, wy);
+            // EVERY PROBE MUST BE ON THE CANVAS.  `getImageData` outside it
+            // reads zeros, which is indistinguishable from "no light here" —
+            // so an off-screen sample silently drags a mean down instead of
+            // failing.  The umbra ring reaches x = 220 world units, which is
+            // only inside a 390-wide viewport once the camera zoom says so,
+            // and zoom is run state.  Record it rather than assume it.
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) offCanvas++;
             const d = g.getImageData(x, y, 1, 1).data;
             rr += d[0]; gg += d[1]; bb += d[2]; n++;
           }
           // OPEN SPACE at the same distance, off the shadow axis: the light
           // that ARRIVED, against which the transmitted light is bounded.
-          let o = 0, on2 = 0;
+          // Its GREEN is carried alongside the luminance, because the bound
+          // has to compare like with like: the light is blue-green (125, 211,
+          // 252), so its green sits 7.7% above its own mean and "umbra green
+          // < open-space MEAN" is a materially tighter claim than the
+          // physical one it is written to make.
+          let o = 0, og = 0, on2 = 0;
           for (const [wx, wy] of [[0, 200], [0, -200], [140, 140]]) {
             const [x, y] = sx(wx, wy);
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) offCanvas++;
             const d = g.getImageData(x, y, 1, 1).data;
-            o += (d[0] + d[1] + d[2]) / 3; on2++;
+            o += (d[0] + d[1] + d[2]) / 3; og += d[1]; on2++;
           }
-          return [rr / n, gg / n, bb / n, o / on2];
+          lastOff = offCanvas;
+          lastGeom = { w: cv.width, h: cv.height, zoom: e.camera.zoom };
+          return [rr / n, gg / n, bb / n, o / on2, og / on2];
         };
         e.renderer.setLighting('unified'); await frames(20);
         const on = read();
@@ -1835,7 +1946,8 @@ test.describe('occluder collection', () => {
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== beam0; i++) {
         e.renderer.cycleFlashlight();
       }
-      return { built: true, none, full, cyc, back: e.renderer.getTintMix() };
+      return { built: true, none, full, cyc, back: e.renderer.getTintMix(),
+               offCanvas: lastOff, geom: lastGeom };
     });
 
     expect(r.built).toBe(true);
@@ -1858,8 +1970,16 @@ test.describe('occluder collection', () => {
     // unerased (which is what lets it carry a colour at all), so the bound
     // that matters is the physical one — a body passes light on, it does not
     // make any — measured against open space at the same distance.
-    expect(r.full[1]).toBeLessThan(r.full[3]);
-    expect(r.none[1]).toBeLessThan(r.none[3]);
+    // Compared GREEN to GREEN (index 4), not green to a luminance mean — see
+    // `read`.  And the probe geometry rides along in the message: a sample
+    // that fell off the canvas reads as zero light rather than as an error,
+    // so a failure here has to be able to say whether it measured the scene
+    // or measured nothing.
+    const where = `offCanvas=${r.offCanvas} geom=${JSON.stringify(r.geom)} `
+      + `none=${JSON.stringify(r.none)} full=${JSON.stringify(r.full)}`;
+    expect(r.offCanvas, where).toBe(0);
+    expect(r.full[1], where).toBeLessThan(r.full[4]);
+    expect(r.none[1], where).toBeLessThan(r.none[4]);
     watch.assertClean();
   });
 
@@ -2194,6 +2314,8 @@ test.describe('occluder collection', () => {
   test('A6: shots are world lights — budgeted, culled, and their own colour', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     const r = await engine(page, async (e) => {
       // EMPTY DARK SCENE, radial light pinned: the shot's own light is the
@@ -2295,6 +2417,8 @@ test.describe('occluder collection', () => {
   test('A7: depth darkens the world through the fog, and the hub never does', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // Hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     const r = await engine(page, async (e) => {
       e.renderer.setLighting('unified');

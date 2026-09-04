@@ -12,7 +12,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats, dockAtStation } from './helpers';
+import { boot, engine, stats, startRun, waitForStats, dockAtStation, waitForTransit } from './helpers';
 
 const STAGE_WAVE_COUNT = 6; // BOSS_CONSTANTS.WAVE_INTERVAL (5) + the capstone
 
@@ -238,6 +238,7 @@ test.describe('a boss ends the ladder', () => {
   async function arenaWithWaves(page: any) {
     await startRun(page);
     await engine(page, e => e.transitionToMap('arena_universe'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
     await waitForStats(page, s => s.wavesEnabled !== false, 'the ladder running');
   }
@@ -305,6 +306,7 @@ test.describe('a boss ends the ladder', () => {
     // clears the halt, and nothing else does. Without this the halt would be
     // a one-way door for the rest of the run.
     await engine(page, e => e.transitionToMap('arena_ring'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'RING', 'a fresh arena');
     expect(await engine(page, e => !!e.waves.halted),
       'a new arena runs its own ladder').toBe(false);
@@ -319,6 +321,7 @@ test.describe('stage-clear screen', () => {
   async function clearAStage(page: any, bossId = 'BOSS_WARDEN') {
     await startRun(page);
     await engine(page, e => e.transitionToMap('arena_universe'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
     await engine(page, (e, id: string) => e.debugSpawnBoss(id), bossId);
     await waitForStats(page, s => !!s.boss, 'the boss to warp in');
@@ -428,6 +431,7 @@ test.describe('stage-clear screen', () => {
     });
 
     await engine(page, e => e.transitionToMap('arena_ring', { descend: true }));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'RING', 'stage 2');
 
     const after = await engine(page, e => ({
@@ -462,12 +466,15 @@ test.describe('stage-clear screen', () => {
     const watch = await boot(page);
     await startRun(page);
     await engine(page, e => e.transitionToMap('arena_universe'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
     await engine(page, e => e.transitionToMap('arena_ring', { descend: true }));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'RING', 'stage 2');
     expect(await engine(page, e => e.stageIndex)).toBe(1);
 
     await engine(page, e => e.transitionToMap('overworld'));
+    await waitForTransit(page);
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
     expect(await engine(page, e => e.stageIndex)).toBe(0);
     expect(await engine(page, e => e.waves.waveOffset)).toBe(0);

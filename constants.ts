@@ -5440,6 +5440,257 @@ export function cycleSnitchSpeed(): number {
   return activeSnitchSpeedIndex;
 }
 
+/** Does this entity STEER ITSELF around portals rather than being captured?
+ *
+ *  ONE predicate, so "aware of the rift" is a property of the world rather
+ *  than a behaviour each mover re-implements.  The default is by TYPE — every
+ *  ENEMY (which is what a bubble, a dragon head and a rival all are) plus the
+ *  snitch — so a future roamer built on those types is covered the day it
+ *  exists, with no physics change and nothing to remember.  `avoidsPortals`
+ *  on the entity overrides it in either direction: opt something else in, or
+ *  opt a specific enemy out so a rift can eat it.
+ *
+ *  The PLAYER is deliberately not included: a human is already aware of the
+ *  hole, and taking their steering away is the one thing the tug must never
+ *  do.  Loose matter is not included either — shards and drops spiralling in
+ *  is the effect, not a bug. */
+export function avoidsPortals(e: GameEntity): boolean {
+  if (e.avoidsPortals !== undefined) return e.avoidsPortals;
+  return e.type === EntityType.ENEMY || e.isSnitch === true;
+}
+
+/** The portal's event-horizon radius in WORLD units — the black disc the
+ *  renderer draws AND the radius at which the well swallows a shard.
+ *
+ *  ONE definition, called by both, because they are the same circle: matter
+ *  has to disappear exactly where the hole is drawn, and two copies of this
+ *  arithmetic would drift the moment either side was tuned.  (Same argument
+ *  as `computeMinimapRect` — see CLAUDE.md §8, "ONE screen corner, one rect".)
+ *
+ *  Scales with the DESTINATION's map span, stamped on the entity as
+ *  `portalDestSpan` by `BaseMapLayer.addPortal` — passed as data rather than
+ *  looked up here, because the map classes import `constants`, so reading map
+ *  dimensions from this module would be an import cycle.  A portal with no
+ *  span recorded falls back to the reference (1×) rather than vanishing. */
+export function portalHorizonRadius(e: GameEntity): number {
+  const H = PORTAL_CONSTANTS.HORIZON;
+  const span = e.portalDestSpan;
+  const scale = span && span > 0
+    ? Math.min(H.MAX_SCALE, Math.max(H.MIN_SCALE,
+        Math.pow(span / H.REFERENCE_SPAN, H.EXPONENT)))
+    : 1;
+  return (e.size.x / 2) * H.BASE_FRACTION * scale * getPortalSizeMult();
+}
+
+// ── DBG portal tuning (user call: the rift reads as too POWERFUL) ───────────
+// Five live multipliers over the wormhole's shipped numbers, so how strong a
+// portal is can be judged by FLYING past one rather than by rebuilding.  Every
+// one is applied at the READ, never baked into the portal entity: the entity
+// keeps PORTAL_CONSTANTS as its base truth, so a knob takes effect on the
+// portals already in the world (no map reload) and nothing drifts out of sync.
+//
+// The reported dizziness is a MOTION complaint — strafing the mouth swings the
+// lensed star field back and forth — so the lens is split into two knobs, one
+// for how far it displaces and one for how fast it turns.  Either can be taken
+// to 0 independently, which is what separates "the warp is too strong" from
+// "the warp must not MOVE" as answers.
+//
+// SIZE scales the drawn rift, its swallow horizon and its lens radius
+// together (all three are `size.x` reads).  It deliberately does NOT touch
+// USE_RANGE: how close you must be to ENTER is an interaction rule, not a look,
+// and a knob that quietly moved it would make every other A/B unreadable.
+export const PORTAL_SIZE_CYCLE: ReadonlyArray<number> = [1.0, 0.75, 0.5, 0.35, 1.25] as const;
+// The well was tuned DOWN to 0.25x strength / 0.5x range and baked, so both
+// cycles now run well ABOVE 1x as well as below it: 4x strength and 2x range
+// together reproduce the old g6000/1050 rift exactly, which is what makes the
+// change itself re-testable from inside the game rather than only in git.
+export const PORTAL_GRAVITY_CYCLE: ReadonlyArray<number> =
+  [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0, 4.0] as const;
+export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> =
+  [1.0, 0.75, 0.5, 1.5, 2.0, 3.0] as const;
+// Strengths ABOVE 1 are here because "how far can this be pushed" is a real
+// question to ask of a look, and the shipped value is only the current answer.
+// Nothing clamps them: the twist stays bounded by construction (TWIST +
+// TWIST_SWING < 2*PI at 1x, so 3x is still under two turns and cannot band),
+// and the push is a fraction of the lens radius, so it scales without ever
+// out-reaching the region it belongs to.
+// Index 0 is what ships.  The high end runs well past plausible on purpose:
+// the twist is CLAMPED below one turn at the read (BackgroundManager), so
+// even 12× cannot bring the banding back — it only drives the radial push
+// harder, which is the half of the warp that has no failure mode.
+export const PORTAL_LENS_CYCLE: ReadonlyArray<number> =
+  [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0] as const;
+/** Lens RADIUS as a multiple of the rift's horizon — how much sky the warp
+ *  covers, separate from how hard it bends it.  Index 0 is LENS.RADIUS_MULT,
+ *  the shipped value; the steps above it are what "hug the hole" looks like
+ *  when it is loosened back off. */
+export const PORTAL_LENS_RADIUS_CYCLE: ReadonlyArray<number> = [14, 4, 6, 9, 20, 30, 2.5] as const;
+let activePortalLensRadiusIndex = 0;
+export function getPortalLensRadiusMult(): number {
+  return PORTAL_LENS_RADIUS_CYCLE[activePortalLensRadiusIndex];
+}
+export function getPortalLensRadiusName(): string {
+  return `${PORTAL_LENS_RADIUS_CYCLE[activePortalLensRadiusIndex]}×`;
+}
+export function cyclePortalLensRadius(): number {
+  activePortalLensRadiusIndex = (activePortalLensRadiusIndex + 1) % PORTAL_LENS_RADIUS_CYCLE.length;
+  return activePortalLensRadiusIndex;
+}
+export const PORTAL_LENS_SPIN_CYCLE: ReadonlyArray<number> = [1.0, 0.5, 0.25, 0, 2.0, 4.0] as const;
+// Index 0 of every cycle is the SHIPPED value, so the panel opens on what the
+// player just flew through and the first click is always the A/B.
+let activePortalSizeIndex = 0;
+let activePortalGravityIndex = 0;
+let activePortalGravityRangeIndex = 0;
+let activePortalLensIndex = 0;
+let activePortalLensSpinIndex = 0;
+
+export function getPortalSizeMult(): number { return PORTAL_SIZE_CYCLE[activePortalSizeIndex]; }
+export function getPortalGravityMult(): number { return PORTAL_GRAVITY_CYCLE[activePortalGravityIndex]; }
+export function getPortalGravityRangeMult(): number { return PORTAL_GRAVITY_RANGE_CYCLE[activePortalGravityRangeIndex]; }
+export function getPortalLensMult(): number { return PORTAL_LENS_CYCLE[activePortalLensIndex]; }
+export function getPortalLensSpinMult(): number { return PORTAL_LENS_SPIN_CYCLE[activePortalLensSpinIndex]; }
+
+/** The outward speed the arrival is thrown at, SOLVED against the exit rift's
+ *  well rather than tuned beside it.
+ *
+ *  This is a number that has to agree with four others — GRAVITY_STRENGTH,
+ *  GRAVITY_PLAYER_SCALE, GRAVITY_RANGE and ARRIVAL_OFFSET — and it stopped
+ *  agreeing the moment the well was retuned: the literal it replaced was
+ *  sized against a 700-unit well and left standing when the well grew to
+ *  1050, which still escaped on a clear run but reached the rim with almost
+ *  nothing left, so one clip of terrain on the way out left the ship stuck
+ *  in the throat.  Solving makes the agreement structural: the well can be
+ *  retuned, or the DBG knobs dialled, and the arrival is re-sized to match
+ *  with nothing to remember.
+ *
+ *  The model is the sim's own arithmetic, not an approximation of it — the
+ *  player-side gravity read from `PhysicsSystem.applyGravity` (including its
+ *  0.2 acceleration clamp and the `max(distSq, 1e4)` near-field floor) and
+ *  the integrate-then-damp order from the same file's integration step, at
+ *  the 60 Hz reference the velocity units are quoted in.  A closed form was
+ *  not usable: friction is what actually decides the trip (a purely
+ *  ballistic escape needs only ~3.7 px/step, which crawls out over several
+ *  seconds and reads as being let go rather than thrown), so the criterion
+ *  has to be "outside the range within CLEAR_SEC", which the drag term makes
+ *  transcendental.  Forty bisection steps over a ~45-step forward integration
+ *  is a few microseconds, once per transit — free at this call rate.
+ *
+ *  Reads the DBG gravity knobs, like every other portal consumer, so an A/B
+ *  on the well's strength carries the escape with it instead of quietly
+ *  breaking the way home. */
+export function playerEjectSpeed(mapType: MapType): number {
+  const P = PORTAL_CONSTANTS;
+  const T = P.TRANSIT;
+  const move = PLAYER_MOVEMENT_CONFIG[mapType];
+  const friction = move.friction;
+  // What the PLAYER feels: the well's strength times its player fraction,
+  // times the DBG knob.  Mass never enters — gravity is applied as an
+  // acceleration — so hull weight cannot change the escape.
+  const pull = P.GRAVITY_STRENGTH * P.GRAVITY_PLAYER_SCALE * getPortalGravityMult();
+  const range = P.GRAVITY_RANGE * getPortalGravityRangeMult();
+  const budget = Math.max(1, Math.round(T.PLAYER_CLEAR_SEC * 60));
+
+  // Does an arrival at v0 get outside `range` within the budget?
+  const clears = (v0: number): boolean => {
+    let d = P.ARRIVAL_OFFSET, v = v0;
+    for (let i = 0; i < budget; i++) {
+      v -= Math.min(pull / Math.max(d * d, 1e4), 0.2);
+      d += v;
+      v *= friction;
+      if (d >= range) return true;
+      if (d <= 1) return false;          // fell back through the mouth
+    }
+    return false;
+  };
+
+  // Cruise is the friction-limited top speed the ship reaches under its own
+  // thrust; the shove is capped as a fraction of it so it can never read as
+  // a launch.  Note the spec is stated against GRAVITY_RANGE, not against the
+  // pull, so a well switched OFF at the DBG knob still spits the player the
+  // same distance clear of the door rather than parking them in it.
+  const cruise = move.acceleration / Math.max(1e-6, 1 - friction);
+  const ceiling = cruise * T.PLAYER_EJECT_CRUISE_FRAC;
+  // Degenerate config guard: an arrival already outside the range needs no
+  // shove at all.  (Not the gravity-knob-off case — with the pull switched
+  // off a resting ship still never crosses the rim, so that one solves for
+  // the speed that simply covers the distance.)
+  if (clears(0)) return 0;
+  let lo = 0, hi = ceiling;
+  if (!clears(hi)) return hi;            // deeper than CLEAR_SEC allows — cap wins
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (clears(mid)) hi = mid; else lo = mid;
+  }
+  return hi;
+}
+
+export function getPortalSizeName(): string { return `${PORTAL_SIZE_CYCLE[activePortalSizeIndex]}×`; }
+export function getPortalGravityName(): string {
+  const v = PORTAL_GRAVITY_CYCLE[activePortalGravityIndex];
+  return v === 0 ? 'off' : `${v}×`;
+}
+export function getPortalGravityRangeName(): string { return `${PORTAL_GRAVITY_RANGE_CYCLE[activePortalGravityRangeIndex]}×`; }
+export function getPortalLensName(): string {
+  const v = PORTAL_LENS_CYCLE[activePortalLensIndex];
+  return v === 0 ? 'off' : `${v}×`;
+}
+export function getPortalLensSpinName(): string {
+  const v = PORTAL_LENS_SPIN_CYCLE[activePortalLensSpinIndex];
+  return v === 0 ? 'frozen' : `${v}×`;
+}
+/** Live readout of what the knobs currently resolve to, in the units the
+ *  constants are authored in — so a chosen combination can be copied back
+ *  into PORTAL_CONSTANTS once an A/B settles. */
+export function getPortalTuningInfo(): string {
+  const size = Math.round(PORTAL_CONSTANTS.SIZE * getPortalSizeMult());
+  const str = Math.round(PORTAL_CONSTANTS.GRAVITY_STRENGTH * getPortalGravityMult());
+  const rng = Math.round(PORTAL_CONSTANTS.GRAVITY_RANGE * getPortalGravityRangeMult());
+  return `${size}px g${str}/${rng}`;
+}
+
+export function cyclePortalSize(): number {
+  activePortalSizeIndex = (activePortalSizeIndex + 1) % PORTAL_SIZE_CYCLE.length;
+  return activePortalSizeIndex;
+}
+export function cyclePortalGravity(): number {
+  activePortalGravityIndex = (activePortalGravityIndex + 1) % PORTAL_GRAVITY_CYCLE.length;
+  return activePortalGravityIndex;
+}
+export function cyclePortalGravityRange(): number {
+  activePortalGravityRangeIndex = (activePortalGravityRangeIndex + 1) % PORTAL_GRAVITY_RANGE_CYCLE.length;
+  return activePortalGravityRangeIndex;
+}
+export function cyclePortalLens(): number {
+  activePortalLensIndex = (activePortalLensIndex + 1) % PORTAL_LENS_CYCLE.length;
+  return activePortalLensIndex;
+}
+/** DBG transit-warp duration (seconds), 0 = the beat OFF.  Index 0 is the
+ *  shipped value, like every other Portals row, so the first click is the A/B.
+ *  Cycling it takes effect on the NEXT transit — the beat reads its length
+ *  once, at the moment it starts. */
+// Index 0 is what ships.  The long tail is deliberately silly at the top —
+// "extreme" is a legitimate thing to want to SEE once, and a beat you can
+// stretch to six seconds is how you inspect a frame of it without a
+// screenshot harness.
+export const PORTAL_WARP_CYCLE: ReadonlyArray<number> =
+  [1.4, 0.9, 0.6, 2.2, 3.5, 6.0, 10.0, 0] as const;
+let activePortalWarpIndex = 0;
+export function getPortalWarpDuration(): number { return PORTAL_WARP_CYCLE[activePortalWarpIndex]; }
+export function getPortalWarpName(): string {
+  const v = PORTAL_WARP_CYCLE[activePortalWarpIndex];
+  return v === 0 ? 'off' : `${v}s`;
+}
+export function cyclePortalWarp(): number {
+  activePortalWarpIndex = (activePortalWarpIndex + 1) % PORTAL_WARP_CYCLE.length;
+  return activePortalWarpIndex;
+}
+
+export function cyclePortalLensSpin(): number {
+  activePortalLensSpinIndex = (activePortalLensSpinIndex + 1) % PORTAL_LENS_SPIN_CYCLE.length;
+  return activePortalLensSpinIndex;
+}
+
 // ── Control schemes (user directive, step 5 G9) ──────────────────────────────
 // Picked at game start (main menu) and changeable from the pause menu.  Like
 // DIFFICULTY, the choice is a PREFERENCE: it survives restarts and is not
@@ -5748,7 +5999,12 @@ export const OVERWORLD_CONSTANTS = {
 // dot and an off-screen chevron for free.  Destinations are MAP-DESCRIPTOR
 // IDS (engine/maps/MapDescriptors.ts), never bare MapType values.
 export const PORTAL_CONSTANTS = {
-  SIZE: 200,                 // world-unit diameter of the rift mouth (reads as
+  // Rift SIZE, GRAVITY_STRENGTH and GRAVITY_RANGE below are the values a
+  // play-testing pass settled on (user call): a much smaller mouth with a
+  // stronger, wider well than the first draft shipped.  They are BAKED here
+  // rather than left as a standing DBG multiplier, so `1×` on every knob
+  // still means "what ships" and the live readout reports the real numbers.
+  SIZE: 70,                 // world-unit diameter of the rift mouth (reads as
                              // a landmark at gameplay zoom, like the station)
   COLOR: '#a855f7',          // violet — the established rift language (dragon/rival warps)
   RETURN_COLOR: '#38bdf8',   // sky — return rifts match the hub/station palette
@@ -5775,6 +6031,272 @@ export const PORTAL_CONSTANTS = {
   // portal costs no particles until it's actually used.
   BURST_RADIUS: 320,
   BURST_DURATION: 0.75,
+  // ── Wormhole gravity well ─────────────────────────────────────────
+  // Portals declare gravityRange/gravityStrength on their entity, so the
+  // existing attractor machinery does everything: PhysicsSystem's
+  // applyGravity pulls every finite-mass dynamic (shards, enemies, drops,
+  // even projectiles curve), the close-attractor crush branch SWALLOWS a
+  // mobile shard that reaches the mouth (radius SIZE/2 — it vanishes into
+  // the horizon rather than shattering), and RenderSystem's attractor
+  // bucket (gravityStrength > 500) feeds the background star lensing.
+  //
+  // Calibration (velocity units are px per 60 Hz tick; ambient shard drift
+  // is ~1): force = STRENGTH / max(distSq, 1e4).  At the range edge the
+  // kick is ~0.005/step (a slow drift-in), at 150 px it is ~0.067/step,
+  // and the near-mouth clamp region tops out at 0.15/step — a current you
+  // notice rather than a hazard you fight, and far below the 5.0 solver cap
+  // so nothing gets flung.
+  //
+  // These are the play-tested values (user call): the well was g6000 out to
+  // 1050 and read as far too strong, so it was A/B'd down through the DBG
+  // knobs to 0.25× strength and 0.5× range and BAKED here.  The knobs
+  // return to 1× accordingly — "1×" has to keep meaning "what ships", or
+  // every escape speed and standoff radius derived from these numbers is
+  // quietly describing a rift nobody plays.
+  GRAVITY_RANGE: 525,
+  GRAVITY_STRENGTH: 1500,
+  // The PLAYER feels only this fraction of the well (gravityPlayerScale).
+  // Entering a portal is a deliberate E/tap, so proximity must never be
+  // commitment: at its strongest the tug is 0.4 × 0.12 = 0.048/step,
+  // comfortably under the 0.085/step thrust — a felt lean, never a trap.
+  GRAVITY_PLAYER_SCALE: 0.12,
+  // ── Debris transit (GameEngine.transitionToMap) ───────────────────
+  // Everything loose around the player travels WITH them: mobile shards
+  // and collectible drops within RADIUS of the ship are captured before
+  // the map swap and re-emerge from the exit rift's mouth AFTER the
+  // player, staggered over DELAY_MIN..MAX seconds, each flung in a random
+  // direction at a random SPEED (px per 60 Hz tick; ambient drift is ~1,
+  // so the top of the range reads as an energetic spit).  MAX_ENTITIES
+  // caps a transit from the middle of a dense field (nearest win).
+  // GRACE_SEC of portal-gravity immunity (portalGraceTimer) lets the
+  // ejecta actually LEAVE — without it the well that just spat them out
+  // (escape speed ~8 from the mouth) would swallow most of them back.
+  // Enemies deliberately do NOT travel: combat leftovers stay behind
+  // (decision #39d — a portal clears the fight), and the hub is wave-free
+  // by design.
+  TRANSIT: {
+    RADIUS: 450,
+    MAX_ENTITIES: 36,
+    DELAY_MIN: 0.25,
+    DELAY_MAX: 1.6,
+    SPEED_MIN: 1.5,
+    SPEED_MAX: 5.5,
+    SCATTER: 70,
+    GRACE_SEC: 2.5,
+    // The PLAYER is EJECTED, not deposited (user call).  Arriving
+    // dead-stopped ARRIVAL_OFFSET from the mouth leaves the ship inside the
+    // exit rift's own well, which then tugs it straight back toward the hole
+    // it just came out of.  Coming out of a wormhole should throw you clear,
+    // so the arrival carries an outward velocity sized to LEAVE THE WELL
+    // OUTRIGHT rather than merely to look energetic.
+    //
+    // That speed is SOLVED against the well rather than hand-set beside it
+    // (see playerEjectSpeed).  It used to be a literal, and a literal is
+    // exactly what goes stale: retuning GRAVITY_STRENGTH/RANGE left the old
+    // number climbing a well half again as wide, which still escaped but
+    // arrived at the rim with nothing left — so a single knock into terrain
+    // on the way out stranded the ship in the throat.  The SPEC is what
+    // survives a retune, so the spec is what is written down here.
+    //
+    // CLEAR_SEC is that spec: the arrival must be outside GRAVITY_RANGE this
+    // many seconds after it starts, which is what makes the escape read as
+    // decisive rather than as a slow crawl that happens to end outside.
+    PLAYER_CLEAR_SEC: 0.75,
+    // …and never faster than this fraction of the ship's own cruise, so the
+    // shove can never read as a launch however the well is retuned.  At the
+    // shipped well the solve lands at ~20.7 px/step against a ~42.5 cruise,
+    // comfortably inside the cap; the cap is what catches a future well so
+    // deep that leaving it in CLEAR_SEC would mean firing the player out of
+    // the arena.
+    PLAYER_EJECT_CRUISE_FRAC: 0.8,
+  },
+  // ── Transit warp (the flight THROUGH the wormhole) ────────────────
+  // A short screen-space beat played on ARRIVAL, over the destination map,
+  // which is already loaded and waiting behind it.  Sequence: the lens
+  // distortion UNROLLS into radial lines, the sky streams outward past the
+  // ship as it flies up the throat, then the whole thing decelerates and the
+  // arena is revealed.
+  //
+  // Structurally it is the STAGE-CLEAR freeze reused: the sim is held for the
+  // duration (the loop's short-circuit), so nothing shoots the player while
+  // they are inside the tunnel and the beat costs no simulation at all.  The
+  // animation runs off WALL CLOCK, which is exactly what a frozen sim leaves
+  // available, and draws no particles and allocates nothing — it is one veil
+  // rect, a few dozen stroked arcs and a batched path of star streaks.
+  //
+  // A star field is effectively at infinity, so "flying forward" through one
+  // is a convention rather than a projection — what sells it is that outer
+  // stars sweep fastest and everything accelerates then eases.  Scaling each
+  // star's radius gives exactly that (dr = r x dE) while keeping the field
+  // recognisably the one already on screen, where a depth model fitted onto
+  // real stars bunched them into a solid disc as their wrapped depths
+  // converged.
+  //
+  // The tunnel is drawn as the REAL STAR FIELD streaking outward
+  // (BackgroundManager.renderWarpStars) — the same stars, bearings, colours
+  // and sizes already on screen.  There are deliberately NO rings or arcs any
+  // more (user call): a synthetic ring set drew a tunnel that the sky was not
+  // part of, and the streaks alone carry the motion.
+  WARP: {
+    DURATION: 1.1,
+    // How far the sky is swept outward over the beat: every star's distance
+    // from the vanishing point is multiplied by 1 -> EXPAND.  At 1 the field
+    // is EXACTLY the sky already on screen, which is what makes the opening
+    // continuous; by the end it has spread over EXPAND^2 times the area, so
+    // the streaks thin out on their own instead of piling into a solid mass.
+    // Outer stars therefore move fastest (dr = r x dE) — the perspective cue,
+    // without needing a depth model the real star field does not have.
+    EXPAND: 7,
+    STREAK: 0.26,           // streak length as a fraction of a star's radius
+    // FULLY OPAQUE, and there is no dim-in at all (user report: the
+    // destination flashed before the beat).  The map swaps synchronously
+    // when the transit fires, so anything the veil lets through is the
+    // arena this beat exists to reveal — 0.93 let 7% of it through, and a
+    // ramp-in let all of it through on the transit's own frame.  The ship
+    // and the streaking sky are drawn ABOVE this, so opaque costs nothing
+    // that matters: what the player sees mid-tunnel is their own hull and
+    // the stars, which is the whole intent.
+    VEIL: 1.0,
+    VEIL_OUT: 0.38,         // fraction spent revealing the arena
+  },
+  // ── Too big to swallow (user call) ────────────────────────────────
+  // A hole can only eat what fits in its mouth.  An object whose OWN radius
+  // reaches SIZE_FRACTION of the horizon does not fall in: it crosses the
+  // centre and is FLUNG out along its own heading, the way a collision would
+  // throw it — so a boulder ploughs straight through a rift and keeps going,
+  // while gravel still disappears down it.
+  //
+  // Sizing the rule against the HORIZON rather than an absolute number is
+  // what makes it read as physics instead of as a threshold: the same rock
+  // that shoots through a Pocket rift (horizon 18) is small enough to vanish
+  // into Deep Space's (52).  Destination scaling and the DBG Size knob come
+  // along for free, because both already move the horizon.
+  //
+  // SPEED must clear the well outright or the eject is a stutter rather than
+  // an exit.  Against the shipped well (g1500 out to 525, clamped at
+  // 0.15/step inside 100) escape from a hub mouth costs ~25/v of speed —
+  // 0.15 × 85 from the 14.7 horizon out to the clamp, then
+  // 1500 × (1/100 − 1/525) beyond it — so the escape speed is ~7.1 px/step.
+  // It was ~14.5 against the old, four-times-deeper well, and 20 is kept
+  // unchanged through that retune ON PURPOSE: the throw's absolute speed is
+  // what the eject FEELS like, and only its margin over escape moved (1.4× →
+  // 2.8×).  A weaker well should make a boulder ploughing through look more
+  // decisive, not less.  GRACE_SEC of immunity covers the rest: the same
+  // trick the transit debris uses, and for the same reason.
+  //
+  // The PLAYER is deliberately exempt.  Its radius (10) sits near the
+  // threshold for a mid-sized rift, so the rule would fire on some
+  // destinations and not others; and a ship is the one thing here that
+  // enters a portal ON PURPOSE, with its own transit and its own arrival
+  // ejection.  Being punted while lining that up would fight the
+  // interaction rather than serve it.  Projectiles are exempt too: a shot
+  // is not an object being thrown around.
+  EJECT: {
+    SIZE_FRACTION: 0.55,
+    SPEED: 20,
+    BOOST: 1.6,       // or this multiple of its own speed, whichever is more
+    SPIN: 2.5,        // random tumble added on the way out
+    GRACE_SEC: 2.0,
+  },
+  // ── Steering clear (user call) ────────────────────────────────────
+  // Anything that steers ITSELF — enemies, bubbles, dragons, rivals, the
+  // snitch, and whatever comes next — gets an outward push near a rift, so
+  // nothing with a mind of its own can be captured and parked in the throat.
+  //
+  // It is ONE rule in ONE place (PhysicsSystem.applyGravity, which already
+  // walks every dynamic against every attractor) rather than avoidance code
+  // in five different AI routines: the dragon, the rivals, the bubbles and
+  // the AISystem strategies all move by different machinery, and a future
+  // roamer would have had to remember to add a sixth copy.  `avoidsPortals`
+  // (types.ts) overrides the default for anything that is not an ENEMY.
+  //
+  // The pull is deliberately NOT cancelled — being drawn toward a rift from
+  // across the arena is the flavour worth keeping.  The push simply WINS
+  // closer in: at 1.4 peak against a pull now clamped at 0.15, the two
+  // balance around 236 units out (215 against the old, deeper well — the
+  // standoff drifted out slightly when the well was tuned down, and stays
+  // comfortably inside RANGE_MIN, so the shape of the rule is unchanged).  So
+  // they drift in, then hold off and slide around it, and a determined
+  // chaser can still push through toward the player rather than hitting a
+  // wall.  RANGE has a floor because a small rift's horizon would otherwise
+  // put the standoff inside the pull's own clamp radius.
+  AVOID: {
+    RANGE_MULT: 5,
+    RANGE_MIN: 240,
+    ACCEL: 1.4,
+  },
+  // ── The event horizon (user call) ─────────────────────────────────
+  // The rift's WORLD ART is now exactly one thing: a black disc.  Every
+  // decoration it used to carry — the bloom, the inspiral arms, the energy
+  // ring, the photon ring, the coloured rim, the funnel throat, the white
+  // core and the in-range halo — was deleted, because the star LENS is what
+  // says "wormhole" and the drawn ornament was competing with it.  What is
+  // left is a hole, the lens bending light around it, the destination tag
+  // and the off-screen chevron.
+  //
+  // Its radius READS THE DESTINATION: a rift is a window onto the arena at
+  // the other end, so a bigger world shows a bigger mouth.  BASE_FRACTION is
+  // of the entity's own half-size at the REFERENCE span, and every
+  // destination lands under the old 0.62 disc (the biggest, Deep Space at
+  // 16k, comes out ≈0.52) — "smaller than the default, varying up and down
+  // from there".
+  //
+  // Spans in the game today, and what they draw at (entity half-size 100,
+  // DBG Size 1×): Pocket 4k → 18, showcase 6k → 25, hub / Ring / Seven
+  // Rings 12k → 42, Deep Space 16k → 52.  The EXPONENT is what makes that
+  // range legible: raw linear scaling would put Pocket at 14 against Deep
+  // Space's 56, which reads as two unrelated objects rather than one kind
+  // of thing sized by where it goes.
+  HORIZON: {
+    BASE_FRACTION: 0.42,
+    REFERENCE_SPAN: 12000,   // the hub's span — what every return rift shows
+    EXPONENT: 0.75,
+    MIN_SCALE: 0.35,
+    MAX_SCALE: 1.35,
+  },
+  // ── Background star lensing (BackgroundManager.renderStars) ───────
+  // Screen-space warp around each on-screen attractor: stars inside the
+  // lens radius are pushed radially outward (the Einstein-ring evacuation
+  // of the throat) and SHEARED around the centre, both easing to zero at
+  // the rim on a quadratic falloff so the warp joins the untouched sky
+  // with no seam.
+  //
+  // EVERYTHING HERE IS RELATIVE, so the whole lens is self-similar across
+  // destinations and DBG Size steps.  The radius is a multiple of the
+  // rift's HORIZON (`portalHorizonRadius`) rather than of its entity size,
+  // so the void HUGS the hole (user call) instead of standing off it by a
+  // fixed 600 units — and it inherits the destination-span scaling, so a
+  // Pocket rift warps a small patch of sky and a Deep Space rift a wide
+  // one.  PUSH is likewise a FRACTION of that radius: an absolute pixel
+  // push would be a gentle nudge inside the biggest lens and a violent
+  // ring inside the smallest.
+  //
+  // TWIST IS BOUNDED, AND THAT IS THE WHOLE POINT (user report: "multiple
+  // bands of stars, each alternating rotational direction going outward",
+  // and the DBG Lens knob barely changing them).  The shear used to be
+  // `f² × (WIND + elapsed × RATE)` — an angle that GREW WITHOUT BOUND with
+  // wall-clock time, which is what a real accretion disk does and exactly
+  // what a picture must not: every 2π of accumulated twist is one visible
+  // band, so the field wound itself into ~4 bands a minute in and ~10 after
+  // three, and scaling a 60-radian twist by 0.25 still left 15 radians —
+  // far past 2π, so the knob could not change the band COUNT and appeared
+  // to do nothing.  The total shear is now capped below one full turn
+  // (TWIST + TWIST_SWING < 2π), which makes banding impossible BY
+  // CONSTRUCTION rather than by tuning, and makes the knob linear in the
+  // thing the eye actually reads: how bent the sky is.  Motion comes from
+  // BREATHING that bounded shear (a sine at SWIRL_RATE) rather than from
+  // accumulating it, so the warp still lives without ever winding up.
+  LENS: {
+    RADIUS_MULT: 4.0,      // × the horizon radius
+    PUSH_FRAC: 0.42,       // radial push at the throat, × the lens radius
+    TWIST: 0.825,          // radians of shear at the throat (see the clamp below)
+    TWIST_SWING: 0.27,     // how much of that shear breathes
+    SWIRL_RATE: 0.70,      // breathing rate (rad/s of the sine's phase)
+    // The nebula-puff layer takes the same treatment at its own scale —
+    // a wider, softer bend, since the puffs are the far backdrop.
+    PUFF_RADIUS_MULT: 24.0,
+    PUFF_PUSH_FRAC: 0.22,
+  },
   // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
   // for a rift on the far side of the map is noise, not navigation — the
   // arrow only appears once the player is close enough for that rift to be

@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PLAYER_ROLL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -450,6 +450,22 @@ export class GameEngine {
   // on any step and the affordance always names the action it will take.
   portals: GameEntity[] = [];
   private nearestPortal: GameEntity | null = null; // nearest in use range this step
+  // Debris-transit queue (PORTAL_CONSTANTS.TRANSIT): loose entities captured
+  // around the player at portal entry, waiting out their stagger delay before
+  // emerging from the exit rift.  Queued entities exist NOWHERE else — they
+  // join currentMap.entities only when updatePortalTransit releases them.
+  // Cleared by loadMapFresh, so a second hop (or a restart) before the queue
+  // drains means the wormhole simply kept the stragglers.
+  private portalTransit: { entity: GameEntity; delay: number }[] = [];
+  // Transit warp — the flight THROUGH the wormhole (PORTAL_CONSTANTS.WARP).
+  // Wall-clock seconds remaining, and the length it started at, so the render
+  // side can be handed a plain 0->1 progress.  Non-zero FREEZES the sim, the
+  // stage-clear pattern: nothing may shoot the player while they are inside
+  // the tunnel, and a frozen sim is what leaves the wall clock free to drive
+  // the beat.
+  private portalWarpTimer: number = 0;
+  private portalWarpDuration: number = 0;
+  private portalTransitExit: Vector2 = { x: 0, y: 0 };
   // Overworld roaming dragon — first spawn shortly after run start, then a
   // fresh rift a while after the previous dragon dies or leaves.
   private overworldDragonTimer: number = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
@@ -1049,6 +1065,14 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      portalWarpName: getPortalWarpName(),
+      portalSizeName: getPortalSizeName(),
+      portalGravityName: getPortalGravityName(),
+      portalGravityRangeName: getPortalGravityRangeName(),
+      portalLensName: getPortalLensName(),
+      portalLensSpinName: getPortalLensSpinName(),
+      portalLensRadiusName: getPortalLensRadiusName(),
+      portalTuningInfo: getPortalTuningInfo(),
       rollFeelName: getActivePlayerRollName(),
       hullModeName: getActivePlayerHullName(),
       rollDampName: getActiveRollDampingName(),
@@ -1128,6 +1152,7 @@ export class GameEngine {
       this.shards.reset();
       this.perfController.reset();
       this.activeDrops = [];
+      this.portalTransit.length = 0;
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
@@ -1296,6 +1321,37 @@ export class GameEngine {
       // used below to put them at the matching rift MOUTH on arrival.
       const fromId = descriptorForMapType(this.currentMap?.type)?.id;
 
+      // DEBRIS TRAVELS WITH YOU (user call): everything loose within
+      // TRANSIT.RADIUS of the ship — mobile shards and collectible drops,
+      // exactly the stuff the wormhole's own gravity has been herding toward
+      // the mouth — is captured out of the departing map here and re-emerges
+      // from the exit rift after the player (updatePortalTransit), each on
+      // its own stagger delay with a random heading and speed.  Nearest win
+      // the cap, so a transit from a dense field takes the debris actually
+      // AROUND the ship.  Enemies deliberately stay behind: the portal
+      // clears the fight (decision #39d), and the hub is wave-free by
+      // design.  The old map is discarded whole (buildMap constructs fresh
+      // instances), so captured entities need no removal from it.
+      const transitCfg = PORTAL_CONSTANTS.TRANSIT;
+      const captured: { e: GameEntity; d2: number }[] = [];
+      if (this.currentMap) {
+          const rSq = transitCfg.RADIUS * transitCfg.RADIUS;
+          for (const e of this.currentMap.entities) {
+              if (!e.active || e.isExploding) continue;
+              const isMobileShard = e.type === EntityType.STRUCTURE
+                  && e.mass !== Infinity && e.dragonSegment !== true;
+              if (!isMobileShard && !isCollectibleDrop(e)) continue;
+              const dx = wrapDeltaX(this.player.position.x, e.position.x);
+              const dy = wrapDeltaY(this.player.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 <= rSq) captured.push({ e, d2 });
+          }
+          captured.sort((a, b) => a.d2 - b.d2);
+          if (captured.length > transitCfg.MAX_ENTITIES) {
+              captured.length = transitCfg.MAX_ENTITIES;
+          }
+      }
+
       if (opts?.descend) this.stageIndex++;
       else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
       // The stage-clear screen belongs to the arena being left.
@@ -1313,6 +1369,27 @@ export class GameEngine {
       // the spawn when there is no matching rift (a descent into a fresh
       // arena has none).
       this.placePlayerAtSpawn(this.arrivalBesideRift(fromId));
+      // …AND THROWN CLEAR.  `placePlayerAtSpawn` lands the ship dead-stopped,
+      // which puts it at rest INSIDE the exit rift's own gravity well — so the
+      // hole it just came out of immediately started pulling it back in.  The
+      // arrival now carries an outward velocity along the mouth→ship axis,
+      // sized to leave the well outright — SOLVED against the destination's
+      // own well by `playerEjectSpeed`, so retuning the well cannot leave the
+      // way out behind.  Radial rather than random, unlike the debris:
+      // being spat sideways into the terrain you arrived beside is not an
+      // arrival, and the player is the one thing that must never have to
+      // fight its way out of the door.
+      const exitMouth = this.exitMouthFor(fromId);
+      if (exitMouth) {
+          const ex = wrapDeltaX(exitMouth.position.x, this.player.position.x);
+          const ey = wrapDeltaY(exitMouth.position.y, this.player.position.y);
+          const len = Math.hypot(ex, ey);
+          if (len > 1e-3) {
+              const k = playerEjectSpeed(this.currentMap.type) / len;
+              this.player.velocity.x = ex * k;
+              this.player.velocity.y = ey * k;
+          }
+      }
       // Combat state belongs to the fight left behind: shield resumes its
       // normal recharge and lingering debuffs (corrosion DoT / EMP) drop.
       // Hull damage does NOT — that's the carry.
@@ -1320,6 +1397,31 @@ export class GameEngine {
       this.player.shieldHitFlash = 0;
       this.player.statusEffects = [];
       this.playerMessages = [];
+
+      // Queue the captured debris on the EXIT rift's mouth — the rift
+      // pointing back where we came from (the same one arrivalBesideRift
+      // read), falling back to the player's own arrival point when there is
+      // no matching rift.  loadMapFresh cleared the queue above, so this
+      // hop's cargo is all it holds.  Stagger delays are rolled here;
+      // headings and speeds are rolled at emergence.
+      if (captured.length > 0) {
+          const mouth = this.exitMouthFor(fromId);
+          const exit = mouth ? mouth.position : this.player.position;
+          this.portalTransitExit.x = exit.x;
+          this.portalTransitExit.y = exit.y;
+          for (const { e } of captured) {
+              e.velocity.x = 0;
+              e.velocity.y = 0;
+              e.hitFlash = 0;
+              if (e.healthBarTimer !== undefined) e.healthBarTimer = 0;
+              if (e.trail) e.trail.length = 0;
+              this.portalTransit.push({
+                  entity: e,
+                  delay: transitCfg.DELAY_MIN
+                      + Math.random() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
+              });
+          }
+      }
 
       // Waves per the DESTINATION descriptor — enabled in an arena, off in
       // the hub — and the always-present ambient fauna for the new map.
@@ -1333,6 +1435,14 @@ export class GameEngine {
           duration: PORTAL_CONSTANTS.BURST_DURATION,
       });
       this.pushPlayerMessage(dest.name.toUpperCase(), PORTAL_CONSTANTS.COLOR);
+
+      // …and fly through it.  Started LAST, once the destination is fully
+      // built and the player placed in it, so the beat is pure presentation
+      // over a world that is already correct — nothing about the arrival is
+      // waiting on the animation, and cutting it short (DBG "Transit fx" off)
+      // changes nothing but the look.
+      this.portalWarpDuration = getPortalWarpDuration();
+      this.portalWarpTimer = this.portalWarpDuration;
 
       this.prepareFrameEntities();
       // Accumulator hygiene — the map load is wall-clock work; don't
@@ -1838,7 +1948,16 @@ export class GameEngine {
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
-    const frameTime = (time - this.lastTime) / 1000;
+    // NEVER NEGATIVE.  `time` is the rAF frame timestamp, which is the moment
+    // the frame STARTED — so any code that stamps `lastTime` from
+    // `performance.now()` mid-frame (transitionToMap does, to keep the map
+    // load out of the sim clock) can leave lastTime AHEAD of the next frame's
+    // timestamp.  The delta then comes back negative, and everything
+    // downstream that subtracts it runs BACKWARDS: measured -0.16s, which
+    // drove the transit beat's timer UP past its own duration and its
+    // progress to -0.11, where the veil declined to paint and the destination
+    // arena showed through — the second, subtler half of that bug.
+    const frameTime = Math.max(0, (time - this.lastTime) / 1000);
     this.lastTime = time;
 
     this.pollGamepad();
@@ -2051,6 +2170,14 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      portalWarpName: getPortalWarpName(),
+      portalSizeName: getPortalSizeName(),
+      portalGravityName: getPortalGravityName(),
+      portalGravityRangeName: getPortalGravityRangeName(),
+      portalLensName: getPortalLensName(),
+      portalLensSpinName: getPortalLensSpinName(),
+      portalLensRadiusName: getPortalLensRadiusName(),
+      portalTuningInfo: getPortalTuningInfo(),
       rollFeelName: getActivePlayerRollName(),
       hullModeName: getActivePlayerHullName(),
       rollDampName: getActiveRollDampingName(),
@@ -2154,6 +2281,18 @@ export class GameEngine {
         return;
     }
 
+    // In transit: the sim is HELD while the player flies up the wormhole, so
+    // nothing shoots them inside the tunnel and the beat costs no simulation.
+    // The timer runs on WALL CLOCK — exactly what a frozen sim leaves
+    // available — and the frame still draws, which is what animates it.
+    if (this.portalWarpTimer > 0) {
+        this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
     // NOTE — deliberately NO `deathPending` short-circuit here.  Death is the
     // one full-screen overlay that does NOT freeze the sim (user call): the
     // field keeps moving behind the semi-transparent summary, so the player
@@ -2203,6 +2342,10 @@ export class GameEngine {
         // rather than a few substeps later.  (Death is NOT here — it no longer
         // freezes the sim.)
         if (this.stageClearPending) { this.simAccumulator = 0; break; }
+        // A portal entry swaps the map IN PLACE mid-substep and arms the
+        // transit warp; the rest of this frame's substeps would otherwise
+        // simulate the destination while the player is still in the tunnel.
+        if (this.portalWarpTimer > 0) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -2518,7 +2661,8 @@ export class GameEngine {
         this.spawnDamageText,
         this.handleEntityDeath,
         this.handleScreenShake,
-        this.handleProjectileHit
+        this.handleProjectileHit,
+        this.handlePortalEject
       );
 
       // Indexed loop, not `forEach(e => …)`: the callback would be a fresh
@@ -3108,6 +3252,35 @@ export class GameEngine {
       }
   };
 
+  /** Something too big to fit crossed a rift's centre and was flung back out
+   *  (PhysicsSystem.applyGravity).  The physics is done by the time this
+   *  runs; this is only the WEIGHT of it — a shake scaled by how big the
+   *  thing was, so a boulder ploughing through reads as heavier than a shard
+   *  clipping the edge.
+   *
+   *  There are deliberately NO SPARKS (user call).  It fired a rift-coloured
+   *  spray, which is the vocabulary of a COLLISION — and nothing collided:
+   *  the rock never touched anything, it was too big to fit down the hole and
+   *  the well threw it back.  Debris flying off it says it hit something
+   *  solid, which is the one reading a wormhole must not give.  Same argument
+   *  as stripping the idle rift to a bare disc: the ornament was saying
+   *  something the mechanic does not mean.
+   *
+   *  Shake is distance-gated by the existing camera falloff rather than by a
+   *  check here: `handleScreenShake` is the one funnel every impact in the
+   *  game already goes through with magnitudes tuned against each other, so
+   *  this joins it rather than inventing a second scale. */
+  private handlePortalEject = (entity: GameEntity) => {
+      const radius = Math.max(entity.size.x, entity.size.y) * 0.5;
+      // Only worth a lurch if it happened near enough to see; the camera's
+      // own falloff does the rest.
+      const dx = wrapDeltaX(this.player.position.x, entity.position.x);
+      const dy = wrapDeltaY(this.player.position.y, entity.position.y);
+      if (dx * dx + dy * dy < 900 * 900) {
+          this.handleScreenShake(Math.min(6, radius * 0.12));
+      }
+  };
+
   private handleAsteroidRespawn(config: any) {
       // Collect POIs once outside the placement-attempt loop.
       const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
@@ -3378,6 +3551,7 @@ export class GameEngine {
     // in place from here; everything below re-reads `currentMap`, so the
     // rest of this step runs against the destination.
     this.updateInteractables();
+    this.updatePortalTransit(dt);
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
     // leaves (the timer re-arms while a dragon is up).
@@ -5374,9 +5548,17 @@ export class GameEngine {
    *  so the player emerges NEXT TO the rift (it stays visible, and the ship
    *  isn't sitting inside the thing it just came out of) while still being in
    *  USE_RANGE, so turning straight around is one tap. */
-  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+  /** The rift on THIS map that points back where the player just came from —
+   *  the mouth they surface out of.  One definition, because three things now
+   *  depend on agreeing about it: where the player lands, which way they are
+   *  thrown, and where their debris re-emerges. */
+  private exitMouthFor(fromId?: string): GameEntity | undefined {
       if (!fromId) return undefined;
-      const mouth = this.portals.find(p => p.portalTargetId === fromId);
+      return this.portals.find(p => p.portalTargetId === fromId);
+  }
+
+  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+      const mouth = this.exitMouthFor(fromId);
       if (!mouth) return undefined;
       const pos = {
           x: mouth.position.x + PORTAL_CONSTANTS.ARRIVAL_OFFSET,
@@ -5384,6 +5566,53 @@ export class GameEngine {
       };
       wrapPosition(pos);
       return pos;
+  }
+
+  /** Drain the debris-transit queue: each captured entity emerges from the
+   *  exit rift's mouth once its stagger delay expires — random heading,
+   *  random speed, a pinch of positional scatter so a big load doesn't
+   *  stack on one point, and a portal-gravity grace window
+   *  (portalGraceTimer) so the well that just spat it out can't swallow it
+   *  straight back.  Runs on sim time, so pause / dock hold the stream
+   *  mid-flow; the reverse splice-walk is event-frequency work (a few
+   *  dozen items once per transit), not a hot path. */
+  private updatePortalTransit(dt: number) {
+      if (this.portalTransit.length === 0 || !this.currentMap) return;
+      const cfg = PORTAL_CONSTANTS.TRANSIT;
+      for (let i = this.portalTransit.length - 1; i >= 0; i--) {
+          const item = this.portalTransit[i];
+          item.delay -= dt;
+          if (item.delay > 0) continue;
+          this.portalTransit.splice(i, 1);
+          const e = item.entity;
+          const scatterA = Math.random() * Math.PI * 2;
+          const scatterR = Math.random() * cfg.SCATTER;
+          e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
+          e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
+          wrapPosition(e.position);
+          const heading = Math.random() * Math.PI * 2;
+          const speed = cfg.SPEED_MIN + Math.random() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
+          e.velocity.x = Math.cos(heading) * speed;
+          e.velocity.y = Math.sin(heading) * speed;
+          if (e.rotationSpeed !== undefined) {
+              e.rotationSpeed += (Math.random() - 0.5) * 1.5;
+          }
+          e.portalGraceTimer = cfg.GRACE_SEC;
+          e.active = true;
+          // A drop that spent its lifetime nearly out gets a top-up: a
+          // pickup that travelled the wormhole with you should be
+          // collectible on the other side, not fade on arrival.
+          if (e.lifetime !== undefined && e.lifetime < 10) e.lifetime = 10;
+          this.currentMap.entities.push(e);
+          if (isCollectibleDrop(e)) this.activeDrops.push(e);
+          // A small pop of rift-coloured sparks sells the spit without a
+          // full openPortal burst per shard.
+          this.spawnParticles(e.position, 3, PORTAL_CONSTANTS.COLOR, {
+              speedMin: 0.5, speedMax: 2,
+              sizeMin: 1, sizeMax: 2.5,
+              lifetimeMin: 0.2, lifetimeMax: 0.5,
+          });
+      }
   }
 
   /** DBG: warp a boss in near the player, phases and all.  `id` is an
@@ -5784,6 +6013,19 @@ export class GameEngine {
       // where the frame is drawn rather than read out of the DOM.
       this.renderer.bossBarActive =
           !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+
+      // Transit warp — hand the renderer a plain 0->1 progress, so the beat
+      // stays a pure function of one number and the render side owns no
+      // timer of its own.  Null when no transit is in flight.
+      // CLAMPED to [0, 1).  The frame-delta guard above is the fix for the
+      // negative case, but this is the one the RULE depends on: the beat's
+      // progress is what decides whether the world is covered, and a value
+      // outside the range would hand the renderer a frame it does not know
+      // how to veil.  Cheap, and it makes "the destination cannot show" a
+      // property of the number rather than of the clock behaving.
+      this.renderer.portalWarp = this.portalWarpTimer > 0 && this.portalWarpDuration > 0
+          ? Math.max(0, Math.min(0.999999, 1 - this.portalWarpTimer / this.portalWarpDuration))
+          : null;
 
       // A7 — hand the renderer the run's depth.  One field write per frame;
       // the fog folds it into its dark level (deeper = darker).

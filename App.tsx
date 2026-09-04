@@ -536,6 +536,32 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleSnitchSpeed();
   };
 
+  // Portal tuning (pause ▸ Debug Menu ▸ Portals) — live A/B over the
+  // wormhole's strength and size; every one re-tunes the portals already in
+  // the world, so the comparison is one keypress away from the rift you are
+  // flying past.
+  const handleCyclePortalWarp = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalWarp();
+  };
+  const handleCyclePortalSize = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalSize();
+  };
+  const handleCyclePortalGravity = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalGravity();
+  };
+  const handleCyclePortalGravityRange = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalGravityRange();
+  };
+  const handleCyclePortalLens = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalLens();
+  };
+  const handleCyclePortalLensRadius = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalLensRadius();
+  };
+  const handleCyclePortalLensSpin = () => {
+      if (engineRef.current) engineRef.current.dbg.cyclePortalLensSpin();
+  };
+
   const handleCyclePlayerRoll = () => {
       if (engineRef.current) engineRef.current.dbg.cyclePlayerRoll();
   };
@@ -866,6 +892,13 @@ const App: React.FC = () => {
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCyclePortalWarp={handleCyclePortalWarp}
+        onCyclePortalSize={handleCyclePortalSize}
+        onCyclePortalGravity={handleCyclePortalGravity}
+        onCyclePortalGravityRange={handleCyclePortalGravityRange}
+        onCyclePortalLens={handleCyclePortalLens}
+        onCyclePortalLensRadius={handleCyclePortalLensRadius}
+        onCyclePortalLensSpin={handleCyclePortalLensSpin}
         onCyclePlayerRoll={handleCyclePlayerRoll}
         onCyclePlayerHull={handleCyclePlayerHull}
         onCycleRollDamping={handleCycleRollDamping}

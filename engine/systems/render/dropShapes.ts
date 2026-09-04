@@ -16,7 +16,7 @@
  *  rotation itself.
  */
 import { GameEntity, EntityType, Vector2 } from '../../../types';
-import { PORTAL_CONSTANTS, STATION_CONSTANTS } from '../../../constants';
+import { STATION_CONSTANTS, portalHorizonRadius } from '../../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb } from './drawUtils';
 
@@ -236,100 +236,42 @@ export function drawDropShape(
         ctx.globalAlpha = 1.0;
 
     } else if (entity.type === EntityType.INTERACTABLE && entity.isPortal) {
-        // ── Map portal (roadmap step (k)) ─────────────────────────
-        // A persistent rift in the flat-shape language: counter-
-        // rotating arc rings around a dark event horizon, with a
-        // slow breathing pulse.  All animation is render-side
-        // (nowSec) — the entity is static, mass-∞ scenery, and the
-        // idle rift costs NO particles (the openPortal burst only
-        // fires on an actual transit).
-        const r = entity.size.x / 2;
-        const breathe = 0.85 + 0.15 * Math.sin(nowSec * 1.6);
-        const spin = nowSec * 0.5;
+        // ── Map portal — A HOLE, AND NOTHING ELSE (user call) ─────
+        // The rift used to draw a bloom, three inspiral arms, a broken
+        // energy ring, a photon ring, a coloured horizon rim, a receding
+        // funnel throat, a white core and an in-range halo.  All of it is
+        // gone.  The wormhole is SAID by the star LENS bending the sky
+        // around this point (BackgroundManager.renderStars); the drawn
+        // ornament was a second, louder voice saying the same thing, and
+        // reading it while flying past was what made the rift exhausting.
+        //
+        // What remains is a black disc, the lens around it, the
+        // destination tag below, and the off-screen chevron that leads
+        // you here.  No animation at all — no breathe, no spin — so a
+        // portal now costs one fill and one string.
+        //
+        // Its RADIUS is the destination's: `portalHorizonRadius` scales
+        // with the span of the map on the other side (and with the DBG
+        // Size knob), so a rift to Pocket is a small mouth and one to
+        // Deep Space is a wide one.  The same call gives PhysicsSystem
+        // the radius at which the well swallows a shard, so matter
+        // disappears exactly where the hole is drawn.
+        const holeR = portalHorizonRadius(entity);
 
-        // Entry-available halo at the use radius, pulsing while the
-        // player is in range and this portal won the arbitration —
-        // the world-space half of the "press E" affordance (mirrors
-        // the station's dock halo).
-        if (entity.portalReady) {
-            const pulse = 0.5 + 0.5 * Math.sin(nowSec * 3.2);
-            ctx.globalAlpha = 0.10 + pulse * 0.12;
-            ctx.strokeStyle = entity.color;
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(0, 0, PORTAL_CONSTANTS.USE_RANGE, 0, Math.PI * 2);
-            ctx.stroke();
-        }
-
-        // Outward bloom — the rift bleeding light into the field.
-        const bloomR = r * 2.1 * breathe;
-        const [pr, pg, pb] = hexToRgb(entity.color);
-        const bloom = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, bloomR);
-        bloom.addColorStop(0, `rgba(${pr}, ${pg}, ${pb}, 0.45)`);
-        bloom.addColorStop(1, `rgba(${pr}, ${pg}, ${pb}, 0)`);
         ctx.globalAlpha = 1.0;
         ctx.beginPath();
-        ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
-        ctx.fillStyle = bloom;
+        ctx.arc(0, 0, holeR, 0, Math.PI * 2);
+        ctx.fillStyle = '#000000';
         ctx.fill();
 
-        // Event horizon — a dark disc so the rift reads as a hole,
-        // not a light source.
-        ctx.globalAlpha = 0.92;
-        ctx.beginPath();
-        ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
-        ctx.fillStyle = '#0b0616';
-        ctx.fill();
-
-        // Rim of the event horizon — a hard bright edge so the hole
-        // reads against a busy nebula backdrop.
-        ctx.globalAlpha = 0.9;
-        ctx.strokeStyle = entity.color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Counter-rotating arc rings — three broken arcs per ring,
-        // spinning opposite ways, which reads as a vortex.  The
-        // inner ring gets a white highlight pass so the swirl stays
-        // legible at gameplay zoom.
-        for (let ring = 0; ring < 2; ring++) {
-            const rr = r * (ring === 0 ? 0.78 : 1.0);
-            const dir = ring === 0 ? 1 : -1;
-            for (let i = 0; i < 3; i++) {
-                const a0 = spin * dir + (i / 3) * Math.PI * 2;
-                const a1 = a0 + Math.PI * 0.44;
-                ctx.globalAlpha = ring === 0 ? 1.0 : 0.7;
-                ctx.strokeStyle = entity.color;
-                ctx.lineWidth = ring === 0 ? 6 : 3.5;
-                ctx.beginPath();
-                ctx.arc(0, 0, rr, a0, a1);
-                ctx.stroke();
-                if (ring === 0) {
-                    ctx.globalAlpha = 0.85;
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 1.6;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, rr, a0, a1);
-                    ctx.stroke();
-                }
-            }
-        }
-
-        // Hot core — the throat of the rift, breathing.
-        ctx.globalAlpha = 0.55 + 0.35 * breathe;
-        ctx.beginPath();
-        ctx.arc(0, 0, r * 0.2 * breathe, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-
-        // Destination tag — the portal always says where it goes.
+        // Destination tag — the portal always says where it goes.  Kept
+        // clear of the mouth by the disc's own radius, so it does not
+        // creep inward as the horizon shrinks for a smaller destination.
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 13px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`↝ ${(entity.name ?? '').toUpperCase()}`, 0, r + 26);
+        ctx.fillText(`\u219d ${(entity.name ?? '').toUpperCase()}`, 0, holeR + 26);
         ctx.globalAlpha = 1.0;
 
     } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {

@@ -811,8 +811,17 @@ test.describe('fire — on the PRESS for a device control', () => {
     await startRun(page);
 
     await feed(page, [pad({ down: [BTN.R2] })]);
-    await engine(page, (e, sec: number) => { e.input.padFireStart -= sec * 1000; }, 0.5);
-    const held = await engine(page, e => e.input.getMouseHoldDuration());
+    // Rewind the hold and READ IT IN THE SAME EVALUATE.  The duration is
+    // measured against the wall clock, so a round-trip between the rewind and
+    // the read is added straight onto it — on a loaded machine that is a
+    // quarter of a second, which is the whole width of the window below.  (It
+    // failed three runs in four locally while passing CI, from a hold that was
+    // behaving perfectly.)  Nothing about the harness's own latency is under
+    // test here; the rewind is a stand-in for holding the trigger.
+    const held = await engine(page, (e, sec: number) => {
+      e.input.padFireStart -= sec * 1000;
+      return e.input.getMouseHoldDuration();
+    }, 0.5);
     expect(held).toBeGreaterThan(0.45);
     expect(held).toBeLessThan(0.75);
 

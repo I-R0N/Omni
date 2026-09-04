@@ -3,12 +3,14 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
-  getActiveStarBands, resolveStarParallax,
+  getActiveStarBands, resolveStarParallax, PORTAL_CONSTANTS,
+  getPortalLensMult, getPortalLensSpinMult, getPortalLensRadiusMult, portalHorizonRadius,
 } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomPaletteHueDeg } from '../NebulaColor';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import { hexToRgb } from './render/drawUtils';
+import { warpExpansion, warpSpeed, warpFade } from './render/portalWarp';
 
 /** A run of stars sharing one `fillStyle`, so the draw loop sets canvas state
  *  once per group instead of once per star.  Colour AND opacity are baked into
@@ -124,6 +126,39 @@ export class BackgroundManager {
   // Reusable output for applyLensing — avoids a heap allocation per puff
   private _lensedX: number = 0;
   private _lensedY: number = 0;
+  // Per-frame lens list — the on-screen attractors (wormhole portals),
+  // projected ONCE per frame into screen space (CSS px, zoom applied) and
+  // shared by the puff lensing and the star warp.  Index-filled and read up
+  // to `_lensN` only, so a shrink never reallocates (refill idiom).
+  private _lensCX: number[] = [];
+  private _lensCY: number[] = [];
+  private _lensStarR: number[] = [];
+  private _lensPuffR: number[] = [];
+  private _lensN: number = 0;
+  // Device-px mirrors of the list above, filled by renderStars (star
+  // positions live in device space).
+  private _lensDevX: number[] = [];
+  private _lensDevY: number[] = [];
+  private _lensDevR: number[] = [];
+  private _lensDevR2: number[] = [];
+  /** Radial push at the throat, per lens, in device px — a fraction of that
+   *  lens's own radius, so the warp is self-similar at every rift size. */
+  private _lensDevPush: number[] = [];
+  // ── What the warp actually applied last frame ────────────────────────────
+  // The two numbers that ARE the distortion: the shear angle at the throat
+  // (radians) and the radial push (device px) of the first live lens.  Public
+  // and written once per frame so `tests/starfield.spec.ts` can read the real
+  // values out of the real render path.
+  //
+  // Pixel-sampling was tried first and abandoned: measuring "how bent does the
+  // sky look" off the canvas turned out to depend on the fog and light layers
+  // and on where the camera had settled, so it measured the scene as much as
+  // the lens.  These are the inputs the bug lived in — an unbounded twist —
+  // and `lastLensTwist` is the only place the "never wind past one turn"
+  // invariant can be checked at all, since a wound field looks similar in any
+  // single frame.
+  lastLensTwist: number = 0;
+  lastLensPush: number = 0;
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -171,22 +206,30 @@ export class BackgroundManager {
     this.initialized = false;
   }
 
-  private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): void {
+  /** Displace a screen-space point (CSS px) away from every lens centre —
+   *  the soft outward shove the nebula puffs take.  Reads the per-frame lens
+   *  list built in `render` (centres already zoom-projected there, so a puff
+   *  and the portal it bends around agree on where the portal is). */
+  private applyLensing(x: number, y: number): void {
     let outX = x;
     let outY = y;
-    for (let i = 0; i < attractors.length; i++) {
-        const attr = attractors[i];
-        const ax = wrapDeltaX(cameraPos.x, attr.position.x) + halfW;
-        const ay = wrapDeltaY(cameraPos.y, attr.position.y) + halfH;
-        const adx = outX - ax;
-        const ady = outY - ay;
+    // Like the star warp, the puff push is a FRACTION of this lens's own
+    // radius rather than a fixed 120 px, so it holds its shape as the rift's
+    // horizon scales with its destination — and it obeys the DBG Lens knob,
+    // so turning the lens down bends the whole backdrop less rather than
+    // only the stars.
+    const lensMult = getPortalLensMult();
+    for (let i = 0; i < this._lensN; i++) {
+        const adx = outX - this._lensCX[i];
+        const ady = outY - this._lensCY[i];
         const distSq = adx*adx + ady*ady;
-        const radius = attr.size.x * 8;
-        if (distSq < radius * radius) {
+        const radius = this._lensPuffR[i];
+        if (distSq < radius * radius && distSq > 1e-6) {
             const dist = Math.sqrt(distSq);
             const factor = (radius - dist) / radius;
             if (factor > 0) {
-              const push = factor * factor * factor * 120;
+              const push = factor * factor * factor
+                  * radius * PORTAL_CONSTANTS.LENS.PUFF_PUSH_FRAC * lensMult;
               outX += (adx / dist) * push;
               outY += (ady / dist) * push;
             }
@@ -194,6 +237,43 @@ export class BackgroundManager {
     }
     this._lensedX = outX;
     this._lensedY = outY;
+  }
+
+  /** Project the attractors into screen space once per frame.  Off-screen
+   *  attractors (beyond their own largest lens radius) are dropped here, so
+   *  the per-puff and per-star loops only ever see lenses that can matter. */
+  private buildLensList(cameraPos: Vector2, attractors: GameEntity[],
+                        width: number, height: number, zoom: number): void {
+    // The lens is anchored on the rift's HORIZON — the black disc the
+    // renderer draws — so the warped patch of sky HUGS the hole and inherits
+    // its destination-span scaling (user call).  It used to be a multiple of
+    // the entity's `size`, which left a 600-unit void standing off a 52-unit
+    // hole: two dark shapes reading as one, and the disc invisible inside it.
+    // A non-portal attractor (a future planet) keeps its own half-size.
+    //
+    // DBG LENS scales the warp's strength; 0 empties the list, which is the
+    // honest way to express "no lens" — the star loop then takes its original
+    // untouched fast path.
+    const lensMult = getPortalLensMult();
+    const L = PORTAL_CONSTANTS.LENS;
+    let n = 0;
+    for (let i = 0; i < attractors.length && lensMult > 0; i++) {
+        const attr = attractors[i];
+        if (!attr.active) continue;
+        const sx = width / 2 + wrapDeltaX(cameraPos.x, attr.position.x) * zoom;
+        const sy = height / 2 + wrapDeltaY(cameraPos.y, attr.position.y) * zoom;
+        const anchor = attr.isPortal ? portalHorizonRadius(attr) : attr.size.x / 2;
+        const starR = anchor * getPortalLensRadiusMult() * zoom;
+        const puffR = anchor * L.PUFF_RADIUS_MULT * zoom;
+        const maxR = Math.max(starR, puffR);
+        if (sx < -maxR || sx > width + maxR || sy < -maxR || sy > height + maxR) continue;
+        this._lensCX[n] = sx;
+        this._lensCY[n] = sy;
+        this._lensStarR[n] = starR;
+        this._lensPuffR[n] = puffR;
+        n++;
+    }
+    this._lensN = n;
   }
 
 public setMapType(type: MapType) {
@@ -594,8 +674,11 @@ public setMapType(type: MapType) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
 
-    const hasAttractors = attractors.length > 0;
-    
+    // Project attractors to screen space once — both the puff lensing and
+    // the star warp read this list.
+    this.buildLensList(cameraPos, attractors, width, height, zoom);
+    const hasAttractors = this._lensN > 0;
+
     // RENDER NEBULAE
     // x/y are world-space coordinates. Project to screen via parallax depth so
     // nebulae are distributed across the world and discovered as the camera moves.
@@ -631,7 +714,7 @@ public setMapType(type: MapType) {
         if (!drawable) return;
 
         if (hasAttractors) {
-           this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
+           this.applyLensing(drawX, drawY);
            drawX = this._lensedX;
            drawY = this._lensedY;
         }
@@ -713,6 +796,53 @@ public setMapType(type: MapType) {
     const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
     const groups = this.starGroups;
 
+    // ── Wormhole star warp ─────────────────────────────────────────────
+    // Mirror the frame's lens list (CSS px, built in `render`) into device
+    // px, the space the star coordinates live in.  Reused arrays, read up
+    // to lensN — no allocation.  The warp displaces stars radially outward
+    // (evacuating the throat into an Einstein-ring pile-up) and SHEARS them
+    // around the centre, both on a quadratic falloff to zero at the rim.
+    // Displaced positions stay fractional — that is already the rule here —
+    // and sizes stay integral, so nothing is resampled.
+    const lensN = this._lensN;
+    const lensMultLocal = getPortalLensMult();
+    const ldx = this._lensDevX, ldy = this._lensDevY;
+    const lr = this._lensDevR, lr2 = this._lensDevR2;
+    const lpush = this._lensDevPush;
+    for (let l = 0; l < lensN; l++) {
+        ldx[l] = this._lensCX[l] * dpr;
+        ldy[l] = this._lensCY[l] * dpr;
+        lr[l] = this._lensStarR[l] * dpr;
+        lr2[l] = lr[l] * lr[l];
+        // Push is a FRACTION of each lens's own radius, so the warp keeps
+        // its shape whatever the destination sizes the rift to.
+        lpush[l] = lr[l] * PORTAL_CONSTANTS.LENS.PUSH_FRAC * lensMultLocal;
+    }
+    // The total shear is CAPPED below one full turn, so the field can never
+    // wind into bands (see PORTAL_CONSTANTS.LENS).  Time BREATHES that
+    // bounded shear instead of accumulating it: SPIN scales the breathing
+    // rate, and at 0 the sine is frozen at phase 0, leaving the standing
+    // TWIST — a static bend.  LENS scales the amplitude of both the push and
+    // the twist, so turning it down genuinely flattens the distortion rather
+    // than re-scaling an angle that was already many turns deep.
+    const spinMult = getPortalLensSpinMult();
+    // CLAMPED BELOW ONE TURN, whatever the knob says.  Total shear under 2*PI
+    // is what makes banding impossible (see PORTAL_CONSTANTS.LENS), and the
+    // Lens knob now reaches 12x — enough to push the shipped 1.095 rad past a
+    // full turn and wind the field into the very bands that knob was added to
+    // investigate.  Clamping here keeps the guarantee true at EVERY setting
+    // and costs nothing at sane ones: the strength knob simply stops adding
+    // twist once the sky is bent as far as it can be without repeating, and
+    // goes on driving the radial push, which has no such failure mode.
+    const TWIST_CEIL = Math.PI * 2 * 0.98;
+    const twistRaw = (PORTAL_CONSTANTS.LENS.TWIST
+        + PORTAL_CONSTANTS.LENS.TWIST_SWING
+          * Math.sin(performance.now() * 0.001 * PORTAL_CONSTANTS.LENS.SWIRL_RATE * spinMult))
+        * lensMultLocal;
+    const twistNow = Math.max(-TWIST_CEIL, Math.min(TWIST_CEIL, twistRaw));
+    this.lastLensTwist = lensN > 0 ? twistNow : 0;
+    this.lastLensPush = lensN > 0 ? lpush[0] : 0;
+
     for (let g = 0; g < groups.length; g++) {
         const grp = groups[g];
         ctx.fillStyle = grp.fill;
@@ -723,14 +853,46 @@ public setMapType(type: MapType) {
         // which is analytic and consistent across engines, unlike the
         // drawImage resampling filter this gauntlet began by removing (and
         // which S4 deleted from this path).
-        for (let i = grp.start; i < end; i++) {
-            const b = B[i];
-            let x = X[i] + bofx[b];
-            if (x >= pw) x -= pw;
-            let y = Y[i] + bofy[b];
-            if (y >= ph) y -= ph;
-            const sz = S[i];
-            ctx.fillRect(x, y, sz, sz);
+        if (lensN === 0) {
+            // No lens on screen: the original tight loop, untouched.
+            for (let i = grp.start; i < end; i++) {
+                const b = B[i];
+                let x = X[i] + bofx[b];
+                if (x >= pw) x -= pw;
+                let y = Y[i] + bofy[b];
+                if (y >= ph) y -= ph;
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
+            }
+        } else {
+            for (let i = grp.start; i < end; i++) {
+                const b = B[i];
+                let x = X[i] + bofx[b];
+                if (x >= pw) x -= pw;
+                let y = Y[i] + bofy[b];
+                if (y >= ph) y -= ph;
+                for (let l = 0; l < lensN; l++) {
+                    const dx0 = x - ldx[l];
+                    const dy0 = y - ldy[l];
+                    const d2 = dx0 * dx0 + dy0 * dy0;
+                    // Quadratic falloff: outside the radius nothing moves;
+                    // the sqrt + sin/cos below run only for stars inside it.
+                    if (d2 >= lr2[l] || d2 < 1e-6) continue;
+                    const d = Math.sqrt(d2);
+                    const f = 1 - d / lr[l];
+                    const f2 = f * f;
+                    const scale = (d + f2 * lpush[l]) / d;
+                    const nx = dx0 * scale;
+                    const ny = dy0 * scale;
+                    const ang = f2 * twistNow;
+                    const ca = Math.cos(ang);
+                    const sa = Math.sin(ang);
+                    x = ldx[l] + nx * ca - ny * sa;
+                    y = ldy[l] + nx * sa + ny * ca;
+                }
+                const sz = S[i];
+                ctx.fillRect(x, y, sz, sz);
+            }
         }
     }
   }
@@ -778,6 +940,85 @@ public setMapType(type: MapType) {
           velocity: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
           alpha: 1.0, length: 20
       });
+  }
+
+  /** THE TRANSIT WARP'S SKY — the real star field, swept outward.
+   *
+   *  Drawn ON TOP of the warp's veil (RenderSystem), so during a wormhole
+   *  flight the player sees their own sky streaming past rather than a
+   *  stand-in: every streak here is one of the stars already on screen, at
+   *  its own bearing, in its own colour and size.  That is the whole point of
+   *  putting this in BackgroundManager instead of in the warp module — the
+   *  star data lives here, and copying it somewhere else to draw a lookalike
+   *  is what the previous synthetic version did.
+   *
+   *  THE FIELD IS SWEPT, NOT REPLACED.  Each star keeps its bearing and simply
+   *  moves outward, its distance from the vanishing point scaled by
+   *  `warpExpansion`.  At the start that factor is 1, so the first frame of
+   *  the beat is EXACTLY the sky already on screen — the continuity is
+   *  structural rather than approximate — and because outer stars move
+   *  fastest (dr = r x dE) the sweep reads as forward motion rather than as a
+   *  uniform zoom.  A depth model was tried first, mapping each star's radius
+   *  to a depth and wrapping it as the ship advanced: the wrapped depths
+   *  converged and drew the whole field as one solid disc of streaks.
+   *
+   *  One batched path per draw group, so ~6 000 streaks cost one canvas state
+   *  change per colour rather than one per star — the same trick the ordinary
+   *  star pass uses, and the reason this is affordable at all.  Runs only
+   *  while a transit is in flight. */
+  public renderWarpStars(ctx: CanvasRenderingContext2D, p: number, dpr: number) {
+    const fade = warpFade(p);
+    if (fade <= 0.01) return;
+    const pw = this.bandPixelWidth, ph = this.bandPixelHeight;
+    if (pw <= 0 || ph <= 0) return;
+
+    const cx = pw / 2, cy = ph / 2;
+    const half = Math.hypot(pw, ph) / 2;
+    const expand = warpExpansion(p);
+    // Streaks follow SPEED, so at rest they are the dots the field already
+    // draws and the opening frame is indistinguishable from the live sky.
+    const streakK = PORTAL_CONSTANTS.WARP.STREAK * warpSpeed(p);
+    const cull = half * 1.5;
+
+    const X = this.starX, Y = this.starY, S = this.starSize, B = this.starBandIdx;
+    const bofx = this.bandOffsetX, bofy = this.bandOffsetY;
+    const groups = this.starGroups;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.lineCap = 'round';
+    for (let g = 0; g < groups.length; g++) {
+      const grp = groups[g];
+      const end = grp.start + grp.count;
+      // Star size doubles as line width, so the field keeps its depth
+      // ordering while streaking: the faint haze stays hairline, the few
+      // foreground stars draw as real streaks.
+      ctx.strokeStyle = grp.fill;
+      ctx.globalAlpha = fade;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = grp.start; i < end; i++) {
+        const b = B[i];
+        let x = X[i] + bofx[b];
+        if (x >= pw) x -= pw;
+        let y = Y[i] + bofy[b];
+        if (y >= ph) y -= ph;
+        // The star's own bearing and distance, as it sits on screen now —
+        // then simply pushed outward along that bearing.
+        const dx = x - cx, dy = y - cy;
+        const r0 = Math.hypot(dx, dy);
+        if (r0 < 1e-3) continue;
+        const r = r0 * expand;
+        if (r > cull) continue;
+        const inv = 1 / r0;
+        const ca = dx * inv, sa = dy * inv;
+        const tail = Math.max(S[i], r * streakK);
+        ctx.moveTo(cx + ca * r, cy + sa * r);
+        ctx.lineTo(cx + ca * (r + tail), cy + sa * (r + tail));
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'butt';
   }
 
   private renderGrid(ctx: CanvasRenderingContext2D, width: number, height: number, cameraPos: Vector2) {

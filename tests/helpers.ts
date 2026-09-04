@@ -218,6 +218,98 @@ export async function startRun(page: Page, mapType?: string) {
   await waitForStats(page, s => s.gameState === 'PLAYING', 'game to reach PLAYING');
 }
 
+/** Wait out the portal ARRIVAL BEAT (PORTAL_CONSTANTS.WARP).
+ *
+ *  A transit freezes the sim for the length of the flight-through animation,
+ *  the same way the stage-clear screen does — so a suite that calls
+ *  `transitionToMap` and immediately pokes the world is racing it.  That is
+ *  not a harness quirk to route around: a PLAYER cannot act during the beat
+ *  either, so a test that acts is testing a state the game never presents.
+ *
+ *  The specific bite, which cost a full-suite run: boss phases are stamped by
+ *  `updateBosses`, which does not run while the sim is held.  A test that
+ *  transitted, zeroed the boss's shield and fired found its shield back —
+ *  the phase landed after the freeze lifted and re-stamped it.
+ *
+ *  Cheap when the beat is off (DBG "Transit fx: off"): the timer is already 0
+ *  and this returns on the first poll. */
+export async function waitForTransit(page: Page, timeoutMs = 15_000) {
+  await waitForEngine(page, e => (e.portalWarpTimer ?? 0) === 0,
+    'the portal arrival beat to finish', timeoutMs);
+}
+
+/** Stop the world from repopulating itself under a measurement.
+ *
+ *  A pixel-sampling test builds its scene and then reads colour SHIFTS across
+ *  knob positions over several settle windows — a second or more of wall clock
+ *  on a slow runner.  Everything that MOVES in that window is noise added to
+ *  the very quantity being read: wave enemies drift through the sample points,
+ *  light the scene themselves, and get steered around by a rift's avoidance
+ *  push.  Clearing them once is not enough, because the engine puts them back
+ *  — the ladder keeps spawning and the ambient bubble keeper tops its own
+ *  population up on a timer.
+ *
+ *  So both sources are stopped rather than swept: `haltForBoss` ends the
+ *  ladder AND drops the spawns already queued behind it (nothing but a map
+ *  load restarts it), and an infinite keeper timer never counts down.  Then
+ *  the movers already out there are cleared once, which is now durable.
+ *
+ *  Only for tests that do not NEED movers — a test about a bubble lighting up
+ *  obviously must not call this. */
+export async function quietScene(page: Page) {
+  await engine(page, e => {
+    const g = e as unknown as {
+      waves: { haltForBoss: () => void };
+      ambientBubbleTimer: number;
+      currentMap: { entities: Array<{ type: string; isSnitch?: boolean; active: boolean }> };
+    };
+    g.waves.haltForBoss();
+    g.ambientBubbleTimer = Number.POSITIVE_INFINITY;
+    for (const t of g.currentMap.entities) {
+      if (t.type === 'ENEMY' || t.isSnitch === true) t.active = false;
+    }
+  });
+}
+
+/** Drive a DBG cycle knob to a NAMED step, and prove it landed there.
+ *
+ *  Two hazards, both of which have bitten this suite:
+ *
+ *  1. Counting clicks from an assumed starting index makes a knob test
+ *     ORDER-DEPENDENT — one stray cycle and every later reading is silently
+ *     taken at the wrong setting.  So the target is a NAME.
+ *  2. The name is only republished on the engine's stats push, so a read
+ *     taken straight after a click can still be the PREVIOUS step.  A loop
+ *     that compares a stale name steps past its target every single time and
+ *     wraps the whole cycle without ever seeing it — which is how a lens test
+ *     passed locally and failed on a slower CI runner.  So each click waits
+ *     for the name to CHANGE, which is bounded and assumes nothing about how
+ *     many frames a push takes.
+ *
+ *  `steps` is the cycle's length; the loop is given one extra so a full lap
+ *  is always possible from wherever the knob happens to be sitting. */
+export async function dialByName(
+  page: Page,
+  statsKey: string,
+  label: string,
+  click: (e: Engine) => void,
+  steps: number,
+): Promise<void> {
+  const read = () => page.evaluate(
+    k => (window as unknown as { __omniStats?: Record<string, unknown> }).__omniStats?.[k],
+    statsKey) as Promise<unknown>;
+  for (let i = 0; i <= steps; i++) {
+    const now = await read();
+    if (now === label) return;
+    await engine(page, click as (e: Engine) => void);
+    for (let f = 0; f < 40; f++) {
+      if (await read() !== now) break;
+      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r(null))));
+    }
+  }
+  throw new Error(`could not reach ${statsKey} "${label}"`);
+}
+
 /** Put the player next to a station of `kind` and dock.  Flies nothing —
  *  "can the ship reach it" is not what any suite using this is testing.
  *

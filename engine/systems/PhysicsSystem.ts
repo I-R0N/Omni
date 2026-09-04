@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode} from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS} from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -380,7 +380,8 @@ export class PhysicsSystem {
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number, opts?: { dirX?: number; dirY?: number }) => void,
-    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
+    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+    onPortalEject?: (entity: GameEntity, portal: GameEntity) => void
   ) {
     const t0 = performance.now();
 
@@ -398,7 +399,7 @@ export class PhysicsSystem {
     // is skipped entirely and lastGravityMs reads zero.
     const tGrav = performance.now();
     if (this.attractorGravityEnabled) {
-      this.applyGravity(entities, timeScale, onDamage);
+      this.applyGravity(entities, timeScale, onDamage, onPortalEject);
     }
     this.lastGravityMs = performance.now() - tGrav;
 
@@ -822,7 +823,7 @@ export class PhysicsSystem {
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void, onPortalEject?: (entity: GameEntity, portal: GameEntity) => void) {
     // Phase 2: use the attractors cache populated on map load instead of
     // re-scanning the full entity array every substep.  Individual dead
     // attractors are skipped at access time by the `active` check below so
@@ -838,28 +839,140 @@ export class PhysicsSystem {
         // tile case while letting mobile shards participate.
         if (!entity.active || entity.isExploding || entity.mass === Infinity || entity.type === EntityType.PARTICLE) continue;
 
+        // Portal-transit grace: debris the exit rift just spat out is immune
+        // to PORTAL gravity (pull and swallow both) until the timer runs
+        // out, or the well that ejected it would recapture most of it —
+        // escape speed from the mouth is ~8 px/tick against ejection speeds
+        // of ~2-6.  Ticked here because this loop is the only per-substep
+        // walk that cares; planets (non-portal attractors) still pull.
+        let graced = false;
+        if (entity.portalGraceTimer !== undefined && entity.portalGraceTimer > 0) {
+            entity.portalGraceTimer -= timeScale / 60;
+            graced = true;
+        }
+
         for (let j = 0; j < attractors.length; j++) {
             const attractor = attractors[j];
             if (!attractor.active) continue;
             if (entity === attractor) continue;
+            if (graced && attractor.isPortal) continue;
 
             const dx = wrapDeltaX(entity.position.x, attractor.position.x);
             const dy = wrapDeltaY(entity.position.y, attractor.position.y);
             const distSq = dx*dx + dy*dy;
-            const rangeSq = attractor.gravityRange! ** 2;
+            // DBG portal tuning is applied at the READ, so the entity keeps
+            // PORTAL_CONSTANTS as its base and a knob re-tunes the portals
+            // already in the world.  Non-portal attractors read 1×.
+            const isPortalAttr = attractor.isPortal === true;
+            const gMult = isPortalAttr ? getPortalGravityMult() : 1;
+            const rMult = isPortalAttr ? getPortalGravityRangeMult() : 1;
+            const range = attractor.gravityRange! * rMult;
+            const rangeSq = range * range;
 
             // Mobile shard-family entities get the close-attractor crush
-            // (mobile shards = STRUCTURE with finite mass).
-            const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
-            if (distSq < (attractor.size.x / 2)**2 && isMobileShard) {
-                entity.active = false;
-                if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
-                continue; 
+            // (mobile shards = STRUCTURE with finite mass).  A wormhole
+            // portal SWALLOWS instead: the radius is the visual event
+            // horizon (0.62 × r, the dark disc dropShapes draws), so the
+            // shard disappears while covered by it, and there is no damage
+            // popup — matter falling past a horizon is silent, and a crush
+            // number over the rift would be pure noise.
+            // Dragon body segments are exempt: they are chain-snapped to the
+            // head's path every frame (velocity is moot) and dying any way
+            // but a SHOT must go through the sever machinery, not a silent
+            // deactivate that would leave a gap the DragonInstance still
+            // references.
+            const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity
+                && entity.dragonSegment !== true;
+            // A portal swallows at exactly the radius it is DRAWN at — the
+            // same `portalHorizonRadius` the renderer calls, so matter can
+            // never vanish beside the hole or survive inside it.  (It carries
+            // the destination-span scaling and the DBG Size knob with it.)
+            const crushR = isPortalAttr
+                ? portalHorizonRadius(attractor)
+                : attractor.size.x / 2;
+
+            // ── STEERING CLEAR ──────────────────────────────────────────
+            // Anything that steers itself is pushed OUT near a rift, so
+            // nothing with a mind of its own is captured and parked in the
+            // throat (user call).  One rule here rather than avoidance code
+            // in the AISystem strategies, the dragon, the rivals and the
+            // bubbles — four different movement machineries, and a fifth
+            // arriving later would have had to remember.
+            //
+            // The pull is NOT cancelled: drifting toward a rift from across
+            // the arena is worth keeping.  This simply wins closer in, so
+            // they hold off at a standoff and slide around it.
+            if (isPortalAttr && avoidsPortals(entity)) {
+                const A = PORTAL_CONSTANTS.AVOID;
+                const avoidR = Math.max(crushR * A.RANGE_MULT, A.RANGE_MIN);
+                if (distSq < avoidR * avoidR) {
+                    const d = Math.sqrt(distSq);
+                    if (d > 1e-3) {
+                        // Linear falloff to nothing at the rim, so there is no
+                        // edge to bounce off — just firmer the closer it gets.
+                        const push = A.ACCEL * (1 - d / avoidR) * timeScale;
+                        entity.velocity.x -= (dx / d) * push;
+                        entity.velocity.y -= (dy / d) * push;
+                    }
+                }
+            }
+
+            if (distSq < crushR * crushR) {
+                // ── TOO BIG TO SWALLOW ──────────────────────────────────
+                // An object whose own radius reaches a fair fraction of the
+                // horizon cannot fit down it: crossing the centre FLINGS it
+                // out along its own heading, the way a collision would throw
+                // it (user call).  Sized against the horizon, so the same
+                // rock ploughs through a small rift and vanishes into a big
+                // one.  The player and projectiles are exempt — see
+                // PORTAL_CONSTANTS.EJECT.
+                const E = PORTAL_CONSTANTS.EJECT;
+                const radius = Math.max(entity.size.x, entity.size.y) * 0.5;
+                const ejectable = isPortalAttr
+                    && entity.type !== EntityType.PLAYER
+                    && entity.type !== EntityType.PROJECTILE
+                    && radius >= crushR * E.SIZE_FRACTION;
+                if (ejectable) {
+                    let vx = entity.velocity.x, vy = entity.velocity.y;
+                    let speed = Math.hypot(vx, vy);
+                    if (speed > 1e-3) {
+                        vx /= speed; vy /= speed;
+                    } else {
+                        // No heading of its own — something nudged it in at
+                        // rest.  Throw it back the way it came in, which is
+                        // the only direction that means anything here.
+                        const d = Math.sqrt(distSq) || 1;
+                        vx = -dx / d; vy = -dy / d; speed = 0;
+                    }
+                    const out = Math.max(E.SPEED, speed * E.BOOST);
+                    entity.velocity.x = vx * out;
+                    entity.velocity.y = vy * out;
+                    entity.rotationSpeed = (entity.rotationSpeed ?? 0)
+                        + (Math.random() - 0.5) * E.SPIN;
+                    // The same immunity the transit debris gets, and for the
+                    // same reason: without it the well it just cleared would
+                    // haul it straight back down.
+                    entity.portalGraceTimer = E.GRACE_SEC;
+                    if (onPortalEject) onPortalEject(entity, attractor);
+                    continue;
+                }
+                if (isMobileShard) {
+                    entity.active = false;
+                    if (onDamage && !attractor.isPortal) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
+                    continue;
+                }
             }
 
             if (distSq < rangeSq) {
-                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
+                let force = ((attractor.gravityStrength || 1000) * gMult) / Math.max(distSq, 10000);
                 const maxAccel = entity.type === EntityType.PLAYER ? 0.2 : 5.0;
+                // Attractor-side player scaling (portals): shards and enemies
+                // take the full well, the player only a fraction of it, so a
+                // wormhole's mouth pulls debris in without trapping a pilot
+                // who only flew close (thrust must always win).
+                if (entity.type === EntityType.PLAYER && attractor.gravityPlayerScale !== undefined) {
+                    force *= attractor.gravityPlayerScale;
+                }
 
                 // Scale force by time step so higher framerates don't increase gravity strength
                 const clampedForce = Math.min(force, maxAccel) * timeScale;

@@ -355,6 +355,19 @@ export interface GameEntity {
   friction?: number; // Per-entity friction override
   gravityRange?: number; // Radius of gravitational influence
   gravityStrength?: number; // Force multiplier (G * Mass)
+  gravityPlayerScale?: number; // Attractor-side scale on the pull the PLAYER feels
+                               // (portals: a tug, never a trap — see PORTAL_CONSTANTS)
+  portalGraceTimer?: number;   // Portal-gravity immunity window on freshly-emerged
+                               // transit debris, so the exit well can't re-swallow it
+  /** Whether this entity STEERS ITSELF around portals rather than being
+   *  captured by them.  Defaults by type (every ENEMY and the snitch do),
+   *  so a future roamer is covered without touching the physics; set it
+   *  explicitly only to opt something else in, or an enemy out. */
+  avoidsPortals?: boolean;
+  portalDestSpan?: number;     // The DESTINATION map's span (world units), stamped by
+                               // addPortal.  A rift is a window onto the arena at the
+                               // other end, so its horizon is sized from this — see
+                               // `portalHorizonRadius`
 
   // AI
   enemySubtype?: EnemySubtype;
@@ -1865,6 +1878,16 @@ export interface EngineStats {
   controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // DBG portal tuning (pause ▸ Debug Menu ▸ Portals) — five live multipliers
+  // over PORTAL_CONSTANTS, plus a readout of what they resolve to.
+  portalWarpName?: string;
+  portalSizeName?: string;
+  portalGravityName?: string;
+  portalGravityRangeName?: string;
+  portalLensName?: string;
+  portalLensSpinName?: string;
+  portalLensRadiusName?: string;
+  portalTuningInfo?: string;
   // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
   rollFeelName?: string;
   // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default —

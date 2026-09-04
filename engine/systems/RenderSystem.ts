@@ -28,6 +28,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
+import { renderPortalWarpVeil } from './render/portalWarp';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
@@ -425,6 +426,15 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   private _trailEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particleBuffer: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
+  /** Transit-warp progress 0->1, pushed per frame by GameEngine.draw; null
+   *  when no transit is in flight.  A number rather than a timer because the
+   *  beat is a pure function of progress — see render/portalWarp.ts. */
+  portalWarp: number | null = null;
+  /** The veil alpha actually painted on the last frame of a transit, 0 when
+   *  no transit is in flight.  Published because "the destination is not
+   *  visible yet" is a RULE, and the only honest way to check it is to read
+   *  what the render path put on the screen — see tests/maps.spec.ts. */
+  lastWarpVeilAlpha: number = 0;
   private _attractors: GameEntity[] = [];
 
   // Object pools backing the {entity,rx,ry} render buckets above.  The
@@ -438,6 +448,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // `.length = 0`, which drops the refs but leaves the pooled objects
   // intact for reuse.  `pushSlot` mutates a pooled slot in place instead
   // of allocating.  Consumers read the live arrays unchanged.
+  /** The player's own draw slot, kept aside during bucket-building so the
+   *  transit warp can re-draw the ship ON TOP of its veil.  A pooled
+   *  one-element list, filled the same way as every other bucket. */
+  private _playerDraw: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _playerDrawPool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _visiblePool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _nebulaTilePool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _nebulaShardPool: { entity: GameEntity, rx: number, ry: number }[] = [];
@@ -879,6 +894,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
+    this._playerDraw.length = 0;
     this._visibleEntities.length = 0;
     this._nebulaTileEntities.length = 0;
     this._nebulaShardEntities.length = 0;
@@ -939,6 +955,14 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
         if (entity.type === EntityType.INTERACTABLE && entity.gravityStrength && entity.gravityStrength > 500) {
             this._attractors.push(entity);
+        }
+
+        // Hold the player's slot aside for the transit warp, which re-draws
+        // the ship above its veil so the player keeps something to hold onto
+        // while the world is gone.  One pooled slot; costs a type compare per
+        // entity on the generic arm (static tiles never reach here).
+        if (entity.type === EntityType.PLAYER) {
+            this.pushSlot(this._playerDraw, this._playerDrawPool, entity, rx, ry);
         }
 
         // Off-screen indicator arrows — for enemies and non-drop POIs.  Gnats
@@ -1137,6 +1161,47 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // follow it, and still precede the HUD: the fog darkens the world, never
     // the interface.
     renderFogLayer(this, ctx, width, height, playerPos, camera);
+
+    // 5b'''. THE TRANSIT WARP (Screen Space).
+    //
+    // After the world and its light/fog layers, so it veils everything the
+    // player has arrived into, and BEFORE the HUD, which stays legible
+    // throughout — the chrome is not inside the wormhole.
+    if (this.portalWarp === null) this.lastWarpVeilAlpha = 0;
+    if (this.portalWarp !== null) {
+        this.lastWarpVeilAlpha = renderPortalWarpVeil(ctx, width, height, this.portalWarp);
+        // The tunnel IS the real sky: the same stars the player was looking
+        // at, swept outward (BackgroundManager owns the star data, so it
+        // draws them).  Above the veil, below the ship.
+        this.backgroundManager.renderWarpStars(ctx, this.portalWarp, effectiveDpr());
+        ctx.setTransform(effectiveDpr(), 0, 0, effectiveDpr(), 0, 0);
+
+        // CONTINUITY: the ship rides ON TOP of the tunnel (user call).  The
+        // veil takes the whole world away, and without the hull still in
+        // frame the beat reads as a cutaway to somewhere else rather than as
+        // the player's own flight — there is nothing to follow from the map
+        // they left to the one they arrive in.  It is the REAL entity through
+        // the REAL entity path (same sprite, same rotation, same hit flash),
+        // not a stand-in silhouette, because a different-looking ship would
+        // break the continuity it is here to provide.
+        //
+        // renderEntities reads the camera matrix off the context, so the
+        // camera transform has to be re-applied for this one draw — the world
+        // pass restored it several steps ago.  Mirrors the block in §2.
+        if (this._playerDraw.length > 0) {
+            ctx.save();
+            ctx.translate(width / 2, height / 2);
+            ctx.scale(camera.zoom, camera.zoom);
+            if (Number.isFinite(camera.position.x) && Number.isFinite(camera.position.y)) {
+                ctx.translate(
+                    -camera.position.x + (camera.shakeOffset ? camera.shakeOffset.x : 0),
+                    -camera.position.y + (camera.shakeOffset ? camera.shakeOffset.y : 0),
+                );
+            }
+            this.renderEntities(ctx, this._playerDraw, camera, playerPos);
+            ctx.restore();
+        }
+    }
 
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {

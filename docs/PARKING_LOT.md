@@ -635,6 +635,48 @@ retaliate against the player. First pass is intentionally lean; revisit:
 
 ---
 
+## Entity ↔ portal awareness — real AI, not just a shove (parked 2026-09-01)
+
+Sits with the other entity-AI items below (roster balance, swarm/bubble feel,
+rival polish): this is the AI half of the portal work, deliberately deferred
+while the physics half ships.
+
+**What exists now.**  `avoidsPortals(e)` in `constants.ts` plus an outward
+push in `PhysicsSystem.applyGravity`.  One predicate, defaulting by TYPE
+(every `ENEMY`, plus the snitch), so bubbles, dragons, rivals and any future
+roamer are covered the day they exist.  The pull is not cancelled — they
+drift in from range and are held off at a standoff of roughly 215 units.
+
+**Why that is a stopgap.**  It is a FORCE, not a decision.  Nothing in the
+game *knows* a rift is there; it is simply pushed away from one, which means:
+
+- an enemy chasing the player across a rift takes a curved path it never
+  chose, and a determined chaser pushes through anyway — correct as physics,
+  but it reads as drag rather than as piloting;
+- nothing can use the standoff tactically (no baiting the player toward a
+  mouth, no refusing to follow through one);
+- the four movement machineries — the AISystem strategies, the dragon's
+  flow-weave, the rivals' strafe, the bubbles' drift — still have no concept
+  of a hazard, so the same problem returns in its own shape for the next
+  hazard that is not a portal;
+- the standoff radius is one global number rather than something an
+  archetype could weigh against what it is doing.
+
+**What a real pass looks like.**  A shared HAZARD AWARENESS input the
+strategies can read — "there is a thing at X with radius R you should not
+enter" — with each archetype deciding what to do about it, and portals as the
+first hazard rather than a special case.  That is the same shape the flow
+field already has (a sampled field every mover can consult), so the natural
+home is probably a hazard layer beside it rather than a portal-specific API.
+
+**Do this when** a second hazard exists (a boss's zone, a hostile region), or
+when a roamer's pathing around rifts starts reading as broken rather than as
+cautious.  Not before: one hazard does not justify a hazard system, and the
+push already satisfies the requirement it was written for — nothing gets
+trapped.
+
+---
+
 ## Exotic-enemy roster (Stages 0–7) — balance / tuning pass
 
 **Context:** The exotic enemy roster shipped across Stages 0–7 (PR #67:
@@ -1011,6 +1053,11 @@ carries long-range discovery and would carry more under option 1).
 
 ## Portal persistence — stages that stay cleared, and enemies that creep back (2026-08-07)
 
+> **2026-09-03:** the node identity this entry needs is specified in
+> `docs/PORTAL_AND_WORLD_LAYER_PLAN.md` §6, and the persistence decision it
+> waits on is that doc's open decision #1.  Tracked as **F1**/**F2** in
+> `docs/CONFIG_CHANGES_PHASED_PLAN.md`.
+
 **Context:** raised in playtest while the stage-descent capstone was being
 built.  The session deliberately shipped the SHALLOW version (kill the boss →
 a descent rift opens → the next stage is a fresh arena, and wave progress is
@@ -1137,6 +1184,14 @@ unrelated rooms.  Material similarity should therefore be a property of
 NEIGHBOURHOODS in the graph, not rolled independently per node; a sensible
 model is to seed regions and let per-node draws perturb a regional base
 composition.
+
+> **2026-09-03 — superseded in part.**  The world-structure half of this
+> entry now lives in `docs/PORTAL_AND_WORLD_LAYER_PLAN.md`, which adds the
+> containment hierarchy, the two portal kinds and the maze/labyrinth
+> topologies, and which proposes SPLITTING the graph into node identity
+> (early, cheap, no generation) and procedural worldgen (Phase G, unchanged).
+> The material-composition half below is untouched and still wanted.
+> `docs/CONFIG_CHANGES_PHASED_PLAN.md` tracks it as **G1** / **G2**.
 
 **This is the same graph the portal-persistence entry needs** (see "Portal
 persistence — stages that stay cleared, and enemies that creep back"): its
@@ -1565,3 +1620,97 @@ Two ways out, and the choice is aesthetic rather than technical:
 
 Deliberately NOT auto-fixed: these are authored assets, and trimming someone's
 recording to satisfy a linter is the wrong default.
+
+---
+
+## Portal and world-layering design — moved to its own plan (2026-09-03)
+
+The portal session (PR #92) went deep enough on portals that the design no
+longer fits a parking-lot entry.  It lives in
+**`docs/PORTAL_AND_WORLD_LAYER_PLAN.md`**: the layer containment hierarchy,
+the two portal kinds (hidden wormhole vs. signposted celestial gateway),
+discovery-by-physics and its interface to the **A4** scanner, the
+maze/labyrinth topologies, and the recommendation to split node identity out
+of Phase **G1**.
+
+That doc takes precedence over `docs/CONFIG_CHANGES_PHASED_PLAN.md` **on
+portals and overworld layering only** (user directive); the phased plan
+remains authoritative on phase order, element IDs and everything else.
+
+---
+
+## Portal effects — follow-ups parked from the wormhole session (2026-09-03)
+
+All small, all deliberately not done while the well was still being tuned.
+
+- **The debris-transit spit still sprays sparks.**  When matter that
+  travelled the wormhole re-emerges from the exit rift, each piece pops three
+  rift-coloured particles (`updatePortalTransit`).  The user removed the
+  equivalent spray from the EJECT path — a rift throwing a boulder back has
+  not collided with anything, and debris flying off it says otherwise — and
+  this one was left because emerging from a wormhole is a different sentence
+  from bouncing off one.  Revisit if it reads as the same mistake.
+- **`EJECT.SPEED` is no longer derived from anything.**  It is 20, and it was
+  chosen when escape from the mouth was ~14.5 px/step.  The retune took
+  escape to ~7.1, so the margin went 1.4× → 2.8× while the throw's absolute
+  speed stayed put — deliberately, because that speed is what the eject
+  *feels* like.  But it is now a literal beside a well that moved, which is
+  exactly the staleness `playerEjectSpeed` was written to end.  If the well
+  is retuned again, either solve this one too or re-check the comment.
+- **The screen shake on an eject survives.**  The sparks went; the
+  size-scaled shake stayed, on the reasoning that it is the WEIGHT of the
+  thing going past rather than a claim about what it touched.  Not
+  re-examined with the user.
+- **Hidden portals may need a stronger well than the tuned one.**  See
+  `PORTAL_AND_WORLD_LAYER_PLAN.md` §4: the retune that fixed the dizziness
+  also made the discovery cues subtle, and those are the same knob.
+
+---
+
+## `lighting.spec.ts` — the open-space reference is not a stable control (2026-09-03)
+
+**Parked from PR #92, where it was the last red test and the one thing on
+that branch left unfixed.**  Five other CI failures in that session were also
+measurement rather than behaviour and WERE fixed there; this one was handed
+over instead, deliberately.
+
+`occluder collection › the material colour rides the light it passes on`
+fails intermittently on CI (green on `bd3b8d1` and `4073fee`, red on
+`5367464`, `727ec92`, `d28954a`) while the full suite runs clean locally.
+
+**What the instrumentation established** — the failure now reports its own
+geometry, and CI was compared against four local runs:
+
+- Geometry is IDENTICAL on both machines (`390×844`, camera zoom `0.65`) and
+  no probe falls off the canvas (asserted, and reads zero).
+- **The umbra reads are deterministic** — `[2.8, 4.8, 5.2]` and `[0, 11, 0]`,
+  identical to the digit across twelve local runs.  The subject of the
+  measurement is not the problem.
+- **The unstable term is the OPEN-SPACE reference**, and its instability is
+  POSITIONAL IN THE SEQUENCE rather than random: whichever measurement is
+  taken second reads ~17 on both machines, the first reads high and variable
+  (12.7–26.7 locally), the third reads low and variable.
+
+That was tested directly by inserting a discarded warm-up pass: it made the
+first measurement perfectly stable — including the open-space read that had
+been swinging by a factor of two — and moved the instability onto the second.
+So the open-space gain RISES AND THEN FALLS over the ~2 s the three passes
+span.  The warm-up was reverted, because relocating a defect is not fixing it.
+
+**Ruled out:** off-canvas probes; device geometry; fog of war (`FOG_CYCLE`
+defaults to `off`); movers repopulating the scene (this test already calls
+`quietScene`, which halts the wave ladder and stops the ambient keeper).
+
+**What it needs:** find what varies in the light stack over ~2 s at ~200
+units from a stationary player, then give the bound a reference that does not
+move — averaging it across the settle window it already runs, or anchoring it
+to something time-independent.  Note the reference is currently three SINGLE
+pixels read at one instant, which is a thin control for a difference-of-
+differences a couple of units wide.
+
+**One deliberate loosening to be aware of** when re-reading this test: the
+bound used to compare umbra GREEN against open-space LUMINANCE MEAN.  The
+light is blue-green (125, 211, 252), so its green sits 7.7% above its own
+mean and the comparison was tighter than the physical claim it is written to
+make.  It compares green to green now.  That is weaker by exactly that 7.7%,
+and it is the comparison the sentence above it describes.

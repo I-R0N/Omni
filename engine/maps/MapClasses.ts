@@ -146,6 +146,20 @@ export abstract class BaseMapLayer {
       health: 1,
       maxHealth: 1,
       mass: Infinity,
+      // Wormhole gravity well: picked up by PhysicsSystem.initializeAttractors
+      // at map load (shards/enemies/drops spiral in; a shard reaching the
+      // mouth is swallowed by the close-attractor crush) and by RenderSystem's
+      // attractor bucket, which feeds the background star lensing.  The
+      // player feels only GRAVITY_PLAYER_SCALE of it — a tug, never a trap.
+      gravityRange: PORTAL_CONSTANTS.GRAVITY_RANGE,
+      gravityStrength: PORTAL_CONSTANTS.GRAVITY_STRENGTH,
+      gravityPlayerScale: PORTAL_CONSTANTS.GRAVITY_PLAYER_SCALE,
+      // How big the world at the other end is.  A rift is a window onto its
+      // destination, so `portalHorizonRadius` sizes the black disc from this
+      // — Pocket shows a small mouth, Deep Space a wide one.  Stamped here
+      // rather than looked up at draw time because the lookup lives in this
+      // module: `constants` cannot import map dimensions without a cycle.
+      portalDestSpan: MAP_SPANS[mapDescriptor(targetId)?.mapType ?? MapType.OVERWORLD],
     });
   }
 
@@ -1092,3 +1106,32 @@ function emitGlassTileRing(
     entities.push(TileGenerator.buildStructureTile(t.c, t.r, t.x, t.y, w, h, variant));
   }
 }
+
+/** Every map's SPAN in world units, read straight off the map classes' own
+ *  statics so there is no second copy to drift.
+ *
+ *  Exists because a portal has to know how big the world at the other end is
+ *  WITHOUT building it: `addPortal` stamps this onto the rift as
+ *  `portalDestSpan`, and `portalHorizonRadius` sizes the black disc from it —
+ *  a rift is a window onto its destination, so a bigger arena shows a bigger
+ *  mouth.  Typed `Record<MapType, number>`, like `MAP_POPULATION` and
+ *  `PLAYER_MOVEMENT_CONFIG`, so adding a MapType has to add a row here rather
+ *  than silently falling back.
+ *
+ *  Square maps today, so one number each; if a map ever becomes rectangular
+ *  this should become its diagonal rather than growing a second field. */
+export const MAP_SPANS: Record<MapType, number> = {
+  [MapType.OVERWORLD]:            OverworldMap.WIDTH,
+  [MapType.UNIVERSE]:             UniverseMap.WIDTH,
+  [MapType.RING]:                 RingMap.WIDTH,
+  [MapType.SEVEN_RINGS]:          SevenRingsMap.WIDTH,
+  [MapType.POCKET]:               PocketMap.WIDTH,
+  [MapType.ASTEROID_FIELD]:       AsteroidFieldMap.WIDTH,
+  [MapType.GLASS_FIELD]:          SingleVariantTileFieldMap.WIDTH,
+  [MapType.PLASTIC_FIELD]:        SingleVariantTileFieldMap.WIDTH,
+  [MapType.METAL_FIELD]:          SingleVariantTileFieldMap.WIDTH,
+  [MapType.INDESTRUCTIBLE_FIELD]: SingleVariantTileFieldMap.WIDTH,
+  [MapType.ROCK_FIELD]:           SingleVariantTileFieldMap.WIDTH,
+  [MapType.TILE_HEAVY]:           SingleVariantTileFieldMap.WIDTH,
+  [MapType.NEBULA_FIELD]:         NebulaFieldMap.WIDTH,
+};

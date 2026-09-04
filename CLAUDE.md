@@ -357,6 +357,72 @@ is now reachable only through that dropdown.
   placement changes).  Coming home used to dump the player at their base
   station across the hub, throwing the trip away.  No matching rift — a
   descent into a fresh arena, or a new run — falls back to `playerSpawn`.
+  AND THE PLAYER IS THROWN CLEAR (user call): `placePlayerAtSpawn` lands
+  the ship dead-stopped, which left it at rest INSIDE the exit rift's own
+  well, so the hole it had just come out of pulled it back in.  The
+  arrival now carries an outward velocity along the mouth→ship axis,
+  and that speed is SOLVED against the well rather than tuned beside it
+  (`playerEjectSpeed` in `constants.ts`).  It WAS a literal, and a
+  literal is what goes stale: retuning `GRAVITY_STRENGTH`/`RANGE` left
+  the old 12 px/step climbing a well half again as wide, which still
+  escaped on a clear run but reached the rim with almost nothing left,
+  so one clip of terrain on the way out stranded the ship in the throat.
+  What is written down now is the SPEC — `TRANSIT.PLAYER_CLEAR_SEC`, be
+  outside `GRAVITY_RANGE` within 0.75 s, capped at
+  `PLAYER_EJECT_CRUISE_FRAC` of the ship's own cruise so it can never
+  read as a launch — and the solve reads the DBG gravity knobs like
+  every other portal consumer, so an A/B on the well's strength carries
+  the way out with it.  A closed form is not available: a purely
+  ballistic escape needs only ~3.7 px/step and crawls out over seconds,
+  so FRICTION is what actually decides the trip, which makes the
+  criterion transcendental.  Forty bisection steps over a ~45-step
+  forward integration of the sim's own gravity arithmetic, once per
+  transit, is free at that call rate; at the shipped well it lands on
+  8.4 px/step, reaching the rim still doing ~7.6 against a ~42.5
+  cruise — and it RE-DERIVED itself when the well was tuned down (it was
+  20.7 against the old g6000/1050), which is the whole point of solving.  RADIAL, unlike
+  the debris' random headings: being spat sideways into the terrain you
+  arrived beside is not an arrival.  `exitMouthFor(fromId)` is the ONE
+  definition of "the rift you came out of" — where you land, which way
+  you are thrown and where your debris re-emerges must agree on it.
+  THE FLIGHT THROUGH is a short screen-space beat
+  (`PORTAL_CONSTANTS.WARP`, `engine/systems/render/portalWarp.ts`) armed
+  LAST in `transitionToMap`, once the destination is fully built — so it
+  is pure presentation over a world that is already correct, and the DBG
+  "off" step changes nothing but the look.  It reuses the STAGE-CLEAR
+  FREEZE (`portalWarpTimer > 0` short-circuits `loop`, and breaks the
+  substep drain when a transit is raised mid-frame): nothing may shoot
+  the player inside the tunnel, and a frozen sim is exactly what leaves
+  the WALL CLOCK free to drive the beat.  The tunnel IS THE REAL SKY (user call):
+  `BackgroundManager.renderWarpStars` sweeps the LIVE star field outward
+  — the same stars, bearings, colours and sizes already on screen, each
+  star's radius scaled 1 → `WARP.EXPAND` — so the opening frame is
+  structurally identical to the sky the player was looking at, and outer
+  stars move fastest (dr = r × dE), which is the forward-motion cue.
+  There are deliberately NO rings or arcs: a synthetic ring set drew a
+  tunnel the sky was not part of.  A depth model over the real stars was
+  tried and thrown away — mapping radius to depth and wrapping it as the
+  ship advanced made the wrapped depths converge and drew the whole
+  field as one solid disc.  Travel is a SMOOTHERSTEP, so the beat rolls
+  in slowly (user call: opening at full speed reads as a cut) and eases
+  out onto the arena, and streak length follows the derivative so the
+  acceleration is legible in the marks.  The PLAYER's own hull is
+  re-drawn above the veil through the real entity path
+  (`RenderSystem._playerDraw`), so the flight has something to hold onto
+  rather than reading as a cutaway.  The renderer owns no timer: `draw` pushes a
+  plain 0..1 `RenderSystem.portalWarp` and the whole effect is a pure
+  function of it, drawn after the fog and BEFORE the HUD.
+  DEBRIS TRAVELS WITH YOU (user call): mobile shards + collectible drops
+  within `PORTAL_CONSTANTS.TRANSIT.RADIUS` of the ship are captured out
+  of the departing map (nearest win the `MAX_ENTITIES` cap; enemies stay
+  behind — the portal clears the fight) and re-emerge from the exit
+  rift's mouth AFTER the player via the `portalTransit` queue
+  (`updatePortalTransit`, sim-time stagger over `DELAY_MIN..MAX`), each
+  flung on a random heading at a random speed with `GRACE_SEC` of
+  portal-gravity immunity (`portalGraceTimer`) so the exit well can't
+  re-swallow it.  Queued entities live NOWHERE but the queue;
+  `loadMapFresh` clears it, so a restart or second hop mid-drain means
+  the wormhole kept the stragglers.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
   Wave progress is FRESH per entry — `WaveSystem.init` zeroes
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
@@ -1394,7 +1460,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
   map portals (roadmap step (k)): rift size / colours (violet out, sky
   home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
-  burst.  `HUB_PORTAL_SITES` places one rift per full-game arena on the
+  burst — plus the WORMHOLE block: `GRAVITY_RANGE` / `GRAVITY_STRENGTH` /
+  `GRAVITY_PLAYER_SCALE` (the gravity well stamped onto every portal
+  entity by `addPortal`) and `LENS` (the background star warp — see the
+  portal-POI note in §8).  `HUB_PORTAL_SITES` places one rift per full-game arena on the
   Overworld (targets are DESCRIPTOR IDS, and the map's existing
   clearance filter drops terrain seeded on top of them);
   `RETURN_PORTAL_OFFSET` places each arena's single return rift relative
@@ -1822,6 +1891,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).
+- **A COLOUR MUST NEVER PARSE TO NaN.**  `hexToRgb` (render/drawUtils) feeds
+  its channels straight back into `rgb()`/`rgba()` strings for gradient
+  stops, and `addColorStop` THROWS on a colour it cannot parse — inside the
+  draw loop, where GameEngine's try/catch turns the throw into a LOST FRAME.
+  So one malformed colour anywhere in the world blanks the screen for as long
+  as it is on it.  Two ways in are closed: 3-digit CSS shorthand (`#fff`,
+  which parsed as `['ff','f','']` → `[255, 15, NaN]`) is expanded, and
+  anything else unparseable falls back to white — a wrong colour is a
+  cosmetic bug, a dropped frame is not.  Keep that guarantee if you touch the
+  helper; `rgbToHex` will happily format NaN back out as `#ff0fNaN`.
 - **A BONDED PAIR DRAWS AS ONE BLOB, and only draws** (`render/shardBlend.ts`).
   A cohesion bond holds two bodies together, and for plastic that bond is
   `cohesionOnly` — it NEVER matures into the single re-polygonised entity
@@ -2097,16 +2176,129 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   included) zeroes the level in `applyModuleEffects`.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
-  portal doesn't also fire a shot.  There is NO HUD dock/enter button —
+  portal doesn't also fire a shot.  A portal is also a WORMHOLE GRAVITY
+  WELL: `addPortal` stamps `gravityRange`/`gravityStrength` (plus
+  `gravityPlayerScale` — the player feels only a fraction, so the mouth
+  is a tug, never a trap), and the EXISTING attractor machinery does the
+  rest — `initializeAttractors` caches it at map load, `applyGravity`
+  spirals shards/enemies/drops (and curves projectiles) in, the
+  close-attractor crush SWALLOWS a mobile shard under the visual horizon
+  (0.62 × r, silently — no damage popup, no shatter; the count-based
+  asteroid keeper replenishes the belt away from portals), and
+  RenderSystem's attractor bucket (`gravityStrength > 500`) feeds
+  `BackgroundManager`'s star lensing: background stars inside the lens
+  radius are pushed off the throat and SHEARED around it (screen-space,
+  applied per star in `renderStars`; the no-lens path is the original
+  untouched loop, and positions stay fractional / sizes integral so the
+  S3 no-resampling invariant holds).  THE LENS IS RELATIVE TO THE HOLE:
+  its radius is `LENS.RADIUS_MULT × portalHorizonRadius` and its push is
+  `PUSH_FRAC ×` that radius, so the warped patch HUGS the disc, inherits
+  the destination-span scaling, and keeps its shape at every rift size —
+  it used to be a multiple of the entity's `size` with an absolute pixel
+  push, which left a 600-unit void standing off a 52-unit hole.  **The
+  twist is BOUNDED, and that is load-bearing**: it was
+  `f² × (WIND + elapsed × SWIRL_RATE)`, an angle growing without bound
+  with wall-clock time, and since every 2π of accumulated twist is one
+  visible BAND of stars the field wound itself into ~4 bands a minute in
+  and ~10 after three — and scaling a 60-radian twist by 0.25 still left
+  ~15 radians, far past 2π, so the DBG Lens knob could not change the
+  band count and read as doing nothing (user report).  Total shear is
+  now capped below one turn (`TWIST + TWIST_SWING < 2π`), which makes
+  banding impossible BY CONSTRUCTION, and time BREATHES that bounded
+  shear (a sine at `SWIRL_RATE`) instead of accumulating it, so the warp
+  still lives without winding up.  `tests/starfield.spec.ts` pins the
+  knob's monotonic response off the pixels — the star coverage where the
+  lens piles stars up minus where it evacuates them, sampled ABOVE the
+  rift so the label and ship stay out of it.  HOW STRONG all of that is is a
+  live A/B (user report: the rift reads as too powerful, and strafing it
+  is dizzying) — DBG ▸ **Portals** carries five multipliers: rift SIZE,
+  gravity STRENGTH and RANGE, and the star lens split into AMOUNT and
+  SPIN.  Every one is applied AT THE READ (`getPortalSizeMult` et al. in
+  PhysicsSystem / BackgroundManager / dropShapes), never baked into the
+  portal entity, so the entity keeps `PORTAL_CONSTANTS` as its base and
+  a knob re-tunes the rifts already in the world with no map reload.
+  Two things are deliberate: SIZE moves the drawn mouth, the swallow
+  horizon and the lens radius TOGETHER (all three are `size.x` reads)
+  but never `USE_RANGE`, which is an interaction rule rather than a
+  look; and the lens is TWO knobs because the complaint is about MOTION
+  — "frozen" keeps the warp's shape while stopping its rotation, which
+  is what separates displacement from spin as the cause.  Index 0 of
+  every cycle is the shipped value, so the first click is always the
+  A/B — and when a tuning pass settles somewhere, that value is BAKED into
+  `PORTAL_CONSTANTS` and the knob returns to 1× rather than shipping a
+  standing multiplier: `1×` has to keep meaning "what ships", or the base
+  constants describe a rift nobody plays and every derivation written
+  against them (escape speeds, standoff radii) quietly goes wrong.  The
+  shipped well is `SIZE` 70 / `g1500` / range 525, which is what the
+  panel's live readout shows at defaults — play-tested DOWN from g6000 /
+  1050 (user call: too strong), A/B'd through the knobs at 0.25× strength
+  and 0.5× range and then baked, with both cycles re-centred so 1× still
+  means what ships and 4×/2× reproduces the old rift for comparison.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
+  object whose own radius reaches `EJECT.SIZE_FRACTION` of the horizon is
+  NOT swallowed — crossing the centre FLINGS it out along its own heading
+  at `EJECT.SPEED` (20, against a ~7.1 escape from the mouth — kept
+  unchanged through the well's retune, since the throw's absolute speed is
+  what it FEELS like and only its margin over escape moved) with
+  `GRACE_SEC` of immunity, so a boulder ploughs through a rift while
+  gravel still vanishes down it.  Sizing the rule against the HORIZON is
+  what makes it physics rather than a threshold — the same rock shoots
+  through Pocket's 18 and disappears into Deep Space's 52 — and it
+  inherits destination scaling and the DBG Size knob for free.  The
+  PLAYER and PROJECTILES are exempt (a ship enters on purpose and has its
+  own transit; a shot is not an object being thrown).  The throw carries
+  a shake scaled by the object's size and NO SPARKS (user call):
+  `handlePortalEject` used to spray rift-coloured particles, which is the
+  vocabulary of a COLLISION, and nothing collided — the rock never
+  touched anything, it was too big to fit down the hole and the well
+  threw it back.  Debris flying off it says it hit something solid, which
+  is the one reading a wormhole must not give.  Same argument as
+  stripping the idle rift to a bare disc.  ANYTHING THAT
+  STEERS ITSELF STEERS CLEAR: `avoidsPortals(e)` in `constants.ts` is the
+  ONE predicate — defaulting by TYPE (every ENEMY, which is what a
+  bubble, a dragon head and a rival all are, plus the snitch) so a future
+  roamer is covered the day it exists, overridable per entity via
+  `GameEntity.avoidsPortals` — and `applyGravity` gives those an outward
+  push inside `AVOID.RANGE`.  It lives there rather than in the AISystem
+  strategies, the dragon, the rivals and the bubbles, which are four
+  different movement machineries that would each have needed their own
+  copy.  The pull is deliberately NOT cancelled: they still drift in from
+  across the arena, the push just wins closer in (1.4 peak against a pull
+  clamped at 0.6 balances ~215 units out), so they hold off and slide
+  around the rift and a determined chaser can still push through.
+  Measured: with the rule off, an enemy dropped on a rift's centre sits
+  1.7 units from it indefinitely.  There is NO HUD dock/enter button —
   the ship prompt is the whole affordance (a pill on top of it was
   redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
   intended path and is deliberately NOT wired here — Pair C (c2) owns the
   gamepad layer in InputSystem; OR its button into the `selected` flag
   when it lands.  The prompt naming the control is drawn AT the ship
   (`GameEntity.interactPrompt`, stamped per step, rendered via
-  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  The idle rift is pure render-side
-  animation (zero particle cost); `openPortal` only fires on an actual
-  transit.
+  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  THE IDLE RIFT IS A HOLE AND NOTHING ELSE (user call): the world art
+  is ONE black disc plus the destination tag.  The bloom, inspiral
+  arms, energy ring, photon ring, coloured rim, funnel throat, white
+  core and in-range halo were all deleted — the star LENS is what says
+  "wormhole", and the drawn ornament was a second louder voice saying
+  the same thing.  There is no animation left at all, so a portal costs
+  one fill and one string.  Its radius is `portalHorizonRadius(e)` in
+  `constants.ts` — the ONE definition the renderer AND
+  `PhysicsSystem.applyGravity` both call, so matter is swallowed
+  exactly where the hole is drawn — and it SCALES WITH THE
+  DESTINATION: a rift is a window onto the arena at the other end, so
+  `addPortal` stamps `portalDestSpan` from `MAP_SPANS` (built off the
+  map classes' own statics in `MapClasses.ts`, so there is no second
+  copy of a map's size) and the disc grows with it.  Every destination
+  draws SMALLER than the old fixed 0.62 disc, and a play-testing pass then
+  settled the shipped rift at a much smaller mouth again (`SIZE` 70, baked —
+  see below): Pocket 4k → 6, showcase 6k → 9, hub / Ring / Seven Rings
+  12k → 15, Deep Space 16k → 18.
+  The span is passed as DATA rather than looked up in `constants`
+  because the map classes import that module — a lookup there would be
+  an import cycle.  Note the LENS radius is still keyed to the entity's
+  own `size.x` (×`LENS.RADIUS_MULT`), NOT to this disc, so at full lens
+  strength the star void is much wider than the hole and the two read
+  as one dark shape; the destination-size variation is legible with the
+  DBG Lens knob dialled down.  `openPortal` still fires only on an
+  actual transit.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
   collapsible section) — the old floating top-left DBG button/panel is
   gone.  The 'Overlays' row inside is the old master toggle (renderer

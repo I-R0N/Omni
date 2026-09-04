@@ -137,6 +137,13 @@ interface UIOverlayProps {
   onToggleAsteroidFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
+  onCyclePortalWarp?: () => void;
+  onCyclePortalSize?: () => void;
+  onCyclePortalGravity?: () => void;
+  onCyclePortalGravityRange?: () => void;
+  onCyclePortalLens?: () => void;
+  onCyclePortalLensRadius?: () => void;
+  onCyclePortalLensSpin?: () => void;
   onCyclePlayerRoll?: () => void;
   onCyclePlayerHull?: () => void;
   onCycleRollDamping?: () => void;
@@ -440,6 +447,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleAsteroidFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
+  onCyclePortalWarp,
+  onCyclePortalSize,
+  onCyclePortalGravity,
+  onCyclePortalGravityRange,
+  onCyclePortalLens,
+  onCyclePortalLensRadius,
+  onCyclePortalLensSpin,
   onCyclePlayerRoll,
   onCyclePlayerHull,
   onCycleRollDamping,
@@ -508,6 +522,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, tilt: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
+    portal: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -1640,6 +1655,30 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ))}
                 </div>
               )}
+
+              {/* ── Portals (wormhole tuning, DBG) ─────────────────── */}
+              {/* Five live multipliers over PORTAL_CONSTANTS.  All applied at
+                  the READ, so each takes effect on the rifts already in the
+                  world — fly past one and click.  Index 0 of every cycle is
+                  the SHIPPED value, so the first click is always the A/B. */}
+              {renderSectionHeader('portal', 'Portals')}
+              {!collapsed.portal && (<>
+                {ctrlRow('Transit fx', onCyclePortalWarp, stats.portalWarpName ?? '0.9s',
+                  'Length of the flight-THROUGH beat played on arrival (0.9 / 0.6 / 1.4s / off) — the tunnel that unrolls the lens into radial streaks, streams the sky outward and decelerates onto the destination. The sim is FROZEN for its duration (the stage-clear pattern), so nothing can shoot you inside the tunnel and the beat costs no simulation; "off" transitions instantly, exactly as before it existed. Takes effect on the next transit.')}
+                {ctrlRow('Size', onCyclePortalSize, stats.portalSizeName ?? '1×',
+                  'Rift SIZE multiplier (1 / 0.75 / 0.5 / 0.35 / 1.25×) — scales the drawn mouth, the horizon that swallows shards, and the star-lens radius together, live on the portals already placed. Deliberately does NOT change how close you must be to ENTER (USE_RANGE): that is an interaction rule, not a look, and moving it would make the other comparisons unreadable.')}
+                {ctrlRow('Gravity', onCyclePortalGravity, stats.portalGravityName ?? '1×',
+                  'Portal gravity STRENGTH (1 / 0.5 / 0.25 / off / 1.5×) — how hard the well pulls shards, enemies and drops (the player always feels only GRAVITY_PLAYER_SCALE of it). "off" leaves the art and the lens untouched, so this isolates the pull from the look.')}
+                {ctrlRow('  ↳ range', onCyclePortalGravityRange, stats.portalGravityRangeName ?? '1×',
+                  'How far the pull REACHES (1 / 0.75 / 0.5 / 1.5× of GRAVITY_RANGE). Separate from strength because a well can be too WIDE without being too strong — a short, firm well reads as a mouth, a long faint one as the whole area sagging.')}
+                {ctrlRow('Lens', onCyclePortalLens, stats.portalLensName ?? '1×',
+                  'Background star-warp strength (1 / 0.5 / 0.25 / off / 1.5 / 2 / 3×). Scales the radial push off the throat AND the twist, both of which are bounded, so each step visibly flattens the distortion. At "off" the star field takes its original untouched draw path — the cheapest possible A/B against the warp existing at all. The warped region hugs the black disc (4× its radius), so it also shrinks with Size and with a smaller destination.')}
+                {ctrlRow('  ↳ radius', onCyclePortalLensRadius, stats.portalLensRadiusName ?? '4×',
+                  'How much SKY the warp covers, as a multiple of the rift\'s black-disc radius (4 / 6 / 9 / 14 / 2.5×) — separate from Lens, because how WIDE the bend reaches and how HARD it bends are different questions. It rides the disc, so it also inherits the destination-span scaling and the Size knob: a Pocket rift warps a small patch, Deep Space a wide one.')}
+                {ctrlRow('  ↳ spin', onCyclePortalLensSpin, stats.portalLensSpinName ?? '1×',
+                  'Star-lens SPIN (1 / 0.5 / 0.25 / frozen / 2×) — the rate the bounded twist BREATHES, nothing else. The twist no longer accumulates over time (that is what used to wind the field into bands), so this changes only how fast the bend swells and relaxes; "frozen" holds it at its standing value for a completely static warp.')}
+                {statRow('  ↳ live', stats.portalTuningInfo ?? '—', 'text-slate-400')}
+              </>)}
 
               {/* ── Boss capstone summon ((h), DBG) ────────────────── */}
               {renderSectionHeader('boss', 'Bosses')}
