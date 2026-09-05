@@ -1,0 +1,14 @@
+{
+  "prompt": "TrackType: SFX, Dry stony knock with a dust fade, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "Dry stony knock with a dust fade.",
+  "style": "crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 702789959,
+  "ms": 90,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.tile.rock"
+}
