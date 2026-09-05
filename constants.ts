@@ -2601,7 +2601,7 @@ export const SHARD_LOD_CONSTANTS = {
   // i.e. UNDER the old gate.  Rock-tile debris could therefore never show
   // its Voronoi silhouette at default zoom, which is the whole feature.
   // At 3 only genuine dust (under ~9 world units) takes the blit.
-  CHIP_LOD_RADIUS_PX: 3,
+  CHIP_LOD_RADIUS_PX: 2,
   // Offscreen LOD bitmap resolution, shared by the disc (rock) and
   // triangle (metal) caches.  Blitted downscaled to a handful of pixels,
   // so 48² is ample and keeps each cached colour tiny.

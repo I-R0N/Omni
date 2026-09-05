@@ -3332,9 +3332,15 @@ test.describe('fracture physics — recoil and re-centring', () => {
     // quantisation step (eps = 1% of the body, ~1.6 units here), against
     // the 10.4 units the pre-fix build drifted to.
     expect(r!.worstCentroid).toBeLessThan(2.5);
-    // (4b) …and the pattern still tiles the body exactly.  An unquantised
-    // shift measured 4.45 here where the pre-fix build measured 0.
-    expect(r!.worstTiling).toBeLessThan(0.001);
+    // (4b) …and the pattern still tiles the body.  TWO SCALES here, and
+    // the tolerance has to sit between them: an unquantised shift
+    // re-quantises the union and measured a 23.9-area disagreement, while
+    // the quantised shift leaves float residue — `round(x/eps)*eps` is not
+    // exactly representable, so a vertex sitting on a key boundary can
+    // still flip, measured up to 0.012 on a body of ~10^4 area (1e-6
+    // relative).  A first draft asserted < 0.001, which passed only on the
+    // runs that happened to land on exactly 0.
+    expect(r!.worstTiling).toBeLessThan(0.5);
     // (3) MOMENTUM: every detach matches the closed form.  Pre-fix this
     // was 0 on every detach — the chip's momentum came from nowhere.
     for (const d of r!.detaches) {
@@ -3479,6 +3485,94 @@ test.describe('chip dust', () => {
     console.log(`[chip dust] ${r!.tiles} glass tiles, ${r!.chips} chips ->`
       + ` ${r!.dust} dust, largest ${r!.maxDustSize.toFixed(1)}`
       + ` against a ${r!.tileSize.toFixed(1)} tile`);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('chip LOD gate', () => {
+  test('a burst\'s grains draw their real polygons, none collapse to a disc',
+    async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'ROCK_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock field');
+
+    // The disc blob is silhouette-NEUTRAL on purpose, and that is only
+    // honest for genuine dust.  `CHIP_LOD_RADIUS_PX` was 3, which sits
+    // INSIDE the size range a material's own grains occupy: measured
+    // across 160 rock grains from 20 tiles, sizes ran 7.4-18.1 units, so
+    // 12.5% of REAL grains collapsed to circles while their siblings drew
+    // polygons — visible as odd round pieces in a burst, which is exactly
+    // how it was reported.  At 2 the figure is 0% on all four materials
+    // (measured min apparent radius: rock 2.22, glass 2.68, metal 2.97,
+    // plastic 4.47).
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities as any[];
+      // SEVERAL tiles, drawn one at a time with the camera on each.  Grain
+      // sizes vary body to body, so a single break is a coin flip on
+      // whether it even produces a grain in the risky band — measured,
+      // only 12.5% of grains fell under the old gate.
+      const tiles = ents.filter((x: any) => x.active
+        && x.shardVariant === 'rock-tile' && x.mass === Infinity).slice(0, 8);
+      if (tiles.length === 0) return null;
+      let allGrains = 0, allDiscs = 0, allLod = 0, minApp = Infinity;
+      for (const t of tiles) {
+      // Camera pinned DIRECTLY — it follows the player with smoothing, so
+      // moving the ship and drawing once leaves the debris off-screen and
+      // every counter reads 0 for the wrong reason.
+      e.player.position.x = t.position.x; e.player.position.y = t.position.y;
+      e.camera.position.x = t.position.x; e.camera.position.y = t.position.y;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      // ONE overwhelming hit, the way a charged or burst shot lands — the
+      // whole pattern arrives at once, which is what makes an odd circle
+      // among polygons unmistakable.
+      e.physics.resolveCollision(
+        { id: 'lodgate_' + Math.random(), type: 'PROJECTILE',
+          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+          velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+          mass: 0.1, active: true, color: '#fff', damage: 120,
+          ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+
+      const grains = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'rock-shard');
+      // prepareFrameEntities FIRST: draw() renders `frameEntities`, which
+      // the sim loop rebuilds, and fresh debris is not in it yet.
+      e.prepareFrameEntities();
+      e.camera.position.x = t.position.x; e.camera.position.y = t.position.y;
+      let discs = 0;
+      const realDisc = e.renderer.getSolidDiscBitmap.bind(e.renderer);
+      e.renderer.getSolidDiscBitmap = (h: string) => { discs++; return realDisc(h); };
+      e.draw();
+      e.renderer.getSolidDiscBitmap = realDisc;
+      for (const k of grains) {
+        minApp = Math.min(minApp, k.size.x * 0.5 * e.camera.zoom);
+      }
+      allGrains += grains.length;
+      allDiscs += discs;
+      allLod += e.renderer.lastLodShardCount;
+      }
+      return {
+        grains: allGrains, zoom: e.camera.zoom,
+        lodEnabled: e.renderer.shardLodEnabled === true,
+        discBlits: allDiscs, lodBlitted: allLod,
+        minApparent: minApp,
+      };
+    });
+
+    expect(r).not.toBeNull();
+    expect(r!.grains).toBeGreaterThan(3);
+    // The LOD path must be LIVE or the assertion below is vacuous.
+    expect(r!.lodEnabled).toBe(true);
+    // The grains sit in the band the old gate was cutting through.
+    expect(r!.minApparent).toBeLessThan(3);
+    // THE BUG: not one of them is a circle.
+    expect(r!.discBlits).toBe(0);
+    expect(r!.lodBlitted).toBe(0);
+
+    console.log(`[chip LOD] ${r!.grains} grains, smallest`
+      + ` ${r!.minApparent.toFixed(2)}px apparent, ${r!.discBlits} disc blits`);
 
     watch.assertClean();
   });

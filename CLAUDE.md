@@ -2198,12 +2198,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   DELETED rather than restricted, so no material can borrow it again, and
   both regression tests are RENDER tests asserting that a broken tile's
   grains draw their real polygons rather than a cached blob.
-  `CHIP_LOD_RADIUS_PX` is 3, not the old 6, and is now the ONE threshold
-  for every grain material: the 6 was tuned when small rock-shards were
-  the occasional conservation chip, and V15 makes EVERY tile break
-  produce `size/√cells` fragments — a 36px tile's grains are ~12.7 units,
-  i.e. ~4px apparent at the default 0.65 zoom, so the old gate collapsed
-  all of them.  Anything that raises this threshold, or points a grain
+  `CHIP_LOD_RADIUS_PX` is **2**, and it is the ONE threshold for every
+  grain material.  It has been walked down twice for the same reason: the
+  original 6 was tuned when small rock-shards were the occasional
+  conservation chip, and V15 makes EVERY tile break produce `size/√cells`
+  fragments; 3 then still sat INSIDE the size range a material's own
+  grains occupy.  Measured across 160 rock grains from 20 tiles, sizes ran
+  7.4-18.1 units, so at 3 **12.5% of real grains** collapsed to circles
+  while their siblings drew polygons — visible as odd round pieces in a
+  burst, which is how it was reported.  At 2 the figure is 0% on all four
+  materials (smallest apparent radius: rock 2.22, glass 2.68, metal 2.97,
+  plastic 4.47), so the margin is real but not large — anything that makes
+  grains finer needs re-measuring against it.  The honest cost is that
+  small debris that used to blit now draws its polygon (rock 14%, glass
+  6%, metal 0.7% of grains).  Anything that raises this threshold, or points a grain
   material at an authored bitmap again, undoes the fracture work at the
   last step.
 - **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
