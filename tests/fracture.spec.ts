@@ -3411,3 +3411,75 @@ test.describe('per-material knob readouts', () => {
     watch.assertClean();
   });
 });
+
+test.describe('chip dust', () => {
+  test('a chipping body throws small nebula dust, not just the solid piece',
+    async ({ page }) => {
+    test.setTimeout(180_000);
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+
+    // The legacy break paths puffed tinted nebula-shards as a body chipped
+    // — rock per hit via `dent.perHitShard`, glass via `spawnGlassShards`
+    // — and BOTH stand down under voronoi, so the dust went with them.
+    // Measured on eight tiles broken to nothing: glass produced 0 nebula
+    // shards under voronoi where the legacy path gave 3 per tile, and rock
+    // kept only its 3-5 death burst.
+    //
+    // GLASS is the material to assert on: rock has a death burst that
+    // would mask the chip dust, and glass's pre-fix count is exactly 0.
+    const r = await engine(page, (e: any) => {
+      const ents = e.currentMap.entities as any[];
+      const tiles = ents.filter((x: any) => x.active
+        && x.shardVariant === 'glass-tile' && x.mass === Infinity).slice(0, 8);
+      if (tiles.length === 0) return null;
+      const tileSize = tiles[0].size.x;
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      let chips = 0;
+      for (const t of tiles) {
+        let hits = 0;
+        while (t.active && hits < 40) {
+          const n0 = ents.filter((x: any) => x.active && !before.has(x.id)
+            && x.shardVariant === 'glass-shard').length;
+          e.physics.resolveCollision(
+            { id: 'dust_' + Math.random(), type: 'PROJECTILE',
+              position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
+              velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+              mass: 0.1, active: true, color: '#fff', damage: 3,
+              ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+            t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+          hits++;
+          const n1 = ents.filter((x: any) => x.active && !before.has(x.id)
+            && x.shardVariant === 'glass-shard').length;
+          if (n1 > n0 && t.active) chips += n1 - n0;
+        }
+      }
+      const nebs = ents.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'nebula-shard');
+      const sizes = nebs.map((x: any) => x.size.x);
+      return {
+        tiles: tiles.length, tileSize, chips, dust: nebs.length,
+        maxDustSize: sizes.length ? Math.max(...sizes) : 0,
+      };
+    });
+
+    expect(r).not.toBeNull();
+    // The run has to have actually chipped, or "dust appeared" is vacuous.
+    expect(r!.chips).toBeGreaterThan(10);
+    // THE BUG: pre-fix this was exactly 0.  Gated at 0.35 per chip, so
+    // assert a rate rather than a count — the gate exists because a puff
+    // on every chip reads as a cloud trailing the player.
+    expect(r!.dust).toBeGreaterThan(2);
+    expect(r!.dust).toBeLessThan(r!.chips);
+    // SMALL dust: sized off the CHIP, not the parent.  Sizing off the
+    // parent (as the legacy per-hit puff did) would make the dust bigger
+    // than the piece that shed it — a grain is ~12 units on a 36px tile.
+    expect(r!.maxDustSize).toBeLessThan(r!.tileSize * 0.5);
+
+    console.log(`[chip dust] ${r!.tiles} glass tiles, ${r!.chips} chips ->`
+      + ` ${r!.dust} dust, largest ${r!.maxDustSize.toFixed(1)}`
+      + ` against a ${r!.tileSize.toFixed(1)} tile`);
+
+    watch.assertClean();
+  });
+});

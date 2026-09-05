@@ -2110,6 +2110,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   and a deformed grain must report its LIVE area and centroid — carrying
   the cut-time values across a dent is what let a shrivelled grain spawn
   a full-size fragment (2.06× measured).
+- **A CHIP THROWS DUST AS WELL AS THE SOLID PIECE.**  The legacy break
+  paths puffed tinted nebula-shards as a body chipped — rock per hit
+  through `dent.perHitShard`, glass through `spawnGlassShards` — and BOTH
+  stand down under voronoi, so the dust went with them.  Measured over
+  eight tiles broken to nothing: glass produced 3 per tile under legacy
+  and **0** under voronoi; plastic and metal 0; rock kept only its 3-5
+  death burst (all of it big — 13.9-24.2 units — with no small dust at
+  all).  `GRAIN_CHIP_DUST` restores it at the detach seam for EVERY grain
+  material, tinted to the body's own colour (rock keeps
+  `randomRockNebulaComposition` and the `fromRock` flag that lets its dust
+  condense back into a rock-shard).  Two things are deliberate: the
+  `CHANCE` gate exists because every detach now makes a chip and a puff on
+  each reads as a constant cloud trailing the player — the same note the
+  legacy per-hit path carries about its own gate — and `SIZE_FRACTION` is
+  of the CHIP, not the parent, because a grain is ~12 units on a 36px tile
+  and sizing off the parent (as the legacy per-hit puff did) makes the
+  dust bigger than the piece that shed it.
 - **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
   things happen at the seam in `progressFracture`, and two of them were
   missing:

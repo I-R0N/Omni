@@ -66,6 +66,29 @@ function blendHexColors(hexA: string, hexB: string): string {
 // dust" feel instead of a continuous cloud.
 const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
 
+/** Dust released when a GRAIN comes off a body (voronoi fracture).
+ *
+ *  The legacy break paths puffed tinted nebula-shards as they chipped —
+ *  rock per hit through `dent.perHitShard`, glass through
+ *  `spawnGlassShards` — and BOTH of those stand down under voronoi, so
+ *  the dust went with them.  Measured on a tile broken to nothing: glass
+ *  produced 3 nebula-shards under legacy and 0 under voronoi, while rock
+ *  kept only its 3-5 death burst and lost every per-chip puff.
+ *
+ *  CHANCE is a gate, not a rounding error.  Every detach makes a chip
+ *  now, and a puff on each one reads as a constant cloud trailing the
+ *  player rather than as occasional dust kicks — which is the exact note
+ *  the legacy per-hit path carries about its own gate.
+ *
+ *  SIZE_FRACTION is of the CHIP, not the parent: a grain is ~12 units
+ *  where the body is ~36, so sizing off the parent (as the legacy per-hit
+ *  puff did) would make the dust bigger than the piece that shed it. */
+const GRAIN_CHIP_DUST = {
+  CHANCE: 0.35,
+  SIZE_FRACTION: 0.7,
+  ALPHA_MUL: 0.5,
+} as const;
+
 
 /** ENGINE-INTERNAL SURFACE (gauntlet 5f).  A member here declared WITHOUT
  *  `private` is not public API — it is reachable because the extracted engine
@@ -5381,6 +5404,30 @@ export class GameEngine {
                   (chip.mass ?? 0) / Math.max(1e-3, target.mass));
               target.velocity.x -= k * (chip.velocity.x - target.velocity.x);
               target.velocity.y -= k * (chip.velocity.y - target.velocity.y);
+          }
+          // DUST.  A chip throws off pulverised material as well as the
+          // solid piece — the look the legacy break paths carried and
+          // that the voronoi routing dropped.  Tinted to the BODY's own
+          // colour so it works for every grain material rather than only
+          // rock, and `fromRock` only for rock, since that flag is what
+          // makes the puff condense back into a rock-shard later.
+          if (chip !== null && Math.random() < GRAIN_CHIP_DUST.CHANCE) {
+              const isRock = target.shardVariant === 'rock-shard'
+                  || target.shardVariant === 'rock-tile';
+              const comp = isRock
+                  ? randomRockNebulaComposition()
+                  : [{ hex: target.color || COLORS.ROCK_SHARD, weight: 1 }];
+              this.drops.spawnColoredNebulaShard(
+                  this.currentMap.entities,
+                  { x: chip.position.x, y: chip.position.y },
+                  Math.max(chip.size.x, chip.size.y),
+                  comp[0].hex,
+                  GRAIN_CHIP_DUST.SIZE_FRACTION,
+                  target.lastImpactVelocity ?? target.velocity,
+                  comp,
+                  GRAIN_CHIP_DUST.ALPHA_MUL,
+                  isRock,
+              );
           }
           // RE-CENTRE ON THE NEW CENTRE OF AREA (mobile bodies only).
           // The remainder replaced `polygonPoints` and nothing moved
