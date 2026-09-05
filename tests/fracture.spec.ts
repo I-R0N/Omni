@@ -1261,11 +1261,18 @@ test.describe('only the struck piece chips (V12)', () => {
       e.player.position.x = t.position.x + 6000;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
 
-      // Drive the pattern to FULLY revealed, so every piece in it is
-      // boundary-complete and the ONLY thing standing between a far-side
-      // piece and detachment is the contact rule under test.
+      // Damage goes in through the REAL path, one weapon hit at a time.
+      //
+      // This used to force `t.health = 1` to "hold the reveal at full",
+      // which was the LEGACY reveal's lever and is actively wrong under
+      // the grain model: `ensureBoundaryModel` reads the damage FRACTION
+      // off health, so health 1 against a derived ~53 says "98% damaged"
+      // and spends that entire budget in one go.  Locality is exactly
+      // what that destroys — and locality is the property under test, so
+      // the setup was dismantling the thing it meant to measure.  It only
+      // surfaced when rock's bondStrength rose, because the absolute
+      // damage injected scales with derived HP.
       t.lastImpactVelocity = { x: -9, y: 0 };
-      t.health = 1;
 
       // Always shoot the +x face.  Track the receding surface the way a
       // real projectile does.
@@ -1277,14 +1284,26 @@ test.describe('only the struck piece chips (V12)', () => {
         return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
       };
       const half = t.size.x * 0.5;
-      let hits = 0;
-      while (t.active && hits < 12) {
-        e.progressFracture(t, { x: contactX(), y: t.position.y });
-        hits++;
-        if (t.active) t.health = 1; // hold the reveal at full
-      }
-      const chips = ents.filter((x: any) => x.active && !before.has(x.id)
+      const liveChips = () => ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
+      let hits = 0;
+      // Snapshot the pieces shed WHILE THE TILE IS ALIVE.  Its DEATH
+      // shatter spawns every surviving cell at once, far side included —
+      // that is the body coming apart, not a chip popping off a face, and
+      // counting it would make this assert something it never meant.
+      let chips: any[] = [];
+      while (t.active && hits < 40) {
+        const cx = contactX();
+        e.physics.resolveCollision(
+          { id: 'v12_' + Math.random(), type: 'PROJECTILE',
+            position: { x: cx + 4, y: t.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
+            mass: 0.1, active: true, color: '#fff', damage: 4,
+            ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
+          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+        hits++;
+        if (t.active) chips = liveChips();
+      }
       // Local x of each chip relative to the tile centre, in half-widths:
       // +1 is the struck face, -1 the far one.
       const sides = chips.map((c: any) => (c.position.x - t.position.x) / half);
