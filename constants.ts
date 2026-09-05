@@ -3151,26 +3151,73 @@ export function grainMaterialOf(variantId: ShardVariantId): GrainMaterial | null
  *  variant table", so the shipped values stay the default and the
  *  readout says so rather than showing a number that only coincidentally
  *  matches. */
+// The STEPS each knob offers, ascending.  These are numbers only — the
+// material's own default is NOT listed here; `grainLadder` splices it in
+// at its sorted position, so cycling walks a true number line rather than
+// starting at the default and jumping to the bottom (user call).  Ranges
+// keep at least one step either side of every shipped default, so no
+// material's default sits at the end of its own ladder.
 export const GRAIN_KNOBS = {
-  grainSize:     [null, 6, 8, 10, 13, 15, 18, 22, 28, 36] as ReadonlyArray<number | null>,
-  grainCountMin: [null, 1, 2, 3, 4, 6, 8, 12] as ReadonlyArray<number | null>,
-  grainCountMax: [null, 4, 6, 8, 12, 16, 22, 30, 48] as ReadonlyArray<number | null>,
-  regularity:    [null, 0, 0.25, 0.5, 0.75, 0.95, 1] as ReadonlyArray<number | null>,
-  bondStrength:  [null, 0.05, 0.1, 0.16, 0.27, 0.4, 0.62, 0.85, 1.2, 1.8] as ReadonlyArray<number | null>,
-  damageSpread:  [null, 0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2] as ReadonlyArray<number | null>,
-} as const;
+  grainSize:     [4, 5, 6, 8, 10, 13, 15, 18, 22, 28, 36],
+  grainCountMin: [1, 2, 3, 4, 6, 8, 12, 16],
+  grainCountMax: [4, 6, 8, 12, 16, 22, 30, 48],
+  regularity:    [0, 0.25, 0.5, 0.75, 0.95, 1],
+  bondStrength:  [0.05, 0.1, 0.16, 0.27, 0.4, 0.62, 0.85, 1.2, 1.8, 2.5, 3.5],
+  damageSpread:  [0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2],
+} as const satisfies Record<string, ReadonlyArray<number>>;
 export type GrainKnob = keyof typeof GRAIN_KNOBS;
 export const GRAIN_KNOB_LIST = Object.keys(GRAIN_KNOBS) as ReadonlyArray<GrainKnob>;
 
 type GrainKnobIndices = Record<GrainKnob, number>;
-const emptyKnobIndices = (): GrainKnobIndices =>
-  ({ grainSize: 0, grainCountMin: 0, grainCountMax: 0, regularity: 0, bondStrength: 0,
-     damageSpread: 0 });
 
-const grainOverrideIdx: Record<GrainMaterial, GrainKnobIndices> = {
-  rock: emptyKnobIndices(), glass: emptyKnobIndices(),
-  plastic: emptyKnobIndices(), metal: emptyKnobIndices(),
-};
+/** One knob's ladder FOR ONE MATERIAL: the shared numeric steps with that
+ *  material's own default spliced in at its sorted position, as `null`.
+ *
+ *  Cycling therefore walks a plain ascending number line and the default
+ *  sits where its value belongs — before this, `null` was pinned at index
+ *  0 and a rock grain-size cycle read 14 (def) -> 6 -> 8 -> 10 -> 13 -> 15,
+ *  jumping down past its own default and back up through it.
+ *
+ *  A step EQUAL to the default is dropped rather than kept beside it: two
+ *  entries both reading `8` — one marked `(def)` — is a distinction with
+ *  no meaning, since an override equal to the table value is the table
+ *  value. */
+export function grainLadder(mat: GrainMaterial, knob: GrainKnob): ReadonlyArray<number | null> {
+  const def = grainTableValue(mat, knob);
+  const out: Array<number | null> = [];
+  let placed = false;
+  for (const v of GRAIN_KNOBS[knob] as ReadonlyArray<number>) {
+    if (!placed && v >= def) { out.push(null); placed = true; }
+    if (v !== def) out.push(v);
+  }
+  if (!placed) out.push(null); // the default is above every step
+  return out;
+}
+
+/** Where the `null` (default) entry sits in a material's ladder — the
+ *  index an untouched knob rests at, and the one `reset all` returns to. */
+function defaultIndex(mat: GrainMaterial, knob: GrainKnob): number {
+  return grainLadder(mat, knob).indexOf(null);
+}
+
+const startKnobIndices = (mat: GrainMaterial): GrainKnobIndices => ({
+  grainSize:     defaultIndex(mat, 'grainSize'),
+  grainCountMin: defaultIndex(mat, 'grainCountMin'),
+  grainCountMax: defaultIndex(mat, 'grainCountMax'),
+  regularity:    defaultIndex(mat, 'regularity'),
+  bondStrength:  defaultIndex(mat, 'bondStrength'),
+  damageSpread:  defaultIndex(mat, 'damageSpread'),
+});
+
+// Built lazily: `grainTableValue` reads SHARD_VARIANTS, which is declared
+// further down this module, so filling these at module scope would run
+// before the table exists.
+const grainOverrideIdx: Partial<Record<GrainMaterial, GrainKnobIndices>> = {};
+function idxFor(mat: GrainMaterial): GrainKnobIndices {
+  let v = grainOverrideIdx[mat];
+  if (v === undefined) { v = startKnobIndices(mat); grainOverrideIdx[mat] = v; }
+  return v;
+}
 
 /** Which material the five knob rows read and write.  Engine-side rather
  *  than UI-side so a cycle handler knows its target without the overlay
@@ -3186,7 +3233,7 @@ export function cycleGrainMaterial(): number {
 
 /** The live override for one knob on one material, or null to defer. */
 export function getGrainOverride(mat: GrainMaterial, knob: GrainKnob): number | null {
-  return GRAIN_KNOBS[knob][grainOverrideIdx[mat][knob]] ?? null;
+  return grainLadder(mat, knob)[idxFor(mat)[knob]] ?? null;
 }
 /** The variant table's OWN value for a knob on a material — what the
  *  material uses when nothing is overridden.  Grain geometry is shared by
@@ -3219,9 +3266,9 @@ function trimNum(v: number): string {
 }
 export function cycleGrainKnob(knob: GrainKnob): number {
   const mat = getGrainMaterial();
-  const ladder = GRAIN_KNOBS[knob];
-  const next = (grainOverrideIdx[mat][knob] + 1) % ladder.length;
-  grainOverrideIdx[mat][knob] = next;
+  const ladder = grainLadder(mat, knob);
+  const next = (idxFor(mat)[knob] + 1) % ladder.length;
+  idxFor(mat)[knob] = next;
   // Most knobs here are a PATTERN input (count, size, regularity) or the
   // strength the derived HP is summed from, so a change must invalidate
   // cached decompositions the same way the global knobs do — otherwise it
@@ -3233,7 +3280,7 @@ export function cycleGrainKnob(knob: GrainKnob): number {
   return next;
 }
 export function resetGrainOverrides(): void {
-  for (const m of GRAIN_MATERIALS) grainOverrideIdx[m] = emptyKnobIndices();
+  for (const m of GRAIN_MATERIALS) grainOverrideIdx[m] = startKnobIndices(m);
   fractureTuningGen++;
 }
 
@@ -3250,11 +3297,10 @@ export function grainSpecFor(variantId: ShardVariantId): GrainSpec | undefined {
   if (base === undefined) return undefined;
   const mat = grainMaterialOf(variantId);
   if (mat === null) return base;
-  const idx = grainOverrideIdx[mat];
+  const idx = idxFor(mat);
   let out: GrainSpec | undefined = undefined;
   for (const knob of GRAIN_KNOB_LIST) {
-    if (idx[knob] === 0) continue;
-    const v = GRAIN_KNOBS[knob][idx[knob]];
+    const v = grainLadder(mat, knob)[idx[knob]];
     if (v === null || v === undefined) continue;
     if (out === undefined) out = { ...base };
     (out as unknown as Record<string, number>)[knob] = v;
@@ -8487,7 +8533,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // which is the radial look.  The legacy fan survives as the DBG
     // 'legacy' path until V7.
     grain: {
-      grainCountMin: 3,
+      grainCountMin: 6,
       grainCountMax: 10,
       grainSize: 15,
       impactBias: 0.75,
@@ -8505,7 +8551,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // its own pattern — see GrainSpec.bondStrength.
       // V15: glass is the brittler material — 0.16 against rock's 0.27,
       // so a 36px pane is ~20 damage (5 Blaster hits, its V9 HP).
-      bondStrength: 0.16,
+      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -8564,9 +8610,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // LARGE grains (user call): a panel comes apart into a few big
       // irregular pieces, not gravel.  grainSize 5 -> 11 takes a 36px
       // tile from ~7 grains to ~3.
-      grainCountMin: 3,
-      grainCountMax: 8,
-      grainSize: 20,
+      grainCountMin: 8,
+      grainCountMax: 16,
+      grainSize: 6,
       impactBias: 0.5,
       // A3: PLASTIC — large grains, only loosely regular, with a wide
       // size mix, so a panel breaks into a few big irregular pieces
@@ -8586,7 +8632,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // grains are large — so plastic is tough per seam and moderate
       // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
       // the old 8.
-      bondStrength: 0.62,
+      bondStrength: 1.8,
       radialSpeed: 1.5,
     },
     shatter: {
@@ -8654,9 +8700,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // break: a pale tier-0 plate is coarse and comes apart, a bright
     // dense one is fine-grained and very hard.
     grain: {
-      grainCountMin: 3,
+      grainCountMin: 8,
       grainCountMax: 22,
-      grainSize: 13,
+      grainSize: 8,
       impactBias: 0.35,     // metal cracks less radially than glass
       regularity: 0.95,     // near-honeycomb: the look the lattice had
       sizeSpread: 0,     // parked — see PARKING_LOT
@@ -8668,7 +8714,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // measured 143px of boundary at tier 2: ~173 damage, or 43 base
       // Blaster hits, against the 48 the old flat HP gave.  A tier-5
       // plate reaches ~314 (78 hits), so density is felt.
-      bondStrength: 0.85,
+      bondStrength: 1.8,
       radialSpeed: 1.1,
     },
     shatter: {
@@ -8788,7 +8834,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // material, tile and shard alike; a bigger body has more boundary
       // and is tougher for free.  0.27 puts a 36px tile at ~36 damage
       // (9 Blaster hits, its old hit ceiling) and a 15px chip at ~6.
-      bondStrength: 0.27,
+      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -8912,7 +8958,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // its own pattern — see GrainSpec.bondStrength.
       // The same rock: strength is a material property, not a per-entity
       // HP.  ~6 damage on a 15px chip, rising with size and merge history.
-      bondStrength: 0.27,
+      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -8970,7 +9016,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // defect this gauntlet exists to remove.  Powerlaw fields stay as
     // the DBG legacy path.
     grain: {
-      grainCountMin: 3,
+      grainCountMin: 6,
       grainCountMax: 10,
       grainSize: 15,
       impactBias: 0.75,
@@ -8983,7 +9029,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // The same glass; a small chip is ~2 damage, i.e. one bolt.
-      bondStrength: 0.16,
+      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -9111,9 +9157,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // a shard real internal structure to break through, without
       // touching the material's bondStrength (which must stay one number
       // per material, tile and shard alike).
-      grainCountMin: 3,
-      grainCountMax: 8,
-      grainSize: 20,
+      grainCountMin: 8,
+      grainCountMax: 16,
+      grainSize: 6,
       impactBias: 0.5,
       // The same plastic, at shard scale.
       regularity: 0.55,
@@ -9129,7 +9175,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // grains are large — so plastic is tough per seam and moderate
       // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
       // the old 8.
-      bondStrength: 0.62,
+      bondStrength: 1.8,
       radialSpeed: 0.8,
     },
     shatter: {
@@ -9216,16 +9262,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // boundary and therefore almost no derived HP, which is what made
     // metal chips die instantly.
     grain: {
-      grainCountMin: 3,
+      grainCountMin: 8,
       grainCountMax: 22,
-      grainSize: 13,
+      grainSize: 8,
       impactBias: 0.35,
       regularity: 0.95,
       sizeSpread: 0,     // parked — see PARKING_LOT
       bondSpread: 0,     // parked — see PARKING_LOT
       grainDent: 0.05,
       progressive: true,
-      bondStrength: 0.85,
+      bondStrength: 1.8,
       radialSpeed: 1.0,
     },
     shatter: {

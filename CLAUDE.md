@@ -1008,7 +1008,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the fragments at death, the interior cell edges are the cracks it
   shows as HP falls, and for rock a qualifying hit DETACHES the cell
   nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
-  holds the min-remainder death rule).  Opted in today: ALL FOUR
+  holds the min-remainder death rule).
+  SHIPPED GRAIN TABLE (user's play-tested defaults, one row per material,
+  shared by its tile and its shard) — `grainSize` / count min / count max
+  / `regularity` / `bondStrength`, with `damageSpread` 0 everywhere:
+  rock 14/3/16/0.5/0.4, glass 15/6/10/0.5/0.4, plastic 6/8/16/0.55/1.8,
+  metal 8/8/22/0.95/1.8.  TWO consequences are worth knowing because
+  neither is visible in the row: (1) grain size and bond strength
+  COMPOUND into derived HP — a finer grain is more boundary AND each
+  pixel costs more — so at 4 damage a hit a 36px tile now takes rock 14
+  hits, glass 13, plastic 96 and metal 118; and (2) plastic and metal are
+  both held by their `grainCountMax` before their `grainSize` is reached
+  (plastic wants 45 sites and gets 16, metal wants 25 and gets 22), so
+  their EFFECTIVE grain is 10.0 and 8.5 rather than the authored 6 and 8
+  — which is also why metal is still the finer material despite plastic
+  carrying the smaller number.
+  Opted in today: ALL FOUR
   breakable materials — rock-tile / rock-shard and glass-tile /
   glass-shard (V10, user call: glass takes rock's breaking behaviour),
   plus metal-tile and plastic-tile / plastic-shard (A3).  Metal is the
@@ -2767,14 +2782,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `Frac sites` still scales whatever count they produce and `Bnd
   strength` still multiplies whatever strength they set, so a global
   sweep keeps working while one material is being tuned.
-  (3) **Index 0 of every ladder is `null` = "use the variant table"**, and
-  the readout shows THE TABLE'S OWN NUMBER with a `(def)` note (user
-  call) — `0.27 (def)` rather than the word `table`, because a number you
-  can read beats a word.  The note is what preserves the property the
-  word carried: a default and a value someone deliberately set to the
-  same number still read differently, since an explicit one shows bare.
-  `↳ reset all` drops all twenty-four and shows how many are currently
-  off the table.
+  (3) **A LADDER IS A NUMBER LINE WITH THE DEFAULT SPLICED INTO IT.**  The
+  readout shows the table's OWN NUMBER with a `(def)` note (user call) —
+  `0.4 (def)` rather than the word `table`, because a number you can read
+  beats a word — and the note preserves what the word carried: a default
+  and a value someone set to the same number still read differently,
+  since an explicit one shows bare.  `GRAIN_KNOBS` therefore holds only
+  the shared numeric STEPS, and `grainLadder(mat, knob)` inserts that
+  material's default at its sorted position, dropping any step equal to
+  it.  Before this the `null` entry was pinned at index 0, so a rock
+  grain-size cycle read 14 (def) → 6 → 8 → 10 → 13 → 15 — starting at the
+  default and jumping BELOW it before climbing back through, which reads
+  as an unordered list once the numbers are visible.  Ladder length is
+  therefore PER MATERIAL, so nothing may walk one by a fixed step count.
+  Ranges keep a step either side of every shipped default (`damageSpread`
+  excepted: 0 is its floor).  `↳ reset all` drops all twenty-four and
+  shows how many are currently off the table.
   (4) **`grainSpecFor(variantId)` is the ONE seam** every read of a
   `grain` block goes through — `ensureFractureCells`, `bondStrengthFor`,
   the bond-variance read, the dent read.  Reaching into

@@ -5,7 +5,7 @@ import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
-         grainSpecFor, type GrainKnob } from './constants';
+         grainSpecFor, grainLadder, grainTableValue, type GrainKnob } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -112,7 +112,7 @@ const App: React.FC = () => {
       // nothing reports: an override that lands in the table but never
       // reaches this resolver reads back perfectly from the panel and
       // changes nothing on screen.
-      grainSpecFor,
+      grainSpecFor, grainLadder, grainTableValue,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
