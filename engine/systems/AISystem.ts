@@ -480,7 +480,7 @@ export class AISystem {
       } else if (sick) {
           // ── Sick: sluggish drift only (can't hunt or chase while queasy) ──
           const ds = B.DRIFT_SPEED * BUBBLE_CONSTANTS.SICK_SPEED_MULT;
-          const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+          const flow = flowField.sampleShardFlow(enemy.position.x, enemy.position.y);
           const tx = flow.x * ds, ty = flow.y * ds;
           const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
           enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
@@ -506,7 +506,7 @@ export class AISystem {
               this.capSpeed(enemy, maxSpeed * B.CHASE_SPEED_MULT);
           } else {
               // Drift: lerp velocity toward the local flow current.
-              const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+              const flow = flowField.sampleShardFlow(enemy.position.x, enemy.position.y);
               const tx = flow.x * B.DRIFT_SPEED, ty = flow.y * B.DRIFT_SPEED;
               const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
               enemy.velocity.x += (tx - enemy.velocity.x) * alpha;

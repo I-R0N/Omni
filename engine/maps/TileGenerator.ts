@@ -1,6 +1,6 @@
 
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, rockHitCeiling } from '../../constants';
+import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, randomRockShade, rockHitCeiling } from '../../constants';
 import { ShardVariantId } from '../systems/ShardSystem.types';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
@@ -290,7 +290,14 @@ export class TileGenerator {
         // STRUCTURE_VARIANTS.  Mobile shards inherit `tile.color`
         // by default (see DropSystem.spawnDentShard, which re-rolls
         // plastic shards independently for further variation).
-        color: variant === 'plastic' ? randomPlasticShade() : cfg.color,
+        // Per-instance shade for the two materials that have a PALETTE
+        // rather than a single colour: plastic (amber families) and, since
+        // G7, rock (slate / rust / mineral — see ROCK_PALETTES).  Both are
+        // rolled once here and inherited by the shards the tile breaks into,
+        // so a cluster keeps its variation through the break/merge cycle.
+        color: variant === 'plastic' ? randomPlasticShade()
+             : variant === 'rock'    ? randomRockShade()
+             : cfg.color,
         active: true,
         // Rock tiles use the probabilistic break model: maxHealth is the
         // size-scaled hit ceiling (ROCK_BREAK), so a rock tile cracks on the

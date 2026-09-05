@@ -355,6 +355,19 @@ export interface GameEntity {
   friction?: number; // Per-entity friction override
   gravityRange?: number; // Radius of gravitational influence
   gravityStrength?: number; // Force multiplier (G * Mass)
+  gravityPlayerScale?: number; // Attractor-side scale on the pull the PLAYER feels
+                               // (portals: a tug, never a trap — see PORTAL_CONSTANTS)
+  portalGraceTimer?: number;   // Portal-gravity immunity window on freshly-emerged
+                               // transit debris, so the exit well can't re-swallow it
+  /** Whether this entity STEERS ITSELF around portals rather than being
+   *  captured by them.  Defaults by type (every ENEMY and the snitch do),
+   *  so a future roamer is covered without touching the physics; set it
+   *  explicitly only to opt something else in, or an enemy out. */
+  avoidsPortals?: boolean;
+  portalDestSpan?: number;     // The DESTINATION map's span (world units), stamped by
+                               // addPortal.  A rift is a window onto the arena at the
+                               // other end, so its horizon is sized from this — see
+                               // `portalHorizonRadius`
 
   // AI
   enemySubtype?: EnemySubtype;
@@ -384,6 +397,33 @@ export interface GameEntity {
   // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
   // (1), preserving the original feel for any un-wired damage path.
   hitReact?: number;
+  /** DIRECTIONAL TILT (player only today) — the ROLL half.  Signed lateral
+   *  tilt angle in radians, eased toward the strafe + turn signal each step
+   *  (`GameEngine.tickPlayerRoll`, tuning in `PLAYER_ROLL_CONSTANTS`).
+   *  Purely presentational — RenderSystem combines it with `visualPitch`
+   *  into one tilt toward the acceleration and foreshortens the hull along
+   *  that direction by cos(tilt); physics/collision never read it. */
+  visualRoll?: number;
+  /** DIRECTIONAL TILT — the PITCH half.  Signed longitudinal tilt angle in
+   *  radians, driven by CHANGES in thrust along the nose (a washout
+   *  filter): punching the throttle pitches, cruising settles level,
+   *  cutting thrust dips.  The top-down projection cannot show nose-up vs
+   *  nose-down (both foreshorten the same), so the sign exists only to keep
+   *  the easing continuous through reversals. */
+  visualPitch?: number;
+  /** DAMAGE-TRIGGERED HEALTH BAR (gauntlet 5d, U5).  Counts down from
+   *  `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION`; the world-space bar draws only
+   *  while it is positive and fades over the last `FADE_DURATION`.  A
+   *  SEPARATE timer from `hitFlash` on purpose: `hitFlash` is a ~0.1–0.3s
+   *  whiten-and-punch, and a bar that lived that long would strobe rather
+   *  than inform.  Purely presentational — nothing reads it but the
+   *  renderer. */
+  healthBarTimer?: number;
+  /** Opt OUT of the damage trigger and keep a persistent bar.  For priority
+   *  targets a player is meant to be tracking rather than reacting to (the
+   *  dragon mini-boss).  Capstone bosses do not need it — they have the
+   *  dedicated HUD bar. */
+  alwaysShowHealthBar?: boolean;
   shield?: number;
   maxShield?: number;
   shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
@@ -817,15 +857,15 @@ export interface GameEntity {
 
   // ── Tile asteroid-pressure accumulator ───────────────────────────────────
   // Set on STRUCTURE tiles to track repeated sub-crash-threshold asteroid
-  // impacts.  When `asteroidHitCount` reaches STRUCTURE_CONSTANTS
-  // .ASTEROID_PRESSURE_HITS within the decaying `asteroidHitTimer` window,
+  // impacts.  When `tilePressureCount` reaches STRUCTURE_CONSTANTS
+  // .TILE_PRESSURE_HITS within the decaying `tilePressureTimer` window,
   // the tile breaks permanently the same way a single above-threshold
-  // momentum crash would.  `asteroidHitCooldown` debounces multi-substep
+  // momentum crash would.  `tilePressureCooldown` debounces multi-substep
   // re-hits from a single bouncing rock so one glancing bounce counts as
   // one pressure event, not several.
-  asteroidHitCount?: number;
-  asteroidHitTimer?: number;
-  asteroidHitCooldown?: number;
+  tilePressureCount?: number;
+  tilePressureTimer?: number;
+  tilePressureCooldown?: number;
 
   // ── Unified shard-variant identity ──────────────────────────────────────
   // Single source of truth for which SHARD_VARIANTS entry a shard-family
@@ -845,11 +885,11 @@ export interface GameEntity {
   // Tile-break / shatter spawns start implicitly at 1 (undefined ===
   // 1); composeEntities sums the two parents' counts on every merge
   // (rock condense / glass-self / plastic-self).  shatter
-  // AsteroidStyle reads this on death and breaks the shard into ~
+  // PowerlawStyle reads this on death and breaks the shard into ~
   // mergeCount fragments with even per-fragment sizing, so a merged
   // shard always fragments back into roughly the same number of
   // base-sized pieces that built it — applies to every variant going
-  // through shatterAsteroidStyle (rock-shard, glass-shard, plastic-
+  // through shatterPowerlawStyle (rock-shard, glass-shard, plastic-
   // shard); metal-shard.shatter.kind is 'none' so the field exists
   // but the override path doesn't fire there.
   mergeCount?: number;
@@ -958,6 +998,19 @@ export interface GameEntity {
   // are "deformed", and their adjacent edges always draw regardless
   // of neighbour presence.
   originalCircumradiusSq?: number;
+  /** Cached SHADOW-CASTING radius — the largest circle centred on the
+   *  centroid that fits INSIDE `polygonPoints` (the inradius), not the
+   *  circumradius.  See render/lighting.ts for why.  Invalidated wherever
+   *  the polygon is mutated, alongside `_satCacheAxes`. */
+  _occluderR?: number;
+  /** Cached EMISSION TINT for the unified light layer: the body's own colour,
+   *  normalised to full value and quantised, as an `'r, g, b'` string ready
+   *  for a gradient stop.  `_emitTintKey` is the source colour it was built
+   *  from — nebula bodies blend theirs per-instance, so the cache has to
+   *  notice when it changes.  Built on first use and on change only; never
+   *  per frame. */
+  _emitTint?: string | null;
+  _emitTintKey?: string;
 
 
   // Composite asteroid — tracks every drop (including power-ups) stored
@@ -1221,8 +1274,93 @@ export interface GameEntity {
   // from the id on first draw.  Mirrors the enemy `glowPhase` seed but
   // for the shared seeded crack pattern in RenderSystem.drawDamageCracks
   // so fractures hold still frame-to-frame and only accrue as HP drops.
-  // Render-only; never read by the sim.
+  // Render-only; never read by the sim.  (Since the voronoi gauntlet the
+  // SAME value also seeds the fracture decomposition below — derived by
+  // the identical pure hash `fracture.seedFromEntityId` — so cracks and
+  // fragments share one pattern; the sim never reads this field, it
+  // re-derives the seed.)
   crackSeed?: number;
+
+  // Seeded Voronoi fracture cache (voronoi gauntlet, V2).  Computed
+  // lazily by ShardSystem.ensureFracture (first damage, or on the spot
+  // for a one-shot kill) for variants carrying a
+  // SHARD_VARIANTS[..].fracture block; cells are entity-LOCAL polygons.
+  // EVERY site that mutates the inputs — polygon deform (dent /
+  // snap-back), size change, merge/compose — must set this back to
+  // undefined.  The render layer reads it for the crack overlay (V3);
+  // the shatter path consumes it on death.
+  fractureCells?: import('./engine/systems/fracture').FractureCell[];
+
+  // The decomposition's interior edges — the entity's CRACKS (V3) —
+  // sorted nearest-impact-first at build so the progressive reveal is
+  // stable.  Derived from fractureCells; cleared wherever it is.
+  fractureEdges?: import('./engine/systems/fracture').FractureEdge[];
+
+  // "This body has already broken apart" (V13).  ShardSystem.shatter
+  // refuses a second call, because with the decomposition cached a
+  // repeat spawns an EXACT copy of every fragment rather than just
+  // extra debris.  Cleared by completeRegen (regen reuses the object).
+  shattered?: boolean;
+
+  // Death-dispatch re-entry guard for STRUCTURE entities (V9).  The
+  // damage-feedback hook (onDamage → progressFracture) can route an
+  // entity through handleEntityDeath MID-HIT via the min-remainder
+  // rule; the outer damage path then sees health <= 0 and raises
+  // onDeath a second time — and with the decomposition cached, the
+  // second shatter spawned an exact duplicate of every fragment.
+  // Set by handleEntityDeath's STRUCTURE branch on first dispatch;
+  // cleared by ShardSystem.completeRegen (regen REUSES the entity
+  // object, so a revived tile must be killable again).
+  deathDispatched?: boolean;
+
+  // The last damaging CONTACT POINT in entity-LOCAL coords (V12) — the
+  // projectile's own position, not a direction proxy.  Stamped by
+  // GameEngine.progressFracture, read by fractureCache to bias the
+  // pattern toward the real hit and to decide which cell was struck.
+  lastImpactLocal?: Vector2;
+  // GRAIN BOUNDARIES (V15).  Damage absorbed by each interior boundary
+  // of the cached decomposition, parallel to `fractureEdges`; an edge is
+  // BROKEN once its entry reaches its strength, and a cell leaves when
+  // every edge still binding it is broken.  `fractureBoundaryHp` is the
+  // pattern's DERIVED total (Σ edge strengths) — the entity's real HP
+  // once the model has taken over, which is why it is cached beside the
+  // fills rather than recomputed.
+  fractureEdgeFill?: number[];
+  // Each boundary's STRENGTH, fixed at model build and parallel to
+  // `fractureEdges`.  Cached rather than derived on read because
+  // per-grain denting (B1) moves boundary endpoints: a strength taken
+  // from the live length would drift the body's derived HP every dent.
+  fractureEdgeNeed?: number[];
+  // Dent steps applied per grain, indexed by the cell's siteIndex, so a
+  // single grain cannot be pulled into itself by sustained fire.
+  fractureGrainDents?: number[];
+  // ELASTIC RECOVERY (user call).  A grain that breaks off DEFORMED keeps
+  // its dented outline — and for an elastic material it then relaxes back
+  // toward `dentRestPolygon` (the shape the grain was cut at, recentred)
+  // over `dentRecoverTimer` seconds.  Absent on rigid materials, which
+  // keep the dent permanently.
+  dentRestPolygon?: Vector2[];
+  dentRecoverTimer?: number;
+  dentRecoverDuration?: number;
+  fractureBoundaryHp?: number;
+  // The HP the entity was SPAWNED with, kept when the grain model
+  // rewrites `maxHealth` to the derived total.  Score and any other
+  // consumer that means "how substantial is this body" must read this,
+  // not the derived number: derived HP is in DAMAGE units over the
+  // body's own boundary set, so scoring off it would pay out on how
+  // finely a tile happened to decompose.
+  authoredMaxHealth?: number;
+
+  // The fracture SHAPE-KNOB generation this entity's cached pattern was
+  // built under (V11).  A DBG cycle bumps the global counter, so a stale
+  // value here forces one recompute; untouched in normal play.
+  fractureGen?: number;
+
+  // Polygon area at the FIRST partial-fracture detach (V4) — the
+  // baseline the min-remainder death rule measures against
+  // (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Never cleared: cumulative
+  // chip-off area drives the break threshold across the entity's life.
+  fractureOriginalArea?: number;
 }
 
 export interface CameraState {
@@ -1268,6 +1406,45 @@ export interface PerfSnapshot {
   explosionRingsMs: number;
   weaponsMs: number;
   renderMs: number;
+  // ── React reconciliation (the UI cost) ────────────────────────────────
+  //
+  // These three are RAW PER-FRAME values, not the 60-frame rolling averages
+  // the timers above carry — there is nothing to smooth, because a frame
+  // either committed the React tree or it didn't.
+  //
+  // Measured by React's own `<Profiler>` around `<UIOverlay>` (App.tsx).
+  // That is the only instrument that can see this cost: `onStatsUpdate` is a
+  // setState called from a rAF callback, so React BATCHES it and defers
+  // reconciliation past the end of that callback.  Any timer bracketing the
+  // `onStatsUpdate` CALL therefore measures scheduling and reads ~0 no matter
+  // how expensive the tree is — see `uiScheduleMs` below, which is exactly
+  // that number, kept as the control.
+  //
+  // ALIGNMENT: the profiler commits after the frame that pushed them, so the
+  // engine consumes them at the TOP of the following frame.  They are one
+  // frame late against the render/sim timers beside them.  That is fine for
+  // the distributions this is read as (median / p95) and wrong for
+  // "which single frame did this belong to" — don't read them that way.
+  /** Profiler `actualDuration` — time spent rendering the committed tree.
+   *  Summed if a frame committed more than once; 0 on frames that didn't
+   *  commit (a throttled HUD push, or nothing changed). */
+  uiActualMs: number;
+  /** Profiler `baseDuration` — the cost of rendering the whole tree with NO
+   *  memoization. `uiBaseMs - uiActualMs` is what memoization is currently
+   *  buying; it is ~0 while nothing in the UI layer is memoized. */
+  uiBaseMs: number;
+  /** React commits folded into the two figures above for this frame. */
+  uiCommits: number;
+  /** Wall time of the `onStatsUpdate` CALL itself — i.e. the cost of
+   *  SCHEDULING the update, not of rendering it.  Retained deliberately as
+   *  the control for the claim above: it stays near zero while `uiActualMs`
+   *  moves.  Do not read it as the React cost. */
+  uiScheduleMs: number;
+  /** Whether the profiler is actually reporting.  FALSE in a normal shipping
+   *  build, where React strips the profiler timers and the three figures
+   *  above are all 0 — which reads identically to "the UI is free".  Never
+   *  quote a ui number without checking this. */
+  uiProfiled: boolean;
   // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
   // debug overlay alongside renderMs so the contribution of the nebula
   // pass can be A/B'd against the twinkle / background-puff ablation
@@ -1289,6 +1466,33 @@ export interface PerfSnapshot {
   // past the range / no-glow early-returns).  Latest frame, not
   // averaged — context for interpreting tileLightingMs.
   tileLightingCount: number;
+  // ── Unified lighting (the shadow-cast light layer) ───────────────────
+  //
+  // Wall time (ms) of the whole unified-lighting pass this frame:
+  // occluder collection, wedge-path construction, the per-light
+  // composite onto the light canvas, and the single blit.  Ring-
+  // averaged like the timers above.
+  //
+  // Read this ALONGSIDE `tileLightingMs`, never instead of it.  The
+  // unified system is absorbing the three legacy hand-rolled models
+  // (proximity bloom, repel glow, glass edge tint), so its cost is only
+  // meaningful NET of theirs — as each legacy receiver migrates,
+  // `tileLightingMs` falls and this rises.  A gross reading of this
+  // field alone will overstate the cost of the change.
+  //
+  // Zero while LIGHTING_CYCLE is at 'legacy' (the default), which is
+  // how the toggle proves it costs nothing when off.
+  lightingMs: number;
+  // Number of lights composited this frame, after viewport culling and
+  // the per-tier cap.  Latest frame, not averaged — context for
+  // interpreting lightingMs, exactly as tileLightingCount is for
+  // tileLightingMs.
+  lightingLights: number;
+  // renderFogLayer wall time, ring-averaged like lightingMs and likewise a
+  // SLICE OF RENDER.  Zero while the fog cycle is `off` (every early return
+  // in the pass zeroes the timer) — which is how the toggle proves the fog
+  // costs nothing when disabled.
+  fogMs: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
@@ -1302,7 +1506,7 @@ export interface PerfSnapshot {
   // Entity counts (snapshot of most recent sim step)
   totalEntities: number;
   enemyCount: number;
-  asteroidCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
+  mobileShardCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
   projectileCount: number;
   particleCount: number;
   interactableCount: number; // Drops, portals, POIs
@@ -1382,6 +1586,15 @@ export interface EngineStats {
    *  flash window + remaining-window fraction for fade. */
   salvageFlash?: { amount: number; fraction: number };
   /** Effective player stats for the player menu (pause screen). */
+  /** The player's live hull + shield pools, pushed EVERY frame (gauntlet 5d,
+   *  U5).  `playerStats` beside it is richer but is built only while a menu
+   *  is open, and the in-game HUD needs these four numbers during play: the
+   *  player's floating world-space bar was removed in U5, so this is now the
+   *  canonical readout for the player's own condition. */
+  vitals?: {
+    health: number; maxHealth: number;
+    shield: number; maxShield: number;
+  };
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
@@ -1593,12 +1806,92 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  /** DBG: enemy health bars appear on damage and fade (true, default) vs
+   *  always drawn (false, the pre-5d behaviour).  See RenderSystem
+   *  `damageTriggeredBars`. */
+  damageTriggeredBars?: boolean;
+  /** DBG minimap MATERIAL mode name (decision #43, G5): 'Flow' / 'Dots' /
+   *  'Off'.  What the map says about shards — streamlines, per-shard dots, or
+   *  nothing. */
+  minimapMaterialName?: string;
+  /** DBG label for LIGHTING_CYCLE — 'legacy' (the three shipped hand-rolled
+   *  models, and the default), 'debug' (flat grey layer, proves the blit) or
+   *  'unified' (the shadow-cast light). */
+  lightingModeName?: string;
+  /** DBG label for the active lighting tier — low (pinned for the phone) /
+   *  medium / high. */
+  lightingTierName?: string;
+  /** DBG: whether MOBILE SHARDS cast shadows too.  Only meaningful while
+   *  the lighting mode is 'unified'. */
+  shardShadowsEnabled?: boolean;
+  /** DBG: is the refraction prototype on? */
+  refractionEnabled?: boolean;
+  /** DBG: refracted-cone brightness, as a fraction of the light's peak. */
+  refractBrightnessName?: string;
+  /** DBG: player-light brightness multiplier, as a percentage label. */
+  lightBrightnessName?: string;
+  /** DBG: do metal and glass re-emit the light that falls on them? */
+  emissiveEnabled?: boolean;
+  worldLightsEnabled?: boolean;
+  depthAmbientEnabled?: boolean;
+  /** DBG: re-emitted fraction, as a label. */
+  emitBrightnessName?: string;
+  /** DBG: may the secondary lights cast shadows of their own? */
+  emitShadowsEnabled?: boolean;
+  /** DBG: emitter-shadow cost tier (how many emitters shadow, and how much
+   *  geometry each of them sees). */
+  emitShadowTierName?: string;
+  /** DBG: how long an emitter takes to fade in or out. */
+  emitFadeName?: string;
+  /** DBG: caustic edge softness — the TIR and occluder-cap fades. */
+  causticFadeName?: string;
+  /** DBG: the player's light as a directional beam — its width, or
+   *  'radial' / 'off'. */
+  flashlightName?: string;
+  /** DBG: the player light's colour. */
+  lightColorName?: string;
+  /** DBG: how much of the material's colour rides transmitted / re-emitted
+   *  light. */
+  tintMixName?: string;
+  /** DBG: fog of war — off / dim / dark / memory. */
+  fogName?: string;
+  /** DBG label for the shadow-edge softness cycle. */
+  shadowSoftnessName?: string;
+  /** DBG rock-palette name (material-palette-residual, G7): 'mixed'
+   *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
+   *  so a change applies to newly generated rock. */
+  rockPaletteName?: string;
+  /** DBG (voronoi gauntlet): the fracture A/B — 'voronoi' (seeded cell
+   *  decomposition) / 'legacy' (the shipped powerlaw + dent-spawn break). */
+  fractureModeName?: string;
+  /** DBG (V11) — the four fracture SHAPE knobs: Lloyd relaxation rounds,
+   *  site min-separation, site-count multiplier, impact-bias override. */
+  fractureRelaxName?: string;
+  boundaryStrengthName?: string;
+  fractureSeparationName?: string;
+  fractureSiteScaleName?: string;
+  /** DBG (Grain) per-material overrides: the selected material, and each
+   *  of the five knobs' live value on it ('table' = defer to the variant
+   *  table).  Paused-only, like every other DBG readout. */
+  damageSpreadName?: string;
+  grainMaterialName?: string;
+  grainKnobNames?: Record<string, string>;
+  grainOverrideCount?: number;
+  fractureBiasName?: string;
+  nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
   repelPushEnabled?: boolean;
   // When true, plastic-shards render in the active palette's constant
   // base shade, brightness-scaled by their plastic-shard contact
   // count (PAuto automata).  Default true.
+  /** DBG "Goo bond" — the bonded-pair blend pass (render/shardBlend.ts). */
+  shardBlendEnabled?: boolean;
+  /** Bridges drawn last frame, post-cull.  Shown beside the toggle so
+   *  "is it doing anything right now" is answerable from the menu. */
+  shardBlendCount?: number;
+  /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
+  shardCoatName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
@@ -1646,17 +1939,98 @@ export interface EngineStats {
   // DBG-toggleable to OFF for A/B-testing zero-flow behaviour
   // (asteroids decay toward zero velocity over a few seconds; only
   // collisions / gravity move them after that).
-  asteroidFlowEnabled?: boolean;
+  shardFlowEnabled?: boolean;
   // Snitch catch mode — DBG-toggleable while playtesting which catch
   // interaction feels better.  'collide' (default): fly into the snitch.
   // 'shoot': any player-owned projectile within its catch radius nabs it.
   snitchCatchMode?: 'collide' | 'shoot';
+  /** DBG live gamepad readout (Pair C, c2) — a readout, not a toggle: the pad
+   *  has nothing to switch, and what a hardware check needs to see is whether
+   *  the axes are reaching the sim.  `gamepadInfo` names the adopted pad
+   *  (`'none'` when there isn't one); `gamepadAxes` carries the post-deadzone
+   *  thrust, the held aim heading, and a live FIRE flag. */
+  gamepadInfo?: string;
+  gamepadAxes?: string;
+  /** DBG: force the touch joystick to draw with no touch session, so its
+   *  size and placement can be checked on a desktop browser. */
+  joystickForceVisible?: boolean;
+  /** DBG: gamepad force feedback on/off. */
+  rumbleEnabled?: boolean;
+  /** DBG: WHY there is or is not force feedback right now — 'ready',
+   *  'playing', 'no pad', 'pad has no actuator', 'browser refused', or
+   *  'off (DBG)'.  Rumble cannot be checked anywhere but on hardware, so the
+   *  panel has to separate the reasons rather than leave silence to cover
+   *  all of them. */
+  rumbleInfo?: string;
+  /** Adaptive triggers (DualSense over WebHID).  `supported` is false on
+   *  every mobile browser and on Safari, and the UI uses it to decide whether
+   *  to OFFER the control at all — a button that can only ever fail is worse
+   *  than no button.  `info` is the DBG line: unsupported / not connected /
+   *  the transport plus the head of the last report sent. */
+  adaptiveTriggersSupported?: boolean;
+  adaptiveTriggersConnected?: boolean;
+  adaptiveTriggerInfo?: string;
+  /** The head of the last output report actually sent, as hex.  The only
+   *  window into a transport that reports nothing back: a pad discards a
+   *  malformed report in silence, so the bytes on the wire are the evidence a
+   *  correction would be made from. */
+  adaptiveTriggerReport?: string;
+  /** The active control scheme (menu selection).  Drives the menu's own
+   *  selector, the help panel's highlight, and the two touch HUD widgets. */
+  controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // DBG portal tuning (pause ▸ Debug Menu ▸ Portals) — five live multipliers
+  // over PORTAL_CONSTANTS, plus a readout of what they resolve to.
+  portalWarpName?: string;
+  portalSizeName?: string;
+  portalGravityName?: string;
+  portalGravityRangeName?: string;
+  portalLensName?: string;
+  portalLensSpinName?: string;
+  portalLensRadiusName?: string;
+  portalTuningInfo?: string;
+  // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
+  rollFeelName?: string;
+  // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default —
+  // "Diamond", "Sphere", "Dodeca", "Rhombic", "Tri", or "Ship").
+  hullModeName?: string;
+  // DBG rotation-damping preset name (PLAYER_ROLL_DAMPING_CYCLE, e.g.
+  // "Default").
+  rollDampName?: string;
+  // DBG tilt-mode name (TILT_MODE_CYCLE: "Lean" — the default — or
+  // "Tumble", the continuous-roll test mode).
+  tiltModeName?: string;
+  // DBG lean-direction A/B name (LEAN_DIR_CYCLE: "Default" — tilt into
+  // the acceleration — or "Reversed").
+  leanDirName?: string;
+  // DBG tilt-source A/B name (TILT_SOURCE_CYCLE: "Thrust" — the input
+  // drives the tilt, the default — or "Velocity", the ship's motion).
+  tiltSourceName?: string;
+  // DBG velocity-gain step name (VEL_GAIN_CYCLE, e.g. "1×") — the
+  // Velocity tilt source's sensitivity multiplier.
+  velGainName?: string;
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
+  /** DBG: active simulation rate label ('120Hz' / '60Hz'). */
+  simRateName?: string;
+  /** DBG: active HUD (React) update rate label. */
+  hudRateName?: string;
+  /** DBG: active substep cap (spiral-of-death clamp). */
+  substepCapName?: string;
   enemyScaleInfo?: string;
   swarmMoveName?: string;
+  /** DBG: active star-field density (stars per 10 000 CSS px²). */
+  starDensityName?: string;
+  /** DBG: active star size floor ('Device px' / 'CSS px'). */
+  starSizeName?: string;
+  /** DBG: active parallax depth-layer count. */
+  starBandsName?: string;
+  /** DBG: active parallax SPREAD (nearest-vs-farthest scroll range). */
+  starParallaxName?: string;
+  /** DBG: voice COLLAPSE mode ('Merge' / 'Some' / 'All') — how a burst of
+   *  simultaneous triggers of one id is folded into voices. */
+  collapseModeName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).
@@ -1730,6 +2104,34 @@ export interface EngineStats {
   perfRecording?: boolean;
   perfRecSamples?: number;
   perfRecScene?: string;
+  // ── Audio (SFX system, Phase 3 Pair B) ───────────────────────────────
+  // Master volume + mute for the pause-menu audio row.  In-memory only:
+  // this project keeps no state across reloads (CLAUDE.md §1), so the
+  // preference resets with the page — the persistence question is logged
+  // under FOR-USER-REVIEW in docs/GAUNTLET_PAIR_B_LOG.md rather than
+  // decided here.
+  // `state` is the live AudioContext state (null before the first user
+  // gesture creates it).  Surfaced because on a phone there is no console:
+  // "no sound" is otherwise indistinguishable from "context never started",
+  // "context interrupted", and "device mute switch is on".
+  audio?: {
+    volume: number; muted: boolean; state: string | null; audible: boolean;
+    /** Synth drafts on/off.  Off = only recorded takes sound, so assets can
+     *  be auditioned without a draft underneath being mistaken for one. */
+    drafts: boolean;
+    /** Recorded-take coverage: ids with at least one decoded file, out of
+     *  every registered id.  This is the progress bar for the asset pass. */
+    sampled: number; total: number;
+    /** Files in public/assets/sfx/ matching no id — i.e. a filename typo,
+     *  which otherwise looks exactly like "that one isn't wired yet". */
+    unmatched: string[];
+    /** Files named after a LOOP id — matched, but loops cannot take a
+     *  recording yet, so they are refused rather than silently ignored. */
+    loopFiles: string[];
+    /** Context→speaker latency readout (base + output), ms; null until the
+     *  context exists.  ~30-45ms = wired/speaker, 150-250ms = Bluetooth. */
+    latencyMs: number | null;
+  };
 }
 
 export interface DamageText {
@@ -1763,10 +2165,76 @@ export interface WaveAnnouncement {
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).
+/**
+ * Which control scheme the player picked (main menu, or the pause menu).
+ *
+ * The distinction that actually matters is the TOUCH MODEL — the two touch
+ * schemes are mutually exclusive ways to drive the same ship, and blending
+ * them (which is what shipped first) means the joystick and the drag-to-fly
+ * gesture fight over the same finger.  Keyboard and controller do NOT
+ * disable touch: they pick the standard touch model and additionally stop
+ * the MOUSE from dragging the ship around, since on those schemes steering
+ * is the keys' or the stick's job and a click should only shoot.
+ */
+/** Which motors an impact should reach.
+ *
+ *  `impact` is the default and plays `dual-rumble` — the handle motors, the
+ *  only effect every pad has.  `trigger` asks for `trigger-rumble` INSTEAD
+ *  when the pad and browser offer it: its parameters are a superset, so one
+ *  effect drives the handles and the trigger together.  Falls back to
+ *  `impact` wherever trigger-rumble is not in the actuator's `effects` list,
+ *  which is most places. */
+export type RumbleKind = 'impact' | 'trigger';
+
+export type ControlScheme =
+  | 'touch'
+  | 'joystick-left'   // stick under the left thumb, fire button under the right
+  | 'joystick-right'  // mirrored, for a left-handed grip
+  | 'keyboard'
+  | 'gamepad'
+  /** Controller with the LEFT TRIGGER as an analogue throttle; the left
+   *  stick steers only.  Its own scheme rather than a toggle because it
+   *  changes what a stick deflection MEANS. */
+  | 'gamepad-thrust'
+  /** ONE-STICK controller (user call): the LEFT stick — or the left D-pad —
+   *  supplies heading, aim AND throttle together, and the gun moves to the
+   *  bottom face button.  The right stick is unused, so a pad that has only
+   *  a left stick plays it in full.  Distinct from `gamepad-thrust`, where
+   *  the throttle is a trigger and the stick's magnitude is discarded. */
+  | 'gamepad-left';
+
 export interface PlayerHUDMessage {
   id: string;
   text: string;
   color: string;
   lifetime: number;
   maxLifetime: number;
+}
+
+/** Render-side view of the onscreen FIRE button — the joystick scheme's
+ *  shooting control.  Null in every other scheme, and (like the joystick)
+ *  null when there is no touch session, so it never ghosts onto a desktop. */
+export interface FireButtonHUDState {
+  x: number;
+  y: number;
+  radius: number;
+  pressed: boolean;
+  /** 0→1 charge progress while held, for the ring around the button. */
+  charge: number;
+}
+
+/** Render-side view of the onscreen joystick (Pair C, c2).  Produced by
+ *  `InputSystem.getJoystickState()` and handed to the HUD pass; NULL whenever
+ *  there is no live touch session, which is how the widget stays off mouse
+ *  and gamepad instead of ghosting there. */
+export interface JoystickHUDState {
+  /** Where the thumb landed — the stick floats, so this is not a constant. */
+  originX: number;
+  originY: number;
+  /** Where the thumb is now, clamped to the ring. */
+  knobX: number;
+  knobY: number;
+  /** 1 while held, decaying to 0 after release. Drives alpha. */
+  fade: number;
+  held: boolean;
 }
