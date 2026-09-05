@@ -4,24 +4,50 @@ Drop `.wav` files here. A file at `public/assets/sfx/foo.wav` is fetched by
 the game from `/assets/sfx/foo.wav` — `public/` is served at the site root,
 the same convention `assets.ts` uses for sprites.
 
-## Wiring a file to a sound
+## Wiring a file to a sound — the filename IS the wiring
 
-Nothing here is discovered automatically. A file is used only once an id in
-`engine/systems/SfxRegistry.ts` names it:
+Discovery is automatic. `vite.config.ts`'s `sfxManifestPlugin` scans this
+folder at build time and `AudioSystem.discoverSamples` matches each file to
+an id by name: **the id with dots as dashes, plus any suffix.**
 
-```ts
-a.register('crash.player.shard', {
-  tier: 1, gain: 0.34, poly: 3, minInterval: ms(70), collapse: true,
-  jitter: 0.12, positional: true,
-  sample: ['shard-hit-a.wav', 'shard-hit-b.wav', 'shard-hit-c.wav'],
-  render: s => …,          // keep this — it is the fallback
-});
-```
+| File | Id it lands on |
+|---|---|
+| `crash-player-shard.wav` | `crash.player.shard` |
+| `crash-player-shard-a.wav` | `crash.player.shard` |
+| `crash-player-shard-rice-02.wav` | `crash.player.shard` |
 
-Several filenames are **variants**, cycled round-robin per trigger. Keep the
-`render` draft: a missing or undecodable file falls back to it, so the game
-degrades to a different sound rather than to silence, and the standalone
-build (which carries no audio) still makes noise.
+Matching is **longest-prefix** against the ids the registry declares, so
+`destroy.enemy` cannot swallow `destroy.enemy.heavy`'s files — both are real
+ids and the longer one wins its own takes. Adding sound is adding **files**;
+`SfxRegistry.ts` is edited only to add a new id or to pin an exceptional
+filename via `SfxDef.sample`, which overrides discovery for that id.
+
+Several filenames for one id are **variants**, cycled round-robin per
+trigger. Keep the `render` draft: a missing, undecodable or silent file
+falls back to it, so the game degrades to a different sound rather than to
+silence.
+
+A file matching no id is **unmatched** and reported in the pause menu — it
+is not an error, it just never plays. Check there after a drop.
+
+## Replacing an existing take
+
+There is no "replace" in the code — this folder is purely additive, and a
+new filename is a new **variant** of its id, not a substitute for the old
+one. Which means:
+
+- **Same filename → a real replacement.** Committing `weapon-blaster-fire-a.wav`
+  over the existing one swaps the take and the id still has three variants.
+  The name must match **exactly, including case**: git is case-sensitive, so
+  `Weapon-Blaster-Fire-A.wav` is a *second* file, and both would then play.
+- **Different filename → a fourth take.** `weapon-blaster-fire-d.wav`
+  alongside `-a/-b/-c` means the id now cycles four recordings. That is the
+  right move for adding variation, and the wrong one for retiring a take.
+- **Retiring a take is a delete.** Nothing prunes a superseded file; the old
+  wav keeps playing one trigger in N until it is removed from the folder.
+
+Note the suffix is free-form, so `-a` / `-b` / `-c` is convention, not
+syntax — any suffix works, and any suffix that differs is an addition.
 
 ## Format
 
@@ -106,13 +132,18 @@ named after a loop id is **refused and reported** in the pause menu rather
 than accepted — accepting it would mark the id as covered while the synth
 kept playing, which looks exactly like a working recording.
 
-## These files never reach the standalone build
+## These files ARE baked into the standalone build
 
-`scripts/inline-build.mjs` inlines images only. The single-file
-`omniverse-standalone.html` therefore carries **no audio**, fetches none, and
-falls back to the procedural synth draft for every id — so it is fully
-audible, and it does not grow as this folder does.
+`scripts/inline-build.mjs` bakes every wav the bundle references into
+`omniverse-standalone.html` as a filename → data-URI table
+(`window.__omniSfxInline`), which the loader checks before fetching. A
+single HTML file cannot fetch anything, so without this the recordings were
+unreachable there and WAV-only mode was silence rather than an A/B.
 
-That is the settled answer to `docs/AUDIO_PLAN.md` §2a: recorded audio is
-web-build only. Record as many takes as you like without watching the
-standalone's size.
+Everything after the byte source is shared, so a baked take takes the same
+decode, silent-file rejection and round-robin as a served one.
+
+The consequence for this folder: **the standalone grows as this folder
+does.** Only files the manifest references are baked, so a stray unmatched
+wav costs nothing — but every take that lands on a real id is carried in
+full, base64'd.
