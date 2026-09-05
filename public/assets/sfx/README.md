@@ -112,6 +112,32 @@ A file that decodes but carries no signal is **rejected at load**
 (`AUDIO_CONSTANTS.SAMPLE_MIN_PEAK`) and its id falls back to the synth
 draft, so a broken export cannot silence a working sound.
 
+## Audit a drop
+
+```bash
+node scripts/sfx-audit.mjs                 # vs the base branch
+node scripts/sfx-audit.mjs --base HEAD~1   # vs any ref
+```
+
+Three sections, in descending order of how certain the answer is:
+
+1. **What the commit did** — `M` is a real replacement (an identical
+   filename), `A` is a new variant, `D` is a retirement. Fact, not
+   inference: the folder is additive, so git is what knows which names
+   matched.
+2. **Where each file lands** — the id every file resolves to under the same
+   longest-prefix rule the engine uses, plus the files matching no id
+   (silent) or a loop id (refused).
+3. **Duplicates** — byte-identical files (certain), and near-identical
+   audio among one id's takes. The similarity pass compares peak-normalised
+   energy ENVELOPES, so it survives the level and trim changes
+   `prep-sfx.mjs` applies: two exports of one take differ in gain and head
+   silence and should still read as the same recording. It is a flag, not a
+   verdict — two deliberate takes of one source score high too.
+
+Pure Node, no dependencies. It does not decode with the browser, so run
+`scripts/smoke/assets.mjs` as well before trusting a batch.
+
 ## Sustained sounds cannot use .wav yet
 
 Seven ids are **loops**, not one-shots — they run continuously and respond to
