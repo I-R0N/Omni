@@ -712,6 +712,51 @@ test.describe('penetration module', () => {
 const portalIndicated = (page: any) => engine(page, e =>
   e.renderer._indicatorBuffer.some((i: any) => i.entity.isPortal === true));
 
+/** Park the player as far as possible from every contact on the map, and
+ *  prove it landed outside `SCANNER.ENCOUNTER_RANGE` (900).
+ *
+ *  Searched on a coarse grid rather than offset from one landmark: an offset
+ *  is only clear of the thing it was measured from, and on a torus a big
+ *  offset wraps back toward something else.  Returns the achieved clearance
+ *  so a caller can assert the premise instead of assuming it. */
+async function parkAwayFromContacts(page: any) {
+  const clearance = await engine(page, e => {
+    const contacts: any[] = [
+      ...e.stations, ...e.portals, ...e.entityIndex.enemies,
+    ].filter((x: any) => x && x.active);
+    const wrapD = (a: number, b: number, span: number) => {
+      let d = b - a;
+      if (d > span / 2) d -= span;
+      if (d < -span / 2) d += span;
+      return d;
+    };
+    const W = e.currentMap.width ?? 12000, H = e.currentMap.height ?? 12000;
+    let best = { x: e.player.position.x, y: e.player.position.y, d: -1 };
+    const STEPS = 24;
+    for (let i = 0; i < STEPS; i++) {
+      for (let j = 0; j < STEPS; j++) {
+        const x = (i + 0.5) * W / STEPS, y = (j + 0.5) * H / STEPS;
+        let nearest = Infinity;
+        for (const c of contacts) {
+          const dx = wrapD(x, c.position.x, W), dy = wrapD(y, c.position.y, H);
+          const d = Math.hypot(dx, dy);
+          if (d < nearest) nearest = d;
+        }
+        if (nearest > best.d) best = { x, y, d: nearest };
+      }
+    }
+    e.player.position.x = best.x; e.player.position.y = best.y;
+    e.player.velocity.x = 0; e.player.velocity.y = 0;
+    e.camera.position.x = best.x; e.camera.position.y = best.y;
+    // Anything already stamped by the flight to here is not what this test
+    // is about.
+    for (const c of contacts) { c.detectedAt = undefined; c.trackedAt = undefined; }
+    return best.d;
+  });
+  expect(clearance, 'parked outside natural-encounter range').toBeGreaterThan(900);
+  await page.waitForTimeout(250);
+}
+
 /** Complete one full ping, polling the wavefront rather than sleeping — this
  *  environment renders in software, so sim-seconds run slower than wall
  *  seconds and any computed sleep is a coin flip (harness rule 1). */
@@ -738,12 +783,20 @@ test.describe('scanner module', () => {
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
     await page.waitForTimeout(400);
 
+    // Park well clear of EVERY contact.  NATURAL ENCOUNTER is deliberately
+    // not scanner-gated, so a test about what a scannerless ship can see has
+    // to stand somewhere it can see nothing — and on the hub, with four
+    // stations and ten rifts, "somewhere" has to be searched for rather than
+    // guessed at.  This is harness rule 5 (isolate from the live world) in
+    // its strongest form: the world here is the thing being measured.
+    await parkAwayFromContacts(page);
+
     const r = await engine(page, e => ({
       mk: e.scannerMk,
       ranges: e.scanRanges,
       arrows: e.renderer._indicatorBuffer.length,
-      // Contacts on the map, EXCLUDING the two always-charted landmarks —
-      // those are the one thing a scannerless ship is given.
+      // Contacts on the map, EXCLUDING the landmarks a run STARTS charted
+      // with — those are the one thing a scannerless ship is given.
       uncharted: e.renderer._minimapBuffer.filter((i: any) =>
         !(i.entity.isStation && i.entity.stationKind === 'home')
         && !(i.entity.isPortal && i.entity.id === e.arrivalPortalId)).length,
@@ -835,7 +888,11 @@ test.describe('scanner module', () => {
       const park = async () => engine(page, e => {
         const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
         if (!r) return false;
-        r.position.x = e.player.position.x + 500;
+        // Beyond SCANNER.ENCOUNTER_RANGE (900) — inside it the rival is seen
+        // with the naked eye whatever the mark, and the ladder claim would be
+        // measuring eyesight.  Still inside both marks' reach (a lone Mk II
+        // makes ~2420), so the ONLY variable left is the mark.
+        r.position.x = e.player.position.x + 1600;
         r.position.y = e.player.position.y;
         r.velocity.x = 0; r.velocity.y = 0;
         r.detectedAt = undefined;
@@ -974,6 +1031,182 @@ test.describe('scanner module', () => {
     watch.assertClean();
   });
 
+  test('flying past a landmark charts it for good — no scanner needed',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page);
+      await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+
+      // A rift the player has never been near: not found, not on the map.
+      await parkAwayFromContacts(page);
+      await engine(page, e => { for (const p of e.portals) p.found = false; });
+      await page.waitForTimeout(250);
+      const before = await engine(page, e => ({
+        found: e.portals.filter((p: any) => p.found === true).length,
+        onMap: e.renderer._minimapBuffer.filter((i: any) => i.entity.isPortal).length,
+      }));
+      expect(before.found, 'nothing charted from out here').toBe(0);
+      expect(before.onMap).toBe(0);
+
+      // Fly to it.  NATURAL ENCOUNTER is not scanner-gated and not
+      // mark-gated: you were there, you saw it.
+      await engine(page, e => {
+        const p = e.portals[0];
+        e.player.position.x = p.position.x + 200;
+        e.player.position.y = p.position.y;
+        e.player.velocity.x = 0; e.player.velocity.y = 0;
+        e.camera.position.x = e.player.position.x;
+        e.camera.position.y = e.player.position.y;
+      });
+      await waitForEngine(page, e => e.portals[0].found === true, 'the rift to be charted');
+
+      // AND IT STAYS.  Fly right across the map: a found landmark is not a
+      // fading contact, which is the whole point of the found/tracked split.
+      await engine(page, e => {
+        e.player.position.x += 5000; e.player.position.y += 5000;
+        e.camera.position.x = e.player.position.x;
+        e.camera.position.y = e.player.position.y;
+        // Clear the transient stamp so ONLY `found` can put it on the map.
+        for (const p of e.portals) { p.detectedAt = undefined; p.trackedAt = undefined; }
+      });
+      await page.waitForTimeout(400);
+
+      const after = await engine(page, e => {
+        const p = e.portals[0];
+        return {
+          found: p.found === true,
+          onMap: e.renderer._minimapBuffer.some((i: any) => i.entity === p),
+          arrow: e.renderer._indicatorBuffer.some((i: any) => i.entity === p),
+          mapAlpha: e.renderer.mapAlpha(p),
+        };
+      });
+      expect(after.found, 'found is permanent for a fixed landmark').toBe(true);
+      expect(after.onMap, 'and it is still on the minimap from across the map').toBe(true);
+      expect(after.mapAlpha, 'at full strength — found does not fade').toBe(1);
+      // The user's rule: found gets a MAP mark and never an ARROW.  Arrows
+      // are transient by design — they say "something is there NOW".
+      expect(after.arrow, 'a found landmark gets no arrow').toBe(false);
+
+      watch.assertClean();
+    });
+
+  test('a moving contact is tracked for a few seconds, never charted',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+
+      await engine(page, e => { e.resetOutfit(); e.debugSpawnRival('neutral'); });
+      await waitForEngine(page, e =>
+        e.entityIndex.enemies.some((x: any) => x.isRival === true), 'a rival');
+
+      // Park it right beside the player: an encounter, no scanner involved.
+      await engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        r.position.x = e.player.position.x + 300;
+        r.position.y = e.player.position.y;
+        r.velocity.x = 0; r.velocity.y = 0;
+      });
+      await waitForEngine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        return r !== undefined && r.detectedAt !== undefined;
+      }, 'the rival to be seen');
+
+      const seen = await engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        return { found: r.found === true, alpha: e.renderer.mapAlpha(r) };
+      });
+      // A thing that MOVES is never charted: a stale dot where an enemy used
+      // to be is worse than no dot.
+      expect(seen.found, 'a mobile contact is never found').toBe(false);
+      expect(seen.alpha, 'but it IS on the map right now').toBeGreaterThan(0);
+
+      // And it drops off once the mark goes stale, which `found` never does.
+      const stale = await engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        r.detectedAt = e.simClock - 1000;
+        r.trackedAt = undefined;
+        return e.renderer.mapAlpha(r);
+      });
+      expect(stale, 'a tracked contact expires').toBe(0);
+
+      watch.assertClean();
+    });
+
+  test('auto-scan is Mk II+, feeds the MINIMAP only, and the switch stops it',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+
+      // Mk I is fully manual — auto-tracking is what a mark buys.
+      await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk1'); });
+      await waitForEngine(page, e => e.scannerMk === 1, 'Mk I');
+      const mk1 = await stats(page);
+      expect(mk1.scanner?.autoCapable, 'Mk I cannot auto-scan').toBe(false);
+      // …so the pause-menu switch does not render for it either.
+      await page.waitForTimeout(300);
+      expect(await engine(page, e => e.autoPingRadius),
+        'and no sweep is running').toBe(0);
+
+      await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk3'); });
+      await waitForEngine(page, e => e.scannerMk === 3, 'Mk III');
+      expect((await stats(page)).scanner?.autoCapable).toBe(true);
+
+      // Plant a contact and let the background sweep find it WITHOUT any
+      // press.  The sweep is driven directly rather than waited out: its
+      // interval is sim-seconds and this environment renders in software.
+      await engine(page, e => { e.debugSpawnRival('neutral'); });
+      await waitForEngine(page, e =>
+        e.entityIndex.enemies.some((x: any) => x.isRival === true), 'a rival');
+      await engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        // Outside natural-encounter range, so ONLY the sweep can find it.
+        r.position.x = e.player.position.x + 1600;
+        r.position.y = e.player.position.y;
+        r.velocity.x = 0; r.velocity.y = 0;
+        r.detectedAt = undefined; r.trackedAt = undefined;
+        e.autoScanTimer = 1e6;   // fire the sweep on the next step
+      });
+      await waitForEngine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        return r !== undefined && r.trackedAt !== undefined;
+      }, 'the background sweep to find it');
+
+      const auto = await engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        return {
+          tracked: r.trackedAt !== undefined,
+          detected: r.detectedAt !== undefined,
+          mapAlpha: e.renderer.mapAlpha(r),
+        };
+      });
+      // THE WHOLE POINT: the sweep feeds the minimap and nothing else.  It
+      // stamps `trackedAt`, never `detectedAt`, so it cannot put a chevron on
+      // screen the player never asked for.
+      expect(auto.tracked, 'the sweep found it').toBe(true);
+      expect(auto.detected, 'but it is NOT an arrow-grade detection').toBe(false);
+      expect(auto.mapAlpha, 'and it is on the minimap').toBeGreaterThan(0);
+
+      // The switch really stops it.
+      await engine(page, e => {
+        e.setAutoScan(false);
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        r.trackedAt = undefined;
+        e.autoScanTimer = 1e6;
+      });
+      await page.waitForTimeout(400);
+      const off = await engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        return { tracked: r.trackedAt !== undefined, radius: e.autoPingRadius,
+                 autoOn: (window as any).__omniStats?.scanner?.autoOn };
+      });
+      expect(off.tracked, 'switched off, nothing is swept').toBe(false);
+      expect(off.radius).toBe(0);
+      expect(off.autoOn).toBe(false);
+
+      await engine(page, e => e.setAutoScan(true));
+      watch.assertClean();
+    });
+
   test('a portal arrow needs a scan, whatever the mark', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
@@ -983,7 +1216,10 @@ test.describe('scanner module', () => {
     await waitForEngine(page, e => e.scannerMk === 5, 'Mk V');
     await engine(page, e => {
       const p = e.portals[0];
-      e.player.position.x = p.position.x + 700;
+      // Beyond SCANNER.ENCOUNTER_RANGE (900): inside it the rift is seen with
+      // the naked eye, and the test would be measuring eyesight rather than
+      // the instrument.
+      e.player.position.x = p.position.x + 1400;
       e.player.position.y = p.position.y;
       e.camera.position.x = e.player.position.x;
       e.camera.position.y = e.player.position.y;

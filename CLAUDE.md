@@ -71,7 +71,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  366 tests.  All run at
+                          anti-flake rules).  369 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1704,16 +1704,34 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   player operates.  A4 shipped it as a gate that quietly widened two
   readouts which were already full, and the play-test verdict was that
   nothing about it read.  Four rules, every one a reversal of A4:
-  1. **NOTHING IS ON THE READOUTS FOR FREE.**  With no scanner the HUD
-     carries NO off-screen arrows at all and the minimap draws neither
-     terrain nor contacts.  A4's rule was the exact opposite ("no scanner
-     degrades to today's behaviour exactly"), which is what made the
-     module invisible.  The standing exception is `isAlwaysCharted` — the
-     HOME station and the rift the player ARRIVED THROUGH
-     (`GameEngine.arrivalPortalId`, resolved off the same `exitMouthFor`
-     that decides where you land and where your debris re-emerges).  Those
-     two get a MINIMAP mark and never an ARROW: the arrows are the
-     scanner's alone.
+  1. **THE MAP IS FOUND, NOT GIVEN.**  With no scanner the minimap draws no
+     TERRAIN (that is gated on merely owning one) and the HUD carries NO
+     off-screen arrows at all — A4's rule was the exact opposite ("no
+     scanner degrades to today's behaviour exactly"), which is what made the
+     module invisible.  What a scannerless ship DOES get is what it has
+     actually met: `isRetainedContact` splits contacts in two (user call).
+     A FIXED LANDMARK — a station or a portal — is flagged
+     `GameEntity.found` the first time anything discovers it and stays on
+     the minimap for the life of the map instance; anything that MOVES is
+     tracked for a few seconds and drops off both readouts, because a stale
+     dot where an enemy used to be is worse than no dot.  `found` is seeded
+     at map load by `isAlwaysCharted` (the HOME station and the rift the
+     player ARRIVED THROUGH, off the same `exitMouthFor` that decides where
+     you land) and set thereafter by an encounter or a scan — a SEEDING rule
+     rather than a per-frame predicate, so "charted from the start" and
+     "charted by flying past" cannot drift into meaning two things.  Found
+     gets a MINIMAP mark and never an ARROW: arrows are transient by design,
+     since they say "something is there NOW".
+  1b. **NATURAL ENCOUNTER.**  Anything within `SCANNER.ENCOUNTER_RANGE` is
+     seen with the naked eye — no scanner, no mark.  That is what makes the
+     scanner's value RANGE (finding a thing before you fly into it) rather
+     than sight itself, and it is why the minimap fills in as the player
+     plays.  The one exception is a CONCEALED POI (`poiTier` above
+     `ENCOUNTER_MAX_POI_TIER`), or "secret" and "hidden" would be words with
+     no mechanism.  It is a POI rule, NOT a tier rule: the tiers rank how
+     RARE a find is, and rarity is not visibility — a rival sits at tier 3
+     because it is uncommon, not because it is hard to see, and gating sight
+     on the tier made a rival parked beside the ship invisible.
   2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
      at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
      `GameEntity.detectedAt` on whatever it crosses, and a mark holds for
@@ -1750,6 +1768,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
      fill them — `GameEntity.poiTier` lets a POI declare its own rung and
      defaults to COMMON, so the phased plan's hidden wormholes (G4) become
      a FIELD ON A PORTAL rather than a change here.
+  **AUTO-SCAN** (user call) is the QUIET half of the tool: a background sweep
+  every `SCANNER.AUTO.INTERVAL_SEC`, Mk II and above
+  (`SCANNER.AUTO.MIN_MARK` — Mk I stays fully manual, so auto-tracking is
+  something a mark buys), switched from the PAUSE menu rather than the debug
+  menu because it changes how the game plays.  It differs from a pressed
+  scan in three deliberate ways: it stamps `trackedAt` rather than
+  `detectedAt`, so it feeds the MINIMAP and can never put a chevron on screen
+  the player did not ask for; it skips RETAINED contacts, since a landmark is
+  `found` for good once discovered and re-finding it every few seconds is
+  work with no output; and its ring draws on the minimap ONLY, dimmer, since
+  a sweep painting the game screen every few seconds is exactly the nag the
+  manual button exists to avoid.  What the button still buys is arrows, the
+  on-screen ring, and discovering landmarks.
+  `RenderSystem.mapAlpha` is where the three routes onto the minimap meet —
+  `found` (permanent), `detectedAt` (a press or an encounter) and `trackedAt`
+  (the sweep), the last two taking whichever is fresher because they are the
+  same claim arriving differently.  The ARROWS read `detectAlpha` alone.
   SCAN IS ITS OWN CONTROL on every device (user call): **Q**, the pad's
   **L1 / Circle** (`INPUT_CONSTANTS.GAMEPAD.BUTTONS.SCAN`), and a HUD
   button beside PAUSE that renders only with a scanner aboard.  It
@@ -3732,7 +3767,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   indicated now (they used to be excluded as clutter) — the small separate
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
-  EVERY ARROW ON THE EDGE WAS PUT THERE BY A SCAN (scanner rework, §5).
+  EVERY ARROW ON THE EDGE IS TRANSIENT, AND NONE OF THEM COME FROM `found`
+  OR FROM THE AUTO SWEEP (scanner rework, §5).  An arrow says "something is
+  there NOW", so a charted landmark gets a map dot and no chevron, and the
+  background sweep feeds the minimap only.
   The buffer is gated on `GameEntity.detectedAt`, so a scannerless ship
   has NO arrows at all, and `item.detect` — `detectionAlpha(simClock −
   detectedAt)`, pure and published on `__omniHud` — is the `globalAlpha`

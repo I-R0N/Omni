@@ -141,8 +141,11 @@ test.describe('off-screen indicators — portals', () => {
     // THE ARROWS BELONG TO THE SCANNER now (rework).  With nothing fitted the
     // HUD carries no arrows at any distance — that is the baseline, and it is
     // asserted first because everything below is a departure from it.
-    expect((await standOff(page, 900)).present,
-      'a scannerless ship gets no arrow, however close').toBe(false);
+    // 1400, not 900: inside SCANNER.ENCOUNTER_RANGE the rift is seen with the
+    // naked eye (which is the point of encounters), so a claim about the
+    // SCANNER has to be made from outside it.
+    expect((await standOff(page, 1400)).present,
+      'a scannerless ship gets no arrow at instrument range').toBe(false);
 
     // This asserts the INPUTS the suppression rule reads — presence in the
     // buffer (now the detection stamp) and the `onScreen` flag (the
@@ -154,9 +157,9 @@ test.describe('off-screen indicators — portals', () => {
     // exists for.  The scan has to happen at THIS standoff — a stamp records
     // where the front crossed the rift, so scanning from elsewhere would
     // measure a stale mark.
-    await standOff(page, 900);
+    await standOff(page, 1400);
     await scanOnce(page);
-    const approach = await standOff(page, 900);
+    const approach = await standOff(page, 1400);
     expect(approach.present).toBe(true);
     expect(approach.onScreen).toBe(false);
 

@@ -846,6 +846,19 @@ export interface GameEntity {
   /** Which scanner mark finds this POI.  Overrides `detectTierFor`'s default
    *  of COMMON for stations and portals; the seam a hidden wormhole uses. */
   poiTier?: number;
+  /** FOUND — a permanent discovery flag, set once and never cleared for the
+   *  life of the map instance.  Only RETAINED contacts (fixed landmarks —
+   *  `isRetainedContact`) ever get it: a thing that moves is tracked for a
+   *  few seconds, because a stale dot where an enemy used to be is worse
+   *  than no dot.  Map-scoped, not run-scoped: entities are rebuilt per map
+   *  load, so re-entering an arena rediscovers it — the same rule destroyed
+   *  tiles already follow. */
+  found?: boolean;
+  /** Stamped by the AUTO-scan, which is the quiet half of the tool: it feeds
+   *  the MINIMAP only.  Separate from `detectedAt` on purpose — the arrows
+   *  read that one, so a background sweep cannot put chevrons on the screen
+   *  the player never asked for. */
+  trackedAt?: number;
   // Dragon leave animation (Stage 6): the head has crossed its exit portal and
   // is being swallowed tail-first — RenderSystem stops drawing it while the body
   // segments collapse through the portal one by one.
@@ -1669,6 +1682,11 @@ export interface EngineStats {
     /** Cooldown as a 0..1 fill, so the button can show it without knowing
      *  SCANNER.COOLDOWN_SEC. */
     ready: number;
+    /** Is the mark high enough for AUTO-SCAN?  The pause-menu switch renders
+     *  only when it is — a toggle for something that would not happen either
+     *  way is worse than no toggle. */
+    autoCapable: boolean;
+    autoOn: boolean;
   };
   playerStats?: {
     health: number; maxHealth: number;

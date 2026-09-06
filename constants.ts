@@ -5808,6 +5808,35 @@ export const SCANNER = {
    *  circumference — so a long scan ends by dissolving rather than by
    *  stopping. */
   RING_MIN_ALPHA_FRAC: 0.15,
+
+  /** NATURAL ENCOUNTER (user call).  A contact this close is seen with the
+   *  naked eye — no scanner required, no mark required.  It is what makes
+   *  the minimap fill in as the player flies rather than staying blank until
+   *  they buy an instrument, and it is why the scanner's value is RANGE:
+   *  finding a thing before you fly into it. */
+  ENCOUNTER_RANGE: 900,
+  /** …except that a CONCEALED POI is not seen by flying past it, or "secret"
+   *  and "hidden" would be words with no mechanism behind them.
+   *
+   *  A POI rule, NOT a tier rule.  The detection tiers rank how RARE a find
+   *  is, and rarity is not visibility: a rival, a bubble and a dragon sit at
+   *  tiers 3 and 4 because they are uncommon, but each is a large object in
+   *  plain sight and flying into one obviously counts as meeting it.  Gating
+   *  natural sight on the detection tier conflated the two and made a rival
+   *  parked beside the ship invisible — caught by the tracking test. */
+  ENCOUNTER_MAX_POI_TIER: 2,
+
+  /** AUTO-SCAN (user call): a background sweep that keeps the MINIMAP
+   *  populated with moving contacts, so the player is not pressing the
+   *  button to stay merely aware.  Deliberately the QUIET half of the
+   *  tool — see `GameEngine.updateAutoScan` for what it does not do. */
+  AUTO: {
+    /** Mk I is the entry instrument and stays fully manual; auto-tracking is
+     *  what a mark buys on top. */
+    MIN_MARK: 2,
+    /** Seconds between background sweeps. */
+    INTERVAL_SEC: 6,
+  },
 } as const;
 
 /** DETECTION TIERS — what each mark adds, and the ONE table that says so.
@@ -7362,14 +7391,31 @@ export function detectTierFor(e: GameEntity): number {
   return 0;
 }
 
-/** The two landmarks that are on the minimap WITHOUT a scanner (user call):
- *  the player's home station, and the rift they arrived through — "if the
- *  player finds a portal in the home arena and travels through it, that
- *  return portal will appear on the minimap".
+/** Is this contact RETAINED once found?
  *
- *  Note what this does NOT grant: an always-charted landmark gets a minimap
- *  mark and never an ARROW.  The HUD's off-screen arrows are the scanner's
- *  alone, so a scannerless ship is told where home is and nothing else. */
+ *  THE SPLIT (user call): a fixed landmark stays on the minimap for good once
+ *  discovered — "flag everything as found or not" — while anything that MOVES
+ *  is tracked for a few seconds and then drops off both readouts.  A stale dot
+ *  where an enemy used to be is worse than no dot; a station does not go
+ *  anywhere, so forgetting it is just annoying.
+ *
+ *  Stations and portals are the fixed landmarks today.  Everything else —
+ *  enemies, rivals, fauna, dragons, the snitch, materials — is transient. */
+export function isRetainedContact(e: GameEntity): boolean {
+  return e.isStation === true || e.isPortal === true;
+}
+
+/** The landmarks a run STARTS knowing, seeded as `found` at map load: the
+ *  player's home station, and the rift they arrived through — "if the player
+ *  finds a portal in the home arena and travels through it, that return
+ *  portal will appear on the minimap".
+ *
+ *  A SEEDING rule, not a per-frame test: `GameEntity.found` is the one thing
+ *  the minimap reads, so being charted from the start and being charted by
+ *  flying past cannot end up meaning two different things.
+ *
+ *  Note what it does NOT grant: found gets a minimap MARK and never an ARROW.
+ *  Arrows are transient by design — they say "something is over there NOW". */
 export function isAlwaysCharted(e: GameEntity, arrivalPortalId: string | null): boolean {
   if (e.isStation === true && e.stationKind === 'home') return true;
   return e.isPortal === true && arrivalPortalId !== null && e.id === arrivalPortalId;

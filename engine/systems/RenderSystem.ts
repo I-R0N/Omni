@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, isAlwaysCharted, SCANNER, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, SCANNER, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -105,6 +105,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   /** Live ping wavefront radius (0 = none) and its target radius. */
   public scanPingRadius: number = 0;
   public scanPingMax: number = 0;
+  /** The AUTO sweep's ring.  Drawn on the MINIMAP ONLY (user call) — a
+   *  background sweep that painted the game screen every few seconds would
+   *  be exactly the nag the manual button exists to avoid. */
+  public autoPingRadius: number = 0;
+  public autoPingMax: number = 0;
   /** Sim clock + the last completed ping's material bubble, for the minimap's
    *  tier-1 reveal.  See `GameEngine.updateScan` for why materials are a
    *  radius and contacts are stamps. */
@@ -130,10 +135,27 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     return detectionAlpha(this.simClock - this.materialRevealAt);
   }
   /** How strongly a contact detected at `at` should draw right now — the ONE
-   *  freshness test, shared by the arrows and the minimap so a mark cannot
-   *  be on one readout and gone from the other. */
+   *  freshness test, so a mark cannot fade differently on two readouts. */
   public detectAlpha(at: number | undefined): number {
     return at === undefined ? 0 : detectionAlpha(this.simClock - at);
+  }
+  /** How strongly a contact draws ON THE MINIMAP.
+   *
+   *  THE THREE WAYS ONTO THE MAP, in order of permanence (user call):
+   *  `found` is a fixed landmark discovered once and kept for good;
+   *  `detectedAt` is a pressed scan or a natural encounter, transient;
+   *  `trackedAt` is the AUTO sweep, transient and minimap-only.  The last two
+   *  take whichever is fresher, because they are the same kind of claim
+   *  ("something is there NOW") arriving by different routes.
+   *
+   *  The ARROWS deliberately read `detectAlpha` alone: a found landmark gets
+   *  a permanent dot and never a chevron, and the background sweep never puts
+   *  a chevron on screen at all. */
+  public mapAlpha(e: GameEntity): number {
+    if (e.found === true) return 1;
+    const a = this.detectAlpha(e.detectedAt);
+    const b = this.detectAlpha(e.trackedAt);
+    return a > b ? a : b;
   }
   /** The rift the player arrived through, charted without a scanner. */
   public arrivalPortalId: string | null = null;
@@ -1070,10 +1092,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // A mobile shard is a MATERIAL contact and is revealed by the
             // ping's radius rather than a per-entity stamp — thousands of
             // them make stamping the wrong shape (GameEngine.updateScan).
-            const charted = isAlwaysCharted(entity, this.arrivalPortalId);
+            // Everything else goes through `mapAlpha`, which is where the
+            // found / encountered / auto-tracked rules meet.
             const detect = entity.type === EntityType.STRUCTURE
                 ? this.materialRevealAlpha
-                : charted ? 1 : this.detectAlpha(entity.detectedAt);
+                : this.mapAlpha(entity);
             if (detect > 0) this._minimapBuffer.push({ entity, dx, dy, detect });
         }
 

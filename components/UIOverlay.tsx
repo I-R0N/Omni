@@ -51,6 +51,7 @@ interface UIOverlayProps {
   onStart?: () => void;
   onPause?: () => void;
   onScan?: () => void;
+  onSetAutoScan?: (on: boolean) => void;
   onResume?: () => void;
   onRestart?: () => void;
   /** Death / run-summary screen (Phase 3 Pair A) — RESPAWN continues the run
@@ -386,6 +387,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onStart,
   onPause,
   onScan,
+  onSetAutoScan,
   onResume,
   onRestart,
   onRespawn,
@@ -1413,7 +1415,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ) : null, ['gamepad', 'gamepad-thrust', 'gamepad-left'])}
 
         {group('The run', 'text-amber-300', [
-          ['Scanner', 'Nothing shows on the minimap or the screen edge until you scan for it. Higher marks find rarer things; fitting more of them scans further.'],
+          ['Scanner', 'Finds things beyond what you can see. Higher marks find rarer things; fitting more scans further. Mk II and up also sweeps on its own — switch it in the pause menu.'],
+          ['Found', 'Stations and rifts stay on the minimap once you find them — by flying past, or by scanning. Anything that MOVES is only tracked for a few seconds.'],
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
           ['Stations', 'Dock to repair, buy modules, and outfit the ship. Outfitting needs a drydock.'],
           ['Portals', 'The rifts on the hub lead to wave arenas. The return rift brings you home.'],
@@ -3192,6 +3195,37 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderSchemeDropdown()}
               {renderAdaptiveTriggers()}
             </div>
+
+            {/* Scanner — the one setting the instrument has.  A player-facing
+                row rather than a debug one (user call): auto-scan changes how
+                the game plays, not how it is developed.  Rendered only with a
+                scanner aboard that can actually do it, so the row is never a
+                switch for something that would not happen either way. */}
+            {stats.scanner && stats.scanner.autoCapable && (
+              <div className={`${PANEL} flex flex-col gap-2`}>
+                <h3 className={`text-sky-300 ${HEADING}`}>Scanner</h3>
+                <div className={`flex items-center justify-between gap-3 ${PANEL_ROW}`}>
+                  <span className="text-left">
+                    <span className={`block text-slate-200 ${T_ROW}`}>Auto-scan</span>
+                    <span className={`block text-slate-400 ${T_MICRO}`}>
+                      Sweeps for moving contacts on its own. Minimap only — no arrows.
+                    </span>
+                  </span>
+                  <button
+                    data-testid="auto-scan-toggle"
+                    onClick={() => onSetAutoScan?.(!stats.scanner!.autoOn)}
+                    aria-pressed={stats.scanner.autoOn}
+                    className={`${BTN_COMPACT} shrink-0 ${
+                      stats.scanner.autoOn
+                        ? 'bg-cyan-600/80 border-cyan-400/60 text-white'
+                        : 'bg-slate-800/70 border-slate-600/60 text-slate-300'
+                    }`}
+                  >
+                    {stats.scanner.autoOn ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Controls & basics — the same widget the main menu shows, so
                 the answer is in the same words wherever you look for it. */}

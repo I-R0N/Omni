@@ -920,18 +920,23 @@ export function renderMinimap(
     // readouts obviously show one scan rather than two effects that happen to
     // look alike.  Drawn under the contacts: the ring is the instrument, the
     // marks it turns up are the information.
-    if (r.scanPingRadius > 0 && r.scanPingMax > 0) {
-        const pr = r.scanPingRadius * scale;
-        const frac = r.scanPingRadius / r.scanPingMax;
-        ctx.globalAlpha = SCANNER.RING_ALPHA
+    // Both rings draw here; only the MANUAL one also draws on the game screen.
+    // The auto sweep is deliberately dimmer — it is ambient instrumentation,
+    // not an event the player caused.
+    const ring = (radius: number, max: number, dim: number) => {
+        if (radius <= 0 || max <= 0) return;
+        const frac = radius / max;
+        ctx.globalAlpha = SCANNER.RING_ALPHA * dim
             * (SCANNER.RING_MIN_ALPHA_FRAC + (1 - SCANNER.RING_MIN_ALPHA_FRAC) * (1 - frac));
         ctx.strokeStyle = SCANNER.RING_COLOR;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, pr, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, radius * scale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
-    }
+    };
+    ring(r.scanPingRadius, r.scanPingMax, 1);
+    ring(r.autoPingRadius, r.autoPingMax, 0.55);
 
     // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
     // Enemy blips pulse so they pop against the static layer; the phase

@@ -745,6 +745,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.fireScan();
   };
 
+  const handleSetAutoScan = (on: boolean) => {
+      if (engineRef.current) engineRef.current.setAutoScan(on);
+  };
+
   const handleAddCredits = () => {
       if (engineRef.current) engineRef.current.addDebugCredits(1_000_000);
   };
@@ -1026,6 +1030,7 @@ const App: React.FC = () => {
         onOutfitAll={handleOutfitAll}
         onResetOutfit={handleResetOutfit}
         onScan={handleScan}
+        onSetAutoScan={handleSetAutoScan}
         onAddCredits={handleAddCredits}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}

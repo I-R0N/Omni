@@ -59,6 +59,9 @@ export interface RendererDiagnostics {
   scanRanges: number[];
   scanPingRadius: number;
   scanPingMax: number;
+  /** The AUTO sweep's ring — minimap only. */
+  autoPingRadius: number;
+  autoPingMax: number;
   simClock: number;
   materialRevealAt: number;
   materialRevealRadius: number;
