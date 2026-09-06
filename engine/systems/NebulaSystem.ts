@@ -666,11 +666,11 @@ export class NebulaSystem {
         let densityTier: number | undefined;
         switch (variantId) {
             case 'rock-shard':
-                color = COLORS.ASTEROID;
+                color = COLORS.ROCK_SHARD;
                 densityTier = 0;
                 break;
             case 'glass-shard':
-                color = COLORS.ASTEROID;
+                color = COLORS.ROCK_SHARD;
                 break;
             case 'plastic-shard':
                 color = randomPlasticShardShade();

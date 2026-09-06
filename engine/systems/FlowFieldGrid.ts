@@ -80,7 +80,7 @@ const DC4 = [ 0,  0, -1,  1] as const;
 // ~90°.  Farther walls in the kernel contribute smoothly less.
 const WALL_REPULSE = 1.2;
 
-// Module-level scratch for sampleAsteroidFlow — mutated and returned
+// Module-level scratch for sampleShardFlow — mutated and returned
 // per call instead of allocating a fresh {x, y} literal each time.
 // Eliminates ~one allocation per shard + drop per sim step in the
 // applyFlow hot path.  Callers MUST consume the returned vector
@@ -90,7 +90,7 @@ const WALL_REPULSE = 1.2;
 const _gridFlowScratch: FlowVector = { x: 0, y: 0 };
 // Dedicated scratch for the enemy-pursuit + wall-repulsion samplers (called
 // once per chasing enemy per AI step).  Separate from _gridFlowScratch so a
-// sampleAsteroidFlow call in the same frame can't clobber an in-flight enemy
+// sampleShardFlow call in the same frame can't clobber an in-flight enemy
 // sample.  Callers must consume the returned vector synchronously.
 const _eneFlowScratch: FlowVector = { x: 0, y: 0 };
 const _repulScratch: FlowVector = { x: 0, y: 0 };
@@ -168,9 +168,9 @@ export class FlowFieldGrid {
   private enemyDirty  = true;   // true = rebuild enemy field next flush
 
   // Active flow sampler — the map's own streamline function when provided,
-  // else the global analytical meander.  Set by buildAsteroidField() and
-  // reused by _computeAsteroidCell() (including wall-repulsion fallbacks)
-  // and sampleAsteroidFlow() (out-of-grid fallback).  Caching the sampler
+  // else the global analytical meander.  Set by buildShardFlowField() and
+  // reused by _computeShardFlowCell() (including wall-repulsion fallbacks)
+  // and sampleShardFlow() (out-of-grid fallback).  Caching the sampler
   // here keeps the map-specific flow geometry in one place instead of
   // reaching across systems for it on every grid recompute.
   private flowSampler: FlowSampler = sampleFlow;
@@ -204,8 +204,8 @@ export class FlowFieldGrid {
   private breathePhase: number = 0;
 
   // Per-cell timestamp of the most recent asteroid-field recompute (ms,
-  // performance.now() domain).  Written by `_computeAsteroidCell` for
-  // every cell it touches: every cell at `buildAsteroidField` (map load)
+  // performance.now() domain).  Written by `_computeShardFlowCell` for
+  // every cell it touches: every cell at `buildShardFlowField` (map load)
   // and 5 cells at each `onTileDestroyed`.  Consumed only by the DBG
   // "FF Rebuilds" overlay — it flashes any cell whose timestamp is
   // within FLASH_DURATION_MS of now().  Allocation matches the typed-
@@ -251,7 +251,7 @@ export class FlowFieldGrid {
   /**
    * Change the grid's cell size and rebuild every grid-sized buffer.
    * Caller (GameEngine) must re-invoke `initObstacles()` +
-   * `buildAsteroidField()` afterward, since the obstacle bitmap and
+   * `buildShardFlowField()` afterward, since the obstacle bitmap and
    * asteroid-flow vectors are wiped here.  The enemy pursuit field is
    * marked dirty so the next `flushEnemyField()` rebakes it for the
    * new resolution.
@@ -295,7 +295,7 @@ export class FlowFieldGrid {
 
   /**
    * Populate the obstacle bitmap from the map's tile entities.
-   * Call once right after map.init() and before buildAsteroidField().
+   * Call once right after map.init() and before buildShardFlowField().
    *
    * Only SOLID static tiles count as flow obstacles — i.e. glass /
    * plastic / metal / indestructible / rock.  Excluded:
@@ -329,10 +329,10 @@ export class FlowFieldGrid {
    * kernels make the field curve gradually around tile clusters
    * instead of staying straight until the very last cell.
    */
-  buildAsteroidField(sampler?: FlowSampler): void {
+  buildShardFlowField(sampler?: FlowSampler): void {
     if (sampler) this.flowSampler = sampler;
     for (let idx = 0; idx < TOTAL; idx++) {
-      this._computeAsteroidCell(idx);
+      this._computeShardFlowCell(idx);
     }
   }
 
@@ -348,7 +348,7 @@ export class FlowFieldGrid {
     if (r === this.kernelR) return;
     this.kernelR = r;
     for (let idx = 0; idx < TOTAL; idx++) {
-      this._computeAsteroidCell(idx);
+      this._computeShardFlowCell(idx);
     }
   }
 
@@ -363,7 +363,7 @@ export class FlowFieldGrid {
     if (mix === this.tangentMix) return;
     this.tangentMix = mix;
     for (let idx = 0; idx < TOTAL; idx++) {
-      this._computeAsteroidCell(idx);
+      this._computeShardFlowCell(idx);
     }
   }
 
@@ -377,12 +377,12 @@ export class FlowFieldGrid {
     this.breatheAmp = amp;
     this.breathePhase = phase;
     for (let idx = 0; idx < TOTAL; idx++) {
-      this._computeAsteroidCell(idx);
+      this._computeShardFlowCell(idx);
     }
   }
 
   /** Recompute the asteroid flow vector for a single cell. */
-  private _computeAsteroidCell(idx: number): void {
+  private _computeShardFlowCell(idx: number): void {
     // Stamp the recompute time for the DBG "FF Rebuilds" overlay
     // regardless of blocked-vs-open outcome — every recompute is a
     // rebuild event worth surfacing.
@@ -536,7 +536,7 @@ export class FlowFieldGrid {
     this.blocked[idx] = 0;
 
     // Asteroid field — recompute the kernel neighbourhood
-    this._rebakeAsteroidKernel(idx);
+    this._rebakeShardFlowKernel(idx);
 
     // Enemy field — BFS patch
     this._patchField(idx, this.eneDist, this.eneFlowX, this.eneFlowY);
@@ -570,7 +570,7 @@ export class FlowFieldGrid {
     if (idx < 0 || this.blocked[idx]) return; // off-grid or already blocked
     this.blocked[idx] = 1;
 
-    this._rebakeAsteroidKernel(idx);
+    this._rebakeShardFlowKernel(idx);
     this.enemyDirty = true;
   }
 
@@ -581,23 +581,23 @@ export class FlowFieldGrid {
    * patch hooks — both flip the obstacle bitmap and must refresh
    * wall-repulsion in the surrounding cells.
    */
-  private _rebakeAsteroidKernel(idx: number): void {
+  private _rebakeShardFlowKernel(idx: number): void {
     const row = (idx / FF_COLS) | 0;
     const col =  idx % FF_COLS;
     const R = this.kernelR;
     if (R === 0) {
-      this._computeAsteroidCell(idx);
+      this._computeShardFlowCell(idx);
       for (let k = 0; k < 4; k++) {
         const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
         const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
-        this._computeAsteroidCell(nr * FF_COLS + nc);
+        this._computeShardFlowCell(nr * FF_COLS + nc);
       }
     } else {
       for (let dr = -R; dr <= R; dr++) {
         const nr = (row + dr + FF_ROWS) % FF_ROWS;
         for (let dc = -R; dc <= R; dc++) {
           const nc = (col + dc + FF_COLS) % FF_COLS;
-          this._computeAsteroidCell(nr * FF_COLS + nc);
+          this._computeShardFlowCell(nr * FF_COLS + nc);
         }
       }
     }
@@ -606,10 +606,10 @@ export class FlowFieldGrid {
   // ─── sampling ────────────────────────────────────────────────────────────
 
   /** O(1) — returns a unit vector in the asteroid streaming direction. */
-  sampleAsteroidFlow(wx: number, wy: number): FlowVector {
+  sampleShardFlow(wx: number, wy: number): FlowVector {
     const idx = this.worldToCell(wx, wy);
     // Outside the grid or zero-vector cell: fall back to the active map
-    // sampler (set by buildAsteroidField).  Both paths mutate a scratch
+    // sampler (set by buildShardFlowField).  Both paths mutate a scratch
     // vector in place — callers must consume the returned vector
     // synchronously before the next sample call.
     if (idx < 0) return this.flowSampler(wx, wy);
@@ -812,7 +812,7 @@ export class FlowFieldGrid {
   // Read-only views of the grid's internal buffers so the renderer's
   // asteroid/shard FF overlays can draw cell outlines, vectors, the
   // obstacle bitmap, and per-cell rebuild flashes without going through
-  // an allocation-heavy `sampleAsteroidFlow()` loop.  Returned arrays
+  // an allocation-heavy `sampleShardFlow()` loop.  Returned arrays
   // are LIVE — callers must not mutate them.
 
   /** Cell edge length in world units. */

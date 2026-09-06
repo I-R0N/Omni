@@ -3,6 +3,8 @@
 import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
+import type { Renderer } from './systems/Renderer';
+import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
@@ -16,19 +18,38 @@ import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
+import { AudioSystem } from './systems/AudioSystem';
+import { registerSfx } from './systems/SfxRegistry';
 import { nextId } from './systems/IdAllocator';
 import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
+import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName } from '../constants';
+import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
+import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
+import { subtractBoundaryCell, polygonArea as fracturePolygonArea,
+         polygonCentroid as fracturePolygonCentroid,
+         pointToPolygonDistance2 , unionOfCells } from './systems/fracture';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import type { FlowSampler } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
 import { randomRockNebulaComposition } from './NebulaColor';
+import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentDeath } from './roamers/dragons';
+import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
+import { updateSnitch } from './roamers/snitch';
+import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
+import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
+import { DebugControls } from './debugControls';
+import { ShockwaveOpts, spawnShockwave as emitShockwave, updateExplosionRings, applyExplosionAoE,
+         applyBlastToPlayer, applyKamikazeBlastToPlayer } from './explosions';
+import { computeActiveSlots, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
+         firstFreeSlotFor, areaSlots, resaleValue, statBreakdown,
+         moveModuleInternal as moveModuleTiles, modulePrice as catalogPrice,
+         outfittingSnapshot as buildOutfittingSnapshot } from './outfitting';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -45,82 +66,211 @@ function blendHexColors(hexA: string, hexB: string): string {
 // dust" feel instead of a continuous cloud.
 const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
 
-/** One live dragon mini-boss (Stage 6): its head entity + Snake body + per-
- *  dragon lifecycle/attack timers.  Multiple can be alive at once. */
-interface DragonInstance {
-  head: GameEntity;
-  body: GameEntity[];                    // eaten/spawned tiles, head→tail
-  state: 'enter' | 'roam' | 'leave';
-  stateTimer: number;                    // seconds left in the current state
-  time: number;                          // weave clock
-  gnatTimer: number;                     // countdown to the next brood spit
-  missileTimer: number;                  // countdown to the next homing missile
-  portal?: { x: number; y: number };     // exit-portal centre (leave state only)
-  headThrough?: boolean;                  // head has crossed the exit portal
+/** Dust released when a GRAIN comes off a body (voronoi fracture).
+ *
+ *  The legacy break paths puffed tinted nebula-shards as they chipped —
+ *  rock per hit through `dent.perHitShard`, glass through
+ *  `spawnGlassShards` — and BOTH of those stand down under voronoi, so
+ *  the dust went with them.  Measured on a tile broken to nothing: glass
+ *  produced 3 nebula-shards under legacy and 0 under voronoi, while rock
+ *  kept only its 3-5 death burst and lost every per-chip puff.
+ *
+ *  CHANCE is a gate, not a rounding error.  Every detach makes a chip
+ *  now, and a puff on each one reads as a constant cloud trailing the
+ *  player rather than as occasional dust kicks — which is the exact note
+ *  the legacy per-hit path carries about its own gate.
+ *
+ *  SIZE_FRACTION is of the CHIP, not the parent: a grain is ~12 units
+ *  where the body is ~36, so sizing off the parent (as the legacy per-hit
+ *  puff did) would make the dust bigger than the piece that shed it. */
+const GRAIN_CHIP_DUST = {
+  CHANCE: 0.35,
+  SIZE_FRACTION: 0.7,
+  ALPHA_MUL: 0.5,
+} as const;
+
+
+/** ENGINE-INTERNAL SURFACE (gauntlet 5f).  A member here declared WITHOUT
+ *  `private` is not public API — it is reachable because the extracted engine
+ *  modules (`engine/roamers/*`, …) are plain free functions taking
+ *  `g: GameEngine`, which is how code moved out of this class without gaining
+ *  an abstraction layer to route through (`docs/GAUNTLET_5F_LOG.md`, D1).
+ *  `private` is compile-time only in TypeScript — the 5b suites already reach
+ *  straight past it through `window.__omniEngine` — so widening it changes
+ *  nothing at runtime.  The real public API is what `App.tsx` calls. */
+// Audio-only tuning that belongs to a single call site each (SFX_INVENTORY
+// §8.1).  PROVISIONAL, like every other number in this pass.
+/** Consecutive salvage pickups inside this window climb the pickup scale. */
+const SALVAGE_STREAK_WINDOW_MS = 1500;
+/** Cap on that climb, so a long magnet train doesn't run off the top. */
+const SALVAGE_STREAK_MAX = 11;
+
+/** DBG (Grain) readouts for the five per-material knob rows: each knob's
+ *  live value on the SELECTED material, or 'table' where it defers.  Built
+ *  per stats push, which is paused-only for the debug panel — five string
+ *  lookups, not a per-frame cost. */
+/** Cap on the recoil a parent takes when it sheds a piece, as a fraction
+ *  of the relative ejection velocity.  A nearly-eroded body shedding a
+ *  large final piece has `chipMass / remainingMass` well above 1, and the
+ *  unclamped impulse reads as a launch rather than a kick. */
+const RECOIL_MAX_RATIO = 0.6;
+
+/** Move a fractured body's local frame so its origin sits back on its
+ *  centre of area, compensating `position` so nothing visibly moves.
+ *
+ *  Every piece of local-frame state shifts TOGETHER — the outline, the
+ *  surviving cells (live outline AND the cut-time outline elastic
+ *  materials spring back to), the boundary endpoints and midpoints, and
+ *  the stamped impact point.  Shifting only some would leave the pattern
+ *  no longer tiling the body, and that tiling is exactly the invariant
+ *  `unionOfCells` relies on to build the next remainder.
+ *
+ *  A pure translation, so no area, no length and no boundary fill
+ *  changes: `fractureEdgeNeed`, and therefore derived HP, is untouched by
+ *  construction. */
+function recentreFracturedBody(e: GameEntity, remainder: Vector2[], eps: number): void {
+  const raw = fracturePolygonCentroid(remainder);
+  // THE SHIFT IS QUANTISED TO THE UNION'S OWN EPSILON, and that is not a
+  // nicety.  `unionOfCells` identifies coincident vertices by keying
+  // ABSOLUTE coordinates (`round(p.x / eps)`), so translating the frame by
+  // an arbitrary amount can change which vertices merge and hand back a
+  // slightly different ring — measured as a 4.45-area disagreement between
+  // the body's outline and the union of its own cells, where the pre-fix
+  // build had none.  Moving by an exact multiple of `eps` shifts every key
+  // by the same integer, so every vertex that keyed together still does.
+  // The residual offset is under one eps (1.6 units on a 160-unit shard)
+  // against the 12+ units of drift this exists to remove.
+  const step = Math.max(1e-6, eps);
+  const c = {
+    x: Math.round(raw.x / step) * step,
+    y: Math.round(raw.y / step) * step,
+  };
+  if (c.x === 0 && c.y === 0) return;
+
+  for (const p of remainder) { p.x -= c.x; p.y -= c.y; }
+
+  const cells = e.fractureCells;
+  if (cells !== undefined) {
+    for (const cell of cells) {
+      for (const p of cell.points) { p.x -= c.x; p.y -= c.y; }
+      cell.centroid.x -= c.x; cell.centroid.y -= c.y;
+      cell.site.x -= c.x; cell.site.y -= c.y;
+      if (cell.points0 !== undefined) {
+        for (const p of cell.points0) { p.x -= c.x; p.y -= c.y; }
+      }
+    }
+  }
+  const edges = e.fractureEdges;
+  if (edges !== undefined) {
+    for (const ed of edges) {
+      ed.ax -= c.x; ed.ay -= c.y;
+      ed.bx -= c.x; ed.by -= c.y;
+      ed.mx -= c.x; ed.my -= c.y;
+    }
+  }
+  // The damage front is a local point too: leaving it behind would make
+  // the next hit spend around where the body's origin USED to be.
+  if (e.lastImpactLocal !== undefined) {
+    e.lastImpactLocal.x -= c.x;
+    e.lastImpactLocal.y -= c.y;
+  }
+
+  // Compensate in WORLD terms so the body does not jump: the local origin
+  // moved by +c, so the world anchor moves by +c rotated into world.
+  const cs = Math.cos(e.rotation), sn = Math.sin(e.rotation);
+  e.position.x += c.x * cs - c.y * sn;
+  e.position.y += c.x * sn + c.y * cs;
+  wrapPosition(e.position);
 }
 
-// A rival ship (Stage 7) and its engine-managed lifecycle/AI state.  The ship
-// itself is a plain EntityType.ENEMY carrying isRival; everything else lives
-// here so the entity stays lean.
-interface RivalInstance {
-  ship: GameEntity;
-  disposition: RivalDisposition;
-  state: 'enter' | 'roam' | 'leave';
-  stateTimer: number;        // seconds left in the current state
-  fireTimer: number;         // weapon cooldown
-  stolen: number;            // points denied to the player so far (HUD/popup)
-  portal?: { x: number; y: number };  // exit-portal centre (leave only)
-  // Cached hunt target (Stage 7 perf).  Re-acquired on the PerfController
-  // `rivalScan` cadence; steering/firing recompute only the O(1) distance to it
-  // every step, and it's dropped the moment it goes inactive/exploding.
-  target?: GameEntity | null;
+function grainKnobNamesSnapshot(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of GRAIN_KNOB_LIST) out[k] = getGrainKnobName(k);
+  return out;
+}
+
+/** How many of the twenty per-material overrides are currently OFF the
+ *  variant table.  The panel shows it beside Reset: with four materials
+ *  across five knobs there is otherwise no way to tell whether what you
+ *  are looking at is the shipped tuning. */
+function grainOverrideCountSnapshot(): number {
+  let n = 0;
+  for (const m of GRAIN_MATERIALS) {
+    for (const k of GRAIN_KNOB_LIST) if (getGrainOverride(m, k) !== null) n++;
+  }
+  return n;
 }
 
 export class GameEngine {
-  private input: InputSystem;
-  private physics: PhysicsSystem;
-  private renderer: RenderSystem;
+  /** Not `private`: DebugControls reaches it for the joystick DBG toggle,
+   *  and the Playwright suites drive the pad mapping through it (CLAUDE.md
+   *  §8 — `private` is compile-time only, so the suites could read it either
+   *  way; this just stops the compiler disagreeing with the debug menu). */
+  input: InputSystem;
+  physics: PhysicsSystem;
+  /* Typed by the SEAM, not the class (gauntlet WebGPU stage 3): the engine
+     depends on what a renderer must provide, and `new RenderSystem()` below
+     is the concrete choice. Canvas2D remains the only implementation.
+
+     `Renderer` is the SWAP CONTRACT (nine members, stable);
+     `RendererDiagnostics` is the debug/perf surface that grows with the
+     renderer and is not part of that contract. Split because 15 of the last
+     15 additions were diagnostics — see engine/systems/Renderer.ts. */
+  renderer: Renderer & RendererDiagnostics;
   private ai: AISystem;
   private particles: ParticleSystem;
-  private trails: TrailSystem;
+  trails: TrailSystem;
   private projectiles: ProjectileSystem;
   private weapons: WeaponSystem;
   private drops: DropSystem;
-  private waves: WaveSystem;
-  private nebulas: NebulaSystem;
+  waves: WaveSystem;
+  nebulas: NebulaSystem;
   // Stage 1 of shard-system overhaul — additive skeleton, no-op
   // update / onDeath.  Existing GameEngine + NebulaSystem code paths
   // still drive regen / shatter / merge.  See docs/SHARD_SYSTEM.md.
-  private shards: ShardSystem;
-  private entityIndex: EntityIndex;
-  private flowField: FlowFieldGrid;
+  shards: ShardSystem;
+  entityIndex: EntityIndex;
+  flowField: FlowFieldGrid;
   // Central performance controller — samples load each sim step and
   // hands every skippable pass an effective frame-skip interval.  See
   // engine/systems/PerfController.ts.
-  private perfController: PerfController;
+  perfController: PerfController;
+  // SFX manager.  PUBLIC because UIOverlay's audio row (master volume +
+  // mute) and the headless smokes both drive it directly — it holds no
+  // simulation state, so there is nothing to protect.  See
+  // docs/SFX_INVENTORY.md for the id contract and
+  // engine/systems/AudioSystem.ts for the voice budget.
+  public audio: AudioSystem;
+  // Salvage-pickup streak: consecutive collections inside
+  // SALVAGE_STREAK_WINDOW_MS step the pickup chime up a semitone, so a
+  // magnetised cluster climbs a scale instead of rattling.  Audio-only
+  // state — it feeds nothing else.
+  private salvageStreak = 0;
+  private salvageStreakAt = 0;
+
   // In-game FPS / perf capture harness (DBG tool).  Zero cost while idle;
   // records the per-frame timing + PerfSnapshot stream over a window and
   // exports a copy-paste text block (see engine/systems/PerfRecorder.ts).
   private perfRecorder: PerfRecorder = new PerfRecorder();
 
   private isRunning: boolean = false;
-  private gameState: GameState = GameState.MENU;
-  private lastTime: number = 0;
+  gameState: GameState = GameState.MENU;
+  lastTime: number = 0;
   // Fixed-timestep accumulator (Phase 1).  Frame delta is accumulated and the
   // simulation is stepped at SIMULATION_CONSTANTS.FIXED_DT until the
   // accumulator is drained; any remainder carries to the next frame.  This
   // decouples gameplay speed from display refresh rate so physics outcomes
   // are deterministic across devices.
-  private simAccumulator: number = 0;
+  simAccumulator: number = 0;
   
-  private currentMap: BaseMapLayer | null = null;
-  private player: GameEntity;
-  private camera: CameraState;
+  currentMap: BaseMapLayer | null = null;
+  player: GameEntity;
+  camera: CameraState;
   
   private damageTexts: DamageText[] = [];
   // Run score — tier-scaled enemy-kill points + early-clear wave bonuses.
   // Reset with the rest of the run state in resetAndLoadSelectedMap.
-  private score: number = 0;
+  score: number = 0;
   // HUD ticker — eases up toward `score` by integer steps each frame so
   // big awards roll up instead of snapping.  Display only; `score` is truth.
   private displayScore: number = 0;
@@ -178,16 +328,20 @@ export class GameEngine {
   // growth and the boss rotation continue across a descent instead of
   // restarting with the arena's wave counter.  Returning to the HUB resets it
   // — the hub is the surface.
-  private stageIndex: number = 0;
+  stageIndex: number = 0;
   private stageClearPending: boolean = false;
   // Counts down AFTER the capstone dies and BEFORE the screen appears, so the
   // explosion, debris and salvage spray all land first.  The sim keeps running
   // during it — that is the point.
-  private stageClearDelay: number = 0;
-  private lastStageClear: {
+  stageClearDelay: number = 0;
+  // Shape mirrors `EngineStats.stageClear` minus `mapName`, which the
+  // snapshot fills from the live map.  (The `discountFraction` /
+  // `discountSeconds` pair this used to carry died with the boss shop
+  // discount; the capstone drops a module now — see §5 payout.)
+  lastStageClear: {
     stage: number; bossName: string; nextStage: number;
-    scoreAwarded: number; salvageDrops: number;
-    discountFraction: number; discountSeconds: number;
+    scoreAwarded: number; salvageCredits: number;
+    rewardLabel?: string; rewardDesc?: string; rewardCredits?: number;
   } | null = null;
   // Salvage forfeited to the CURRENT death (shown on the summary) and across
   // the whole run (so repeated deaths read as a running cost).
@@ -197,10 +351,10 @@ export class GameEngine {
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
   // shop stations; all reset per run.
-  private credits: number = 0;
+  credits: number = 0;
   // 2-slot equip loadout (pivot 1b) — DERIVED from the weapon-group GUN
   // hexes via syncLoadoutFromSlots (WeaponSystem is untouched).
-  private equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
+  equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
   // land in `inventory` (tile grid, duplicates allowed); outfitting moves
@@ -211,19 +365,19 @@ export class GameEngine {
   // AND its adjacency
   // requirement is met (MODULE_REQUIREMENTS fixpoint — see
   // computeActiveSlots); `activeShip`/`activeWeapon` cache the result.
-  private shipSlots: (string | null)[] = (() => {
+  shipSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
       s[0] = 'hull_base'; // free starter hull — the adjacency root, mounted center
       return s;
   })();
-  private weaponSlots: (string | null)[] = (() => {
+  weaponSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
       s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
       return s;
   })();
-  private inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
-  private activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
-  private activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+  inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
+  activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+  activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -236,7 +390,7 @@ export class GameEngine {
   private readonly DAMAGE_TEXT_POOL_CAP = 64;
   private playerMessages: PlayerHUDMessage[] = [];
   private readonly MAX_PLAYER_MESSAGES = 6;
-  private currentWeaponIndex: number = 0;
+  currentWeaponIndex: number = 0;
   
   private minimapExpanded: boolean = false;
   private minimapTimer: number = 0;
@@ -254,7 +408,7 @@ export class GameEngine {
   // DBG enemy-test override: when set, every wave spawns ONLY this subtype.
   // Persists across map switches (a testing setting); applies from the next
   // wave start.
-  private forcedTestEnemy: EnemySubtype | null = null;
+  forcedTestEnemy: EnemySubtype | null = null;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
   // Map the next restart / initial load should build.  Updated from the
@@ -269,18 +423,18 @@ export class GameEngine {
   private selectedMapType: MapType = HUB_DESCRIPTOR.mapType;
 
   // Debug mode
-  private debugMode: boolean = false;
+  debugMode: boolean = false;
 
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
-  private trailShape: TrailShape = TrailShape.CIRCLE;
+  trailShape: TrailShape = TrailShape.CIRCLE;
   // Player-trail direction mode — VELOCITY (default) extends the trail
   // opposite to velocity (current production look — points emitted at
   // player.position naturally trail behind via the ship's path through
   // space).  THRUST extends the trail opposite to the input/thrust
   // direction by accumulating a per-emit offset in -input.  Toggled
   // from the DBG panel.
-  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
+  trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
   // ── Performance toggle: player↔asteroid local gravity ───────────
   // PhysicsSystem.applyLocalGravity is the bidirectional pull
@@ -288,7 +442,7 @@ export class GameEngine {
   // CONSTANTS).  Defaults to ON to match production; the DBG
   // panel's "LGrav" button flips it for measuring its cost in
   // isolation.
-  private localGravityEnabled: boolean = true;
+  localGravityEnabled: boolean = true;
   // ── Performance toggle: attractor gravity scan ──────────────────
   // PhysicsSystem.applyGravity walks the master entity list every
   // frame to apply each POI / attractor's gravity to in-range
@@ -296,21 +450,21 @@ export class GameEngine {
   // tiles + shards + particles even when there are no attractors
   // active.  DBG panel's "Grav" button flips it off so the cost
   // can be measured in isolation.
-  private attractorGravityEnabled: boolean = true;
+  attractorGravityEnabled: boolean = true;
   // ── Performance toggle: SAT collision broadphase ────────────────
   // PhysicsSystem.handleEntityCollisions is the dynamic-grid
   // broadphase + SAT polygon resolver.  Off mode disables the
   // entire pass — projectiles fly through everything, ships clip,
   // tiles aren't destructible — purely for measuring the isolated
   // cost in the perf overlay.  Defaults to ON.
-  private collisionsEnabled: boolean = true;
+  collisionsEnabled: boolean = true;
 
   // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
   // collision scan in PhysicsSystem.  Defaults to OFF: today's
   // broadphase doesn't pair these (shards skip the outer loop), so
   // mobile shards drift through tiles' geometry; flipping ON adds
   // the missing scan and the asteroid-crash branch starts firing.
-  private shardTileCollisionsEnabled: boolean = true;
+  shardTileCollisionsEnabled: boolean = true;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -323,69 +477,80 @@ export class GameEngine {
   private set waveGraceTimer(v: number) { this.waves.waveGraceTimer = v; }
 
   // Screen Shake State
-  private shakeTimer: number = 0;
-  private shakeIntensity: number = 0;
+  shakeTimer: number = 0;
+  shakeIntensity: number = 0;
+  /** Impact axis for the current shake, normalised; (0,0) = no direction, so
+   *  the camera falls back to the isotropic jitter.  See handleScreenShake. */
+  shakeDirX: number = 0;
+  shakeDirY: number = 0;
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
-  private screenShakeEnabled: boolean = false;
+  // ON by default (user call).  Shake is the game's primary impact feedback —
+  // what a crash, a detonation and a boss landing all read through — and it
+  // shipped OFF, so the default build had no camera reaction to any of them.
+  // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
+  // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
+  screenShakeEnabled: boolean = true;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
-  // When `asteroidFlowEnabled` is false, the per-asteroid / per-drop
+  // When `shardFlowEnabled` is false, the per-asteroid / per-drop
   // velocity nudge in updatePhysics is skipped entirely.  Asteroids that
   // were moving keep their current velocity but receive no further
   // streamline correction; combined with `linearDamping` they decay
   // toward zero velocity over a few seconds and then only move when
   // collided with or pulled by gravity.  Default true.
-  private asteroidFlowEnabled: boolean = true;
+  shardFlowEnabled: boolean = true;
 
   // ── Snitch state ──────────────────────────────────────────────────────
   // One quidditch-style snitch that persists across waves: rides the
   // asteroid flow field with a burst/coast AI; catching it pays
   // SCORE_CONSTANTS.SNITCH_POINTS and ends the current wave (see
   // updateSnitch / catchSnitch).  A fresh one spawns for the next wave.
-  private snitch: GameEntity | null = null;
+  snitch: GameEntity | null = null;
   // Wander clock for the weave oscillation (sim-time accumulated).
-  private snitchTime: number = 0;
+  snitchTime: number = 0;
   // Snitches CAUGHT this run — drives the speed ramp (NOT the wave number),
   // so the player can defer the snitch to keep it slow.  Reset per run.
-  private snitchCatchCount: number = 0;
+  snitchCatchCount: number = 0;
   // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
-  private snitchCatchMode: 'collide' | 'shoot' = 'collide';
+  snitchCatchMode: 'collide' | 'shoot' = 'collide';
   // Burst/coast AI state (see the SNITCH_CONSTANTS doc block) — there is
   // only ever one live snitch, so engine-level fields suffice; all of
   // these are re-seeded in spawnSnitch().
-  private snitchAiState: 'coast' | 'dart' = 'coast';
-  private snitchAiTimer: number = 0;        // countdown to the next state flip
-  private snitchPanicCooldown: number = 0;  // guaranteed coast window between panic darts
-  private snitchSpeedMult: number = 0;      // eased current speed (fraction of player cruise)
-  private snitchDartAway: boolean = false;  // current dart is a panic dart (away-bias active)
-  private snitchDartAwayX: number = 0;
-  private snitchDartAwayY: number = 0;
+  snitchAiState: 'coast' | 'dart' = 'coast';
+  snitchAiTimer: number = 0;        // countdown to the next state flip
+  snitchPanicCooldown: number = 0;  // guaranteed coast window between panic darts
+  snitchSpeedMult: number = 0;      // eased current speed (fraction of player cruise)
+  snitchDartAway: boolean = false;  // current dart is a panic dart (away-bias active)
+  snitchDartAwayX: number = 0;
+  snitchDartAwayY: number = 0;
 
   // ── Ambient bubble fauna (Stage 5) ────────────────────────────────────────
   // Bubbles are always-present roamers, not wave enemies.  maintainAmbient-
   // Bubbles keeps at least BUBBLE_CONSTANTS.AMBIENT_POPULATION alive, spawning
   // one offscreen each time this top-up timer elapses while the field is short.
-  private ambientBubbleTimer: number = 0;
+  ambientBubbleTimer: number = 0;
 
   // ── Dragon mini-boss (Stage 6) ────────────────────────────────────────────
   // Any number of engine-managed segmented serpents at once.  Each head is a
   // normal ENEMY (damageable / routed through handleEntityDeath); per-dragon
-  // lifecycle + movement + Snake-body live on its DragonInstance (see
-  // spawnDragon / updateDragons).
-  private dragons: DragonInstance[] = [];
-  private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
-  private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
-  private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
-  private nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
+  // lifecycle + movement + Snake-body live on its DragonInstance, and the
+  // behaviour lives in engine/roamers/dragons.ts.
+  dragons: DragonInstance[] = [];
+  _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
+  _bubbleBiteBuf: GameEntity[] = []; // reused tile-gnaw scratch (same rule)
+  dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
+  // Stage 7 player-like roamers; behaviour lives in engine/roamers/rivals.ts.
+  rivals: RivalInstance[] = [];
+  nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
 
   // ── (h) Bosses ────────────────────────────────────────────────────────────
   // A boss is an ordinary wave enemy carrying a BOSS_DEFS phase table, so the
   // only engine state it needs is the live-boss handle the HUD bar reads and
   // the TIMED shop discount from the model-(d) payout (salvage + discount, no
   // unlock plumbing).  All three are run-scoped — reset with credits/score.
-  private liveBoss: GameEntity | null = null;
-  private bossesKilled = 0;
+  liveBoss: GameEntity | null = null;
+  bossesKilled = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
   // The station lives on the OVERWORLD map (found by isStation at map load).
@@ -407,23 +572,38 @@ export class GameEngine {
   // portals SHARE the E key: `updateInteractables` arbitrates by nearest
   // in-range, so at most one of `nearestStation` / `nearestPortal` is set
   // on any step and the affordance always names the action it will take.
-  private portals: GameEntity[] = [];
+  portals: GameEntity[] = [];
   private nearestPortal: GameEntity | null = null; // nearest in use range this step
+  // Debris-transit queue (PORTAL_CONSTANTS.TRANSIT): loose entities captured
+  // around the player at portal entry, waiting out their stagger delay before
+  // emerging from the exit rift.  Queued entities exist NOWHERE else — they
+  // join currentMap.entities only when updatePortalTransit releases them.
+  // Cleared by loadMapFresh, so a second hop (or a restart) before the queue
+  // drains means the wormhole simply kept the stragglers.
+  private portalTransit: { entity: GameEntity; delay: number }[] = [];
+  // Transit warp — the flight THROUGH the wormhole (PORTAL_CONSTANTS.WARP).
+  // Wall-clock seconds remaining, and the length it started at, so the render
+  // side can be handed a plain 0->1 progress.  Non-zero FREEZES the sim, the
+  // stage-clear pattern: nothing may shoot the player while they are inside
+  // the tunnel, and a frozen sim is what leaves the wall clock free to drive
+  // the beat.
+  private portalWarpTimer: number = 0;
+  private portalWarpDuration: number = 0;
+  private portalTransitExit: Vector2 = { x: 0, y: 0 };
   // Overworld roaming dragon — first spawn shortly after run start, then a
   // fresh rift a while after the previous dragon dies or leaves.
   private overworldDragonTimer: number = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
-  private ffOverlayVectors:   boolean = false;
-  private ffOverlayCells:     boolean = false;
-  private ffOverlayObstacles: boolean = false;
-  private ffOverlayRebuilds:  boolean = false;
+  ffOverlayVectors:   boolean = false;
+  ffOverlayCells:     boolean = false;
+  ffOverlayObstacles: boolean = false;
+  ffOverlayRebuilds:  boolean = false;
   // Vector overlay stride — cycles through SAMPLE_N_CYCLE so a coarser
   // sweep doesn't bury detail on dense maps.  Cells/obstacles/rebuild
   // overlays always render every cell.
-  private static readonly FF_SAMPLE_N_CYCLE: readonly number[] = [1, 2, 4, 8, 16] as const;
-  private ffOverlaySampleN: number = 1;
+  ffOverlaySampleN: number = 1;
   // Cycle of cell sizes for the DBG "FF Density" toggle.  Coarsest
   // first (matches the existing default).  Each step rebuilds both
   // grids — asteroid field via the analytical formula + repulsion,
@@ -433,17 +613,13 @@ export class GameEngine {
   // of the default the BFS only fans out ~350 units, leaving enemies
   // outside that radius to rely on direct steering.  DBG-only knob;
   // production stays at the default 256.
-  private static readonly FF_DENSITY_CYCLE: readonly number[] =
-    [256, 192, 128, 96, 64, 48, 32] as const;
-  private ffCellSize: number = 48;
+  ffCellSize: number = 48;
   // Wall-repulsion kernel radius for the asteroid field, in cells.
   // R = 0 → legacy 4-cardinal-only scan (A/B baseline); R = 1..5 →
   // (2R+1)² neighbourhood with 1/d² falloff so the flow curves around
   // tile clusters from several cells away.  Default 3 — matches the
   // FlowFieldGrid default constant.  DBG-cycle via "FF KernelR".
-  private static readonly FF_KERNEL_R_CYCLE: readonly number[] =
-    [0, 1, 2, 3, 4, 5] as const;
-  private ffKernelR: number = 5;
+  ffKernelR: number = 5;
   // Tangent-mix factor for the wall-repulsion contribution.  0 = pure
   // radial (push perpendicular away from walls — current behaviour
   // produces opposing vectors on opposite sides of a long wall and
@@ -452,17 +628,13 @@ export class GameEngine {
   // sides of the wall now point the same way along the wall, no
   // saddle).  Default 0.5 — meaningful tangent contribution while
   // still preserving some push-away behaviour.  DBG-cycle.
-  private static readonly FF_TANGENT_MIX_CYCLE: readonly number[] =
-    [0.0, 0.25, 0.5, 0.75, 1.0] as const;
-  private ffTangentMix: number = 0.5;
+  ffTangentMix: number = 0.5;
   // Breathing field — scroll rate (rad/s) for the slow undulation
   // that migrates convergence zones so shard piles dissolve.  0 = off
   // (static field, no periodic re-bake).  DBG-cycle "FF Breathe":
   // off / slow / med / fast.
-  private static readonly FF_BREATHE_RATE_CYCLE: readonly number[] =
-    [0, 0.15, 0.4, 0.9] as const;
-  private ffBreatheRate: number = 0;
-  private ffBreathePhase: number = 0;
+  ffBreatheRate: number = 0;
+  ffBreathePhase: number = 0;
   private ffBreatheRebakeTimer: number = 0;
   // Seconds between breathing re-bakes.  ~3 Hz: smooth enough for a
   // slow drift, cheap enough that the per-bake cost (sub-ms at default
@@ -472,28 +644,13 @@ export class GameEngine {
   // offset added to each shard's flow target so shards ride slightly
   // different parallel lanes instead of collapsing onto one streamline.
   // 0 = off.  DBG-cycle "FF Lane": off / low / med / high.
-  private static readonly FF_LANE_JITTER_CYCLE: readonly number[] =
-    [0, 0.1, 0.2, 0.35] as const;
-  private ffLaneJitter: number = 0.2;
+  ffLaneJitter: number = 0.2;
   // Selectable base-flow pattern (DBG "FF Pattern").  DEFAULT routes to
   // the active map's own sampleFlow(); the rest swap in an analytical
   // field (circular / spiral / gravity well / directional / wavy …).
   // Persists across map loads so a pattern can be compared on different
   // maps.  Cycling re-bakes the asteroid field with the chosen sampler;
   // kernel / tangent / breathing all still apply on top.
-  private static readonly FF_PATTERN_CYCLE: readonly FlowPattern[] = [
-    FlowPattern.DEFAULT,
-    FlowPattern.MEANDER,
-    FlowPattern.CIRCULAR,
-    FlowPattern.SPIRAL,
-    FlowPattern.GRAVITY_WELL,
-    FlowPattern.WAVY_GRAVITY_WELL,
-    FlowPattern.OUTWARD,
-    FlowPattern.HORIZONTAL,
-    FlowPattern.VERTICAL,
-    FlowPattern.WAVY_HORIZONTAL,
-    FlowPattern.WAVY_VERTICAL,
-  ];
   // Short DBG-button labels per pattern (compact for the panel chip).
   private static readonly FF_PATTERN_LABELS: Record<FlowPattern, string> = {
     [FlowPattern.DEFAULT]:           'Map',
@@ -508,7 +665,7 @@ export class GameEngine {
     [FlowPattern.WAVY_HORIZONTAL]:   'WavyH',
     [FlowPattern.WAVY_VERTICAL]:     'WavyV',
   };
-  private ffPattern: FlowPattern = FlowPattern.DEFAULT;
+  ffPattern: FlowPattern = FlowPattern.DEFAULT;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -516,7 +673,7 @@ export class GameEngine {
   // ShardSystem.update() drains the queue per fixed-step dt.
 
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
-  private activeDrops: GameEntity[] = [];
+  activeDrops: GameEntity[] = [];
 
   // Wave announcement banners rendered on the canvas — forwarded from
   // WaveSystem so existing call sites keep working verbatim.
@@ -582,6 +739,70 @@ export class GameEngine {
   // reads for tail attribution (distinct from the 60-frame-averaged
   // PerfSnapshot sim timers, which can't localise a single 50ms frame).
   private lastFrameSimMs: number = 0;
+  /** Substeps the accumulator drained on the last frame (0..MAX_SUBSTEPS).
+   *  `lastFrameSimMs` alone is ambiguous: at a fixed 120 Hz sim a 33 ms frame
+   *  legitimately costs twice the sim of a 16 ms one, so a rising sim total
+   *  can mean "the sim got slower" OR "the frame got longer and pulled more
+   *  substeps in".  Pairing the two separates the sim's own cost from the
+   *  substep-bunching a slow frame causes — the frame-PACING signal. */
+  private lastFrameSteps: number = 0;
+  /** Wall time of the `onStatsUpdate` CALL — i.e. how long it takes to
+   *  SCHEDULE a React update, NOT how long React then spends rendering one.
+   *  `onStatsUpdate` is a setState called from a rAF callback: React 18/19
+   *  batches it and defers reconciliation past the end of this callback, so
+   *  this bracket closes before any of the work it was once captioned as
+   *  measuring has happened.  It is kept, under an honest name, as the
+   *  CONTROL for that claim — it should stay near zero while `uiActualMs`
+   *  moves.  The real cost is measured by `<Profiler>` (see noteUiRender). */
+  private lastStatsScheduleMs: number = 0;
+  // ── React reconciliation cost, reported IN by the UI layer ────────────
+  //
+  // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
+  // App.tsx.  Plain field writes, never a setState — an instrument that
+  // re-renders the tree it is measuring is its own load.
+  //
+  // Accumulated across commits and CONSUMED once per frame (see `loop`), so
+  // a frame that committed nothing records 0 rather than repeating the last
+  // commit's cost.  React commits after the rAF callback that scheduled
+  // them, so what a frame consumes belongs to the PREVIOUS frame's push.
+  private uiActualAccum: number = 0;
+  private uiBaseAccum: number = 0;
+  private uiCommitAccum: number = 0;
+  private lastUiActualMs: number = 0;
+  private lastUiBaseMs: number = 0;
+  private lastUiCommits: number = 0;
+
+  /** True once the `<Profiler>` has reported even one commit.
+   *
+   *  This exists because of the single most dangerous failure mode in this
+   *  measurement: React's SHIPPING `react-dom` build strips the profiler
+   *  timers, so `onRender` never fires and the UI cost reads exactly 0.00 —
+   *  which is indistinguishable from "reconciliation is free".  A measurement
+   *  build (`OMNI_PROFILE_REACT=1 npx vite build`, see vite.config.ts) keeps
+   *  them.  Anything reporting the ui figures must report this flag beside
+   *  them, so a zero is readable as EITHER "measured, and cheap" or "not
+   *  measured at all". */
+  public uiProfilerSeen: boolean = false;
+
+  /** Fold one React commit of the UI tree into this frame's totals.
+   *  `actualDuration` is what the commit cost; `baseDuration` is what it
+   *  would have cost with no memoization anywhere. */
+  public noteUiRender(actualDuration: number, baseDuration: number): void {
+    this.uiProfilerSeen = true;
+    this.uiActualAccum += actualDuration;
+    this.uiBaseAccum += baseDuration;
+    this.uiCommitAccum++;
+  }
+  /** Seconds accrued toward the next HUD (React) push — see HUD_RATE_CYCLE. */
+  statsPushAccum: number = 0;
+  // Last-seen values for the Perf REC event timeline (see markPerfEvents).
+  private _pmWave = -1;
+  private _pmState = '';
+  private _pmBoss = false;
+  private _pmMap = '';
+  private _pmDead = false;
+  private _pmStage = false;
+  private _pmDocked = false;
   private lastPhysMiscMs: number = 0;
   private lastLogicMiscMs: number = 0;
   private lastDropsMs: number = 0;
@@ -594,6 +815,8 @@ export class GameEngine {
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfTileLighting  = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLighting      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfFog           = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -602,684 +825,34 @@ export class GameEngine {
   private perfCounts = {
       totalEntities: 0,
       enemyCount: 0,
-      asteroidCount: 0,
+      mobileShardCount: 0,
       projectileCount: 0,
       particleCount: 0,
       interactableCount: 0,
   };
 
-  public toggleDebug() {
-    this.debugMode = !this.debugMode;
-    this.renderer.setDebugMode(this.debugMode);
-  }
 
-  /**
-   * Cycle through player-trail shapes: CIRCLE → SQUARE → TRIANGLE → LINE
-   * → NONE → CIRCLE.  Forwards the new shape to the renderer; existing
-   * trail points keep their stored emit-time angle, so a shape change is
-   * an instant visual swap with no respawn needed.
-   */
-  public cycleTrailShape() {
-    const order = [TrailShape.CIRCLE, TrailShape.SQUARE, TrailShape.TRIANGLE, TrailShape.LINE, TrailShape.PATH, TrailShape.DOTS, TrailShape.NONE];
-    const i = order.indexOf(this.trailShape);
-    this.trailShape = order[(i + 1) % order.length];
-    this.renderer.setTrailShape(this.trailShape);
-  }
+  /** The DEBUG MENU — every toggle and cycle behind pause ▸ Debug Menu, moved
+   *  to engine/debugControls.ts in gauntlet 5f.  Called from the UI as
+   *  `engine.dbg.<toggle>()`; the flags they write are still engine fields. */
+  readonly dbg = new DebugControls(this);
 
-  /**
-   * Toggle the player-trail direction mode between THRUST and VELOCITY.
-   * Both modes emit only while throttle > 0.  VELOCITY (default) places
-   * trail points at player.position so the trail extends opposite to
-   * velocity as the ship moves; THRUST accumulates an offset in the
-   * -input direction each emit so the trail extends opposite to thrust
-   * regardless of velocity.  Resets the per-thrust-event offset so the
-   * new mode starts cleanly at the ship.
-   */
-  public cycleTrailEmitMode() {
-    this.trailEmitMode = this.trailEmitMode === TrailEmitMode.THRUST
-      ? TrailEmitMode.VELOCITY
-      : TrailEmitMode.THRUST;
-  }
+  /** Flashlight Kit tool state (user call): whether the kit module is
+   *  installed+active (folded by applyModuleEffects), and the tap-cycled
+   *  level (index into FLASHLIGHT_TOOL_LEVELS: 0 off / 1 medium / 2 high).
+   *  Run-scoped like the outfit it derives from. */
+  public flashlightEquipped: boolean = false;
+  public flashlightLevel: number = 0;
 
-  /**
-   * Toggle the player↔asteroid local-gravity scan on/off.  When off,
-   * `PhysicsSystem.applyLocalGravity` is skipped entirely and the
-   * `lgrv` perf timer should drop to zero.
-   */
-  public toggleLocalGravity() {
-    this.localGravityEnabled = !this.localGravityEnabled;
-    this.physics.localGravityEnabled = this.localGravityEnabled;
-  }
-
-  /**
-   * Toggle the attractor gravity pass on/off.  When off,
-   * `PhysicsSystem.applyGravity` is skipped entirely and the
-   * `grav` perf timer should drop to zero.  Used to measure the
-   * cost of the full-master-list outer loop in isolation.
-   */
-  public toggleAttractorGravity() {
-    this.attractorGravityEnabled = !this.attractorGravityEnabled;
-    this.physics.attractorGravityEnabled = this.attractorGravityEnabled;
-  }
-
-  /**
-   * Toggle the SAT collision broadphase on/off.  Off mode is
-   * game-breaking (projectiles fly through, tiles are inert) —
-   * it's strictly a perf measurement aid for the `coll` timer.
-   */
-  public toggleCollisions() {
-    this.collisionsEnabled = !this.collisionsEnabled;
-    this.physics.collisionsEnabled = this.collisionsEnabled;
-  }
-
-  /**
-   * Toggle the dedicated mobile-shard ↔ static-tile collision pass.
-   * Default OFF — the main broadphase skips this pair (shards drift
-   * through tile geometry, only the repel field pushes them away).
-   * Flip ON to add hard collisions: the asteroid-crash branch in
-   * resolveCollision fires (pressure damage to the tile + elastic
-   * bounce off the face).
-   */
-  public toggleShardTileCollisions() {
-    this.shardTileCollisionsEnabled = !this.shardTileCollisionsEnabled;
-    this.physics.shardTileCollisionsEnabled = this.shardTileCollisionsEnabled;
-  }
-
-  /**
-   * Cycle the shard ↔ shard pair-resolution interval through
-   * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 4 → 8 → 16 →
-   * 32 → 64 → 128 → 256 → 512 → 1028).  AUTO (= 0) lets
-   * PhysicsSystem pick N from the previous step's peak collision-
-   * cell density; numeric values pin the interval.  The effective
-   * N (whether AUTO or manual) is mirrored into EngineStats so the
-   * DBG panel can render `auto (3)` or `every 256` accordingly.
-   */
-  public cycleShardPairInterval() {
-    const order = SHARD_PAIR_CONSTANTS.CYCLE_ORDER;
-    const cur = this.physics.shardPairFrameInterval;
-    const idx = order.indexOf(cur as (typeof order)[number]);
-    const next = order[(idx + 1) % order.length];
-    this.physics.shardPairFrameInterval = next;
-  }
-
-  /**
-   * Cycle the shard ↔ static-tile pair-resolution interval through
-   * SHARD_TILE_PAIR_CONSTANTS.CYCLE_ORDER.  Mirrors
-   * `cycleShardPairInterval` exactly — same order, same AUTO
-   * semantics — but gates `resolveShardTilePairs` instead of
-   * `resolveShardPairs`.  Only meaningful when the parent
-   * `shardTileCollisionsEnabled` toggle is on; cycling while OFF
-   * still updates the stored value so the panel reflects it when
-   * the user flips back on.
-   */
-  public cycleShardTilePairInterval() {
-    const order = SHARD_TILE_PAIR_CONSTANTS.CYCLE_ORDER;
-    const cur = this.physics.shardTilePairFrameInterval;
-    const idx = order.indexOf(cur as (typeof order)[number]);
-    const next = order[(idx + 1) % order.length];
-    this.physics.shardTilePairFrameInterval = next;
-  }
-
-  /**
-   * Toggle shard ↔ shard gravity pull (the attractedTo pass in
-   * ShardSystem.runMergeBroadphase).  Today only nebula-shard has
-   * non-'none' attractedTo, so this primarily flips nebula self-
-   * coalesce gravity and any cross-variant pull on/off.
-   */
-  public toggleShardGravity() {
-    this.shards.shardGravityEnabled = !this.shards.shardGravityEnabled;
-  }
-
-  /**
-   * Master AUTO toggle for the central performance controller.  When
-   * off, every AUTO task (manual interval 0) runs every step — i.e. all
-   * automatic frame-skipping is disabled — while explicit manual pins
-   * (set via the ShPair / Sh↔Tl int / ColorBlend int buttons) still
-   * apply.  Lets a dev A/B the whole throttling system in one click.
-   */
-  public togglePerfAuto() {
-    this.perfController.autoEnabled = !this.perfController.autoEnabled;
-  }
-
-  /**
-   * Toggle shard ↔ shard bond formation + cohesion.  When off, any
-   * existing bonds drop on the next ShardSystem.update() tick and
-   * no new bonds form.  Nebula self-compose (which fires via the
-   * zero-time bond path) and cross-variant absorb both stop too.
-   */
-  public toggleShardBonding() {
-    this.shards.shardBondingEnabled = !this.shards.shardBondingEnabled;
-  }
-
-  /**
-   * Toggle hard collisions between nebula-shard ↔ nebula-shard
-   * pairs.  When on, the per-variant passThrough flag is ignored
-   * for that specific pair and the SAT impulse path runs as
-   * normal.  Default OFF — used to A/B-test whether forcing
-   * nebula-pair separation breaks up the "one big pile" symptom.
-   */
-  public toggleNebulaShardCollisions() {
-    this.physics.nebulaShardCollisionsEnabled = !this.physics.nebulaShardCollisionsEnabled;
-  }
-
-  /** DBG (Shards & Physics): toggle the PLAYER ↔ nebula-shard hard collision —
-   *  the ship physically parts the cloud vs. gliding through with only the pull.
-   *  Default on. */
-  public togglePlayerNebulaCollision() {
-    this.physics.playerNebulaCollisionEnabled = !this.physics.playerNebulaCollisionEnabled;
-  }
-
-  /**
-   * Toggle collision-sleep for mobile shards.  When on, resolveShardPairs
-   * skips the SAT+impulse math for asleep↔asleep pairs (the bulk of a
-   * settled field).  Off restores resolving every pair every pass — used
-   * to A/B-test the win and confirm sleeping never freezes a shard
-   * through a real collision.
-   */
-  public toggleShardSleep() {
-    this.physics.shardSleepEnabled = !this.physics.shardSleepEnabled;
-  }
-
-  /**
-   * Toggle viewport-gated shard-pair cadence.  When on, both-offscreen
-   * shard pairs resolve only on the catch-up phase (every Nth pass);
-   * on/near-screen pairs always resolve.  Off resolves every pair
-   * regardless of visibility — used to A/B the win and confirm no
-   * visible pop when off-screen piles scroll into view.
-   */
-  public toggleShardViewportCull() {
-    this.physics.shardViewportCullEnabled = !this.physics.shardViewportCullEnabled;
-  }
-
-  /**
-   * Toggle shard render LOD.  When on, mobile shards too small for their
-   * polygon detail to read blit a cached solid disc instead of the full
-   * polygon fill+stroke+glow.  Purely visual; off restores the full
-   * per-vertex render for every shard.
-   */
-  public toggleShardLod() {
-    this.renderer.shardLodEnabled = !this.renderer.shardLodEnabled;
-  }
-
-  /**
-   * Toggle the local-density-driven merge/absorption rate.  When off, the
-   * rate holds at a neutral 1.0× (base merge rate, no acceleration, base
-   * per-frame budget) — used to A/B the consolidation feature.  When on,
-   * shards in dense pockets merge/absorb faster and big absorbing rocks
-   * slow down (see ShardSystem.tickBonds + LOCAL_MERGE_CONSTANTS).
-   */
-  public toggleMergeRate() {
-    this.perfController.mergeRateEnabled = !this.perfController.mergeRateEnabled;
-  }
-
-  /**
-   * Toggle the camera screen-shake effect on/off.  When off,
-   * handleScreenShake early-returns and any in-flight shake decays
-   * to zero on the next sim step (the existing decay logic clears
-   * shakeOffset once shakeTimer hits 0).
-   */
-  public toggleScreenShake() {
-    this.screenShakeEnabled = !this.screenShakeEnabled;
-    if (!this.screenShakeEnabled) {
-      // Cancel any in-flight shake immediately so the camera
-      // returns to centered on the next frame.
-      this.shakeTimer = 0;
-      this.shakeIntensity = 0;
-      this.camera.shakeOffset = { x: 0, y: 0 };
-    }
-  }
-
-  /**
-   * Toggle the DBG outline overlay for tile-and-shard variants
-   * whose default render is outlineless — plastic-tile / plastic-
-   * shard (soft gradient) and nebula-tile / nebula-shard (cloud
-   * sprite).  When ON the renderer draws a thin cyan stroke of
-   * each entity's collision polygon over the gradient / sprite,
-   * making the SAT footprint visible against the soft fill.
-   * Independent of the main DBG-mode toggle.
-   */
-  public toggleTileOutlines() {
-    this.renderer.tileOutlinesEnabled = !this.renderer.tileOutlinesEnabled;
-  }
-
-  /** DBG (Visual): flip the off-screen-indicator chevron mode between
-   *  "Offscreen" (only nearby-but-offscreen entities get a chevron) and "All"
-   *  (also chevron on-screen entities — the original behaviour). */
-  public toggleChevronMode() {
-    this.renderer.chevronsOffscreenOnly = !this.renderer.chevronsOffscreenOnly;
-  }
-
-  /** DBG (Shards & Physics): toggle the tile repel PUSH (glass + metal tiles).
-   *  OFF disables only the outward velocity shove — the tile/scanner glow still
-   *  reacts to a nearby body. */
-  public toggleRepelPush() {
-    this.physics.repelPushEnabled = !this.physics.repelPushEnabled;
-  }
-
-  /**
-   * Toggle the plastic-shard neighbour-brightness automata (PAuto).
-   * On: shards render in the active palette's constant base shade,
-   * darkened by how many plastic-shards they're in contact with.
-   * Off: per-instance random shades (and the contact count isn't
-   * computed).  Flips the render flag AND the ShardSystem compute
-   * flag together so the count work is skipped when off.
-   */
-  public togglePlasticAutomata() {
-    const next = !this.renderer.plasticAutomataEnabled;
-    this.renderer.plasticAutomataEnabled = next;
-    this.shards.plasticAutomataEnabled = next;
-  }
-
-  /**
-   * Flip the PAuto automata direction between darkening dense
-   * interiors (default) and brightening them.  Live — RenderSystem
-   * reads the shared flag in plasticAutomataHex each draw.
-   */
-  public togglePlasticAutomataDirection() {
-    togglePlasticAutomataBrighten();
-  }
-
-  /**
-   * Toggle the material-tile neighbour automata (DBG "Tile shade") for
-   * glass / metal / rock static tiles.  Flips the render gate; on enable
-   * it bakes the (frozen) neighbour counts once so the tint is correct
-   * even if the toggle started off.
-   */
-  public toggleMaterialAutomata() {
-    const next = !this.renderer.materialAutomataEnabled;
-    this.renderer.materialAutomataEnabled = next;
-    this.shards.materialAutomataEnabled = next;
-    if (next && this.currentMap) this.shards.ensureMaterialNeighbors(this.currentMap.entities);
-  }
-
-  /**
-   * Cycle the active plastic-TILE palette (litegreen → amber → black …)
-   * and re-roll the colour of every active plastic-tile so the swap
-   * is visible without breaking tiles.  Shards have their own
-   * independent cycle (cyclePlasticShardPalette) so this method only
-   * touches tiles.
-   */
-  public cyclePlasticPalette() {
-    cyclePlasticPalette();
-    if (!this.currentMap) return;
-    const ents = this.currentMap.entities;
-    for (let i = 0; i < ents.length; i++) {
-      const e = ents[i];
-      if (e.shardVariant !== 'plastic-tile') continue;
-      e.color = randomPlasticShade();
-    }
-  }
-
-  /**
-   * Cycle the DBG plastic-SHARD palette through PLASTIC_PALETTES.
-   * Independent of the tile palette (cyclePlasticPalette) — rotates
-   * the shard colour family without touching tiles.  Live re-roll:
-   * every plastic-shard's colour resamples from the new palette so
-   * the change is visible without breaking shards.
-   */
-  public cyclePlasticShardPalette() {
-    cyclePlasticShardPalette();
-    if (!this.currentMap) return;
-    const ents = this.currentMap.entities;
-    for (let i = 0; i < ents.length; i++) {
-      const e = ents[i];
-      if (e.shardVariant !== 'plastic-shard') continue;
-      e.color = randomPlasticShardShade();
-    }
-  }
-
-  /**
-   * Cycle the plastic-tile proximity-glow brightness multiplier
-   * (MATERIAL_GLOW_BRIGHTNESS_CYCLE, 1× … 5×).  RenderSystem reads
-   * the multiplier live each frame inside renderProximityBloom for
-   * the plastic-tile branch only; metal has its own cycle, and other
-   * glow-bearing tiles (rock / indestructible) are unaffected.
-   */
-  public cyclePlasticGlowBrightness() {
-    cyclePlasticGlowBrightness();
-  }
-
-  /**
-   * Cycle the metal-tile proximity-glow brightness multiplier
-   * (MATERIAL_GLOW_BRIGHTNESS_CYCLE, 1× … 5×).  RenderSystem reads
-   * the multiplier live each frame inside the metal-tile glow draw.
-   */
-  public cycleMetalGlowBrightness() {
-    cycleMetalGlowBrightness();
-  }
-
-  /**
-   * Cycle the DBG glass palette through GLASS_GLOW_COLORS.  Governs
-   * the glass-tile proximity glow ONLY (RenderSystem reads the hex
-   * live per draw).  Glass-shatter dust + main background nebula
-   * clusters live on the Nebula cycle (see cycleNebulaPalette).
-   * Default 'sky'.  No entity re-roll needed — the glow is read live.
-   */
-  public cycleGlassGlowColor() {
-    cycleGlassGlowColor();
-  }
-
-  /**
-   * Cycle the DBG metal-glow palette through the same 11-entry list
-   * Glass uses (GLASS_GLOW_COLORS).  RenderSystem reads the active
-   * hex via getActiveMetalGlowColor() in the metal-tile glow render
-   * branch — range + peakAlpha stay with the variant.  Default
-   * 'magenta' (closest to the legacy fuchsia baked into the
-   * variant config).
-   */
-  public cycleMetalGlowColor() {
-    cycleMetalGlowColor();
-  }
-
-  /**
-   * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Now
-   * narrowly governs glass-tile shatter / merge dust ONLY
-   * (randomGlassNebulaComposition).  Default 'sky'.  Main background
-   * nebula clusters, nebula tiles, nebula shards, and BG puffs all
-   * stay on the legacy default palette regardless of this cycle, and
-   * rock-side dust is fixed at white.  Glass dust is ephemeral
-   * (spawned per shatter event), so no entity re-roll is needed — the
-   * next dust spawn picks up the new selection.
-   */
-  public cycleNebulaPalette() {
-    cycleNebulaPalette();
-  }
-
-
-  /**
-   * Toggle the plastic colour-equilibration pipeline (NebulaSystem
-   * .equilibrateColors plastic block).  When off, plastic tiles
-   * and shards stop drifting toward each other and stay at their
-   * spawn / shatter colours.  Nebula blending is unaffected.
-   */
-  public togglePlasticBlend() {
-    this.nebulas.plasticBlendEnabled = !this.nebulas.plasticBlendEnabled;
-  }
-
-  /**
-   * Cycle the nebula-shard velocity-stretch stiffness through
-   * VEL_STRETCH_K_CYCLE (off → soft → med → firm → stiff → off …).
-   * The renderer reads getActiveNebulaStretchK() fresh each frame
-   * so the change takes effect immediately.  The "free" rotation
-   * behaviour (only squash aligns to velocity; sprite keeps its
-   * own rotation) is fixed — see RenderSystem nebula-shard branch.
-   */
-  public cycleNebulaStretch() {
-    cycleNebulaStretch();
-  }
-
-  /**
-   * Cycle the DBG player-thrust multiplier (PLAYER_THRUST_CYCLE) applied
-   * live to the per-map acceleration.  This is the knob that actually
-   * raises everyday top speed, since terminal cruise is
-   * acceleration/(1−friction).
-   */
-  public cyclePlayerThrust() {
-    cyclePlayerThrust();
-  }
-
-  /**
-   * Cycle the DBG player-speed multiplier (PLAYER_SPEED_CYCLE) applied
-   * live to the per-map maxSpeed cap.  Only bites once the cap drops
-   * below the friction-limited terminal velocity (or thrust pushes
-   * cruise above it).
-   */
-  public cyclePlayerSpeed() {
-    cyclePlayerSpeed();
-  }
-
-  /**
-   * Toggle the per-asteroid / per-drop flow-field velocity nudge
-   * in updatePhysics.  When OFF, the `applyFlow` step early-exits after
-   * the rotation update — asteroids retain whatever velocity they had
-   * but receive no streamline correction.  Combined with linearDamping
-   * they decay toward zero velocity over a few seconds; from then on
-   * they only move when collided with or pulled by gravity.  Surfaced
-   * in the DBG panel for A/B-testing the contribution of the flow nudge
-   * to the asteroid-field "feel".
-   */
-  public toggleAsteroidFlow() {
-    this.asteroidFlowEnabled = !this.asteroidFlowEnabled;
-  }
-
-  /** Toggle the snitch catch interaction (collide ↔ shoot) — DBG aid for
-   *  playtesting which catch mode feels better. */
-  public toggleSnitchCatchMode() {
-    this.snitchCatchMode = this.snitchCatchMode === 'collide' ? 'shoot' : 'collide';
-  }
-
-  /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
-   *  both AI speed states live so the chase feel can be tuned in-game. */
-  public cycleSnitchSpeed() {
-    cycleSnitchSpeed();
-  }
-
-  /** Cycle the DBG enemy-scaling multiplier (ENEMY_SCALE_CYCLE) — scales
-   *  the per-wave HP+damage growth live to feel the comfortable-lead margin.
-   *  Applies to enemies spawned after the change. */
-  public cycleEnemyScale() {
-    cycleEnemyScale();
-  }
-
-  /** DBG: cycle the gnat (Swarm) movement mode to feel each side-by-side. */
-  public cycleSwarmMove() {
-    cycleSwarmMove();
-  }
-
-  /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B. */
+  /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B.
+   *  The one debug row that stayed a method on the engine: the 5b trait
+   *  suites call it straight off `window.__omniEngine`, which makes it
+   *  observable surface (ledger P7). */
   public toggleTraits() {
     this.physics.traitsEnabled = !this.physics.traitsEnabled;
     // The AI-side trait (evasive) switches with the damage-side ones (armor) —
     // one DBG toggle for the whole counterplay layer.
     this.ai.traitsEnabled = this.physics.traitsEnabled;
-  }
-
-  /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
-  public toggleFFOverlayVectors() {
-    this.ffOverlayVectors = !this.ffOverlayVectors;
-  }
-  /** Toggle the FF Cells overlay (per-cell grid outlines). */
-  public toggleFFOverlayCells() {
-    this.ffOverlayCells = !this.ffOverlayCells;
-  }
-  /** Toggle the FF Obstacles overlay (blocked-cell tint). */
-  public toggleFFOverlayObstacles() {
-    this.ffOverlayObstacles = !this.ffOverlayObstacles;
-  }
-  /** Toggle the FF Rebuilds overlay (flash recently-rebaked cells). */
-  public toggleFFOverlayRebuilds() {
-    this.ffOverlayRebuilds = !this.ffOverlayRebuilds;
-  }
-  /**
-   * Cycle the vector-overlay sample stride through 1 → 2 → 4 → 8 → 16.
-   * Coarser strides reduce arrow density on whichever map is loaded;
-   * stride 1 draws every cell.  Cells / obstacles / rebuilds overlays
-   * always render every cell — only the vector overlay uses this.
-   */
-  public cycleFFOverlaySampleN() {
-    const order = GameEngine.FF_SAMPLE_N_CYCLE;
-    const idx = order.indexOf(this.ffOverlaySampleN);
-    this.ffOverlaySampleN = order[(idx + 1) % order.length];
-  }
-
-  /**
-   * Cycle the flow-field cell size through `FF_DENSITY_CYCLE` (256 →
-   * 192 → 128 → 96 → 64 → 48 → 32 → 256).  Each step reallocates the
-   * grid's typed-array buffers at the new resolution, rebuilds the
-   * obstacle bitmap from the live entity list, and re-bakes the
-   * asteroid field with the active map's sampleFlow.  The enemy
-   * pursuit field is marked dirty so the next `flushEnemyField()`
-   * rebuilds it for the new resolution.  All of this happens
-   * synchronously inside the cycle — at the highest density (32-unit
-   * cells on a 6 k map) the bake is still sub-millisecond.
-   *
-   * No-op when no map is loaded.
-   */
-  public cycleFFDensity() {
-    if (!this.currentMap) return;
-    const order = GameEngine.FF_DENSITY_CYCLE;
-    const idx = order.indexOf(this.ffCellSize);
-    const next = order[(idx + 1) % order.length];
-    this.ffCellSize = next;
-    this.flowField.setCellSize(next);
-    this.flowField.initObstacles(this.currentMap.entities);
-    // Re-bake under the active pattern selection (not necessarily the
-    // map's own sampler) so the chosen pattern survives density changes.
-    this.flowField.buildAsteroidField(this.flowSamplerFor(this.currentMap));
-    // The new grid starts with defaults; push the current cycled
-    // values back so they survive density changes.
-    this.flowField.setKernelR(this.ffKernelR);
-    this.flowField.setTangentMix(this.ffTangentMix);
-  }
-
-  /**
-   * Cycle the asteroid-field wall-repulsion kernel radius through
-   * `FF_KERNEL_R_CYCLE` (0 → 1 → 2 → 3 → 4 → 5).  R = 0 is the legacy
-   * 4-cardinal-only scan kept for A/B testing; R ≥ 1 enables the
-   * (2R+1)² kernel with 1/d² falloff so cells several positions away
-   * from a wall already start curving the flow.  Each step re-bakes
-   * the asteroid field in-place (sub-ms even at the finest density).
-   */
-  public cycleFFKernelR() {
-    const order = GameEngine.FF_KERNEL_R_CYCLE;
-    const idx = order.indexOf(this.ffKernelR);
-    const next = order[(idx + 1) % order.length];
-    this.ffKernelR = next;
-    this.flowField.setKernelR(next);
-  }
-
-  /**
-   * Cycle the wall-repulsion tangent-mix factor through
-   * `FF_TANGENT_MIX_CYCLE` (0.00 → 0.25 → 0.50 → 0.75 → 1.00).  At 0
-   * the kernel pushes purely perpendicular away from walls (creates
-   * opposing vectors on either side of a long wall — the saddle
-   * dead-zone failure mode).  At 1 each blocked-neighbour
-   * contribution is rotated 90° so the flow slides ALONG the wall
-   * (both sides flow in the same direction along the wall, no
-   * saddle).  Re-bakes the asteroid field in-place.
-   */
-  public cycleFFTangentMix() {
-    const order = GameEngine.FF_TANGENT_MIX_CYCLE;
-    const idx = order.indexOf(this.ffTangentMix);
-    const next = order[(idx + 1) % order.length];
-    this.ffTangentMix = next;
-    this.flowField.setTangentMix(next);
-  }
-
-  /**
-   * Cycle the breathing scroll rate through `FF_BREATHE_RATE_CYCLE`
-   * (off → slow → med → fast).  When non-zero, the asteroid field's
-   * base direction undulates over time (re-baked on a throttled
-   * cadence in updatePhysics) so convergence zones drift and shard
-   * piles dissolve.  Cycling to a non-zero rate immediately re-bakes
-   * at the current phase so the undulation appears; cycling back to
-   * off re-bakes once with amplitude 0 to restore the static field.
-   */
-  public cycleFFBreathe() {
-    const order = GameEngine.FF_BREATHE_RATE_CYCLE;
-    const idx = order.indexOf(this.ffBreatheRate);
-    const next = order[(idx + 1) % order.length];
-    this.ffBreatheRate = next;
-    const amp = next > 0 ? FlowFieldGrid.BREATHE_AMP : 0;
-    this.flowField.setBreathe(amp, this.ffBreathePhase);
-  }
-
-  /**
-   * Cycle the per-shard lane-jitter strength through
-   * `FF_LANE_JITTER_CYCLE` (off → low → med → high).  Adds a stable
-   * per-shard perpendicular offset to the flow target so shards ride
-   * slightly different parallel lanes instead of collapsing onto one
-   * streamline.  Live — no re-bake (applied at sample time in the
-   * per-shard flow nudge).
-   */
-  public cycleFFLaneJitter() {
-    const order = GameEngine.FF_LANE_JITTER_CYCLE;
-    const idx = order.indexOf(this.ffLaneJitter);
-    this.ffLaneJitter = order[(idx + 1) % order.length];
-  }
-
-  /**
-   * Resolve the base-flow sampler for the given map under the current
-   * DBG pattern selection.  DEFAULT uses the map's own sampleFlow();
-   * any other pattern swaps in the corresponding analytical field.
-   * Used at map load and at every re-bake (density / pattern cycle)
-   * so the selection sticks.
-   */
-  private flowSamplerFor(map: BaseMapLayer): FlowSampler {
-    if (this.ffPattern === FlowPattern.DEFAULT) {
-      return (x, y) => map.sampleFlow(x, y);
-    }
-    const p = this.ffPattern;
-    return (x, y) => samplePattern(p, x, y);
-  }
-
-  /**
-   * Cycle the base-flow pattern through `FF_PATTERN_CYCLE` (map default
-   * → meander → circular → spiral → gravity well → wavy well → outward
-   * → horizontal → vertical → wavy-H → wavy-V).  Re-bakes the asteroid
-   * field with the new sampler; current kernel / tangent / breathing
-   * settings still apply on top.  The map's spawn-time seeding is
-   * unaffected — existing shards re-settle onto the new pattern over a
-   * second or two via the per-frame flow nudge.
-   */
-  public cycleFFPattern() {
-    if (!this.currentMap) return;
-    const order = GameEngine.FF_PATTERN_CYCLE;
-    const idx = order.indexOf(this.ffPattern);
-    this.ffPattern = order[(idx + 1) % order.length];
-    this.flowField.buildAsteroidField(this.flowSamplerFor(this.currentMap));
-  }
-
-  /**
-   * Cycle the hot-spot-collapse grace delay through SHATTER_GRACE_CYCLE
-   * (0.6 → 3.6s).  Freshly-shattered rock/glass shards read
-   * getActiveShatterGraceDelay() at spawn, so the new value applies to
-   * tiles destroyed after the cycle.
-   */
-  public cycleShatterGrace() {
-    cycleShatterGrace();
-  }
-
-  /**
-   * Cycle the nebula tile→tile color-equilibration alpha through
-   * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
-   * Fast).  Anchors the cluster's structural hue — tiles drift
-   * toward their 6-hex-neighbour weighted average each frame at
-   * this alpha.
-   */
-  public cycleTileBlendAlpha() {
-    const order = NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE;
-    const cur = this.nebulas.tileBlendAlpha;
-    const idx = order.indexOf(cur as (typeof order)[number]);
-    const next = order[(idx + 1) % order.length];
-    this.nebulas.tileBlendAlpha = next;
-  }
-
-  /**
-   * Cycle the nebula shard→nearest-tile color-equilibration alpha
-   * through NEBULA_CONSTANTS.BLEND_SHARD_ALPHA_CYCLE.  Catch-up
-   * blend for shards (anchors don't move).
-   */
-  public cycleShardBlendAlpha() {
-    const order = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA_CYCLE;
-    const cur = this.nebulas.shardBlendAlpha;
-    const idx = order.indexOf(cur as (typeof order)[number]);
-    const next = order[(idx + 1) % order.length];
-    this.nebulas.shardBlendAlpha = next;
-  }
-
-  /**
-   * Cycle the cadence interval for the nebula color-equilibration
-   * pass through NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE.
-   * Higher values trade smoothness for perf — the per-call work
-   * stays the same but fires less often.
-   */
-  public cycleColorBlendInterval() {
-    const order = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE;
-    const cur = this.nebulas.colorBlendFrameInterval;
-    const idx = order.indexOf(cur as (typeof order)[number]);
-    const next = order[(idx + 1) % order.length];
-    this.nebulas.colorBlendFrameInterval = next;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -1291,24 +864,44 @@ export class GameEngine {
     this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
     
     this.input = new InputSystem();
+    // Audio: the AudioContext is NOT created here.  Mobile browsers
+    // refuse to start audio outside a user gesture, so the manager only
+    // arms one-shot window listeners and builds its graph on the first
+    // real tap/click/keypress (including a menu tap, which on phones is
+    // usually the first gesture there is).
+    this.audio = new AudioSystem();
+    registerSfx(this.audio);
+    this.audio.armGestureUnlock();
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
     // Wire physics into the renderer so the material-tile branch can
     // suppress edge strokes on edges that are cleanly butted against
     // a neighbour tile (queried via hasStaticTileNear).
     this.renderer.setPhysics(this.physics);
+    // Physics-side SFX sink (shield absorb/deflect/break, armor chip,
+    // crashes).  One generic hook so PhysicsSystem never imports audio
+    // state — see PhysicsSystem.sfx.
+    this.physics.sfx = (id, x, y, opts) =>
+        this.audio.play(id, { x, y, gain: opts?.gain, pitch: opts?.pitch });
     this.ai = new AISystem();
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();
     this.projectiles = new ProjectileSystem();
     this.weapons = new WeaponSystem(this.projectiles);
+    this.weapons.onEnemyFire = (id, x, y) => this.audio.play(id, { x, y });
     this.drops = new DropSystem(this.particles);
+    this.drops.sfx = (id, x, y) => this.audio.play(id, { x, y });
     this.waves = new WaveSystem();
     this.nebulas = new NebulaSystem(this.particles, this.drops);
     this.shards = new ShardSystem(this.particles);
+    this.shards.sfx = (id, x, y) => this.audio.play(id, { x, y });
     // Wire the variant-specific completion hook for the
     // neighbourhood-blend regen path (today: nebula-tile only).
     this.shards.setRegenAdapter(this.nebulas);
+    // The renderer's bonded-pair blend pass reads the live bond list —
+    // presentation only, and the only thing in the renderer that knows
+    // ShardSystem exists.
+    this.renderer.setShards(this.shards);
     this.entityIndex = new EntityIndex();
     // Wire the EntityIndex into ShardSystem so the large-shard-collapse
     // pass can prefer offscreen candidates (graceful cleanup — never
@@ -1335,7 +928,7 @@ export class GameEngine {
     // Hand the renderer a reference to the flow field so the DBG
     // asteroid/shard FF overlays (vectors / cells / obstacles /
     // rebuilds) can read per-cell state directly without going
-    // through allocation-heavy `sampleAsteroidFlow()` calls.
+    // through allocation-heavy `sampleShardFlow()` calls.
     this.renderer.setFlowField(this.flowField);
 
     // Central performance controller — injected into every system that
@@ -1371,8 +964,8 @@ export class GameEngine {
       shieldRechargeTimer: 0,
       shieldHitFlash: 0
     };
-    this.syncUnlocksToPlayer();
-    this.syncLoadoutFromSlots(); // derive loadout from gun hexes + apply module effects
+    syncUnlocksToPlayer(this);
+    syncLoadoutFromSlots(this); // derive loadout from gun hexes + apply module effects
 
     this.camera = {
       position: { x: 0, y: 0 },
@@ -1382,6 +975,21 @@ export class GameEngine {
     };
 
     this.loadMap(this.buildMap(this.selectedMapType));
+  }
+
+  /**
+   * Resolve the base-flow sampler for the given map under the current
+   * DBG pattern selection.  DEFAULT uses the map's own sampleFlow();
+   * any other pattern swaps in the corresponding analytical field.
+   * Used at map load and at every re-bake (density / pattern cycle)
+   * so the selection sticks.
+   */
+  flowSamplerFor(map: BaseMapLayer): FlowSampler {
+    if (this.ffPattern === FlowPattern.DEFAULT) {
+      return (x, y) => map.sampleFlow(x, y);
+    }
+    const p = this.ffPattern;
+    return (x, y) => samplePattern(p, x, y);
   }
 
   /** Factory for the per-run map class so both the constructor and
@@ -1422,6 +1030,10 @@ export class GameEngine {
     } else {
       this.resetAndLoadSelectedMap();
       this.gameState = GameState.PLAYING;
+      // Start is a user gesture by construction, so this doubles as a
+      // guaranteed unlock point on top of the window listeners.
+      this.audio.unlock();
+      this.audio.play('ui.confirm');
       this.initWaveSystem();
       this.prepareFrameEntities();
     }
@@ -1449,7 +1061,7 @@ export class GameEngine {
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
-    this.seedAmbientBubbles(); // always-present fauna, ready from frame one
+    seedAmbientBubbles(this); // always-present fauna, ready from frame one
   }
 
   public skipWave() {
@@ -1472,7 +1084,7 @@ export class GameEngine {
       waveGraceTimer: undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
-      boss: this.bossStatsSnapshot(),
+      boss: bossStatsSnapshot(this),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -1482,6 +1094,12 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
+      vitals: {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: Math.round(this.player.maxHealth),
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: Math.round(this.player.maxShield ?? 0),
+      },
       playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -1490,6 +1108,11 @@ export class GameEngine {
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.moduleSpeedMult,
+        shipWeight: this.shipWeight,
+        position: {
+          x: Math.round(this.player.position.x),
+          y: Math.round(this.player.position.y),
+        },
       } : undefined,
       outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
       debugMode: this.debugMode,
@@ -1514,27 +1137,93 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      damageTriggeredBars: this.renderer.damageTriggeredBars,
+      minimapMaterialName: getActiveMinimapMaterialName(),
+      lightingModeName:  getActiveLightingMode(),
+      lightingTierName:  getActiveLightingTier().name,
+      shardShadowsEnabled: getShardShadowsEnabled(),
+      refractionEnabled: getRefractionEnabled(),
+      refractBrightnessName: getRefractBrightnessName(),
+      lightBrightnessName: getLightBrightnessName(),
+      emissiveEnabled: getEmissiveEnabled(),
+      worldLightsEnabled: getWorldLightsEnabled(),
+      depthAmbientEnabled: getDepthAmbientEnabled(),
+      emitBrightnessName: getEmitBrightnessName(),
+      emitShadowsEnabled: getEmitShadowsEnabled(),
+      emitShadowTierName: getEmitShadowTierName(),
+      emitFadeName: getEmitFadeName(),
+      causticFadeName: getCausticFadeName(),
+      flashlightName: getFlashlightName(),
+      lightColorName: getLightColorName(),
+      tintMixName: getTintMixName(),
+      fogName: getFogName(),
+      shadowSoftnessName: getShadowSoftnessName(),
+      rockPaletteName: getActiveRockPaletteName(),
+      fractureModeName: getActiveFractureMode(),
+      fractureRelaxName: getFractureRelaxName(),
+      boundaryStrengthName: getBoundaryStrengthName(),
+      fractureSeparationName: getFractureSeparationName(),
+      fractureSiteScaleName: getFractureSiteScaleName(),
+      damageSpreadName: getDamageSpreadName(),
+      grainMaterialName: getGrainMaterial(),
+      grainKnobNames: grainKnobNamesSnapshot(),
+      grainOverrideCount: grainOverrideCountSnapshot(),
+      fractureBiasName: getFractureBiasName(),
+      nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
+      shardBlendEnabled: this.renderer.shardBlendEnabled,
+      shardBlendCount: this.renderer.lastShardBlendCount,
+      shardCoatName: getActiveShardCoatName(),
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticShardPaletteName: getActivePlasticShardPaletteName(),
       plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
-      metalGlowBrightnessName:   getActiveMetalGlowBrightnessName(),
-      glassGlowColorName: getActiveGlassGlowColorName(),
-      metalGlowColorName: getActiveMetalGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
       shatterGraceName:   getActiveShatterGraceName(),
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
-      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      shardFlowEnabled: this.shardFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
+      gamepadInfo: this.input.padDebugName(),
+      gamepadAxes: this.input.padDebugAxes(),
+      rumbleInfo: this.input.rumbleDebugInfo(),
+      joystickForceVisible: this.input.joystickForceVisible,
+      controlScheme: this.input.getControlScheme(),
+      rumbleEnabled: this.input.rumbleEnabled,
+      adaptiveTriggersSupported: this.input.adaptiveTriggersSupported(),
+      adaptiveTriggersConnected: this.input.adaptiveTriggersConnected(),
+      adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
+      adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      portalWarpName: getPortalWarpName(),
+      portalSizeName: getPortalSizeName(),
+      portalGravityName: getPortalGravityName(),
+      portalGravityRangeName: getPortalGravityRangeName(),
+      portalLensName: getPortalLensName(),
+      portalLensSpinName: getPortalLensSpinName(),
+      portalLensRadiusName: getPortalLensRadiusName(),
+      portalTuningInfo: getPortalTuningInfo(),
+      rollFeelName: getActivePlayerRollName(),
+      hullModeName: getActivePlayerHullName(),
+      rollDampName: getActiveRollDampingName(),
+      tiltModeName: getActiveTiltModeName(),
+      leanDirName: getActiveLeanDirName(),
+      tiltSourceName: getActiveTiltSourceName(),
+      velGainName: getActiveVelGainName(),
       enemyScaleName: getActiveEnemyScaleName(),
+      simRateName: getActiveSimRateName(),
+      hudRateName: getActiveHudRateName(),
+      substepCapName: getActiveSubstepCapName(),
       swarmMoveName: getActiveSwarmMoveName(),
+      starDensityName: getActiveStarDensityName(this.currentMap?.type),
+      starSizeName: getActiveStarSizeName(),
+      starBandsName: getActiveStarBandsName(),
+      starParallaxName: getActiveStarParallaxName(this.currentMap?.type),
+      collapseModeName: getActiveCollapseModeName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
       forcedEnemy: this.forcedTestEnemy,
@@ -1569,12 +1258,14 @@ export class GameEngine {
     if (this.gameState === GameState.PLAYING && !this.dockedAtStation
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
+        this.audio.play('ui.back');
     }
   }
 
   public resumeGame() {
     if (this.gameState === GameState.PAUSED) {
         this.gameState = GameState.PLAYING;
+        this.audio.play('ui.confirm');
         this.lastTime = performance.now(); // Prevent physics jump
         this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
@@ -1595,6 +1286,7 @@ export class GameEngine {
       this.shards.reset();
       this.perfController.reset();
       this.activeDrops = [];
+      this.portalTransit.length = 0;
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
@@ -1728,6 +1420,10 @@ export class GameEngine {
    * `WaveSystem.init` zeroes waveIndex, so leaving an arena abandons the
    * ladder and re-entering starts at wave 1.  No per-map run state exists.
    */
+  /** Portal travel audio (SFX_INVENTORY §7.3).  One id covers the whole
+   *  cut — pull, snap of silence, arrival bloom — because the map swap is
+   *  instantaneous and two sounds across a zero-length gap phase against
+   *  each other.  Flat, not positional: the player IS the transit. */
   public transitionToMap(descriptorId: string, opts?: { descend?: boolean }): boolean {
       const dest = mapDescriptor(descriptorId);
       if (!dest) return false;
@@ -1736,6 +1432,7 @@ export class GameEngine {
       if (this.gameState !== GameState.PLAYING) return false;
       if (this.dockedAtStation || this.player.isExploding) return false;
 
+      this.audio.play('portal.transit');
       // Departure burst at the rift the player is leaving through — fired
       // before the load so it plays against the map being left.
       this.openPortal(this.player.position, {
@@ -1758,6 +1455,37 @@ export class GameEngine {
       // used below to put them at the matching rift MOUTH on arrival.
       const fromId = descriptorForMapType(this.currentMap?.type)?.id;
 
+      // DEBRIS TRAVELS WITH YOU (user call): everything loose within
+      // TRANSIT.RADIUS of the ship — mobile shards and collectible drops,
+      // exactly the stuff the wormhole's own gravity has been herding toward
+      // the mouth — is captured out of the departing map here and re-emerges
+      // from the exit rift after the player (updatePortalTransit), each on
+      // its own stagger delay with a random heading and speed.  Nearest win
+      // the cap, so a transit from a dense field takes the debris actually
+      // AROUND the ship.  Enemies deliberately stay behind: the portal
+      // clears the fight (decision #39d), and the hub is wave-free by
+      // design.  The old map is discarded whole (buildMap constructs fresh
+      // instances), so captured entities need no removal from it.
+      const transitCfg = PORTAL_CONSTANTS.TRANSIT;
+      const captured: { e: GameEntity; d2: number }[] = [];
+      if (this.currentMap) {
+          const rSq = transitCfg.RADIUS * transitCfg.RADIUS;
+          for (const e of this.currentMap.entities) {
+              if (!e.active || e.isExploding) continue;
+              const isMobileShard = e.type === EntityType.STRUCTURE
+                  && e.mass !== Infinity && e.dragonSegment !== true;
+              if (!isMobileShard && !isCollectibleDrop(e)) continue;
+              const dx = wrapDeltaX(this.player.position.x, e.position.x);
+              const dy = wrapDeltaY(this.player.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 <= rSq) captured.push({ e, d2 });
+          }
+          captured.sort((a, b) => a.d2 - b.d2);
+          if (captured.length > transitCfg.MAX_ENTITIES) {
+              captured.length = transitCfg.MAX_ENTITIES;
+          }
+      }
+
       if (opts?.descend) this.stageIndex++;
       else if (dest.id === HUB_DESCRIPTOR.id) this.stageIndex = 0;
       // The stage-clear screen belongs to the arena being left.
@@ -1775,6 +1503,27 @@ export class GameEngine {
       // the spawn when there is no matching rift (a descent into a fresh
       // arena has none).
       this.placePlayerAtSpawn(this.arrivalBesideRift(fromId));
+      // …AND THROWN CLEAR.  `placePlayerAtSpawn` lands the ship dead-stopped,
+      // which puts it at rest INSIDE the exit rift's own gravity well — so the
+      // hole it just came out of immediately started pulling it back in.  The
+      // arrival now carries an outward velocity along the mouth→ship axis,
+      // sized to leave the well outright — SOLVED against the destination's
+      // own well by `playerEjectSpeed`, so retuning the well cannot leave the
+      // way out behind.  Radial rather than random, unlike the debris:
+      // being spat sideways into the terrain you arrived beside is not an
+      // arrival, and the player is the one thing that must never have to
+      // fight its way out of the door.
+      const exitMouth = this.exitMouthFor(fromId);
+      if (exitMouth) {
+          const ex = wrapDeltaX(exitMouth.position.x, this.player.position.x);
+          const ey = wrapDeltaY(exitMouth.position.y, this.player.position.y);
+          const len = Math.hypot(ex, ey);
+          if (len > 1e-3) {
+              const k = playerEjectSpeed(this.currentMap.type) / len;
+              this.player.velocity.x = ex * k;
+              this.player.velocity.y = ey * k;
+          }
+      }
       // Combat state belongs to the fight left behind: shield resumes its
       // normal recharge and lingering debuffs (corrosion DoT / EMP) drop.
       // Hull damage does NOT — that's the carry.
@@ -1783,10 +1532,35 @@ export class GameEngine {
       this.player.statusEffects = [];
       this.playerMessages = [];
 
+      // Queue the captured debris on the EXIT rift's mouth — the rift
+      // pointing back where we came from (the same one arrivalBesideRift
+      // read), falling back to the player's own arrival point when there is
+      // no matching rift.  loadMapFresh cleared the queue above, so this
+      // hop's cargo is all it holds.  Stagger delays are rolled here;
+      // headings and speeds are rolled at emergence.
+      if (captured.length > 0) {
+          const mouth = this.exitMouthFor(fromId);
+          const exit = mouth ? mouth.position : this.player.position;
+          this.portalTransitExit.x = exit.x;
+          this.portalTransitExit.y = exit.y;
+          for (const { e } of captured) {
+              e.velocity.x = 0;
+              e.velocity.y = 0;
+              e.hitFlash = 0;
+              if (e.healthBarTimer !== undefined) e.healthBarTimer = 0;
+              if (e.trail) e.trail.length = 0;
+              this.portalTransit.push({
+                  entity: e,
+                  delay: transitCfg.DELAY_MIN
+                      + Math.random() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
+              });
+          }
+      }
+
       // Waves per the DESTINATION descriptor — enabled in an arena, off in
       // the hub — and the always-present ambient fauna for the new map.
       this.initWaveSystem();
-      this.seedAmbientBubbles();
+      seedAmbientBubbles(this);
 
       // Arrival burst at the destination spawn.
       this.openPortal(this.player.position, {
@@ -1795,6 +1569,14 @@ export class GameEngine {
           duration: PORTAL_CONSTANTS.BURST_DURATION,
       });
       this.pushPlayerMessage(dest.name.toUpperCase(), PORTAL_CONSTANTS.COLOR);
+
+      // …and fly through it.  Started LAST, once the destination is fully
+      // built and the player placed in it, so the beat is pure presentation
+      // over a world that is already correct — nothing about the arrival is
+      // waiting on the animation, and cutting it short (DBG "Transit fx" off)
+      // changes nothing but the look.
+      this.portalWarpDuration = getPortalWarpDuration();
+      this.portalWarpTimer = this.portalWarpDuration;
 
       this.prepareFrameEntities();
       // Accumulator hygiene — the map load is wall-clock work; don't
@@ -1877,12 +1659,288 @@ export class GameEngine {
   }
 
   private selectWeapon(wType: WeaponType) {
+      this.audio.play('weapon.cycle');
     this.currentWeaponIndex = this.weapons.selectWeapon(this.player, wType);
   }
 
   public cycleWeapon() {
+      this.audio.play('weapon.cycle');
     if (this.gameState !== GameState.PLAYING) return;
     this.currentWeaponIndex = this.weapons.cycleWeapon(this.player);
+  }
+
+  /**
+   * Pick the control scheme (user directive, G9).  A PREFERENCE, like
+   * difficulty: it deliberately survives `restartGame()` and every map load,
+   * because it describes the player's hands, not the run.
+   */
+  public setControlScheme(scheme: ControlScheme) {
+    this.input.setControlScheme(scheme);
+  }
+
+  /**
+   * Toggle the DualSense adaptive-trigger link (WebHID).
+   *
+   * Routed through the engine like every other UI action, but note what it is
+   * NOT: it is not a control scheme and it is not a prerequisite for
+   * anything.  The pad plays identically without it — this only changes what
+   * the right trigger FEELS like — so nothing in the sim may branch on it,
+   * and a platform without WebHID loses no functionality.
+   *
+   * Must be reached from a real click: `requestDevice` needs a user gesture.
+   */
+  public toggleAdaptiveTriggers(): Promise<boolean> {
+    return this.input.adaptiveTriggersConnected()
+      ? this.input.disconnectAdaptiveTriggers().then(() => false)
+      : this.input.connectAdaptiveTriggers();
+  }
+
+  /** DBG: step the trigger wire encoding, and pulse the pad's motors over the
+   *  SAME HID path to prove the transport independently of the encoding.
+   *  Both exist because a DualSense answers a report it dislikes with
+   *  silence, so "nothing happened" needs to be bisected rather than
+   *  re-guessed. */
+  /** How close the ship is to its speed cap, 0..1 — what the thrust
+   *  trigger's resistance reports. */
+  private lastMaxSpeed: number = PHYSICS_CONSTANTS.MAX_SPEED;
+  private playerSpeedFraction(): number {
+    const v = this.player.velocity;
+    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastMaxSpeed)));
+  }
+  /** The ship's real terminal speed under held thrust (see the movement
+   *  block for the derivation) — the tilt code's velocity normaliser. */
+  private lastCruiseSpeed: number = PHYSICS_CONSTANTS.MAX_SPEED;
+  /** How close the ship is to its CRUISE speed, 0..1 — the fraction the
+   *  tilt terms read.  Separate from `playerSpeedFraction` (the cap
+   *  fraction), which the thrust trigger's resistance still reports. */
+  private playerCruiseFraction(): number {
+    const v = this.player.velocity;
+    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
+    return Math.max(0, Math.min(1, speed / Math.max(1e-6, this.lastCruiseSpeed)));
+  }
+
+  public cycleTriggerEncoding() { this.input.cycleTriggerEncoding(); }
+  public testAdaptiveTriggerLink() { this.input.testAdaptiveTriggerLink(); }
+
+  /** DIRECTIONAL TILT — ease `player.visualRoll` + `player.visualPitch`
+   *  toward the tilt signal (PLAYER_ROLL_CONSTANTS documents every term and
+   *  why it exists; the fields are documented in types.ts).  ROLL (lateral)
+   *  is the STRAFE term — the thrust input's projection onto the facing
+   *  axis's perpendicular — plus the TURN term — the smoothed rate the
+   *  facing is swinging, scaled by throttle, the term the aim-locked
+   *  schemes (touch / joystick / gamepad, where thrust is always along the
+   *  nose) actually exercise, scaled by the CENTRIPETAL gate (bank scales
+   *  with real speed), plus the SLIP term (drift relative to the nose
+   *  holds the bank through a hard turn's slide).  PITCH (longitudinal)
+   *  is nose-line thrust directly — held throttle holds the lean, cutting
+   *  it settles level.  Components are signed so reversals swing
+   *  through level instead of teleporting across it, and the signal VECTOR
+   *  is magnitude-clamped so a diagonal cannot out-tilt the authored
+   *  maximum.  Easing is a SECOND-ORDER SPRING (user call): each component
+   *  carries an angular velocity and overshoots-and-settles rather than
+   *  lerping, its frequency divided by √(mass ratio) so a heavy outfit
+   *  tilts ponderously.  TUMBLE mode (DBG "Tilt mode") repurposes the same
+   *  velocity state as a continuous roll rate — see the constants note. */
+  private _rollPrevFacing: number | null = null;
+  private _rollYawRate = 0;
+  /** Tilt spring state: the angular velocities of the two eased
+   *  components in LEAN mode, and the continuous roll rates in TUMBLE. */
+  private _rollVel = 0;
+  private _pitchVel = 0;
+  /** The tilt spring's effective natural frequency: the authored omega ×
+   *  the DBG damping step, over √(mass ratio) — rotational inertia grows
+   *  with mass and ω ∝ 1/√I, so the same outfit that shoves slower also
+   *  tilts slower, with the wobble character (the damping RATIO)
+   *  unchanged. */
+  private tiltOmega(): number {
+    const { SPRING_OMEGA } = PLAYER_ROLL_CONSTANTS;
+    const massRatio = Math.max(1e-6, this.player.mass / PHYSICS_CONSTANTS.PLAYER_MASS);
+    return SPRING_OMEGA * getActiveRollDampingMult() / Math.sqrt(Math.max(1, massRatio));
+  }
+  /** One semi-implicit Euler step of the tilt spring for one component.
+   *  Returns the new angle; the velocity lives in `_rollVel`/`_pitchVel`
+   *  and is written back by the caller.  Semi-implicit (velocity first)
+   *  keeps it stable at every damping step. */
+  private springTilt(
+    cur: number, velKey: '_rollVel' | '_pitchVel', target: number,
+    dt: number, omega: number,
+  ): number {
+    const { SPRING_ZETA, REST_EPSILON, REST_VEL_EPSILON } = PLAYER_ROLL_CONSTANTS;
+    const k = omega * omega;
+    const c = 2 * SPRING_ZETA * omega;
+    let v = this[velKey];
+    v += (k * (target - cur) - c * v) * dt;
+    let next = cur + v * dt;
+    // Snap to true level once the settle is invisible — angle AND velocity
+    // both small — so the renderer's straight-flight path stays the plain
+    // rotation matrix.
+    if (target === 0 && Math.abs(next) < REST_EPSILON && Math.abs(v) < REST_VEL_EPSILON) {
+      next = 0;
+      v = 0;
+    }
+    this[velKey] = v;
+    return next;
+  }
+  /** The tilt signal for ONE source vector, written to the scratch pair
+   *  below (no allocation — this runs up to twice per sim step).
+   *
+   *  Everything that makes a source distinct lives here: the STRAFE term
+   *  reads the vector, and BOTH the turn gate and the slip term are scaled
+   *  by the THROTTLE derived from it.  That is why 'Average' and 'Sum'
+   *  blend the two RESULTS rather than the two input vectors — blending
+   *  the vectors first would gate both halves by one merged throttle and
+   *  lose exactly the difference the A/B exists to show. */
+  private _tiltSigLat = 0;
+  private _tiltSigLong = 0;
+  private tiltSignalFrom(mx: number, my: number, cosF: number, sinF: number) {
+    const { YAW_GAIN, PITCH_GAIN, SLIP_GAIN, TURN_SPEED_FLOOR } = PLAYER_ROLL_CONSTANTS;
+    const vel = this.player.velocity;
+    // STRAFE — perpendicular of facing (cos, sin) is (-sin, cos).
+    const lat = my * cosF - mx * sinF;
+    const throttle = Math.min(1, Math.sqrt(mx * mx + my * my));
+    // TURN gate — CENTRIPETAL (tan(bank) ∝ v·ω): the bank of a carved
+    // turn scales with actual SPEED, floored so a low-speed turn still
+    // reads, and gated by throttle so a coasting or parked nose-swing —
+    // which curves no path — stays level.  The MINUS sign below makes the
+    // turn and strafe terms agree: mid-turn, thrust not yet swung to the
+    // new nose lies on the NEGATIVE perp side of it.
+    const turnGate = throttle
+      * (TURN_SPEED_FLOOR + (1 - TURN_SPEED_FLOOR) * this.playerCruiseFraction());
+    // SLIP — the velocity's lateral component relative to the nose, under
+    // power: after a hard turn the path lags the nose and the hull stays
+    // banked into the drift until it catches up.  Same sign convention as
+    // the strafe term (thrusting and drifting the same way reinforce).
+    const vLat = (vel.y * cosF - vel.x * sinF) / Math.max(1e-6, this.lastCruiseSpeed);
+    const slip = SLIP_GAIN * Math.max(-1, Math.min(1, vLat)) * throttle;
+    this._tiltSigLat = lat + slip - YAW_GAIN * this._rollYawRate * turnGate;
+    // PITCH — nose-line thrust directly (the washout was removed, user
+    // call): holding the throttle holds the lean, cutting it settles
+    // level, reverse thrust leans the other way.
+    this._tiltSigLong = (mx * cosF + my * sinF) * PITCH_GAIN;
+  }
+  private tickPlayerRoll(dt: number, moveDir: Vector2) {
+    const { YAW_SMOOTHING, MAX_TILT } = PLAYER_ROLL_CONSTANTS;
+    const facing = this.player.rotation;
+    const cosF = Math.cos(facing);
+    const sinF = Math.sin(facing);
+    const vel = this.player.velocity;
+    // TURN tracker — the facing's angular step this tick, wrapped so aiming
+    // across the ±π seam is a small swing rather than a full spin, low-passed
+    // to cancel pointer jitter.  Null prev = first tick (or a respawn reset):
+    // measure from here, spike nothing.  Ticked ONCE per step, above the
+    // source dispatch, so a two-source blend does not advance it twice.
+    const prev = this._rollPrevFacing ?? facing;
+    this._rollPrevFacing = facing;
+    let dTheta = facing - prev;
+    if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
+    else if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
+    const rawRate = dt > 0 ? dTheta / dt : 0;
+    this._rollYawRate += (rawRate - this._rollYawRate) * Math.min(1, YAW_SMOOTHING * dt);
+
+    // The DBG "Tilt src" A/B (user call): what DRIVES the signal.  THRUST
+    // (the default) is the input vector — no input, no tilt.  VELOCITY is
+    // the ship's motion normalised by the CRUISE speed, so the hull leans
+    // with where it is actually going: a coasting drift holds its lean, a
+    // wall bounce reads on the hull, and a tumble rolls as long as the ship
+    // moves.  AVERAGE and SUM run BOTH and blend the RESULTS.  Whichever it
+    // is, the branch below reads one clamped signal, so the choice reaches
+    // both tilt modes for free.
+    const src = getActiveTiltSource();
+    // The velocity vector, cruise-normalised and gain-stepped, clamped to
+    // the same 0..1 range the thrust input already lives in so the two are
+    // commensurable before anything blends them.  The DBG "Vel gain" step
+    // rides the normaliser: it moves WHERE the signal saturates, never how
+    // deep it goes.
+    const inv = getActiveVelGainMult() / Math.max(1e-6, this.lastCruiseSpeed);
+    let vx = vel.x * inv;
+    let vy = vel.y * inv;
+    const vm = Math.sqrt(vx * vx + vy * vy);
+    if (vm > 1) { vx /= vm; vy /= vm; }
+
+    let sigLat: number;
+    let sigLong: number;
+    if (src === 'thrust' || src === 'velocity') {
+      const useVel = src === 'velocity';
+      this.tiltSignalFrom(useVel ? vx : moveDir.x, useVel ? vy : moveDir.y, cosF, sinF);
+      sigLat = this._tiltSigLat;
+      sigLong = this._tiltSigLong;
+    } else {
+      // BOTH effects, blended.  Average keeps the pair inside the range
+      // either source reaches alone (it is the midpoint); Sum lets them
+      // reinforce, so the hull banks SOONER — the magnitude clamp below is
+      // what makes that safe, exactly as it does for an extreme Vel gain.
+      // Sum is therefore 2× Average pre-clamp, and identical to it wherever
+      // the pair already saturates.
+      this.tiltSignalFrom(moveDir.x, moveDir.y, cosF, sinF);
+      const tLat = this._tiltSigLat;
+      const tLong = this._tiltSigLong;
+      this.tiltSignalFrom(vx, vy, cosF, sinF);
+      const scale = src === 'average' ? 0.5 : 1;
+      sigLat = (tLat + this._tiltSigLat) * scale;
+      sigLong = (tLong + this._tiltSigLong) * scale;
+    }
+    // Clamp the SIGNAL VECTOR's magnitude, not each component: the tilt is
+    // one direction in 360°, and clamping per-axis would let a diagonal
+    // reach √2 of the authored maximum.
+    const sigMag = Math.sqrt(sigLat * sigLat + sigLong * sigLong);
+    if (sigMag > 1) { sigLat /= sigMag; sigLong /= sigMag; }
+    // Max angle comes from the DBG feel cycle (Player ▸ "Roll feel");
+    // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
+    // levels out through this same easing rather than a separate branch.
+    const maxAngle = getActivePlayerRollAngle();
+    const omega = this.tiltOmega();
+
+    if (getActiveTiltMode() === 'tumble') {
+      // CONTINUOUS ROLL (test mode — user call): the clamped signal drives
+      // angular RATE, not angle, so the hull keeps rolling about the axis
+      // perpendicular to the thrust — end-over-end under forward
+      // throttle, a barrel roll under strafe — and freezes where it
+      // stopped when thrust drops, like a rolled object.  The velocity
+      // state doubles as the rate; the "Roll feel" presets scale the rate
+      // so Off stops the tumble; angles wrap to ±π.
+      const { TUMBLE_RATE, MAX_ANGLE, REST_EPSILON, REST_VEL_EPSILON } =
+        PLAYER_ROLL_CONSTANTS;
+      const rateScale = TUMBLE_RATE * (maxAngle / MAX_ANGLE);
+      const ease = Math.min(1, omega * dt);
+      // NEGATED signal (user call): the tumble rolls the opposite way to
+      // the lean's tilt — the read of a ball rolling WITH its travel
+      // rather than tipping against it.
+      this._rollVel += (-sigLat * rateScale - this._rollVel) * ease;
+      this._pitchVel += (-sigLong * rateScale - this._pitchVel) * ease;
+      const wrapPi = (a: number) =>
+        a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a;
+      let roll = wrapPi((this.player.visualRoll ?? 0) + this._rollVel * dt);
+      let pitch = wrapPi((this.player.visualPitch ?? 0) + this._pitchVel * dt);
+      // A stopped tumble that happens to sit near level snaps to it, so an
+      // idle ship still earns the renderer's plain path.
+      if (Math.abs(this._rollVel) < REST_VEL_EPSILON) {
+        this._rollVel = sigLat === 0 ? 0 : this._rollVel;
+        if (this._rollVel === 0 && Math.abs(roll) < REST_EPSILON) roll = 0;
+      }
+      if (Math.abs(this._pitchVel) < REST_VEL_EPSILON) {
+        this._pitchVel = sigLong === 0 ? 0 : this._pitchVel;
+        if (this._pitchVel === 0 && Math.abs(pitch) < REST_EPSILON) pitch = 0;
+      }
+      this.player.visualRoll = roll;
+      this.player.visualPitch = pitch;
+      return;
+    }
+
+    // The DBG "Lean dir" A/B (user call): one sign over both spring
+    // targets, so Reversed tips the hull AWAY from the acceleration —
+    // the same signal, easing and clamps, mirrored.
+    const dirSign = getActiveLeanDirSign();
+    let roll = this.springTilt(this.player.visualRoll ?? 0, '_rollVel', sigLat * maxAngle * dirSign, dt, omega);
+    let pitch = this.springTilt(this.player.visualPitch ?? 0, '_pitchVel', sigLong * maxAngle * dirSign, dt, omega);
+    // Combined-tilt ceiling: past π/2 the cos-foreshortening mirrors the
+    // sprite.  The spring OVERSHOOTS by design, so this also brackets a
+    // Deep-preset overshoot; a mirror is the one artefact that must never
+    // draw.
+    const tilt = Math.sqrt(roll * roll + pitch * pitch);
+    if (tilt > MAX_TILT) { const s = MAX_TILT / tilt; roll *= s; pitch *= s; }
+    this.player.visualRoll = roll;
+    this.player.visualPitch = pitch;
   }
 
   public setDifficulty(level: number) {
@@ -1896,11 +1954,148 @@ export class GameEngine {
       }
   }
 
+  /**
+   * Stamp discrete world transitions onto the Perf REC capture clock.
+   *
+   * The worst-frame table says WHEN a spike happened; without this it cannot
+   * say WHAT was happening, and a 194s device capture stalled on exactly that
+   * — three of its six worst frames inside one second, obviously an event
+   * rather than load, and no way to name it.
+   *
+   * Detection is done by DIFFING state here rather than by calling
+   * markEvent() from a dozen sites across WaveSystem / boss / portal code.
+   * That keeps the instrumentation in one readable place and out of the
+   * gameplay paths, at the cost of a few comparisons per frame — and those
+   * only run while a capture is active.
+   */
+  private markPerfEvents(): void {
+      const rec = this.perfRecorder;
+      if (this.waveIndex !== this._pmWave) {
+          this._pmWave = this.waveIndex;
+          rec.markEvent(`wave${this.waveIndex + 1}`);
+      }
+      if (this.waveState !== this._pmState) {
+          this._pmState = this.waveState;
+          // 'active' is the spawn stream opening; 'cleared' is the wave-clear
+          // beat (salvage spray + milestone drop), both plausible burst sites.
+          if (this.waveState === 'active') rec.markEvent('spawn');
+          else if (this.waveState === 'cleared') rec.markEvent('clear');
+      }
+      const bossAlive = !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+      if (bossAlive !== this._pmBoss) {
+          this._pmBoss = bossAlive;
+          rec.markEvent(bossAlive ? 'boss-in' : 'boss-dead');
+      }
+      const mapName = this.currentMap?.name ?? '';
+      if (mapName !== this._pmMap) {
+          const first = this._pmMap === '';
+          this._pmMap = mapName;
+          if (!first) rec.markEvent('mapload');
+      }
+      if (this.deathPending !== this._pmDead) {
+          this._pmDead = this.deathPending;
+          if (this.deathPending) rec.markEvent('death');
+      }
+      if (this.stageClearPending !== this._pmStage) {
+          this._pmStage = this.stageClearPending;
+          if (this.stageClearPending) rec.markEvent('stageclear');
+      }
+      if (this.dockedAtStation !== this._pmDocked) {
+          this._pmDocked = this.dockedAtStation;
+          rec.markEvent(this.dockedAtStation ? 'dock' : 'undock');
+      }
+  }
+
+  /**
+   * Sample the gamepad once per rendered frame and spend the edges that do
+   * not belong to a sim step (Pair C, c2).
+   *
+   * Runs BEFORE every freeze short-circuit in `loop`, which is the point: the
+   * pause button has to work from inside the paused state, and a pad that
+   * connects while the menu is up should still say so.  What is gated is the
+   * FIRE queue — a trigger held through a station visit must not bank a shot
+   * that lands the instant you undock.
+   */
+  private pollGamepad() {
+    const frozen = this.gameState !== GameState.PLAYING || this.dockedAtStation
+                || this.stageClearPending || this.deathPending;
+    this.input.pollGamepad(!frozen);
+
+    const conn = this.input.consumePadConnectionEvent();
+    if (conn) {
+      this.pushPlayerMessage(
+        conn.connected ? 'GAMEPAD CONNECTED' : 'GAMEPAD DISCONNECTED',
+        conn.connected ? '#7dd3fc' : '#fca5a5',
+        INPUT_CONSTANTS.GAMEPAD.HINT_LIFETIME,
+      );
+    }
+
+    if (this.input.consumePausePress()) {
+      // pauseGame() is already a no-op while docked (one full-screen overlay
+      // at a time), so this needs no docked branch of its own.
+      if (this.gameState === GameState.PLAYING) this.pauseGame();
+      else if (this.gameState === GameState.PAUSED) this.resumeGame();
+    }
+
+    // Both of these are DRAINED every frame whether or not they can be spent,
+    // so a press made against a frozen world cannot fire later out of context.
+    // The one exception is INTERACT while docked — the docked branch below is
+    // its consumer, and undocking is exactly what it is for.
+    const cycle = this.input.consumeCyclePress();
+    if (cycle && !frozen) this.cycleWeapon();
+    if (frozen && !this.dockedAtStation) this.input.consumeInteractPress();
+  }
+
+  /**
+   * BACK, pressed with a full-screen overlay up (G15).
+   *
+   * The menu-nav driver owns CONFIRM — it clicks whatever has focus, which
+   * needs no game knowledge at all — but BACK means something different on
+   * each screen, and only the engine knows which is up.  Deliberately does
+   * NOT dismiss the death or stage-clear screens: those are decisions
+   * (respawn / restart / quit; descend / return), and a button that quietly
+   * picks one for you is worse than no button.
+   */
+  public menuBack() {
+    if (this.dockedAtStation) { this.undock(); return; }
+    if (this.gameState === GameState.PAUSED) { this.resumeGame(); return; }
+  }
+
+  /**
+   * Per-frame upkeep for the onscreen joystick (Pair C, c2): advance the
+   * release fade, and hand InputSystem the LIVE minimap rect.
+   *
+   * The rect is pushed rather than looked up because the stick must not claim
+   * a touch that belongs to the minimap toggle, and the minimap changes size
+   * at runtime (75 px collapsed, 280 px expanded) — a constant in
+   * INPUT_CONSTANTS could only be right for one of those.  This keeps HUD
+   * layout knowledge in the engine, where it already lives (the fire-event
+   * handler computes the same rect to catch the toggle tap).
+   */
+  private tickJoystick(frameTime: number) {
+    this.input.tickJoystick(frameTime);
+
+    const mm = computeMinimapRect(window.innerHeight, this.minimapExpanded);
+    this.input.setStickExclusion(mm.x, mm.y, mm.size, mm.size);
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
-    const frameTime = (time - this.lastTime) / 1000;
+    // NEVER NEGATIVE.  `time` is the rAF frame timestamp, which is the moment
+    // the frame STARTED — so any code that stamps `lastTime` from
+    // `performance.now()` mid-frame (transitionToMap does, to keep the map
+    // load out of the sim clock) can leave lastTime AHEAD of the next frame's
+    // timestamp.  The delta then comes back negative, and everything
+    // downstream that subtracts it runs BACKWARDS: measured -0.16s, which
+    // drove the transit beat's timer UP past its own duration and its
+    // progress to -0.11, where the veil declined to paint and the destination
+    // arena showed through — the second, subtler half of that bug.
+    const frameTime = Math.max(0, (time - this.lastTime) / 1000);
     this.lastTime = time;
+
+    this.pollGamepad();
+    this.tickJoystick(frameTime);
 
     // HUD score ticker — roll the displayed total up toward the true
     // score by integer steps (≥1, ≤ a fraction of the gap) so awards
@@ -1924,11 +2119,38 @@ export class GameEngine {
     // Build the perf snapshot once and reuse it for the HUD + the perf
     // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
     // pollute the FPS distribution).  `frameTime` is the true rAF delta.
+    // HUD push gate.  React reconciliation is per-frame work the engine's
+    // timers never measured; the HUD is chips and bars and does not need
+    // 60 Hz.  Anything that must stay frame-perfect (minimap, loadout strip,
+    // banners, damage text) is canvas-drawn and unaffected.
+    //
+    // Overlay states push IMMEDIATELY and unconditionally: the React tree is
+    // what renders the pause / station / death / stage-clear screens, so
+    // throttling those would delay a screen the player just asked for.  Only
+    // the in-play HUD is throttled.
+    this.statsPushAccum += frameTime;
+    const hudPeriod = 1 / getActiveHudRate();
+    const overlayUp = this.gameState !== GameState.PLAYING
+        || this.dockedAtStation || this.deathPending || this.stageClearPending;
+    const pushStats = overlayUp || this.statsPushAccum >= hudPeriod;
+    if (pushStats) this.statsPushAccum = 0;
+    // Consume whatever React committed since the last frame.  Done BEFORE the
+    // snapshot so the snapshot, the recorder sample and the HUD all report the
+    // same figures for this frame.  Zero here means "no commit landed", which
+    // is the honest answer for a throttled frame — hence consume-and-reset
+    // rather than a sticky last-value.
+    this.lastUiActualMs = this.uiActualAccum;
+    this.lastUiBaseMs   = this.uiBaseAccum;
+    this.lastUiCommits  = this.uiCommitAccum;
+    this.uiActualAccum = 0;
+    this.uiBaseAccum = 0;
+    this.uiCommitAccum = 0;
     const perf = this.buildPerfSnapshot();
     // Menu-grade snapshots (loadout / shop / stats) are built while the
     // pause menu OR the docked station UI is up — both are sim-frozen
     // full-screen overlays that need them.
     const menuOpen = this.gameState === GameState.PAUSED || this.dockedAtStation;
+    if (this.perfRecorder.recording) this.markPerfEvents();
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
       // frameTime (raw rAF delta), the raw per-frame render + sim (aligned to
       // the SAME just-finished frame — sample() runs at the top of the next
@@ -1941,9 +2163,21 @@ export class GameEngine {
         this.perfController.loadLevel,
         this.renderer.lastRenderMs,
         this.lastFrameSimMs,
+        this.lastFrameSteps,
+        // The recorder's `ui` column.  This used to be fed the setState
+        // SCHEDULING time, which is near-zero by construction — so every
+        // capture in the repo's history reported a ui cost of ~0 and an
+        // unexplained `other` residual of the same size as the real cost.
+        // It is now the profiler's measured reconciliation time.
+        this.lastUiActualMs,
+        this.renderer.lastStampMs,
+        this.renderer.lastStampCount,
+        this.renderer.lastTintMs,
+        this.renderer.lastTintMisses,
       );
     }
-    this.onStatsUpdate({
+    const tStats0 = performance.now();
+    if (pushStats) this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
@@ -1957,7 +2191,7 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
-      boss: this.bossStatsSnapshot(),
+      boss: bossStatsSnapshot(this),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
@@ -1967,6 +2201,12 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
+      vitals: {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: Math.round(this.player.maxHealth),
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: Math.round(this.player.maxShield ?? 0),
+      },
       playerStats: menuOpen ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -2012,27 +2252,93 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      damageTriggeredBars: this.renderer.damageTriggeredBars,
+      minimapMaterialName: getActiveMinimapMaterialName(),
+      lightingModeName:  getActiveLightingMode(),
+      lightingTierName:  getActiveLightingTier().name,
+      shardShadowsEnabled: getShardShadowsEnabled(),
+      refractionEnabled: getRefractionEnabled(),
+      refractBrightnessName: getRefractBrightnessName(),
+      lightBrightnessName: getLightBrightnessName(),
+      emissiveEnabled: getEmissiveEnabled(),
+      worldLightsEnabled: getWorldLightsEnabled(),
+      depthAmbientEnabled: getDepthAmbientEnabled(),
+      emitBrightnessName: getEmitBrightnessName(),
+      emitShadowsEnabled: getEmitShadowsEnabled(),
+      emitShadowTierName: getEmitShadowTierName(),
+      emitFadeName: getEmitFadeName(),
+      causticFadeName: getCausticFadeName(),
+      flashlightName: getFlashlightName(),
+      lightColorName: getLightColorName(),
+      tintMixName: getTintMixName(),
+      fogName: getFogName(),
+      shadowSoftnessName: getShadowSoftnessName(),
+      rockPaletteName: getActiveRockPaletteName(),
+      fractureModeName: getActiveFractureMode(),
+      fractureRelaxName: getFractureRelaxName(),
+      boundaryStrengthName: getBoundaryStrengthName(),
+      fractureSeparationName: getFractureSeparationName(),
+      fractureSiteScaleName: getFractureSiteScaleName(),
+      damageSpreadName: getDamageSpreadName(),
+      grainMaterialName: getGrainMaterial(),
+      grainKnobNames: grainKnobNamesSnapshot(),
+      grainOverrideCount: grainOverrideCountSnapshot(),
+      fractureBiasName: getFractureBiasName(),
+      nebulaWakeSpinName: getNebulaWakeSpinMode(),
       repelPushEnabled: this.physics.repelPushEnabled,
+      shardBlendEnabled: this.renderer.shardBlendEnabled,
+      shardBlendCount: this.renderer.lastShardBlendCount,
+      shardCoatName: getActiveShardCoatName(),
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticShardPaletteName: getActivePlasticShardPaletteName(),
       plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
-      metalGlowBrightnessName:   getActiveMetalGlowBrightnessName(),
-      glassGlowColorName: getActiveGlassGlowColorName(),
-      metalGlowColorName: getActiveMetalGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
       shatterGraceName:   getActiveShatterGraceName(),
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
-      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      shardFlowEnabled: this.shardFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
+      gamepadInfo: this.input.padDebugName(),
+      gamepadAxes: this.input.padDebugAxes(),
+      rumbleInfo: this.input.rumbleDebugInfo(),
+      joystickForceVisible: this.input.joystickForceVisible,
+      controlScheme: this.input.getControlScheme(),
+      rumbleEnabled: this.input.rumbleEnabled,
+      adaptiveTriggersSupported: this.input.adaptiveTriggersSupported(),
+      adaptiveTriggersConnected: this.input.adaptiveTriggersConnected(),
+      adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
+      adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      portalWarpName: getPortalWarpName(),
+      portalSizeName: getPortalSizeName(),
+      portalGravityName: getPortalGravityName(),
+      portalGravityRangeName: getPortalGravityRangeName(),
+      portalLensName: getPortalLensName(),
+      portalLensSpinName: getPortalLensSpinName(),
+      portalLensRadiusName: getPortalLensRadiusName(),
+      portalTuningInfo: getPortalTuningInfo(),
+      rollFeelName: getActivePlayerRollName(),
+      hullModeName: getActivePlayerHullName(),
+      rollDampName: getActiveRollDampingName(),
+      tiltModeName: getActiveTiltModeName(),
+      leanDirName: getActiveLeanDirName(),
+      tiltSourceName: getActiveTiltSourceName(),
+      velGainName: getActiveVelGainName(),
       enemyScaleName: getActiveEnemyScaleName(),
+      simRateName: getActiveSimRateName(),
+      hudRateName: getActiveHudRateName(),
+      substepCapName: getActiveSubstepCapName(),
       swarmMoveName: getActiveSwarmMoveName(),
+      starDensityName: getActiveStarDensityName(this.currentMap?.type),
+      starSizeName: getActiveStarSizeName(),
+      starBandsName: getActiveStarBandsName(),
+      starParallaxName: getActiveStarParallaxName(this.currentMap?.type),
+      collapseModeName: getActiveCollapseModeName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
       forcedEnemy: this.forcedTestEnemy,
@@ -2062,7 +2368,29 @@ export class GameEngine {
       perfRecording: this.perfRecorder.recording,
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
+      audio: {
+        volume: this.audio.volume, muted: this.audio.muted,
+        state: this.audio.contextState, audible: this.audio.audible,
+        drafts: this.audio.draftsEnabled,
+        sampled: this.audio.sampledIds.length, total: this.audio.allIds.length,
+        unmatched: this.audio.unmatchedFiles,
+        loopFiles: this.audio.loopSampleFilenames,
+        latencyMs: this.audio.latencyMs,
+      },
     });
+    // Cost of SCHEDULING the React update — not of performing it.  The
+    // reconciliation this setState triggers is deferred past the end of this
+    // rAF callback, so it is not inside this bracket and never was: the
+    // number this line produces is ~0 whatever the tree costs.  The measured
+    // cost is `lastUiActualMs`, reported in by the `<Profiler>` in App.tsx.
+    // Kept as the control that demonstrates the point.
+    this.lastStatsScheduleMs = pushStats ? performance.now() - tStats0 : 0;
+
+    // Audio follows the camera, and goes quiet whenever the sim does.  Two
+    // number writes and a boolean per frame — the manager is otherwise
+    // purely event-driven, so this is the entire per-frame audio cost.
+    this.audio.setListener(this.camera.position.x, this.camera.position.y);
+    this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation);
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
@@ -2079,7 +2407,7 @@ export class GameEngine {
     // routes through undock() as well.
     if (this.dockedAtStation) {
         const eDown = this.input.isKeyDown('KeyE');
-        if (eDown && !this.dockKeyHeld) this.undock();
+        if ((eDown && !this.dockKeyHeld) || this.input.consumeInteractPress()) this.undock();
         this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
@@ -2091,6 +2419,18 @@ export class GameEngine {
     // same freeze as the death screen, dismissed by CONTINUE, after which the
     // choice (descend / go home) is made in the world by flying to a rift.
     if (this.stageClearPending) {
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // In transit: the sim is HELD while the player flies up the wormhole, so
+    // nothing shoots them inside the tunnel and the beat costs no simulation.
+    // The timer runs on WALL CLOCK — exactly what a frozen sim leaves
+    // available — and the frame still draws, which is what animates it.
+    if (this.portalWarpTimer > 0) {
+        this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -2115,8 +2455,28 @@ export class GameEngine {
     // frame.  A MAX_SUBSTEPS clamp on the inner loop is the spiral-of-death
     // safeguard: if the sim is genuinely slower than real time the extra
     // time is silently discarded rather than compounding.
-    const { FIXED_DT, MAX_SUBSTEPS, MAX_FRAME_TIME } = SIMULATION_CONSTANTS;
-    this.simAccumulator += Math.min(frameTime, MAX_FRAME_TIME);
+    // FIXED_DT and the substep clamp are read LIVE from the sim-rate cycle
+    // (DBG "Sim rate", default 120Hz — identical to the hardcoded value it
+    // replaced).  See SIM_RATE_CYCLE in constants.ts for why the rate is a
+    // toggle rather than an edit.
+    const FIXED_DT = getSimDt();
+    const MAX_SUBSTEPS = getMaxSubsteps();
+    const { MAX_FRAME_TIME, VSYNC_SNAP_FRACTION } = SIMULATION_CONSTANTS;
+    let dtIn = Math.min(frameTime, MAX_FRAME_TIME);
+    // VSYNC SNAP.  Without this, a sim rate equal to the display rate makes
+    // the accumulator drift a hair either side of exactly one step, so frames
+    // alternate 1-step / 2-step and the world judders — which is exactly why
+    // a 1/60 timestep was tried and reverted once already (see the comment on
+    // SIMULATION_CONSTANTS).  Snapping a frame delta that lands within a
+    // quarter-step to the nearest whole number of steps removes the
+    // alternation at its source.  At 120Hz a 60fps frame is already ~2.000
+    // steps, so this is a no-op on the default path.
+    const rawSteps = dtIn / FIXED_DT;
+    const nearest = Math.round(rawSteps);
+    if (nearest >= 1 && Math.abs(rawSteps - nearest) < VSYNC_SNAP_FRACTION) {
+        dtIn = nearest * FIXED_DT;
+    }
+    this.simAccumulator += dtIn;
 
     let steps = 0;
     let frameSimMs = 0; // raw per-frame sim total (summed across substeps)
@@ -2126,6 +2486,10 @@ export class GameEngine {
         // rather than a few substeps later.  (Death is NOT here — it no longer
         // freezes the sim.)
         if (this.stageClearPending) { this.simAccumulator = 0; break; }
+        // A portal entry swaps the map IN PLACE mid-substep and arms the
+        // transit warp; the rest of this frame's substeps would otherwise
+        // simulate the destination while the player is still in the tunnel.
+        if (this.portalWarpTimer > 0) { this.simAccumulator = 0; break; }
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
@@ -2171,6 +2535,7 @@ export class GameEngine {
         this.simAccumulator %= FIXED_DT;
     }
     this.lastFrameSimMs = frameSimMs; // raw per-frame sim total (spike attribution)
+    this.lastFrameSteps = steps;      // …and how many substeps it covers
 
     // Enforce the particle hard-cap ONCE per frame (moved out of the per-spawn
     // path — see ParticleSystem.spawn).  Runs after the whole sim drain so
@@ -2191,12 +2556,27 @@ export class GameEngine {
 
   private prepareFrameEntities() {
       if (!this.currentMap) return;
-      this.frameEntities.length = 0;
+      // REFILL IDIOM (gauntlet 5c, P2) — the canonical explanation lives here
+      // because this list is the hottest instance of it in the engine.
+      //
+      // `arr.length = 0` followed by `push` looks free and is not: setting the
+      // length down shrinks the backing store, and the pushes then re-grow it
+      // through the array growth policy, allocating a fresh backing store (and
+      // several intermediate ones) EVERY refill.  This list is rebuilt 2-3
+      // times per frame with ~1300-3600 entries, and it measured as the single
+      // largest allocator in the engine — in the idle hub as much as in combat.
+      //
+      // Index-filling into the existing array and truncating ONLY when the
+      // count actually shrank keeps the backing store at its high-water mark,
+      // so a steady-state field allocates nothing.  Contents and `length` are
+      // identical either way; no consumer can tell.  Measured standalone:
+      // 2.6x faster and 11x less heap churn over 20 000 refills of 1300 items.
       const ents = this.currentMap.entities;
-      for (let i = 0; i < ents.length; i++) {
-          this.frameEntities.push(ents[i]);
-      }
-      this.frameEntities.push(this.player);
+      const frame = this.frameEntities;
+      const n = ents.length;
+      for (let i = 0; i < n; i++) frame[i] = ents[i];
+      frame[n] = this.player;
+      if (frame.length !== n + 1) frame.length = n + 1;
       // Phase 4: rebuild type-filtered candidate lists so every downstream
       // system scan runs on the minimal relevant slice instead of the full
       // master entity list.  Rebuilt once per sim substep; consumers must
@@ -2231,10 +2611,103 @@ export class GameEngine {
       // add 1 to totalEntities to match the existing entityCount semantics.
       this.perfCounts.totalEntities     = this.entityIndex.activeCount + 1;
       this.perfCounts.enemyCount        = this.entityIndex.enemies.length;
-      this.perfCounts.asteroidCount     = this.entityIndex.asteroids.length;
+      this.perfCounts.mobileShardCount     = this.entityIndex.shardCandidates.length;
       this.perfCounts.projectileCount   = this.entityIndex.projectiles.length;
       this.perfCounts.particleCount     = this.entityIndex.particleCount;
       this.perfCounts.interactableCount = this.entityIndex.interactableCount;
+  }
+
+  /** Baseline flow-correction rate, shared by the shard pass
+   *  (`applyFlowTo`) and the collectible-drop pass that mirrors it. */
+  private static readonly FLOW_CORRECTION = 0.08;
+
+  /**
+   * Steer one shard toward the local flow-field direction.
+   *
+   * CLOSURE HOISTING (gauntlet 5c, P3) — this used to be a `const applyFlow =
+   * (e) => {…}` declared inside `updatePhysics`, i.e. a function object
+   * CONSTRUCTED FRESH on every sim substep, 120 times a second.  That is not
+   * just the cost of the allocation: a function re-created that often never
+   * settles into V8's optimised tier, and in the unoptimised tier every
+   * intermediate double is boxed on the heap.  The site measured ~98 bytes of
+   * allocation per shard per substep — 175 MB over a 12 s capture on the
+   * Asteroid Field, the single largest allocator in the engine after P2 —
+   * while `perf/probe.mjs` showed the exact same operations allocating ZERO
+   * when run from a stable, optimisable loop.
+   *
+   * The body below is byte-for-byte the old closure's; only its home changed.
+   * Everything it used to capture is now an explicit parameter, which is what
+   * lets it be a plain method.
+   *
+   * The collectible-drop pass in `updatePhysics` deliberately keeps its own
+   * copy of this arithmetic rather than calling through here: drops carry a
+   * `rotationSpeed`, so routing them through this method would start
+   * integrating their rotation and that is a behaviour change, not a perf fix.
+   */
+  private applyFlowTo(
+      e: GameEntity,
+      dt: number,
+      flowTargetSpeed: number,
+      flowEnabled: boolean,
+      laneJitter: number,
+  ): void {
+      // Nebula shards anchor in place — flow correction is
+      // skipped so the field can't drag them around the map.
+      // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
+      // shard's velocity decays to zero after any kick (shatter,
+      // gravity pull, impact) and stays there.  Rotation still
+      // integrates so spinning shards keep tumbling visually.
+      if (e.shardVariant === 'nebula-shard') {
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+          return;
+      }
+      // DBG: when the asteroid-flow toggle is OFF, skip the
+      // velocity nudge entirely.  Rotation still integrates so
+      // existing tumble is preserved; existing velocity is left
+      // untouched (only damping + collisions modify it).
+      if (!flowEnabled) {
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+          return;
+      }
+      const flow = this.flowField.sampleShardFlow(e.position.x, e.position.y);
+      // Per-shard lane jitter: nudge the target slightly
+      // perpendicular to the flow by a STABLE per-shard amount so
+      // shards ride parallel lanes instead of collapsing onto one
+      // streamline.  Lazily seeded once per entity (stable
+      // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
+      let fxDir = flow.x, fyDir = flow.y;
+      if (laneJitter > 0) {
+          if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+          const off = e.flowLane * laneJitter;
+          const px = -flow.y, py = flow.x;
+          const nx = flow.x + px * off;
+          const ny = flow.y + py * off;
+          const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
+          fxDir = nx / nmag;
+          fyDir = ny / nmag;
+      }
+      // Inverse-mass scaling — heavier shards lock on slower AND
+      // cruise at a lower terminal speed.  Plastic's 5× boost is
+      // multiplied BEFORE the mass scale so heavy plastic blobs
+      // are diluted along with everything else; the boost shows
+      // primarily on light plastic.
+      const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
+          / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
+      const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
+      const correctionMul = plasticBoost * massScale;
+      const targetSpeed = flowTargetSpeed * massScale;
+      const tx = fxDir * targetSpeed;
+      const ty = fyDir * targetSpeed;
+      const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
+      const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
+      const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
+      const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
+      const perpDeficit     = Math.min(1, vPerp / targetSpeed);
+      const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
+      const alpha           = Math.min(0.8, GameEngine.FLOW_CORRECTION * dt * urgency * correctionMul);
+      e.velocity.x += (tx - e.velocity.x) * alpha;
+      e.velocity.y += (ty - e.velocity.y) * alpha;
+      if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
   }
 
   private handleEnemyShooting(dt: number) {
@@ -2242,12 +2715,38 @@ export class GameEngine {
       this.weapons.updateEnemyShooting(this.currentMap.entities, this.entityIndex.enemies, this.player, dt);
   }
 
-  private handleScreenShake = (amount: number) => {
+  /** Haptic feedback with NO camera shake.  Most impacts want both and go
+   *  through `handleScreenShake`; a few — the plain Blaster's shot — want the
+   *  hand to feel something the camera must not react to. */
+  handleRumble = (amount: number, kind: RumbleKind = 'impact') => {
+      this.input.rumble(amount, kind);
+  }
+
+  handleScreenShake = (
+      amount: number,
+      opts?: { dirX?: number; dirY?: number; rumble?: RumbleKind },
+  ) => {
+      const rumbleKind: RumbleKind = opts?.rumble ?? 'impact';
+      // Force feedback rides this call — every impact in the game already
+      // funnels through it with magnitudes tuned against each other, so the
+      // hand feels what the camera feels.  Deliberately ABOVE the
+      // screen-shake toggle: wanting a crash in the hand and wanting the
+      // camera to lurch are different preferences.
+      this.input.rumble(amount, rumbleKind);
+
       if (!this.screenShakeEnabled) return;
       // Prioritize larger shakes
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
           this.shakeIntensity = amount;
           this.shakeTimer = CAMERA_CONSTANTS.SHAKE_DECAY;
+          // A DIRECTION is optional: an impact has one (the axis the ship was
+          // shoved along), an explosion or a warp-in does not.  Stored
+          // normalised; (0,0) means "no direction" and keeps the isotropic
+          // jitter, so every existing caller is unchanged.
+          const dx = opts?.dirX, dy = opts?.dirY;
+          const dm = dx !== undefined && dy !== undefined ? Math.hypot(dx, dy) : 0;
+          this.shakeDirX = dm > 0 ? dx! / dm : 0;
+          this.shakeDirY = dm > 0 ? dy! / dm : 0;
       }
   }
 
@@ -2291,7 +2790,7 @@ export class GameEngine {
       if (this.perfController.shouldRun('ai')) {
           const aiDt = dt * this.perfController.effectiveInterval('ai');
           this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField,
-              this.entityIndex.asteroids, this.entityIndex.projectiles);
+              this.entityIndex.shardCandidates, this.entityIndex.projectiles);
       } else {
           this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
       }
@@ -2299,51 +2798,57 @@ export class GameEngine {
 
       this.physics.update(
         allEntities,
-        this.entityIndex.asteroids,
+        this.entityIndex.shardCandidates,
         this.player,
         this.currentMap.type,
         dt,
         this.spawnDamageText,
         this.handleEntityDeath,
         this.handleScreenShake,
-        this.handleProjectileHit
+        this.handleProjectileHit,
+        this.handlePortalEject
       );
 
-      this.currentMap.entities.forEach(e => {
+      // Indexed loop, not `forEach(e => …)`: the callback would be a fresh
+      // closure on every substep (120 Hz).  See the CLOSURE HOISTING note on
+      // applyFlowTo below — a function re-created per substep never settles
+      // into optimised code.
+      const mapEnts = this.currentMap.entities;
+      for (let i = 0; i < mapEnts.length; i++) {
+          const e = mapEnts[i];
           if (e.isExploding && e.explosionTimer !== undefined) {
               e.explosionTimer -= dt;
               if (e.explosionTimer <= 0) {
                   e.active = false;
               }
           }
-      });
+      }
 
-      // Asteroid census + shard generation.  EntityIndex only contains
-      // active asteroids, so we still need a master-list scan to catch
-      // asteroids that were just deactivated this step (they're no longer
-      // in the index) and to preserve the original total-count semantics.
-      //
+      // Rock-shard population census, for the free-spawn respawn target.
       // Pulls count/minSize/maxSize from the CURRENT map's config so the
       // respawn loop honours per-map population targets — previously
       // this was hardcoded to MapType.UNIVERSE which filled small maps
       // (e.g. Pocket, count = 2) with Deep Space's 140 asteroids.
+      //
+      // This loop USED to also shatter every rock-shard it found
+      // deactivated, from before `handleEntityDeath` owned structure
+      // deaths (CLAUDE.md §8: EVERY structure death goes through
+      // `onDeath`).  Once the death path gained the shatter, that made it
+      // a SECOND, unguarded shatter — measured: a large rock-shard's 4
+      // fragments became 8 one frame later, each cell spawned twice, and
+      // rock-shard was the only variant filtered for, which is exactly
+      // why only mobile rocks doubled.  Worse, with no shooting at all it
+      // shattered shards at FULL HEALTH (10/10, 11/11) — healthy shards
+      // that a MERGE had just absorbed — spraying debris out of every
+      // compose.  Deleted; ShardSystem.shatter now also refuses a second
+      // call per entity so no future caller can reintroduce it.
       const config = getRockShardFreeSpawn(this.currentMap.type);
-      const newlyDestroyed: GameEntity[] = [];
-      let currentAsteroidCount = 0;
+      let currentMobileShardCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
-          const e = this.currentMap.entities[i];
-          if (e.shardVariant !== 'rock-shard') continue;
-          currentAsteroidCount++;
-          if (!e.active) newlyDestroyed.push(e);
+          if (this.currentMap.entities[i].shardVariant === 'rock-shard') currentMobileShardCount++;
       }
-      for (const ast of newlyDestroyed) {
-          // Asteroid-style shatter is variant-driven via ShardSystem
-          // (Stage 3): the variant config gates count / size / scatter
-          // and the size-floor check now lives inside shatter() too.
-          if (this.currentMap) this.shards.shatter(ast, this.currentMap.entities);
-      }
-      if (currentAsteroidCount < config.count) {
-          this.handleAsteroidRespawn(config);
+      if (currentMobileShardCount < config.count) {
+          this.handleRockShardRespawn(config);
       }
 
       // Flow-field nudge: steer each asteroid toward the grid flow direction.
@@ -2362,71 +2867,14 @@ export class GameEngine {
       //   it had accumulated.  Keeping the perp-deficit hot makes the
       //   correction actively damp sideways motion, so packs spread back
       //   out onto the flow lines.
-      const FLOW_CORRECTION  = 0.08;
+      const FLOW_CORRECTION = GameEngine.FLOW_CORRECTION;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
-      const asteroids = this.entityIndex.asteroids;
-      const flowEnabled = this.asteroidFlowEnabled;
+      const asteroids = this.entityIndex.shardCandidates;
+      const flowEnabled = this.shardFlowEnabled;
       const laneJitter = this.ffLaneJitter;
-      const applyFlow = (e: GameEntity) => {
-          // Nebula shards anchor in place — flow correction is
-          // skipped so the field can't drag them around the map.
-          // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
-          // shard's velocity decays to zero after any kick (shatter,
-          // gravity pull, impact) and stays there.  Rotation still
-          // integrates so spinning shards keep tumbling visually.
-          if (e.shardVariant === 'nebula-shard') {
-              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-              return;
-          }
-          // DBG: when the asteroid-flow toggle is OFF, skip the
-          // velocity nudge entirely.  Rotation still integrates so
-          // existing tumble is preserved; existing velocity is left
-          // untouched (only damping + collisions modify it).
-          if (!flowEnabled) {
-              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-              return;
-          }
-          const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
-          // Per-shard lane jitter: nudge the target slightly
-          // perpendicular to the flow by a STABLE per-shard amount so
-          // shards ride parallel lanes instead of collapsing onto one
-          // streamline.  Lazily seeded once per entity (stable
-          // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
-          let fxDir = flow.x, fyDir = flow.y;
-          if (laneJitter > 0) {
-              if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
-              const off = e.flowLane * laneJitter;
-              const px = -flow.y, py = flow.x;
-              let nx = flow.x + px * off;
-              let ny = flow.y + py * off;
-              const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
-              fxDir = nx / nmag;
-              fyDir = ny / nmag;
-          }
-          // Inverse-mass scaling — heavier shards lock on slower AND
-          // cruise at a lower terminal speed.  Plastic's 5× boost is
-          // multiplied BEFORE the mass scale so heavy plastic blobs
-          // are diluted along with everything else; the boost shows
-          // primarily on light plastic.
-          const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
-              / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
-          const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
-          const correctionMul = plasticBoost * massScale;
-          const targetSpeed = FLOW_TARGET_SPEED * massScale;
-          const tx = fxDir * targetSpeed;
-          const ty = fyDir * targetSpeed;
-          const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
-          const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-          const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
-          const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
-          const perpDeficit     = Math.min(1, vPerp / targetSpeed);
-          const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
-          const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * correctionMul);
-          e.velocity.x += (tx - e.velocity.x) * alpha;
-          e.velocity.y += (ty - e.velocity.y) * alpha;
-          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
-      };
-      for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
+      for (let i = 0; i < asteroids.length; i++) {
+          this.applyFlowTo(asteroids[i], dt, FLOW_TARGET_SPEED, flowEnabled, laneJitter);
+      }
 
       // Collectible drops (salvage + health) follow the same asteroid flow
       // field — the wind that catches loose shards also drags drops along,
@@ -2439,7 +2887,7 @@ export class GameEngine {
               if (!d.active) continue;
               if (!isCollectibleDrop(d)) continue;
               if (d.magnetized) continue;
-              const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+              const flow = this.flowField.sampleShardFlow(d.position.x, d.position.y);
               let fxDir = flow.x, fyDir = flow.y;
               if (laneJitter > 0) {
                   if (d.flowLane === undefined) d.flowLane = Math.random() * 2 - 1;
@@ -2501,15 +2949,179 @@ export class GameEngine {
       this.currentMap.entities.length = writeIdx;
   }
 
-  private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
+  /** Enemy subtype → its death voice (SFX_INVENTORY §5.2).  Anything not
+   *  listed falls back to `destroy.enemy.standard`, so a new archetype is
+   *  audible from the day it is added rather than silent until someone
+   *  remembers to wire it. */
+  private static readonly ENEMY_DEATH_SFX: Partial<Record<EnemySubtype, string>> = {
+      [EnemySubtype.SWARM]:    'destroy.enemy.small',
+      [EnemySubtype.RAMMER_3]: 'destroy.enemy.heavy',
+      [EnemySubtype.KAMIKAZE]: 'destroy.enemy.kamikaze',
+      [EnemySubtype.BUBBLE]:   'destroy.enemy.bubble',
+  };
+
+  /** Enemy subtype → its death FX profile (roadmap step (b)).  Same shape
+   *  and same fallbacks as ENEMY_DEATH_SFX, and resolved by the SAME
+   *  classification below, so a class's look and its voice can never
+   *  disagree. */
+  private static readonly ENEMY_DEATH_FX: Partial<Record<EnemySubtype, ExplosionProfile>> = {
+      [EnemySubtype.SWARM]:    EXPLOSION_PROFILES.SWARM,
+      [EnemySubtype.RAMMER_3]: EXPLOSION_PROFILES.HEAVY,
+      [EnemySubtype.KAMIKAZE]: EXPLOSION_PROFILES.KAMIKAZE,
+      [EnemySubtype.BUBBLE]:   EXPLOSION_PROFILES.BUBBLE,
+  };
+
+  /** Material family → its break FX profile.  Plastic and nebula are
+   *  deliberately absent: plastic has always emitted no death spark burst
+   *  and nebula fades out through `mergeFadeTimer` in the renderer, and
+   *  both of those are existing deliberate looks, not omissions. */
+  private static readonly MATERIAL_FX: Record<string, ExplosionProfile> = {
+      glass: EXPLOSION_PROFILES.GLASS,
+      rock:  EXPLOSION_PROFILES.ROCK,
+      metal: EXPLOSION_PROFILES.METAL,
+  };
+
+  /**
+   * ONE classification of a dying entity into BOTH its visual profile and
+   * its sound — the thing that makes a differentiated explosion and its
+   * SFX land as a single beat (roadmap step (b) pairs with step (a)).
+   *
+   * Either half may be null: a POI has neither, the dragon head's death is
+   * staged bespoke by `dragonDeath`, and plastic/nebula have a voice but
+   * deliberately no particle burst.
+   */
+  private deathFx(entity: GameEntity): { fx: ExplosionProfile | null; sfx: string | null } {
+      if (entity.type === EntityType.PLAYER) {
+          return { fx: EXPLOSION_PROFILES.PLAYER, sfx: 'destroy.player' };
+      }
+      // A severed dragon segment is material, but breaking a piece off
+      // something ALIVE has its own voice.  Checked before the material
+      // branch, since a segment is a real tile-variant STRUCTURE.
+      if (entity.dragonSegment === true) {
+          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          return { fx: GameEngine.MATERIAL_FX[mat] ?? null, sfx: 'destroy.dragon.segment' };
+      }
+      if (entity.type === EntityType.ENEMY) {
+          // The dragon head's death is staged by dragonDeath, not here.
+          if (entity.enemySubtype === EnemySubtype.DRAGON) return { fx: null, sfx: null };
+          if (entity.isBoss) return { fx: EXPLOSION_PROFILES.BOSS, sfx: null }; // payBossBounty owns the voice
+          if (entity.isRival) return { fx: EXPLOSION_PROFILES.RIVAL, sfx: 'destroy.rival' };
+          const byType = GameEngine.ENEMY_DEATH_FX[entity.enemySubtype as EnemySubtype];
+          if (byType) {
+              return { fx: byType, sfx: GameEngine.ENEMY_DEATH_SFX[entity.enemySubtype as EnemySubtype] ?? null };
+          }
+          // A `poise` hull is by definition a heavy one — reading the trait
+          // beats maintaining a second subtype list that drifts from it.
+          return entity.poise
+              ? { fx: EXPLOSION_PROFILES.HEAVY,    sfx: 'destroy.enemy.heavy' }
+              : { fx: EXPLOSION_PROFILES.STANDARD, sfx: 'destroy.enemy.standard' };
+      }
+      if (entity.type === EntityType.STRUCTURE) {
+          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          if (!mat) return { fx: null, sfx: null };
+          return {
+              fx: GameEngine.MATERIAL_FX[mat] ?? null,
+              sfx: entity.mass === Infinity ? `destroy.tile.${mat}` : `destroy.shard.${mat}`,
+          };
+      }
+      return { fx: null, sfx: null };
+  }
+
+  /**
+   * Render one death burst from its profile: up to two rings, the body-
+   * coloured debris, the profile's accent layer, and a hot spark layer.
+   * Every layer is optional (count/scale 0 skips it), which is how a
+   * bubble gets no hot core and a material break gets no ring.
+   *
+   * Runs entirely on the EXISTING ParticleSystem — no new particle engine,
+   * and no gradients, so there is nothing to cache per entity here.
+   */
+  private playDeathFx(entity: GameEntity, p: ExplosionProfile) {
+      const pos = entity.position;
+      const color = entity.color || '#f87171';
+      const r = Math.max(entity.size.x, entity.size.y);
+      if (p.ringScale > 0) {
+          this.spawnShockwave(pos, {
+              radius: r * p.ringScale, damage: 0, knockback: 0,
+              color, lifetime: p.ringLifetime,
+          });
+      }
+      if (p.coreScale > 0) {
+          this.spawnShockwave(pos, {
+              radius: r * p.coreScale, damage: 0, knockback: 0,
+              color: '#ffffff', lifetime: p.coreLifetime,
+          });
+      }
+      if (p.debrisCount > 0) {
+          this.spawnParticles(pos, p.debrisCount, color, {
+              speedMin: p.debrisSpeedMin, speedMax: p.debrisSpeedMax,
+              sizeMin: p.debrisSizeMin,   sizeMax: p.debrisSizeMax,
+              lifetimeMin: p.debrisLifeMin, lifetimeMax: p.debrisLifeMax,
+          });
+      }
+      // The accent is what lets a class read by HUE rather than only by the
+      // body tint — amber embers on a heavy hull, cyan droplets on a bubble.
+      if (p.accent && p.accentCount > 0) {
+          this.spawnParticles(pos, p.accentCount, p.accent, {
+              speedMin: p.debrisSpeedMin * 0.7, speedMax: p.debrisSpeedMax * 0.8,
+              sizeMin: p.debrisSizeMin * 0.7,   sizeMax: p.debrisSizeMax * 0.8,
+              lifetimeMin: p.debrisLifeMin * 1.2, lifetimeMax: p.debrisLifeMax * 1.4,
+          });
+      }
+      if (p.sparkCount > 0) {
+          this.spawnParticles(pos, p.sparkCount, '#ffffff', {
+              speedMin: p.sparkSpeedMin, speedMax: p.sparkSpeedMax,
+              sizeMin: 1, sizeMax: 3, lifetimeMin: 0.15, lifetimeMax: 0.35,
+          });
+      }
+      if (p.shake > 0) this.handleScreenShake(p.shake);
+  }
+
+  handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
+      // Destruction audio (SFX_INVENTORY §5).  Fired FIRST, before any of
+      // the bespoke branches below return early, so every death that
+      // reaches this handler is heard.  A boss additionally gets its
+      // payout beat from payBossBounty, and a dragon its own from
+      // dragonDeath — both layered on top rather than replacing this.
+      // Every id here collapses on retrigger, which is what keeps a
+      // 40-fragment shatter to one heavier sound instead of 40 thin ones.
+      // Resolved ONCE and reused for the burst below, so a class's look and
+      // its voice come from a single classification.
+      // STRUCTURE deaths are IDEMPOTENT (V9).  progressFracture can kill
+      // an entity from INSIDE the damage-feedback hook (min-remainder),
+      // after which the outer damage path still sees health <= 0 and
+      // raises onDeath again — the cached decomposition then spawned an
+      // exact duplicate of every fragment (user report: large rocks
+      // releasing doubled shards).  Enemies/player already guard via
+      // isExploding; structures get an explicit stamp, cleared on regen
+      // revival (completeRegen reuses the entity object).
+      if (entity.type === EntityType.STRUCTURE) {
+          if (entity.deathDispatched === true) return;
+          entity.deathDispatched = true;
+      }
+      const death = entity.isExploding ? { fx: null, sfx: null } : this.deathFx(entity);
+      if (death.sfx) {
+          // AMBIENT shard breaks (shard-on-shard, shard-on-tile) are
+          // near-field by default so a dense field doesn't chatter from
+          // events the player is not part of.  A break the PLAYER caused —
+          // shot, rammed, chained or splashed, all of which stamp
+          // killedByPlayer — is theirs to hear, so it overrides back to the
+          // normal radius.  The flag is still live here: the scoring branch
+          // that consumes it runs further down.
+          const mine = entity.killedByPlayer === true;
+          this.audio.play(death.sfx, mine
+              ? { x: entity.position.x, y: entity.position.y,
+                  near: AUDIO_CONSTANTS.NEAR_RADIUS, far: AUDIO_CONSTANTS.FAR_RADIUS }
+              : { x: entity.position.x, y: entity.position.y });
+      }
       // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
       // not the normal enemy explosion/shard/drop path.
       if (entity.enemySubtype === EnemySubtype.DRAGON && !entity.isExploding) {
           const inst = this.dragons.find(g => g.head === entity);
-          if (inst) { this.dragonDeath(inst); return; }
+          if (inst) { dragonDeath(this, inst); return; }
       }
       // A body segment shot off: sever the tail + dissolve it (no regen/drops).
-      if (entity.dragonSegment === true) { this.dragonSegmentDeath(entity); return; }
+      if (entity.dragonSegment === true) { dragonSegmentDeath(this, entity); return; }
       // Score before startExplosion flips isExploding — the flag doubles
       // as the already-scored guard if a second death dispatch slips in.
       // Survivors retired at time-up never reach this path (WaveSystem
@@ -2522,7 +3134,13 @@ export class GameEngine {
       // like one.  A rival-stolen kill pays the player nothing, same rule.
       if (entity.isBoss === true && entity.type === EntityType.ENEMY
           && !entity.isExploding && !entity.killedByRival) {
-          this.payBossBounty(entity);
+          payBossBounty(this, entity);
+      }
+      // A rival stole this kill — a small, pointed, deflating sting.  The
+      // sound is the ONLY immediate signal the player was robbed, since
+      // the points popup simply never appears.
+      if (entity.type === EntityType.ENEMY && !entity.isExploding && entity.killedByRival) {
+          this.audio.play('rival.steal', { x: entity.position.x, y: entity.position.y });
       }
       if (entity.type === EntityType.ENEMY && !entity.isExploding && !entity.killedByRival) {
           // Ship kills build the combo and are paid at the resulting
@@ -2564,7 +3182,7 @@ export class GameEngine {
               ownerId: entity.id, // a caught bubble blames the bomber (Stage 5)
               excludeIds: ['player'],
           });
-          this.applyKamikazeBlastToPlayer(entity);
+          applyKamikazeBlastToPlayer(this, entity);
           // Heavy screen punch — the detonation should feel like a real blast.
           this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
       }
@@ -2599,7 +3217,12 @@ export class GameEngine {
               entity.killedByPlayer = undefined;
               if (!isNebula) {
                   const points = isStaticTile
-                      ? SCORE_CONSTANTS.TILE_DESTROY_POINTS_PER_HP * Math.max(1, Math.round(entity.maxHealth))
+                      // authoredMaxHealth, not maxHealth: the grain model (V15)
+                      // rewrites maxHealth to the DERIVED boundary total, and
+                      // paying per derived HP would price a tile by how finely
+                      // it happened to decompose.
+                      ? SCORE_CONSTANTS.TILE_DESTROY_POINTS_PER_HP
+                          * Math.max(1, Math.round(entity.authoredMaxHealth ?? entity.maxHealth))
                       : SCORE_CONSTANTS.SHARD_DESTROY_POINTS;
                   this.awardScore(points, entity.position);
               }
@@ -2629,8 +3252,23 @@ export class GameEngine {
           //   only there for the HP-per-hit / no-visible-deform
           //   contract.
           const dent = SHARD_VARIANTS[variant].dent;
-          const isDentSpawn = dent !== undefined && dent.breakShards.length > 0;
-          if (this.currentMap && variant !== 'glass-tile' && !isDentSpawn) {
+          // Voronoi opt-outs of the dent-spawn detour (voronoi gauntlet,
+          // V2): a dent variant whose shatter.kind is 'voronoi' routes to
+          // ShardSystem.shatter like any other — under the DBG 'legacy'
+          // A/B the flag flips back and breakShards spawn as before.
+          // DropSystem.spawnDrops carries the SAME guard on its
+          // spawnDentShard call, so the two paths never double-spawn.
+          const voronoiShatter = SHARD_VARIANTS[variant].shatter.kind === 'voronoi'
+              && getActiveFractureMode() === 'voronoi';
+          const isDentSpawn = dent !== undefined && dent.breakShards.length > 0
+              && !voronoiShatter;
+          // glass-tile's legacy debris comes from spawnGlassShards (via
+          // spawnDrops), so it skips shatter — EXCEPT under voronoi (V5),
+          // where its death breaks it into its own cells and the
+          // spawnGlassShards call stands down (mirrored gate in
+          // DropSystem.spawnDrops).
+          if (this.currentMap && (variant !== 'glass-tile' || voronoiShatter)
+              && !isDentSpawn) {
               this.shards.shatter(entity, this.currentMap.entities);
           }
 
@@ -2751,69 +3389,28 @@ export class GameEngine {
           }
       }
 
-      // Death burst particles — size/color tuned per entity type
-      if (entity.type === EntityType.ENEMY) {
-          const ec = entity.color || '#f87171';
-          const r = Math.max(entity.size.x, entity.size.y);
-          // Tiny pop-on-contact gnats (Swarm) die in bulk, so they get a
-          // deliberately LIGHT burst — one small ring + a few sparks, no screen
-          // shake — to avoid particle/shake spam when a cloud goes down at once.
-          if (entity.diesOnContact) {
-              this.spawnShockwave(entity.position, { radius: r * 1.6, damage: 0, knockback: 0, color: ec, lifetime: 0.2 });
-              this.spawnParticles(entity.position, 5, ec, {
-                  speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3,
-                  lifetimeMin: 0.18, lifetimeMax: 0.4,
-              });
-          } else {
-              // Expanding shockwave ring (visual only) — a satisfying pop sized
-              // to the enemy; bigger enemies pop bigger.
-              this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
-              this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
-              // Big colored debris burst + white core flash.  (Counts trimmed
-              // ~40 % — Tier 2b — so a mass death spawns fewer particles; the
-              // pop still reads at MAX_PARTICLES-bounded density.)
-              this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), ec, {
-                  speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
-                  lifetimeMin: 0.3, lifetimeMax: 0.7,
-              });
-              this.spawnParticles(entity.position, 5, '#ffffff', {
-                  speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
-                  lifetimeMin: 0.15, lifetimeMax: 0.35,
-              });
-              // Small tier-scaled screen punch (respects the DBG shake toggle).
-              this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
+      // Death burst — differentiated per entity class by EXPLOSION_PROFILES
+      // (roadmap step (b)).  Before this, every enemy died the same way
+      // tinted by its colour, so a gnat, a tank and a bomber were one event
+      // at three sizes; a profile varies ring shape, debris count/speed/
+      // size/lifetime, an accent hue and the screen punch.  The profile was
+      // chosen by the SAME lookup that picked the sound above.
+      //
+      // Classes with a deliberate NON-burst keep it: plastic has never
+      // sparked on death, and nebulae fade out via mergeFadeTimer in the
+      // renderer.  Both resolve to a null profile rather than a special
+      // case here.
+      if (death.fx) {
+          this.playDeathFx(entity, death.fx);
+          // Enemy hulls additionally scale their punch by tier, as before.
+          if (entity.type === EntityType.ENEMY && death.fx.shake > 0) {
+              this.handleScreenShake((entity.enemyTier ?? 1));
           }
-      } else if (entity.type === EntityType.PLAYER) {
-          // Cyan energy explosion
-          this.spawnParticles(entity.position, 12, '#38bdf8', {
-              speedMin: 4, speedMax: 12, sizeMin: 1.5, sizeMax: 3,
-              lifetimeMin: 0.3, lifetimeMax: 0.6,
-          });
-          this.spawnParticles(entity.position, 6, '#ffffff', {
-              speedMin: 6, speedMax: 16, sizeMin: 1, sizeMax: 2,
-              lifetimeMin: 0.15, lifetimeMax: 0.3,
-          });
-      } else if (variant === 'rock-shard' || variant === 'glass-shard') {
-          // Small shard break — quick dusty puff.  Tile-shards
-          // (glass-shard) puff the parent's tile colour; rock-shards
-          // puff slate.  Stage 5: drives off shardVariant instead of
-          // shardType so it works for both legacy ASTEROID-typed
-          // entities and post-collapse STRUCTURE-typed shards.
-          const breakColor = variant === 'glass-shard'
-            ? (entity.color || '#6366f1')
-            : '#94a3b8';
-          this.spawnParticles(entity.position, 4, breakColor, {
-              speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
-              lifetimeMin: 0.15, lifetimeMax: 0.35,
-          });
-      } else if (variant === 'plastic-tile' || variant === 'plastic-shard') {
-          // Plastic intentionally emits no death spark burst.
-      } else if (isNebula) {
-          // Nebulae fade out gracefully via mergeFadeTimer in the
-          // renderer — no spark burst on destruction.  Merge/transmute
-          // events emit a subtle glimmer instead (see NebulaSystem).
-      } else {
-          // Generic fallback (structures, misc)
+      } else if (entity.type !== EntityType.PLAYER
+                 && entity.type !== EntityType.ENEMY
+                 && !isShardFamily) {
+          // Generic fallback for anything outside the classification
+          // (misc structures) — unchanged from before.
           const numParticles = 4 + Math.floor(Math.random() * 3);
           const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
           this.spawnParticles(entity.position, numParticles, entity.color || '#facc15', {
@@ -2830,7 +3427,36 @@ export class GameEngine {
       }
   };
 
-  private handleAsteroidRespawn(config: any) {
+  /** Something too big to fit crossed a rift's centre and was flung back out
+   *  (PhysicsSystem.applyGravity).  The physics is done by the time this
+   *  runs; this is only the WEIGHT of it — a shake scaled by how big the
+   *  thing was, so a boulder ploughing through reads as heavier than a shard
+   *  clipping the edge.
+   *
+   *  There are deliberately NO SPARKS (user call).  It fired a rift-coloured
+   *  spray, which is the vocabulary of a COLLISION — and nothing collided:
+   *  the rock never touched anything, it was too big to fit down the hole and
+   *  the well threw it back.  Debris flying off it says it hit something
+   *  solid, which is the one reading a wormhole must not give.  Same argument
+   *  as stripping the idle rift to a bare disc: the ornament was saying
+   *  something the mechanic does not mean.
+   *
+   *  Shake is distance-gated by the existing camera falloff rather than by a
+   *  check here: `handleScreenShake` is the one funnel every impact in the
+   *  game already goes through with magnitudes tuned against each other, so
+   *  this joins it rather than inventing a second scale. */
+  private handlePortalEject = (entity: GameEntity) => {
+      const radius = Math.max(entity.size.x, entity.size.y) * 0.5;
+      // Only worth a lurch if it happened near enough to see; the camera's
+      // own falloff does the rest.
+      const dx = wrapDeltaX(this.player.position.x, entity.position.x);
+      const dy = wrapDeltaY(this.player.position.y, entity.position.y);
+      if (dx * dx + dy * dy < 900 * 900) {
+          this.handleScreenShake(Math.min(6, radius * 0.12));
+      }
+  };
+
+  private handleRockShardRespawn(config: any) {
       // Collect POIs once outside the placement-attempt loop.
       const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
       for (let i=0; i<5; i++) {
@@ -2850,7 +3476,7 @@ export class GameEngine {
           }
 
           if (safe && this.currentMap) {
-               const newAst = this.currentMap.createAsteroid(x, y,
+               const newAst = this.currentMap.createRockShard(x, y,
                   config.minSize + Math.random() * (config.maxSize - config.minSize),
                   config.speedMultiplier
                );
@@ -2918,6 +3544,18 @@ export class GameEngine {
         if (this.shakeTimer <= 0) {
             this.camera.shakeOffset.x = 0;
             this.camera.shakeOffset.y = 0;
+        } else if (this.shakeDirX !== 0 || this.shakeDirY !== 0) {
+            // DIRECTIONAL: lurch along the impact axis and ring back, rather
+            // than shiver.  cos() starts at 1, so the first frame is the
+            // hardest push and it is along the direction the ship was shoved
+            // — the camera moves with the hit instead of vibrating about it.
+            const S = COLLISION_CONFIG.SHAKE;
+            const elapsed = CAMERA_CONSTANTS.SHAKE_DECAY - this.shakeTimer;
+            const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
+            const along = mag * osc;
+            const jitter = mag * S.DIR_JITTER;
+            this.camera.shakeOffset.x = this.shakeDirX * along + (Math.random() - 0.5) * jitter;
+            this.camera.shakeOffset.y = this.shakeDirY * along + (Math.random() - 0.5) * jitter;
         } else {
             this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
             this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;
@@ -2987,20 +3625,20 @@ export class GameEngine {
 
     // Stage 5: bubbles form/tick player latches and split when fat.  Runs
     // BEFORE updateAttachments so a latch formed this step snaps the same frame.
-    this.updateBubbles(dt);
+    updateBubbles(this, dt);
     // Ambient fauna: keep the always-present bubble population topped up.
-    this.maintainAmbientBubbles(dt);
+    maintainAmbientBubbles(this, dt);
 
     // Stage 3 reusable mechanics: snap grapples to their targets, and run the
     // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
     // attachedToId / consume (Stage 4/5/6).
-    this.updateAttachments();
-    if (this.perfController.shouldRun('consume')) this.updateConsumers(dt);
+    updateAttachments(this);
+    if (this.perfController.shouldRun('consume')) updateConsumers(this, dt);
 
     // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
     // pass, so a phase that raises an escort brood arms its timer on the same
     // step it is entered.  Also ticks the timed shop-discount window.
-    this.updateBosses(dt);
+    updateBosses(this, dt);
     // (h) regen trait: tick the burst buckets and heal.  Not boss-only — any
     // enemy carrying the trait is served here.
     this.updateEnemyRegen(dt);
@@ -3009,7 +3647,7 @@ export class GameEngine {
     this.updateNests(dt);
 
     const tRings = performance.now();
-    this.updateExplosionRings();
+    updateExplosionRings(this);
     this.lastExplosionRingsMs = performance.now() - tRings;
 
     // Death handling
@@ -3018,6 +3656,9 @@ export class GameEngine {
     }
 
     if (this.player.isExploding) {
+        // Cut the engine with the ship — this branch returns early, so the
+        // idle bed would otherwise hum right through the death explosion.
+        this.audio.loop('move.thrust', false);
         // `> 0` is load-bearing, not defensive: the sim keeps running after
         // death now, so without it this branch would re-fire (and re-charge
         // the penalty) on every subsequent step.
@@ -3075,9 +3716,9 @@ export class GameEngine {
 
     // Snitch tick — spawn for a fresh wave, steer along the flow field,
     // run the catch check (collide / shoot per the DBG toggle).
-    this.updateSnitch(dt);
-    this.updateDragons(dt);
-    this.updateRivals(dt);
+    updateSnitch(this, dt);
+    updateDragons(this, dt);
+    updateRivals(this, dt);
 
     // Station docking + portal travel — a handful of O(1) torus-wrapped
     // distances to fixed POI points + the shared E-key edge check.  No
@@ -3085,6 +3726,7 @@ export class GameEngine {
     // in place from here; everything below re-reads `currentMap`, so the
     // rest of this step runs against the destination.
     this.updateInteractables();
+    this.updatePortalTransit(dt);
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
     // leaves (the timer re-arms while a dragon is up).
@@ -3095,7 +3737,7 @@ export class GameEngine {
             this.overworldDragonTimer -= dt;
             if (this.overworldDragonTimer <= 0) {
                 const types: (StructureVariant | 'mixed')[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
-                this.spawnDragon(types[Math.floor(Math.random() * types.length)]);
+                spawnDragon(this, types[Math.floor(Math.random() * types.length)]);
                 this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
             }
         }
@@ -3115,6 +3757,20 @@ export class GameEngine {
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
     const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult() * this.moduleThrustMult;
     const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult() * this.moduleSpeedMult;
+    // Cached for the thrust trigger's resistance, which reports how close the
+    // ship is to its cap.  Read here rather than recomputed, so the number the
+    // hand feels is the number the sim is enforcing.
+    this.lastMaxSpeed = maxSpeed;
+    // The ship's actual TERMINAL speed under held thrust: each 60Hz tick the
+    // movement below adds `acc` and PhysicsSystem multiplies by the per-map
+    // friction f, so speed settles at acc·f/(1−f) — about a THIRD of the cap
+    // on the shipped tuning (the cap only matters for knockback overshoot).
+    // Cached for the tilt code, which normalises every velocity read by what
+    // the ship can actually REACH: dividing by the cap ran the slip term, the
+    // centripetal gate and the whole Velocity tilt source ~3× too weak
+    // (user report: "velocity effects are very weak or not showing").
+    const fr = moveConfig ? moveConfig.friction : PHYSICS_CONSTANTS.FRICTION;
+    this.lastCruiseSpeed = Math.min(maxSpeed, (acc * fr) / Math.max(1e-6, 1 - fr));
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -3155,6 +3811,12 @@ export class GameEngine {
     // the same per-second emission count as full throttle, keeping
     // consecutive points (and PATH-shape segments) close together at
     // low throttle instead of stretching out into long choppy strokes.
+    // Engine rumble (SFX_INVENTORY §6).  ALWAYS ON while alive — the loop
+    // idles and the throttle swells it, rather than the whole bed snapping
+    // on and off with the input.  Flat rather than positional: it is the
+    // player's own ship.
+    this.audio.loop('move.thrust', true, { param: Math.min(1, throttle) });
+
     if (throttle > 0) {
         // Latch a chain break the first frame thrust resumes.  Stays set
         // through subsequent substeps / frames until an emission consumes
@@ -3222,12 +3884,14 @@ export class GameEngine {
     const cy = window.innerHeight / 2;
     this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
 
+    // Banking roll — after the rotation update so the lateral decomposition
+    // reads this step's facing, not last step's.
+    this.tickPlayerRoll(dt, moveDir);
+
     const fireEvents = this.input.getFireEvents();
     fireEvents.forEach(evt => {
-        const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
-        const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
-        const mapX = MARGIN;
-        const mapY = window.innerHeight - currentSize - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN;
+        const { x: mapX, y: mapY, size: currentSize } =
+            computeMinimapRect(window.innerHeight, this.minimapExpanded);
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
@@ -3255,7 +3919,12 @@ export class GameEngine {
             }
         }
 
-        if (!this.minimapExpanded) {
+        // Whether a TAP is a shot is the scheme's call (G9): under the
+        // joystick scheme shooting is the fire button's job, and a tap that
+        // both aims and fires cannot coexist with a thumb that drags to aim.
+        // The tap still reached the minimap toggle, the loadout slots and
+        // `claimTapNear` above — those are not weapons.
+        if (!this.minimapExpanded && this.input.tapFires()) {
             this.handleShooting(evt, false);
         }
     });
@@ -3264,23 +3933,75 @@ export class GameEngine {
     // released.  Fire a charged shot.
     const chargeReleaseEvents = this.input.getChargeReleaseEvents();
     chargeReleaseEvents.forEach(evt => {
-        if (!this.minimapExpanded) {
+        if (!this.minimapExpanded && this.input.tapFires()) {
             this.handleShooting(evt, true);
         }
     });
 
+    // DEVICE shots — the onscreen fire button and the pad's trigger.  These
+    // bypass the tap handler entirely (see InputSystem.getDeviceFireEvents):
+    // a synthesised shot is aimed at the world, so it must not be offered to
+    // the HUD widgets a real tap would hit on the way past.  The expanded
+    // minimap does not block them either — the player pressed a weapon
+    // control, not the map.
+    const deviceFires = this.input.getDeviceFireEvents();
+    for (let i = 0; i < deviceFires.length; i++) this.handleShooting(deviceFires[i], false);
+    const deviceCharges = this.input.getDeviceChargeEvents();
+    for (let i = 0; i < deviceCharges.length; i++) this.handleShooting(deviceCharges[i], true);
+
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
+    const prevCharge = this.player.chargeProgress ?? 0;
     this.player.chargeProgress = (this.player.overchargeUnlocked && this.player.currentWeapon !== undefined && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
+    // Charge audio (SFX_INVENTORY §4.1): the whine TRACKS progress, so the
+    // player can charge without watching their own ship, and a bell ping
+    // marks the moment the shot arms.  `loop` is idempotent both ways, so
+    // firing it every step with a live predicate is the intended usage.
+    this.audio.loop('weapon.charge.loop', this.player.chargeProgress > 0,
+                    { param: this.player.chargeProgress });
+    if (this.player.chargeProgress >= 1 && prevCharge < 1) this.audio.play('weapon.charge.ready');
+
+    // Adaptive triggers follow the SAME state the charge ring does, which is
+    // why the sync sits here rather than on the weapon-change path: what the
+    // trigger should feel like is a function of what the player is holding
+    // RIGHT NOW, and "charging" is a state no weapon-change event fires for.
+    // Three cases, in order of precedence: nothing to fire (no gun, or EMP'd
+    // — the trigger goes slack, which is the disable made physical), winding
+    // up a charged shot (a hard wall), or the equipped gun's own profile.
+    // The call is a struct compare when nothing changed; it is a no-op
+    // entirely unless the player has opted into WebHID.
+    const thrustScheme = this.input.usesTriggerThrust();
+    this.input.setTriggerProfile(
+      // Under trigger-thrust the RIGHT trigger is a throttle too, so a weapon
+      // profile on it would be describing a control the player is not using.
+      thrustScheme ? THRUST_TRIGGER(this.playerSpeedFraction())
+      // ...and where the gun has moved to a FACE button (`gamepad-left`) the
+      // trigger is not the gun either, so it goes slack rather than
+      // resisting for a control that fires nothing.
+      : this.input.usesFaceFire() ? TRIGGER_OFF
+      : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
+      : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
+      : WEAPON_TRIGGERS[this.player.currentWeapon]);
+
+    // The LEFT trigger is the throttle under the trigger-thrust scheme, and
+    // its resistance reports what the engine is doing: it stiffens as the
+    // ship approaches its top speed, so "already flat out" is something the
+    // hand knows without reading the HUD.  Released under every other scheme
+    // — a clutch on a control that does nothing is just a stiff trigger.
+    this.input.setThrustTriggerProfile(
+      thrustScheme && !this.player.isExploding
+        ? THRUST_TRIGGER(this.playerSpeedFraction())
+        : TRIGGER_OFF);
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
     // EMP-disabled (Stage 3c) so an in-flight burst halts too.
     const tWeapons = performance.now();
     if (this.currentMap && !this.player.systemsDisabled) {
-        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
+        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt,
+                                     this.handleScreenShake, this.playWeaponSfx);
     }
     this.lastWeaponsMs = performance.now() - tWeapons;
 
@@ -3416,7 +4137,7 @@ export class GameEngine {
   // ── Particle helpers ────────────────────────────────────────────────────────
 
   // Thin wrapper kept for call-site compatibility — delegates to ParticleSystem.
-  private spawnParticles(
+  spawnParticles(
     position: Vector2,
     count: number,
     color: string,
@@ -3440,7 +4161,33 @@ export class GameEngine {
     this.particles.spawnGlitterTrail(this.currentMap.entities, this.player);
   }
 
+  /** Shard variant → its material's impact / destruction SFX suffix.  One
+   *  table drives both `impact.tile.*` and `destroy.tile.*`/`destroy.shard.*`
+   *  so a material can never sound like one thing when chipped and another
+   *  when broken. */
+  private static readonly MATERIAL_SFX: Record<string, string> = {
+      'glass-tile': 'glass', 'glass-shard': 'glass',
+      'rock-tile': 'rock',   'rock-shard': 'rock',
+      'metal-tile': 'metal', 'metal-shard': 'metal',
+      'plastic-tile': 'plastic', 'plastic-shard': 'plastic',
+      'nebula-tile': 'nebula',   'nebula-shard': 'nebula',
+      // Indestructible tiles never die, but they DO get shot at.
+      'indestructible-tile': 'metal',
+  };
+
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
+    // Impact audio (SFX_INVENTORY §4.3).  This handler already switches on
+    // target class and shard variant for the particle layer, so the sound
+    // rides the same dispatch — audio and visual land as one beat.
+    if (target.type === EntityType.ENEMY) {
+        this.audio.play('impact.hull.enemy', { x: impactPos.x, y: impactPos.y });
+    } else if (target.type === EntityType.PLAYER) {
+        this.audio.play('impact.hull.player', { x: impactPos.x, y: impactPos.y });
+    } else if (target.type === EntityType.STRUCTURE) {
+        const mat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+        if (mat) this.audio.play(`impact.tile.${mat}`, { x: impactPos.x, y: impactPos.y });
+    }
+
     // Status-effect rounds (e.g. corrosion) debuff the player on hit.
     if (proj.appliesEffect && target.type === EntityType.PLAYER && !target.isExploding) {
       this.applyStatusEffect(target, proj.appliesEffect);
@@ -3525,7 +4272,7 @@ export class GameEngine {
     // proj.explosionDamage and a knockback impulse.  Direct-hit target
     // is excluded (it already took config.damage in PhysicsSystem).
     if (proj.explosionRadius && proj.explosionRadius > 0) {
-        this.applyExplosionAoE(impactPos, proj, target);
+        applyExplosionAoE(this, impactPos, proj, target);
     }
   };
 
@@ -3533,103 +4280,12 @@ export class GameEngine {
 
   // Movement multipliers from ACTIVE engine/thruster modules — read in the
   // per-frame movement line alongside the DBG thrust/speed cycles.
-  private moduleSpeedMult = 1;
-  private moduleThrustMult = 1;
+  moduleSpeedMult = 1;
+  moduleThrustMult = 1;
   // Total SHIP weight (hull + every active module).  A first-class ship
   // attribute — the acceleration curve reads it, and the Ship Status panel
   // reports it as its own stat rather than blaming individual guns.
-  private shipWeight = SHIP_WEIGHT.HULL_BASE;
-
-  /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
-   *  when its family has no requirement (hull / gun roots) or it touches
-   *  an ACTIVE module of its required family (HEX_ADJACENCY).  Chains
-   *  resolve naturally: thrusters need a LIVE engine, which needs a hull. */
-  private computeActiveSlots(slots: (string | null)[], out: boolean[]) {
-      for (let i = 0; i < out.length; i++) {
-          const id = slots[i];
-          const def = id !== null ? moduleDef(id) : undefined;
-          out[i] = def !== undefined && MODULE_REQUIREMENTS[def.family] === undefined;
-      }
-      let changed = true;
-      while (changed) {
-          changed = false;
-          for (let i = 0; i < slots.length; i++) {
-              const id = slots[i];
-              if (id === null || out[i]) continue;
-              const req = MODULE_REQUIREMENTS[moduleDef(id)!.family];
-              if (!req) continue;
-              for (const n of HEX_ADJACENCY[i]) {
-                  const nid = slots[n];
-                  if (nid !== null && out[n] && req.includes(moduleDef(nid)!.family)) {
-                      out[i] = true;
-                      changed = true;
-                      break;
-                  }
-              }
-          }
-      }
-  }
-
-  /** Recompute module activity (adjacency fixpoint) and fold the summed
-   *  effects of every ACTIVE module into the player's stats.  Called at
-   *  construction, on any outfit change, and on run reset.  Hull heals
-   *  the HP it adds so a purchase is felt immediately. */
-  private applyModuleEffects() {
-      this.computeActiveSlots(this.shipSlots, this.activeShip);
-      this.computeActiveSlots(this.weaponSlots, this.activeWeapon);
-      let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
-      let shieldCore = false, overcharge = false;
-      // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
-      // module's weight is a contribution to the SHIP's attribute, not an
-      // effect the module has on acceleration — see SHIP_WEIGHT.
-      let shipWeight = SHIP_WEIGHT.HULL_BASE;
-      const fold = (slots: (string | null)[], active: boolean[]) => {
-          for (let i = 0; i < slots.length; i++) {
-              const id = slots[i];
-              if (id === null || !active[i]) continue;
-              const d = moduleDef(id);
-              shipWeight += d?.weight ?? 0;
-              const e = d?.effect;
-              if (!e) continue;
-              maxHp += e.maxHp ?? 0;
-              maxShield += e.maxShield ?? 0;
-              regen += e.shieldRegenFrac ?? 0;
-              speed += e.speedFrac ?? 0;
-              accel += e.accelFrac ?? 0;
-              dmg += e.damageFrac ?? 0;
-              cool += e.cooldownFrac ?? 0;
-              if (e.shieldCore) shieldCore = true;
-              if (e.overcharge) overcharge = true;
-          }
-      };
-      fold(this.shipSlots, this.activeShip);
-      fold(this.weaponSlots, this.activeWeapon);
-      this.moduleSpeedMult = 1 + speed;
-      // Ship weight: flying light is faster — an unladen ship earns the
-      // BASE_BOOST, a heavy one drags (Blaster-only ≈ the 1.0 baseline).
-      this.shipWeight = shipWeight;
-      this.moduleThrustMult = (1 + accel)
-          * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));
-      // Weight is PHYSICAL too (user call): the player's collision mass scales
-      // with it, so PhysicsSystem's impulse solver (which divides by mass)
-      // shoves a heavy ship less and lets it plow through debris, while a
-      // stripped hull gets knocked around.  Normalised so the LEAN loadout is
-      // exactly the old constant — no change to the feel a run starts with.
-      this.player.mass = PHYSICS_CONSTANTS.PLAYER_MASS
-          * ((SHIP_WEIGHT.MASS_BASE + shipWeight)
-             / (SHIP_WEIGHT.MASS_BASE + SHIP_WEIGHT.MASS_REFERENCE));
-      const newMaxHp = 100 + maxHp;
-      const hpDelta = newMaxHp - this.player.maxHealth;
-      this.player.maxHealth = newMaxHp;
-      if (hpDelta > 0) this.player.health = Math.min(newMaxHp, this.player.health + hpDelta);
-      // Shield exists only while a shield CORE is active; plating adds on top.
-      this.player.maxShield = shieldCore ? SHIELD_CONSTANTS.MAX_CHARGE + maxShield : 0;
-      if ((this.player.shield ?? 0) > this.player.maxShield) this.player.shield = this.player.maxShield;
-      this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE * (1 + regen);
-      this.player.damageMult = 1 + dmg;
-      this.player.cooldownMult = Math.max(COOLDOWN_FLOOR, 1 - cool);
-      this.player.overchargeUnlocked = overcharge;
-  }
+  shipWeight = SHIP_WEIGHT.HULL_BASE;
 
   // ── DBG module grants ───────────────────────────────────────────────────
 
@@ -3643,7 +4299,7 @@ export class GameEngine {
       const inv = this.inventory.indexOf(null);
       if (inv === -1) return;
       this.inventory[inv] = id;
-      const free = this.firstFreeSlotFor(def);
+      const free = firstFreeSlotFor(this, def);
       if (free !== -1) this.moveModuleInternal({ area: 'inventory', idx: inv }, { area: def.group, idx: free });
   }
 
@@ -3671,7 +4327,7 @@ export class GameEngine {
       this.weaponSlots[4] = 'overcharge';
       const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
-      this.syncLoadoutFromSlots();
+      syncLoadoutFromSlots(this);
       this.player.shield = this.player.maxShield ?? 0;
   }
 
@@ -3686,7 +4342,7 @@ export class GameEngine {
       this.weaponSlots[0] = 'wpn_blaster';
       this.player.currentWeapon = WeaponType.BLASTER;
       this.currentWeaponIndex = 0;
-      this.syncLoadoutFromSlots();
+      syncLoadoutFromSlots(this);
   }
 
   /** DBG: grant Salvage for testing the shop. */
@@ -3696,8 +4352,19 @@ export class GameEngine {
 
   /** Apply (or refresh + stack) a status effect on an entity (the player
    *  today).  Re-hits add a stack up to maxStacks and refresh the timer. */
-  private applyStatusEffect(target: GameEntity, payload: EffectPayload) {
+  applyStatusEffect(target: GameEntity, payload: EffectPayload) {
     const list = target.statusEffects ?? (target.statusEffects = []);
+    // Corrosion steps a semitone per stack so three stacks are audible AS
+    // three; the EMP's power-down is the warning that fire is about to do
+    // nothing (SFX_INVENTORY §8.2).
+    if (target.type === EntityType.PLAYER) {
+      const stacks = (list.find(e => e.kind === payload.kind)?.stacks ?? 0) + 1;
+      if (payload.kind === 'corrosion') {
+        this.audio.play('status.corrosion.apply', { pitch: Math.pow(2, (stacks - 1) / 12) });
+      } else {
+        this.audio.play('status.disable.apply');
+      }
+    }
     const existing = list.find(e => e.kind === payload.kind);
     if (existing) {
       existing.stacks = Math.min(payload.maxStacks, existing.stacks + 1);
@@ -3720,7 +4387,13 @@ export class GameEngine {
     // early-out so it can't stick after the effect lapses.
     this.player.systemsDisabled = false;
     const list = this.player.statusEffects;
-    if (!list || list.length === 0) return;
+    if (!list || list.length === 0) {
+      // Nothing active: make sure the EMP dead-air loop is down.  The
+      // recovery rise is played by the splice below, once per effect, so
+      // it is deliberately NOT repeated here.
+      this.audio.loop('status.disable.loop', false);
+      return;
+    }
     let acidParticle = false;
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
@@ -3733,8 +4406,12 @@ export class GameEngine {
         this.player.systemsDisabled = true;
       }
       e.remaining -= dt;
-      if (e.remaining <= 0) list.splice(i, 1);
+      if (e.remaining <= 0) { list.splice(i, 1); this.audio.play('status.expire'); }
     }
+    // Dead-air hum while EMP'd — the audible half of "your systems are
+    // off".  Idempotent, so driving it from the live flag each tick is the
+    // intended usage.
+    this.audio.loop('status.disable.loop', this.player.systemsDisabled === true);
     // Occasional acid drip on the ship while corroding (throttled).
     if (acidParticle && Math.random() < 0.4) {
       this.spawnParticles(this.player.position, 1, CORROSION.COLOR, {
@@ -3779,27 +4456,37 @@ export class GameEngine {
 
     let station: GameEntity | null = null;
     let stationD2 = Infinity;
+    // Nearest station at ANY distance — drives the presence loop, which
+    // should swell on approach rather than switch on at the dock range.
+    let nearestStationAny: GameEntity | null = null;
+    let nearestStationAnyD2 = Infinity;
     const dockR2 = STATION_CONSTANTS.DOCK_RANGE * STATION_CONSTANTS.DOCK_RANGE;
     for (let i = 0; i < this.stations.length; i++) {
         const s = this.stations[i];
         s.stationDockReady = false;
-        if (!s.active || blocked) continue;
+        if (!s.active) continue;
         const dx = wrapDeltaX(s.position.x, this.player.position.x);
         const dy = wrapDeltaY(s.position.y, this.player.position.y);
         const d2 = dx * dx + dy * dy;
+        if (d2 < nearestStationAnyD2) { nearestStationAny = s; nearestStationAnyD2 = d2; }
+        if (blocked) continue;
         if (d2 <= dockR2 && d2 < stationD2) { station = s; stationD2 = d2; }
     }
 
     let portal: GameEntity | null = null;
     let portalD2 = Infinity;
+    let nearestPortalAny: GameEntity | null = null;
+    let nearestPortalAnyD2 = Infinity;
     const useR2 = PORTAL_CONSTANTS.USE_RANGE * PORTAL_CONSTANTS.USE_RANGE;
     for (let i = 0; i < this.portals.length; i++) {
         const p = this.portals[i];
         p.portalReady = false;
-        if (!p.active || blocked) continue;
+        if (!p.active) continue;
         const dx = wrapDeltaX(p.position.x, this.player.position.x);
         const dy = wrapDeltaY(p.position.y, this.player.position.y);
         const d2 = dx * dx + dy * dy;
+        if (d2 < nearestPortalAnyD2) { nearestPortalAny = p; nearestPortalAnyD2 = d2; }
+        if (blocked) continue;
         if (d2 <= useR2 && d2 < portalD2) { portal = p; portalD2 = d2; }
     }
 
@@ -3810,6 +4497,21 @@ export class GameEngine {
     }
     this.nearestStation = station;
     this.nearestPortal = portal;
+    // POI presence loops.  Driven by the NEAREST portal / station at any
+    // distance, so the volume swells as the player approaches instead of
+    // snapping on at the interaction range; the per-sound radii do the
+    // falloff.  One loop per id, so with four rifts on the Overworld the
+    // nearest one owns the voice.  Deliberately different characters —
+    // the portal is a tonal hum, the station a broadband bed — so the two
+    // are tellable apart without looking.
+    this.audio.loop('portal.idle', nearestPortalAny !== null,
+                    nearestPortalAny
+                      ? { x: nearestPortalAny.position.x, y: nearestPortalAny.position.y }
+                      : undefined);
+    this.audio.loop('poi.station.idle', nearestStationAny !== null,
+                    nearestStationAny
+                      ? { x: nearestStationAny.position.x, y: nearestStationAny.position.y }
+                      : undefined);
     this.dockInRange = station !== null;
     if (station) station.stationDockReady = true;
     if (portal) portal.portalReady = true;
@@ -3823,10 +4525,10 @@ export class GameEngine {
     // actually in range, so tapping the ship in open space still shoots.
     // E stays as the keyboard equivalent.
     //
-    // A CONTROLLER button is the third path the user asked for; it is
-    // deliberately NOT wired here because Pair C (c2) owns the gamepad layer
-    // in InputSystem, and adding a second polling path would collide with it.
-    // When c2 lands, OR its button into `selected` below — nothing else moves.
+    // A CONTROLLER button is the third path, and c2 wired it exactly as the
+    // hole was left: the pad polls ONCE per frame in GameEngine.pollGamepad
+    // and latches an edge, which is OR'd into `selected` below.  Nothing else
+    // moved — no second polling path, no second arbitration.
     // Prompt AT the ship — the control lives there now, so the instruction
     // does too.  Cleared whenever nothing is in range.
     this.player.interactPrompt = portal
@@ -3836,8 +4538,22 @@ export class GameEngine {
         : station ? 'TAP SHIP TO DOCK'
         : undefined;
 
+    // Drained EVERY step, spent only when something is in range: a press in
+    // open space is a press in open space, not a charge banked against the
+    // next station you happen to fly past.  (The tap path gets this for free —
+    // `claimTapNear` is only called while in range, and an unclaimed tap just
+    // shoots.)
+    const padInteract = this.input.consumeInteractPress();
+
     let selected = false;
-    if (station || portal) {
+    // The FLASHLIGHT TOOL rides the same gesture as the dock/portal, as the
+    // fallback: with the kit installed, a ship-tap (or E, or the pad's
+    // action button) in OPEN SPACE cycles the light.  Claiming the tap here
+    // means a tap on the ship no longer fires a stray shot at your own hull
+    // while the kit is aboard — which is the affordance the user asked for
+    // ("turned on and off by touching the player ship").  Without the kit,
+    // open-space behaviour is unchanged (the tap still shoots).
+    if (station || portal || this.flashlightEquipped) {
         const screen = this.renderer.worldToScreen(this.camera, this.player.position);
         if (screen) {
             selected = this.input.claimTapNear(
@@ -3845,11 +4561,13 @@ export class GameEngine {
                 INPUT_CONSTANTS.SHIP_SELECT_RADIUS,
             );
         }
+        if (!selected && padInteract) selected = true;
     }
     const eDown = this.input.isKeyDown('KeyE');
     if (selected || (eDown && !this.dockKeyHeld)) {
         if (portal) this.enterPortal();
         else if (station) this.dockAtStation();
+        else this.cycleShipLight();
     }
     this.dockKeyHeld = eDown;
   }
@@ -3862,6 +4580,7 @@ export class GameEngine {
     if (this.dockedAtStation || !this.nearestStation || this.player.isExploding) return false;
     this.dockedAtStation = true;
     this.dockedStation = this.nearestStation;
+    this.audio.play('poi.dock');
     this.player.velocity.x = 0;
     this.player.velocity.y = 0;
     return true;
@@ -3871,6 +4590,7 @@ export class GameEngine {
    *  hygiene so the first post-dock frame doesn't integrate stale time. */
   public undock() {
     if (!this.dockedAtStation) return;
+    this.audio.play('poi.undock');
     this.dockedAtStation = false;
     this.dockedStation = null;
     this.lastTime = performance.now();
@@ -3889,6 +4609,7 @@ export class GameEngine {
     this.credits -= heal * per;
     this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
     this.pushPlayerMessage(`+${heal} hull`, '#4ade80');
+    this.audio.play('poi.repair');
     return true;
   }
 
@@ -3973,55 +4694,6 @@ export class GameEngine {
 
   // ── Outfitting: loadout sync, tile moves, purchases, snapshots ──────────
 
-  /** Push the gun + module state onto the player entity so WeaponSystem
-   *  can gate weapon cycle/select + charged shots without reaching into
-   *  the engine.  ownedWeapons = the INSTALLED guns (the usable set). */
-  private syncUnlocksToPlayer() {
-      this.player.ownedWeapons = this.equippedWeapons.filter((w): w is WeaponType => w !== null);
-      this.player.equippedWeapons = [...this.equippedWeapons];
-      // The active weapon must be a mounted gun — if a move removed it,
-      // fall to the first mounted gun, or to NONE (weaponless flight is
-      // allowed; firing is gated off while currentWeapon is undefined).
-      const cur = this.player.currentWeapon;
-      if (cur === undefined || !this.equippedWeapons.includes(cur)) {
-          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null);
-          this.player.currentWeapon = first;
-          this.player.burstQueue = 0;
-          this.currentWeaponIndex = first !== undefined ? WEAPON_LIST.indexOf(first) : 0;
-      }
-  }
-
-  /** Rebuild the derived weapon loadout from the mounted guns (any
-   *  weapon hex, slot order; ≤ MAX_INSTALLED_GUNS by the move guard),
-   *  then re-sync the player entity + recompute activity/effects. */
-  private syncLoadoutFromSlots() {
-      const guns: WeaponType[] = [];
-      for (let i = 0; i < this.weaponSlots.length; i++) {
-          const id = this.weaponSlots[i];
-          const def = id !== null ? moduleDef(id) : undefined;
-          if (def?.weapon !== undefined) guns.push(def.weapon);
-      }
-      for (let i = 0; i < this.equippedWeapons.length; i++) {
-          this.equippedWeapons[i] = guns[i] ?? null;
-      }
-      this.syncUnlocksToPlayer();
-      this.applyModuleEffects();
-  }
-
-  /** First empty slot of the module's group that accepts its kind, or -1. */
-  private firstFreeSlotFor(def: ModuleDef): number {
-      const slots = def.group === 'ship' ? this.shipSlots : this.weaponSlots;
-      for (let i = 0; i < slots.length; i++) {
-          if (slots[i] === null && moduleFitsSlot(def, def.group, i)) return i;
-      }
-      return -1;
-  }
-
-  private areaSlots(area: 'inventory' | 'ship' | 'weapon'): (string | null)[] {
-      return area === 'inventory' ? this.inventory
-          : area === 'ship' ? this.shipSlots : this.weaponSlots;
-  }
-
   /**
    * Move a module item between tiles: inventory↔inventory (reorder),
    * inventory→hex (install), hex→inventory (uninstall), hex↔hex (move).
@@ -4036,9 +4708,41 @@ export class GameEngine {
       to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ): boolean {
       const cargoOnly = from.area === 'inventory' && to.area === 'inventory';
-      if (!cargoOnly && !this.dockedServices()?.drydock) return false;
-      return this.moveModuleInternal(from, to);
+      if (!cargoOnly && !this.dockedServices()?.drydock) {
+          // Outfitting away from a drydock is the single most common thing
+          // a player tries and cannot do — it needs an audible "no".
+          this.audio.play('poi.reject');
+          return false;
+      }
+      const moved = this.moveModuleInternal(from, to);
+      // Seating a module into a hex is the tactile beat; dropping one back
+      // into cargo is the softer one; a refused move is the reject buzz.
+      this.audio.play(!moved ? 'poi.reject'
+          : to.area === 'inventory' ? 'poi.module.stow' : 'poi.module.install');
+      return moved;
   }
+
+  // ─── Outfitting: the three entry points that are PUBLIC SURFACE ─────────
+  //
+  // Bodies live in engine/outfitting.ts with the rest of the hex-slot
+  // machinery (gauntlet 5f).  These three keep a method on the engine because
+  // the 5b suites call them straight off `window.__omniEngine` — `private` is
+  // compile-time only, so what the tests reach for IS the observable surface,
+  // and moving them off the class broke three suites until they came back.
+  // That is the test net doing exactly the job it exists for; the forwards are
+  // the honest record of where the boundary actually is.
+
+  /** The tile move/swap itself, without `moveModule`'s drydock guard. */
+  moveModuleInternal(
+      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ): boolean { return moveModuleTiles(this, from, to); }
+
+  /** The ONE pricing seam — buy and resale both route through it. */
+  modulePrice(cost: number): number { return catalogPrice(cost); }
+
+  /** Hex-slot snapshot for the station UI + the pause cargo panel. */
+  outfittingSnapshot() { return buildOutfittingSnapshot(this); }
 
   /** SELL an inventory module back for MODULE_RESALE.SELL_FRACTION of its
    *  cost.  Needs a station (any — every station drydocks); acts on
@@ -4046,10 +4750,11 @@ export class GameEngine {
    *  first.  Free items (Base Hull) can't be sold — scrap those. */
   public sellModule(idx: number): boolean {
       if (!this.dockedAtStation) return false;
-      const value = this.resaleValue(idx, MODULE_RESALE.SELL_FRACTION);
+      const value = resaleValue(this, idx, MODULE_RESALE.SELL_FRACTION);
       if (value === null || value <= 0) return false;
       this.inventory[idx] = null;
       this.credits += value;
+      this.audio.play('poi.sell');
       return true;
   }
 
@@ -4058,61 +4763,11 @@ export class GameEngine {
    *  option when no station is near (also the only way to shed cost-0
    *  items like a spare Base Hull, which pay nothing). */
   public scrapModule(idx: number): boolean {
-      const value = this.resaleValue(idx, MODULE_RESALE.SCRAP_FRACTION);
+      const value = resaleValue(this, idx, MODULE_RESALE.SCRAP_FRACTION);
       if (value === null) return false;
       this.inventory[idx] = null;
       this.credits += value;
-      return true;
-  }
-
-  /** Rounded resale payout for an inventory tile, or null when the tile
-   *  is empty/invalid. */
-  private resaleValue(idx: number, fraction: number): number | null {
-      if (idx < 0 || idx >= this.inventory.length) return null;
-      const id = this.inventory[idx];
-      if (id === null) return null;
-      const def = moduleDef(id);
-      if (!def) return null;
-      // Priced off the DISCOUNTED cost, not the catalog cost — see modulePrice.
-      return Math.round(this.modulePrice(def.cost) * fraction);
-  }
-
-  /** The actual tile move/swap.  Guards: destination kind fit, displaced
-   *  item must fit the vacated tile, and the last mounted gun can never
-   *  leave the gun hexes without another gun taking its place. */
-  private moveModuleInternal(
-      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
-      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
-  ): boolean {
-      const fromSlots = this.areaSlots(from.area);
-      const toSlots = this.areaSlots(to.area);
-      if (from.idx < 0 || from.idx >= fromSlots.length) return false;
-      if (to.idx < 0 || to.idx >= toSlots.length) return false;
-      if (from.area === to.area && from.idx === to.idx) return false;
-      const id = fromSlots[from.idx];
-      if (id === null) return false;
-      const def = moduleDef(id);
-      if (!def) return false;
-      const displaced = toSlots[to.idx];
-      const dDef = displaced !== null ? moduleDef(displaced) : undefined;
-      if (to.area !== 'inventory' && !moduleFitsSlot(def, to.area, to.idx)) return false;
-      if (displaced !== null) {
-          if (!dDef) return false;
-          if (from.area !== 'inventory' && !moduleFitsSlot(dDef, from.area, from.idx)) return false;
-      }
-      // Apply, then enforce the slot-agnostic gun COUNT limit — a move may
-      // not leave more than MAX_INSTALLED_GUNS guns mounted in the weapon
-      // flower (weaponless is fine; there is no minimum).
-      fromSlots[from.idx] = displaced;
-      toSlots[to.idx] = id;
-      const gunsMounted = this.weaponSlots.reduce(
-          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
-      if (gunsMounted > MAX_INSTALLED_GUNS) {
-          fromSlots[from.idx] = id;
-          toSlots[to.idx] = displaced;
-          return false;
-      }
-      this.syncLoadoutFromSlots();
+      this.audio.play('poi.scrap');
       return true;
   }
 
@@ -4139,17 +4794,8 @@ export class GameEngine {
       if (inv === -1) return false; // inventory full
       this.credits -= price;
       this.inventory[inv] = moduleId;
+      this.audio.play('poi.purchase');
       return true;
-  }
-
-  /** Shop price for a catalog cost after the run's TIMED boss discount ((h)
-   *  payout model (d): a boss kill makes the shop cheaper for a window rather
-   *  than unlocking anything).  RESALE IS PRICED OFF THE SAME NUMBER
-   *  (resaleValue) — if buying were discounted while sell-back stayed on full
-   *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
-   *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
-  private modulePrice(cost: number): number {
-      return Math.max(0, Math.round(cost));
   }
 
   /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
@@ -4180,7 +4826,7 @@ export class GameEngine {
           if (inv !== -1) this.inventory[inv] = displaced;
       }
       this.weaponSlots[slot] = mDef.id;
-      this.syncLoadoutFromSlots();
+      syncLoadoutFromSlots(this);
   }
 
   /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
@@ -4195,186 +4841,6 @@ export class GameEngine {
               return i === -1 ? null : i;
           })(),
       }));
-  }
-
-  /** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
-  /** Per-stat module attribution for the Ship Status panel (A2).
-   *
-   *  Walks the two hex groups exactly the way `applyModuleEffects`'s `fold`
-   *  does — same slots, same `activeShip`/`activeWeapon` fixpoint — and files
-   *  each module's effect under the derived stat it feeds.  The HEADLINE
-   *  value of every line is read straight off the player entity / the module
-   *  multipliers, so the panel can never disagree with the simulation: the
-   *  breakdown explains the number, it does not derive it.
-   *
-   *  A contributor's `active` means "this amount is IN the total".  It is
-   *  false both for an adjacency-inactive module (`requires` names the family
-   *  it must touch) and for shield PLATING with no shield core installed —
-   *  plating that is perfectly well connected but has nothing to plate.
-   *
-   *  Menu-only (built with the rest of the outfitting snapshot while paused
-   *  or docked), so it costs nothing on a live frame. */
-  private statBreakdown() {
-      type Contrib = {
-          area?: 'ship' | 'weapon'; idx?: number; moduleId?: string;
-          label: string; display: string; active: boolean; requires?: string;
-      };
-      const pct = (f: number) => `${f >= 0 ? '+' : '−'}${Math.round(Math.abs(f) * 100)}%`;
-      const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
-      const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
-      const cool: Contrib[] = [], charge: Contrib[] = [], weight: Contrib[] = [];
-      let shipWeight = SHIP_WEIGHT.HULL_BASE, shieldCore = false;
-
-      const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
-          for (let i = 0; i < slots.length; i++) {
-              const id = slots[i];
-              if (id === null) continue;
-              const def = moduleDef(id);
-              if (!def) continue;
-              const on = active[i];
-              const req = MODULE_REQUIREMENTS[def.family];
-              const base: Contrib = {
-                  area, idx: i, moduleId: id, label: def.label, active: on,
-                  requires: on ? undefined : (req !== undefined ? (req[0] as string) : undefined),
-              };
-              // Weight is a contribution to the SHIP's weight, not to
-              // acceleration: a gun does not make the ship accelerate worse,
-              // it makes the ship HEAVIER, and weight is what drags thrust.
-              // So a weighted module files under `weight` and tapping it
-              // highlights Ship weight — Acceleration then carries ONE derived
-              // row for the whole ship's weight (below).  Read off any module,
-              // not just guns.
-              if (def.weight) {
-                  if (on) shipWeight += def.weight;
-                  weight.push({ ...base, display: `+${def.weight.toFixed(1)}` });
-              }
-              const e = def.effect;
-              if (!e) continue;
-              if (e.maxHp)           hull.push({ ...base, display: `+${e.maxHp} HP` });
-              if (e.maxShield)       shield.push({ ...base, display: `+${e.maxShield}` });
-              if (e.shieldCore)    { if (on) shieldCore = true;
-                                     shield.push({ ...base, display: `+${SHIELD_CONSTANTS.MAX_CHARGE} base` }); }
-              if (e.shieldRegenFrac) regen.push({ ...base, display: pct(e.shieldRegenFrac) });
-              if (e.speedFrac)       speed.push({ ...base, display: pct(e.speedFrac) });
-              if (e.accelFrac)       accel.push({ ...base, display: pct(e.accelFrac) });
-              if (e.damageFrac)      dmg.push({ ...base, display: pct(e.damageFrac) });
-              if (e.cooldownFrac)    cool.push({ ...base, display: pct(-e.cooldownFrac) });
-              if (e.overcharge)      charge.push({ ...base, display: on ? 'enabled' : 'offline' });
-          }
-      };
-      walk('ship', this.shipSlots, this.activeShip);
-      walk('weapon', this.weaponSlots, this.activeWeapon);
-
-      // Plating with no shield core is connected-but-pointless: `maxShield`
-      // is gated to 0 in applyModuleEffects, so report zero contribution and
-      // name the missing piece rather than showing a number that isn't real.
-      if (!shieldCore) {
-          for (const c of shield) {
-              if (c.moduleId === 'shield') continue;
-              c.active = false;
-              c.requires = 'shield core';
-          }
-      }
-
-      // Fire RATE is the inverse of the cooldown multiplier, so the per-module
-      // cooldown cuts above do not sum in rate space.  Same shape as the
-      // acceleration drag row: the hex contributions stay in the units the
-      // modules are actually specified in (−8% cooldown), and one derived row
-      // carries the cooldown total the headline rate inverts.
-      if (cool.length > 0) {
-          cool.push({
-              label: 'Resulting cooldown',
-              display: `×${(this.player.cooldownMult ?? 1).toFixed(2)}`,
-              active: true,
-          });
-      }
-
-      // Weight drag is MULTIPLICATIVE over the ship's TOTAL weight, so it
-      // belongs to the ship, not to any hex.  One derived row on Acceleration
-      // names the ship weight it came from; the modules that make up that
-      // weight live on the Ship weight line above.
-      const dragMult = SHIP_WEIGHT.BASE_BOOST
-          / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight);
-      accel.push({
-          label: shipWeight === 0 ? 'Unladen ship' : `Ship weight ${shipWeight.toFixed(1)}`,
-          display: `×${dragMult.toFixed(2)}`,
-          active: true,
-      });
-
-      const line = (id: string, label: string, display: string, baseDisplay: string,
-                    contributors: Contrib[], note?: string) =>
-          ({ id, label, display, baseDisplay, contributors, note });
-
-      return [
-          // "Max hull"/"Max shield", not "Hull"/"Shield": the Condition block
-          // shows the LIVE pools (87 / 150) under those names, and the same
-          // word against two different numbers reads as a contradiction.
-          line('hull', 'Max hull', `${this.player.maxHealth}`, '100', hull),
-          line('shield', 'Max shield', `${this.player.maxShield}`, '0', shield,
-               shieldCore ? undefined : 'no shield core installed'),
-          line('shieldRegen', 'Shield regen',
-               `${(this.player.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE).toFixed(1)}/s`,
-               `${SHIELD_CONSTANTS.RECHARGE_RATE.toFixed(1)}/s`, regen),
-          line('damage', 'Damage', `×${(this.player.damageMult ?? 1).toFixed(2)}`, '×1.00', dmg),
-          line('cooldown', 'Fire rate',
-               `×${(1 / (this.player.cooldownMult ?? 1)).toFixed(2)}`, '×1.00', cool,
-               'modules cut cooldown; the rate is its inverse'),
-          line('speed', 'Top speed', `×${this.moduleSpeedMult.toFixed(2)}`, '×1.00', speed),
-          line('accel', 'Acceleration', `×${this.moduleThrustMult.toFixed(2)}`, '×1.00', accel,
-               'a heavier ship accelerates worse'),
-          line('weight', 'Ship weight', shipWeight.toFixed(1),
-               SHIP_WEIGHT.HULL_BASE.toFixed(1), weight,
-               'hull + everything mounted; drags Acceleration'),
-          line('overcharge', 'Charged shots',
-               this.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
-      ];
-  }
-
-  private outfittingSnapshot() {
-      const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
-          if (id === null) return null;
-          const def = moduleDef(id)!;
-          const req = MODULE_REQUIREMENTS[def.family];
-          return {
-              id, label: def.label, kind: def.kind as string, family: def.family as string,
-              active: active[i],
-              requires: req !== undefined ? (req[0] as string) : undefined,
-          };
-      });
-      const gunsMounted = this.weaponSlots.reduce(
-          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
-      return {
-          ship: hexSnap(this.shipSlots, this.activeShip),
-          weapon: hexSnap(this.weaponSlots, this.activeWeapon),
-          gunsMounted,
-          maxGuns: MAX_INSTALLED_GUNS,
-          inventory: this.inventory.map(id => {
-              if (id === null) return null;
-              const def = moduleDef(id)!;
-              // Both resale values track the same discounted price the shop
-              // charges, so a discount can never be laundered into credits.
-              const price = this.modulePrice(def.cost);
-              return {
-                  id, label: def.label, kind: def.kind as string, family: def.family as string, group: def.group as string,
-                  sellValue: Math.round(price * MODULE_RESALE.SELL_FRACTION),
-                  scrapValue: Math.round(price * MODULE_RESALE.SCRAP_FRACTION),
-              };
-          }),
-          // Per-module stat attribution (Pair A, A2).  Built from the SAME
-          // slot walk applyModuleEffects folds, so the UI never recomputes a
-          // derived stat — it only renders what the sim is already using.
-          statLines: this.statBreakdown(),
-          // Catalog prices are the DISCOUNTED prices the shop will actually
-          // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
-          catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
-              const price = this.modulePrice(d.cost);
-              return {
-                  id: d.id, group: d.group as string, kind: d.kind as string,
-                  label: d.label, desc: d.desc, cost: price,
-                  affordable: this.credits >= price && this.inventory.includes(null),
-              };
-          }),
-      };
   }
 
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
@@ -4404,7 +4870,7 @@ export class GameEngine {
    *  "earned this run" counter can't drift from the balance.  Deliberately
    *  NOT used by resale (sell/scrap is a refund of money already earned, so
    *  routing it here would double-count) nor by the DBG credit grant. */
-  private earnCredits(n: number) {
+  earnCredits(n: number) {
       this.credits += n;
       this.runCreditsEarned += n;
       this.lifeCreditsEarned += n;
@@ -4423,7 +4889,7 @@ export class GameEngine {
   /** Add points to the run score and float a gold "+N" popup.  A burst of
    *  awards (AoE / chain / sweep / rapid kills) accumulates into the one
    *  live popup — O(1), no array scan — so it reads as a growing total. */
-  private awardScore(points: number, popupPos?: Vector2) {
+  awardScore(points: number, popupPos?: Vector2) {
       this.score += points;
       // NOTE: score no longer mints Salvage (the 1:1 credits mirror is gone —
       // weapons-ammo pivot increment 1a).  Credits come only from COLLECTING
@@ -4457,7 +4923,7 @@ export class GameEngine {
       this._livePointsPopup = popup;
   }
 
-  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
+  spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
       // Player damage goes to the HUD list, not the world-space float
       if (target?.type === EntityType.PLAYER) {
           const isCrit = amount > 3;
@@ -4587,14 +5053,23 @@ export class GameEngine {
                   }
               }
           }
-          // Rock base layer — conservation-of-mass chipping.  Independent of
-          // the dent block above (rock-shards have no dent policy): every
-          // non-killing hit on a rock tile or asteroid chips one piece off
-          // (mostly dust, sometimes a solid chunk) and slims a mobile
-          // asteroid down so its mass is ~conserved over its life.
-          if (impactWorldPos
-              && (target.shardVariant === 'rock-tile' || target.shardVariant === 'rock-shard')) {
-              this.releaseRockChip(target, impactWorldPos);
+          // PROGRESSIVE FRACTURE (V8; V10 generalised past rock).  Damage
+          // highlights the pattern's boundaries and a piece breaks off
+          // exactly when its boundary completes — no cadence roll.  Any
+          // variant carrying `fracture.progressive` runs it: rock AND
+          // glass since V10 (user call).  The legacy spawn-beside chip
+          // stays for rock under the DBG 'legacy' A/B, and as the
+          // fallback when an entity carries no usable decomposition.
+          if (impactWorldPos && target.shardVariant !== undefined) {
+              const isRockChipper = target.shardVariant === 'rock-tile'
+                  || target.shardVariant === 'rock-shard';
+              if (isProgressiveFracture(target.shardVariant)) {
+                  if (!this.progressFracture(target, impactWorldPos) && isRockChipper) {
+                      this.releaseRockChip(target, impactWorldPos);
+                  }
+              } else if (isRockChipper) {
+                  this.releaseRockChip(target, impactWorldPos);
+              }
           }
       }
   };
@@ -4672,6 +5147,380 @@ export class GameEngine {
               invalidateCollisionR(parent);
           }
       }
+  }
+
+  /**
+   * PROGRESSIVE FRACTURE (voronoi gauntlet, V8 — the user's correction
+   * of V4).  The decomposition is applied ONCE at first damage and then
+   * FIXED: each hit reveals more of the impact-sorted edge list — the
+   * same reveal the crack overlay draws, via the shared
+   * `fractureRevealedEdgeCount` — and a cell whose BINDING edges are all
+   * revealed has a fully highlighted boundary and BREAKS OFF as that
+   * piece: it detaches with the cell's own polygon, the parent keeps
+   * the spliced remainder (`subtractBoundaryCell`), and the SURVIVING
+   * cells of the same pattern stay cached so later pieces break off the
+   * decomposition the player has been watching.  An edge stops binding
+   * once its partner cell has departed (that seam is open air), so
+   * interior pieces free up as their neighbours leave; a cell whose
+   * boundary is complete but which cannot splice yet simply waits.
+   * There is NO chip-chance roll — the highlight completing IS the
+   * trigger — and no recompute between detaches.
+   *
+   * entity.size and position stay untouched (the dent contract: stable
+   * footprint, `position === hexCoord` for tiles) so the static grid
+   * never rebuilds; the tile cache re-stamps via the `_staticCached`
+   * flip every damage event already does.  The remainder routes to FULL
+   * death — the remaining cells breaking as the final pieces — when it
+   * would fall below FRACTURE_DETACH.MIN_REMAINDER_FRAC of the original
+   * area, or when only one cell is left (feedback item 26c: cumulative
+   * chip-off area IS the break threshold); the hit ceiling ends it the
+   * same way.
+   *
+   * Returns false only when the entity carries no decomposition at all
+   * (degenerate polygon) — the caller falls back to the legacy dust
+   * puff; true means the hit was handled, including the quiet ticks
+   * where boundaries merely highlighted further.
+   */
+  /**
+   * Chip a grain off a structure at a world contact point — the SAME
+   * mechanism a weapon hit uses, exposed so a NON-weapon source can drive it.
+   *
+   * Three steps, in the order the projectile path runs them: stamp the real
+   * contact in entity-local coords, spend the damage on the grain boundaries
+   * nearest it, then harvest whatever that freed.  Going through
+   * `applyBoundaryDamage` + `progressFracture` rather than a bespoke chip is
+   * the whole point — the cracks a body shows, the piece it sheds and the HP
+   * it has left all stay one model, however the damage arrived.
+   *
+   * Today's caller is the BUBBLE's feeding bite: food too big to swallow gets
+   * chipped down to mouth-sized pieces instead of being absorbed whole.
+   *
+   * Returns false HAVING DONE NOTHING for a body that is not running the grain
+   * model — an indestructible or nebula tile, or any variant under the DBG
+   * legacy fracture mode (`bondStrengthFor` gates on `isProgressiveFracture`,
+   * so that one check covers all of it).  Deliberately no fallback: this is
+   * the chip path, not a general damage entry point, and a caller that cannot
+   * chip a body must not be able to plink its HP instead.
+   */
+  chipStructureAt(target: GameEntity, worldPos: Vector2, damage: number, from?: Vector2): boolean {
+      if (!this.currentMap) return false;
+      if (!target.active || target.isExploding || (target.health ?? 0) <= 0) return false;
+      stampLocalImpact(target, worldPos);
+      if (!applyBoundaryDamage(target, damage)) return false;
+      markDamaged(target, 0.12);
+      // A shatter reads its direction off the last impact, so point the
+      // fragments AWAY from whatever bit it rather than leaving them the
+      // stale velocity of some earlier hit.
+      if (from !== undefined) {
+          const ax = wrapDeltaX(from.x, target.position.x);
+          const ay = wrapDeltaY(from.y, target.position.y);
+          const m = Math.hypot(ax, ay) || 1;
+          target.lastImpactVelocity = { x: (ax / m) * 6, y: (ay / m) * 6 };
+      }
+      if (target.health > 0) {
+          this.progressFracture(target, worldPos);
+      } else {
+          // The last boundary went: end the body through the NORMAL death
+          // path so it shatters, drops and sounds like any other break.
+          target.lastImpactDamage = 1;
+          this.handleEntityDeath(target);
+      }
+      return true;
+  }
+
+  private progressFracture(target: GameEntity, impactWorldPos?: Vector2): boolean {
+      if (!this.currentMap) return true;
+      if (!target.active || (target.health ?? 0) <= 0) return true;
+      // Stamp the REAL contact point in entity-local coords BEFORE the
+      // pattern is built (V12), so the site bias crowds toward where the
+      // shot actually landed rather than toward a direction proxy, and
+      // so the contact test below has something honest to measure.
+      stampLocalImpact(target, impactWorldPos);
+      const cells = ensureFractureCells(target);
+      if (cells === null || cells.length === 0) return false;
+      const edges = ensureFractureEdges(target);
+      // A single-cell pattern has no interior boundary to highlight —
+      // the hit-ceiling model owns that break.
+      if (edges === null || edges.length === 0) return true;
+      const pts0 = target.polygonPoints;
+      if (!pts0 || pts0.length < 3) return false;
+
+      const original = target.fractureOriginalArea
+          ?? (target.fractureOriginalArea = fracturePolygonArea(pts0));
+
+      // GRAIN BOUNDARIES (V15): a boundary is either broken through or it
+      // is not, and a cell is loose when every boundary still binding it
+      // has been broken.  There is no reveal SCHEDULE any more — the
+      // damage each boundary has absorbed is the whole state.  Variants
+      // with no `bondStrength` (and the legacy A/B) keep the old
+      // HP-paced reveal, so this is additive rather than a fork.
+      const grain = ensureBoundaryModel(target);
+      // PER-GRAIN DEFORMATION (B1): the struck grain dimples before
+      // anything comes off, so a ductile material visibly warps where it
+      // is being shot.  Inert for a material with no `grainDent` (rock,
+      // glass), and it must run BEFORE the harvest below so the piece
+      // that leaves carries the shape the player was just shown.
+      if (grain !== null && dentStruckGrain(target)) {
+          target._satCacheAxes = undefined;
+          target._occluderR = undefined;
+          if (target._staticCached === true) target._staticCached = false;
+          invalidateCollisionR(target);
+      }
+      let revealed = 0;
+      if (grain === null) {
+          const cfg = crackConfigForVariant(target.shardVariant);
+          if (cfg === undefined) return true;
+          revealed = fractureRevealedEdgeCount(target, edges.length, cfg.freq);
+          if (revealed <= 0) return true;
+      }
+
+      // HARVEST every piece the damage has actually freed (V15).  Under
+      // the grain model a cell with no unbroken boundary left is not
+      // attached to anything — holding it on until the next hit is what
+      // produced the old "half the pieces arrive in one lump at death".
+      // Locality is still enforced, but EARLIER and more strictly than
+      // V12's radius: damage is spent on boundaries nearest the contact
+      // first, so an interior cell's boundaries cannot break until
+      // everything between it and the surface has already gone.  The
+      // legacy reveal path keeps the radius and its one-piece-per-hit
+      // cadence, since its damage carries no such locality.
+      const local = target.lastImpactLocal;
+      // No usable contact point (a damage source that carries none) — the
+      // pattern still cracks, nothing detaches, and the death path still
+      // ends the body.
+      if (local === undefined) return true;
+      const reach2 = grain !== null ? Infinity
+          : (Math.max(target.size.x, target.size.y)
+             * FRACTURE_DETACH.CONTACT_RADIUS_FRAC) ** 2;
+
+      for (let pass = 0; pass <= cells.length; pass++) {
+          const living = new Set<number>();
+          for (const cc of cells) living.add(cc.siteIndex);
+
+          // Candidates in order of distance FROM THE CONTACT.  Distance is
+          // measured to each cell's OWN OUTLINE, not its centroid: a
+          // projectile stops at the surface, so the contact point sits just
+          // outside the hull and a centroid comparison on a large body would
+          // happily nominate a piece buried on the far side.
+          const near: Array<{ i: number; d: number }> = [];
+          for (let i = 0; i < cells.length; i++) {
+              const d = pointToPolygonDistance2(local.x, local.y, cells[i].points);
+              if (d <= reach2) near.push({ i, d });
+          }
+          if (near.length === 0) return true;
+          near.sort((a, b) => a.d - b.d);
+
+          const pts = target.polygonPoints;
+          if (!pts || pts.length < 3) return true;
+          const polyArea = fracturePolygonArea(pts);
+
+          // ONE epsilon for the pass: the union's vertex-merge tolerance
+          // AND the quantum the re-centre shift is snapped to.  They must
+          // be the same number or the re-centre can re-quantise the very
+          // union it is compensating for.
+          const eps = Math.max(0.01, Math.max(target.size.x, target.size.y) * 0.01);
+          let hitIdx = -1;
+          let c: (typeof cells)[number] | undefined;
+          let remainder: { x: number; y: number }[] | null = null;
+          let remainderArea = 0;
+          let stillBound = 0;
+          for (const cand of near) {
+              const cc = cells[cand.i];
+              // An edge BINDS this cell while it references it, still has a
+              // living partner on the other side (a neighbour that has
+              // already left frees the arc), and has not been broken
+              // through.  Under the grain model "broken" is the absorbed
+              // damage reaching the boundary's strength; under the legacy
+              // reveal it is the edge's position in the reveal order.
+              let bound = false;
+              for (let k = 0; k < edges.length && !bound; k++) {
+                  const ed = edges[k];
+                  if (!ed.cells.includes(cc.siteIndex)) continue;
+                  let binds = ed.cells.length === 1;
+                  if (!binds) {
+                      for (const site of ed.cells) {
+                          if (site !== cc.siteIndex && living.has(site)) { binds = true; break; }
+                      }
+                  }
+                  if (!binds) continue;
+                  if (grain !== null ? !edgeIsBroken(target, k) : k >= revealed) bound = true;
+              }
+              if (bound) { stillBound++; continue; } // this hit only cracks it
+              if (cells.length <= 1) { hitIdx = cand.i; c = cc; break; }
+              // The remainder is the UNION of the cells that stay (V15).
+              // The arc splice below is the fallback: it is exact where it
+              // applies but refuses once a survivor's whole outline lies on
+              // the boundary, which is precisely the tail — and the tail is
+              // where "the last pieces dump at death" comes from.
+              const survivors = cells.filter((_, i) => i !== cand.i);
+              // For a grain material the body's outline IS the union of
+              // its surviving grains, and that is what makes the break
+              // CONSERVE: the area the parent loses is exactly the area
+              // the fragment carries away.  The arc splice is NOT an
+              // acceptable fallback here — it reconstructs the remainder
+              // from the cell's outline instead, and once grains have
+              // been DEFORMED that outline no longer matches the body's
+              // boundary, so the remainder comes out wrong.  Measured
+              // with the splice still in place: a tile that GREW by 6.7
+              // while shedding a 157-area shard (worst gap 164 over 22
+              // detaches).  If the union cannot express the remainder,
+              // the piece simply stays attached until it can.
+              const rem = grain !== null
+                  ? unionOfCells(survivors, eps)
+                  : subtractBoundaryCell(pts, cc.points);
+              if (rem === null) continue; // not expressible off this remainder
+              const remArea = fracturePolygonArea(rem);
+              // CONSERVATION, enforced rather than assumed.  The area the
+              // body loses must equal the area the fragment carries away.
+              // Several geometric cases break that quietly — an interior
+              // grain leaving would punch a hole the outline cannot
+              // express, so the walk traces the outer ring, the body
+              // keeps its area and a full-size shard appears out of
+              // nothing (measured: a tile GROWING by 9.5 while shedding
+              // 164).  Rather than enumerate those cases, check the
+              // invariant here and refuse the detach when it fails; the
+              // piece leaves on a later hit, or at death.
+              if (grain !== null) {
+                  // The remainder must be SMALLER than the body was (a
+                  // break never adds area) and must lose exactly what the
+                  // fragment carries.  Tolerance is a floating-point
+                  // allowance, not a licence: 0.2% of the body.
+                  const expect = polyArea - cc.area;
+                  if (remArea > polyArea + 1e-6) continue;
+                  if (Math.abs(remArea - expect) > Math.max(0.5, polyArea * 0.002)) continue;
+              }
+              hitIdx = cand.i; c = cc; remainder = rem;
+              remainderArea = remArea;
+              break;
+          }
+          // Nothing more is loose (or nothing loose is spliceable yet — it
+          // leaves once a neighbour frees its arc).
+          if (hitIdx < 0 || c === undefined || remainder === null) {
+              // The body ends when there is no boundary left to break.  Two
+              // shapes of that, and neither is an arbitrary limit — which is
+              // the whole point of V15:
+              //  - one cell left: it IS the remainder, so it leaves as the
+              //    final piece rather than as a dump of leftovers;
+              //  - nothing binds anything any more: the survivors are held
+              //    together by boundaries that have all been broken through,
+              //    so the body has no cohesion left and comes apart into
+              //    exactly those grains.  They can be a ring the outline
+              //    cannot express (two grains touching at a point), which is
+              //    why this is an ending rather than another detach.
+              if (cells.length <= 1 || (grain !== null && stillBound === 0)) {
+                  this.killByFracture(target);
+              }
+              return true;
+          }
+          if (grain === null
+              && remainderArea < FRACTURE_DETACH.MIN_REMAINDER_FRAC * original) {
+              this.killByFracture(target);
+              return true;
+          }
+
+          // Fragment first (it reads the pre-mutation parent), then splice.
+          // refArea is the ORIGINAL polygon area so every piece of the
+          // pattern comes out area-true to the shape it was cut from.
+          // NOTE (A2): a departing grain carries NO damage, and that is a
+          // property of the model rather than an omission.  It leaves
+          // only once every boundary binding it is broken, and its
+          // non-binding boundaries were broken too — that is how the
+          // neighbour on the other side left.  So its whole boundary is
+          // spent at the moment it comes away, measured 0 partial on
+          // every detach.  See docs/MATERIAL_GRAIN_SPEC.md §6.3.
+          const chip = this.shards.spawnDetachedCell(
+              target, c, original, this.currentMap.entities);
+          target.polygonPoints = remainder;
+          const massBefore = target.mass;
+          if (target.mass !== Infinity && polyArea > 0) {
+              target.mass *= remainderArea / polyArea;
+          }
+          // The PATTERN persists — surviving cells + edges stay so the rest
+          // of the decomposition breaks off later; only the derived
+          // collision/render caches die.
+          cells.splice(hitIdx, 1);
+          // EJECTING A PIECE IS A RECOIL.  The chip's velocity used to be
+          // created from nothing while the parent's MASS was scaled down
+          // and its VELOCITY left alone, so a break destroyed momentum
+          // twice over (measured: a chip left at vx +0.54 with zero
+          // reaction on the parent).  Conserving it is the ordinary rocket
+          // equation — eject mass m at relative velocity (v - V) and the
+          // remainder takes -(m / M') of it.  STATIC bodies are exempt: a
+          // tile is bolted to the map, and its infinite mass says so.
+          if (chip !== null && target.mass !== Infinity && massBefore !== Infinity) {
+              const k = Math.min(RECOIL_MAX_RATIO,
+                  (chip.mass ?? 0) / Math.max(1e-3, target.mass));
+              target.velocity.x -= k * (chip.velocity.x - target.velocity.x);
+              target.velocity.y -= k * (chip.velocity.y - target.velocity.y);
+          }
+          // DUST.  A chip throws off pulverised material as well as the
+          // solid piece — the look the legacy break paths carried and
+          // that the voronoi routing dropped.  Tinted to the BODY's own
+          // colour so it works for every grain material rather than only
+          // rock, and `fromRock` only for rock, since that flag is what
+          // makes the puff condense back into a rock-shard later.
+          if (chip !== null && Math.random() < GRAIN_CHIP_DUST.CHANCE) {
+              const isRock = target.shardVariant === 'rock-shard'
+                  || target.shardVariant === 'rock-tile';
+              const comp = isRock
+                  ? randomRockNebulaComposition()
+                  : [{ hex: target.color || COLORS.ROCK_SHARD, weight: 1 }];
+              this.drops.spawnColoredNebulaShard(
+                  this.currentMap.entities,
+                  { x: chip.position.x, y: chip.position.y },
+                  Math.max(chip.size.x, chip.size.y),
+                  comp[0].hex,
+                  GRAIN_CHIP_DUST.SIZE_FRACTION,
+                  target.lastImpactVelocity ?? target.velocity,
+                  comp,
+                  GRAIN_CHIP_DUST.ALPHA_MUL,
+                  isRock,
+              );
+          }
+          // RE-CENTRE ON THE NEW CENTRE OF AREA (mobile bodies only).
+          // The remainder replaced `polygonPoints` and nothing moved
+          // `position` to match, so as a shard eroded its centre of area
+          // walked away from its own origin — measured -5.9 -> -12.3 over
+          // five detaches on a 160-unit shard.  Two things go wrong, and
+          // the second is the visible one: physics acts at `position`,
+          // which is no longer the centre of mass, and the body ROTATES
+          // ABOUT THE WRONG POINT, so a spinning eroded shard orbits its
+          // old origin instead of spinning in place.
+          //
+          // STATIC tiles are deliberately excluded: their position is the
+          // hex coordinate the static grid, regen and neighbour counts are
+          // all keyed on (the dent contract, CLAUDE.md §8).
+          if (target.mass !== Infinity) {
+              recentreFracturedBody(target, remainder, eps);
+          }
+          target._satCacheAxes = undefined;
+          target._occluderR = undefined;
+          if (target._staticCached === true) target._staticCached = false;
+          invalidateCollisionR(target);
+          // The chip's own material, never a hardcoded one: progressive
+          // fracture stopped being rock-only at V10, and a glass piece
+          // breaking off must not crack like stone.  Same MATERIAL_SFX
+          // table `deathFx` reads; a detached cell is always a mobile shard.
+          const chipMat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+          this.audio.play(`destroy.shard.${chipMat ?? 'rock'}`, {
+              x: target.position.x, y: target.position.y });
+
+          // Legacy reveal path keeps its one-piece-per-hit cadence; the
+          // grain model keeps harvesting while pieces are genuinely loose.
+          if (grain === null) return true;
+      }
+      return true;
+  }
+
+  /** End a body through the fracture path: the normal death dispatch, so
+   *  the shatter consumes exactly the surviving cells of the pattern the
+   *  player was just shown.  `killedByPlayer` was already stamped by the
+   *  damage path. */
+  private killByFracture(target: GameEntity): void {
+      target.health = 0;
+      target.active = false;
+      if (target.mass === Infinity) this.physics.removeStaticEntity(target);
+      this.handleEntityDeath(target);
   }
 
   /**
@@ -4764,7 +5613,16 @@ export class GameEngine {
       );
   }
 
-  private startExplosion(entity: GameEntity) {
+  /** Put an expanding shockwave ring into the world.  Body lives in
+   *  engine/explosions.ts with the rest of the AoE layer (gauntlet 5f); it
+   *  keeps a method here because the 5b trait suite calls it straight off
+   *  `window.__omniEngine`, which makes it observable surface (ledger P7). */
+  spawnShockwave(pos: Vector2, opts: ShockwaveOpts) { emitShockwave(this, pos, opts); }
+
+  /** The death path: flip an entity to EXPLODING and arm the wreck timer.
+   *  Not the FX layer — the particles are spawned by the caller — and also
+   *  observable surface (the 5b death/economy suites call it). */
+  startExplosion(entity: GameEntity) {
       if (entity.isExploding) return;
 
       entity.isExploding = true;
@@ -4790,6 +5648,12 @@ export class GameEngine {
       this.player.position = { ...spawn };
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
+      this.player.visualRoll = 0;
+      this.player.visualPitch = 0;
+      this._rollPrevFacing = null;
+      this._rollYawRate = 0;
+      this._rollVel = 0;
+      this._pitchVel = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -4805,7 +5669,7 @@ export class GameEngine {
   private handleShooting(target: Vector2, charged: boolean = false) {
       if (!this.currentMap) return;
       // Weapon offline while EMP-disabled (Stage 3c).
-      if (this.player.systemsDisabled) return;
+      if (this.player.systemsDisabled) { this.audio.play('weapon.reject'); return; }
 
       // Convert screen-space target to world coords once; the rest of the
       // firing flow lives in WeaponSystem.
@@ -4820,7 +5684,15 @@ export class GameEngine {
           { x: worldX, y: worldY },
           this.handleScreenShake,
           charged,
+          this.handleRumble,
+          this.playWeaponSfx,
       );
+      // A trigger pull that produced nothing still makes a sound — the
+      // dead click is the feedback that the weapon is on cooldown, EMP'd,
+      // or missing.  Its own hard throttle keeps mashing bearable.
+      if (!fired && (this.player.weaponCooldown ?? 0) <= 0) {
+          this.audio.play('weapon.reject');
+      }
 
       // Keep the HUD weapon index aligned with the player's current weapon in
       // case WeaponSystem auto-fell back to blaster on an empty mag.
@@ -4829,9 +5701,39 @@ export class GameEngine {
       }
   }
 
+  /** WeaponType → SFX_INVENTORY §4.1 id.  A plain table rather than a
+   *  switch so adding a weapon is a row, matching how ENEMY_BEHAVIOR and
+   *  SHARD_VARIANTS dispatch. */
+  private static readonly WEAPON_SFX: Record<WeaponType, string> = {
+      [WeaponType.BLASTER]:   'weapon.blaster.fire',
+      [WeaponType.BURST]:     'weapon.burst.fire',
+      [WeaponType.SHOTGUN]:   'weapon.shotgun.fire',
+      [WeaponType.BOUNCER]:   'weapon.bouncer.fire',
+      [WeaponType.LIGHTNING]: 'weapon.lightning.fire',
+      [WeaponType.HOMING]:    'weapon.homing.fire',
+      [WeaponType.CANNON]:    'weapon.cannon.fire',
+  };
+
+  /** Fired by WeaponSystem once per spawned player shot.  A charged shot
+   *  LAYERS `weapon.charged.release` over the family voice so every weapon
+   *  reads as the same supercharged gesture (SFX_INVENTORY §4.1). */
+  private playWeaponSfx = (weapon: WeaponType, isCharged: boolean, subShot: number) => {
+      const pos = this.player.position;
+      if (subShot > 0) {
+          // Rising triplet: a semitone (×2^(1/12)) per sub-shot.
+          this.audio.play('weapon.burst.sub', {
+              x: pos.x, y: pos.y, pitch: Math.pow(2, subShot / 12),
+          });
+          return;
+      }
+      const id = GameEngine.WEAPON_SFX[weapon];
+      if (id) this.audio.play(id, { x: pos.x, y: pos.y });
+      if (isCharged) this.audio.play('weapon.charged.release', { x: pos.x, y: pos.y });
+  };
+
   // Thin wrappers that delegate to ProjectileSystem / TrailSystem.  Kept so
   // existing GameEngine call sites stay unchanged during the Phase 2 split.
-  private spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
+  spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
       if (!this.currentMap) return;
       this.projectiles.spawn(this.currentMap.entities, shooter, target, config, ownerType);
   }
@@ -4846,7 +5748,7 @@ export class GameEngine {
       this.projectiles.updateLightningGravity(
           this.entityIndex.projectiles,
           this.entityIndex.enemies,
-          this.entityIndex.asteroids,
+          this.entityIndex.shardCandidates,
           dt,
       );
   }
@@ -4859,6 +5761,10 @@ export class GameEngine {
   // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
   private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity) {
+      // One trigger for the whole chain: every arc in a chain lands within
+      // this id's retrigger window, so the collapse rule turns a five-link
+      // chain into one bigger crackle instead of five thin ones.
+      this.audio.play('impact.lightning.arc', { x: impactPos.x, y: impactPos.y });
       if (!this.currentMap) return;
 
       // Per-projectile chain overrides (set by ProjectileSystem.spawn from
@@ -4879,7 +5785,7 @@ export class GameEngine {
       // full entity array.  Exploding entities are still skipped since the
       // index holds `active` entities that may be mid-animation.
       const enemies = this.entityIndex.enemies;
-      const asteroids = this.entityIndex.asteroids;
+      const asteroids = this.entityIndex.shardCandidates;
       const nodesByDepth: GameEntity[][] = [[firstTarget]];
       const edges: { from: GameEntity; to: GameEntity }[] = [];
       const hitSet = new Set<string>([firstTarget.id]);
@@ -4921,6 +5827,7 @@ export class GameEngine {
           return picked;
       };
 
+      const parentOf = new Map<GameEntity, GameEntity>();
       for (let depth = 1; depth <= hopBudget; depth++) {
           const prev = nodesByDepth[depth - 1];
           const next: GameEntity[] = [];
@@ -4929,6 +5836,9 @@ export class GameEngine {
               const picked = pickNearestK(parent, branches);
               for (let c = 0; c < picked.length; c++) {
                   edges.push({ from: parent, to: picked[c] });
+                  // Who the arc jumped FROM — the contact side for the
+                  // grain model's boundary spend (V15).
+                  parentOf.set(picked[c], parent);
                   next.push(picked[c]);
               }
           }
@@ -4950,13 +5860,17 @@ export class GameEngine {
               const target = tier[i];
               if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
 
-              target.health -= dmg;
+              // A chain arrives at the body's nearest face, so stamp the
+              // arc's origin as the contact and let the grain model spend
+              // it on boundaries like any other hit (V15).
+              stampLocalImpact(target, parentOf.get(target)?.position);
+              if (!applyBoundaryDamage(target, dmg)) target.health -= dmg;
               // (h) regen: chain damage feeds the burst bucket like a pellet
               // does.  Note the chain deliberately BYPASSES the front-shield
               // plate — it never travels as a projectile, which is exactly why
               // Lightning is a §7 answer to a directional defence.
               noteTraitDamage(target, dmg);
-              target.hitFlash = 0.15;
+              markDamaged(target, 0.15);
               target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
               this.spawnDamageText(target.position, dmg, target);
 
@@ -5058,248 +5972,6 @@ export class GameEngine {
       }
   }
 
-  // ─── Bubble engagement pass (Stage 5) ──────────────────────────────────
-  //
-  // For each BUBBLE enemy: (1) a PASSIVE bubble grown to its multiply.atSize
-  // SPLITS — it resets to base size and births one offspring (counts=false),
-  // capped at multiply.maxPopulation live bubbles; (2) a PROVOKED bubble LATCHES
-  // onto its AGGRO TARGET (the last thing to attack it — the player OR an enemy)
-  // on contact — attach (Stage 3c) + drain, and an EMP (disable status) when the
-  // target is the player.  Against the player the latch ends in a pop (spent
-  // charge); against an enemy it releases and the bubble survives to re-engage.
-  // O(enemies) with a one-shot population census only on a split frame; ungated
-  // (bubbles are few), matching the kamikaze/nest passes.  Toroidal.
-  private updateBubbles(dt: number) {
-      if (!this.currentMap) return;
-      const p = this.player;
-      const enemies = this.entityIndex.enemies;
-      const B = BUBBLE_CONSTANTS;
-      const baseSize = ENEMY_VARIANTS[EnemySubtype.BUBBLE].size;
-      // Terrain-slam window (player smacked a tile/asteroid fast) ticks down here.
-      if (p.terrainSlamTimer) p.terrainSlamTimer = Math.max(0, p.terrainSlamTimer - dt);
-      let ctx: WaveSpawnContext | null = null;
-
-      for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i];
-          if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
-          const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
-          if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
-          if (e.bubbleSickTimer) e.bubbleSickTimer = Math.max(0, e.bubbleSickTimer - dt);
-          const sick = (e.bubbleSickTimer ?? 0) > 0;
-
-          // ── Digesting a held shard: tick down, then grow + heal (the eat). The
-          // shrinking ghost is drawn inside the membrane by RenderSystem. ──
-          if ((e.bubbleDigestTimer ?? 0) > 0) {
-              e.bubbleDigestTimer = e.bubbleDigestTimer! - dt;
-              if (Math.random() < 0.25) {
-                  this.spawnParticles(e.position, 1, e.bubbleDigestColor || '#a8a29e', {
-                      speedMin: 0.5, speedMax: 2, sizeMin: 0.8, sizeMax: 1.8,
-                      lifetimeMin: 0.2, lifetimeMax: 0.45, positionJitter: Math.max(e.size.x, e.size.y) * 0.3,
-                  });
-              }
-              if (e.bubbleDigestTimer <= 0) {
-                  // Recover the richness from the stored per-shard duration.
-                  const rich = (e.bubbleDigestDuration ?? B.DIGEST_DURATION) / B.DIGEST_DURATION;
-                  this.growConsumer(e, cfg.consume!, rich);
-                  this.syncBubbleMaxHealth(e); // maxHP scales with the new size
-                  e.bubbleFeedTimer = B.FEED_PULSE; // final gulp bulge
-                  e.bubbleDigestTimer = 0;
-                  e.bubbleDigestDuration = undefined;
-                  e.bubbleDigestColor = undefined;
-                  e.bubbleDigestSize0 = undefined;
-              }
-          }
-
-          // ── Latched: EMP + size-scaled drain; falls off (→ sick) on the timer,
-          // a projectile hit, or a player terrain slam.  No longer dies. ──
-          if (e.attachedToId !== undefined) {
-              const victim = this.resolveAggroTarget(e.attachedToId);
-              const onPlayer = e.attachedToId === 'player';
-              // Face the target so the membrane squashes against its hull (render).
-              e.rotation = Math.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
-              if (victim && !victim.isExploding) {
-                  if (onPlayer) this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                  const drain = B.LATCH_DPS * (Math.max(e.size.x, e.size.y) / baseSize); // bigger bubble bites harder
-                  victim.health -= drain * dt;
-                  if (victim.health <= 0 && !victim.isExploding) this.handleEntityDeath(victim);
-              }
-              e.bubbleLatchTimer = (e.bubbleLatchTimer ?? 0) - dt;
-              const shaken = e.bubbleKnockFree === true || (onPlayer && (p.terrainSlamTimer ?? 0) > 0);
-              if (e.bubbleLatchTimer <= 0 || shaken || !victim || victim.isExploding) {
-                  e.bubbleKnockFree = undefined;
-                  this.detachLatch(e); // fall off + go sick + lose aggro (no death)
-              }
-              continue;
-          }
-
-          if (sick) continue; // sluggish + can't hunt/latch/breed (AISystem drifts it)
-
-          // ── Provoked + in contact with the aggro target → latch on ──
-          const target = e.aggroTargetId ? this.resolveAggroTarget(e.aggroTargetId) : (e.provoked ? p : null);
-          if (target) {
-              if (!target.active || target.isExploding) {
-                  // Attacker gone → calm down (back to ambient drift / breeding).
-                  e.aggroTargetId = undefined;
-                  e.provoked = false;
-              } else {
-                  const tr = Math.max(target.size.x, target.size.y) / 2;
-                  const dx = wrapDeltaX(e.position.x, target.position.x);
-                  const dy = wrapDeltaY(e.position.y, target.position.y);
-                  const reach = tr + Math.max(e.size.x, e.size.y) / 2 + B.CONTACT_PAD;
-                  if (dx * dx + dy * dy <= reach * reach) {
-                      e.attachedToId = target.id;
-                      e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
-                      e.bubbleLatchTimer = B.LATCH_DURATION;
-                      if (target.id === 'player') this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                      this.spawnParticles(target.position, 10, e.color || '#67e8f9', {
-                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
-                          lifetimeMin: 0.2, lifetimeMax: 0.5,
-                      });
-                  }
-                  continue; // a provoked bubble doesn't breed
-              }
-          }
-
-          // ── Passive + fat enough → split into two base-size bubbles ──
-          // (not while digesting a meal).
-          const mult = cfg.multiply;
-          if (mult && (e.bubbleDigestTimer ?? 0) <= 0 && Math.max(e.size.x, e.size.y) >= mult.atSize) {
-              let pop = 0;
-              for (let k = 0; k < enemies.length; k++) {
-                  const o = enemies[k];
-                  if (o.enemySubtype === EnemySubtype.BUBBLE && o.active && !o.isExploding) pop++;
-              }
-              if (pop >= mult.maxPopulation) continue;
-              ctx = ctx ?? this.waveContext();
-              if (!ctx) continue;
-              const base = cfg.size;
-              e.size.x = base; e.size.y = base;
-              this.syncBubbleMaxHealth(e); // back to base maxHP after shedding mass
-              const a = Math.random() * Math.PI * 2;
-              e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
-              e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
-              const child = this.waves.spawnAt(EnemySubtype.BUBBLE, e.position, ctx, false);
-              child.velocity.x = -Math.cos(a) * B.SPLIT_SPEED;
-              child.velocity.y = -Math.sin(a) * B.SPLIT_SPEED;
-              this.spawnParticles(e.position, 8, e.color || '#67e8f9', {
-                  speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3,
-                  lifetimeMin: 0.2, lifetimeMax: 0.5,
-              });
-          }
-      }
-  }
-
-  /** Resolve a bubble's aggro/latch target id to a live entity — the player
-   *  ('player') or an active enemy by id — or null if it's gone.  Cheap: the
-   *  player is special-cased and enemies come from the small filtered index. */
-  private resolveAggroTarget(id: string): GameEntity | null {
-      if (id === 'player') return this.player;
-      const enemies = this.entityIndex.enemies;
-      for (let i = 0; i < enemies.length; i++) {
-          if (enemies[i].id === id) return enemies[i].active ? enemies[i] : null;
-      }
-      return null;
-  }
-
-  /** Break a bubble's latch: it falls off, goes SICK (sluggish + can't eat),
-   *  and loses aggro — it does NOT die (shoot it while sick for the kill). */
-  private detachLatch(e: GameEntity) {
-      e.attachedToId = undefined;
-      e.attachOffset = undefined;
-      e.bubbleLatchTimer = 0;
-      e.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
-      e.aggroTargetId = undefined;
-      e.provoked = false; // calm down after the bite
-      this.spawnParticles(e.position, 12, BUBBLE_CONSTANTS.SICK_COLOR, {
-          speedMin: 2, speedMax: 7, sizeMin: 1.5, sizeMax: 3.2,
-          lifetimeMin: 0.2, lifetimeMax: 0.55,
-      });
-  }
-
-  /** Richness of a shard for mass/energy-conserved eating (shardRichness):
-   *  denser/bigger shards score higher → longer digest + more growth/health.
-   *  Clamped to BUBBLE_CONSTANTS.RICH_MIN..RICH_MAX. */
-  private shardRichness(shard: GameEntity): number {
-      const sizeR = Math.max(shard.size.x, shard.size.y) / 26; // ≈ a baseline shard
-      let dens = 1;
-      switch (shard.shardVariant) {
-          case 'metal-shard':   dens = 1.7;  break;
-          case 'rock-shard':    dens = 1.35; break;
-          case 'glass-shard':   dens = 0.9;  break;
-          case 'plastic-shard': dens = 0.9;  break;
-          case 'nebula-shard':  dens = 0.8;  break;
-      }
-      return Math.max(BUBBLE_CONSTANTS.RICH_MIN, Math.min(BUBBLE_CONSTANTS.RICH_MAX, sizeR * dens));
-    }
-
-  /** Toxic shards make the bubble sick on eating: plastic, or a GREEN nebula
-   *  shard (green-dominant blended colour). */
-  private isToxicShard(shard: GameEntity): boolean {
-      if (shard.shardVariant === 'plastic-shard') return true;
-      if (shard.shardVariant === 'nebula-shard') {
-          const hex = shard.nebulaBlendedHex || shard.color || '';
-          if (hex.length >= 7) {
-              const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-              return g > r * 1.1 && g > b * 1.1 && g > 90; // green-dominant
-          }
-      }
-      return false;
-  }
-
-  // ─── Ambient bubble population (Stage 5) ───────────────────────────────
-  //
-  // Bubbles are always-present fauna, not wave enemies — keep at least
-  // BUBBLE_CONSTANTS.AMBIENT_POPULATION alive at all times by topping up
-  // offscreen on a timer while the field is short (breeding can carry the count
-  // higher on its own).  Skipped while a DIFFERENT enemy is force-selected in
-  // the DBG enemy-test so that isolation stays clean.  O(enemies) census.
-  private maintainAmbientBubbles(dt: number) {
-      if (!this.currentMap || this.gameState !== GameState.PLAYING) return;
-      // A DBG enemy-test forcing a single type suppresses the ambient fauna so
-      // that type is seen in isolation.
-      if (this.forcedTestEnemy) return;
-
-      let count = 0;
-      const enemies = this.entityIndex.enemies;
-      for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i];
-          if (e.enemySubtype === EnemySubtype.BUBBLE && e.active && !e.isExploding) count++;
-      }
-      if (count >= BUBBLE_CONSTANTS.AMBIENT_POPULATION) {
-          this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
-          return;
-      }
-      this.ambientBubbleTimer -= dt;
-      if (this.ambientBubbleTimer > 0) return;
-      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
-      this.spawnAmbientBubble();
-  }
-
-  /** Seed the ambient bubble population in one shot (called on entering play so
-   *  the fauna is present from the first frame, not trickled in). */
-  private seedAmbientBubbles() {
-      if (!this.currentMap || this.forcedTestEnemy) return;
-      for (let i = 0; i < BUBBLE_CONSTANTS.AMBIENT_POPULATION; i++) this.spawnAmbientBubble();
-      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
-  }
-
-  /** Spawn one ambient bubble just outside the viewport (so it drifts in rather
-   *  than popping into view).  counts=false + the `ambient` variant flag keep it
-   *  out of wave accounting. */
-  private spawnAmbientBubble(): GameEntity | null {
-      const ctx = this.waveContext();
-      if (!ctx) return null;
-      const zoom = this.camera.zoom || 1;
-      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-      const angle = Math.random() * Math.PI * 2;
-      const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + Math.random() * 240;
-      const pos = {
-          x: this.player.position.x + Math.cos(angle) * dist,
-          y: this.player.position.y + Math.sin(angle) * dist,
-      };
-      wrapPosition(pos);
-      return this.waves.spawnAt(EnemySubtype.BUBBLE, pos, ctx, false);
-  }
 
   // ─── Kamikaze proximity fuse ───────────────────────────────────────────
   //
@@ -5326,451 +5998,6 @@ export class GameEngine {
       }
   }
 
-  // ─── Attach pass (Stage 3c) ────────────────────────────────────────────
-  //
-  // Snap every attached entity onto its target each frame (a latch / grapple).
-  // Runs in updateGameLogic AFTER physics so it tracks the target's post-move
-  // position.  If the target is gone (dead / inactive / missing) the attachment
-  // releases.  Iterates the (small) enemies index — the only attachers today
-  // are enemies (the bubble grappling the player); revisit if a non-enemy ever
-  // needs to attach.
-  private updateAttachments() {
-      const ents = this.entityIndex.enemies;
-      for (let i = 0; i < ents.length; i++) {
-          const e = ents[i];
-          if (!e.active || e.attachedToId === undefined) continue;
-          // Attachment targets are the player or an enemy (the bubble latch), so
-          // resolve through the player special-case + the small enemies index
-          // rather than a full O(all-entities) master-list scan.
-          const target = this.resolveAggroTarget(e.attachedToId);
-          if (!target || !target.active || target.isExploding) {
-              e.attachedToId = undefined;
-              continue;
-          }
-          e.position.x = target.position.x + (e.attachOffset?.x ?? 0);
-          e.position.y = target.position.y + (e.attachOffset?.y ?? 0);
-          wrapPosition(e.position);
-          e.velocity.x = target.velocity.x;
-          e.velocity.y = target.velocity.y;
-      }
-  }
-
-  // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
-  //
-  // For each consumer (an entity carrying a `consume` config — the bubble; the
-  // dragon later), two-phase feeding within the SENSE radius (`cfg.range`):
-  // mobile candidates outside membrane contact are PULLED inward (a suck-in tug,
-  // `cfg.pull`), and a candidate that has reached MEMBRANE CONTACT (radii
-  // overlap) is SWALLOWED — grow + animate (consumeEntity).  This replaces the
-  // old eat-on-sight-at-range so shards visibly stream in and pop on contact
-  // instead of vanishing from afar.  PerfController-gated ('consume');
-  // torus-correct.  Growth is capped at `cfg.maxSize`; the self-replication
-  // entity cap lives at the child-spawn site (updateBubbles, Stage 5).
-  private updateConsumers(dt: number) {
-      if (!this.currentMap) return;
-      const enemies = this.entityIndex.enemies;
-      // Candidates: mobile shards (asteroids index) and/or static tiles.
-      const shards = this.entityIndex.asteroids;
-      for (let c = 0; c < enemies.length; c++) {
-          const consumer = enemies[c];
-          const cfg = consumer.consume;
-          if (!cfg || !consumer.active || consumer.isExploding) continue;
-          // Only a calm, idle bubble feeds: a hunting (provoked), latched,
-          // digesting, or SICK bubble doesn't pull or capture shards.
-          if ((consumer.bubbleDigestTimer ?? 0) > 0 || consumer.attachedToId !== undefined
-              || consumer.provoked || (consumer.bubbleSickTimer ?? 0) > 0) continue;
-          const rangeSq = cfg.range * cfg.range;
-          const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
-          for (let k = 0; k < shards.length; k++) {
-              const cand = shards[k];
-              if (!cand.active || cand.isExploding) continue;
-              const wantTile = cfg.eats === 'tile';
-              const isTile = cand.mass === Infinity;
-              if (wantTile !== isTile) continue;
-              const dx = wrapDeltaX(consumer.position.x, cand.position.x); // consumer→cand
-              const dy = wrapDeltaY(consumer.position.y, cand.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 > rangeSq) continue;
-              const candR = Math.max(cand.size.x, cand.size.y) * 0.5;
-              const contact = consumerR + candR;
-              if (d2 <= contact * contact) {
-                  // SWALLOW on membrane contact.  Mobile shards are engulfed and
-                  // DIGESTED over time (held inside the bubble); static tiles
-                  // (the future dragon) are eaten instantly.
-                  if (isTile) this.consumeTile(consumer, cand, cfg, dx, dy);
-                  else { this.beginDigest(consumer, cand, dx, dy); break; }
-              } else if (!isTile && cfg.pull) {
-                  // Suck-in: tug the mobile shard toward the membrane, stronger
-                  // the closer it is (so a near shard accelerates into the mouth).
-                  const d = Math.sqrt(d2) || 1;
-                  const prox = 1 - d / cfg.range;          // 0 at the rim → 1 at contact
-                  const a = cfg.pull * (0.3 + 0.7 * prox) * dt;
-                  cand.velocity.x -= (dx / d) * a;
-                  cand.velocity.y -= (dy / d) * a;
-              }
-          }
-      }
-  }
-
-  /** Grow a consumer by one eat (size + heal + optional mass), scaled by `scale`
-   *  (the shard's richness — mass/energy conserved), capped at maxSize.  Shared
-   *  by the shard-digest finish + the instant tile eat.  (The bubble's maxHealth
-   *  is recomputed from its new size by syncBubbleMaxHealth, called after.) */
-  private growConsumer(consumer: GameEntity, cfg: ConsumeConfig, scale: number = 1) {
-      const cur = Math.max(consumer.size.x, consumer.size.y);
-      if (cur < cfg.maxSize) {
-          const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat * scale);
-          const s = grown / (cur || 1);
-          consumer.size.x *= s;
-          consumer.size.y *= s;
-      }
-      // Heal from eating (a denser meal heals more) — caps at the current maxHP;
-      // size-driven maxHP growth is applied by syncBubbleMaxHealth afterwards.
-      consumer.health = Math.min(consumer.maxHealth, consumer.health + BUBBLE_CONSTANTS.HEAL_PER_RICH * scale);
-      if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat * scale;
-  }
-
-  /** Keep a bubble's maxHealth LINEAR with its size (anchored at the variant's
-   *  base health @ base size).  Growing raises the ceiling AND fills the new HP
-   *  (mass conserved); shrinking on a split caps current HP to the new ceiling. */
-  private syncBubbleMaxHealth(e: GameEntity) {
-      const v = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
-      const newMax = v.health * (Math.max(e.size.x, e.size.y) / v.size);
-      const delta = newMax - e.maxHealth;
-      e.maxHealth = newMax;
-      e.health = delta > 0 ? Math.min(newMax, e.health + delta) : Math.min(e.health, newMax);
-  }
-
-  /** Begin digesting a mobile shard: snapshot its look onto the bubble, swallow
-   *  it (deactivate), and spray a brief inward implosion.  Digest TIME scales
-   *  with the shard's richness (denser = slower), stored on the bubble so the
-   *  finish (updateBubbles) recovers the same richness for the heal/grow.  A
-   *  TOXIC shard (plastic / green-nebula) also makes the bubble sick.  The bubble
-   *  renders the shard as a shrinking ghost INSIDE its membrane until done.
-   *  `dx/dy` is consumer→shard. */
-  private beginDigest(consumer: GameEntity, shard: GameEntity, dx: number, dy: number) {
-      const rich = this.shardRichness(shard);
-      const dur = BUBBLE_CONSTANTS.DIGEST_DURATION * rich;
-      consumer.bubbleDigestTimer = dur;
-      consumer.bubbleDigestDuration = dur;
-      consumer.bubbleDigestColor = shard.color || '#a8a29e';
-      consumer.bubbleDigestSize0 = Math.max(shard.size.x, shard.size.y);
-      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
-      if (this.isToxicShard(shard)) consumer.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
-      const inward = Math.atan2(-dy, -dx); // shard → bubble
-      this.spawnParticles(shard.position, 8, consumer.bubbleDigestColor, {
-          spreadAngle: inward, spreadCone: 0.8,
-          speedMin: 2.5, speedMax: 6, sizeMin: 1, sizeMax: 2.4,
-          lifetimeMin: 0.1, lifetimeMax: 0.26,
-      });
-      shard.active = false; // swallowed (no score/regen — it's eaten, not destroyed)
-  }
-
-  /** Instant tile eat (the future dragon): grow + route the tile through the
-   *  death/flow-field patch + an inward implosion.  `dx/dy` is consumer→tile. */
-  private consumeTile(consumer: GameEntity, tile: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
-      this.growConsumer(consumer, cfg);
-      const inward = Math.atan2(-dy, -dx);
-      this.spawnParticles(tile.position, 9, tile.color || '#a8a29e', {
-          spreadAngle: inward, spreadCone: 0.9,
-          speedMin: 2.5, speedMax: 6.5, sizeMin: 1, sizeMax: 2.6,
-          lifetimeMin: 0.12, lifetimeMax: 0.3,
-      });
-      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
-      this.physics.removeStaticEntity(tile);
-      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
-      tile.active = false;
-  }
-
-  // ─── Kamikaze blast → player (direct, instant) ─────────────────────────
-  //
-  // Applied at detonation (handleEntityDeath) so the launch + damage land the
-  // same frame at the contact point, independent of the expanding ring (which
-  // only sweeps collateral onto other entities).  Damage is shield-respecting;
-  // the knockback drives the player past the speed cap via `overSpeedAllow` so
-  // it reads as a real shove (the hard cap would otherwise eat it).  Falloff
-  // floors at 0.3 so a point-blank bomber always throws you.
-  private applyKamikazeBlastToPlayer(bomb: GameEntity) {
-      this.applyBlastToPlayer(
-          bomb.position,
-          bomb.explosionRadius ?? 0,
-          bomb.explosionDamage ?? 0,
-          bomb.explosionKnockback ?? 0,
-      );
-  }
-
-  /**
-   * Apply an ENEMY-owned area blast to the player DIRECTLY — shield-respecting
-   * damage plus a launch, with distance falloff.  This exists (rather than
-   * letting the shockwave ring do it) because the ring only sweeps
-   * `currentMap.entities`, and the player is not in that list: it is appended
-   * to `frameEntities` each step.  So every enemy AoE that should hurt the
-   * player routes through here — the kamikaze detonation, and the (h) Bastion's
-   * siege shells.  Landing it at the impact point also means the shove is
-   * instant rather than gated on the ring's expanding wavefront reaching you.
-   */
-  private applyBlastToPlayer(pos: Vector2, radius: number, damage: number, knockback: number) {
-      const p = this.player;
-      if (p.isExploding) return;
-      if (radius <= 0) return;
-      const dx = wrapDeltaX(pos.x, p.position.x);
-      const dy = wrapDeltaY(pos.y, p.position.y);
-      const dist = Math.hypot(dx, dy);
-      if (dist > radius) return;
-      const falloff = Math.max(0.3, 1 - dist / radius);
-
-      // Damage (shield first, then hull) — mirrors the projectile/ram paths.
-      let dmg = damage * falloff;
-      if ((p.shield ?? 0) > 0) {
-          const absorbed = Math.min(p.shield!, dmg);
-          p.shield! -= absorbed;
-          dmg -= absorbed;
-          p.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
-          p.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
-      }
-      if (dmg > 0) {
-          p.health -= dmg;
-          this.spawnDamageText(p.position, dmg, p);
-      }
-      p.hitFlash = 0.2;
-
-      // Launch: shove along the blast→player vector (away from it) and raise
-      // the overshoot allowance so the cap doesn't clamp the impulse.
-      const k = knockback * falloff;
-      let nx: number, ny: number;
-      if (dist > 0.001) { nx = dx / dist; ny = dy / dist; }
-      else { const a = Math.random() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
-      p.velocity.x += nx * k;
-      p.velocity.y += ny * k;
-      p.overSpeedAllow = Math.max(p.overSpeedAllow ?? 0, Math.hypot(p.velocity.x, p.velocity.y));
-
-      if (p.health <= 0 && !p.isExploding) this.handleEntityDeath(p);
-  }
-
-  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {      if (!this.currentMap) return;
-
-      // Impact-frame visuals (instant): bright spark burst + screen shake.
-      // These don't wait for the wavefront — the player should feel the
-      // hit immediately while the ring continues outward.
-      this.spawnParticles(impactPos, 14, '#fb923c', {
-          speedMin: 4, speedMax: 11, sizeMin: 1.5, sizeMax: 3,
-      });
-      this.spawnParticles(impactPos, 6, '#ffffff', {
-          speedMin: 6, speedMax: 14, sizeMin: 0.5, sizeMax: 1.5,
-      });
-      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-
-      // Spawn the damaging shockwave ring for the WORLD (enemies, structures).
-      // The direct-hit target is excluded (it already took config.damage from
-      // the projectile collision) and so is the player — the ring only ever
-      // sweeps entities in currentMap.entities, which the player is not part
-      // of (it is appended to frameEntities), so the player is handled by the
-      // DIRECT path below exactly as the kamikaze blast is.
-      this.spawnShockwave(impactPos, {
-          radius: proj.explosionRadius!,
-          damage: proj.explosionDamage ?? 0,
-          knockback: proj.explosionKnockback ?? 0,
-          color: WEAPONS[WeaponType.CANNON].color,
-          ownerType: proj.ownerType,
-          ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
-          excludeIds: [directTarget.id, 'player'],
-      });
-
-      // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
-      // Plasma Cannon, splash and all) must actually threaten the player —
-      // otherwise its signature weapon is a light show.  Same direct,
-      // shield-respecting blast the kamikaze uses, and for the same reason:
-      // the ring sweep never reaches the player.  A player-owned Cannon
-      // obviously doesn't self-damage.
-      if (proj.ownerType === EntityType.ENEMY && directTarget !== this.player) {
-          this.applyBlastToPlayer(
-              impactPos,
-              proj.explosionRadius!,
-              proj.explosionDamage ?? 0,
-              proj.explosionKnockback ?? 0,
-          );
-      }
-  }
-
-  // ─── Reusable expanding shockwave ──────────────────────────────────────
-  //
-  // Spawns an `isExplosionRing` particle whose currentRadius grows 0 →
-  // radius across `lifetime`.  updateExplosionRings (each fixed step) ticks
-  // it, applying falloff damage + knockback to entities the wavefront
-  // reaches.  Powers both the Plasma Cannon AoE and the smaller shard→tile
-  // merge blow-back.  Only entities in range AT SPAWN are eligible
-  // (validHitIds snapshot), so entities born during the sweep are excluded.
-  private spawnShockwave(pos: Vector2, opts: {
-      radius: number;
-      damage: number;
-      knockback: number;
-      color: string;
-      lifetime?: number;
-      ownerType?: GameEntity['ownerType'];
-      ownerId?: string;
-      excludeIds?: string[];
-  }) {
-      if (!this.currentMap) return;
-      const radius = opts.radius;
-      if (!radius || radius <= 0) return;
-      const radiusSq = radius * radius;
-
-      // Cosmetic rings (the portal warp: damage 0 + knockback 0) never apply
-      // anything, so the in-range snapshot is pure waste — updateExplosionRings
-      // early-outs on an empty validHitIds set and the renderer draws the ring
-      // from its radius/lifetime alone.  Skip the O(all-entities) scan + Set
-      // work for them: a spawn burst (e.g. 10 dragon portals × 3 rings each)
-      // used to walk the whole map per ring on the single spawn frame, which
-      // is the bulk of the "spawn-burst hitch".  Damaging rings (cannon AoE,
-      // kamikaze, merge blow-back) still snapshot exactly as before.
-      const validHitIds = new Set<string>();
-      const ents = this.currentMap.entities;
-      const cosmeticRing = opts.damage <= 0 && opts.knockback <= 0;
-      if (!cosmeticRing) {
-          for (let i = 0; i < ents.length; i++) {
-              const e = ents[i];
-              if (!e.active || e.isExploding) continue;
-              if (e.type === EntityType.PROJECTILE) continue;
-              if (e.type === EntityType.PARTICLE) continue;
-              if (e.type === EntityType.INTERACTABLE) continue;
-              const dx = wrapDeltaX(pos.x, e.position.x);
-              const dy = wrapDeltaY(pos.y, e.position.y);
-              if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
-          }
-      }
-
-      const lifetime = opts.lifetime ?? 0.35;
-      ents.push({
-          id: nextId('explosion-ring'),
-          type: EntityType.PARTICLE,
-          position: { x: pos.x, y: pos.y },
-          velocity: { x: 0, y: 0 },
-          size: { x: 1, y: 1 },
-          rotation: 0,
-          color: opts.color,
-          active: true,
-          health: 1,
-          maxHealth: 1,
-          lifetime,
-          maxLifetime: lifetime,
-          mass: 0,
-          isExplosionRing: true,
-          explosionRadius: radius,
-          explosionDamage: opts.damage,
-          explosionKnockback: opts.knockback,
-          ownerType: opts.ownerType,
-          ownerId: opts.ownerId,
-          hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
-          validHitIds,
-      });
-  }
-
-  // ─── Cannon AoE — per-frame shockwave tick ─────────────────────────────
-  //
-  // Walks isExplosionRing particles each fixed step.  For each, computes
-  // currentRadius via the same `1 − lifetime/maxLifetime` formula the
-  // renderer uses (so the damage front is always pixel-aligned with the
-  // visible ring).  Then walks the master entity list once, damaging /
-  // knocking back any entity whose current toroidal distance falls
-  // within currentRadius and that hasn't been hit yet.  hitEntityIds
-  // grows monotonically to prevent double-hits as the wave widens.
-  private updateExplosionRings() {
-      if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-
-      for (let r = 0; r < entities.length; r++) {
-          const ring = entities[r];
-          if (!ring.active || !ring.isExplosionRing) continue;
-
-          const maxRadius = ring.explosionRadius;
-          if (!maxRadius || maxRadius <= 0) continue;
-
-          const life = ring.lifetime ?? 0;
-          const maxLife = ring.maxLifetime ?? 1;
-          const expand = Math.max(0, Math.min(1, 1 - life / maxLife));
-          const currentRadius = maxRadius * expand;
-          if (currentRadius <= 0) continue;
-
-          const currentR2 = currentRadius * currentRadius;
-          const dmg   = ring.explosionDamage ?? 0;
-          const knock = ring.explosionKnockback ?? 0;
-          const hits  = ring.hitEntityIds ?? (ring.hitEntityIds = []);
-
-          // Only candidates that were in range AT SPAWN are eligible —
-          // entities born during the sweep (e.g. glass-shards from tiles
-          // the wave just shattered) are excluded.
-          const valid = ring.validHitIds;
-          if (!valid || valid.size === 0) continue;
-
-          for (let i = 0; i < entities.length; i++) {
-              const e = entities[i];
-              if (!e.active || e.isExploding) continue;
-              if (!valid.has(e.id)) continue;
-              if (hits.includes(e.id)) continue;
-
-              const dx = wrapDeltaX(ring.position.x, e.position.x);
-              const dy = wrapDeltaY(ring.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 > currentR2) continue;
-
-              hits.push(e.id);
-              const dist = Math.sqrt(d2);
-              const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
-
-              if (dmg > 0) {
-                  let applied = dmg * falloff;
-                  const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
-                  // Player shield soaks the blast first (kamikaze AoE and any
-                  // future enemy-owned explosion) so an AoE hit isn't a raw
-                  // shield-bypass — mirrors the projectile / ram absorption.
-                  if (e.id === 'player' && (e.shield ?? 0) > 0 && !e.systemsDisabled) {
-                      const absorbed = Math.min(e.shield!, applied);
-                      e.shield! -= absorbed;
-                      applied -= absorbed;
-                      e.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
-                      e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
-                  }
-                  if (!isIndestructible) e.health -= applied;
-                  // (h) regen: splash damage counts toward a burst too — but
-                  // ONLY when the blast is the player's (an enemy shell healing
-                  // its own boss through the bucket would be nonsense).  Like
-                  // the chain, a ring bypasses the front-shield plate.
-                  if (ring.ownerType === EntityType.PLAYER) noteTraitDamage(e, applied);
-                  if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
-                  // Third-party retaliation (Stage 5): an AoE that catches a
-                  // bubble makes it target the blast's owner.
-                  if (e.thirdParty && ring.ownerId) e.aggroTargetId = ring.ownerId;
-                  e.hitFlash = 0.12;
-                  e.hitReact = hitReactStrength(applied, e.maxHealth ?? e.health);
-                  this.spawnDamageText(e.position, applied, e);
-                  if (e.health <= 0 && !e.isExploding) {
-                      e.lastImpactDamage = applied;
-                      if (ring.ownerType === EntityType.PLAYER) e.killedByPlayer = true;
-                      if (e.type === EntityType.STRUCTURE && dist > 0) {
-                          e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
-                      }
-                      if (e.type === EntityType.STRUCTURE && e.mass === Infinity) {
-                          this.physics.removeStaticEntity(e);
-                      }
-                      this.handleEntityDeath(e);
-                      e.active = false;
-                  }
-              }
-
-              if (knock > 0 && e.mass !== Infinity && dist > 0) {
-                  const k = knock * falloff;
-                  e.velocity.x += (dx / dist) * k;
-                  e.velocity.y += (dy / dist) * k;
-                  // Let the player overshoot the speed cap so the blast actually
-                  // launches them; the overshoot decays in updatePlayerMovement.
-                  if (e.id === 'player') {
-                      const sp = Math.hypot(e.velocity.x, e.velocity.y);
-                      e.overSpeedAllow = Math.max(e.overSpeedAllow ?? 0, sp);
-                  }
-              }
-          }
-      }
-  }
 
   // createAsteroidShards moved to ShardSystem.shatter in Stage 3 of
   // the shard-system overhaul.  See engine/systems/ShardSystem.ts.
@@ -5780,7 +6007,7 @@ export class GameEngine {
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
    *  tiny helper so every wave entry point (init / update tick / skip)
    *  goes through the same factory. */
-  private waveContext(): WaveSpawnContext | null {
+  waveContext(): WaveSpawnContext | null {
     if (!this.currentMap) return null;
     // Read the live window size + camera zoom at spawn time so a recent
     // browser resize is reflected without needing a resize listener.
@@ -5808,30 +6035,36 @@ export class GameEngine {
   // health-fraction gate the boss has fallen past, keep the live-boss handle
   // for the HUD, and pay the model-(d) bounty on death.
 
-  /** Live-boss HUD readout — undefined when no boss is alive, so the HUD bar
-   *  simply isn't rendered.  Cheap: `liveBoss` is maintained by updateBosses,
-   *  so this is a couple of divisions per stats push. */
-  private bossStatsSnapshot(): EngineStats['boss'] {
-      const b = this.liveBoss;
-      if (!b || !b.active || b.isExploding) return undefined;
-      const def = b.enemySubtype ? BOSS_DEFS[b.enemySubtype] : undefined;
-      return {
-          name: def?.name ?? 'BOSS',
-          healthFrac: Math.max(0, Math.min(1, b.health / Math.max(1, b.maxHealth))),
-          shieldFrac: (b.maxShield ?? 0) > 0
-              ? Math.max(0, Math.min(1, (b.shield ?? 0) / b.maxShield!)) : 0,
-          phase: Math.max(0, b.bossPhase ?? 0),
-          phaseCount: def?.phases.length ?? 1,
-          color: b.color || '#f87171',
-      };
-  }
-
   /** Timed boss shop-discount readout — undefined when no window is running,
    *  so the shop UI can show the beat only while it is live. */
   /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
    *  the same `openPortal` abstraction the dragon and the rivals use. */
+  /** ── The FLASHLIGHT TOOL (user call) ────────────────────────────────
+   *  Cycle the ship's light: off → medium → high → off.  Reachable only
+   *  while the Flashlight Kit module is installed and active
+   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
+   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
+   *  FALLBACK when neither of those is in range — the arbitration in
+   *  updateInteractables stays nearest-wins, the light just claims the
+   *  gesture nothing else wanted. */
+  public cycleShipLight(): boolean {
+      if (!this.flashlightEquipped) return false;
+      this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
+      const lvl = FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel];
+      this.pushPlayerMessage(lvl.label, lvl.tier === undefined ? '#94a3b8' : '#fde68a');
+      this.audio.play('ui.confirm');
+      return true;
+  }
+
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
+      // THE LADDER STOPS HERE (user call).  One seam for both ways a boss
+      // reaches the field — the capstone wave's own spawn and the debug
+      // menu's warp-in — so neither can leave the ladder running underneath
+      // the fight.  It does not resume when the boss dies; see
+      // WaveSystem.haltForBoss.
+      this.waves.haltForBoss();
+      this.audio.play('boss.intro');
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,
@@ -5839,116 +6072,6 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
   };
-
-  /**
-   * Boss phase pass.  Walks the enemy index (a wave has one boss, but the DBG
-   * menu can stack several) and, for each, finds the deepest BOSS_DEFS phase
-   * whose `atHealthFrac` gate it has fallen past.  If that isn't the applied
-   * phase, STAMP it.
-   *
-   * Every phase field lands on machinery that already exists — the weapon
-   * override merges in WeaponSystem, the shield rides the generalized
-   * absorption path, the spawner rides updateNests, the traits ride the
-   * PhysicsSystem damage path.  Nothing here is a bespoke boss script, which
-   * is the whole point of the framework (guardrail #36e).
-   *
-   * O(enemies) with an early flag check and no work on a non-transition step,
-   * so it stays ungated like the kamikaze / nest passes.
-   */
-  private updateBosses(dt: number) {
-      // Timed shop discount (payout model (d)) — run-scoped, ticks on sim time
-      // so it doesn't drain while docked or paused.
-      if (!this.currentMap) return;
-      const enemies = this.entityIndex.enemies;
-      let live: GameEntity | null = null;
-      for (let i = 0; i < enemies.length; i++) {
-          const b = enemies[i];
-          if (b.isBoss !== true || !b.active || b.isExploding) continue;
-          // The HUD bar tracks the most-wounded live boss (the one being fought).
-          if (!live || (b.health / Math.max(1, b.maxHealth)) < (live.health / Math.max(1, live.maxHealth))) live = b;
-
-          const def = b.enemySubtype ? BOSS_DEFS[b.enemySubtype] : undefined;
-          if (!def) continue;
-          const frac = b.health / Math.max(1, b.maxHealth);
-          let want = 0;
-          for (let p = 0; p < def.phases.length; p++) {
-              if (frac <= def.phases[p].atHealthFrac) want = p;
-          }
-          if (b.bossPhase === want) continue;
-          this.applyBossPhase(b, def, want);
-      }
-      this.liveBoss = live;
-  }
-
-  /** Stamp one BOSS_DEFS phase onto a boss.  Fields ABSENT from the phase are
-   *  CLEARED (a phase can drop a shield or stop escorts), so a phase is a full
-   *  description of the boss's current state rather than a patch. */
-  private applyBossPhase(boss: GameEntity, def: BossDef, index: number) {
-      const phase = def.phases[index];
-      const first = boss.bossPhase === undefined || boss.bossPhase < 0;
-      boss.bossPhase = index;
-
-      const arch = boss.enemySubtype ? ENEMY_VARIANTS[boss.enemySubtype] : undefined;
-      if (phase.color) boss.color = phase.color;
-      if (arch) boss.maxSpeed = arch.maxSpeed * (phase.speedMult ?? 1);
-      boss.weaponOverride = phase.weapon;
-      boss.spawner = phase.spawner;
-      boss.spawnTimer = phase.spawner ? phase.spawner.interval * 0.35 : undefined;
-
-      // Traits REPLACE the previous phase's set — a defence can be traded away.
-      boss.armor = phase.traits?.armor;
-      boss.evasive = phase.traits?.evasive;
-      if (!boss.evasive) boss.dodgeTimer = undefined;
-      boss.frontShield = phase.traits?.frontShield;
-      boss.regen = phase.traits?.regen;
-      if (!boss.regen) {
-          boss.regenBucket = undefined;
-          boss.regenBucketTimer = undefined;
-          boss.regenBurnTimer = undefined;
-      }
-
-      // Shield: raise / re-arm, or drop it entirely when the phase has none.
-      if (phase.shield) {
-          boss.shield = phase.shield.amount;
-          boss.maxShield = phase.shield.amount;
-          boss.shieldRechargeRate = phase.shield.regen;
-          boss.shieldRechargeTimer = 0;
-          if (phase.shield.arc) {
-              boss.shieldArcHalfWidth = (phase.shield.arc.deg * Math.PI / 180) / 2;
-              boss.shieldArcSpin = phase.shield.arc.slew;
-              boss.shieldArcAngle = boss.rotation;
-          } else {
-              boss.shieldArcHalfWidth = undefined;
-              boss.shieldArcSpin = undefined;
-          }
-      } else {
-          boss.shield = undefined;
-          boss.maxShield = undefined;
-          boss.shieldArcHalfWidth = undefined;
-          boss.shieldArcSpin = undefined;
-      }
-
-      // Phase-transition beat — skipped on the INITIAL stamp (phase 0 applies on
-      // the boss's first tick, and the entrance rift already sold that).
-      if (first) return;
-      if (phase.announce) {
-          const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-          this.waves.announcements.push({
-              text: phase.announce,
-              subtext: `PHASE ${index + 1}`,
-              color: phase.color ?? '#f87171',
-              lifetime: life,
-              maxLifetime: life,
-          });
-      }
-      this.spawnShockwave(boss.position, {
-          radius: Math.max(boss.size.x, boss.size.y) * 3,
-          damage: 0, knockback: 0,
-          color: phase.color ?? '#f87171',
-          lifetime: 0.5,
-      });
-      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-  }
 
   /**
    * REGEN counterplay trait ((h), WEAPONS_AMMO_PLAN §7).  For each enemy
@@ -5986,127 +6109,22 @@ export class GameEngine {
       }
   }
 
-  /**
-   * Boss kill payout — WEAPONS_AMMO_PLAN §6 model (d): SALVAGE + a timed SHOP
-   * DISCOUNT.  Deliberately NO weapon unlock: weapons stay purely purchased and
-   * the boss is an income accelerator that funds (or cheapens) the next shop
-   * run.  Called from handleEntityDeath alongside the normal enemy death path,
-   * which still runs — a boss explodes, pays kill points and sprays enemy
-   * shards like any other enemy.
-   */
-  private payBossBounty(boss: GameEntity) {
-      this.bossesKilled++;
-      this.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
-      // Stack the discount fraction (capped) and refresh the window.
-      // The money is PHYSICAL — the same salvage drops every other source pays,
-      // sprayed off the corpse so it converges and merges normally.
-      for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const d = 30 + Math.random() * 140;
-          this.spawnSalvageDrop({
-              x: boss.position.x + Math.cos(a) * d,
-              y: boss.position.y + Math.sin(a) * d,
-          });
-      }
-      // ── The payoff moment ──────────────────────────────────────────────
-      // Same beat the dragon gets (dragonDeath is the precedent): a rift
-      // COLLAPSE where the entrance rift opened, a debris burst in the boss's
-      // phase colour, and a heavy shake — layered on top of the normal enemy
-      // explosion the death path still runs.  All existing machinery.
-      this.openPortal(boss.position, {
-          color: boss.color || '#f87171',
-          radius: BOSS_CONSTANTS.PORTAL_RADIUS,
-          duration: BOSS_CONSTANTS.PORTAL_DURATION,
-      });
-      this.spawnParticles(boss.position, BOSS_CONSTANTS.DEATH_DEBRIS, boss.color || '#f87171', {
-          speedMin: 3, speedMax: 15, sizeMin: 2, sizeMax: 6,
-          lifetimeMin: 0.4, lifetimeMax: 1.1,
-      });
-      this.spawnParticles(boss.position, Math.round(BOSS_CONSTANTS.DEATH_DEBRIS * 0.4), '#ffffff', {
-          speedMin: 6, speedMax: 20, sizeMin: 1, sizeMax: 2.5,
-          lifetimeMin: 0.25, lifetimeMax: 0.6,
-      });
-      this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
-
-      // Name the kill and its payout — the banner is what tells the player the
-      // capstone is DOWN and that the shop just got cheaper, which is
-      // otherwise only legible by opening a station menu.
-      // The DROP-COUNT payout in real money, so the banner and the screen
-      // speak the same units the shop does.
-      const salvageCredits = BOSS_CONSTANTS.SALVAGE_DROPS * SALVAGE_CONSTANTS.CREDITS_PER_DROP;
-      // Capstone reward (user call, replaces the timed shop discount): a
-      // RANDOM module item — something you carry away and install, rather than
-      // a countdown you may not be near a shop to spend.
-      const reward = this.grantBossModule();
-      const def = boss.enemySubtype ? BOSS_DEFS[boss.enemySubtype] : undefined;
-      const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-      this.waves.announcements.push({
-          text: `${def?.name ?? 'BOSS'} DESTROYED`,
-          subtext: reward.label
-              ? `+◈${salvageCredits.toLocaleString()}  ·  ${reward.label.toUpperCase()}`
-              : `+◈${salvageCredits.toLocaleString()} SALVAGE`,
-          color: boss.color || '#f87171',
-          lifetime: life,
-          maxLifetime: life,
-      });
-      if (this.liveBoss === boss) this.liveBoss = null;
-
-      // ── The capstone's death ROUTS its forces ──────────────────────────
-      // Killing the boss wipes every enemy still standing, each through the
-      // FULL death path at FULL value (user call) — so the escort explodes,
-      // pays its kill points and sprays its salvage rather than being
-      // silently deleted or left to be mopped up after the fight is over.
-      // Mechanically this is the snitch board-clear (catchSnitch), minus the
-      // half-value scale.  NEUTRAL third parties (bubbles, dragons) and
-      // RIVALS are spared: they are not the boss's forces, and a capstone
-      // should not vacuum the ambient fauna off the map.  Snapshot the count
-      // first so the shards/particles those deaths append aren't re-scanned.
-      if (this.currentMap) {
-          const ents = this.currentMap.entities;
-          const n = ents.length;
-          for (let i = 0; i < n; i++) {
-              const e = ents[i];
-              if (e !== boss && e.type === EntityType.ENEMY && e.active && !e.isExploding
-                  && !e.thirdParty && !e.isRival) {
-                  this.handleEntityDeath(e);
-              }
-          }
-      }
-
-      // ── Stage cleared ──────────────────────────────────────────────────
-      // Open the DESCENT rift beside the wreck and raise the stage-clear
-      // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
-      // (or any wave-free map) has no ladder to descend from.
-      if (this.wavesEnabled) {
-          // The stage's ladder is FINISHED — no further wave starts in this
-          // arena.  Whatever is still on the field stays (the player mops up),
-          // but the arena stops feeding the fight so the choice between the
-          // two rifts is made in quiet.
-          this.waves.halted = true;
-          this.openDescentPortal(boss.position);
-          this.lastStageClear = {
-              stage: this.stageIndex + 1,
-              bossName: def?.name ?? 'Boss',
-              nextStage: this.stageIndex + 2,
-              scoreAwarded: BOSS_CONSTANTS.SCORE,
-              salvageCredits,
-              rewardLabel: reward.label,
-              rewardDesc: reward.desc,
-              rewardCredits: reward.credits,
-          };
-          // Arm the beat rather than freezing on the killing blow.
-          this.stageClearDelay = BOSS_CONSTANTS.STAGE_CLEAR_DELAY_SEC;
-      }
-  }
-
   /** Arrival point beside the rift that leads back to `fromId`, or undefined
    *  when the freshly-loaded map has no such rift.  Offset clear of the mouth
    *  so the player emerges NEXT TO the rift (it stays visible, and the ship
    *  isn't sitting inside the thing it just came out of) while still being in
    *  USE_RANGE, so turning straight around is one tap. */
-  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+  /** The rift on THIS map that points back where the player just came from —
+   *  the mouth they surface out of.  One definition, because three things now
+   *  depend on agreeing about it: where the player lands, which way they are
+   *  thrown, and where their debris re-emerges. */
+  private exitMouthFor(fromId?: string): GameEntity | undefined {
       if (!fromId) return undefined;
-      const mouth = this.portals.find(p => p.portalTargetId === fromId);
+      return this.portals.find(p => p.portalTargetId === fromId);
+  }
+
+  private arrivalBesideRift(fromId?: string): Vector2 | undefined {
+      const mouth = this.exitMouthFor(fromId);
       if (!mouth) return undefined;
       const pos = {
           x: mouth.position.x + PORTAL_CONSTANTS.ARRIVAL_OFFSET,
@@ -6116,82 +6134,51 @@ export class GameEngine {
       return pos;
   }
 
-  /** Capstone reward: one RANDOM purchasable module dropped straight into the
-   *  inventory (user call — it replaced the timed shop discount, which asked
-   *  the player to be near a shop within a countdown to collect anything).
-   *
-   *  Uniform over the catalog, which is PROVISIONAL: it can hand a Mk III on
-   *  stage 1.  Weighting by stage depth is a tuning-pass question.
-   *
-   *  If the inventory is full there is nowhere to put it, so the reward pays
-   *  its catalog value in Salvage instead — the player is never simply denied
-   *  the drop for having full cargo. */
-  private grantBossModule(): { label?: string; desc?: string; credits?: number } {
-      const catalog = MODULE_DEFS.filter(d => d.cost > 0);
-      if (catalog.length === 0) return {};
-      const def = catalog[Math.floor(Math.random() * catalog.length)];
-      const slot = this.inventory.indexOf(null);
-      if (slot === -1) {
-          const paid = this.modulePrice(def.cost);
-          this.earnCredits(paid);
-          return { credits: paid };
+  /** Drain the debris-transit queue: each captured entity emerges from the
+   *  exit rift's mouth once its stagger delay expires — random heading,
+   *  random speed, a pinch of positional scatter so a big load doesn't
+   *  stack on one point, and a portal-gravity grace window
+   *  (portalGraceTimer) so the well that just spat it out can't swallow it
+   *  straight back.  Runs on sim time, so pause / dock hold the stream
+   *  mid-flow; the reverse splice-walk is event-frequency work (a few
+   *  dozen items once per transit), not a hot path. */
+  private updatePortalTransit(dt: number) {
+      if (this.portalTransit.length === 0 || !this.currentMap) return;
+      const cfg = PORTAL_CONSTANTS.TRANSIT;
+      for (let i = this.portalTransit.length - 1; i >= 0; i--) {
+          const item = this.portalTransit[i];
+          item.delay -= dt;
+          if (item.delay > 0) continue;
+          this.portalTransit.splice(i, 1);
+          const e = item.entity;
+          const scatterA = Math.random() * Math.PI * 2;
+          const scatterR = Math.random() * cfg.SCATTER;
+          e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
+          e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
+          wrapPosition(e.position);
+          const heading = Math.random() * Math.PI * 2;
+          const speed = cfg.SPEED_MIN + Math.random() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
+          e.velocity.x = Math.cos(heading) * speed;
+          e.velocity.y = Math.sin(heading) * speed;
+          if (e.rotationSpeed !== undefined) {
+              e.rotationSpeed += (Math.random() - 0.5) * 1.5;
+          }
+          e.portalGraceTimer = cfg.GRACE_SEC;
+          e.active = true;
+          // A drop that spent its lifetime nearly out gets a top-up: a
+          // pickup that travelled the wormhole with you should be
+          // collectible on the other side, not fade on arrival.
+          if (e.lifetime !== undefined && e.lifetime < 10) e.lifetime = 10;
+          this.currentMap.entities.push(e);
+          if (isCollectibleDrop(e)) this.activeDrops.push(e);
+          // A small pop of rift-coloured sparks sells the spit without a
+          // full openPortal burst per shard.
+          this.spawnParticles(e.position, 3, PORTAL_CONSTANTS.COLOR, {
+              speedMin: 0.5, speedMax: 2,
+              sizeMin: 1, sizeMax: 2.5,
+              lifetimeMin: 0.2, lifetimeMax: 0.5,
+          });
       }
-      this.inventory[slot] = def.id;
-      return { label: def.label, desc: def.desc };
-  }
-
-  /** The way DOWN: a descent rift beside the fallen boss, targeting a fresh
-   *  arena for the next stage.
-   *
-   *  The destination is a RANDOM arena descriptor (user call).  The existing
-   *  maps are test terrain and effectively interchangeable — this is a
-   *  placeholder for the procedural areas that will eventually pick terrain,
-   *  enemies and flow parameters per AREA.  What matters structurally is that
-   *  the target is a descriptor id, exactly like every other portal, so
-   *  swapping in a generator later changes this one line.
-   *
-   *  Marked `isDescent` so `enterPortal` knows to increment the depth; the
-   *  arena's own return rift is untouched, which is what makes the choice
-   *  in-world rather than a menu button. */
-  private openDescentPortal(pos: Vector2) {
-      if (!this.currentMap) return;
-      const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled
-          && HUB_PORTAL_SITES.some(site => site.targetId === d.id));
-      if (arenas.length === 0) return;
-      const dest = arenas[Math.floor(Math.random() * arenas.length)];
-
-      // Offset from the corpse so the rift doesn't sit under the debris.
-      const a = Math.random() * Math.PI * 2;
-      const p = {
-          x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
-          y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
-      };
-      wrapPosition(p);
-      const portal: GameEntity = {
-          id: nextId('portal'),
-          type: EntityType.INTERACTABLE,
-          isPortal: true,
-          isDescent: true,
-          portalTargetId: dest.id,
-          name: `Stage ${this.stageIndex + 2}`,
-          position: p,
-          velocity: { x: 0, y: 0 },
-          size: { x: PORTAL_CONSTANTS.SIZE, y: PORTAL_CONSTANTS.SIZE },
-          rotation: 0,
-          color: PORTAL_CONSTANTS.DESCENT_COLOR,
-          active: true,
-          health: 1,
-          maxHealth: 1,
-          mass: Infinity,
-      };
-      this.currentMap.entities.push(portal);
-      this.portals.push(portal);
-      // Arrival flourish so the rift reads as something that just OPENED.
-      this.openPortal(p, {
-          color: PORTAL_CONSTANTS.DESCENT_COLOR,
-          radius: PORTAL_CONSTANTS.BURST_RADIUS,
-          duration: PORTAL_CONSTANTS.BURST_DURATION,
-      });
   }
 
   /** DBG: warp a boss in near the player, phases and all.  `id` is an
@@ -6223,7 +6210,7 @@ export class GameEngine {
   /** Shared wave-completion hook — fires once per wave end on every path
    *  (time-up, early clear, snitch catch).  Pays the early-clear bonus,
    *  retires any uncaught snitch, and drops the milestone health pickup. */
-  private handleWaveCleared = (clearedIndex: number, elapsedSec: number, bySnitch: boolean = false) => {
+  handleWaveCleared = (clearedIndex: number, elapsedSec: number, bySnitch: boolean = false) => {
     // Completion bonus: flat base + speed-graded bonus from the wave timer.
     // Par = the wave's spawn-stream window; clearing at/under par pays the
     // full speed bonus, decaying to 0 by 2× par.
@@ -6239,7 +6226,8 @@ export class GameEngine {
     this.awardScore(bonus, this.player.position);
 
     // Wave-clear celebration — gold for a snitch catch, green for a
-    // clear-the-field win.
+    // clear-the-field win.  The audio mirrors the same split.
+    this.audio.play(bySnitch ? 'wave.clear.snitch' : 'wave.clear');
     this.playWaveClearCelebration(bySnitch);
     // The snitch is wave bookkeeping only in that it pays out + ends the
     // wave on catch; the entity itself persists across wave boundaries
@@ -6291,241 +6279,6 @@ export class GameEngine {
     this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
   }
 
-  // ── Snitch — quidditch-style bonus target ───────────────────────────────
-  //
-  // The snitch rides the asteroid flow field with a burst/coast AI and
-  // PERSISTS across wave boundaries — one keeps flying until the player
-  // catches it.  Catching it (colliding with it or shooting it, per the
-  // DBG-toggleable catch mode) pays SCORE_CONSTANTS.SNITCH_POINTS and ends
-  // the current wave; the next wave then spawns a fresh one.
-
-  /** Per-sim-step snitch tick: lifecycle, flow-field steering, comet-tail
-   *  emission, and the catch check.  Called from updateGameLogic after the
-   *  wave tick so waveState is fresh. */
-  private updateSnitch(dt: number) {
-    if (!this.currentMap) return;
-    this.snitchTime += dt;
-
-    // Persist across wave boundaries: the snitch is never despawned at a
-    // wave end, so an uncaught one keeps flying into the next wave.  A
-    // fresh one only spawns when a wave is active and none is live — the
-    // first wave, or the wave after a catch removed the previous snitch.
-    if (this.waves.waveState === 'active' && (!this.snitch || !this.snitch.active)) {
-      this.spawnSnitch();
-    }
-
-    const s = this.snitch;
-    if (!s || !s.active) return;
-
-    // ── Burst/coast AI ──────────────────────────────────────────────────
-    // The snitch is interactive prey, not a constant-speed rail rider:
-    // it coasts slow enough to close on (the catch window), then darts —
-    // on a random timer, or the moment the player gets near (panic dart,
-    // biased away from the player).  See the SNITCH_CONSTANTS doc block.
-    this.snitchPanicCooldown = Math.max(0, this.snitchPanicCooldown - dt);
-    this.snitchAiTimer -= dt;
-    const toPlayerX = wrapDeltaX(s.position.x, this.player.position.x);
-    const toPlayerY = wrapDeltaY(s.position.y, this.player.position.y);
-    const playerDistSq = toPlayerX * toPlayerX + toPlayerY * toPlayerY;
-    if (this.snitchAiState === 'coast') {
-      const panic = this.snitchPanicCooldown <= 0
-          && !this.player.isExploding
-          && playerDistSq < SNITCH_CONSTANTS.PANIC_RADIUS * SNITCH_CONSTANTS.PANIC_RADIUS;
-      if (panic || this.snitchAiTimer <= 0) {
-        this.snitchAiState = 'dart';
-        this.snitchAiTimer = SNITCH_CONSTANTS.DART_DURATION_MIN
-            + Math.random() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
-        this.snitchDartAway = false;
-        if (panic) {
-          this.snitchPanicCooldown = SNITCH_CONSTANTS.PANIC_COOLDOWN;
-          const d = Math.sqrt(playerDistSq);
-          if (d > 1e-4) {
-            this.snitchDartAwayX = -toPlayerX / d;
-            this.snitchDartAwayY = -toPlayerY / d;
-            this.snitchDartAway = true;
-          }
-        }
-      }
-    } else if (this.snitchAiTimer <= 0) {
-      this.snitchAiState = 'coast';
-      this.snitchDartAway = false;
-      this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
-          + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
-    }
-    // Speed eases toward the state target — near-instant on the way up
-    // (the burst), visibly slower on the way back down (the catch window
-    // opens gradually as the dart bleeds off).
-    const darting = this.snitchAiState === 'dart';
-    // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×
-    // cruise per wave, capped; coast is a fixed fraction of it.  Read live
-    // from the wave counter so the persistent snitch speeds up each wave.
-    const waveBase = Math.min(
-      SNITCH_CONSTANTS.WAVE_SPEED_MAX,
-      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.snitchCatchCount + 1),
-    );
-    const speedTarget = waveBase * (darting ? SNITCH_CONSTANTS.DART_RATIO : SNITCH_CONSTANTS.COAST_RATIO);
-    const ease = darting ? SNITCH_CONSTANTS.SPEED_EASE_DART : SNITCH_CONSTANTS.SPEED_EASE_COAST;
-    this.snitchSpeedMult += (speedTarget - this.snitchSpeedMult) * Math.min(1, ease * dt);
-
-    // Steering: sampled flow direction rotated by the wander oscillation;
-    // panic darts blend the away-from-player escape vector on top.  Speed
-    // derives from the player's friction-limited terminal cruise (same
-    // formula as the DBG thrust tooltip: acceleration/(1−friction),
-    // clamped by maxSpeed) so the chase tracks thrust-mult changes.
-    const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
-    const wob = Math.sin(this.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
-        * SNITCH_CONSTANTS.WANDER_AMPLITUDE;
-    const cosW = Math.cos(wob), sinW = Math.sin(wob);
-    let dirX = flow.x * cosW - flow.y * sinW;
-    let dirY = flow.x * sinW + flow.y * cosW;
-    if (this.snitchDartAway) {
-      const b = SNITCH_CONSTANTS.PANIC_AWAY_BIAS;
-      const bx = dirX * (1 - b) + this.snitchDartAwayX * b;
-      const by = dirY * (1 - b) + this.snitchDartAwayY * b;
-      const bm = Math.sqrt(bx * bx + by * by) || 1;
-      dirX = bx / bm;
-      dirY = by / bm;
-    }
-    const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const cruise = Math.min(
-      moveCfg.maxSpeed,
-      (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction),
-    );
-    const targetSpeed = cruise * this.snitchSpeedMult * getActiveSnitchSpeedMult();
-    const steerRate = darting ? SNITCH_CONSTANTS.DART_STEER_RATE : SNITCH_CONSTANTS.COAST_STEER_RATE;
-    const alpha = Math.min(1, steerRate * dt * 60);
-    s.velocity.x += (dirX * targetSpeed - s.velocity.x) * alpha;
-    s.velocity.y += (dirY * targetSpeed - s.velocity.y) * alpha;
-    s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
-
-    // Comet tail: decay + emit trail-strip points (rendered like a
-    // projectile trail in gold) and sprinkle sparkle motes behind the core.
-    if (!s.trail) s.trail = [];
-    this.trails.tickTrail(s.trail, dt);
-    const last = s.trail.length > 0 ? s.trail[s.trail.length - 1] : null;
-    const tdx = last ? wrapDeltaX(last.x, s.position.x) : 1;
-    const tdy = last ? wrapDeltaY(last.y, s.position.y) : 1;
-    if (!last || tdx * tdx + tdy * tdy > TRAIL_CONSTANTS.MIN_DISTANCE_SQ) {
-      s.trail.push({
-        x: s.position.x,
-        y: s.position.y,
-        lifetime: SNITCH_CONSTANTS.TRAIL_LIFETIME,
-        maxLifetime: SNITCH_CONSTANTS.TRAIL_LIFETIME,
-        scale: SNITCH_CONSTANTS.TRAIL_SCALE,
-      });
-    }
-    const sparkColors = SNITCH_CONSTANTS.SPARKLE_COLORS;
-    this.spawnParticles(s.position, 1, sparkColors[(Math.random() * sparkColors.length) | 0], {
-      speedMin: 0, speedMax: 1.5,
-      sizeMin: 0.5, sizeMax: 1.6,
-      lifetimeMin: 0.15, lifetimeMax: 0.4,
-      positionJitter: SNITCH_CONSTANTS.SIZE * 0.5,
-    });
-
-    // Catch check (toPlayer deltas already computed by the AI block above).
-    if (this.snitchCatchMode === 'collide') {
-      if (this.player.isExploding) return;
-      const r = Math.max(this.player.size.x, this.player.size.y) / 2
-          + SNITCH_CONSTANTS.SIZE / 2 + SNITCH_CONSTANTS.COLLIDE_GRACE;
-      if (playerDistSq <= r * r) this.catchSnitch(s);
-    } else {
-      const r = SNITCH_CONSTANTS.SHOOT_RADIUS;
-      const projs = this.entityIndex.projectiles;
-      for (let i = 0; i < projs.length; i++) {
-        const p = projs[i];
-        if (!p.active || p.ownerType !== EntityType.PLAYER) continue;
-        const dx = wrapDeltaX(s.position.x, p.position.x);
-        const dy = wrapDeltaY(s.position.y, p.position.y);
-        if (dx * dx + dy * dy <= r * r) {
-          p.active = false; // the shot is spent on the catch
-          this.catchSnitch(s);
-          break;
-        }
-      }
-    }
-  }
-
-  /** Spawn a snitch on the off-screen ring around the player (same
-   *  viewport-derived contract as wave-enemy spawns).  Non-drop
-   *  INTERACTABLE → the physics broadphase ignores it entirely; it flies
-   *  through everything and only the manual catch check can end it. */
-  private spawnSnitch() {
-    if (!this.currentMap) return;
-    const zoom = this.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-    const angle = Math.random() * Math.PI * 2;
-    const dist = halfDiag + SNITCH_CONSTANTS.SPAWN_MARGIN;
-    const pos = {
-      x: this.player.position.x + Math.cos(angle) * dist,
-      y: this.player.position.y + Math.sin(angle) * dist,
-    };
-    wrapPosition(pos);
-    const s: GameEntity = {
-      id: nextId('snitch'),
-      type: EntityType.INTERACTABLE,
-      isSnitch: true,
-      snitchWanderPhase: Math.random() * Math.PI * 2,
-      position: pos,
-      velocity: { x: 0, y: 0 },
-      size: { x: SNITCH_CONSTANTS.SIZE, y: SNITCH_CONSTANTS.SIZE },
-      rotation: 0,
-      color: SNITCH_CONSTANTS.CORE_COLOR,
-      active: true,
-      health: 1,
-      maxHealth: 1,
-      mass: SNITCH_CONSTANTS.MASS,
-      trail: [],
-    };
-    this.currentMap.entities.push(s);
-    this.snitch = s;
-    // Re-seed the burst/coast AI for the fresh snitch: open on a coast
-    // window so the spawn reads as a wandering glint, not an escape.
-    this.snitchAiState = 'coast';
-    this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
-        + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
-    this.snitchPanicCooldown = 0;
-    const waveBase = Math.min(
-      SNITCH_CONSTANTS.WAVE_SPEED_MAX,
-      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.snitchCatchCount + 1),
-    );
-    this.snitchSpeedMult = waveBase * SNITCH_CONSTANTS.COAST_RATIO;
-    this.snitchDartAway = false;
-  }
-
-  /** Snitch caught: big gold payout + burst, then end the wave through
-   *  the shared cleared path (no early-clear bonus stacks on top). */
-  private catchSnitch(s: GameEntity) {
-    s.active = false;
-    this.snitch = null;
-    this.snitchCatchCount++; // the NEXT snitch spawns faster — catching ramps speed, not waves
-    this.awardScore(SCORE_CONSTANTS.SNITCH_POINTS, s.position);
-    // Salvage spray — score no longer mints credits, so the catch pays money
-    // as physical drops (they scatter, merge, and magnetise like any salvage;
-    // sized against the per-wave income arithmetic in SALVAGE_CONSTANTS).
-    for (let i = 0; i < SALVAGE_CONSTANTS.SNITCH_CATCH_DROPS; i++) {
-      this.spawnSalvageDrop(s.position, s.velocity);
-    }
-    this.spawnParticles(s.position, SNITCH_CONSTANTS.CATCH_BURST_COUNT, SNITCH_CONSTANTS.CORE_COLOR, {
-      speedMin: 1, speedMax: 6,
-      sizeMin: 1, sizeMax: 3,
-      lifetimeMin: 0.3, lifetimeMax: 0.8,
-    });
-    // Board clear: the catch wipes every live enemy on the field, each
-    // worth half its normal kill value (full death path — explosions,
-    // enemy shards, half-point "+N" popups).  Snapshot the count first so
-    // the shards/particles those deaths append aren't re-scanned.
-    if (this.currentMap) {
-      const ents = this.currentMap.entities;
-      const n = ents.length;
-      for (let i = 0; i < n; i++) {
-        const e = ents[i];
-        if (e.type === EntityType.ENEMY && e.active && !e.isExploding) {
-          this.handleEntityDeath(e, { scoreScale: SCORE_CONSTANTS.SNITCH_SWEEP_KILL_FRACTION });
-        }
-      }
-    }
-    this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
-  }
 
   // ─── Dragon mini-boss (Stage 6) ────────────────────────────────────────
   //
@@ -6534,381 +6287,6 @@ export class GameEngine {
   // lifecycle (enter→roam→leave), the flow-weave steering, the body-path
   // history, and the tile-devour growth (via the shared consume pass).  One at a
   // time; DBG-summonable.  Toroidal.
-  private updateDragons(dt: number) {
-      if (this.dragons.length === 0 || !this.currentMap) return;
-      const D = DRAGON_CONSTANTS;
-      const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-      const cruise = Math.min(moveCfg.maxSpeed,
-          (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction));
-
-      for (let n = this.dragons.length - 1; n >= 0; n--) {
-          const inst = this.dragons[n];
-          const d = inst.head;
-          if (!d.active) { this.dragons.splice(n, 1); continue; }
-          inst.time += dt;
-
-          // ── Steering ── while LEAVING, drive STRAIGHT toward the exit portal
-          // (then keep going straight once the head is through, so the whole
-          // body follows it through); otherwise the slow flow-weave roam.
-          let dirX: number, dirY: number, speedMul: number;
-          if (inst.state === 'leave' && inst.portal) {
-              if (!inst.headThrough) {
-                  const px = wrapDeltaX(d.position.x, inst.portal.x), py = wrapDeltaY(d.position.y, inst.portal.y);
-                  const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm;
-              } else {
-                  const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1; dirX = d.velocity.x / vm; dirY = d.velocity.y / vm; // continue straight
-              }
-              speedMul = D.LEAVE_SPEED_MULT;
-          } else {
-              const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
-              const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
-              const cosW = Math.cos(wob), sinW = Math.sin(wob);
-              dirX = flow.x * cosW - flow.y * sinW;
-              dirY = flow.x * sinW + flow.y * cosW;
-              speedMul = 1;
-          }
-          const target = cruise * D.SPEED_FRAC * speedMul;
-          const alpha = Math.min(1, D.STEER_RATE * dt * 60 * (inst.state === 'leave' ? 4 : 1));
-          d.velocity.x += (dirX * target - d.velocity.x) * alpha;
-          d.velocity.y += (dirY * target - d.velocity.y) * alpha;
-          d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
-
-          // ── Body path history (newest first) ──
-          if (!d.dragonPath) d.dragonPath = [{ x: d.position.x, y: d.position.y }];
-          const head0 = d.dragonPath[0];
-          const mdx = wrapDeltaX(head0.x, d.position.x), mdy = wrapDeltaY(head0.y, d.position.y);
-          if (mdx * mdx + mdy * mdy >= D.PATH_SPACING * D.PATH_SPACING) {
-              d.dragonPath.unshift({ x: d.position.x, y: d.position.y });
-              if (d.dragonPath.length > D.PATH_MAX) d.dragonPath.length = D.PATH_MAX;
-          }
-
-          // ── Devour tiles in the head's path → APPEND each as a body segment ──
-          if (inst.state !== 'leave') {
-              const headR = Math.max(d.size.x, d.size.y) * 0.6;
-              const buf = this._dragonEatBuf;
-              buf.length = 0;
-              this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 40, (t) => buf.push(t));
-              for (let i = 0; i < buf.length; i++) {
-                  const t = buf[i];
-                  if (!t.active || t.shardVariant === 'indestructible-tile') continue; // can't devour the unbreakable
-                  const tdx = wrapDeltaX(d.position.x, t.position.x);
-                  const tdy = wrapDeltaY(d.position.y, t.position.y);
-                  const contact = headR + Math.max(t.size.x, t.size.y) * 0.5;
-                  if (tdx * tdx + tdy * tdy <= contact * contact) this.appendDragonSegment(inst, t, tdx, tdy);
-              }
-          }
-
-          // ── Chain-follow: snap each body segment along the head's path ──
-          this.positionDragonBody(inst);
-
-          // ── Leaving: the dragon flies INTO the exit portal and is consumed
-          // HEAD→TAIL — each part vanishes (puff) as it crosses the portal, the
-          // body trailing through behind the (now-hidden) head. ──
-          if (inst.state === 'leave' && inst.portal) {
-              const cr = D.PORTAL_CONSUME_RADIUS, crSq = cr * cr;
-              if (!inst.headThrough) {
-                  const hx = wrapDeltaX(d.position.x, inst.portal.x), hy = wrapDeltaY(d.position.y, inst.portal.y);
-                  if (hx * hx + hy * hy <= crSq) {
-                      inst.headThrough = true;
-                      d.dragonHidden = true;        // head "entered" — stop drawing it
-                      d.contactDamage = 0;          // and stop hurting on contact
-                      this.spawnParticles(d.position, 14, D.PORTAL_COLOR, { speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.2, lifetimeMax: 0.6 });
-                  }
-              }
-              let remaining = 0;
-              for (let i = 0; i < inst.body.length; i++) {
-                  const s = inst.body[i];
-                  if (!s.active) continue;
-                  const sx = wrapDeltaX(s.position.x, inst.portal.x), sy = wrapDeltaY(s.position.y, inst.portal.y);
-                  if (sx * sx + sy * sy <= crSq) {
-                      s.active = false;
-                      this.spawnParticles(s.position, 9, s.color || D.PORTAL_COLOR, { speedMin: 2, speedMax: 7, sizeMin: 1.2, sizeMax: 3, lifetimeMin: 0.15, lifetimeMax: 0.5 });
-                  } else remaining++;
-              }
-              // Fully through (or the safety timer expired) → gone.
-              if ((inst.headThrough && remaining === 0) || inst.stateTimer <= 0) {
-                  this.despawnDragon(inst);
-                  this.dragons.splice(n, 1);
-                  continue;
-              }
-          }
-
-          // ── Provoke-on-attack (third party): head shot stamps `provoked`
-          // (PhysicsSystem); a BODY-segment hit provokes too (default player). ──
-          if (!d.provoked) {
-              for (let i = 0; i < inst.body.length; i++) {
-                  if ((inst.body[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
-              }
-          }
-
-          // ── Head attacks: ONLY once provoked — spit gnats + lob missiles ──
-          if (inst.state === 'roam' && d.provoked) {
-              inst.gnatTimer -= dt;
-              if (inst.gnatTimer <= 0) {
-                  inst.gnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
-                  const ctx = this.waveContext();
-                  if (ctx) {
-                      this.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
-                      this.spawnParticles(d.position, 7, '#2dd4bf', {
-                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3, lifetimeMin: 0.2, lifetimeMax: 0.5,
-                      });
-                  }
-              }
-              inst.missileTimer -= dt;
-              if (inst.missileTimer <= 0 && !this.player.isExploding) {
-                  inst.missileTimer = D.MISSILE_INTERVAL;
-                  this.fireDragonMissile(d);
-              }
-          }
-
-          // ── Lifecycle ── (leave COMPLETION is handled by the portal-consume
-          // pass above; here we only advance enter→roam→leave and open the exit
-          // rift AHEAD of the head so it flies into it.) ──
-          inst.stateTimer -= dt;
-          if (inst.state === 'enter') {
-              if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = D.ROAM_DURATION; }
-          } else if (inst.state === 'roam') {
-              if (inst.stateTimer <= 0) {
-                  inst.state = 'leave';
-                  inst.stateTimer = D.LEAVE_DURATION; // safety cap only
-                  const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1;
-                  const portal = { x: d.position.x + (d.velocity.x / vm) * D.PORTAL_AHEAD, y: d.position.y + (d.velocity.y / vm) * D.PORTAL_AHEAD };
-                  wrapPosition(portal);
-                  inst.portal = portal;
-                  inst.headThrough = false;
-                  this.openDragonPortal(portal);
-              }
-          }
-      }
-  }
-
-  /** Open an offscreen entry portal and birth a dragon of `type` ('mixed' = a
-   *  multi-material starting body).  Multiple can be alive at once. */
-  private spawnDragon(type: StructureVariant | 'mixed' = 'mixed') {
-      if (!this.currentMap) return;
-      const zoom = this.camera.zoom || 1;
-      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-      const angle = Math.random() * Math.PI * 2;
-      const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
-      const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
-      wrapPosition(pos);
-      this.openDragonPortal(pos);
-
-      const v = ENEMY_VARIANTS[EnemySubtype.DRAGON];
-      const d: GameEntity = {
-          id: nextId('dragon'),
-          type: EntityType.ENEMY,
-          enemySubtype: EnemySubtype.DRAGON,
-          position: { x: pos.x, y: pos.y },
-          velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // head inward
-          size: { x: v.size, y: v.size },
-          rotation: angle + Math.PI,
-          color: v.color,
-          active: true,
-          health: v.health,
-          maxHealth: v.health,
-          maxSpeed: v.maxSpeed,
-          mass: v.mass,
-          contactDamage: v.contactDamage,
-          enemyShape: 'dragon',
-          phasesTerrain: true,          // glides through terrain, eats it
-          thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
-          consume: v.consume ? { ...v.consume } : undefined,
-          aiState: 'chase',
-          glowPhase: Math.random() * Math.PI * 2,
-      };
-      // Seed a trailing path (outward, away from the head's inward heading) so the
-      // starting body lays out behind it immediately instead of stacking.
-      const ox = Math.cos(angle), oy = Math.sin(angle); // outward = away from movement
-      const seed: Vector2[] = [];
-      for (let k = 0; k < 110; k++) seed.push({ x: pos.x + ox * k * DRAGON_CONSTANTS.PATH_SPACING, y: pos.y + oy * k * DRAGON_CONSTANTS.PATH_SPACING });
-      d.dragonPath = seed;
-      this.currentMap.entities.push(d);
-      const inst: DragonInstance = {
-          head: d, body: [], state: 'enter',
-          stateTimer: DRAGON_CONSTANTS.ENTER_DURATION, time: 0,
-          gnatTimer: DRAGON_CONSTANTS.GNAT_INTERVAL, missileTimer: DRAGON_CONSTANTS.MISSILE_INTERVAL,
-      };
-      // Spawn a starting body so it never enters as a bare head.  A 'mixed'
-      // dragon cycles materials; a typed dragon is all one (it still becomes
-      // mixed as it eats other tiles).
-      const MIX: StructureVariant[] = ['glass', 'rock', 'metal', 'plastic'];
-      for (let i = 0; i < DRAGON_CONSTANTS.START_SEGMENTS; i++) {
-          const segVar = type === 'mixed' ? MIX[i % MIX.length] : type;
-          const seg = this.makeDragonSegment(segVar, pos.x, pos.y);
-          this.currentMap.entities.push(seg);
-          inst.body.push(seg);
-      }
-      this.dragons.push(inst);
-      this.positionDragonBody(inst); // lay the body out along the seeded path now
-  }
-
-  /** Fire one slow HOMING missile from the dragon head at the player. */
-  private fireDragonMissile(d: GameEntity) {
-      const M = DRAGON_CONSTANTS.MISSILE;
-      const cfg = {
-          type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
-          speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
-          count: 1, spread: 0, recoil: 0, pierce: 0,
-          homing: true, homingStrength: M.homingStrength, glow: true,
-      } as WeaponConfig;
-      this.spawnProjectileFromConfig(d, this.player.position, cfg, EntityType.ENEMY);
-  }
-
-  /** Devour a static tile → APPEND it as a body segment (Snake growth).  Beyond
-   *  MAX_SEGMENTS the tile is just destroyed (the dragon still carves a path). */
-  private appendDragonSegment(inst: DragonInstance, tile: GameEntity, dx: number, dy: number) {
-      this.physics.removeStaticEntity(tile);
-      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
-      if (inst.body.length >= DRAGON_CONSTANTS.MAX_SEGMENTS) {
-          const inward = Math.atan2(-dy, -dx);
-          this.spawnParticles(tile.position, 6, tile.color || '#94a3b8', {
-              spreadAngle: inward, spreadCone: 0.9, speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.1, lifetimeMax: 0.3,
-          });
-          tile.active = false;
-          return;
-      }
-      tile.mass = DRAGON_CONSTANTS.SEGMENT_MASS; // finite → dynamic + shootable
-      tile.dragonSegment = true;
-      tile.phasesTerrain = true; // glides through terrain/each other; still solid to player + shots
-      if (!tile.velocity) tile.velocity = { x: 0, y: 0 }; else { tile.velocity.x = 0; tile.velocity.y = 0; }
-      inst.body.push(tile);
-  }
-
-  /** Build a fresh hex-tile body segment of `variant` at (x,y) — used to spawn
-   *  the dragon's starting body.  A real tile (dent/shatter) flagged as a chain-
-   *  controlled, phasing dragon segment. */
-  private makeDragonSegment(variant: StructureVariant, x: number, y: number): GameEntity {
-      const w = HEX_WIDTH, h = HEX_HEIGHT;
-      const seg = TileGenerator.buildStructureTile(0, 0, x, y, w, h, variant);
-      seg.mass = DRAGON_CONSTANTS.SEGMENT_MASS;
-      seg.dragonSegment = true;
-      seg.phasesTerrain = true;
-      return seg;
-  }
-
-  /** Snap each body segment onto the head's path, SEGMENT_SPACING apart by arc
-   *  length, oriented along the body — the Snake chain.  The walk is ANCHORED to
-   *  the head's LIVE position (not the last recorded path point, which only
-   *  updates every PATH_SPACING and made the whole body jump), so the chain
-   *  tracks the smoothly-moving head jitter-free. */
-  private positionDragonBody(inst: DragonInstance) {
-      const head = inst.head;
-      const body = inst.body;
-      const path = head.dragonPath;
-      if (body.length === 0 || !path || path.length < 1) return;
-      const SP = DRAGON_CONSTANTS.SEGMENT_SPACING;
-      let prevX = head.position.x, prevY = head.position.y; // live anchor
-      let acc = 0, seg = 0, target = SP;
-      for (let i = 0; i < path.length && seg < body.length; i++) {
-          const cur = path[i];
-          const vx = wrapDeltaX(prevX, cur.x), vy = wrapDeltaY(prevY, cur.y); // prev → cur
-          const len = Math.hypot(vx, vy);
-          if (len > 1e-4) {
-              while (seg < body.length && acc + len >= target) {
-                  const t = (target - acc) / len;
-                  const s = body[seg];
-                  s.position.x = prevX + vx * t;
-                  s.position.y = prevY + vy * t;
-                  wrapPosition(s.position);
-                  s.rotation = Math.atan2(vy, vx);
-                  s.velocity.x = 0; s.velocity.y = 0;
-                  seg++; target += SP;
-              }
-              acc += len;
-          }
-          prevX = cur.x; prevY = cur.y;
-      }
-      // Path too short for the whole body — stack the rest at the tail end.
-      const tail = path[path.length - 1];
-      for (; seg < body.length; seg++) {
-          const s = body[seg];
-          s.position.x = tail.x; s.position.y = tail.y;
-          wrapPosition(s.position);
-          s.velocity.x = 0; s.velocity.y = 0;
-      }
-  }
-
-  /** A body segment was destroyed: everything AFT of it falls off (→ free
-   *  drifting shards), and the segment itself shatters (handled by the caller). */
-  private severDragon(inst: DragonInstance, seg: GameEntity) {
-      const idx = inst.body.indexOf(seg);
-      if (idx < 0) return;
-      for (let i = idx + 1; i < inst.body.length; i++) this.detachDragonSegment(inst.body[i]);
-      inst.body.length = idx; // drop the broken segment + everything aft
-  }
-
-  /** Find the live dragon whose body contains `seg` (for sever routing). */
-  private dragonOwning(seg: GameEntity): DragonInstance | undefined {
-      for (let i = 0; i < this.dragons.length; i++) if (this.dragons[i].body.indexOf(seg) >= 0) return this.dragons[i];
-      return undefined;
-  }
-
-  /** A severed segment falls off the dragon: clear the flag, turn it into a free
-   *  mobile shard of its material, and kick it loose. */
-  private detachDragonSegment(seg: GameEntity) {
-      seg.dragonSegment = false;
-      seg.phasesTerrain = false; // a loose shard collides normally again
-      seg.shardVariant = this.tileToShardVariant(seg.shardVariant);
-      const a = Math.random() * Math.PI * 2;
-      seg.velocity.x = Math.cos(a) * 3.5;
-      seg.velocity.y = Math.sin(a) * 3.5;
-  }
-
-  /** A killed body segment: sever the owning dragon's tail, then dissolve it
-   *  (shatter burst, no regen/drops — it's a body part, not a map tile). */
-  private dragonSegmentDeath(seg: GameEntity) {
-      const inst = this.dragonOwning(seg);
-      if (inst) this.severDragon(inst, seg);
-      this.spawnParticles(seg.position, 12, seg.color || '#94a3b8', {
-          speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 3.5, lifetimeMin: 0.2, lifetimeMax: 0.55,
-      });
-      seg.active = false;
-  }
-
-  /** Map a tile variant to its mobile-shard variant (for severed body parts). */
-  private tileToShardVariant(v: GameEntity['shardVariant']): GameEntity['shardVariant'] {
-      switch (v) {
-          case 'glass-tile':   return 'glass-shard';
-          case 'rock-tile':    return 'rock-shard';
-          case 'metal-tile':   return 'metal-shard';
-          case 'plastic-tile': return 'plastic-shard';
-          default:             return v;
-      }
-  }
-
-  /** Dragon killed: big payoff + score + collapse the rift + scatter the body. */
-  private dragonDeath(inst: DragonInstance) {
-      const d = inst.head;
-      // Payout doubles per kill this run: 3000, 6000, 12000, …
-      this.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, this.dragonsKilled), d.position);
-      this.dragonsKilled++;
-      this.openDragonPortal(d.position);
-      this.spawnParticles(d.position, 24, DRAGON_CONSTANTS.COLOR, { // Tier 2b: 40 → 24
-          speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,
-      });
-      this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
-      d.active = false;
-      for (let i = 0; i < inst.body.length; i++) this.detachDragonSegment(inst.body[i]); // body scatters
-      const k = this.dragons.indexOf(inst);
-      if (k >= 0) this.dragons.splice(k, 1);
-  }
-
-  /** Despawn a dragon (left via portal — no payoff).  The body leaves with it.
-   *  Caller removes it from `this.dragons`. */
-  private despawnDragon(inst: DragonInstance) {
-      inst.head.active = false;
-      for (let i = 0; i < inst.body.length; i++) inst.body[i].active = false;
-  }
-
-  /** Portal VFX: an expanding violet rift ring + sparks. */
-  private openDragonPortal(pos: Vector2) {
-      this.openPortal(pos, {
-          color: DRAGON_CONSTANTS.PORTAL_COLOR,
-          radius: DRAGON_CONSTANTS.PORTAL_RADIUS,
-          duration: DRAGON_CONSTANTS.PORTAL_DURATION,
-      });
-  }
 
   /**
    * Reusable rift-portal VFX (Stage 7 — abstracted from the dragon's single
@@ -6917,7 +6295,13 @@ export class GameEngine {
    * scatter of hot white sparks — plus a light screen punch.  Shared by the
    * dragon and the rival ships; tune via the caller's PORTAL_* constants.
    */
-  private openPortal(pos: Vector2, opts: { color: string; radius: number; duration: number }) {
+  openPortal(pos: Vector2, opts: { color: string; radius: number; duration: number }) {
+      // A rift tearing open, heard from OUTSIDE (SFX_INVENTORY §7.3) — the
+      // roamer arrivals/departures and the boss entrance all route here.
+      // The player's own transit fires openPortal twice around the map
+      // swap; this id's retrigger window collapses both into the
+      // portal.transit voice instead of stacking a third layer on it.
+      this.audio.play('portal.open', { x: pos.x, y: pos.y });
       const { color, radius, duration } = opts;
       // White core flash (fast, small) → the rift "ignites".
       this.spawnShockwave(pos, { radius: radius * 0.42, damage: 0, knockback: 0, color: '#ffffff', lifetime: duration * 0.55 });
@@ -6943,255 +6327,38 @@ export class GameEngine {
    *  Each call adds another — multiple dragons can be out at once. */
   public debugSpawnDragon(type: string = 'mixed') {
       const allowed = ['glass', 'rock', 'metal', 'plastic', 'mixed'];
-      this.spawnDragon((allowed.includes(type) ? type : 'mixed') as StructureVariant | 'mixed');
-  }
-
-  // ─── Rival ships (Stage 7) ─────────────────────────────────────────────
-  //
-  // Player-like roamers that warp in via portal, hunt the WAVE enemies
-  // (stealing the player's kill points + loot), and—per disposition—fight,
-  // ignore, or retaliate against the player.  Engine-managed lifecycle
-  // (mirrors updateDragons); the ship is a lean EntityType.ENEMY + isRival.
-
-  private rollRivalDisposition(): RivalDisposition {
-      const w = RIVAL_CONSTANTS.WEIGHTS;
-      const r = Math.random() * (w.hostile + w.ally + w.neutral);
-      if (r < w.hostile) return 'hostile';
-      if (r < w.hostile + w.ally) return 'ally';
-      return 'neutral';
-  }
-
-  /** Per-frame rival lifecycle: cadence warp-ins, per-ship hunt/strafe/fire/
-   *  loot, and the warp-out fly-through.  Engine-driven (AISystem skips them). */
-  private updateRivals(dt: number) {
-      if (!this.currentMap) return;
-      const R = RIVAL_CONSTANTS;
-
-      // Cadence — a fresh random rival warps in every SCORE_INTERVAL points
-      // earned (capped at MAX_RIVALS alive).  The threshold advances with the
-      // score whether or not a rival actually spawns, so a score that vaults
-      // several intervals at once doesn't queue a backlog of warp-ins.
-      while (this.score >= this.nextRivalScore) {
-          if (this.rivals.length < R.MAX_RIVALS) this.spawnRival();
-          this.nextRivalScore += R.SCORE_INTERVAL;
-      }
-      if (this.rivals.length === 0) return;
-
-      // Re-acquire targets + run the loot vacuum on the PerfController cadence;
-      // everything else (steering, firing, lifecycle) still ticks every step.
-      const doScan = this.perfController.shouldRun('rivalScan');
-      const enemies = this.entityIndex.enemies;
-      // Rivals fly with the SAME mechanics as the player: thrust toward the
-      // desired heading + a self speed-cap, with the map's friction applied by
-      // PhysicsSystem (enemies already get it).  acc/maxSpeed come from the map
-      // movement config (player BASE values, no upgrade mults), so a rival is a
-      // baseline player ship — the upgraded player can still out-fly it.
-      const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-      const acc = moveCfg ? moveCfg.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
-      const baseMaxSpeed = moveCfg ? moveCfg.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
-      const timeScale = dt * 60;
-      for (let n = this.rivals.length - 1; n >= 0; n--) {
-          const inst = this.rivals[n];
-          const s = inst.ship;
-          if (!s.active) { this.rivals.splice(n, 1); continue; }
-          inst.stateTimer -= dt;
-          inst.fireTimer -= dt;
-
-          // ── Target: re-acquired on the rivalScan cadence (nearest wave enemy
-          // within VISION; a hostile / provoked-neutral rival also weighs the
-          // player), then CACHED on the instance.  Between scans steering/firing
-          // reuse the cached target and only recompute the O(1) distance to it —
-          // dropping it the moment it goes inactive/exploding. ──
-          let target: GameEntity | null = inst.target ?? null;
-          if (target && (!target.active || target.isExploding)) target = null;
-          if (doScan) {
-              const huntsPlayer = inst.disposition === 'hostile'
-                  || (inst.disposition === 'neutral' && s.provoked === true);
-              // Publish it on the ENTITY so the renderer's off-screen indicator
-              // can blink a hunting rival red without reaching into the
-              // RivalInstance (disposition lives on the instance, not the hull).
-              s.huntingPlayer = huntsPlayer;
-              target = null;
-              let acqD2 = R.VISION * R.VISION;
-              for (let i = 0; i < enemies.length; i++) {
-                  const e = enemies[i];
-                  if (e.isRival || e.isExploding) continue;
-                  const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
-                  const d2 = dx * dx + dy * dy;
-                  if (d2 < acqD2) { acqD2 = d2; target = e; }
-              }
-              if (huntsPlayer && !this.player.isExploding) {
-                  const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
-                  const d2 = dx * dx + dy * dy;
-                  if (target === null || d2 < acqD2) { target = this.player; acqD2 = d2; }
-              }
-              inst.target = target;
-          }
-          // Live squared distance to the (cached) target — drives the strafe
-          // sign + the fire-range gate below.
-          let bestD2 = Infinity;
-          if (target) {
-              const tdx = wrapDeltaX(s.position.x, target.position.x), tdy = wrapDeltaY(s.position.y, target.position.y);
-              bestD2 = tdx * tdx + tdy * tdy;
-          }
-
-          // ── Steering ──
-          let dirX: number, dirY: number, speedMul = 1;
-          if (inst.state === 'leave' && inst.portal) {
-              const px = wrapDeltaX(s.position.x, inst.portal.x), py = wrapDeltaY(s.position.y, inst.portal.y);
-              const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm; speedMul = R.LEAVE_SPEED_MULT;
-          } else if (target) {
-              const tx = wrapDeltaX(s.position.x, target.position.x), ty = wrapDeltaY(s.position.y, target.position.y);
-              const tm = Math.hypot(tx, ty) || 1;
-              // Hold a firing gap: close if far, back off if too near; always strafe.
-              const sign = tm > R.PREFERRED_DIST * 1.15 ? 1 : tm < R.PREFERRED_DIST * 0.7 ? -1 : 0;
-              dirX = (tx / tm) * sign + (-ty / tm) * 0.7;
-              dirY = (ty / tm) * sign + (tx / tm) * 0.7;
-              const dm = Math.hypot(dirX, dirY) || 1; dirX /= dm; dirY /= dm;
-              s.rotation = Math.atan2(ty, tx); // face the target
-          } else {
-              const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
-              const fm = Math.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
-              s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
-          }
-          // Player-style movement: apply thrust along the desired heading, then
-          // self-cap speed (PhysicsSystem applies the map friction afterward, so
-          // the rival accelerates + coasts exactly like the player ship).
-          s.velocity.x += dirX * acc * timeScale;
-          s.velocity.y += dirY * acc * timeScale;
-          const maxSpeed = baseMaxSpeed * speedMul;
-          const sp = Math.hypot(s.velocity.x, s.velocity.y);
-          if (sp > maxSpeed) { const k = maxSpeed / sp; s.velocity.x *= k; s.velocity.y *= k; }
-          if (inst.state === 'leave') s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
-
-          // ── Fire (only while roaming, target in range) ──
-          if (inst.state === 'roam' && target && inst.fireTimer <= 0
-              && bestD2 <= R.FIRE_RANGE * R.FIRE_RANGE) {
-              inst.fireTimer = R.WEAPON.cooldown;
-              this.fireRivalShot(inst, target);
-          }
-
-          // ── Loot vacuum: steal nearby collectible drops from the player
-          // (cadenced with the target re-acquire; drops settle over many frames
-          // so a few-step defer is invisible). ──
-          if (doScan) this.rivalVacuumDrops(inst);
-
-          // ── Lifecycle ──
-          if (inst.state === 'enter') {
-              if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = R.ROAM_DURATION; }
-          } else if (inst.state === 'roam') {
-              if (inst.stateTimer <= 0) {
-                  inst.state = 'leave'; inst.stateTimer = R.LEAVE_DURATION;
-                  const vm = Math.hypot(s.velocity.x, s.velocity.y) || 1;
-                  const portal = { x: s.position.x + (s.velocity.x / vm) * R.PORTAL_AHEAD, y: s.position.y + (s.velocity.y / vm) * R.PORTAL_AHEAD };
-                  wrapPosition(portal);
-                  inst.portal = portal;
-                  this.openPortal(portal, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
-              }
-          } else if (inst.state === 'leave' && inst.portal) {
-              const cr = R.PORTAL_CONSUME_RADIUS;
-              const hx = wrapDeltaX(s.position.x, inst.portal.x), hy = wrapDeltaY(s.position.y, inst.portal.y);
-              if (hx * hx + hy * hy <= cr * cr || inst.stateTimer <= 0) {
-                  this.spawnParticles(s.position, 14, R.PORTAL_COLOR, { speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.2, lifetimeMax: 0.6 });
-                  s.active = false; this.rivals.splice(n, 1); continue;
-              }
-          }
-      }
-  }
-
-  /** Warp a rival ship in from an offscreen rift.  Disposition is rolled by
-   *  weight unless one is forced (DBG). */
-  private spawnRival(forced?: RivalDisposition) {
-      if (!this.currentMap) return;
-      const R = RIVAL_CONSTANTS;
-      const zoom = this.camera.zoom || 1;
-      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-      const angle = Math.random() * Math.PI * 2;
-      const dist = halfDiag + R.SPAWN_MARGIN;
-      const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
-      wrapPosition(pos);
-      this.openPortal(pos, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
-
-      const disposition = forced ?? this.rollRivalDisposition();
-      const sprite = R.SPRITES[Math.floor(Math.random() * R.SPRITES.length)];
-      const ship: GameEntity = {
-          id: nextId('rival'),
-          type: EntityType.ENEMY,
-          position: { x: pos.x, y: pos.y },
-          velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // heading inward
-          size: { x: R.SIZE, y: R.SIZE },
-          rotation: angle + Math.PI,
-          color: R.COLORS[disposition],
-          active: true,
-          health: R.HEALTH,
-          maxHealth: R.HEALTH,
-          maxSpeed: R.MAX_SPEED,
-          mass: R.MASS,
-          enemyTier: R.TIER,            // kill bounty when the player downs it
-          isRival: true,
-          sprite,
-          trail: [],
-          glowPhase: Math.random() * Math.PI * 2,
-      };
-      this.currentMap.entities.push(ship);
-      this.rivals.push({
-          ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
-          fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
-      });
-  }
-
-  /** Rival weapon: a blaster bolt that may damage the wave enemies (hitsEnemies)
-   *  and—unless hostile or aimed AT the player—passes through the player. */
-  private fireRivalShot(inst: RivalInstance, target: GameEntity) {
-      if (!this.currentMap) return;
-      const W = RIVAL_CONSTANTS.WEAPON;
-      const cfg = {
-          type: WeaponType.BLASTER, name: 'Rival Blaster', cooldown: W.cooldown,
-          speed: W.speed, damage: W.damage, lifetime: W.lifetime,
-          color: inst.ship.color || W.color, size: W.size,
-          count: 1, spread: 0, recoil: 0, pierce: 0,
-      } as WeaponConfig;
-      const ents = this.currentMap.entities;
-      const before = ents.length;
-      this.spawnProjectileFromConfig(inst.ship, { x: target.position.x, y: target.position.y }, cfg, EntityType.ENEMY);
-      const targetingPlayer = target === this.player;
-      const spares = !(inst.disposition === 'hostile' || targetingPlayer);
-      for (let i = before; i < ents.length; i++) {
-          const p = ents[i];
-          if (p.type === EntityType.PROJECTILE) { p.hitsEnemies = true; p.sparesPlayer = spares; }
-      }
-  }
-
-  /** Steal any collectible drop within LOOT_RANGE (denies the player + heals). */
-  private rivalVacuumDrops(inst: RivalInstance) {
-      const R = RIVAL_CONSTANTS;
-      const s = inst.ship;
-      const rng2 = R.LOOT_RANGE * R.LOOT_RANGE;
-      for (let i = 0; i < this.activeDrops.length; i++) {
-          const drop = this.activeDrops[i];
-          if (!drop.active || !isCollectibleDrop(drop)) continue;
-          const dx = wrapDeltaX(s.position.x, drop.position.x), dy = wrapDeltaY(s.position.y, drop.position.y);
-          if (dx * dx + dy * dy > rng2) continue;
-          drop.active = false;
-          s.health = Math.min(s.maxHealth ?? R.HEALTH, (s.health ?? 0) + R.HEAL_PER_LOOT);
-          this.spawnParticles(drop.position, 5, s.color || '#e2e8f0', {
-              speedMin: 1, speedMax: 5, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.15, lifetimeMax: 0.4,
-          });
-      }
+      spawnDragon(this, (allowed.includes(type) ? type : 'mixed') as StructureVariant | 'mixed');
   }
 
   /** DBG: warp in a rival of the given disposition (or a weighted roll). */
   public debugSpawnRival(disposition: string = 'random') {
       const forced = (disposition === 'hostile' || disposition === 'ally' || disposition === 'neutral')
           ? disposition as RivalDisposition : undefined;
-      this.spawnRival(forced);
+      spawnRival(this, forced);
   }
 
   // ─── Perf recorder (DBG FPS harness) ───────────────────────────────────
   // Start/stop a capture, cycle the scene label, and export a copy-paste
   // report.  Surfaced in the DBG panel's "Perf REC" section; see
   // engine/systems/PerfRecorder.ts.
-  public perfRecToggle() { this.perfRecorder.toggle(); }
+  public perfRecToggle() {
+    const starting = !this.perfRecorder.recording;
+    this.perfRecorder.toggle();
+    // Seed the event-diff markers to the CURRENT world state when a capture
+    // opens.  Without this the first recorded frame reads every marker as
+    // "changed" and the timeline opens with a cluster of phantom events at
+    // 0.0s — which is exactly the false correlation the timeline exists to
+    // prevent.  Seeded silently, so the timeline holds only real transitions.
+    if (starting) {
+      this._pmWave = this.waveIndex;
+      this._pmState = this.waveState;
+      this._pmBoss = !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+      this._pmMap = this.currentMap?.name ?? '';
+      this._pmDead = this.deathPending;
+      this._pmStage = this.stageClearPending;
+      this._pmDocked = this.dockedAtStation;
+    }
+  }
   public perfRecCycleScene() { this.perfRecorder.cycleScene(); }
 
   /** Build the copy-paste perf report from the current capture window.  The
@@ -7201,11 +6368,31 @@ export class GameEngine {
     return this.perfRecorder.report({
       viewportW: typeof window !== 'undefined' ? window.innerWidth : 0,
       viewportH: typeof window !== 'undefined' ? window.innerHeight : 0,
-      dpr: typeof window !== 'undefined' ? Math.round((window.devicePixelRatio || 1) * 10) / 10 : 1,
+      // The EFFECTIVE ratio — what the frame was actually rasterised at, and
+      // therefore what the render numbers below correspond to.  The raw device
+      // ratio is recoverable from the `set` line's rscale entry.
+      dpr: Math.round(effectiveDpr() * 10) / 10,
       zoom: this.camera.zoom || 1,
+      audioLatencyMs: this.audio.latencyMs,
       mapName: this.currentMap?.name || '—',
       difficulty: this.difficultyLevel,
-      buildTag: 'exotic-opt',
+      buildTag: '5c-perf',
+      // Every DBG knob that can change what these numbers mean.  Without it
+      // an A/B capture cannot be told apart from the run it is compared to.
+      settings: `sim ${getActiveSimRateName()} · substep ${getActiveSubstepCapName()}`
+        + ` · rscale ${getActiveRenderScaleName()} · hud ${getActiveHudRateName()}`
+        + ` · auto ${this.perfController.autoEnabled ? 'on' : 'off'}`
+        // The lighting vocabulary, so a pasted capture says which
+        // configuration produced its light/fog columns without a follow-up
+        // question.  Report-time values: change settings mid-capture and the
+        // line describes the end state, not the whole window.
+        + ` · light ${getActiveLightingMode()}/${getActiveLightingTier().name}`
+        + ` · soft ${this.renderer.getShadowSoftness()}`
+        + ` · beam ${this.renderer.getFlashlight()}`
+        + ` · refr ${this.renderer.getRefraction() ? 'on' : 'off'}`
+        + ` · emis ${this.renderer.getEmissive() ? 'on' : 'off'}`
+        + ` · eshd ${this.renderer.getEmitShadows() ? this.renderer.getEmitShadowTier().name : 'off'}`
+        + ` · fog ${this.renderer.getFog()}`,
     }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 
@@ -7215,7 +6402,7 @@ export class GameEngine {
    *  of truth: the OVERWORLD hub is the wave-free home map — WaveSystem
    *  is initialised disabled there, exactly like difficulty "None" — and
    *  every arena runs waves.  Unregistered maps default to enabled. */
-  private get wavesEnabled(): boolean {
+  get wavesEnabled(): boolean {
     return descriptorForMapType(this.currentMap?.type)?.wavesEnabled ?? true;
   }
 
@@ -7235,6 +6422,23 @@ export class GameEngine {
   // sites in updateGameLogic / handleEntityDeath / collection paths.
 
   private applyDropEffect(entity: GameEntity) {
+    // Pickup audio (SFX_INVENTORY §7.1).  Salvage arrives in magnetised
+    // CLUSTERS, so a fixed pitch reads as a machine-gun rattle; stepping
+    // it up a semitone per pickup inside a short window turns a cluster
+    // into a climbing scale instead.  The streak resets once collection
+    // pauses.
+    const pos = entity.position;
+    if (entity.dropType === 'salvage') {
+        const now = performance.now();
+        this.salvageStreak = (now - this.salvageStreakAt < SALVAGE_STREAK_WINDOW_MS)
+            ? Math.min(this.salvageStreak + 1, SALVAGE_STREAK_MAX) : 0;
+        this.salvageStreakAt = now;
+        this.audio.play('pickup.salvage', {
+            x: pos.x, y: pos.y, pitch: Math.pow(2, this.salvageStreak / 12),
+        });
+    } else if (entity.dropType === 'health') {
+        this.audio.play('pickup.health', { x: pos.x, y: pos.y });
+    }
     this.drops.applyDropEffect(
       this.player,
       entity,
@@ -7282,7 +6486,7 @@ export class GameEngine {
     this.drops.spawnGlassShards(this.currentMap.entities, tile);
   }
 
-  private spawnSalvageDrop(pos: Vector2, parentVelocity?: Vector2) {
+  spawnSalvageDrop(pos: Vector2, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     this.drops.spawnSalvageDrop(this.currentMap.entities, this.activeDrops, pos, parentVelocity);
   }
@@ -7295,7 +6499,7 @@ export class GameEngine {
   private loadMap(map: BaseMapLayer) {
       // Push the new map's dimensions into the shared toroidal module
       // BEFORE the map initialises or any system rebuilds its static
-      // state — initializeStaticGrid, initObstacles, buildAsteroidField
+      // state — initializeStaticGrid, initObstacles, buildShardFlowField
       // all read dimension-derived constants that must reflect the
       // active map.  Listeners registered by PhysicsSystem, FlowField,
       // and FlowFieldGrid update their caches synchronously here.
@@ -7304,6 +6508,11 @@ export class GameEngine {
           map.init();
       }
       this.currentMap = map;
+      // The fog's EXPLORED memory is world space, and world space means
+      // something different here — a memory kept across a load would draw the
+      // last map's explored shape onto this one.  The renderer owns no other
+      // per-map persistent state, which is why this is the only such call.
+      this.renderer.resetFog();
       // Pre-calculate spatial grid for static tiles to avoid overhead in main loop
       this.physics.initializeStaticGrid(map.entities);
       // Cache gravitational attractors once per map so applyGravity no
@@ -7320,7 +6529,7 @@ export class GameEngine {
       // Bake under the active DBG pattern (DEFAULT = the map's own
       // sampler) so a selected pattern persists across map loads /
       // restarts.
-      this.flowField.buildAsteroidField(this.flowSamplerFor(map));
+      this.flowField.buildShardFlowField(this.flowSamplerFor(map));
       this.flowField.setKernelR(this.ffKernelR);
       this.flowField.setTangentMix(this.ffTangentMix);
       this.renderer.setMapType(map.type);
@@ -7364,6 +6573,40 @@ export class GameEngine {
   private draw() {
       if (!this.currentMap) return;
 
+      // The DOM's capstone bar occupies the top of the screen while a boss is
+      // alive; the off-screen indicator rect reserves that band so an arrow
+      // pointing straight up does not draw underneath it.  One boolean, set
+      // where the frame is drawn rather than read out of the DOM.
+      this.renderer.bossBarActive =
+          !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+
+      // Transit warp — hand the renderer a plain 0->1 progress, so the beat
+      // stays a pure function of one number and the render side owns no
+      // timer of its own.  Null when no transit is in flight.
+      // CLAMPED to [0, 1).  The frame-delta guard above is the fix for the
+      // negative case, but this is the one the RULE depends on: the beat's
+      // progress is what decides whether the world is covered, and a value
+      // outside the range would hand the renderer a frame it does not know
+      // how to veil.  Cheap, and it makes "the destination cannot show" a
+      // property of the number rather than of the clock behaving.
+      this.renderer.portalWarp = this.portalWarpTimer > 0 && this.portalWarpDuration > 0
+          ? Math.max(0, Math.min(0.999999, 1 - this.portalWarpTimer / this.portalWarpDuration))
+          : null;
+
+      // A7 — hand the renderer the run's depth.  One field write per frame;
+      // the fog folds it into its dark level (deeper = darker).
+      this.renderer.stageDepth = this.stageIndex;
+      // The Light TOOL, when it is ON: the cone override gives it the BEAM
+      // style, and the TIER override steps the whole light system to the
+      // level's rung ('medium'/'high') — both over the DBG globals, which
+      // stay the raw dev overrides underneath (tool off / no kit → null →
+      // the globals decide; the flashlight global ships 'off', the tier
+      // 'low').
+      const lightOn = this.flashlightEquipped && this.flashlightLevel > 0;
+      this.renderer.playerLightToolHalfDeg =
+          lightOn ? FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].halfDeg : null;
+      setLightingTierOverride(
+          lightOn ? (FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].tier ?? null) : null);
       this.renderer.render(
           this.frameEntities,
           this.camera,
@@ -7381,6 +6624,8 @@ export class GameEngine {
               rebuilds:  this.ffOverlayRebuilds,
               sampleN:   this.ffOverlaySampleN,
           },
+          this.input.getJoystickState(),
+          this.input.getFireButtonState(),
       );
   }
 
@@ -7433,6 +6678,8 @@ export class GameEngine {
       this.perfRender[this.perfRenderIdx]        = this.renderer.lastRenderMs;
       this.perfNebula[this.perfRenderIdx]        = this.renderer.lastNebulaMs;
       this.perfTileLighting[this.perfRenderIdx] = this.renderer.lastTileLightingMs;
+      this.perfLighting[this.perfRenderIdx]     = this.renderer.lastLightingMs;
+      this.perfFog[this.perfRenderIdx]          = this.renderer.lastFogMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
@@ -7484,18 +6731,27 @@ export class GameEngine {
           weaponsMs:      GameEngine.ringAvg(this.perfWeapons,      simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
+          // Raw per-frame, not ring-averaged — see the PerfSnapshot comment.
+          uiActualMs:     this.lastUiActualMs,
+          uiBaseMs:       this.lastUiBaseMs,
+          uiCommits:      this.lastUiCommits,
+          uiScheduleMs:   this.lastStatsScheduleMs,
+          uiProfiled:     this.uiProfilerSeen,
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),
           nebulaVisible:  this.renderer.lastNebulaVisible,
           nebulaFast:     this.renderer.lastNebulaFastCount,
           nebulaSlow:     this.renderer.lastNebulaSlowCount,
           tileLightingMs:    GameEngine.ringAvg(this.perfTileLighting, this.perfRenderFilled),
           tileLightingCount: this.renderer.lastTileLightingCount,
+          lightingMs:        GameEngine.ringAvg(this.perfLighting,     this.perfRenderFilled),
+          lightingLights:    this.renderer.lastLightingLights,
+          fogMs:             GameEngine.ringAvg(this.perfFog,          this.perfRenderFilled),
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),
           totalEntities:     this.perfCounts.totalEntities,
           enemyCount:        this.perfCounts.enemyCount,
-          asteroidCount:     this.perfCounts.asteroidCount,
+          mobileShardCount:     this.perfCounts.mobileShardCount,
           projectileCount:   this.perfCounts.projectileCount,
           particleCount:     this.perfCounts.particleCount,
           interactableCount: this.perfCounts.interactableCount,
