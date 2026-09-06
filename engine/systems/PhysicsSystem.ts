@@ -3503,12 +3503,17 @@ export class PhysicsSystem {
           // shot's capacity is.  Ordinal 0 is 1 by construction, so a
           // non-piercing bolt is untouched by this.
           //
-          // DIRECT damage only, deliberately: the Cannon's AoE splash and
-          // the Lightning chain are applied in GameEngine from
-          // `explosionDamage` / the chain constants and are NOT scaled
-          // here — whether a pierced shot should also carry a weaker
-          // blast is an open decision the user has not made.
+          // EVERY WEAPON IS AFFECTED EQUALLY (user call).  The falloff is
+          // not direct-damage-only: the Cannon's AoE splash and the
+          // Lightning chain are applied in GameEngine, from a callback that
+          // fires LATER in this function — by which point the grain bore
+          // may already have advanced `pierceHits` past this hit's ordinal.
+          // So the factor actually used here is STASHED on the projectile
+          // and those consumers read it, rather than re-deriving an ordinal
+          // that no longer means the same thing.  One number, one hit, three
+          // damage paths.
           const falloff = pierceFalloffAt(proj.pierceHits ?? 0, proj.pierceFalloffRate);
+          proj.hitFalloff = falloff;
           let projDmg = (proj.damage || 1) * falloff;
           // Hoisted: the bore below must respect it too, so a bolt that
           // re-contacts a body it already pierced does not drill it again.

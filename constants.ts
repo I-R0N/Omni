@@ -5068,36 +5068,41 @@ export const MAX_PIERCE = 99;
 // deals full projectile damage, which is the control for judging whether the
 // decay is carrying its weight at all.
 //
-// WHY 0.05 SHIPS.  The number that matters is what a DEEP bore is worth,
-// because the reachable stack is large: six Penetration Mk III in the weapon
-// flower is +18, and inside a grain material every GRAIN spends a charge.
-// A geometric decay has no floor, so a rate that feels mild early can round
-// the tail to nothing — at 0.20 the 18th hit is 1.8% of a shot.  0.05 keeps
-// it at 40%, which is where the retired table's tail sat, while being gentler
-// than that table over the first few hits (0.95 vs 0.90 on hit 1).
+// SHIPPED OFF (user call).  The decay is a knob to be judged, not a balance
+// statement to inherit: at 0 every penetration hit lands FULL projectile
+// damage, so what ships is the honest ceiling and the rate is what a tuning
+// pass turns up.  The step below it in the cycle is 0.05, which is the value
+// the retired table's tail worked out to at depth — a sensible first click.
 //
-// Applies to every weapon evenly for now (user call).  `WeaponConfig
-// .pierceFalloffRate` is kept as the per-weapon seam for when that changes;
-// nothing overrides it today.
-export const PIERCE_FALLOFF_RATE = 0.05;
+// The number matters more than it looks once turned on, because the
+// reachable stack is large: six Penetration Mk III in the weapon flower is
+// +18, and inside a grain material every GRAIN spends a charge.  A geometric
+// decay has no floor, so the rate mostly decides what a DEEP bore is worth —
+// at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.
+//
+// It applies to EVERY WEAPON EQUALLY (user call), and to every damage path a
+// hit produces: the direct bite, the Cannon's AoE splash and the Lightning
+// chain all take the same factor.  `WeaponConfig.pierceFalloffRate` is kept
+// as the per-weapon seam for when that changes; nothing overrides it today.
+export const PIERCE_FALLOFF_RATE = 0;
 
 /** DBG "Pierce falloff" — index 0 is what ships, so the first click is the
  *  A/B.  0 is the no-decay control; the top of the range is deliberately
  *  past useful, because a range whose top is not too far cannot show where
  *  too far is. */
 export const PIERCE_FALLOFF_CYCLE: ReadonlyArray<number> = [
-  PIERCE_FALLOFF_RATE, 0, 0.10, 0.20, 0.35, 0.50,
+  PIERCE_FALLOFF_RATE, 0.05, 0.10, 0.20, 0.35, 0.50,
 ] as const;
 
-let activePierceFalloffIndex = 0; // 0.05 — what ships
+let activePierceFalloffIndex = 0; // 0 — what ships: the decay is OFF
 
 export function getActivePierceFalloffRate(): number {
   return PIERCE_FALLOFF_CYCLE[activePierceFalloffIndex];
 }
 export function getActivePierceFalloffName(): string {
   const v = getActivePierceFalloffRate();
-  if (v === 0) return 'off (full dmg)';
-  return v === PIERCE_FALLOFF_RATE ? `${v.toFixed(2)} (def)` : v.toFixed(2);
+  if (v === 0) return 'off (full dmg, def)';
+  return v.toFixed(2);
 }
 export function cyclePierceFalloff(): number {
   activePierceFalloffIndex =

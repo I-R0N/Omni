@@ -232,7 +232,11 @@ export function updateExplosionRings(g: GameEngine) {
     }
 }
 
-export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {      if (!g.currentMap) return;
+/** `falloff` is the PENETRATION damage factor already applied to this hit's
+ *  DIRECT damage (PhysicsSystem stashes it on the projectile).  Passing it in
+ *  keeps every weapon affected equally by the falloff rate: a pierced shot's
+ *  fourth blast is as weakened as its fourth bite.  1 when nothing pierced. */
+export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity, falloff: number = 1) {      if (!g.currentMap) return;
 // Compact splash blast — deliberately not the boss-death boom, since
 // a Cannon build fires this several times a fight.
 g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
@@ -256,7 +260,7 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
     // DIRECT path below exactly as the kamikaze blast is.
     spawnShockwave(g, impactPos, {
         radius: proj.explosionRadius!,
-        damage: proj.explosionDamage ?? 0,
+        damage: (proj.explosionDamage ?? 0) * falloff,
         knockback: proj.explosionKnockback ?? 0,
         color: WEAPONS[WeaponType.CANNON].color,
         ownerType: proj.ownerType,
@@ -274,7 +278,7 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         applyBlastToPlayer(g, 
             impactPos,
             proj.explosionRadius!,
-            proj.explosionDamage ?? 0,
+            (proj.explosionDamage ?? 0) * falloff,
             proj.explosionKnockback ?? 0,
         );
     }

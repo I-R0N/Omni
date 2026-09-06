@@ -2056,7 +2056,8 @@ penetration path:
    be what decides whether matter behaves like matter.
 3. **Does the falloff RATE belong to the material rather than the
    weapon?**  It is a global DBG knob today (`PIERCE_FALLOFF_RATE`,
-   applying to all weapons evenly by user call) with a per-weapon seam
+   shipped at 0 and applying to all weapons — and to all three damage
+   paths a hit produces — evenly, by user call) with a per-weapon seam
    (`WeaponConfig.pierceFalloffRate`) that nothing uses.  A material-side
    rate — how fast a given stuff absorbs an advancing shot — is a third
    possibility and probably the physically honest one.

@@ -471,6 +471,12 @@ export interface GameEntity {
   pierceHits?: number;
   // The falloff table this shot flies with, copied from its WeaponConfig
   // at spawn.  Absent → the shared curve.
+  /** The falloff factor actually applied to THIS hit, stashed by
+   *  PhysicsSystem so the on-hit consumers in GameEngine (the Cannon's AoE
+   *  splash, the Lightning chain) scale by the same number the direct
+   *  damage did.  They cannot re-derive it: the grain bore may have
+   *  advanced `pierceHits` before their callback runs. */
+  hitFalloff?: number;
   pierceFalloffRate?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 

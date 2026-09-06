@@ -1575,30 +1575,35 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   as effectively infinite", and the Laser ships `pierce: 4` now.
   WHAT A CHARGE BUYS is the part the first version got wrong (user
   review, "option C").  Three rules replace "one charge, one body":
-  - **DAMAGE FALLS OFF PER HIT, AT A RATE.**  Damage at hit ordinal `n` is
-    `base × (1 - PIERCE_FALLOFF_RATE)^n` (0.05, beside `MAX_PIERCE`).
-    Ordinal 0 — the contact hit — is always 1, so a bolt with no
-    penetration is untouched by any of this; only penetration hits decay.
-    A RATE, not the authored table it replaced (user call): the table
-    could express an irregular shape but could not be TUNED IN PLAY, and
-    tuning is what this actually needs.  DBG ▸ Player ▸ "Pierce falloff"
-    sweeps it (0.05 default / off / 0.10 / 0.20 / 0.35 / 0.50), and **0
-    is a first-class step** — every penetration hit then lands full
-    damage, which is the control for judging whether the decay earns its
-    place.  WHY 0.05: the reachable stack is large (six Penetration Mk III
-    in the weapon flower is +18, and inside a grain material every GRAIN
-    spends a charge), and a geometric decay has no floor, so the rate
-    mostly decides what a DEEP bore is worth — at 0.05 the 18th hit still
-    lands 40%, at 0.20 it is under 2%.  It rides the projectile as
-    `pierceHits` (a count UP, so the curve is read forwards —
-    `pierceCount` counts DOWN and would read it backwards) and an
-    optional per-weapon override `WeaponConfig.pierceFalloffRate`,
-    stamped at spawn on the SAME seam `pierce` is (both spawn paths, and
-    the pooled one clears the field when the new config has none — a
-    recycled shot must never inherit a stale rate).  Nothing overrides it
-    today: it applies to every weapon evenly (user call).  DIRECT damage
-    only: the Cannon's AoE splash and the Lightning chain are applied in
-    `GameEngine` and deliberately unscaled, pending a decision.
+  - **DAMAGE FALLS OFF PER HIT, AT A RATE — AND IT SHIPS OFF.**  Damage at
+    hit ordinal `n` is `base × (1 - PIERCE_FALLOFF_RATE)^n`, and the
+    shipped rate is **0**: every penetration hit lands FULL projectile
+    damage unless someone turns the knob up (user call — the decay is a
+    thing to be judged, not a balance statement to inherit).  Ordinal 0 —
+    the contact hit — is always 1, so a bolt with no penetration is
+    untouched by any of this.  A RATE, not the authored table it replaced:
+    the table could express an irregular shape but could not be TUNED IN
+    PLAY, and tuning is what this needs.  DBG ▸ Player ▸ "Pierce falloff"
+    sweeps it (off / 0.05 / 0.10 / 0.20 / 0.35 / 0.50).  The number matters
+    more than it looks once on, because the reachable stack is large (six
+    Penetration Mk III in the weapon flower is +18, and inside a grain
+    material every GRAIN spends a charge) and a geometric decay has no
+    floor — at 0.05 the 18th hit still lands 40%, at 0.20 under 2%.
+    EVERY WEAPON IS AFFECTED EQUALLY, and so is every damage path ONE HIT
+    produces: the direct bite, the Cannon's AoE splash and the Lightning
+    chain all take the same factor.  The splash and the chain are applied
+    in `GameEngine` from a callback that fires LATER in `resolveCollision`,
+    by which point the grain bore may already have advanced `pierceHits`
+    past this hit's ordinal — so the factor is STASHED on the projectile
+    (`GameEntity.hitFalloff`) and those consumers READ it rather than
+    re-deriving an ordinal that no longer means the same thing.  The
+    ordinal itself rides the projectile as `pierceHits` (a count UP, so
+    the curve is read forwards — `pierceCount` counts DOWN and would read
+    it backwards) and an optional per-weapon override
+    `WeaponConfig.pierceFalloffRate`, stamped at spawn on the SAME seam
+    `pierce` is (both spawn paths, and the pooled one clears the field
+    when the new config has none — a recycled shot must never inherit a
+    stale rate).  Nothing overrides it today.
   - **INSIDE A GRAIN BODY A CHARGE BUYS A GRAIN, NOT A TILE** — the bore
     track; see §8.
   - **AN INDESTRUCTIBLE TILE STOPS THE BOLT DEAD** and costs it nothing.
@@ -1611,7 +1616,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   charge actually spent, so a four-grain bore slows four times.
   THE LASER'S OWN BUDGET went 99 → 4 in the same pass (user call).
   "Effectively infinite" pre-dated there being any COST to piercing;
-  with the falloff in place a beam already gives up damage per body, so an
+  with a falloff available at all a beam can be made to give up damage per
+  body, so an
   unbounded budget just made the Laser the answer to every line of
   targets.  A RICOCHET MAY RE-HIT what it already struck, with no cap —
   bought by CLEARING `hitEntityIds` at the bounce site rather than by
@@ -2454,9 +2460,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   Bodies with no grain model (nebula, metal-shard composites, enemies,
   the player) fall through to the single spend they always took, with the
   falloff applied.  Measured on a 36px glass pane at 4 damage a hit: one
-  charge bores 2 grains for 7.8 (4 + 3.8 at the shipped 0.05 rate) and
-  stops inside, where the body-level rule crossed the whole tile for one
-  bite of 4.
+  charge bores 2 grains and stops inside — 8.0 at the shipped rate (which
+  is 0, so both grains take full damage), or 7.8 with the decay cycled to
+  0.05 — where the body-level rule crossed the whole tile for one bite of
+  4.  The pane is ~3 grains deep on that chord, so 4+ charges bore 3 and
+  carry on: terrain costs about three charges per body, not a budget.
 - **Progressive fracture IS the rock damage model under voronoi** (V8 —
   the boundary-highlight rework).  The decomposition is applied ONCE at
   first damage and FIXED; each hit reveals more of the impact-sorted

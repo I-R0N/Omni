@@ -38,17 +38,18 @@
 import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
 
-/** WEAPONS[BOUNCER].pierce and the shipped falloff RATE, hard-coded (harness
- *  rule: a test that imports the constant it is checking pins nothing).
+/** WEAPONS[BOUNCER].pierce and the falloff cycle, hard-coded (harness rule:
+ *  a test that imports the constant it is checking pins nothing).
  *
- *  The falloff is a RATE now, not an authored table (user call): damage at
- *  hit ordinal n is `base x (1 - rate)^n`, so the whole curve is one number
- *  and the DBG cycle can sweep it live — including to 0, where every
- *  penetration hit lands full damage. */
+ *  The falloff is a RATE, and it SHIPS OFF (user call): damage at hit ordinal
+ *  n is `base x (1 - rate)^n`, and at the shipped rate of 0 every penetration
+ *  hit lands full damage.  One click of DBG "Pierce falloff" reaches 0.05,
+ *  which is where the decay can be observed. */
 const LASER_PIERCE = 4;
-const FALLOFF_RATE = 0.05;
-const falloffAt = (ordinal: number) =>
-  ordinal <= 0 ? 1 : Math.pow(1 - FALLOFF_RATE, ordinal);
+const SHIPPED_RATE = 0;
+const FIRST_CLICK_RATE = 0.05;
+const falloffAt = (ordinal: number, rate = FIRST_CLICK_RATE) =>
+  ordinal <= 0 ? 1 : Math.pow(1 - rate, ordinal);
 
 /** Park the player in empty space on a quiet showcase map. */
 async function quietField(page: any, map = 'GLASS_FIELD') {
@@ -124,6 +125,16 @@ function isolate(page: any, group: 'ship' | 'weapon', rootId: string, modId: str
       rootActive: active[2], modActive: active[4],
     };
   }, { group, rootId, modId });
+}
+
+
+/** Turn the decay ON.  It SHIPS OFF, so a test about the curve has to click
+ *  the DBG cycle once — index 0 is the shipped 0, index 1 is 0.05. */
+async function decayOn(page: any) {
+  await engine(page, e => { e.dbg.cyclePierceFalloff(); });
+  const s = await stats(page);
+  expect(s.pierceFalloffName, 'one click reaches the first real rate')
+    .toBe(FIRST_CLICK_RATE.toFixed(2));
 }
 
 // ── A3 — Penetration ────────────────────────────────────────────────────────
@@ -248,11 +259,13 @@ test.describe('penetration module', () => {
       const pierced = await run();
       expect(pierced.firstHit).toBeGreaterThan(0);
       expect(pierced.survived, 'Mk I: the bolt carries on').toBe(true);
-      // NOT the same bite any more: the falloff rate (option C) charges the
-      // second body (1 - rate) of the first.  Stated as the RATIO rather than an
-      // absolute so it tracks the Blaster's damage, not this tuning of it.
+      // The decay SHIPS OFF, so at the default the second body takes the
+      // same bite as the first.  Stated as the RATIO rather than an absolute
+      // so it tracks the Blaster's damage, not this tuning of it; the curve
+      // itself is pinned by the falloff tests below, which turn it on.
       expect(pierced.secondHit / pierced.firstHit,
-        'and the second enemy takes the falloff-stepped bite').toBeCloseTo(falloffAt(1), 5);
+        'and at the shipped rate the second enemy takes the SAME bite')
+        .toBeCloseTo(1, 5);
 
       watch.assertClean();
     });
@@ -301,20 +314,21 @@ test.describe('penetration module', () => {
         return bites;
       });
 
+      // SHIPPED: the decay is off, so a penetration hit lands full damage.
+      const s0 = await stats(page);
+      expect(s0.pierceFalloffName, 'the readout names the shipped control')
+        .toContain('off');
       const shipped = await bite();
       expect(shipped[0], 'contact hit, full').toBeCloseTo(10, 6);
-      expect(shipped[1] / 10, 'penetration hit, decayed at the shipped rate')
+      expect(shipped[1], 'and at the shipped rate so is the penetration hit')
+        .toBeCloseTo(10, 6);
+
+      // One click turns it on — the knob is the whole point of the rate.
+      await decayOn(page);
+      const on = await bite();
+      expect(on[0], 'the contact hit is never scaled').toBeCloseTo(10, 6);
+      expect(on[1] / 10, 'and the penetration hit now decays')
         .toBeCloseTo(falloffAt(1), 6);
-
-      // Walk the cycle to OFF.  Index 1 is 0 by construction (index 0 is the
-      // shipped value, so the first click is always the A/B).
-      await engine(page, e => { e.dbg.cyclePierceFalloff(); });
-      const s2 = await stats(page);
-      expect(s2.pierceFalloffName, 'the readout names the control').toContain('off');
-
-      const off = await bite();
-      expect(off[0], 'contact hit unchanged').toBeCloseTo(10, 6);
-      expect(off[1], 'and the penetration hit lands FULL damage').toBeCloseTo(10, 6);
 
       watch.assertClean();
     });
@@ -322,6 +336,7 @@ test.describe('penetration module', () => {
   test('successive bodies take the falloff rate, at every depth', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
+    await decayOn(page);   // the decay ships OFF; this test is about the curve
 
     // SIX parked, effectively immortal targets on one line and one bolt with
     // five charges.  A RATE has no tail to fall off — it just keeps decaying —
@@ -375,6 +390,7 @@ test.describe('penetration module', () => {
   test('inside a grain body a charge buys a GRAIN, not the whole tile', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
+    await decayOn(page);   // the decay ships OFF; these expectations are the curve
 
     /** Fire one synthesised 4-damage bolt into a fresh glass tile from just
      *  outside its left face, straight along +x, and report what the tile
@@ -440,6 +456,7 @@ test.describe('penetration module', () => {
   test('a bolt that reaches the far side keeps flying, and hits what is behind', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
+    await decayOn(page);   // the decay ships OFF; these expectations are the curve
 
     const r = await engine(page, e => {
       const ents = e.currentMap.entities;
@@ -529,6 +546,7 @@ test.describe('penetration module', () => {
   test('a ricochet may re-hit what it already struck; sustained contact may not', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
+    await decayOn(page);   // the decay ships OFF; these expectations are the curve
 
     const r = await engine(page, e => {
       const ctx = e.waveContext();

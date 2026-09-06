@@ -4282,16 +4282,23 @@ export class GameEngine {
         break;
     }
 
+    // PENETRATION FALLOFF reaches the on-hit effects too, so every weapon is
+    // affected equally (user call): a bolt's fourth blast is as weakened as
+    // its fourth direct bite.  The factor is the one PhysicsSystem actually
+    // used for this hit — read, never re-derived, because the grain bore may
+    // have advanced `pierceHits` since.  1 when nothing pierced.
+    const hitFalloff = proj.hitFalloff ?? 1;
+
     // Lightning projectile: chain to nearby entities on impact
     if (proj.isLightningProjectile) {
-        this.fireLightningChainFromImpact(impactPos, target, proj);
+        this.fireLightningChainFromImpact(impactPos, target, proj, hitFalloff);
     }
 
     // Cannon AoE: every entity within proj.explosionRadius takes
     // proj.explosionDamage and a knockback impulse.  Direct-hit target
     // is excluded (it already took config.damage in PhysicsSystem).
     if (proj.explosionRadius && proj.explosionRadius > 0) {
-        applyExplosionAoE(this, impactPos, proj, target);
+        applyExplosionAoE(this, impactPos, proj, target, hitFalloff);
     }
   };
 
@@ -5782,7 +5789,11 @@ export class GameEngine {
 
   // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
-  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity) {
+  /** `pierceFalloff` is the PENETRATION factor already applied to this hit's
+   *  direct damage — passed in so the chain is weakened equally on a pierced
+   *  shot (user call: every weapon affected equally by the rate).  1 when
+   *  nothing pierced. */
+  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity, pierceFalloff: number = 1) {
       // One trigger for the whole chain: every arc in a chain lands within
       // this id's retrigger window, so the collapse rule turns a five-link
       // chain into one bigger crackle instead of five thin ones.
@@ -5872,7 +5883,7 @@ export class GameEngine {
       // (already damaged upstream by the projectile collision).  Damage at
       // depth d = baseDmg * (1 - d/maxDepth) — same falloff curve as the
       // pre-branching linear chain so balance per-target stays consistent.
-      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage;
+      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage * pierceFalloff;
       const maxDepth = nodesByDepth.length - 1;
       for (let d = 1; d <= maxDepth; d++) {
           const factor = maxDepth > 0 ? Math.max(0, 1 - d / maxDepth) : 1;
