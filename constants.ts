@@ -5058,30 +5058,63 @@ export const DAMAGE_TEXT_CONSTANTS = {
 // balance statement should be read into the number.
 export const MAX_PIERCE = 99;
 
-// PENETRATION FALLOFF (A3 follow-up, user "option C").  A pierced bolt no
-// longer delivers full damage to everything on its line: each successive
-// body — or, inside a grain material, each successive GRAIN — takes a
-// smaller bite.  Authored as a TABLE rather than a per-hit rate because
-// the ratios the user picked are irregular (0.90, 0.83, 0.87, 0.62 of the
-// step before), which no single multiplier can express.
+// PENETRATION FALLOFF — a RATE, not a table (user call, superseding the
+// authored curve).  Damage at hit ordinal `n` is `base x (1 - rate)^n`, so
+// ONE number describes the whole decay and the DBG cycle below can sweep it
+// live.  The authored table it replaces could express an irregular shape but
+// could not be tuned in play, which is what the tuning actually needs.
 //
-// Indexed by HIT ORDINAL, 0-based, so index 0 is the contact hit and is 1
-// by construction — a bolt with no penetration is untouched by any of
-// this.  The LAST entry is the TAIL for anything deeper: a bolt boring
-// through a grain material spends a step per GRAIN, so "how much does the
-// ninth hit do" has to have a defined answer rather than falling off the
-// end of the array.
-export const PIERCE_FALLOFF: readonly number[] = [1, 0.90, 0.75, 0.65, 0.40];
+// RATE 0 IS A FIRST-CLASS SETTING (user call): every penetration hit then
+// deals full projectile damage, which is the control for judging whether the
+// decay is carrying its weight at all.
+//
+// WHY 0.05 SHIPS.  The number that matters is what a DEEP bore is worth,
+// because the reachable stack is large: six Penetration Mk III in the weapon
+// flower is +18, and inside a grain material every GRAIN spends a charge.
+// A geometric decay has no floor, so a rate that feels mild early can round
+// the tail to nothing — at 0.20 the 18th hit is 1.8% of a shot.  0.05 keeps
+// it at 40%, which is where the retired table's tail sat, while being gentler
+// than that table over the first few hits (0.95 vs 0.90 on hit 1).
+//
+// Applies to every weapon evenly for now (user call).  `WeaponConfig
+// .pierceFalloffRate` is kept as the per-weapon seam for when that changes;
+// nothing overrides it today.
+export const PIERCE_FALLOFF_RATE = 0.05;
+
+/** DBG "Pierce falloff" — index 0 is what ships, so the first click is the
+ *  A/B.  0 is the no-decay control; the top of the range is deliberately
+ *  past useful, because a range whose top is not too far cannot show where
+ *  too far is. */
+export const PIERCE_FALLOFF_CYCLE: ReadonlyArray<number> = [
+  PIERCE_FALLOFF_RATE, 0, 0.10, 0.20, 0.35, 0.50,
+] as const;
+
+let activePierceFalloffIndex = 0; // 0.05 — what ships
+
+export function getActivePierceFalloffRate(): number {
+  return PIERCE_FALLOFF_CYCLE[activePierceFalloffIndex];
+}
+export function getActivePierceFalloffName(): string {
+  const v = getActivePierceFalloffRate();
+  if (v === 0) return 'off (full dmg)';
+  return v === PIERCE_FALLOFF_RATE ? `${v.toFixed(2)} (def)` : v.toFixed(2);
+}
+export function cyclePierceFalloff(): number {
+  activePierceFalloffIndex =
+    (activePierceFalloffIndex + 1) % PIERCE_FALLOFF_CYCLE.length;
+  return activePierceFalloffIndex;
+}
 
 /** The damage multiplier for the `ordinal`-th hit of one bolt (0 = the
- *  first contact).  `table` is a weapon's own override (WeaponConfig
- *  .pierceFalloff, stamped onto the projectile at spawn); absent → the
- *  shared curve.  Past the end of whichever table applies, the last entry
- *  is the tail. */
-export function pierceFalloffAt(ordinal: number, table?: readonly number[]): number {
-  const t = (table !== undefined && table.length > 0) ? table : PIERCE_FALLOFF;
-  if (ordinal <= 0) return t[0];
-  return ordinal < t.length ? t[ordinal] : t[t.length - 1];
+ *  first contact, always 1 — a bolt with no penetration is untouched by any
+ *  of this).  `rate` is a weapon's own override (WeaponConfig
+ *  .pierceFalloffRate, stamped onto the projectile at spawn); absent → the
+ *  live DBG rate.  Rate 0 returns 1 at every depth. */
+export function pierceFalloffAt(ordinal: number, rate?: number): number {
+  if (ordinal <= 0) return 1;
+  const r = rate !== undefined ? rate : getActivePierceFalloffRate();
+  if (r <= 0) return 1;
+  return Math.pow(1 - r, ordinal);
 }
 
 // PIERCE SPEED DECAY.  A per-hit multiplier on a piercing bolt's speed —
@@ -5185,12 +5218,12 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     // 99 → 4 (user call, penetration rework).  "Effectively infinite" was a
     // number that pre-dated any cost to piercing: with the shared
-    // PIERCE_FALLOFF curve in place a beam already gives up damage per body,
+    // falloff rate in place a beam already gives up damage per body,
     // so an unbounded budget just made the Laser the answer to every line of
     // targets.  Four DAMAGE EVENTS is the budget for the whole flight —
     // bounces do not refresh it (see the reflection branch in
     // PhysicsSystem) — and it runs the SHARED falloff table: no
-    // `pierceFalloff` override here, deliberately.
+    // `pierceFalloffRate` override here, deliberately.
     pierce: 4,
     bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
   },

@@ -2011,3 +2011,83 @@ wanted, the lever is the detach rule rather than the damage spend: a cell
 could require a minimum number of ITS OWN boundaries broken (rather than
 merely all of its still-binding ones) so a freed neighbour does not hand
 it a discount.  Answer this before touching the harvest loop.
+
+---
+
+## Penetration bore tracks as a FRACTURE MODEL (2026-09-06) — user call
+
+**The observation.** Option C's penetration bore — a bolt walking its own
+chord through a body, spending one charge and one falloff step per GRAIN
+(`PhysicsSystem.borePierceTrack`) — produces a fracture pattern the user
+judged notably realistic, and did so as a side effect rather than by
+design.  The reason is worth stating because it is what any follow-up has
+to preserve: damage is deposited at SUCCESSIVE POINTS along a real path,
+each weaker than the last, into a model where damage already lands on
+GRAIN BOUNDARIES rather than an HP pool.  So the body is eroded along a
+line, most heavily at the entry face, tapering with depth — which is what
+a projectile actually does to brittle matter.
+
+**Why this is a parking-lot item and not a bug report.**  The voronoi /
+grain gauntlet (PR #91, `docs/GAUNTLET_VORONOI_LOG.md`) attempted richer
+fracture behaviour and, by the user's assessment, did not land it in a
+desirable form; parts were abandoned.  The bore arrived at something
+closer by accident, from a different direction — a WEAPON mechanic rather
+than a MATERIAL one.  That makes it evidence about which direction the
+material work should take, not merely a feature that happens to look good.
+
+### The investigation
+
+Take the bore's deposition profile — successive contact points along a
+path, with a decaying per-point spend — and ask whether it generalises
+into the fracture model itself, rather than living only in the
+penetration path:
+
+1. **Does every impact want a track, not a point?**  Today a non-piercing
+   hit stamps ONE contact and spends there (`stampLocalImpact` +
+   `applyBoundaryDamage`).  A shot has a direction and a penetration depth
+   even when it does not pierce; giving every impact a short decaying
+   track may be the whole difference between the current look and the
+   realistic one.  If so, the penetration module stops being the source of
+   the effect and becomes a multiplier on its DEPTH, which is a cleaner
+   story than the two mechanisms living apart.
+2. **What is the right depth for a non-piercing shot?**  Presumably a
+   function of damage, projectile size and the material's `bondStrength`
+   — not of pierce charges, which are a purchased resource and should not
+   be what decides whether matter behaves like matter.
+3. **Does the falloff RATE belong to the material rather than the
+   weapon?**  It is a global DBG knob today (`PIERCE_FALLOFF_RATE`,
+   applying to all weapons evenly by user call) with a per-weapon seam
+   (`WeaponConfig.pierceFalloffRate`) that nothing uses.  A material-side
+   rate — how fast a given stuff absorbs an advancing shot — is a third
+   possibility and probably the physically honest one.
+4. **Interaction with `damageSpread`.**  The bore works as well as it does
+   *because* every material ships `damageSpread: 0`, so each stamp spends
+   sequentially outward from its own point.  A non-zero spread would
+   smear the track into a blur.  Any generalisation has to decide whether
+   spread and track-depth are the same knob wearing two names.
+
+### Related entries — read together
+
+This belongs with the other open tile/shard physics items rather than
+beside them, and several of them are the same question from other angles:
+
+- **Grain clusters: several grains leaving as ONE fragment (A4-B)** — the
+  bore currently frees grains one at a time; a track that undercuts a
+  group is exactly the case that entry is about.
+- **The erosion cascade / do old cracks compete with new wounds** — a bore
+  track IS a concentrated wound, so it sharpens that entry's open
+  question rather than sitting apart from it.
+- **Polygonal face bonding for metal** — a bore through a bonded composite
+  has no defined behaviour yet.
+- **Rotational mechanics for shards and asteroids (2026-08-21)** — a track
+  is off-centre by construction, so it implies a torque the solver does
+  not model.
+
+### What NOT to conclude
+
+The bore looking right is not evidence that the SPEND profile is right in
+general — it is evidence about deposition GEOMETRY.  The V15 grain-
+boundary model's own measured lessons still hold (spend order is cell by
+cell; a flat nearest-edge sort completes almost nothing until the end),
+and any generalisation has to re-measure against them rather than assume
+the bore's success transfers.

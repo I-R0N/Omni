@@ -915,6 +915,7 @@ const App: React.FC = () => {
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBlend={handleToggleShardBlend}
         onCycleShardCoat={handleCycleShardCoat}
+        onCyclePierceFalloff={() => engineRef.current?.dbg.cyclePierceFalloff()}
         onCyclePierceSpeedRetain={handleCyclePierceSpeedRetain}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}

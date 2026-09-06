@@ -189,9 +189,9 @@ export class ProjectileSystem {
         // rival flags below carry: a recycled shot that kept a previous
         // gun's falloff table — or a previous shot's hit count — would
         // start part-way down a curve it never fired through.  Assigning
-        // `config.pierceFalloff` unconditionally is what CLEARS it when
+        // `config.pierceFalloffRate` unconditionally is what CLEARS it when
         // the new config has none (undefined → the shared curve).
-        pooled.pierceFalloff = config.pierceFalloff;
+        pooled.pierceFalloffRate = config.pierceFalloffRate;
         pooled.pierceHits = 0;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
@@ -237,7 +237,7 @@ export class ProjectileSystem {
           ownerType,
           ownerId: shooter.id, // for third-party retaliation (Stage 5)
           pierceCount: config.pierce,
-          pierceFalloff: config.pierceFalloff,
+          pierceFalloffRate: config.pierceFalloffRate,
           pierceHits: 0,
           trail: [],
           isLightningProjectile: isLight,

@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -900,6 +900,17 @@ export class DebugControls {
    *  against the falloff table before either is tuned. */
   cyclePierceSpeedRetain() {
     cyclePierceSpeedRetain();
+  }
+
+  /** Cycle the PENETRATION DAMAGE FALLOFF RATE (DBG "Pierce falloff") —
+   *  the per-hit decay every penetration hit after the first is scaled by,
+   *  as `(1 - rate)^ordinal`.  A RATE rather than the authored table it
+   *  replaced precisely so it can be swept from here (user call), and 0 is
+   *  a first-class step: every hit then lands full projectile damage,
+   *  which is the control for judging whether the decay earns its place.
+   *  Global — it applies to every weapon evenly for now. */
+  cyclePierceFalloff() {
+    cyclePierceFalloff();
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────

@@ -38,13 +38,17 @@
 import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
 
-/** WEAPONS[BOUNCER].pierce and the shared PIERCE_FALLOFF table, hard-coded
- *  (harness rule: a test that imports the constant it is checking pins
- *  nothing).  MAX_PIERCE is deliberately absent — it is 99 and nothing
- *  reaches it any more, so a test written against it would pin the clamp
- *  rather than the behaviour. */
+/** WEAPONS[BOUNCER].pierce and the shipped falloff RATE, hard-coded (harness
+ *  rule: a test that imports the constant it is checking pins nothing).
+ *
+ *  The falloff is a RATE now, not an authored table (user call): damage at
+ *  hit ordinal n is `base x (1 - rate)^n`, so the whole curve is one number
+ *  and the DBG cycle can sweep it live — including to 0, where every
+ *  penetration hit lands full damage. */
 const LASER_PIERCE = 4;
-const FALLOFF = [1, 0.90, 0.75, 0.65, 0.40];
+const FALLOFF_RATE = 0.05;
+const falloffAt = (ordinal: number) =>
+  ordinal <= 0 ? 1 : Math.pow(1 - FALLOFF_RATE, ordinal);
 
 /** Park the player in empty space on a quiet showcase map. */
 async function quietField(page: any, map = 'GLASS_FIELD') {
@@ -244,11 +248,11 @@ test.describe('penetration module', () => {
       const pierced = await run();
       expect(pierced.firstHit).toBeGreaterThan(0);
       expect(pierced.survived, 'Mk I: the bolt carries on').toBe(true);
-      // NOT the same bite any more: the falloff table (option C) charges the
-      // second body 0.90 of the first.  Stated as the RATIO rather than an
+      // NOT the same bite any more: the falloff rate (option C) charges the
+      // second body (1 - rate) of the first.  Stated as the RATIO rather than an
       // absolute so it tracks the Blaster's damage, not this tuning of it.
       expect(pierced.secondHit / pierced.firstHit,
-        'and the second enemy takes the falloff-stepped bite').toBeCloseTo(0.90, 5);
+        'and the second enemy takes the falloff-stepped bite').toBeCloseTo(falloffAt(1), 5);
 
       watch.assertClean();
     });
@@ -260,13 +264,69 @@ test.describe('penetration module', () => {
   // count-DOWN charge counter, or a bore that spends its whole shot on the
   // entry grain all leave the same shapes on screen.
 
-  test('successive bodies take the falloff curve, and past its end the tail', async ({ page }) => {
+  test('the falloff RATE is a live knob, and 0 means full damage every hit',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+
+      /*  The whole reason the authored table became a rate: it has to be
+       *  sweepable in play.  Two targets, one bolt, read the second bite —
+       *  once at the shipped rate and once with the cycle walked to `off`. */
+      const bite = () => engine(page, e => {
+        const ctx = e.waveContext();
+        const foes: any[] = [];
+        for (let i = 1; i <= 2; i++) {
+          const a = e.waves.spawnAt('RAMMER_1',
+            { x: e.player.position.x + i * 200, y: e.player.position.y }, ctx, false);
+          a.maxSpeed = 0; a.health = a.maxHealth = 1e6;
+          foes.push(a);
+        }
+        const proj: any = {
+          id: 'rate_' + Math.random(), type: 'PROJECTILE',
+          position: { x: e.player.position.x, y: e.player.position.y },
+          velocity: { x: 900, y: 0 }, rotation: 0,
+          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+          damage: 10, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          pierceCount: 1, pierceHits: 0,
+        };
+        const bites: number[] = [];
+        for (const f of foes) {
+          if (!proj.active) break;
+          const before = f.health;
+          e.physics.resolveCollision(proj, f, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
+          bites.push(before - f.health);
+        }
+        foes.forEach(f => { f.active = false; });
+        proj.active = false;
+        return bites;
+      });
+
+      const shipped = await bite();
+      expect(shipped[0], 'contact hit, full').toBeCloseTo(10, 6);
+      expect(shipped[1] / 10, 'penetration hit, decayed at the shipped rate')
+        .toBeCloseTo(falloffAt(1), 6);
+
+      // Walk the cycle to OFF.  Index 1 is 0 by construction (index 0 is the
+      // shipped value, so the first click is always the A/B).
+      await engine(page, e => { e.dbg.cyclePierceFalloff(); });
+      const s2 = await stats(page);
+      expect(s2.pierceFalloffName, 'the readout names the control').toContain('off');
+
+      const off = await bite();
+      expect(off[0], 'contact hit unchanged').toBeCloseTo(10, 6);
+      expect(off[1], 'and the penetration hit lands FULL damage').toBeCloseTo(10, 6);
+
+      watch.assertClean();
+    });
+
+  test('successive bodies take the falloff rate, at every depth', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
 
     // SIX parked, effectively immortal targets on one line and one bolt with
-    // five charges: enough hits to walk off the end of a five-entry table and
-    // land on its tail twice.  Synthesised projectile (the fracture suite's
+    // five charges.  A RATE has no tail to fall off — it just keeps decaying —
+    // so what this pins is that every depth reads (1 - rate)^n rather than
+    // flattening or stopping.  Synthesised projectile (the fracture suite's
     // idiom) so the damage is a round number the ratios can be read off.
     const r = await engine(page, e => {
       const ctx = e.waveContext();
@@ -298,14 +358,15 @@ test.describe('penetration module', () => {
     });
 
     // Five charges buys SIX damage events — the contact plus five
-    // continuations — and the sixth reads the tail, not nothing.
+    // continuations — and every one of them is a real, scaled bite.
     expect(r.bites.length, 'five charges = six damage events').toBe(6);
-    for (let i = 0; i < 5; i++) {
-      expect(r.bites[i] / 10, `hit ${i} takes the table's entry ${i}`)
-        .toBeCloseTo(FALLOFF[i], 6);
+    for (let i = 0; i < 6; i++) {
+      expect(r.bites[i] / 10, `hit ${i} decays to (1 - rate)^${i}`)
+        .toBeCloseTo(falloffAt(i), 6);
     }
-    expect(r.bites[5] / 10, 'past the end of the table, the last entry is the tail')
-      .toBeCloseTo(FALLOFF[FALLOFF.length - 1], 6);
+    // The first contact is ALWAYS full: only penetration hits decay, so a
+    // bolt with no charges is untouched by any of this.
+    expect(r.bites[0], 'the contact hit is never scaled').toBeCloseTo(10, 6);
     expect(r.left, 'and the budget is spent').toBe(0);
 
     watch.assertClean();
@@ -363,7 +424,7 @@ test.describe('penetration module', () => {
     const one = await bore(1);
     expect(one.steps, 'one charge = one extra grain').toBe(2);
     expect(one.dealt, 'each grain stepping down the curve')
-      .toBeCloseTo(4 * (FALLOFF[0] + FALLOFF[1]), 6);
+      .toBeCloseTo(4 * (falloffAt(0) + falloffAt(1)), 6);
     expect(one.left, 'the charge is spent').toBe(0);
     expect(one.alive, 'and out of charges INSIDE the body, the bolt stops there')
       .toBe(false);
@@ -421,10 +482,10 @@ test.describe('penetration module', () => {
     // Each grain took its own step of the curve, so the tile's total is the
     // running sum — not `steps` full-damage hits.
     let expected = 0;
-    for (let i = 0; i < r.steps; i++) expected += 4 * FALLOFF[Math.min(i, FALLOFF.length - 1)];
+    for (let i = 0; i < r.steps; i++) expected += 4 * falloffAt(i);
     expect(r.tileTook).toBeCloseTo(expected, 6);
     // And the thing behind the tile is struck, further down the curve.
-    expect(r.nextBite / 4).toBeCloseTo(FALLOFF[Math.min(r.steps, FALLOFF.length - 1)], 6);
+    expect(r.nextBite / 4).toBeCloseTo(falloffAt(r.steps), 6);
 
     watch.assertClean();
   });
@@ -536,7 +597,7 @@ test.describe('penetration module', () => {
     expect(r.after.alive, 'a returning beam carries on').toBe(true);
     expect(r.after.steps, 'and its second damage event is its second step').toBe(2);
     expect(r.secondBite / 5, 'at the falloff curve\'s next entry')
-      .toBeCloseTo(FALLOFF[1], 6);
+      .toBeCloseTo(falloffAt(1), 6);
     // PIERCE IS A LIFETIME BUDGET: bounces buy COVERAGE, not extra damage
     // events.  Four charges is four continuations however many times the
     // beam turns around.
@@ -554,7 +615,7 @@ test.describe('penetration module', () => {
     // shows a stale string.  Drive the real method and read the real payload.
     const shipped = await stats(page);
     expect(shipped.pierceSpeedRetainName,
-      'shipped at 1.00 — the falloff table is the change; this is the A/B')
+      'shipped at 1.00 — the damage falloff is the change; this is the A/B')
       .toContain('(def)');
 
     /** Walk one bolt through two parked, immortal enemies and report the

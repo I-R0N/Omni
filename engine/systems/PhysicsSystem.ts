@@ -1389,7 +1389,7 @@ export class PhysicsSystem {
           p.x = target.position.x + (lx * cw - ly * sw);
           p.y = target.position.y + (lx * sw + ly * cw);
           stampLocalImpact(target, p);
-          if (!applyBoundaryDamage(target, baseDmg * pierceFalloffAt(ordinal, proj.pierceFalloff))) {
+          if (!applyBoundaryDamage(target, baseDmg * pierceFalloffAt(ordinal, proj.pierceFalloffRate))) {
               // The model went away under us (an empty decomposition).
               // Nothing has been spent yet on the first step, so hand the
               // body back to the ordinary path rather than eating the hit.
@@ -3508,7 +3508,7 @@ export class PhysicsSystem {
           // `explosionDamage` / the chain constants and are NOT scaled
           // here — whether a pierced shot should also carry a weaker
           // blast is an open decision the user has not made.
-          const falloff = pierceFalloffAt(proj.pierceHits ?? 0, proj.pierceFalloff);
+          const falloff = pierceFalloffAt(proj.pierceHits ?? 0, proj.pierceFalloffRate);
           let projDmg = (proj.damage || 1) * falloff;
           // Hoisted: the bore below must respect it too, so a bolt that
           // re-contacts a body it already pierced does not drill it again.

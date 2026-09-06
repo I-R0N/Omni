@@ -278,10 +278,11 @@ export interface WeaponConfig {
   pierce: number; // How many entities the projectile passes through after the first hit
   // Per-hit damage falloff for a PIERCING shot, indexed by hit ordinal
   // (0 = the first contact, so entry 0 is 1 by construction).  Absent →
-  // the shared PIERCE_FALLOFF curve.  Sits beside `pierce` because it is
-  // the same seam: ProjectileSystem.spawn stamps both onto the shot and
-  // nothing downstream of the gun knows a module or a table exists.
-  pierceFalloff?: readonly number[];
+  // the shared falloff RATE.  Sits beside `pierce` because it is the same
+  // seam: per-weapon, stamped onto the projectile at spawn.  Absent → the
+  // live global rate (DBG "Pierce falloff"), which is what every weapon
+  // uses today.
+  pierceFalloffRate?: number;
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
   // commitment; charged shots cost only the charge-time hold.
@@ -470,7 +471,7 @@ export interface GameEntity {
   pierceHits?: number;
   // The falloff table this shot flies with, copied from its WeaponConfig
   // at spawn.  Absent → the shared curve.
-  pierceFalloff?: readonly number[];
+  pierceFalloffRate?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
@@ -1922,6 +1923,7 @@ export interface EngineStats {
   shardCoatName?: string;
   // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
   pierceSpeedRetainName?: string;
+  pierceFalloffName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
