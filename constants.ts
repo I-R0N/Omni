@@ -7418,7 +7418,17 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     // growthPerEat / hpPerEat / the digest time are all SCALED per-eat by the
     // shard's richness (mass/energy conserved — see shardRichness): denser/
     // stronger shards take longer to digest and give more growth + health.
-    consume: { eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14 },
+    // `swallowMaxFrac: 1` — a bubble swallows a shard up to its OWN diameter
+    // and no more (user call: it used to engulf boulders several times its
+    // size in one action).  Anything bigger, tiles included, it BITES: a chip
+    // off through the shared grain-fracture path, which it can then eat.  So
+    // a small bubble works a big rock down instead of inhaling it, and the
+    // mouth grows with the bubble.
+    consume: {
+      eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14,
+      swallowMaxFrac: 1,
+      bite: { damage: 3, interval: 1.2, reach: 8, tiles: true },
+    },
     multiply: { atSize: 50, maxPopulation: 14 },
     ambient: true, thirdParty: true,
   },

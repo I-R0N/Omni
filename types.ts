@@ -228,6 +228,22 @@ export interface ConsumeConfig {
   pull?: number;          // optional inward tug (accel) on mobile candidates in
                           // sense range — the suck-in before the swallow.  Tiles
                           // (static) are never pulled.
+  // MOUTH SIZE.  Largest body this consumer can SWALLOW WHOLE, as a fraction
+  // of its OWN diameter.  Absent = no limit (a consumer that engulfs anything
+  // it touches, which is what every consumer did before this field existed).
+  swallowMaxFrac?: number;
+  // Food too big for that mouth is BITTEN instead of ignored: a chip is taken
+  // off it through the SAME grain-fracture path a weapon hit uses
+  // (GameEngine.chipStructureAt), and the freed grain is a small body the
+  // consumer can then eat normally.  So a boulder still feeds it — one
+  // mouthful at a time.  Absent = too-big food is simply left alone.
+  //   damage   — per bite; small, because this is a feeding mechanism and
+  //              NOT a weapon.
+  //   interval — seconds between bites (the consumer's own cadence).
+  //   reach    — units of slack past membrane contact that count as biting.
+  //   tiles    — also gnaw STATIC tiles, which are never swallowable and so
+  //              are otherwise invisible to a shard-eater.
+  bite?: { damage: number; interval: number; reach: number; tiles: boolean };
 }
 
 // Brood-spawner config (Stage 4 Nest; reused by (h) boss phases).  Births
@@ -664,6 +680,11 @@ export interface GameEntity {
   // refreshed by `stampBubbleAggro` at every site that stamps a target;
   // ticked in `updateBubbles`; cleared by `calmBubble`.  Undefined = calm.
   bubbleAggroTimer?: number;
+  // Feeding-bite cadence (ConsumeConfig.bite): SIM seconds until this consumer
+  // may take its next chip out of a body too big to swallow.  Ticked in
+  // `updateBubbles` with the other bubble timers — NOT in `updateConsumers`,
+  // which is PerfController-gated and would make the cadence sag under load.
+  bubbleBiteTimer?: number;
   // Firing entity id stamped on a projectile (ProjectileSystem.spawn) so a
   // third-party victim can blame the exact shooter.  'player' for player shots,
   // the enemy's id for enemy shots.

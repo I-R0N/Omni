@@ -65,10 +65,11 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           terrain / shake / knockback / deflect /
                           flashlight / nebulaspin / roll / shipsprites /
                           shardblend, fracture, bubbles (the Phase-A
-                          aggro timeout + the immovability fix),
+                          aggro timeout + the immovability fix, and
+                          the mouth-size / bite eating rules),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  337 tests.  All run at
+                          anti-flake rules).  342 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1119,7 +1120,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`AISystem.updateBubble`) rides the asteroid flow field
   (`flowField.sampleShardFlow`), peeling OFF the flow to chase + eat the
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
-  via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
+  via `GameEngine.updateConsumers`).  IT HAS A MOUTH SIZE (user call): a body
+  is SWALLOWED only while its own diameter is within `consume.swallowMaxFrac`
+  of the BUBBLE'S — it used to engulf whatever its membrane touched, so a
+  15-unit blob absorbed a 160-unit boulder in one action.  Anything bigger it
+  BITES instead (`consume.bite`): one chip off it per `bite.interval`, through
+  `GameEngine.chipStructureAt` — the SAME grain-fracture path a weapon hit
+  uses (stamp the contact, spend the damage on the boundaries nearest it,
+  harvest what that freed), so the cracks a body shows, the piece it sheds and
+  the HP it has left stay ONE model however the damage arrived.  The freed
+  grain is then ordinary mouth-sized food, so a big rock still feeds the
+  bubble — one mouthful at a time — and the mouth grows with the bubble.
+  `bite.tiles` extends it to STATIC tiles, which are never swallowable and are
+  absent from the shard index entirely, so before this a bubble could not
+  interact with terrain at all.  A body with no grain model — indestructible,
+  nebula, or any variant under the DBG legacy fracture mode — is REFUSED by
+  `chipStructureAt` having done nothing (deliberately no fallback: it is the
+  chip path, not a general damage entry point), and the tile walk arms the
+  cadence anyway so a bubble parked on unbreakable terrain cannot re-walk the
+  static grid every tick.  Eating is MASS/ENERGY CONSERVED
   (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
   scaled by size) take proportionally LONGER to digest
   (`DIGEST_DURATION × richness`) and give more growth + maxHealth + heal
@@ -2599,7 +2618,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   This mirrors the LATCH (a held target processed over a timer); the bubble just
   can't engulf the too-big player/enemy, so that path clings to the hull
   (squash-cling render + EMP-arc crackle on the player) and drains instead.
-  Tiles (the future dragon) are eaten instantly (`consumeTile`).  The entity-COUNT
+  Tiles (the future dragon) are eaten instantly (`consumeTile`).  Food too big
+  for the consumer's `swallowMaxFrac` mouth is neither pulled nor swallowed:
+  it is BITTEN (`consume.bite` → `GameEngine.chipStructureAt`), the reusable
+  seam for "damage a structure at a point through the grain model" and the
+  ONE place a non-weapon source may drive the chip path.  The entity-COUNT
   cap for self-replication is a live-subtype census at the child-spawn site
   (`updateBubbles` for the bubble, `updateNests` for nest brood — both
   pattern-match `enforceTypeCap`).

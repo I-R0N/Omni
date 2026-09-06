@@ -27,6 +27,7 @@ import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, ConsumeConfig, GameState } from '../../types';
 import {
     BUBBLE_CONSTANTS, ENEMY_VARIANTS, AI_CONFIG, NEBULA_CONSTANTS, calmBubble,
+    isProgressiveFracture,
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import type { WaveSpawnContext } from '../systems/WaveSystem';
@@ -58,6 +59,10 @@ export function updateBubbles(g: GameEngine, dt: number) {
         const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
         if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
         if (e.bubbleSickTimer) e.bubbleSickTimer = Math.max(0, e.bubbleSickTimer - dt);
+        // Feeding-bite cadence.  Ticked HERE rather than in updateConsumers
+        // because that pass is PerfController-gated ('consume'), so ticking it
+        // there would make a bubble gnaw more slowly the busier the field got.
+        if (e.bubbleBiteTimer) e.bubbleBiteTimer = Math.max(0, e.bubbleBiteTimer - dt);
         const sick = (e.bubbleSickTimer ?? 0) > 0;
 
         // ── A1: the non-aggression timeout — a hunter left alone LOSES INTEREST.
@@ -342,6 +347,20 @@ export function updateConsumers(g: GameEngine, dt: number) {
             || consumer.provoked || (consumer.bubbleSickTimer ?? 0) > 0) continue;
         const rangeSq = cfg.range * cfg.range;
         const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
+        // MOUTH SIZE (user call).  A bubble used to engulf anything its
+        // membrane touched, so a 15-unit blob swallowed a 160-unit boulder in
+        // one action.  A body is swallowable only up to `swallowMaxFrac` of
+        // the consumer's OWN diameter; past that it is BITTEN (below), which
+        // chips a grain off through the shared fracture path and leaves a
+        // mouth-sized piece behind.  Absent config = the old no-limit mouth.
+        const mouth = cfg.swallowMaxFrac === undefined
+            ? Infinity
+            : Math.max(consumer.size.x, consumer.size.y) * cfg.swallowMaxFrac;
+        // One bite per cadence, and the STATIC query below only runs on a
+        // frame the consumer could actually bite — so a field of bubbles
+        // costs one spatial walk each per BITE_INTERVAL, not per step.
+        const canBite = cfg.bite !== undefined && (consumer.bubbleBiteTimer ?? 0) <= 0;
+        let bit = false;
         for (let k = 0; k < shards.length; k++) {
             const cand = shards[k];
             if (!cand.active || cand.isExploding) continue;
@@ -354,15 +373,19 @@ export function updateConsumers(g: GameEngine, dt: number) {
             if (d2 > rangeSq) continue;
             const candR = Math.max(cand.size.x, cand.size.y) * 0.5;
             const contact = consumerR + candR;
+            const fits = Math.max(cand.size.x, cand.size.y) <= mouth;
             if (d2 <= contact * contact) {
                 // SWALLOW on membrane contact.  Mobile shards are engulfed and
                 // DIGESTED over time (held inside the bubble); static tiles
                 // (the future dragon) are eaten instantly.
                 if (isTile) consumeTile(g, consumer, cand, cfg, dx, dy);
-                else { beginDigest(g, consumer, cand, dx, dy); break; }
-            } else if (!isTile && cfg.pull) {
+                else if (fits) { beginDigest(g, consumer, cand, dx, dy); break; }
+                else if (canBite && !bit) { bit = biteBody(g, consumer, cand, cfg.bite!); if (bit) break; }
+            } else if (!isTile && cfg.pull && fits) {
                 // Suck-in: tug the mobile shard toward the membrane, stronger
                 // the closer it is (so a near shard accelerates into the mouth).
+                // Only what it can actually SWALLOW — dragging a boulder it can
+                // only nibble at would read as trying to eat it.
                 const d = Math.sqrt(d2) || 1;
                 const prox = 1 - d / cfg.range;          // 0 at the rim → 1 at contact
                 const a = cfg.pull * (0.3 + 0.7 * prox) * dt;
@@ -370,7 +393,80 @@ export function updateConsumers(g: GameEngine, dt: number) {
                 cand.velocity.y -= (dy / d) * a;
             }
         }
+
+        // ── Gnaw a STATIC tile ──────────────────────────────────────────
+        // Tiles are never swallowable and never appear in the shard index
+        // (EntityIndex keeps mobile bodies only), so a shard-eater cannot see
+        // them at all.  A biter can: same chip, taken off the tile in place.
+        if (canBite && !bit && cfg.bite!.tiles) biteNearbyTile(g, consumer, consumerR, cfg.bite!);
     }
+}
+
+/** Take one chip out of a body too big to swallow, through the engine's
+ *  shared grain-fracture seam.  The contact point is put ON the target's
+ *  surface along the line from the consumer, so the chip comes off the side
+ *  actually being bitten rather than somewhere arbitrary.
+ *
+ *  Returns false — and burns no cadence — when the body cannot be chipped at
+ *  all (indestructible, nebula, or the DBG legacy fracture mode), so a bubble
+ *  parked against an unbreakable wall is not stuck pretending to eat it. */
+function biteBody(
+    g: GameEngine, consumer: GameEntity, target: GameEntity,
+    bite: { damage: number; interval: number; reach: number; tiles: boolean },
+): boolean {
+    const dx = wrapDeltaX(consumer.position.x, target.position.x); // consumer→target
+    const dy = wrapDeltaY(consumer.position.y, target.position.y);
+    const d = Math.hypot(dx, dy) || 1;
+    const surface = Math.max(target.size.x, target.size.y) * 0.5;
+    const at = {
+        x: target.position.x - (dx / d) * surface,
+        y: target.position.y - (dy / d) * surface,
+    };
+    wrapPosition(at);
+    if (!g.chipStructureAt(target, at, bite.damage, consumer.position)) return false;
+    consumer.bubbleBiteTimer = bite.interval;
+    consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE; // the membrane works at it
+    g.spawnParticles(at, 4, target.color || '#a8a29e', {
+        speedMin: 1.5, speedMax: 4, sizeMin: 0.8, sizeMax: 1.8,
+        lifetimeMin: 0.12, lifetimeMax: 0.3,
+    });
+    return true;
+}
+
+/** Find the nearest static tile in biting contact and take a chip out of it.
+ *  Uses the same reusable-buffer static walk the dragon's tile-devour uses,
+ *  and only ever runs on a frame the consumer's bite cadence is ready. */
+function biteNearbyTile(
+    g: GameEngine, consumer: GameEntity, consumerR: number,
+    bite: { damage: number; interval: number; reach: number; tiles: boolean },
+): void {
+    const buf = g._bubbleBiteBuf;
+    buf.length = 0;
+    const reach = consumerR + bite.reach;
+    g.physics.forEachStaticNear(consumer.position.x, consumer.position.y, reach + 80, (t) => buf.push(t));
+    let best: GameEntity | null = null;
+    let bestD2 = Infinity;
+    for (let i = 0; i < buf.length; i++) {
+        const t = buf[i];
+        if (!t.active || t.isExploding) continue;
+        // Skip what cannot be chipped at all (indestructible, nebula, or any
+        // variant under the DBG legacy fracture mode) rather than discovering
+        // it inside `chipStructureAt`: an unbiteable neighbour would otherwise
+        // never burn the cadence, and this walk would re-run every tick for as
+        // long as the bubble sat beside it.
+        if (t.shardVariant === undefined || !isProgressiveFracture(t.shardVariant)) continue;
+        const dx = wrapDeltaX(consumer.position.x, t.position.x);
+        const dy = wrapDeltaY(consumer.position.y, t.position.y);
+        const d2 = dx * dx + dy * dy;
+        const contact = reach + Math.max(t.size.x, t.size.y) * 0.5;
+        if (d2 > contact * contact || d2 >= bestD2) continue;
+        bestD2 = d2; best = t;
+    }
+    buf.length = 0;
+    // Found nothing worth biting: still arm the cadence, so this spatial walk
+    // costs one visit per interval per bubble and not one per consume tick.
+    if (best === null) consumer.bubbleBiteTimer = bite.interval;
+    else biteBody(g, consumer, best, bite);
 }
 
 /** Grow a consumer by one eat (size + heal + optional mass), scaled by `scale`

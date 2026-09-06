@@ -371,3 +371,270 @@ test.describe('A2 — a bubble is a body, not a wall', () => {
     watch.assertClean();
   });
 });
+
+// ── Eating ────────────────────────────────────────────────────────────────
+//
+// Three claims, deliberately split so none of them has to WAIT for a long
+// accumulation.  A first draft parked a bubble on a boulder and waited for a
+// whole grain to come off; that takes ~7 sim-seconds on a quiet machine and
+// ~38 in a full-suite run, which is a flake with extra steps.  The pieces:
+//
+//   1. the MOUTH GATE — too big is not swallowed, what fits still is;
+//   2. the BITE — a parked bubble actually spends damage on a too-big body's
+//      grain boundaries (one bite is enough to see, ~1s);
+//   3. the CHIP — that damage, driven to completion through the engine's own
+//      seam, frees a grain and leaves the parent standing.
+//
+// Whether enough bites eventually complete a boundary is `progressFracture`'s
+// behaviour, and `fracture.spec.ts` pins that at length already.
+
+/** Park a bubble in contact with a body and hold it there while the world
+ *  runs, reporting what the feeding pass did to both.
+ *
+ *  The bubble is re-pinned every frame because the point is what happens IN
+ *  CONTACT, and an ambient bubble drifts — a lapse reads as "it declined to
+ *  eat", which is the thing under test.  The pin sits WELL INSIDE contact
+ *  rather than just touching it: the sim runs several substeps per animation
+ *  frame, so a 2-unit margin (this had one) lapses between pins under load. */
+function feed(page: any, opts: { pick: 'biggest-shard' | 'tile'; watchSec: number }) {
+  return engine(page, async (e: any, o: any) => {
+    const area = (pts: any[]) => {
+      if (!pts || pts.length < 3) return 0;
+      let a = 0;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+      }
+      return Math.abs(a) * 0.5;
+    };
+    const absorbed = (t: any) => {
+      const f = t.fractureEdgeFill;
+      if (!f) return 0;
+      let sum = 0;
+      for (let i = 0; i < f.length; i++) sum += f[i];
+      return sum;
+    };
+    const p = e.player;
+    p.position.x = 100; p.position.y = 100; p.velocity.x = 0; p.velocity.y = 0;
+
+    let target: any = null;
+    if (o.pick === 'tile') {
+      for (const t of e.currentMap.entities) {
+        if (t.active && t.mass === Infinity && t.shardVariant) { target = t; break; }
+      }
+    } else {
+      const shards = e.currentMap.entities.filter((x: any) => x.active && x.type === 'STRUCTURE'
+        && x.mass !== Infinity && x.polygonPoints);
+      shards.sort((a: any, c: any) => Math.max(c.size.x, c.size.y) - Math.max(a.size.x, a.size.y));
+      target = shards[0] ?? null;
+    }
+    if (!target) return { built: false };
+
+    const b = e.waves.spawnAt('BUBBLE', { x: target.position.x, y: target.position.y }, e.waveContext(), false);
+    const bubD = Math.max(b.size.x, b.size.y);
+    const targD = Math.max(target.size.x, target.size.y);
+    const standoff = targD * 0.5;                   // deep contact, +x face
+    const area0 = area(target.polygonPoints);
+
+    const t0 = e.runTimeSec;
+    let bitten = false, armed = false;
+    while (e.runTimeSec - t0 < o.watchSec) {
+      b.position.x = target.position.x + standoff; b.position.y = target.position.y;
+      b.velocity.x = 0; b.velocity.y = 0;
+      if (target.mass !== Infinity) { target.velocity.x = 0; target.velocity.y = 0; }
+      if (!target.active) break;                      // eaten or broken outright
+      if ((b.bubbleBiteTimer ?? 0) > 0) armed = true;
+      // Damage ABSORBED ON THE GRAIN BOUNDARIES is the honest read that a bite
+      // landed.  Raw `health` is not: the boundary model converts authored HP
+      // to the derived total on the FIRST damage, so a bitten body's health
+      // JUMPS (measured 12 -> 183 on a rock shard) before it ever falls.
+      if (absorbed(target) > 0) { bitten = true; break; }
+      await new Promise(r => requestAnimationFrame(() => r(null)));
+    }
+    return {
+      built: true, bubD, targD, variant: target.shardVariant,
+      targetGone: !target.active, bitten, armed,
+      absorbed: absorbed(target), area0, areaNow: area(target.polygonPoints),
+      digesting: (b.bubbleDigestTimer ?? 0) > 0,
+      elapsed: e.runTimeSec - t0,
+    };
+  }, opts);
+}
+
+test.describe('a bubble eats what fits and bites what does not', () => {
+  test('a shard bigger than the bubble is NOT swallowed whole — it is bitten', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
+    await quietScene(page);
+
+    const r: any = await feed(page, { pick: 'biggest-shard', watchSec: 30 });
+
+    expect(r.built).toBe(true);
+    // The premise: this really is food several times the bubble's own size —
+    // a ~15-unit bubble against a ~160-unit boulder, the reported case.
+    expect(r.targD, 'the target dwarfs the bubble').toBeGreaterThan(r.bubD * 2);
+    // THE ASK.  It used to vanish in one action.
+    expect(r.targetGone, 'a body that big is not engulfed').toBe(false);
+    expect(r.digesting, 'and the bubble is not holding it as a meal').toBe(false);
+    // Not ignored either: it is being worked on, through the grain model.
+    expect(r.bitten, 'the bubble bites what it cannot swallow').toBe(true);
+    expect(r.armed, 'on its own cadence').toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('a static TILE is gnawed — the one food a shard-eater could never see', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'GLASS_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+    await quietScene(page);
+
+    // Tiles are static, never swallowable, and absent from the shard index
+    // entirely (EntityIndex keeps mobile bodies only) — so before the bite a
+    // bubble could not interact with one at all.
+    const r: any = await feed(page, { pick: 'tile', watchSec: 30 });
+
+    expect(r.built).toBe(true);
+    expect(r.variant).toBe('glass-tile');
+    expect(r.bitten, 'a bubble can gnaw terrain it cannot swallow').toBe(true);
+    expect(r.targetGone, 'and a bite does not delete the tile').toBe(false);
+
+    watch.assertClean();
+  });
+
+  test('a shard that fits is still swallowed and digested', async ({ page }) => {
+    const watch = await boot(page);
+    await emptyArena(page);
+
+    // The control for the two above: the mouth gate must not have stopped a
+    // bubble eating normally.  Built to order at half the bubble's diameter,
+    // since `emptyArena` has just cleared the map.
+    const r: any = await engine(page, async (e: any) => {
+      const p = e.player;
+      p.position.x = 100; p.position.y = 100; p.velocity.x = 0; p.velocity.y = 0;
+      const b = e.waves.spawnAt('BUBBLE', { x: 4200, y: 4200 }, e.waveContext(), false);
+      b.velocity.x = 0; b.velocity.y = 0;
+      const bubD = Math.max(b.size.x, b.size.y);
+      const small: any = {
+        id: 'eat_small', type: 'STRUCTURE', shardVariant: 'rock-shard',
+        position: { x: b.position.x + 8, y: b.position.y }, velocity: { x: 0, y: 0 },
+        rotation: 0, size: { x: bubD * 0.5, y: bubD * 0.5 }, mass: 4,
+        active: true, color: '#888', health: 5, maxHealth: 5,
+      };
+      e.currentMap.entities.push(small);
+      const t0 = e.runTimeSec;
+      while (e.runTimeSec - t0 < 10) {
+        b.position.x = 4200; b.position.y = 4200; b.velocity.x = 0; b.velocity.y = 0;
+        if (!small.active) return { swallowed: true, digesting: (b.bubbleDigestTimer ?? 0) > 0 };
+        await new Promise(r => requestAnimationFrame(() => r(null)));
+      }
+      return { swallowed: false, digesting: false };
+    });
+
+    expect(r.swallowed, 'food inside the mouth size is still eaten whole').toBe(true);
+    expect(r.digesting, 'and held as a meal, not deleted').toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('the bite is the REAL chip path: a grain leaves, the parent stands', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
+    await quietScene(page);
+
+    // Drive `chipStructureAt` — the seam the bubble's bite calls — directly,
+    // rather than waiting for a bubble to nibble a boundary to completion
+    // (harness rule 6: drive the mechanism).  What is asserted is that this
+    // really is the fracture path: the parent's OUTLINE loses a grain, which
+    // is `progressFracture` splicing the remainder, and nothing else on the
+    // map can produce that.
+    const r: any = await engine(page, e => {
+      const area = (pts: any[]) => {
+        if (!pts || pts.length < 3) return 0;
+        let a = 0;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+        }
+        return Math.abs(a) * 0.5;
+      };
+      const shards = (e.currentMap.entities as any[]).filter(x => x.active && x.type === 'STRUCTURE'
+        && x.mass !== Infinity && x.polygonPoints && x.shardVariant === 'rock-shard');
+      shards.sort((a: any, c: any) => Math.max(c.size.x, c.size.y) - Math.max(a.size.x, a.size.y));
+      const t = shards[0];
+      if (!t) return { built: false };
+      const r0 = Math.max(t.size.x, t.size.y) * 0.5;
+      const at = { x: t.position.x + r0, y: t.position.y };   // on its +x face
+      const from = { x: t.position.x + r0 * 2, y: t.position.y };
+      const area0 = area(t.polygonPoints);
+      // Bite it repeatedly at ONE point until a grain frees — the same call
+      // the bubble makes, just without waiting out its feeding cadence.
+      let took = 0, chipped = false;
+      for (let i = 0; i < 400 && t.active; i++) {
+        took++;
+        if (!e.chipStructureAt(t, at, 3, from)) return { built: true, refused: true };
+        if (area(t.polygonPoints) < area0 - 1) { chipped = true; break; }
+      }
+      return {
+        built: true, refused: false, chipped, took, area0,
+        areaNow: area(t.polygonPoints), alive: t.active,
+      };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.refused, 'a rock shard runs the grain model').toBe(false);
+    expect(r.chipped, 'the bite frees a grain off the body').toBe(true);
+    // A CHIP, not a bisection: one grain is a small fraction of its parent.
+    expect(r.areaNow, 'and most of the body is still there').toBeGreaterThan(r.area0 * 0.5);
+    expect(r.alive, 'grazing, not a kill').toBe(true);
+
+    watch.assertClean();
+  });
+
+  test('an indestructible tile is immune, and does not spin the bite', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'INDESTRUCTIBLE_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'INDESTRUCTIBLE_FIELD', 'the indestructible field');
+    await quietScene(page);
+
+    const r: any = await engine(page, async (e: any) => {
+      const p = e.player;
+      p.position.x = 100; p.position.y = 100; p.velocity.x = 0; p.velocity.y = 0;
+      let tile: any = null;
+      for (const t of e.currentMap.entities) {
+        if (t.active && t.mass === Infinity && t.shardVariant) { tile = t; break; }
+      }
+      if (!tile) return { built: false };
+      // The seam itself refuses a body with no grain model, having done
+      // nothing — no fallback HP plink.
+      const r0 = Math.max(tile.size.x, tile.size.y) * 0.5;
+      const refused = e.chipStructureAt(tile, { x: tile.position.x + r0, y: tile.position.y }, 999) === false;
+
+      const b = e.waves.spawnAt('BUBBLE', { x: tile.position.x, y: tile.position.y }, e.waveContext(), false);
+      const standoff = r0;
+      const h0 = tile.health;
+      const t0 = e.runTimeSec;
+      let armed = false; // did the cadence ever get armed (the walk guard)?
+      while (e.runTimeSec - t0 < 12) {
+        b.position.x = tile.position.x + standoff; b.position.y = tile.position.y;
+        b.velocity.x = 0; b.velocity.y = 0;
+        if ((b.bubbleBiteTimer ?? 0) > 0) armed = true;
+        await new Promise(r => requestAnimationFrame(() => r(null)));
+      }
+      return { built: true, variant: tile.shardVariant, refused, h0, hNow: tile.health,
+        alive: tile.active, armed };
+    });
+
+    expect(r.built).toBe(true);
+    expect(r.variant).toBe('indestructible-tile');
+    expect(r.refused, 'the chip seam refuses a body with no grain model').toBe(true);
+    expect(r.hNow, 'an unbreakable tile takes no damage from a bite').toBe(r.h0);
+    expect(r.alive).toBe(true);
+    // The guard that stops the static walk re-running every tick: the cadence
+    // is armed even when the walk finds nothing worth biting.  Without it a
+    // bubble parked on unbreakable terrain re-walks the grid every pass.
+    expect(r.armed, 'a fruitless look still costs the cadence').toBe(true);
+
+    watch.assertClean();
+  });
+});

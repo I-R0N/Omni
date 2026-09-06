@@ -538,6 +538,7 @@ export class GameEngine {
   // behaviour lives in engine/roamers/dragons.ts.
   dragons: DragonInstance[] = [];
   _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
+  _bubbleBiteBuf: GameEntity[] = []; // reused tile-gnaw scratch (same rule)
   dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
   // Stage 7 player-like roamers; behaviour lives in engine/roamers/rivals.ts.
   rivals: RivalInstance[] = [];
@@ -5180,6 +5181,53 @@ export class GameEngine {
    * puff; true means the hit was handled, including the quiet ticks
    * where boundaries merely highlighted further.
    */
+  /**
+   * Chip a grain off a structure at a world contact point — the SAME
+   * mechanism a weapon hit uses, exposed so a NON-weapon source can drive it.
+   *
+   * Three steps, in the order the projectile path runs them: stamp the real
+   * contact in entity-local coords, spend the damage on the grain boundaries
+   * nearest it, then harvest whatever that freed.  Going through
+   * `applyBoundaryDamage` + `progressFracture` rather than a bespoke chip is
+   * the whole point — the cracks a body shows, the piece it sheds and the HP
+   * it has left all stay one model, however the damage arrived.
+   *
+   * Today's caller is the BUBBLE's feeding bite: food too big to swallow gets
+   * chipped down to mouth-sized pieces instead of being absorbed whole.
+   *
+   * Returns false HAVING DONE NOTHING for a body that is not running the grain
+   * model — an indestructible or nebula tile, or any variant under the DBG
+   * legacy fracture mode (`bondStrengthFor` gates on `isProgressiveFracture`,
+   * so that one check covers all of it).  Deliberately no fallback: this is
+   * the chip path, not a general damage entry point, and a caller that cannot
+   * chip a body must not be able to plink its HP instead.
+   */
+  chipStructureAt(target: GameEntity, worldPos: Vector2, damage: number, from?: Vector2): boolean {
+      if (!this.currentMap) return false;
+      if (!target.active || target.isExploding || (target.health ?? 0) <= 0) return false;
+      stampLocalImpact(target, worldPos);
+      if (!applyBoundaryDamage(target, damage)) return false;
+      markDamaged(target, 0.12);
+      // A shatter reads its direction off the last impact, so point the
+      // fragments AWAY from whatever bit it rather than leaving them the
+      // stale velocity of some earlier hit.
+      if (from !== undefined) {
+          const ax = wrapDeltaX(from.x, target.position.x);
+          const ay = wrapDeltaY(from.y, target.position.y);
+          const m = Math.hypot(ax, ay) || 1;
+          target.lastImpactVelocity = { x: (ax / m) * 6, y: (ay / m) * 6 };
+      }
+      if (target.health > 0) {
+          this.progressFracture(target, worldPos);
+      } else {
+          // The last boundary went: end the body through the NORMAL death
+          // path so it shatters, drops and sounds like any other break.
+          target.lastImpactDamage = 1;
+          this.handleEntityDeath(target);
+      }
+      return true;
+  }
+
   private progressFracture(target: GameEntity, impactWorldPos?: Vector2): boolean {
       if (!this.currentMap) return true;
       if (!target.active || (target.health ?? 0) <= 0) return true;
