@@ -493,6 +493,10 @@ export interface GameEntity {
   //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
   damageMult?: number;
   cooldownMult?: number;
+  //  - pierceBonus: extra projectile penetrations from Penetration modules
+  //    (A3), added to the weapon's own `pierce` in WeaponSystem and clamped
+  //    to MAX_PIERCE; default 0.
+  pierceBonus?: number;
   shieldRechargeRate?: number;
   // Unlock + loadout gating (player only; set by GameEngine
   // .syncUnlocksToPlayer):
@@ -1634,6 +1638,16 @@ export interface EngineStats {
      *  must touch) and for shield plating with no shield core.  A contributor
      *  with no `area`/`idx` is a DERIVED row with no hex behind it (today:
      *  the weapon-weight drag factor), so it highlights nothing. */
+    /** Hex UNLOCK state (A5).  A hex at index >= `shipUnlocked` /
+     *  `weaponUnlocked` is LOCKED: it renders inert and refuses drops.  Both
+     *  equal `maxSlots` on a shipped run, so nothing is locked by default.
+     *  The `*SlotOffer` pair is the next hex a station would sell for that
+     *  group — absent once the flower is full. */
+    shipUnlocked: number;
+    weaponUnlocked: number;
+    maxSlots: number;
+    shipSlotOffer?: { cost: number; available: boolean; affordable: boolean };
+    weaponSlotOffer?: { cost: number; available: boolean; affordable: boolean };
     statLines: {
       id: string;
       label: string;

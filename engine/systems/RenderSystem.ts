@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, scannerShowsMaterials, scannerShowsPortalsMapWide, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -91,6 +91,20 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  state, deliberately — the canvas layer must not start measuring React's
    *  layout, but "is a capstone alive" is something the sim already knows. */
   public bossBarActive: boolean = false;
+  /** SCANNER tier (A4) — 0..3, pushed once per frame by `GameEngine.draw`
+   *  from the module fold.  The two contact readouts read it through the
+   *  pure `scanner*` predicates in constants.ts, so "no scanner" is
+   *  structurally today's behaviour: every one of them is `mk >= n`. */
+  public scannerMk: number = 0;
+  /** Does the minimap draw a dot per mobile shard this frame?  TWO callers
+   *  have to agree — the per-entity buffer fill here and the draw in
+   *  `render/hud.ts` — and they used to agree by both calling
+   *  `getActiveMinimapMaterial()`.  A Scanner Mk I forces the layer on top of
+   *  whatever that cycle says, so the OR lives in one place rather than in
+   *  both. */
+  public get minimapShardDots(): boolean {
+    return getActiveMinimapMaterial() === 'dots' || scannerShowsMaterials(this.scannerMk);
+  }
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -894,7 +908,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
     // Whether the minimap wants per-shard dots this frame (G5).  Hoisted out
     // of the loop: it is one lookup for the whole pass, not one per entity.
-    const minimapDots = getActiveMinimapMaterial() === 'dots';
+    const minimapDots = this.minimapShardDots;
 
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
@@ -996,7 +1010,12 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // rather than navigation.  Gate the INDICATOR only — the portal
             // keeps its minimap dot at every distance (the pushes below are
             // deliberately left alone).
+            // A Scanner Mk III lifts the range gate entirely (A4) — the two
+            // OTHER portal-arrow rules are untouched: an on-screen rift still
+            // suppresses its arrow, and the arrow still carries a name and no
+            // distance.  With no scanner this is the shipped expression.
             const farPortal = entity.isPortal === true
+                && !scannerShowsPortalsMapWide(this.scannerMk)
                 && distSq > PORTAL_CONSTANTS.INDICATOR_RANGE * PORTAL_CONSTANTS.INDICATOR_RANGE;
             if (!farPortal) this._indicatorBuffer.push({ entity, distSq, onScreen });
         }

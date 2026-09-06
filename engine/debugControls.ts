@@ -34,7 +34,7 @@ import {
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
+    MODULE_SLOT_UNLOCK, cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
     cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
     cycleDamageSpread,
@@ -360,6 +360,31 @@ export class DebugControls {
    *  honest control for that is showing neither. */
   cycleMinimapMaterial() {
     cycleMinimapMaterial();
+  }
+
+  /** DBG (Modules): lock hexes off both flowers so the A5 purchase can
+   *  actually be flown.  `MODULE_SLOT_UNLOCK.START` ships at the cap — the
+   *  count is the seam for the ship catalog, not a balance number to set
+   *  here — so without this row the locked state and the shop's "+1 Hex
+   *  Slot" entry are unreachable in play.  Steps 7 -> 5 -> 4 -> 3 -> 7;
+   *  modules sitting in a hex that is about to lock go back to the
+   *  INVENTORY, and are SCRAPPED if the hold is full (DBG only). */
+  cycleSlotLock() {
+    const g = this.g;
+    const steps = [MODULE_SLOT_UNLOCK.MAX, 5, 4, 3];
+    const next = steps[(steps.indexOf(g.shipSlotsUnlocked) + 1 + steps.length) % steps.length];
+    for (const area of ['ship', 'weapon'] as const) {
+      const slots = area === 'ship' ? g.shipSlots : g.weaponSlots;
+      for (let i = next; i < slots.length; i++) {
+        if (slots[i] === null) continue;
+        const free = g.inventory.indexOf(null);
+        if (free !== -1) g.inventory[free] = slots[i];
+        slots[i] = null;
+      }
+    }
+    g.shipSlotsUnlocked = next;
+    g.weaponSlotsUnlocked = next;
+    g.syncOutfitAfterDebugSlotLock();
   }
 
   /** DBG (Visual): cycle the ROCK palette — mixed (default) / slate / rust /

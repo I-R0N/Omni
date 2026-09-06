@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -378,6 +378,15 @@ export class GameEngine {
   inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
   activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
   activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+  /** How many hexes of each flower are UNLOCKED (A5).  A locked hex holds
+   *  nothing and accepts nothing, so the adjacency fixpoint never sees it and
+   *  `HEX_ADJACENCY` is untouched — the whole feature is one destination
+   *  guard in `moveModuleInternal` plus a skip in `firstFreeSlotFor`.
+   *  RUN-scoped: reset by `resetOutfit`, carried across a portal like the
+   *  outfit it belongs to.  Both start at the cap today (MODULE_SLOT_UNLOCK
+   *  .START), so nothing is locked unless something lowers them. */
+  shipSlotsUnlocked: number = MODULE_SLOT_UNLOCK.START;
+  weaponSlotsUnlocked: number = MODULE_SLOT_UNLOCK.START;
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -842,6 +851,13 @@ export class GameEngine {
    *  Run-scoped like the outfit it derives from. */
   public flashlightEquipped: boolean = false;
   public flashlightLevel: number = 0;
+
+  /** SCANNER tier (A4): the highest MARK of any installed-and-ACTIVE Scanner
+   *  module, 0 = none.  Folded by `applyModuleEffects` (marks do not stack —
+   *  the best one aboard wins) and pushed to the renderer once per frame in
+   *  `draw`, exactly the way the Light's cone override travels.  Every reveal
+   *  gate is `mk >= n`, so 0 is today's behaviour to the pixel. */
+  public scannerMk: number = 0;
 
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B.
    *  The one debug row that stayed a method on the engine: the 5b trait
@@ -4306,24 +4322,31 @@ export class GameEngine {
    *  satisfies every adjacency requirement, plus the remaining guns in
    *  the inventory. */
   public debugOutfitAll() {
+      // Writes the flowers DIRECTLY, so it has to own every hex it fills.
+      this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.MAX;
+      this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.MAX;
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
       this.inventory.fill(null);
       // Ship flower: hull core center; shield at 1 (touches hull);
       // capacitor at 6 (touches shield); plating 2, engine 3, thrusters 4
-      // (touches engine).  Slot 5 left free.
+      // (touches engine); scanner at 5.
       this.shipSlots[0] = 'hull_mk3';
       this.shipSlots[1] = 'shield';
       this.shipSlots[6] = 'capacitor_mk3';
       this.shipSlots[2] = 'plating_mk3';
       this.shipSlots[3] = 'engine_mk3';
       this.shipSlots[4] = 'thrusters_mk3';
-      // Weapon flower: two guns + the three mods around the center gun.
+      this.shipSlots[5] = 'scanner_mk3';       // A4 — touches the hull core
+
+      // Weapon flower: two guns + the four mods around the center gun.
       this.weaponSlots[0] = 'wpn_blaster';
       this.weaponSlots[1] = 'wpn_cannon';
       this.weaponSlots[2] = 'gunnery_mk3';
       this.weaponSlots[3] = 'autoloader_mk3';
       this.weaponSlots[4] = 'overcharge';
+      this.weaponSlots[5] = 'piercing_mk3';    // A3 — touches the centre gun
+
       const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
       syncLoadoutFromSlots(this);
@@ -4337,6 +4360,8 @@ export class GameEngine {
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
       this.inventory.fill(null);
+      this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+      this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
       this.shipSlots[0] = 'hull_base';
       this.weaponSlots[0] = 'wpn_blaster';
       this.player.currentWeapon = WeaponType.BLASTER;
@@ -4771,7 +4796,7 @@ export class GameEngine {
   }
 
   /** Services of the currently docked station (null when undocked). */
-  private dockedServices(): StationServices | null {
+  dockedServices(): StationServices | null {
       const kind = this.dockedAtStation
           ? (this.dockedStation?.stationKind as StationKind | undefined)
           : undefined;
@@ -4795,6 +4820,47 @@ export class GameEngine {
       this.inventory[inv] = moduleId;
       this.audio.play('poi.purchase');
       return true;
+  }
+
+  /** Buy the next hex of one flower (A5).  Station commerce like every other
+   *  purchase: it needs the matching SHOP docked (the same gate
+   *  `purchaseModule` uses — a slot is ship hardware, bought where that
+   *  hardware is sold) and REJECTS everywhere else.
+   *
+   *  Nothing about adjacency moves: the new hex is an EMPTY hex, and an empty
+   *  hex was already invisible to `computeActiveSlots`.  So there is no
+   *  refold to do here — the next module MOVE does that, as it always did. */
+  public purchaseSlot(group: ModuleGroup): boolean {
+      const svc = this.dockedServices();
+      if (!svc) return false;
+      if (group === 'ship' ? !svc.shipShop : !svc.weaponShop) return false;
+      const unlocked = this.slotsUnlocked(group);
+      const cost = slotUnlockCost(unlocked);
+      if (cost === null) return false;             // the flower is full
+      const price = this.modulePrice(cost);
+      if (price <= 0 || this.credits < price) return false;
+      this.credits -= price;
+      if (group === 'ship') this.shipSlotsUnlocked = unlocked + 1;
+      else this.weaponSlotsUnlocked = unlocked + 1;
+      this.audio.play('poi.purchase');
+      return true;
+  }
+
+  /** DBG only: re-derive the loadout after the slot-lock cycle has moved
+   *  modules out of hexes it just locked.  `syncLoadoutFromSlots` is a free
+   *  function in engine/outfitting.ts and `DebugControls` deliberately does
+   *  not import it — the debug layer drives the engine, never its machinery. */
+  syncOutfitAfterDebugSlotLock() {
+      syncLoadoutFromSlots(this);
+  }
+
+  /** Unlocked hex count for one flower. */
+  slotsUnlocked(group: ModuleGroup): number {
+      return group === 'ship' ? this.shipSlotsUnlocked : this.weaponSlotsUnlocked;
+  }
+  /** Is hex `idx` of `group` unlocked?  `inventory` has no locked tiles. */
+  slotUnlocked(area: 'inventory' | 'ship' | 'weapon', idx: number): boolean {
+      return area === 'inventory' || idx < this.slotsUnlocked(area);
   }
 
   /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
@@ -6554,6 +6620,9 @@ export class GameEngine {
       // stay the raw dev overrides underneath (tool off / no kit → null →
       // the globals decide; the flashlight global ships 'off', the tier
       // 'low').
+      // The SCANNER's reveal tier — one field write per frame, read by the
+      // minimap + indicator gates in the render layer (A4).
+      this.renderer.scannerMk = this.scannerMk;
       const lightOn = this.flashlightEquipped && this.flashlightLevel > 0;
       this.renderer.playerLightToolHalfDeg =
           lightOn ? FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].halfDeg : null;

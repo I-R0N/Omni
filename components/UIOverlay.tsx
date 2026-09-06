@@ -180,6 +180,7 @@ interface UIOverlayProps {
   // levels): grant a variety into the inventory (auto-installs if a hex
   // is free), outfit a full canonical loadout, or reset to the lean start.
   onGrantModule?: (id: string) => void;
+  onCycleSlotLock?: () => void;
   onOutfitAll?: () => void;
   onResetOutfit?: () => void;
   onAddCredits?: () => void;
@@ -200,6 +201,9 @@ interface UIOverlayProps {
     to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ) => void;
   onPurchaseModule?: (id: string) => void;
+  /** A5 — buy the next hex of one flower.  Station commerce like a module
+   *  purchase; the engine gates it on the matching shop. */
+  onPurchaseSlot?: (group: 'ship' | 'weapon') => void;
   // Module resale, INVENTORY tiles only: sell-back (90% of cost) needs a
   // station — any, every station drydocks; scrap (9%) works from anywhere
   // on the map (the pause-menu cargo panel's only cash-out).
@@ -497,6 +501,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onApplyDisable,
   onToggleTraits,
   onGrantModule,
+  onCycleSlotLock,
   onOutfitAll,
   onResetOutfit,
   onAddCredits,
@@ -508,6 +513,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPerfRecExport,
   onMoveModule,
   onPurchaseModule,
+  onPurchaseSlot,
   onSellModule,
   onScrapModule,
   onUndock,
@@ -744,6 +750,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    *  source and no [data-tile] drop target. */
   const renderHexGroup = (g: 'ship' | 'weapon', title: string, accentText: string, accentBg: string, interactive: boolean) => {
     const slots = g === 'ship' ? (out?.ship ?? []) : (out?.weapon ?? []);
+    // A5: hexes at or past the unlocked count are LOCKED — empty hexes that
+    // cannot be filled.  Defaults to every hex unlocked, so a stats payload
+    // without the field (or a shipped run) draws exactly what it always did.
+    const unlocked = (g === 'ship' ? out?.shipUnlocked : out?.weaponUnlocked) ?? slots.length;
     const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
     return (
       <div className="flex flex-col items-center gap-1.5">
@@ -770,6 +780,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             const isGun = m?.kind === 'weapon';
             const sel = selSlot?.g === g && selSlot.i === i;
             const offline = m !== null && !m.active;
+            const locked = i >= unlocked;
             const lifted = dragging?.moved === true && dragging.area === g && dragging.idx === i;
             return (
               <button
@@ -778,21 +789,28 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                    exists on interactive flowers; `data-hex` is a stable
                    identity for every hex (read-only flowers included). */
                 data-hex={`${g}:${i}`}
-                data-tile={interactive ? `${g}:${i}` : undefined}
-                onPointerDown={interactive && m !== null ? beginDrag(g, i, m.label) : undefined}
-                onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
+                /* A LOCKED hex carries no [data-tile], so the drag resolver
+                   simply cannot land a module on it — the engine's move guard
+                   is the second line, not the only one. */
+                data-tile={interactive && !locked ? `${g}:${i}` : undefined}
+                onPointerDown={interactive && !locked && m !== null ? beginDrag(g, i, m.label) : undefined}
+                onClick={() => { if (suppressClickRef.current || locked) return; setSelSlot(sel ? null : { g, i }); }}
+                disabled={locked}
                 className="absolute transition-transform active:scale-95"
                 style={{
                   width: HEXW, height: HEXH, touchAction: 'none',
-                  opacity: lifted ? 0.35 : undefined,
+                  opacity: lifted ? 0.35 : locked ? 0.4 : undefined,
                   left: cw / 2 + off.x * HEXW - HEXW / 2,
                   top: ch / 2 + off.y * HEXH - HEXH / 2,
                   clipPath: HEX_CLIP,
-                  background: sel ? '#f8fafc'
+                  background: locked ? '#1e293b'
+                    : sel ? '#f8fafc'
                     : offline ? '#9f1239'
                     : m ? (isGun ? '#f59e0b' : accentBg) : '#475569',
                 }}
-                title={m
+                title={locked
+                  ? `Locked ${g} slot — buy it at a station that stocks ${g === 'ship' ? 'ship' : 'weapon'} modules`
+                  : m
                   ? (m.active ? m.label : `${m.label} — OFFLINE: must touch ${m.requires ?? 'its requirement'}`)
                   : `Empty ${g} slot`}
               >
@@ -803,7 +821,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {/* 9px is the readability floor on glass; these two were
                       7px before 5d U2 (audit finding C4). */}
                   {isGun && <span className={`${T_MICRO} font-bold text-amber-400/90 tracking-widest leading-none mb-0.5`}>W{(gunOrder.get(i) ?? 0) + 1}</span>}
-                  {m ? (
+                  {locked ? (
+                    <span className="text-slate-600 text-base font-bold leading-none">🔒</span>
+                  ) : m ? (
                     <>
                       <span className={`${T_MICRO} font-bold uppercase tracking-tight leading-tight px-1 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
                       {offline && <span className={`${T_MICRO} text-rose-400/90 font-bold leading-none mt-0.5`}>OFFLINE</span>}
@@ -1599,6 +1619,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
                   ['engine', 'Engine'], ['thrusters', 'Thrusters'],
                   ['gunnery', 'Gunnery'], ['autoloader', 'Autoloader'],
+                  ['piercing', 'Penetration'], ['scanner', 'Scanner'],
                 ] as const).map(([fam, label]) => (
                   <div key={fam} className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                     <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{label}</span>
@@ -1622,6 +1643,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Grant the Overcharge module (DBG). Needs to touch a gun on the weapon flower to function.')}
                 {ctrlRow('Light', () => onGrantModule?.('flashlight_kit'), 'Grant',
                   'Grant the Light module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high (the beam style at the medium / high lighting tiers).')}
+                {ctrlRow('Lock slots', onCycleSlotLock,
+                  out ? `${out.shipUnlocked}/${out.maxSlots}` : '—',
+                  'A5 — lock hexes off BOTH flowers (7 / 5 / 4 / 3) so the station\'s "+1 Hex Slot" purchase can be flown. A shipped run starts with every hex unlocked, so this is the only way to see the locked state. Modules in a hex that locks go back to the hold (scrapped if it is full — DBG).')}
                 {ctrlRow('Outfit all', onOutfitAll, 'Max',
                   'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).')}
                 {ctrlRow('Reset', onResetOutfit, 'Lean',
@@ -2651,6 +2675,33 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       Shop · {g === 'ship' ? 'Ship Modules' : 'Weapon Modules'}
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {/*  A5 — the next HEX of this flower, sold beside the
+                           things that go in it.  Absent once the flower is
+                           full, which is every shipped run today, so the
+                           grid is unchanged unless something locked a hex.
+                           It costs no cargo: a slot is not an item. */}
+                      {(() => {
+                        const o = g === 'ship' ? out.shipSlotOffer : out.weaponSlotOffer;
+                        if (!o) return null;
+                        const buyable = o.available && o.affordable;
+                        return (
+                          <button
+                            disabled={!buyable}
+                            onClick={() => onPurchaseSlot?.(g)}
+                            title={o.available
+                              ? 'Unlock one more hex on this flower — it holds no cargo and needs no room'
+                              : 'This station does not stock hardware for that flower'}
+                            className={`${BTN_COMPACT} flex items-center justify-between gap-2 ${
+                              buyable
+                                ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100'
+                                : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            <span className="font-bold">+1 Hex Slot</span>
+                            <span className="tabular-nums">◈{o.cost.toLocaleString()}</span>
+                          </button>
+                        );
+                      })()}
                       {out.catalog.filter(c => c.group === g).map(c => (
                         <button
                           key={c.id}

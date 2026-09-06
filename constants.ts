@@ -5047,6 +5047,15 @@ export const DAMAGE_TEXT_CONSTANTS = {
   DAMAGE_FONT_SCALE: 0.8, // damage chips render small vs. points popups
 };
 
+// PIERCE CEILING (A3).  The Penetration module adds +1 pierce per mark to
+// EVERY gun uniformly (guidance call), and the Laser already ships
+// `pierce: 99` as its "effectively infinite enemy penetration".  Rather than
+// letting the bonus run past that into a number nothing else in the codebase
+// means anything by, the sum is clamped here: 99 stays the ceiling the Laser
+// defines, so the bonus is a real upgrade on every other gun and a no-op on
+// the one that was already at the top.
+export const MAX_PIERCE = 99;
+
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 //
 // Stat budgeting (d2 weapon overhaul):
@@ -5459,7 +5468,8 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge' | 'utility';
+  | 'gun' | 'gunnery' | 'autoloader' | 'piercing' | 'overcharge'
+  | 'utility' | 'scanner';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
  *  Base values modified: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
@@ -5472,6 +5482,11 @@ export interface ModuleEffect {
   accelFrac?: number;       // thrusters
   damageFrac?: number;      // gunnery
   cooldownFrac?: number;    // autoloader
+  pierceBonus?: number;     // piercing — +N projectile penetrations (A3)
+  // scanner — the MARK of one Scanner module (A4).  Summed nowhere: the
+  // ship's scanner TIER is the highest active mark, so two Mk I do not add
+  // up to a Mk II.  See applyModuleEffects.
+  scannerMk?: number;
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
   flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
@@ -5495,6 +5510,37 @@ export interface ModuleDef {
 }
 
 export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
+// ── Purchasable hex slots (A5) ──────────────────────────────────────────────
+// A flower has MODULE_SLOT_COUNT hexes; how many of them are UNLOCKED is a
+// run field on GameEngine, and a station sells the rest.  A locked hex holds
+// nothing and accepts nothing — which is why this needed no change to
+// HEX_ADJACENCY or `computeActiveSlots`: an empty hex is already invisible to
+// the adjacency fixpoint, and "locked" is just an empty hex that cannot be
+// filled.  The ONE new rule is a destination guard in `moveModuleInternal`.
+//
+// START equals the cap TODAY, so nothing is locked and shipped behaviour is
+// unchanged — this is the seam, exactly the way `SHIP_WEIGHT.HULL_BASE` is 0:
+// the ship catalog (phased plan Phase D) is what will start different hulls
+// at different counts, and lowering the number for the CURRENT hull is a
+// balance call for the economy pass rather than something to slip in here.
+// DBG ▸ Modules ▸ "Lock slots" walks it down so the purchase can be flown.
+export const MODULE_SLOT_UNLOCK = {
+  START: MODULE_SLOT_COUNT,
+  MAX: MODULE_SLOT_COUNT,
+  /** Price of the NEXT unlock, indexed by how many hexes the group already
+   *  has.  Rising steeply at the top: the last hex on a flower is worth more
+   *  than anything that could sit in it.  Entries below a plausible start are
+   *  there so the table is total — a group can never ask for a price the
+   *  table has no answer for. */
+  PRICES: [30000, 30000, 30000, 30000, 30000, 60000, 120000] as readonly number[],
+};
+/** Catalog cost of the next hex for a group that has `unlocked` of them, or
+ *  null when the group is already full.  Routed through `modulePrice` by the
+ *  caller like every other price — that seam stays the only one. */
+export function slotUnlockCost(unlocked: number): number | null {
+  if (unlocked >= MODULE_SLOT_UNLOCK.MAX) return null;
+  return MODULE_SLOT_UNLOCK.PRICES[Math.max(0, Math.min(unlocked, MODULE_SLOT_UNLOCK.PRICES.length - 1))];
+}
 export const MAX_INSTALLED_GUNS = 2;  // gun COUNT limit in the weapon group (slot-agnostic)
 export const INVENTORY_CAPACITY = 12; // inventory tile count (future ships vary this)
 // Module resale: SELL-BACK pays 90% of cost but needs a station (any —
@@ -5560,8 +5606,10 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   capacitor:  ['shield'],
   gunnery:    ['gun'],
   autoloader: ['gun'],
+  piercing:   ['gun'],
   overcharge: ['gun'],
   utility:    ['hull'],
+  scanner:    ['hull'],
 };
 
 /** Neighbour indices per hex slot in the 7-flower: 0 = center (touches
@@ -5587,6 +5635,65 @@ const statMks = (
   weight: +(mk1Weight * (i + 1)).toFixed(1),
 }));
 
+// ── Scanner (A4) ────────────────────────────────────────────────────────────
+// A ship module whose MARK widens what the two existing contact readouts —
+// the minimap and the off-screen indicator arrows — are willing to reveal.
+// It is a GATE/EXTENDER over display plumbing that already exists, never a
+// new render system: every mark below names an existing gate and relaxes it.
+//
+// Three rules make it safe to ship long before the things it will eventually
+// reveal exist (the hidden wormholes of the phased plan's G4):
+//   · NO scanner (or one that is adjacency-OFFLINE) degrades to today's
+//     behaviour EXACTLY — every threshold below is `mk >= n`, so 0 relaxes
+//     nothing and the suites written against the current gating still hold.
+//   · Colours stay the INDICATORS type legend's.  A scanner reveals MORE
+//     contacts, never a new KIND of mark.
+//   · There is NO "discovered" state anywhere in here.  The effect is purely
+//     "while installed and active" — discovered-ness is per NODE and belongs
+//     to the later persistence work, so nothing here may grow a flag it
+//     would have to fight.
+export const SCANNER = {
+  /** Mk I — MATERIALS: mobile-shard dots on the minimap, on top of whatever
+   *  the DBG "Minimap mat" cycle is drawing (the dots layer already exists
+   *  behind that cycle; the scanner just stops the cycle being the only way
+   *  to get it). */
+  MATERIALS_MK: 1,
+  /** Mk II — ENEMIES at extended range.  Enemy chevrons are range-UNLIMITED
+   *  already (CLAUDE.md §8), so their real range gate is the FADE ramp:
+   *  past ENEMY_FADE_START they dim toward ENEMY_MIN_ALPHA. The scanner
+   *  pushes that ramp out, which is what "extended-range enemy indicators"
+   *  can honestly mean here.  The per-type BUDGETS are untouched — a scanner
+   *  makes far contacts legible, it does not put more arrows on the edge. */
+  ENEMIES_MK: 2,
+  ENEMY_RANGE_MULT: 3,
+  /** Mk III — PORTALS map-wide: lifts PORTAL_CONSTANTS.INDICATOR_RANGE so a
+   *  rift arrow appears from anywhere.  The other two portal-arrow rules are
+   *  deliberately untouched — an on-screen rift still suppresses its arrow,
+   *  and the arrow still prints a NAME and no distance. */
+  PORTALS_MK: 3,
+};
+
+/** Shop/inventory blurb per mark — each line names what that mark ADDS on
+ *  top of the ones below it, since the marks are cumulative. */
+const SCANNER_MK_DESC: Record<number, string> = {
+  1: 'Material contacts on the minimap',
+  2: '+ long-range enemy indicators',
+  3: '+ portal indicators map-wide',
+};
+
+/** Does an `mk`-tier scanner draw mobile-shard dots on the minimap? */
+export function scannerShowsMaterials(mk: number): boolean {
+  return mk >= SCANNER.MATERIALS_MK;
+}
+/** Multiplier over the enemy-chevron fade ramp (1 = today's behaviour). */
+export function scannerEnemyRangeMult(mk: number): number {
+  return mk >= SCANNER.ENEMIES_MK ? SCANNER.ENEMY_RANGE_MULT : 1;
+}
+/** Does an `mk`-tier scanner lift the portal chevron's range gate entirely? */
+export function scannerShowsPortalsMapWide(mk: number): boolean {
+  return mk >= SCANNER.PORTALS_MK;
+}
+
 export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Ship group ──
   // Every run STARTS with the free Base Hull mounted on the center ship
@@ -5597,6 +5704,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
   { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
+  ...statMks('scanner', 'ship', 'ship', 'Scanner', mk => SCANNER_MK_DESC[mk], [7000, 17500, 32000], mk => ({ scannerMk: mk }), 0.25),
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
@@ -5614,6 +5722,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
   ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
   ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
+  ...statMks('piercing', 'weapon', 'weapon-mod', 'Penetration', mk => `+${mk} shot penetration`, [9000, 22500, 43000], mk => ({ pierceBonus: mk }), 0.2),
   { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 
@@ -7014,6 +7123,30 @@ export function computeIndicatorRect(
     bottom = Math.min(screenHeight, mid + MIN_BAND * 0.5);
   }
   return { left, right, top, bottom };
+}
+
+/** Opacity of one off-screen ENEMY chevron at world distance `dist`, for a
+ *  ship carrying an `mk`-tier Scanner (0 = none).
+ *
+ *  Enemy chevrons are range-UNLIMITED by design (CLAUDE.md §8) — every live
+ *  enemy is findable — so the range gate they actually have is this FADE:
+ *  full strength inside ENEMY_FADE_START, dimming to ENEMY_MIN_ALPHA by
+ *  ENEMY_FADE_END.  A Scanner Mk II pushes both ends out, which is what
+ *  "extended-range enemy indicators" (A4) can honestly mean for a readout
+ *  that never culled anything in the first place.  Budgets are untouched.
+ *
+ *  Pure and exported on exactly the `computeIndicatorRect` rationale: it
+ *  exists only as a `globalAlpha` inside a draw call, so a wrong ramp — a
+ *  scanner tier that reveals nothing, or one that reveals at the wrong
+ *  mark — throws nothing and logs nothing.  `__omniHud` publishes it. */
+export function enemyIndicatorAlpha(dist: number, mk: number): number {
+  const { ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA } = UI_CONSTANTS.INDICATORS;
+  const mult = scannerEnemyRangeMult(mk);
+  const start = ENEMY_FADE_START * mult;
+  const end = ENEMY_FADE_END * mult;
+  if (dist <= start) return 1;
+  const ff = Math.min(1, (dist - start) / (end - start));
+  return 1 - ff * (1 - ENEMY_MIN_ALPHA);
 }
 
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {

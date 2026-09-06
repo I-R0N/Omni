@@ -26,7 +26,8 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial, computeMinimapRect, computeIndicatorRect,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, enemyIndicatorAlpha,
+    computeMinimapRect, computeIndicatorRect,
     FOG,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
@@ -129,10 +130,15 @@ export function renderIndicators(
 
     const {
         TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
-        MAX_VISIBLE_BUBBLE, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
+        MAX_VISIBLE_BUBBLE,
         SIZE_NEAR, SIZE_FAR, NEAR_DIST, FAR_DIST, BOSS_SCALE, AGGRO_BLINK_HZ,
         COLORS,
     } = UI_CONSTANTS.INDICATORS;
+    // SCANNER Mk II — extended-range enemy indicators (A4).  The ramp itself
+    // lives in `enemyIndicatorAlpha` (constants.ts), pure and published on
+    // __omniHud, because it exists only as a globalAlpha here and so is wrong
+    // in a way nothing reports.  Tier 0 returns today's curve exactly.
+    const scannerMk = r.scannerMk;
     const H = UI_CONSTANTS.HUD;
 
     if (targets.length === 0) return;
@@ -245,9 +251,8 @@ export function renderIndicators(
         // Far enemies fade toward an alpha floor — still findable, but a
         // distant straggler doesn't shout like a closing threat.  A boss
         // never fades: it is the thing you are supposed to be flying toward.
-        if (t.type === EntityType.ENEMY && !isBoss && dist > ENEMY_FADE_START) {
-            const ff = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
-            ctx.globalAlpha = 1 - ff * (1 - ENEMY_MIN_ALPHA);
+        if (t.type === EntityType.ENEMY && !isBoss) {
+            ctx.globalAlpha = enemyIndicatorAlpha(dist, scannerMk);
         }
         ctx.translate(ix, iy);
         ctx.rotate(angle);
@@ -890,6 +895,9 @@ export function renderMinimap(
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
     const materialMode = getActiveMinimapMaterial();
+    // Hoisted: ONE lookup for the whole pass, not one per contact — the
+    // buffer can hold a few thousand mobile shards in dots mode.
+    const shardDots = r.minimapShardDots;
     if (materialMode === 'flow') {
         renderMinimapFlow(r, ctx, camera, centerX, centerY, scale, range);
     }
@@ -1034,7 +1042,10 @@ export function renderMinimap(
         // grey wash, and it answers a question ("where is that rock") the
         // player never asks of a 75px map.
         if (entity.type === EntityType.STRUCTURE) {
-            if (materialMode !== 'dots') continue;
+            // A Scanner Mk I (A4) draws the dots on top of whatever the cycle
+            // is doing.  ONE definition of the answer, shared with the buffer
+            // fill in RenderSystem — see RenderSystem.minimapShardDots.
+            if (!shardDots) continue;
             ctx.globalAlpha = 1;
             ctx.fillStyle = entity.color;
             ctx.beginPath();

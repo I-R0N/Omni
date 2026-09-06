@@ -50,6 +50,10 @@ export interface RendererDiagnostics {
   lastWarpVeilAlpha: number;
   stageDepth: number;
   playerLightToolHalfDeg: number | null;
+  /** SCANNER tier 0..3 (A4) — pushed per frame by GameEngine.draw from the
+   *  module fold; widens what the minimap and the off-screen indicators
+   *  reveal.  0 = no scanner = today's gating exactly. */
+  scannerMk: number;
   /** Discard generated background content so the next frame rebuilds it.
    *
    *  Here rather than in the seam by this file's own rule: its only callers

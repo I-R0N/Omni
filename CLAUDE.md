@@ -61,10 +61,11 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
                           flashlight / nebulaspin / roll / shipsprites /
-                          shardblend,
+                          shardblend and modules (the Phase-A module
+                          families: Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  265 tests.  All run at
+                          anti-flake rules).  280 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1436,13 +1437,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
 - `MODULE_DEFS` / `moduleDef()` / `moduleFitsSlot()` /
-  `MODULE_SLOT_COUNT` / `WEAPON_GUN_SLOTS` / `INVENTORY_CAPACITY` /
+  `MODULE_SLOT_COUNT` / `MODULE_SLOT_UNLOCK` / `slotUnlockCost()` /
+  `WEAPON_GUN_SLOTS` / `INVENTORY_CAPACITY` /
   `MODULE_REQUIREMENTS` / `HEX_ADJACENCY` — the hex-slot outfitting
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
   Mk I/II/III varieties (own price ≈ the cumulative old level-curve
   cost, own fixed effect — no levels, no in-place upgrades), guns and
-  Shield/Overcharge are single varieties.  Purchases land in the
+  Shield/Overcharge/Light are single varieties.  The Mk families today
+  are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
+  (ship) and Gunnery / Autoloader / **Penetration** (weapon-mod).  Purchases land in the
   INVENTORY (12 tiles rendered as a honeycomb of hex tiles, duplicates
   allowed and stacking); outfitting is moving hex tiles between the
   inventory and the two 7-hex groups — SHIP and WEAPON.  GUN placement
@@ -1522,8 +1526,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `applyModuleEffects` folds — the UI renders, it never recomputes, so
   the panel cannot disagree with the sim.  A contributor's `active`
   means "this amount is IN the total": false for an adjacency-OFFLINE
-  module (`requires` names the family it must touch) AND for shield
-  plating with no shield core (connected but with nothing to plate).  A
+  module (`requires` names the family it must touch), for shield
+  plating with no shield core (connected but with nothing to plate),
+  and for a SUPERSEDED scanner — marks do not stack, so every scanner
+  but the best one aboard reports `superseded` rather than a
+  `requires`, which is the adjacency vocabulary and would read as
+  nonsense on a module that is perfectly well connected.  A
   contributor with no `area`/`idx` is a DERIVED row with no hex behind
   it — today the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE over
   the ship's total weight and so belongs to no hex, and the FIRE-RATE
@@ -1552,6 +1560,61 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate
   (UPGRADE_DEFS / UNLOCK_DEFS / upgradeCost / upgradeLevels /
   unlockedWeapons) is DELETED.
+  **PENETRATION** (`piercing`, weapon-mod, A3) is the model MINOR module:
+  `+1 pierce per mark`, summed into `player.pierceBonus` by
+  `applyModuleEffects` and folded into the shot config by
+  `WeaponSystem.withPierceBonus` — the same channel `damageMult` and
+  `cooldownMult` take, so nothing downstream of the gun knows a module
+  exists.  The bonus applies to EVERY gun UNIFORMLY (guidance call):
+  Lightning and Cannon are `pierce: 0` because their identity is chain
+  and splash and they take it anyway with eyes open, and the sum is
+  clamped to `MAX_PIERCE` — 99, the value the Laser already ships as
+  "effectively infinite" — so the ceiling is the one the Laser defines
+  rather than a number nothing means anything by.  A burst SUB-shot
+  takes it too (`tickPlayerBurst` re-derives its config per shot).
+  **PURCHASABLE HEX SLOTS** (A5): how many hexes of each flower are
+  UNLOCKED is a run field (`GameEngine.shipSlotsUnlocked` /
+  `weaponSlotsUnlocked`, reset by `resetOutfit`), and
+  `purchaseSlot(group)` sells the next one — gated on the matching SHOP
+  being docked, priced by `slotUnlockCost` through the `modulePrice`
+  seam, capped at `MODULE_SLOT_COUNT`.  The reason this needed no change
+  to `HEX_ADJACENCY` or `computeActiveSlots` is the whole design: a
+  LOCKED hex is an EMPTY hex that cannot be filled, and an empty hex was
+  always invisible to the adjacency fixpoint — so the feature is ONE
+  destination guard in `moveModuleInternal` plus a skip in
+  `firstFreeSlotFor`, and the UI drawing those hexes inert (no
+  `data-tile`, so a drag cannot even land on one).
+  `MODULE_SLOT_UNLOCK.START` equals the cap TODAY, so nothing is locked
+  and a shipped run is unchanged: the count is the SEAM for the ship
+  catalog (the same way `SHIP_WEIGHT.HULL_BASE` is 0), and lowering it
+  for the current hull is a balance call for the economy pass.  DBG ▸
+  Modules ▸ "Lock slots" (7 / 5 / 4 / 3) is what makes the locked state
+  and the shop's "+1 Hex Slot" entry reachable in play.
+- `SCANNER` / `scannerShowsMaterials()` / `scannerEnemyRangeMult()` /
+  `scannerShowsPortalsMapWide()` — the SCANNER module's reveal tiers
+  (A4).  A ship module (`scanner` family, hull-adjacent like every
+  utility) whose MARK widens what the two existing contact readouts are
+  willing to show; it is a GATE/EXTENDER over display plumbing that
+  already exists, never a new render system.  Mk I = MATERIALS
+  (mobile-shard dots on the minimap, on top of whatever the DBG "Minimap
+  mat" cycle is drawing), Mk II = + ENEMIES at extended range (see the
+  fade-ramp note in §8), Mk III = + PORTALS map-wide (lifts
+  `PORTAL_CONSTANTS.INDICATOR_RANGE`).  Marks do NOT stack — the ship's
+  tier is the highest ACTIVE mark aboard, so two Mk I stay a Mk I, which
+  is the one place the module system deliberately departs from summing.
+  The tier rides `GameEngine.scannerMk` → `RenderSystem.scannerMk`, one
+  field write per frame in `draw`, the SAME channel the Light's cone
+  override takes; the sim grows no second path to the render layer.
+  Three rules are load-bearing: every gate is `mk >= n`, so NO scanner
+  degrades to today's behaviour exactly (the existing indicator / minimap
+  / portal suites are written against that gating and must keep passing);
+  colours stay the `UI_CONSTANTS.INDICATORS` type legend's — a scanner
+  reveals MORE contacts, never a new KIND of mark; and there is NO
+  "discovered" state anywhere in it, because discovered-ness is per NODE
+  and belongs to the later persistence work.  That last one is also a
+  FORWARD INTERFACE: the phased plan's hidden wormholes (G4) are meant to
+  use the Mk III tier as their reveal mechanism, and A4 ships long before
+  they exist, so nothing here may assume them.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -2978,7 +3041,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
   `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's PURE
   layout functions — `fitFontPx`, `computeMinimapRect`,
-  `computeLoadoutHUDLayout`, `computeIndicatorRect` — on exactly the
+  `computeLoadoutHUDLayout`, `computeIndicatorRect`, and (A4)
+  `enemyIndicatorAlpha` — on exactly the
   `__omniHid` rationale: they are
   pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
   320px, a minimap rect disagreeing with the tap handler that catches its
@@ -3432,6 +3496,21 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   indicated now (they used to be excluded as clutter) — the small separate
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
+  ENEMY chevrons have NO range cull, so the only range gate they have is
+  the FADE: `enemyIndicatorAlpha(dist, scannerMk)` (constants.ts, pure and
+  published on `__omniHud`) ramps them from full strength at
+  `ENEMY_FADE_START` down to `ENEMY_MIN_ALPHA` at `ENEMY_FADE_END`.  A
+  SCANNER Mk II (§5) multiplies both ends by `SCANNER.ENEMY_RANGE_MULT`,
+  which is what "extended-range enemy indicators" can honestly mean for a
+  readout that never culled anything — the per-type BUDGETS are untouched,
+  so a scanner makes far contacts LEGIBLE rather than putting more arrows
+  on the edge.  Tier 0 returns today's curve exactly.  The ramp is pulled
+  out pure because it exists only as a `globalAlpha` inside the draw: a
+  tier that reveals nothing, or reveals at the wrong mark, throws nothing
+  and logs nothing.  A SCANNER Mk III likewise lifts the PORTAL range gate
+  (`RenderSystem`'s `farPortal` test) so a rift arrow appears from
+  anywhere; the other two portal-arrow rules — on-screen suppression and
+  no distance readout — are deliberately untouched by it.
 
 - **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
   object.**  (The shipped material default is DOTS, not flow — user call;
@@ -3446,7 +3525,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
      (`MINIMAP_CONSTANTS.FLOW`); the old per-shard dots are still
      available behind the DBG cycle Visual ▸ "Minimap mat"
      (Flow / Dots / Off), and in any mode but `dots` mobile shards are
-     not even collected into `_minimapBuffer`.  Two things to know
+     not even collected into `_minimapBuffer`.  A SCANNER Mk I (§5)
+     forces the dots layer ON TOP of whatever the cycle says, and the
+     answer has exactly ONE definition — `RenderSystem.minimapShardDots`
+     — because TWO callers have to agree on it: the per-entity buffer
+     fill in `RenderSystem` and the draw in `render/hud.ts`.  They used
+     to agree by both calling `getActiveMinimapMaterial()`; with a second
+     input, the OR could not stay duplicated.  Two things to know
      before touching it: the streamline geometry is cached in WORLD
      space and keyed on the seed CELL (panning must not retrace), and
      the polyline needs a SEAM BREAK — per-point torus math is not
