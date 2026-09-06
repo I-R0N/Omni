@@ -1876,9 +1876,21 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   branch protection points at one required check.  The honest trade: a
   regression outside the smoke surfaces at the merge point rather than per
   push — label the PR `full-tests` when it wants the whole net first.
-  LOCAL practice moves the same way: per-commit, run typecheck + build +
-  the suites the change touches; run the FULL suite before calling a PR
-  ready to merge (and after a base sync).  The browser download is CACHED, keyed on the resolved
+  LOCAL practice moves the same way, and WHO CALLS THE MOMENT matters
+  (user clarification, 2026-09-06 — the old wording said "before calling a
+  PR ready to merge", which reads as a judgement the session makes and was
+  over-applied to every push).  The rule is:
+  - **PUSHING TO A WORKING BRANCH mid-PR needs typecheck + build + the
+    suites the change touches — NOT the full suite.**  A PR branch is a
+    place to iterate; a ~19-minute suite per push buys nothing and costs
+    the session's momentum.  CI's SMOKE scope is the backstop on every
+    push, which is exactly what it is for.
+  - **THE FULL SUITE RUNS WHEN THE USER SAYS THEY ARE READY TO MERGE** a
+    PR into its parent branch (not always `main`).  That notice is the
+    trigger; the session does not decide it has arrived.  Also run it
+    after a base sync, since a merge can break what neither side broke.
+  So a red touched-suite blocks a push; a full-suite run without that
+  notice is optional diligence, not a gate to wait behind.  The browser download is CACHED, keyed on the resolved
   `@playwright/test` version plus the runner OS; on a cache hit the
   workflow installs only the apt system libraries (`install-deps`),
   because a restored browser with no libraries cannot launch.  A green
@@ -3727,8 +3739,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - **`PR checks` is the default gate on every PR and the final step before
   a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
   merge seams and on the `full-tests` label (§7).  Locally: typecheck +
-  build + the touched suites per commit, the FULL `npm test` before
-  calling a PR ready to merge.  Never merge past a pending or failing
+  build + the touched suites per commit AND per push to a working branch;
+  the FULL `npm test` when the USER gives notice they are ready to merge
+  the PR into its parent branch, not on the session's own judgement that
+  it looks ready (§7).  Never merge past a pending or failing
   `typecheck · build · test`.  The other two workflows still gate
   nothing — a preview build or a standalone release is not validation.
 
