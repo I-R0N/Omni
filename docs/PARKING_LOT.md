@@ -2153,3 +2153,162 @@ work is presentational.
 - The two competing ship-design directions (ship catalog CHOSEN vs modular
   physical ship SUPERSEDED) recorded elsewhere in this file bound how much
   of the flower is worth investing in before that is settled.
+
+---
+
+## Unified impact physics — penetration, crashes and fracture are one mechanism wearing three names (2026-09-06) — user call
+
+**The concern, in the user's words:** penetration "should really be an
+inherent behavior based on physics and it may not be" — a ship colliding
+with tiles ought to behave the way a piercing bolt does; and since "damage
+should be based on energy/momentum, as projectiles lose speed due to
+penetration hits, they should also naturally be reducing damage."  The
+worry is that the penetration system **overlaps strongly with other physics
+mechanics**, and that this has to be resolved before new entities,
+projectiles, weapons and materials are built on top of it.
+
+That reading is correct, and this entry is the review it asks for.  It is
+the general form of the **"Penetration bore tracks as a FRACTURE MODEL"**
+entry above — that one asks whether every impact wants a track; this one
+asks whether every impact wants the same *arithmetic*.
+
+### 1. The inventory: how a body can be damaged today
+
+Nine paths, and they do NOT share a model:
+
+| # | path | what it spends | where |
+|---|---|---|---|
+| 1 | projectile hit | authored `WeaponConfig.damage` | `resolveCollision` projectile branch |
+| 2 | pierce bore | the same, per grain, × a falloff RATE | `borePierceTrack` |
+| 3 | player crash into a tile | `health -= 1` (a whole pane for glass) | `resolveCollision` player branch |
+| 4 | asteroid crash into a tile | same, plus a momentum gate | two `killStructureByImpact` sites |
+| 5 | tile pressure | a COUNT of sub-threshold impacts | `tilePressureCount` |
+| 6 | AoE shockwave ring | authored splash damage | `updateExplosionRings` |
+| 7 | lightning chain | authored chain damage | `fireLightningChainFromImpact` |
+| 8 | bubble bite | boundary damage, on a cadence | `chipStructureAt` |
+| 9 | dragon consume | deletes the tile outright | `consumeTile` |
+
+**Paths 1, 2, 6, 7 and 8 spend on GRAIN BOUNDARIES** (V15) — the physically
+grounded model, where HP is *derived* from `Σ (boundary length ×
+bondStrength)`.  **Paths 3, 4, 5 and 9 do not**: they decrement `health`
+directly or delete the body.  CLAUDE.md states that split as a deliberate
+simplification ("PHYSICAL smashes still take the whole body: they meter
+boulders, not weapons"), and it is exactly the asymmetry the user is
+pointing at.  A bolt bores a pane grain by grain; a hull at speed takes the
+whole pane in one event and leaves no track.
+
+### 2. The four overlaps
+
+1. **TWO DAMAGE VOCABULARIES.**  "HP damage" (a scalar decrementing a pool)
+   and "boundary damage" (energy spent on interfaces, HP derived from what
+   is left).  The second is the real model; the first is a legacy the
+   collision paths still speak.  Every new material inherits both.
+
+2. **TWO ENERGY MODELS, one real and one authored.**  Collisions already
+   compute genuine mechanics — `impactStrength` is
+   `(1+e)·|v_n|·effInv_self/(effInv_self+effInv_other)`, a real velocity
+   step, and the crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`.
+   Weapons carry an authored `damage` number with no mass, no speed and no
+   relation to either.  The same tile therefore answers to two different
+   physics depending on what hit it.
+
+3. **THE FALLOFF IS A SECOND KNOB FOR SOMETHING THE FIRST SHOULD ALREADY
+   SAY.**  `PIERCE_FALLOFF_RATE` decays damage per hit, and
+   `PIERCE_SPEED_RETAIN` decays SPEED per hit — and ships at `1.0`, a no-op.
+   If damage were kinetic (`½mv²`, or `mv`), the falloff would **fall out of
+   the speed loss** rather than being authored beside it.  Two knobs
+   describing one phenomenon is the clearest single symptom of the overlap,
+   and it is why the shipped falloff rate is 0: nobody could say what the
+   right number was, because the number should not have existed.
+
+4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**  A shot
+   gets N discrete charges regardless of what it hits — a 36px pane and a
+   200-unit boulder each cost the same charge (the bore softened this
+   *within* a body but not between bodies).  Under an energy model there is
+   no count: a shot stops when its energy is spent, so a bolt crosses thin
+   glass and buries itself in metal without either being enumerated.
+
+### 3. The unification, and why it is nearer than it looks
+
+The substrate is already right.  **`bondStrength` is damage per PIXEL of
+boundary — dimensionally a specific fracture energy** (energy per unit
+area), which is precisely the physical constant this wants.  The proposal:
+
+- **One quantity crosses every impact seam: ENERGY.**  A projectile carries
+  `½mv²`.  A hull carries `½mv²`.  Breaking a boundary of length `L` costs
+  `L × bondStrength`.  Whatever is spent is subtracted from the mover's
+  kinetic energy, and the mover slows accordingly.
+- **Damage falloff DISAPPEARS as a knob.**  A bolt that has spent energy on
+  three grains is slower, so its next bite is smaller, automatically and
+  with the right curve.  `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
+  collapse into one another and then into nothing.
+- **The player bores terrain by the same routine.**  `borePierceTrack`
+  already walks a chord in a body's local frame at `grainSize` steps; a hull
+  sweeping through a tile is the same walk with a different energy budget
+  and a wider track.  A fast heavy ship ploughs a channel and slows; a slow
+  one bounces because it cannot pay for the first boundary.  That is the
+  user's first point, and it needs no new mechanism — only for path 3 to
+  call what path 2 calls.
+- **The crash THRESHOLD becomes a consequence.**
+  `CRASH_VELOCITY_THRESHOLD` and `ASTEROID_CRASH_MOMENTUM` stop being
+  authored gates and become "did the impactor bring enough energy to break
+  the first boundary" — which is automatically material-dependent, so metal
+  resists a bump that shatters glass without a per-material threshold table.
+- **A Penetration module stops buying charges** and starts buying what a
+  penetrator actually has: sectional density, or a smaller contact patch —
+  i.e. it concentrates the same energy on less boundary. That is a better
+  story for the item as well as a truer one.
+
+### 4. What must NOT be unified
+
+Named explicitly, because a unification that swallows these will be wrong:
+
+- **ACTORS ARE NOT STRUCTURES.**  The player, enemies, bosses and fauna have
+  authored HP pools, shields, armour, front-shields and regen — all of them
+  *authored-damage* concepts and all of them load-bearing for the
+  counterplay layer (`docs/WEAPONS_AMMO_PLAN.md` §7).  The unification
+  belongs to STRUCTURAL bodies; the seam between the two needs exactly one
+  documented conversion, and that conversion is where balance lives.
+- **`damageSpread: 0` is load-bearing for the bore.**  The track works
+  because each stamp spends sequentially outward from its own point.  Any
+  energy model has to preserve that, or the track blurs (V15's own measured
+  lesson).
+- **Presentation must not be re-derived.**  Shake, audio gain and rumble
+  already come from `impactStrength`, and CLAUDE.md's rule is that how hard
+  a hit reads to the eye and to the ear cannot drift apart.  An energy model
+  should FEED that one number, not add a second.
+
+### 5. Cost, and the order to do it in
+
+This is a multi-session change and should not be started inside a feature
+PR.  The honest sequencing:
+
+1. **Measure first.**  Establish what a shipped weapon's authored `damage`
+   is worth in energy terms against each material's derived HP, so the
+   conversion constant is fitted to the game that exists rather than chosen.
+   Without this the whole roster re-balances silently.
+2. **Route paths 3, 4 and 5 through `applyBoundaryDamage`** — the smallest
+   change with the biggest honesty gain, and independently testable: a
+   crushed tile should crack and shed grains the way a shot one does.
+   `chipStructureAt` (the bubble's bite) is the proof this works: it is
+   already a non-weapon caller of the grain model.
+3. **Make projectile damage kinetic**, retire the falloff rate and the speed
+   retain, and check the §7 counterplay table still holds.
+4. **Give hulls a bore track**, which is when the user's first point is
+   actually delivered.
+5. **Revisit `pierceCount`** last, since removing a budget changes what the
+   Penetration module *is*.
+
+### 6. Related entries — this is the hub
+
+- **Penetration bore tracks as a FRACTURE MODEL** — the deposition-geometry
+  half of the same question.
+- **Grain clusters: several grains leaving as ONE fragment (A4-B)** — what a
+  wide (hull-sized) track should free.
+- **Fracture: the erosion cascade** — whether old wounds compete with new.
+- **Polygonal face bonding for metal** — bonded composites have no defined
+  bore behaviour.
+- **Rotational mechanics for shards and asteroids** — a track is off-centre
+  by construction and therefore implies a torque the solver does not model.
+- `docs/MATERIAL_GRAIN_SPEC.md` — the PROPOSED unified bonding system, which
+  this entry is the impact-side counterpart to.
