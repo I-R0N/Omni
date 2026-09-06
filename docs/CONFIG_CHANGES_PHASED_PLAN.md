@@ -105,9 +105,23 @@ Selection rule: an element goes pre-merge only if it (a) fixes a live bug,
 or (b) drops cleanly into an existing seam without prejudging the Phase B–D
 redesigns.  Everything here is a bounded session, **not** a gauntlet —
 except that A1+A2 together may warrant a short bubble-behavior mini-gauntlet
-if the A2 root-cause turns out to be systemic.
+if the A2 root-cause turns out to be systemic.  (It did not — see A2 below.
+A1+A2 have LANDED; A3 and A4 follow in their own sessions.)
 
-### A1 — Bubble aggro timeout  *(bug/behavior fix, small)*
+### ~~A1 — Bubble aggro timeout~~  *(bug/behavior fix, small)*  — **LANDED**
+
+> **Shipped** on `claude/bubble-aggro-immovability-fixes-lbnozu` →
+> `claude/plan-completion`, together with A2.  As planned:
+> `BUBBLE_CONSTANTS.AGGRO_TIMEOUT_SEC` (6s), armed and refreshed by every
+> fresh act of aggression, ticked on sim time in `updateBubbles`, clearing
+> `provoked`/`aggroTargetId` on expiry with no sick state.  One thing was
+> added beyond the brief and is worth carrying into Phase E: the arm and the
+> clear are now SINGLE SEAMS — `constants.stampBubbleAggro` for all three
+> sites that set a target (projectile, AoE ring, ram) and
+> `constants.calmBubble` for all four that drop it — because a window can
+> otherwise be armed by one path and forgotten by another.  Any Phase-E
+> aggression source should stamp through the same seam.  Covered by
+> `tests/bubbles.spec.ts`; recorded in `CLAUDE.md` §5.
 
 Today aggro clears only when the target dies/deactivates, flees past
 `AGGRO_LOSE_RANGE`, or the latch detaches (`engine/roamers/bubbles.ts` —
@@ -123,7 +137,33 @@ bubble just loses interest).  Applies identically whoever the target is
 wait past timeout with no further damage, assert calm; assert a mid-window
 hit refreshes the window.
 
-### A2 — Post-attack bubble immovability  *(bug fix, repro first)*
+### ~~A2 — Post-attack bubble immovability~~  *(bug fix, repro first)*  — **LANDED**
+
+> **Shipped** with A1.  Reproduced headlessly first, and the root cause is
+> NONE of the three suspects below — which matters for Phase E, so it is
+> recorded rather than just struck:
+>
+> - **`massPerEat` growth was never real.**  The bubble's `consume` config
+>   sets no `massPerEat` at all, so eating adds no mass: a bubble's `mass` is
+>   a constant 9 for its whole life, from 15 units across to 58.  There is no
+>   unbounded mass to cap, and no mass shed to audit on split or detach.
+>   **E's hive design can assume mass is decoupled from size today** — and
+>   should decide deliberately whether it wants to stay that way, since a
+>   58-unit blob currently weighs exactly what a 15-unit one does.
+> - Leftover attach state: not it (the sick path never latches).
+> - The sick branch skipping integration: not it (it integrates and damps).
+>
+> The actual cause was `AISystem.updateBubble` applying its regime SPEED CAP
+> to the bubble's TOTAL velocity every sim step, deleting the collision
+> recoil the impulse solver had just computed (measured: a ship at 20 shoves
+> the bubble to 23.08 and keeps 13.08 — correct — and the next AI step snapped
+> the bubble back to 0.66).  The bubble never left the contact, the player
+> re-collided every step and lost ~35% each time: 20 down to 0.65 in ten
+> frames.  Fixed by flooring each regime cap at the speed the bubble ARRIVED
+> with, so the cap bounds propulsion and never motion.  The impulse
+> arithmetic is untouched.  Not systemic beyond the bubble — the other AI
+> strategies cap at their own `maxSpeed` while actively thrusting — so the
+> mini-gauntlet the Phase A preamble holds in reserve was not needed.
 
 Report: after an attack pass ends and the bubble goes green (sick), the
 player colliding with it comes to a sudden stop, as if the bubble were
