@@ -42,6 +42,9 @@ assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
+                          (= test:smoke — boot + loop, the DEFAULT), plus
+                          test:smoke / test:full.  The smoke set is defined
+                          HERE and nowhere else; CI runs these same scripts
                           (no lint script)
 playwright.config.ts      Test harness: one 390×844 project (the DESIGN
                           TARGET; viewports.spec.ts overrides it per
@@ -1764,7 +1767,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     NOT type-check** (esbuild strips types without checking them), which
     is how six type errors accumulated unseen before 5b; the build being
     green says nothing about the types.
-  - `npm test` — `playwright test`. The suites in `tests/` drive the
+  - `npm test` — **the SMOKE scope: `boot` + `loop`, ~1 minute.**  This is
+    the DEFAULT on purpose (user call): the full suite is ~13 minutes, and
+    a gate that expensive stops being run.  `npm run test:full` is the
+    whole net, and it belongs at the merge seams — see the scopes below.
+    Add the suites your change touches alongside the smoke
+    (`npx playwright test tests/bubbles.spec.ts`); that pair is the
+    per-commit gate, not the full suite.
+    The suites in `tests/` drive the
     REAL engine in a REAL browser through the `window.__omniEngine` /
     `window.__omniStats` debug handles; nothing is stubbed. The config's
     `webServer` block runs `npm run build` itself and previews the
@@ -1786,9 +1796,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   branch protection points at one required check.  The honest trade: a
   regression outside the smoke surfaces at the merge point rather than per
   push — label the PR `full-tests` when it wants the whole net first.
-  LOCAL practice moves the same way: per-commit, run typecheck + build +
-  the suites the change touches; run the FULL suite before calling a PR
-  ready to merge (and after a base sync).  The browser download is CACHED, keyed on the resolved
+  BOTH SCOPES ARE THE npm SCRIPTS (`test:smoke` / `test:full`), so the
+  smoke set is defined ONCE — in `package.json` — and a bare `npm test`
+  on a contributor's machine runs exactly what the per-push gate runs.
+  It was a literal file list inside the workflow, which is how the two
+  halves drifted: CI had the cheap default from 2026-08-21 while `npm
+  test` still meant all 337 tests, so the fast gate existed on paper and
+  every local run still cost thirteen minutes.
+  LOCAL practice mirrors it EXACTLY (user call): per-commit, run
+  typecheck + build + `npm test` + the suites the change touches.  The
+  FULL suite is for the same seam CI reserves it for — the
+  `plan-completion` → `main` promotion, or a PR deliberately labelled
+  `full-tests` — NOT for every PR into `plan-completion`.  A full run
+  before an ordinary feature PR is wasted time, and in a software-
+  rendering container it is worse than wasted: the pixel-sampling and
+  frame-counting suites (`fracture`, `lighting`) drop a stray test on
+  most long runs, and with `retries: 0` each one reads as a failure that
+  has to be chased.  The browser download is CACHED, keyed on the resolved
   `@playwright/test` version plus the runner OS; on a cache hit the
   workflow installs only the apt system libraries (`install-deps`),
   because a restored browser with no libraries cannot launch.  A green

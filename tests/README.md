@@ -20,8 +20,21 @@ happens to pass has told you nothing.
 
 ```
 npx playwright install chromium   # once, per machine
-npm test                          # builds, previews, runs everything
+npm test                          # SMOKE: boot + loop, ~1 minute
+npm run test:full                 # everything — the merge-seam scope
 ```
+
+**`npm test` is the SMOKE scope, not the whole suite** (user call). The full
+337 tests cost ~13 minutes, and a gate that expensive stops being run — which
+is exactly what happened: CI got the cheap per-push scope in 2026-08-21 while
+`npm test` still meant everything, so local practice and the gate disagreed
+for months. Both are now the same two npm scripts, and the smoke set is
+defined once, in `package.json`.
+
+Per commit: `npm run typecheck`, `npm run build`, `npm test`, and the suites
+your change touches (`npx playwright test tests/bubbles.spec.ts`). Save
+`test:full` for the seam CI reserves it for — the `plan-completion` → `main`
+promotion, or a PR deliberately labelled `full-tests`.
 
 `npm test` is one command from a clean clone. The `webServer` block in
 `playwright.config.ts` runs `npm run build` and then `vite preview` itself,
@@ -36,6 +49,7 @@ tree" or it means nothing.
 Useful variations:
 
 ```
+npm run test:full                            # all 337, ~13 minutes
 npx playwright test tests/economy.spec.ts     # one suite
 npx playwright test -g "refold"               # one test by name
 npx playwright test --headed                  # watch it happen

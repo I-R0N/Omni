@@ -13,6 +13,10 @@ name: PR checks
 #           `full-tests` label (the opt-in for pre-merge full validation),
 #           and manual dispatch.
 #
+# Both scopes are npm scripts (`test:smoke` / `test:full`), so the smoke set
+# is defined ONCE, in package.json, and a bare `npm test` on a contributor's
+# machine runs exactly what this gate runs per push.
+#
 # The check NAME stays `typecheck · build · test` in both scopes, so branch
 # protection keeps pointing at one required check.  The honest trade: a
 # regression OUTSIDE the smoke now surfaces at the merge point rather than
@@ -130,16 +134,25 @@ jobs:
       # clean) plus the full-game loop (dock, outfit, portal, boss, home) —
       # the two suites that prove the game IS a game before a merge-point
       # run proves everything else.
+      #
+      # WHICH SUITES the smoke set contains is NOT decided here.  It is
+      # `test:smoke` in package.json, and this step only picks which npm
+      # script to run — so the scope a contributor gets from a bare
+      # `npm test` on their machine and the scope CI gates on are the SAME
+      # LIST, and cannot drift.  It used to be a literal file list in this
+      # file, which is exactly the drift that made local practice ("run the
+      # full suite before a PR") disagree with the gate it was supposed to
+      # anticipate.
       - name: Decide test scope
         id: scope
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ] \
              || [ "${{ github.base_ref }}" = "main" ] \
              || [ "${{ contains(github.event.pull_request.labels.*.name, 'full-tests') }}" = "true" ]; then
-            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "script=test:full" >> "$GITHUB_OUTPUT"
             echo "label=full suite" >> "$GITHUB_OUTPUT"
           else
-            echo "args=tests/boot.spec.ts tests/loop.spec.ts" >> "$GITHUB_OUTPUT"
+            echo "script=test:smoke" >> "$GITHUB_OUTPUT"
             echo "label=smoke (boot + loop)" >> "$GITHUB_OUTPUT"
           fi
 
@@ -147,7 +160,7 @@ jobs:
       # webServer builds and previews `dist/` itself, so this needs no
       # separate serve step.
       - name: Test (${{ steps.scope.outputs.label }})
-        run: npx playwright test ${{ steps.scope.outputs.args }}
+        run: npm run ${{ steps.scope.outputs.script }}
 
       - name: Upload Playwright report
         if: failure()
