@@ -29,7 +29,7 @@
  * which is precisely the work a GPU renderer moves off the CPU.
  * See docs/GAUNTLET_WEBGPU_LOG.md.
  */
-import type { TrailShape } from '../../types';
+import type { TrailShape, GameEntity } from '../../types';
 
 export interface RendererDiagnostics {
   // ── Debug flags (written by DebugControls) ───────────────────────────────
@@ -50,6 +50,30 @@ export interface RendererDiagnostics {
   lastWarpVeilAlpha: number;
   stageDepth: number;
   playerLightToolHalfDeg: number | null;
+  /** SCANNER — pushed per frame by GameEngine.draw from the module fold and
+   *  the live ping.  `scannerMk` is the highest mark aboard (which detection
+   *  TIERS are reachable) and `scanRanges` is the per-tier reach; the rest
+   *  carry the ping and the material bubble.  With no scanner the minimap and
+   *  the off-screen arrows show nothing but the always-charted landmarks. */
+  scannerMk: number;
+  scanRanges: number[];
+  scanPingRadius: number;
+  scanPingMax: number;
+  /** The AUTO sweep's ring — minimap only. */
+  autoPingRadius: number;
+  autoPingMax: number;
+  simClock: number;
+  materialRevealAt: number;
+  materialRevealRadius: number;
+  materialRevealX: number;
+  materialRevealY: number;
+  /** Add / remove one DISCOVERED tile on the pre-rendered terrain layer.
+   *  Terrain is tracked per tile, so the layer is built up as the player
+   *  meets tiles rather than baked complete at map load. */
+  stampMinimapTile(e: GameEntity): void;
+  unstampMinimapTile(e: GameEntity): void;
+  /** The rift the player arrived through, charted without a scanner. */
+  arrivalPortalId: string | null;
   /** Discard generated background content so the next frame rebuilds it.
    *
    *  Here rather than in the seam by this file's own rule: its only callers

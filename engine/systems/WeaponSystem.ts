@@ -8,6 +8,7 @@ import {
   ENEMY_VARIANTS,
   ENEMY_ATTACK_EFFECTS,
   CORROSION,
+  MAX_PIERCE,
   COLLISION_CONFIG,
   LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
@@ -22,7 +23,7 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
  *   - BLASTER: 5× damage slug, pierces 3, no recoil
  *   - BURST:   5-shot piercing burst (vs 3) with pierce 3
  *   - SHOTGUN: 12-pellet wide cone (50°), each pellet pierces 2
- *   - BOUNCER: 3-beam fan (±15°) — beams keep their per-shot pierce/bounce
+ *   - BOUNCER: 8-beam 360° nova — beams keep their per-shot pierce/bounce
  *   - LIGHTNING: chain doubles to 4 hops over 2× range (read on the projectile)
  *   - HOMING:  4-missile volley with weaker tracking (homingStrength 0.5),
  *              each missile pierces 1
@@ -73,6 +74,25 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
       };
   }
   return config;
+}
+
+/** Apply the player's Penetration modules (A3) to one shot config.
+ *
+ *  The bonus is UNIFORM across guns by design (guidance call): the Cannon and
+ *  Lightning are `pierce: 0` because their identity is splash and chain, and
+ *  they take the bonus anyway with eyes open — the weapon x trait table in
+ *  docs/WEAPONS_AMMO_PLAN.md §7 stays the balance reference.  The sum is
+ *  clamped to MAX_PIERCE, which is a sanity ceiling against an authoring
+ *  mistake rather than a balance statement — the largest reachable stack is
+ *  the Laser's 4 plus Mk III's +3.
+ *
+ *  Applied to the COPY, never to the shared WEAPONS table — same rule the
+ *  damage/cooldown folds above it follow. */
+function withPierceBonus(config: WeaponConfig, player: GameEntity): WeaponConfig {
+  const bonus = player.pierceBonus ?? 0;
+  if (bonus <= 0) return config;
+  const pierce = Math.min(MAX_PIERCE, config.pierce + bonus);
+  return pierce === config.pierce ? config : { ...config, pierce };
 }
 
 /**
@@ -140,6 +160,7 @@ export class WeaponSystem {
         explosionDamage: config.explosionDamage !== undefined ? config.explosionDamage * dmgMult : config.explosionDamage,
       };
     }
+    config = withPierceBonus(config, player);
     player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
 
     // Every player shot asks for the TRIGGER kind: on a pad with trigger
@@ -200,6 +221,8 @@ export class WeaponSystem {
     if (dmgMult !== 1) {
       config = { ...config, damage: config.damage * dmgMult };
     }
+    // A burst sub-shot is a player shot like any other — same Penetration.
+    config = withPierceBonus(config, player);
     player.burstTimer = config.burstDelay || 0.1;
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;

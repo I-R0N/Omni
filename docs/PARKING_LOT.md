@@ -2011,3 +2011,304 @@ wanted, the lever is the detach rule rather than the damage spend: a cell
 could require a minimum number of ITS OWN boundaries broken (rather than
 merely all of its still-binding ones) so a freed neighbour does not hand
 it a discount.  Answer this before touching the harvest loop.
+
+---
+
+## Penetration bore tracks as a FRACTURE MODEL (2026-09-06) — user call
+
+**The observation.** Option C's penetration bore — a bolt walking its own
+chord through a body, spending one charge and one falloff step per GRAIN
+(`PhysicsSystem.borePierceTrack`) — produces a fracture pattern the user
+judged notably realistic, and did so as a side effect rather than by
+design.  The reason is worth stating because it is what any follow-up has
+to preserve: damage is deposited at SUCCESSIVE POINTS along a real path,
+each weaker than the last, into a model where damage already lands on
+GRAIN BOUNDARIES rather than an HP pool.  So the body is eroded along a
+line, most heavily at the entry face, tapering with depth — which is what
+a projectile actually does to brittle matter.
+
+**Why this is a parking-lot item and not a bug report.**  The voronoi /
+grain gauntlet (PR #91, `docs/GAUNTLET_VORONOI_LOG.md`) attempted richer
+fracture behaviour and, by the user's assessment, did not land it in a
+desirable form; parts were abandoned.  The bore arrived at something
+closer by accident, from a different direction — a WEAPON mechanic rather
+than a MATERIAL one.  That makes it evidence about which direction the
+material work should take, not merely a feature that happens to look good.
+
+### The investigation
+
+Take the bore's deposition profile — successive contact points along a
+path, with a decaying per-point spend — and ask whether it generalises
+into the fracture model itself, rather than living only in the
+penetration path:
+
+1. **Does every impact want a track, not a point?**  Today a non-piercing
+   hit stamps ONE contact and spends there (`stampLocalImpact` +
+   `applyBoundaryDamage`).  A shot has a direction and a penetration depth
+   even when it does not pierce; giving every impact a short decaying
+   track may be the whole difference between the current look and the
+   realistic one.  If so, the penetration module stops being the source of
+   the effect and becomes a multiplier on its DEPTH, which is a cleaner
+   story than the two mechanisms living apart.
+2. **What is the right depth for a non-piercing shot?**  Presumably a
+   function of damage, projectile size and the material's `bondStrength`
+   — not of pierce charges, which are a purchased resource and should not
+   be what decides whether matter behaves like matter.
+3. **Does the falloff RATE belong to the material rather than the
+   weapon?**  It is a global DBG knob today (`PIERCE_FALLOFF_RATE`,
+   shipped at 0 and applying to all weapons — and to all three damage
+   paths a hit produces — evenly, by user call) with a per-weapon seam
+   (`WeaponConfig.pierceFalloffRate`) that nothing uses.  A material-side
+   rate — how fast a given stuff absorbs an advancing shot — is a third
+   possibility and probably the physically honest one.
+4. **Interaction with `damageSpread`.**  The bore works as well as it does
+   *because* every material ships `damageSpread: 0`, so each stamp spends
+   sequentially outward from its own point.  A non-zero spread would
+   smear the track into a blur.  Any generalisation has to decide whether
+   spread and track-depth are the same knob wearing two names.
+
+### Related entries — read together
+
+This belongs with the other open tile/shard physics items rather than
+beside them, and several of them are the same question from other angles:
+
+- **Grain clusters: several grains leaving as ONE fragment (A4-B)** — the
+  bore currently frees grains one at a time; a track that undercuts a
+  group is exactly the case that entry is about.
+- **The erosion cascade / do old cracks compete with new wounds** — a bore
+  track IS a concentrated wound, so it sharpens that entry's open
+  question rather than sitting apart from it.
+- **Polygonal face bonding for metal** — a bore through a bonded composite
+  has no defined behaviour yet.
+- **Rotational mechanics for shards and asteroids (2026-08-21)** — a track
+  is off-centre by construction, so it implies a torque the solver does
+  not model.
+
+### What NOT to conclude
+
+The bore looking right is not evidence that the SPEND profile is right in
+general — it is evidence about deposition GEOMETRY.  The V15 grain-
+boundary model's own measured lessons still hold (spend order is cell by
+cell; a flat nearest-edge sort completes almost nothing until the end),
+and any generalisation has to re-measure against them rather than assume
+the bore's success transfers.
+
+---
+
+## Hex-slot outfitting — the UI needs a pass (2026-09-06) — user call
+
+**Play-test verdict: the MECHANIC is functional, the SCREEN is not.**  A5
+shipped purchasable hex slots and the user tested them working end to end —
+a locked hex refuses every way in, the shop offers the next one, the price
+ladder climbs, a run reset puts the counts back.  What is missing is the
+part that tells the player any of that.
+
+Parked deliberately rather than patched now: the user expects this to be
+addressed **during the mining implementation**, which is when the outfitting
+screen gets its next real look anyway.  Fixing it twice is the waste.
+
+### What is wrong today
+
+A locked hex is drawn INERT — no `data-tile`, so a drag cannot land on it —
+which is correct behaviour and almost no communication.  It reads as a hex
+that is simply not there, rather than as one that can be bought.  Nothing on
+the OUTFIT tab connects the empty space to the "+1 Hex Slot" line in the
+SHOP tab, and nothing names the price without switching tabs.
+
+The underlying design is deliberately minimal and should NOT be re-opened to
+fix this — a LOCKED hex is an EMPTY hex that cannot be filled, which is why
+the feature needed no change to `HEX_ADJACENCY` or `computeActiveSlots`.  The
+work is presentational.
+
+### Open questions for that pass
+
+1. **How does a locked hex read?**  A dashed outline plus a padlock and a
+   price is the obvious answer; the risk is that seven of them turn the
+   flower into a shopping list and bury the modules the player actually has.
+2. **Should the flower itself be the buy button?**  Tapping a locked hex
+   could offer the purchase in the detail strip — the same strip that already
+   describes a module — instead of routing through the SHOP tab.  That keeps
+   one gesture (tap a hex, read about it) meaning one thing.
+3. **Where does the ship's GROWTH show?**  There is no readout anywhere for
+   "5 of 7 ship hexes" — the count exists on `EngineStats.outfitting`
+   (`shipUnlocked` / `weaponUnlocked` / `maxSlots`) and nothing renders it.
+   The header already carries `◈` balance and `⬢` cargo; a third chip is the
+   cheap answer.
+4. **Does the shop entry survive?**  If the flower becomes the buy surface,
+   the SHOP tab's "+1 Hex Slot" row is a second path to one action.  Two
+   paths is not automatically wrong — the shop is where money is spent — but
+   they must not disagree about price or availability, and `slotUnlockCost`
+   through the `modulePrice` seam is what keeps that true.
+5. **`MODULE_SLOT_UNLOCK.START` is the cap TODAY**, so none of this is
+   reachable in a shipped run without DBG ▸ Modules ▸ "Lock slots".  The
+   balance call — what a hull actually starts with — belongs to the economy
+   pass, and this UI work should not settle it by accident.
+
+### Related
+
+- **Ship classes** — `SHIP_WEIGHT.HULL_BASE` (0 today) and the slot count are
+  the same seam from two directions: a heavier hull that starts with more
+  hexes is one table row, and this screen is where the difference would have
+  to read.
+- The two competing ship-design directions (ship catalog CHOSEN vs modular
+  physical ship SUPERSEDED) recorded elsewhere in this file bound how much
+  of the flower is worth investing in before that is settled.
+
+---
+
+## Unified impact physics — penetration, crashes and fracture are one mechanism wearing three names (2026-09-06) — user call
+
+**The concern, in the user's words:** penetration "should really be an
+inherent behavior based on physics and it may not be" — a ship colliding
+with tiles ought to behave the way a piercing bolt does; and since "damage
+should be based on energy/momentum, as projectiles lose speed due to
+penetration hits, they should also naturally be reducing damage."  The
+worry is that the penetration system **overlaps strongly with other physics
+mechanics**, and that this has to be resolved before new entities,
+projectiles, weapons and materials are built on top of it.
+
+That reading is correct, and this entry is the review it asks for.  It is
+the general form of the **"Penetration bore tracks as a FRACTURE MODEL"**
+entry above — that one asks whether every impact wants a track; this one
+asks whether every impact wants the same *arithmetic*.
+
+### 1. The inventory: how a body can be damaged today
+
+Nine paths, and they do NOT share a model:
+
+| # | path | what it spends | where |
+|---|---|---|---|
+| 1 | projectile hit | authored `WeaponConfig.damage` | `resolveCollision` projectile branch |
+| 2 | pierce bore | the same, per grain, × a falloff RATE | `borePierceTrack` |
+| 3 | player crash into a tile | `health -= 1` (a whole pane for glass) | `resolveCollision` player branch |
+| 4 | asteroid crash into a tile | same, plus a momentum gate | two `killStructureByImpact` sites |
+| 5 | tile pressure | a COUNT of sub-threshold impacts | `tilePressureCount` |
+| 6 | AoE shockwave ring | authored splash damage | `updateExplosionRings` |
+| 7 | lightning chain | authored chain damage | `fireLightningChainFromImpact` |
+| 8 | bubble bite | boundary damage, on a cadence | `chipStructureAt` |
+| 9 | dragon consume | deletes the tile outright | `consumeTile` |
+
+**Paths 1, 2, 6, 7 and 8 spend on GRAIN BOUNDARIES** (V15) — the physically
+grounded model, where HP is *derived* from `Σ (boundary length ×
+bondStrength)`.  **Paths 3, 4, 5 and 9 do not**: they decrement `health`
+directly or delete the body.  CLAUDE.md states that split as a deliberate
+simplification ("PHYSICAL smashes still take the whole body: they meter
+boulders, not weapons"), and it is exactly the asymmetry the user is
+pointing at.  A bolt bores a pane grain by grain; a hull at speed takes the
+whole pane in one event and leaves no track.
+
+### 2. The four overlaps
+
+1. **TWO DAMAGE VOCABULARIES.**  "HP damage" (a scalar decrementing a pool)
+   and "boundary damage" (energy spent on interfaces, HP derived from what
+   is left).  The second is the real model; the first is a legacy the
+   collision paths still speak.  Every new material inherits both.
+
+2. **TWO ENERGY MODELS, one real and one authored.**  Collisions already
+   compute genuine mechanics — `impactStrength` is
+   `(1+e)·|v_n|·effInv_self/(effInv_self+effInv_other)`, a real velocity
+   step, and the crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`.
+   Weapons carry an authored `damage` number with no mass, no speed and no
+   relation to either.  The same tile therefore answers to two different
+   physics depending on what hit it.
+
+3. **THE FALLOFF IS A SECOND KNOB FOR SOMETHING THE FIRST SHOULD ALREADY
+   SAY.**  `PIERCE_FALLOFF_RATE` decays damage per hit, and
+   `PIERCE_SPEED_RETAIN` decays SPEED per hit — and ships at `1.0`, a no-op.
+   If damage were kinetic (`½mv²`, or `mv`), the falloff would **fall out of
+   the speed loss** rather than being authored beside it.  Two knobs
+   describing one phenomenon is the clearest single symptom of the overlap,
+   and it is why the shipped falloff rate is 0: nobody could say what the
+   right number was, because the number should not have existed.
+
+4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**  A shot
+   gets N discrete charges regardless of what it hits — a 36px pane and a
+   200-unit boulder each cost the same charge (the bore softened this
+   *within* a body but not between bodies).  Under an energy model there is
+   no count: a shot stops when its energy is spent, so a bolt crosses thin
+   glass and buries itself in metal without either being enumerated.
+
+### 3. The unification, and why it is nearer than it looks
+
+The substrate is already right.  **`bondStrength` is damage per PIXEL of
+boundary — dimensionally a specific fracture energy** (energy per unit
+area), which is precisely the physical constant this wants.  The proposal:
+
+- **One quantity crosses every impact seam: ENERGY.**  A projectile carries
+  `½mv²`.  A hull carries `½mv²`.  Breaking a boundary of length `L` costs
+  `L × bondStrength`.  Whatever is spent is subtracted from the mover's
+  kinetic energy, and the mover slows accordingly.
+- **Damage falloff DISAPPEARS as a knob.**  A bolt that has spent energy on
+  three grains is slower, so its next bite is smaller, automatically and
+  with the right curve.  `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
+  collapse into one another and then into nothing.
+- **The player bores terrain by the same routine.**  `borePierceTrack`
+  already walks a chord in a body's local frame at `grainSize` steps; a hull
+  sweeping through a tile is the same walk with a different energy budget
+  and a wider track.  A fast heavy ship ploughs a channel and slows; a slow
+  one bounces because it cannot pay for the first boundary.  That is the
+  user's first point, and it needs no new mechanism — only for path 3 to
+  call what path 2 calls.
+- **The crash THRESHOLD becomes a consequence.**
+  `CRASH_VELOCITY_THRESHOLD` and `ASTEROID_CRASH_MOMENTUM` stop being
+  authored gates and become "did the impactor bring enough energy to break
+  the first boundary" — which is automatically material-dependent, so metal
+  resists a bump that shatters glass without a per-material threshold table.
+- **A Penetration module stops buying charges** and starts buying what a
+  penetrator actually has: sectional density, or a smaller contact patch —
+  i.e. it concentrates the same energy on less boundary. That is a better
+  story for the item as well as a truer one.
+
+### 4. What must NOT be unified
+
+Named explicitly, because a unification that swallows these will be wrong:
+
+- **ACTORS ARE NOT STRUCTURES.**  The player, enemies, bosses and fauna have
+  authored HP pools, shields, armour, front-shields and regen — all of them
+  *authored-damage* concepts and all of them load-bearing for the
+  counterplay layer (`docs/WEAPONS_AMMO_PLAN.md` §7).  The unification
+  belongs to STRUCTURAL bodies; the seam between the two needs exactly one
+  documented conversion, and that conversion is where balance lives.
+- **`damageSpread: 0` is load-bearing for the bore.**  The track works
+  because each stamp spends sequentially outward from its own point.  Any
+  energy model has to preserve that, or the track blurs (V15's own measured
+  lesson).
+- **Presentation must not be re-derived.**  Shake, audio gain and rumble
+  already come from `impactStrength`, and CLAUDE.md's rule is that how hard
+  a hit reads to the eye and to the ear cannot drift apart.  An energy model
+  should FEED that one number, not add a second.
+
+### 5. Cost, and the order to do it in
+
+This is a multi-session change and should not be started inside a feature
+PR.  The honest sequencing:
+
+1. **Measure first.**  Establish what a shipped weapon's authored `damage`
+   is worth in energy terms against each material's derived HP, so the
+   conversion constant is fitted to the game that exists rather than chosen.
+   Without this the whole roster re-balances silently.
+2. **Route paths 3, 4 and 5 through `applyBoundaryDamage`** — the smallest
+   change with the biggest honesty gain, and independently testable: a
+   crushed tile should crack and shed grains the way a shot one does.
+   `chipStructureAt` (the bubble's bite) is the proof this works: it is
+   already a non-weapon caller of the grain model.
+3. **Make projectile damage kinetic**, retire the falloff rate and the speed
+   retain, and check the §7 counterplay table still holds.
+4. **Give hulls a bore track**, which is when the user's first point is
+   actually delivered.
+5. **Revisit `pierceCount`** last, since removing a budget changes what the
+   Penetration module *is*.
+
+### 6. Related entries — this is the hub
+
+- **Penetration bore tracks as a FRACTURE MODEL** — the deposition-geometry
+  half of the same question.
+- **Grain clusters: several grains leaving as ONE fragment (A4-B)** — what a
+  wide (hull-sized) track should free.
+- **Fracture: the erosion cascade** — whether old wounds compete with new.
+- **Polygonal face bonding for metal** — bonded composites have no defined
+  bore behaviour.
+- **Rotational mechanics for shards and asteroids** — a track is off-centre
+  by construction and therefore implies a torque the solver does not model.
+- `docs/MATERIAL_GRAIN_SPEC.md` — the PROPOSED unified bonding system, which
+  this entry is the impact-side counterpart to.

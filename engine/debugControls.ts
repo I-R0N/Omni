@@ -30,11 +30,11 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
+    MODULE_SLOT_UNLOCK, cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
     cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
     cycleDamageSpread,
@@ -360,6 +360,31 @@ export class DebugControls {
    *  honest control for that is showing neither. */
   cycleMinimapMaterial() {
     cycleMinimapMaterial();
+  }
+
+  /** DBG (Modules): lock hexes off both flowers so the A5 purchase can
+   *  actually be flown.  `MODULE_SLOT_UNLOCK.START` ships at the cap — the
+   *  count is the seam for the ship catalog, not a balance number to set
+   *  here — so without this row the locked state and the shop's "+1 Hex
+   *  Slot" entry are unreachable in play.  Steps 7 -> 5 -> 4 -> 3 -> 7;
+   *  modules sitting in a hex that is about to lock go back to the
+   *  INVENTORY, and are SCRAPPED if the hold is full (DBG only). */
+  cycleSlotLock() {
+    const g = this.g;
+    const steps = [MODULE_SLOT_UNLOCK.MAX, 5, 4, 3];
+    const next = steps[(steps.indexOf(g.shipSlotsUnlocked) + 1 + steps.length) % steps.length];
+    for (const area of ['ship', 'weapon'] as const) {
+      const slots = area === 'ship' ? g.shipSlots : g.weaponSlots;
+      for (let i = next; i < slots.length; i++) {
+        if (slots[i] === null) continue;
+        const free = g.inventory.indexOf(null);
+        if (free !== -1) g.inventory[free] = slots[i];
+        slots[i] = null;
+      }
+    }
+    g.shipSlotsUnlocked = next;
+    g.weaponSlotsUnlocked = next;
+    g.syncOutfitAfterDebugSlotLock();
   }
 
   /** DBG (Visual): cycle the ROCK palette — mixed (default) / slate / rust /
@@ -867,6 +892,25 @@ export class DebugControls {
    *  both AI speed states live so the chase feel can be tuned in-game. */
   cycleSnitchSpeed() {
     cycleSnitchSpeed();
+  }
+
+  /** Cycle the PIERCE SPEED DECAY (DBG "Pierce spd") — the per-hit
+   *  multiplier a piercing bolt's speed keeps as it bores through.  Ships
+   *  at 1.00 (a no-op), so this is the only way to feel a decaying bolt
+   *  against the falloff table before either is tuned. */
+  cyclePierceSpeedRetain() {
+    cyclePierceSpeedRetain();
+  }
+
+  /** Cycle the PENETRATION DAMAGE FALLOFF RATE (DBG "Pierce falloff") —
+   *  the per-hit decay every penetration hit after the first is scaled by,
+   *  as `(1 - rate)^ordinal`.  A RATE rather than the authored table it
+   *  replaced precisely so it can be swept from here (user call), and 0 is
+   *  a first-class step: every hit then lands full projectile damage,
+   *  which is the control for judging whether the decay earns its place.
+   *  Global — it applies to every weapon evenly for now. */
+  cyclePierceFalloff() {
+    cyclePierceFalloff();
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────
