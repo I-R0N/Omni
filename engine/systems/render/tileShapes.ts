@@ -23,7 +23,7 @@
  *
  *  What did NOT travel: `materialAutomataAlpha` (the glass fast path and
  *  `staticTileCache.ts` also call it) and the sprite / bitmap caches
- *  (`getSolidTriangleBitmap`, `getSpecularBitmap`) — CLAUDE.md §2 files those
+ *  (`getSolidDiscBitmap`, `getSpecularBitmap`) — CLAUDE.md §2 files those
  *  on `RenderSystem`, so they are reached through `rs`.
  *
  *  NAMING: the renderer parameter is `rs`, not the `r` the other `render/`
@@ -41,8 +41,8 @@ import {
 import { HEX_SIZE } from '../../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb, rgbToHex, densityTintForRender, liftCh, sinkCh, hash01,
-         CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE,
-         METAL_CRACK_STYLE, roundedPolyPath } from './drawUtils';
+         CrackStyle, crackSeedFor, drawDamageCracks, ROCK_CRACK_STYLE, METAL_CRACK_STYLE, roundedPolyPath, drawFractureCracks, GLASS_CRACK_STYLE } from './drawUtils';
+import { ensureFractureEdges, fractureRevealedEdgeCount, edgeBreakFraction, bondStrengthFor } from '../fractureCache';
 
 /**
  * PAuto automata colour for a plastic-shard: the active palette's
@@ -371,13 +371,48 @@ export function overlayMaterialCracks(
     // tiny or distant damaged bodies (the proliferating rock/metal chips).
     // Pure render saving; the silhouette + base fill still draw normally.
     if (r * apparentScale < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) return;
+    // Which crack model this body uses has to be decided BEFORE the
+    // legacy pacing gate below, because that gate does not apply to the
+    // grain model.  `count` paces the seeded-spoke look off the body's
+    // HP; a grain body instead draws each boundary at its OWN absorbed
+    // damage, and used to be turned away here — so a body carrying real
+    // boundary damage drew nothing at all until it had lost a whole
+    // `cfg.freq` of HP, which is most of a small pattern's life.
+    const fractured = entity.shardVariant !== undefined
+        && SHARD_VARIANTS[entity.shardVariant].grain !== undefined
+        ? ensureFractureEdges(entity) : null;
+    const grain = fractured !== null && fractured.length > 0
+        && bondStrengthFor(entity) !== null;
     const count = Math.min(cfg.cap, Math.floor((maxHp - hp) / cfg.freq));
-    if (count <= 0) return;
+    if (!grain && count <= 0) return;
     const dmgFrac = Math.min(1, Math.max(0, 1 - hp / maxHp));
     ctx.save();
     buildPath();
     ctx.clip();
-    drawDamageCracks(ctx, r, crackSeedFor(entity), count, dmgFrac, style);
+    // Voronoi materials (a SHARD_VARIANTS `fracture` block — rock today)
+    // draw the INTERIOR CELL EDGES of the cached decomposition instead of
+    // seeded spokes: the cracks ARE the seams the entity breaks along
+    // (V3), and since V8 the reveal count comes from the SAME helper the
+    // progressive-detach sim reads (`fractureRevealedEdgeCount`), so a
+    // boundary the player sees fully highlighted is exactly a piece
+    // about to break off.  Everything else (metal, and enemy hulls via
+    // enemyShapes) keeps the legacy spoke look.
+    if (fractured !== null && fractured.length > 0) {
+        // No max(1, …) floor: the helper's count IS the truth the sim
+        // detaches by, and an early hit on a small pattern legitimately
+        // reveals zero edges — the scorch still reads as damage.
+        // V15: under the grain model each boundary carries its own break
+        // progress, so the overlay draws PARTIAL cracks and a boundary the
+        // player sees complete is exactly one that no longer binds.  The
+        // legacy HP-paced reveal stays for variants without a
+        // `bondStrength` (and for the legacy fracture A/B).
+        const upTo = grain ? fractured.length
+            : fractureRevealedEdgeCount(entity, fractured.length, cfg.freq);
+        drawFractureCracks(ctx, fractured, upTo, r, dmgFrac, style,
+            grain ? (i: number) => edgeBreakFraction(entity, i) : undefined);
+    } else {
+        drawDamageCracks(ctx, r, crackSeedFor(entity), count, dmgFrac, style);
+    }
     ctx.restore();
 }
 
@@ -592,6 +627,18 @@ export function drawTileShape(
         if (!isFlash) {
             ctx.globalAlpha = Math.min(1, (0.28 + prox * 0.18) * autoAlpha);
             ctx.drawImage(rs.getSpecularBitmap(), -15, -17);
+        }
+
+        // Glass damage layer (V9): the fracture pattern webs across the
+        // pane as HP falls — bright hairlines along the cell boundaries
+        // the pane will actually break into.
+        if (entity.shardVariant === 'glass-tile') {
+            const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+            overlayMaterialCracks(
+                ctx, entity, rr, buildPath,
+                GLASS_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.glass,
+                camera.zoom,
+            );
         }
 
         // Indestructible-tile lighting — the fill-only warm-white
@@ -888,7 +935,38 @@ export function drawTileShape(
                     }
                     ctx.clip();
                     const dmgFracC = Math.min(1, Math.max(0, 1 - hpC / maxHpC));
-                    drawDamageCracks(ctx, radC, crackSeedFor(entity), countC, dmgFracC, METAL_CRACK_STYLE);
+                    // V5 (metal keeps the lattice): the composite's cracks
+                    // run along its OWN lattice-cell edges — the exact
+                    // seams decomposeMetalComposite breaks it into — not
+                    // the seeded radial spokes.  Reveal a crackSeed-rotated
+                    // prefix of cells (stable per entity, grows with
+                    // damage), stroking each revealed cell's outline; the
+                    // scorch darken is kept from the spoke treatment.
+                    ctx.fillStyle = `rgba(${METAL_CRACK_STYLE.scorchRgb},${
+                        METAL_CRACK_STYLE.scorchBase + METAL_CRACK_STYLE.scorchGain * dmgFracC})`;
+                    ctx.fillRect(-radC * 1.2, -radC * 1.2, radC * 2.4, radC * 2.4);
+                    const showC = Math.max(1, Math.ceil(cells.length * countC / cfgC.cap));
+                    const rot = Math.floor(crackSeedFor(entity)) % cells.length;
+                    ctx.strokeStyle = METAL_CRACK_STYLE.crackColor;
+                    ctx.lineWidth = METAL_CRACK_STYLE.crackWidth;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    for (let k = 0; k < showC && k < cells.length; k++) {
+                        const c = cells[(rot + k) % cells.length];
+                        const ccx = c.ix * ux - cmx;
+                        const ccy = c.iy * uy - cmy;
+                        if (c.up) {
+                            ctx.moveTo(ccx, ccy - R);
+                            ctx.lineTo(ccx + ux, ccy + uy);
+                            ctx.lineTo(ccx - ux, ccy + uy);
+                        } else {
+                            ctx.moveTo(ccx, ccy + R);
+                            ctx.lineTo(ccx + ux, ccy - uy);
+                            ctx.lineTo(ccx - ux, ccy - uy);
+                        }
+                        ctx.closePath();
+                    }
+                    ctx.stroke();
                     ctx.restore();
                 }
             }
@@ -901,46 +979,35 @@ export function drawTileShape(
         const isTileShard = entity.shardVariant === 'glass-shard';
         const glowColor = entity.powerupGlowColor;
 
-        // ── LOD: tiny metal shards → cached solid triangle ─────────
-        // Below MIN_APPARENT_RADIUS_PX the equilateral-triangle metal
-        // shard's edge stroke and bloom are sub-pixel, so a flat
-        // filled triangle is indistinguishable from the full render at
-        // a fraction of the cost (one drawImage vs beginPath +
-        // per-vertex lineTo + fill + stroke).  The cached bitmap is a
-        // triangle (NOT a disc) so the silhouette stays faithful —
-        // metal shards read as triangles, and a circle here was a
-        // mis-render.  Restricted to metal-shard; rock (irregular
-        // 5-9-gon) and glass (sharp splinter) are EXCLUDED — their
-        // silhouette is part of the material's identity.  Also
-        // excluded: hit-flashing and power-up-glowing shards (cues
-        // must read).  Reset globalAlpha before the early return so a
-        // following fast-path tile blit isn't faded.
         const lodR = entity.size.x * 0.5;
+        // GRAIN CHIPS → a cached solid DISC.  A shattering tile spawns
+        // many small fragments, so the tiniest ones collapse to one
+        // drawImage, skipping the full polygon + density tint + (already
+        // LOD-gated) crack render.
+        //
+        // A DISC, and the SAME small threshold for every grain material.
+        // This is the silhouette-neutrality rule, learned twice:
+        //   - rock blitted METAL's equilateral triangle for a while, so a
+        //     tile shattering into 8 grains read as 8 identical triangles
+        //     — precisely the Voronoi shape the fracture model exists to
+        //     show;
+        //   - metal then kept a triangle branch of its own at the MUCH
+        //     larger MIN_APPARENT_RADIUS_PX (9px), justified by its shards
+        //     genuinely being lattice triangles.  A3 gave metal Voronoi
+        //     fracture and that stopped being true, but the branch stayed:
+        //     measured on METAL_FIELD, a broken tile's 9 grains (real 4-,
+        //     5- and 6-gons) sat at 3.5-4.5px apparent and took 9 triangle
+        //     blits — every grain on screen wearing an authored shape.
+        // A disc says "small fragment" and nothing about shape, and
+        // CHIP_LOD_RADIUS_PX is deliberately small enough that a tile's
+        // own grains draw their real polygons and only genuine dust takes
+        // this path.  Glass (sharp splinter) stays excluded entirely.
         if (rs.shardLodEnabled
-            && entity.shardVariant === 'metal-shard'
-            && !isFlash
-            && glowColor === undefined
-            && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
-            const tri = rs.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
-            ctx.globalAlpha = shardMergeFadeAlpha(entity);
-            ctx.drawImage(tri, -lodR, -lodR, lodR * 2, lodR * 2);
-            ctx.globalAlpha = 1.0;
-            drawMetalDebugOutline(rs, ctx, entity);
-            rs.lastLodShardCount++;
-            return;
-        }
-        // Rock chips: the conservation-chip system spawns many small
-        // rock-shards, so collapse the tiniest ones (below the
-        // chip-LOD radius, smaller than the metal threshold) to the
-        // same cached solid blob — skips the full polygon + density
-        // tint + (already LOD-gated) crack render.  Their jagged
-        // silhouette is imperceptible at this apparent size.
-        if (rs.shardLodEnabled
-            && entity.shardVariant === 'rock-shard'
+            && (entity.shardVariant === 'rock-shard' || entity.shardVariant === 'metal-shard')
             && !isFlash
             && glowColor === undefined
             && lodR * camera.zoom < SHARD_LOD_CONSTANTS.CHIP_LOD_RADIUS_PX) {
-            const blob = rs.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
+            const blob = rs.getSolidDiscBitmap(densityTintForRender(entity, entity.color));
             ctx.globalAlpha = shardMergeFadeAlpha(entity);
             ctx.drawImage(blob, -lodR, -lodR, lodR * 2, lodR * 2);
             ctx.globalAlpha = 1.0;
@@ -986,6 +1053,19 @@ export function drawTileShape(
             ctx.strokeStyle = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},0.85)`;
             ctx.lineWidth   = isFlash ? 2.5 : 1.5;
             ctx.stroke();
+
+            // Glass damage layer (V9) — same webbing as the tile:
+            // glass-shards carry their own fracture block, so these are
+            // the exact cell seams the shard breaks into.
+            ctx.globalAlpha = fadeAlpha;
+            {
+                const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+                overlayMaterialCracks(
+                    ctx, entity, rr, buildPath,
+                    GLASS_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.glass,
+                    camera.zoom,
+                );
+            }
 
         } else {
             // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay

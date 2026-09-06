@@ -23,6 +23,7 @@
  *  the 5b suites call it straight off `window.__omniEngine`.
  */
 import type { GameEngine } from './GameEngine';
+import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { GameEntity, EntityType, Vector2, WeaponType } from '../types';
 import {
     EXPLOSION_CONSTANTS, PHYSICS_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS,
@@ -183,7 +184,13 @@ export function updateExplosionRings(g: GameEngine) {
                     e.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                     e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                 }
-                if (!isIndestructible) e.health -= applied;
+                if (!isIndestructible) {
+                    // GRAIN BOUNDARIES (V15): a blast arrives from the ring's
+                    // centre, so stamp that side and let it break boundaries
+                    // like any other damage rather than draining a pool.
+                    stampLocalImpact(e, ring.position);
+                    if (!applyBoundaryDamage(e, applied)) e.health -= applied;
+                }
                 // (h) regen: splash damage counts toward a burst too — but
                 // ONLY when the blast is the player's (an enemy shell healing
                 // its own boss through the bucket would be nonsense).  Like

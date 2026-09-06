@@ -115,7 +115,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
   // derives from the player's friction-limited terminal cruise (same
   // formula as the DBG thrust tooltip: acceleration/(1−friction),
   // clamped by maxSpeed) so the chase tracks thrust-mult changes.
-  const flow = g.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
+  const flow = g.flowField.sampleShardFlow(s.position.x, s.position.y);
   const wob = Math.sin(g.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
       * SNITCH_CONSTANTS.WANDER_AMPLITUDE;
   const cosW = Math.cos(wob), sinW = Math.sin(wob);

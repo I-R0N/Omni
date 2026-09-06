@@ -183,7 +183,7 @@ export abstract class BaseMapLayer {
    * Per-map flow sampler.  Default is the global analytical meander used
    * by the universe map; subclasses can override to give the map its
    * own streamline geometry (e.g. concentric rings).  Must return a
-   * unit vector.  Also consumed by `FlowFieldGrid.buildAsteroidField`
+   * unit vector.  Also consumed by `FlowFieldGrid.buildShardFlowField`
    * via `GameEngine.loadMap`, so the baked grid matches the map-specific
    * flow visible in asteroid motion from frame 1.
    */
@@ -191,7 +191,7 @@ export abstract class BaseMapLayer {
     return sampleFlow(wx, wy);
   }
 
-  protected spawnAsteroids(
+  protected spawnRockShards(
       count: number,
       minSize: number,
       maxSize: number,
@@ -244,7 +244,7 @@ export abstract class BaseMapLayer {
         wrapPosition(pos);
 
         const size = minSize + Math.random() * (maxSize - minSize);
-        this.entities.push(this.createAsteroid(pos.x, pos.y, size, speedMultiplier, allowedSprites));
+        this.entities.push(this.createRockShard(pos.x, pos.y, size, speedMultiplier, allowedSprites));
     }
 
     // Scatter the remainder across the original radial distribution so
@@ -256,11 +256,11 @@ export abstract class BaseMapLayer {
         const x = Math.cos(angle) * dist;
         const y = Math.sin(angle) * dist;
         const size = minSize + Math.random() * (maxSize - minSize);
-        this.entities.push(this.createAsteroid(x, y, size, speedMultiplier, allowedSprites));
+        this.entities.push(this.createRockShard(x, y, size, speedMultiplier, allowedSprites));
     }
   }
 
-  public createAsteroid(
+  public createRockShard(
       x: number,
       y: number,
       size: number,
@@ -371,7 +371,7 @@ export class UniverseMap extends BaseMapLayer {
 
     // Asteroids spread around spawn
     const gen = getRockShardFreeSpawn(MapType.UNIVERSE);
-    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    this.spawnRockShards(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     // Asteroids are spawned on a linear radial distribution and may fall
     // just outside the canonical wrap range; normalise so every entity
     // sits in [-HALF, HALF) before any distance math runs.
@@ -468,7 +468,7 @@ export class OverworldMap extends BaseMapLayer {
     this.initialized = true;
 
     const gen = getRockShardFreeSpawn(MapType.OVERWORLD);
-    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    this.spawnRockShards(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
     // Same 95 %-of-map cluster zone as the UniverseMap (5 % dead ring at
@@ -574,7 +574,7 @@ export class RingMap extends BaseMapLayer {
     // Asteroids follow the concentric flow from spawn (sampleFlow above
     // is called by the base-class helper through `this.sampleFlow`).
     const gen = getRockShardFreeSpawn(MapType.RING);
-    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    this.spawnRockShards(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
     // Glass tile ring at the featured radius.
@@ -624,7 +624,7 @@ export class SevenRingsMap extends BaseMapLayer {
     this.initialized = true;
 
     const gen = getRockShardFreeSpawn(MapType.SEVEN_RINGS);
-    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    this.spawnRockShards(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
     // Evenly-spaced radii from inner to outer.  Division by (COUNT - 1)
@@ -688,7 +688,7 @@ export class PocketMap extends BaseMapLayer {
     // Asteroids on the shared analytical meander — same sampler as
     // Deep Space, so motion reads consistently between maps.
     const gen = getRockShardFreeSpawn(MapType.POCKET);
-    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    this.spawnRockShards(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
     // 90 %-of-map cluster zone keeps every spawn well inside the seam.
@@ -770,7 +770,7 @@ export class AsteroidFieldMap extends BaseMapLayer {
     this.initialized = true;
 
     const gen = getRockShardFreeSpawn(MapType.ASTEROID_FIELD);
-    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    this.spawnRockShards(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
     const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;

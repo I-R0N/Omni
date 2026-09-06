@@ -136,6 +136,13 @@ export const METAL_CRACK_STYLE: CrackStyle = {
     scorchRgb: '8,11,18', scorchBase: 0.10, scorchGain: 0.30,
     crackColor: 'rgba(2,6,12,0.55)', crackWidth: 1.1, glint: false,
 };
+// Glass (V9 damage layer): BRIGHT hairlines, not dark ones — a crack in
+// glass catches the light, and a dark stroke on a translucent pane reads
+// as dirt.  Near-zero scorch: glass doesn't char, the pane just webs.
+export const GLASS_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '148,163,184', scorchBase: 0.03, scorchGain: 0.08,
+    crackColor: 'rgba(224,242,254,0.85)', crackWidth: 1.0, glint: false,
+};
 
 // Stable [0,1000) per-entity seed for the crack overlay, lazily derived
 // from the entity id (same id-hash the enemy core-pulse uses for
@@ -187,6 +194,54 @@ export function drawDamageCracks(
         ctx.lineWidth = s.crackWidth;
         ctx.stroke();
         // Thin hot-edge highlight on the worst damage so deep cracks glint.
+        if (s.glint && dmgFrac > 0.5) {
+            ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+        }
+    }
+}
+
+/** Draw the first `upTo` INTERIOR CELL EDGES of a fracture decomposition
+ *  as the entity's cracks (voronoi gauntlet, V3) — same scorch + stroke +
+ *  glint treatment as drawDamageCracks, but the fissures are the exact
+ *  seams the entity will break along instead of seeded radial spokes.
+ *  Edges arrive pre-sorted (nearest-impact first, see
+ *  fractureCache.ensureFractureEdges), so revealing a prefix grows the
+ *  pattern outward from the hits without reshuffling frame to frame.
+ *  Caller owns the silhouette clip, exactly as with drawDamageCracks. */
+export function drawFractureCracks(
+    ctx: CanvasRenderingContext2D,
+    edges: ReadonlyArray<{ ax: number; ay: number; bx: number; by: number }>,
+    upTo: number,
+    r: number,
+    dmgFrac: number,
+    s: CrackStyle,
+    /** GRAIN BOUNDARIES (V15): 0..1 per edge, how far through breaking
+     *  that boundary is.  A partly-broken boundary is drawn as a PARTIAL
+     *  CRACK growing from the end nearest the impact, so the player can
+     *  read how close a piece is to coming loose rather than only that it
+     *  is cracked at all.  Absent → the legacy binary reveal by `upTo`. */
+    breakFrac?: (i: number) => number,
+): void {
+    ctx.fillStyle = `rgba(${s.scorchRgb},${s.scorchBase + s.scorchGain * dmgFrac})`;
+    ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+    ctx.lineCap = 'round';
+    const n = breakFrac ? edges.length : Math.min(upTo, edges.length);
+    for (let i = 0; i < n; i++) {
+        const e = edges[i];
+        let bx = e.bx, by = e.by;
+        if (breakFrac) {
+            const t = breakFrac(i);
+            if (t <= 0) continue;
+            if (t < 1) { bx = e.ax + (e.bx - e.ax) * t; by = e.ay + (e.by - e.ay) * t; }
+        }
+        ctx.beginPath();
+        ctx.moveTo(e.ax, e.ay);
+        ctx.lineTo(bx, by);
+        ctx.strokeStyle = s.crackColor;
+        ctx.lineWidth = s.crackWidth;
+        ctx.stroke();
         if (s.glint && dmgFrac > 0.5) {
             ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
             ctx.lineWidth = 0.7;

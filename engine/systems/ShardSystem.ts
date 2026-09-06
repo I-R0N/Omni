@@ -34,6 +34,9 @@ import {
   METAL_ASSEMBLY,
   METAL_MAX_DENSITY_TIER,
   getActiveShatterGraceDelay,
+  getActiveFractureMode,
+  GLASS_SHARD_HP,
+  METAL_SHARD_HP,
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
   NEBULA_CONDENSE_STALL_BONDS,
@@ -54,6 +57,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
+import { ensureFractureCells } from './fractureCache';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -400,7 +404,7 @@ export class ShardSystem {
   private _mergeGridScratch: Map<number, number[]> = new Map();
 
   // ── Per-shatter scratch buffers (allocation discipline) ─────────────────
-  // shatterAsteroidStyle used to allocate the size / raw-area / density-tier
+  // shatterPowerlawStyle used to allocate the size / raw-area / density-tier
   // temp arrays (via Array.from / map / filter) every shatter, and
   // generateShardPolygon allocated an intermediate {angle,r}[] + sort/map
   // closures per polygon.  A mass-shatter frame (a cluster crushed at once)
@@ -472,6 +476,52 @@ export class ShardSystem {
    * candidates that were just merged this frame don't get double-
    * processed.
    */
+  /** ELASTIC RECOVERY (user call): a fragment that broke off DEFORMED
+   *  springs slowly back toward the shape its grain was cut at.  Plastic
+   *  opts in via `grain.dentRecoverSeconds`; metal does not, so a metal
+   *  chip keeps its dent for good.
+   *
+   *  The lerp runs on the polygon rather than on a scale factor because
+   *  the dent is not uniform — only the vertices that were on the body's
+   *  outline moved, so springing back has to restore exactly those.
+   *  Collision caches are invalidated as it goes, since SAT reads the
+   *  polygon. */
+  private tickDentRecovery(entities: GameEntity[], dt: number): void {
+    for (const e of entities) {
+      if (e.dentRecoverTimer === undefined || !e.active) continue;
+      const rest = e.dentRestPolygon;
+      const pts = e.polygonPoints;
+      if (rest === undefined || pts === undefined || rest.length !== pts.length) {
+        e.dentRecoverTimer = undefined;
+        continue;
+      }
+      // LINEAR in time.  Moving a fraction `1 - timer/total` of the
+      // REMAINING distance each tick compounds into an exponential
+      // approach that reaches rest long before the timer expires, which
+      // makes `dentRecoverSeconds` mean nothing; stepping by
+      // dt/remaining covers the remaining distance at a constant rate.
+      const k = Math.max(0, Math.min(1, dt / Math.max(dt, e.dentRecoverTimer)));
+      e.dentRecoverTimer -= dt;
+      let moved = false;
+      for (let i = 0; i < pts.length; i++) {
+        const nx = pts[i].x + (rest[i].x - pts[i].x) * k;
+        const ny = pts[i].y + (rest[i].y - pts[i].y) * k;
+        if (nx !== pts[i].x || ny !== pts[i].y) moved = true;
+        pts[i].x = nx; pts[i].y = ny;
+      }
+      if (moved) {
+        e._satCacheAxes = undefined;
+        e._occluderR = undefined;
+        invalidateCollisionR(e);
+      }
+      if (e.dentRecoverTimer <= 0) {
+        e.dentRecoverTimer = undefined;
+        e.dentRestPolygon = undefined;
+        e.dentRecoverDuration = undefined;
+      }
+    }
+  }
+
   public update(
     entities: GameEntity[],
     dt: number,
@@ -479,6 +529,7 @@ export class ShardSystem {
     runMergePass: boolean = true,
   ): void {
     const t0 = performance.now();
+    this.tickDentRecovery(entities, dt);
     // DBG bonding toggle is destructive — when off, any bonds left
     // over from the previous frame are dropped here so cohesion
     // stops dragging shards together as soon as the user flips it.
@@ -678,6 +729,8 @@ export class ShardSystem {
     entity.health = entity.maxHealth;
     entity.active = true;
     entity.regenProgress = undefined;
+    entity.deathDispatched = undefined; // revived — killable again (V9)
+    entity.shattered = undefined;       // ...and breakable again (V13)
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +
@@ -721,7 +774,7 @@ export class ShardSystem {
    *  - 'asteroid' — power-law area distribution over parent area,
    *                 cone scatter around impact direction, count
    *                 driven by lastImpactDamage.  Replaces today's
-   *                 `GameEngine.createAsteroidShards`.
+   *                 the long-deleted `GameEngine.createAsteroidShards`.
    *  - 'nebula'   — fixed 2–3 children sized off GLASS_TILE_HALF²
    *                 (independent of parent size), rear-cone fan
    *                 positioning, tangent-rule spin, parallel/perp
@@ -732,12 +785,22 @@ export class ShardSystem {
    *  can dispatch unconditionally.  STRUCTURE tile variants today
    *  spawn glass-shards via DropSystem.spawnGlassShards (out of
    *  scope per task brief) and `shatter.kind === 'powerlaw'` is
-   *  currently invoked only by ASTEROID + NEBULA + NEBULA_SHARD
+   *  currently invoked only by ROCK_SHARD + NEBULA + NEBULA_SHARD
    *  death dispatch in GameEngine.
    */
   public shatter(parent: GameEntity, entities: GameEntity[]): void {
     const variantId = shardVariantOf(parent);
     if (variantId === null) return;
+    // AN ENTITY SHATTERS AT MOST ONCE.  Not defensive padding: a legacy
+    // census sweep in the sim loop used to call this on every rock-shard
+    // it found deactivated, so a death that had already shattered through
+    // `handleEntityDeath` spawned its whole fragment set twice (measured:
+    // 4 pieces became 8).  That caller is gone; this makes the invariant
+    // enforced instead of assumed, since the cached decomposition makes a
+    // repeat call spawn an exact copy rather than merely more debris.
+    // Cleared by ShardSystem.completeRegen — regen reuses the object.
+    if (parent.shattered === true) return;
+    parent.shattered = true;
     const variant = SHARD_VARIANTS[variantId];
 
     // Metal-composite decomposition — metal-shard.shatter.kind is
@@ -753,7 +816,43 @@ export class ShardSystem {
     if (parent.shardVariant === 'metal-shard'
      && parent.metalCells !== undefined
      && parent.metalCells.length >= 2) {
+      // Under voronoi the composite breaks into the GRAINS of its own
+      // outline, not back into the lattice triangles it was assembled
+      // from.  The lattice is how metal BONDS; it is not how metal
+      // BREAKS, and emitting equilateral triangles here was the one
+      // path still putting authored shapes into the world — measured on
+      // METAL_FIELD, a field that shattered into 54 true voronoi grains
+      // was 6 equilateral triangles ten seconds later, because assembly
+      // re-triangulated them and this call handed the triangles back.
+      // The composite's convex hull (metalRecomputeBounds) is an
+      // ordinary polygon, so it decomposes like any other body.
+      // `skipSizeGate`: a composite is ≥ 2 cells of material by
+      // definition, so the mobile-parent minimum that protects tiny
+      // chips from spawning sub-minimum debris must not apply — a
+      // 2-cell composite measures ~30px against a 28.3px floor and
+      // would vanish on the wrong side of a coin flip.
+      if (variant.shatter.kind === 'voronoi' && getActiveFractureMode() === 'voronoi'
+       && parent.polygonPoints !== undefined && parent.polygonPoints.length >= 3) {
+        this.shatterVoronoiStyle(parent, variant, entities, true);
+        return;
+      }
       this.decomposeMetalComposite(parent, entities);
+      return;
+    }
+
+    // Voronoi fracture (voronoi gauntlet, V2).  Under the DBG 'legacy'
+    // A/B a 'voronoi' variant takes its OLD path instead: dent tiles
+    // (breakShards non-empty) break via DropSystem.spawnDentShard — the
+    // GameEngine death gate routes them there, so this call is a no-op —
+    // and mobile shards fall through to the powerlaw pipeline below.
+    if (variant.shatter.kind === 'voronoi') {
+      if (getActiveFractureMode() === 'voronoi') {
+        this.shatterVoronoiStyle(parent, variant, entities);
+        return;
+      }
+      const dent = variant.dent;
+      if (dent !== undefined && dent.breakShards.length > 0) return;
+      this.shatterPowerlawStyle(parent, variant, entities);
       return;
     }
 
@@ -762,7 +861,350 @@ export class ShardSystem {
     if (variant.shatter.style === 'nebula') {
       this.shatterNebulaStyle(parent, variant, entities);
     } else {
-      this.shatterAsteroidStyle(parent, variant, entities);
+      this.shatterPowerlawStyle(parent, variant, entities);
+    }
+  }
+
+  /**
+   * Authored spawn HP for one fresh shard — the ONE ladder behind all
+   * three fracture-spawn sites (shatterVoronoiStyle, spawnDetachedCell,
+   * shatterPowerlawStyle).
+   *
+   * It lived as three near-copies, and metal fell through every one of
+   * them onto the `newSize > 30 ? 2 : 1` default.  That default is not a
+   * chosen value for metal: it is what a variant with no branch gets.
+   * The consequence is invisible through a gun and fatal everywhere
+   * else, which is why it survived — the grain model rewrites maxHealth
+   * to the DERIVED boundary total at first WEAPON damage (measured:
+   * metal 16.2, plastic 17.0, rock 5.3, glass 3.2), but the crash and
+   * tile-pressure paths in PhysicsSystem decrement `health` directly, so
+   * a 1-HP metal grain shrugged off six blaster bolts and died to one
+   * bump.
+   *
+   * `dentOverride` is the parent variant's `dent.shardHealth` where the
+   * caller has one — the released-shard durability the dent contract
+   * declares — and wins over the family default.  `densityTier` is
+   * rock-only; every other family leaves it undefined.
+   */
+  private static spawnShardHealth(
+    childVariantId: ShardVariantId,
+    newSize: number,
+    densityTier: number | undefined,
+    dentOverride?: number,
+  ): number {
+    if (childVariantId === 'rock-shard') return rockHitCeiling(newSize, densityTier);
+    if (dentOverride !== undefined) return dentOverride;
+    if (childVariantId === 'glass-shard') return GLASS_SHARD_HP;
+    if (childVariantId === 'metal-shard') return METAL_SHARD_HP;
+    const baseHp = newSize > 30 ? 2 : 1;
+    return densityTier !== undefined
+      ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
+      : baseHp;
+  }
+
+  /**
+   * Voronoi shatter (V2): the cached decomposition becomes the children —
+   * each cell is a fragment carrying the CELL's polygon (translated to
+   * the cell centroid, rotated with the parent), an area-proportional
+   * size (Σ child size² = parent size², the same conservation the merge
+   * paths keep), rock hit-ceiling HP, and a velocity of impact scatter
+   * plus a small radial term along its own centroid direction so the
+   * pattern visibly flies apart along its seams.  Density-tier mixing,
+   * the dust burst and the grace timer mirror shatterPowerlawStyle.
+   */
+  private shatterVoronoiStyle(
+    parent: GameEntity,
+    parentVariant: ShardVariantDef,
+    entities: GameEntity[],
+    skipSizeGate = false,
+  ): void {
+    const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
+    const childSpawn = childVariant.spawn;
+    const MIN_SIZE = childSpawn.sizeMin;
+    // Same tiny-parent floor as the area-conservative powerlaw mode: a
+    // chip without room for two minimum children dies clean.  MOBILE
+    // parents only — a static tile always breaks into its cells, exactly
+    // as the legacy dent path spawned its breakShards with no size gate
+    // (a 42px hex is smaller than two 30px rock minimums, and gating it
+    // here made rock-tiles vanish without debris).
+    if (!skipSizeGate && parent.mass !== Infinity
+      && parent.size.x * parent.size.x < MIN_SIZE * MIN_SIZE * 2) return;
+
+    const cells = ensureFractureCells(parent);
+    if (cells === null || cells.length < 2) {
+      // Degenerate polygon (or no fracture block despite the kind) —
+      // fall back to the legacy pipeline rather than vanish silently.
+      this.shatterPowerlawStyle(parent, parentVariant, entities);
+      return;
+    }
+
+    let totalArea = 0;
+    for (const cell of cells) totalArea += cell.area;
+    if (totalArea <= 0) return;
+    // Size against the ORIGINAL polygon area when pieces already broke
+    // off progressively (V8): entity.size never shrank with the splices,
+    // so distributing the full size² over the SURVIVING cells would
+    // inflate the final fragments.  With no detach history the two
+    // denominators coincide.
+    const refArea = Math.max(totalArea, parent.fractureOriginalArea ?? 0);
+
+    const iv = parent.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const HALF_CONE = parentVariant.shatter.scatterHalfCone;
+    const radialSpeed = parentVariant.grain!.radialSpeed;
+
+    const isRockParent = parent.shardVariant === 'rock-shard'
+      || parent.shardVariant === 'rock-tile';
+    const maxTier = ROCK_CONDENSE.DENSITY_MULT.length - 1;
+    const parentTier = parent.densityTier ?? 0;
+
+    const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
+    const parentSize = parent.size.x;
+
+    for (const cell of cells) {
+      const newSize = parentSize * Math.sqrt(cell.area / refArea);
+
+      // Density mix as in the powerlaw rock path: fragments spread ±2
+      // tiers around the parent so a dense boulder breaks unevenly.
+      let densityTier: number | undefined = undefined;
+      let childMass = childSpawn.sizeToMass(newSize);
+      if (isRockParent && childVariant.id === 'rock-shard') {
+        const offset = Math.floor(Math.random() * 5) - 2;
+        densityTier = Math.max(0, Math.min(maxTier, parentTier + offset));
+        childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
+      }
+      // The dent contract's released-shard durability survives the
+      // voronoi routing (V5: plastic-tile children keep their 24-HP dent
+      // life, decoupled from the tile's brittle face).
+      const hp = ShardSystem.spawnShardHealth(
+        childVariant.id, newSize, densityTier, parentVariant.dent?.shardHealth);
+
+      // World-space cell centroid: rotate the local centroid with the
+      // parent so the fragment sits exactly where its cell rendered.
+      const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
+      const wy = parent.position.y + cell.centroid.x * sin + cell.centroid.y * cos;
+
+      // Radial direction — along the (rotated) centroid offset, so the
+      // pieces separate along their own seams; a cell centred on the
+      // parent origin takes a random direction.
+      const rlen = Math.hypot(cell.centroid.x, cell.centroid.y);
+      let rdx: number, rdy: number;
+      if (rlen > 1e-3) {
+        rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
+        rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
+      } else {
+        const a = Math.random() * Math.PI * 2;
+        rdx = Math.cos(a); rdy = Math.sin(a);
+      }
+      const rSpeed = radialSpeed * (0.7 + Math.random() * 0.6);
+
+      // Shared forward term from the killing hit — same magnitude curve
+      // and cap as the powerlaw path, with a narrower per-child cone
+      // (the geometry already scatters the pattern).
+      let vx = parent.velocity.x + rdx * rSpeed;
+      let vy = parent.velocity.y + rdy * rSpeed;
+      if (impactAngle !== null) {
+        const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
+        const fa = impactAngle + (Math.random() - 0.5) * HALF_CONE * 0.5;
+        vx += Math.cos(fa) * fwd;
+        vy += Math.sin(fa) * fwd;
+      }
+
+      // Fragment polygon: the cell's own shape, re-centred on its
+      // centroid (entity-local space; entity rotation carries the
+      // parent's so the pattern alignment survives the handoff).
+      const points: Vector2[] = new Array(cell.points.length);
+      for (let i = 0; i < cell.points.length; i++) {
+        points[i] = {
+          x: cell.points[i].x - cell.centroid.x,
+          y: cell.points[i].y - cell.centroid.y,
+        };
+      }
+
+      const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
+      entities.push({
+        id:            nextId('shard'),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  childVariant.id,
+        position:      { x: wx, y: wy },
+        velocity:      { x: vx, y: vy },
+        size:          { x: newSize, y: newSize },
+        rotation:      parent.rotation,
+        rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+        // Plastic re-rolls its shade per child (the powerlaw path's
+        // rule) so each generation keeps visible variation; every other
+        // material inherits the parent body colour.
+        color:         childVariant.id === 'plastic-shard'
+          ? randomPlasticShardShade()
+          : (parent.color || COLORS.ROCK_SHARD),
+        active:        true,
+        health:        hp,
+        maxHealth:     hp,
+        polygonPoints: points,
+        mass:          childMass,
+        densityTier,
+        sprite:        parent.sprite,
+        linearDamping:  childSpawn.linearDamping,
+        angularDamping: childSpawn.angularDamping,
+        restSpeed:      childSpawn.restSpeed,
+        restSpin:       childSpawn.restSpin,
+        collapseGraceTimer: getActiveShatterGraceDelay(),
+      });
+    }
+
+    this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
+  }
+
+  /**
+   * Spawn ONE detached Voronoi cell as a mobile fragment (partial
+   * fracture, V4) — the same recipe as a shatterVoronoiStyle child
+   * (cell polygon re-centred on its centroid, size = parentSize ×
+   * √(cellArea/refArea) so the size² metric is conserved against the
+   * parent's loss, rock hit-ceiling HP), but chip-flavoured motion: it
+   * pops OFF the parent along its own centroid direction plus a share
+   * of the impact velocity, inheriting the parent's density tier
+   * unchanged (a chip is the same material, not a re-rolled mix).
+   */
+  public spawnDetachedCell(
+    parent: GameEntity,
+    cell: { points: ReadonlyArray<Vector2>; centroid: Vector2; area: number;
+            area0?: number; points0?: ReadonlyArray<Vector2> },
+    refArea: number,
+    entities: GameEntity[],
+  ): GameEntity | null {
+    const variantId = shardVariantOf(parent);
+    if (variantId === null) return null;
+    const parentVariant = SHARD_VARIANTS[variantId];
+    const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
+    const childSpawn = childVariant.spawn;
+    const f = parentVariant.grain;
+    if (f === undefined || refArea <= 0) return null;
+
+    const newSize = Math.max(6, parent.size.x * Math.sqrt(cell.area / refArea));
+    const densityTier = parent.densityTier;
+    let childMass = childSpawn.sizeToMass(newSize);
+    if (densityTier !== undefined && densityTier > 0) {
+      childMass *= ROCK_CONDENSE.DENSITY_MULT[
+        Math.min(densityTier, ROCK_CONDENSE.DENSITY_MULT.length - 1)];
+    }
+    const hp = ShardSystem.spawnShardHealth(childVariant.id, newSize, densityTier);
+
+    const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
+    const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
+    const wy = parent.position.y + cell.centroid.x * sin + cell.centroid.y * cos;
+
+    const rlen = Math.hypot(cell.centroid.x, cell.centroid.y);
+    let rdx: number, rdy: number;
+    if (rlen > 1e-3) {
+      rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
+      rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
+    } else {
+      const a = Math.random() * Math.PI * 2;
+      rdx = Math.cos(a); rdy = Math.sin(a);
+    }
+    const rSpeed = f.radialSpeed * (1.0 + Math.random() * 0.6);
+    let vx = parent.velocity.x + rdx * rSpeed;
+    let vy = parent.velocity.y + rdy * rSpeed;
+    const iv = parent.lastImpactVelocity;
+    if (iv !== undefined) {
+      const s = Math.hypot(iv.x, iv.y);
+      if (s > 1e-3) {
+        const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          s * parentVariant.shatter.forwardDrag + 0.3 + Math.random() * 0.8);
+        vx += (iv.x / s) * fwd;
+        vy += (iv.y / s) * fwd;
+      }
+    }
+
+    // The fragment carries the grain's CURRENT outline — deformed if it
+    // was dented before it came away (user call).  `cell.centroid` and
+    // `cell.area` are live values maintained by the dent, so the piece is
+    // both sized and centred on what it actually looks like.
+    const points: Vector2[] = new Array(cell.points.length);
+    for (let i = 0; i < cell.points.length; i++) {
+      points[i] = {
+        x: cell.points[i].x - cell.centroid.x,
+        y: cell.points[i].y - cell.centroid.y,
+      };
+    }
+    // ELASTIC materials additionally remember the shape the grain was CUT
+    // at, scaled into the child's own frame, and spring back toward it.
+    const recover = parentVariant.grain?.dentRecoverSeconds;
+    let restPoly: Vector2[] | undefined;
+    if (recover !== undefined && recover > 0 && cell.points0 !== undefined
+        && (cell.area0 ?? 0) > 0 && Math.abs((cell.area0 ?? 0) - cell.area) > 1e-6) {
+      // points0 is the cell's outline in the PARENT's frame at the cut;
+      // recentre it on its own centroid so the rest shape shares the
+      // child's origin.  NO scaling: the child's live polygon is the
+      // deformed cell at 1:1, so the rest shape is the cut cell at 1:1
+      // and the piece springs from its squashed area back to its cut
+      // area — which is what elastic deformation MEANS.  (Scaling by
+      // sqrt(area/area0) here was wrong in both magnitude and direction:
+      // it nearly doubled the rest shape, 319 -> 630 instead of the
+      // intended 0.67 -> 1.0.)
+      let cx = 0, cy = 0;
+      for (const p of cell.points0) { cx += p.x; cy += p.y; }
+      cx /= cell.points0.length; cy /= cell.points0.length;
+      restPoly = cell.points0.map(p => ({ x: p.x - cx, y: p.y - cy }));
+    }
+
+    const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
+    const child: GameEntity = {
+      id:            nextId('shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  childVariant.id,
+      position:      { x: wx, y: wy },
+      velocity:      { x: vx, y: vy },
+      size:          { x: newSize, y: newSize },
+      rotation:      parent.rotation,
+      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+      color:         parent.color || COLORS.ROCK_SHARD,
+      active:        true,
+      health:        hp,
+      maxHealth:     hp,
+      polygonPoints: points,
+      mass:          childMass,
+      densityTier,
+      sprite:        parent.sprite,
+      linearDamping:  childSpawn.linearDamping,
+      angularDamping: childSpawn.angularDamping,
+      restSpeed:      childSpawn.restSpeed,
+      restSpin:       childSpawn.restSpin,
+      collapseGraceTimer: getActiveShatterGraceDelay(),
+      dentRestPolygon: restPoly,
+      dentRecoverTimer: restPoly !== undefined ? recover : undefined,
+      dentRecoverDuration: restPoly !== undefined ? recover : undefined,
+    };
+    entities.push(child);
+    return child;
+  }
+
+  /** The variant-driven dust/debris burst shared by the powerlaw and
+   *  voronoi shatter styles (extracted verbatim from the powerlaw tail). */
+  private spawnShatterDust(
+    parent: GameEntity,
+    parentVariant: ShardVariantDef,
+    entities: GameEntity[],
+    impactSpeed: number,
+    impactAngle: number | null,
+  ): void {
+    const onParticles = parentVariant.onShatterParticles;
+    if (onParticles && onParticles !== 'none') {
+      const dustColor = onParticles === 'inherit'
+        ? (parent.color || '#94a3b8')
+        : onParticles.color;
+      const dustCount = 5 + Math.floor(parent.size.x / 20);
+      const dustSpeed = impactSpeed * 0.4 + 2;
+      this.particles.spawn(entities, parent.position, dustCount, dustColor, {
+        speedMin: 1, speedMax: dustSpeed,
+        sizeMin: 1, sizeMax: 2.5,
+        lifetimeMin: 0.25, lifetimeMax: 0.55,
+        spreadAngle: impactAngle ?? undefined,
+        spreadCone: Math.PI,
+        baseVelocity: parent.velocity,
+      });
     }
   }
 
@@ -813,13 +1255,13 @@ export class ShardSystem {
   }
 
   /**
-   * Asteroid-style shatter — port of GameEngine.createAsteroidShards.
+   * Powerlaw scatter shatter — port of the long-deleted GameEngine.createAsteroidShards.
    * Power-law area distribution over the parent's area, cone scatter
    * around impact direction, child count driven by impact damage.
    * Used by rock-shard, glass-shard, rock-tile, and (when wired in
    * future stages) STRUCTURE-tile variants.
    */
-  private shatterAsteroidStyle(
+  private shatterPowerlawStyle(
     parent: GameEntity,
     parentVariant: ShardVariantDef,
     entities: GameEntity[],
@@ -860,7 +1302,7 @@ export class ShardSystem {
     // shards in, N fragments out" holds regardless of how hard the
     // killing hit was.  A small ±1 wobble keeps the fragment count
     // from feeling mechanically uniform on repeated breaks.  Applies
-    // to every variant going through shatterAsteroidStyle (rock-
+    // to every variant going through shatterPowerlawStyle (rock-
     // shard / glass-shard / plastic-shard); base shards (mergeCount
     // === 1 or undefined) fall through to the existing size-keyed
     // and damage-based formulas.
@@ -970,7 +1412,6 @@ export class ShardSystem {
 
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
-      const isRockChild = childVariant.id === 'rock-shard';
       // Density-aware mass: dense fragments feel heavy on impact and resist
       // push.  HP is resolved per-family below.
       let childMass = childSpawn.sizeToMass(newSize);
@@ -979,20 +1420,13 @@ export class ShardSystem {
         densityTier = childDensityTiers[i];
         childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
       }
-      let hp: number;
-      if (isRockChild) {
-        // Rock children follow the same probabilistic crack→break model as
-        // free-spawn asteroids and rock tiles: maxHealth is the size/density
-        // hit ceiling (ROCK_BREAK), not a flat HP.
-        hp = rockHitCeiling(newSize, densityTier);
-      } else {
-        // glass / plastic / metal debris keep the original brittle 1-2 HP,
-        // gently scaled by density (sqrt) when condensed.
-        const baseHp = newSize > 30 ? 2 : 1;
-        hp = densityTier !== undefined
-          ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
-          : baseHp;
-      }
+      // Rock children follow the same probabilistic crack→break model as
+      // free-spawn asteroids and rock tiles (maxHealth is the size/density
+      // hit ceiling, not a flat HP); glass and metal carry their family
+      // durability in BOTH fracture modes, since that is tile/shard
+      // toughness rather than fracture geometry and so is not part of the
+      // A/B.
+      const hp = ShardSystem.spawnShardHealth(childVariant.id, newSize, densityTier);
 
       let scatterAngle: number;
       let scatterSpeed: number;
@@ -1034,7 +1468,7 @@ export class ShardSystem {
       // inherits the parent's colour.
       const childColor = childVariant.id === 'plastic-shard'
         ? randomPlasticShardShade()
-        : (isTile ? parent.color : (parent.color || COLORS.ASTEROID));
+        : (isTile ? parent.color : (parent.color || COLORS.ROCK_SHARD));
 
       entities.push({
         id:           nextId('shard'),
@@ -1071,26 +1505,8 @@ export class ShardSystem {
       });
     }
 
-    // Variant-driven dust/debris burst.  Today's per-parent count
-    // formula `5 + floor(parent.size.x / 20)` is preserved inline;
-    // the variant's onShatterParticles supplies the colour ('inherit'
-    // → parent.color for tile shards; { color } for rock shards).
-    const onParticles = parentVariant.onShatterParticles;
-    if (onParticles && onParticles !== 'none') {
-      const dustColor = onParticles === 'inherit'
-        ? (parent.color || '#94a3b8')
-        : onParticles.color;
-      const dustCount = 5 + Math.floor(parent.size.x / 20);
-      const dustSpeed = impactSpeed * 0.4 + 2;
-      this.particles.spawn(entities, parent.position, dustCount, dustColor, {
-        speedMin: 1, speedMax: dustSpeed,
-        sizeMin: 1, sizeMax: 2.5,
-        lifetimeMin: 0.25, lifetimeMax: 0.55,
-        spreadAngle: impactAngle ?? undefined,
-        spreadCone: Math.PI,
-        baseVelocity: parent.velocity,
-      });
-    }
+    // Variant-driven dust/debris burst — shared with the voronoi style.
+    this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
   }
 
   /**
@@ -1454,7 +1870,7 @@ export class ShardSystem {
     // Candidate set: every mobile shard-family entity + eligible drops.
     // Stage 5: shards live on EntityType.STRUCTURE with finite mass
     // (mass=Infinity tiles are in the static grid — never candidates).
-    // The legacy ASTEROID branch is kept as defence for any spawn
+    // The legacy ROCK_SHARD branch is kept as defence for any spawn
     // site that hasn't migrated yet.  Fading nebula-shards are
     // skipped (they're in their death animation).
     const candidates: GameEntity[] = [];
@@ -2209,6 +2625,8 @@ export class ShardSystem {
       if (mutated) {
         e._satCacheAxes = undefined;
         e._occluderR = undefined;   // the shadow radius is derived from the polygon
+        e.fractureCells = undefined; // decomposition rides the polygon (voronoi gauntlet)
+        e.fractureEdges = undefined;
         if (e._staticCached === true) e._staticCached = false;
       }
     }
@@ -2262,8 +2680,8 @@ export class ShardSystem {
         rotationSpeed: (Math.random() - 0.5) * 2,
         color:         variant === 'plastic-shard' ? randomPlasticShardShade() : COLORS.STRUCTURE,
         active:        true,
-        health:        1,
-        maxHealth:     1,
+        health:        variant === 'glass-shard' ? GLASS_SHARD_HP : 1,
+        maxHealth:     variant === 'glass-shard' ? GLASS_SHARD_HP : 1,
         polygonPoints: points,
         mass,
         collapseGraceTimer: getActiveShatterGraceDelay(),
@@ -2998,6 +3416,15 @@ export class ShardSystem {
   ): void {
     if (!a.active || !b.active) return;
 
+    // A compose mutates the survivor's size / mass / merge count (and,
+    // through condense, sometimes its polygon), all inputs of the
+    // fracture decomposition — drop both caches up front (voronoi
+    // gauntlet; the dead partner's entry is moot but harmless).
+    a.fractureCells = undefined;
+    a.fractureEdges = undefined;
+    b.fractureCells = undefined;
+    b.fractureEdges = undefined;
+
     // Stage 5: shard-family entities are now all EntityType.STRUCTURE.
     // Distinguish by variant id rather than the legacy EntityTypes.
     const aVariant = shardVariantOf(a);
@@ -3197,7 +3624,7 @@ export class ShardSystem {
         a.densityCachedTint = undefined;
       }
       // Merge-count sum — tracks how many base shards composed this
-      // entity so shatterAsteroidStyle can fragment it back into the
+      // entity so shatterPowerlawStyle can fragment it back into the
       // same count on death.  Applies to EVERY compose path (rock
       // condense / glass-self / plastic-self) so the "N in, N out"
       // invariant holds across all variants going through this

@@ -34,7 +34,11 @@ import {
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
-    cycleMinimapMaterial, cycleRockPalette, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
+    cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
+    cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
+    cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
+    cycleDamageSpread,
+    cycleBoundaryStrength,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
     toggleWorldLights, toggleDepthAmbient,
@@ -363,6 +367,87 @@ export class DebugControls {
    *  on newly generated rock; reload the map to repaint a whole field. */
   cycleRockPalette() {
     cycleRockPalette();
+  }
+
+  /** DBG (Visual): LLOYD RELAXATION rounds on the fracture pattern —
+   *  the REGULARITY dial (V11).  0 is raw Poisson Voronoi (ragged,
+   *  wildly uneven chunks), 2 ships, 4 is nearly a honeycomb.  Applies
+   *  to patterns computed from here on: the cycle bumps the tuning
+   *  generation, so already-cracked terrain rebuilds on its next hit
+   *  (and a mid-life rebuild resets that body's chip progress — expected
+   *  for a debug knob). */
+  cycleFractureRelax() {
+    cycleFractureRelax();
+  }
+
+  /** DBG (Visual): master multiplier on every material's GRAIN-BOUNDARY
+   *  STRENGTH (V15) — how much damage it takes to break through a
+   *  boundary, and therefore, since HP is derived from the pattern, how
+   *  tough terrain is overall.  Relative material strengths stay the
+   *  variant table's job; this is the master.  Bumps the tuning
+   *  generation like the shape knobs, so it lands on the next hit. */
+  cycleBoundaryStrength() {
+    cycleBoundaryStrength();
+  }
+
+  /** DBG (Visual): minimum fracture-site separation (blue noise before
+   *  relaxation).  Matters most at relaxation 0. */
+  cycleFractureSeparation() {
+    cycleFractureSeparation();
+  }
+
+  /** DBG (Visual): multiplier on the per-variant fracture site count —
+   *  fewer/bigger or more/smaller chunks without touching the table. */
+  cycleFractureSiteScale() {
+    cycleFractureSiteScale();
+  }
+
+  /** DBG (Visual): force the impact bias (site crowding toward the hit)
+   *  or leave it to the variant.  Pulls AGAINST regularity by design —
+   *  crowding sites is what makes cell sizes uneven — so this is the
+   *  other half of the same look. */
+  cycleFractureBias() {
+    cycleFractureBias();
+  }
+  /** DBG (Grain): which MATERIAL the five per-material knob rows read and
+   *  write.  The selector lives here rather than in the overlay so a knob
+   *  handler knows its target without the UI threading it through five
+   *  callbacks — and so a knob row is one argument-free method like every
+   *  other DBG row. */
+  /** DBG (Grain): how deep a hit's damage reaches into the pattern,
+   *  forced across every material.  'material' defers to each one's own
+   *  `damageSpread`; 'off' is the shipped sequential spend, and 0 is a
+   *  real forced value here rather than "unset". */
+  cycleDamageSpread() {
+    cycleDamageSpread();
+  }
+
+  cycleGrainMaterial() {
+    cycleGrainMaterial();
+  }
+
+  /** DBG (Grain): step one knob on the SELECTED material.  Index 0 of
+   *  every ladder is "use the variant table", so the shipped values stay
+   *  the default and a readout of `table` means exactly that rather than a
+   *  number that happens to match. */
+  cycleGrainKnob(knob: GrainKnob) {
+    cycleGrainKnob(knob);
+  }
+
+  /** DBG (Grain): drop every per-material override at once.  Tuning four
+   *  materials across five knobs leaves no way to tell which of twenty
+   *  values are still off the table; this is the way back. */
+  resetGrainOverrides() {
+    resetGrainOverrides();
+  }
+
+
+  /** DBG (Visual): the fracture A/B (voronoi gauntlet) — voronoi
+   *  (default: variants break along their seeded Voronoi cell
+   *  decomposition) / legacy (the shipped powerlaw + dent-spawn break).
+   *  Applies at the next break; nothing cached needs a reload. */
+  cycleFractureMode() {
+    cycleFractureMode();
   }
 
   /** DBG (Visual): which way the player's wake spins a passing nebula
@@ -712,8 +797,8 @@ export class DebugControls {
    * in the DBG panel for A/B-testing the contribution of the flow nudge
    * to the asteroid-field "feel".
    */
-  toggleAsteroidFlow() {
-    this.g.asteroidFlowEnabled = !this.g.asteroidFlowEnabled;
+  toggleShardFlow() {
+    this.g.shardFlowEnabled = !this.g.shardFlowEnabled;
   }
 
   /** Toggle the snitch catch interaction (collide ↔ shoot) — DBG aid for
@@ -1009,7 +1094,7 @@ export class DebugControls {
     this.g.flowField.initObstacles(this.g.currentMap.entities);
     // Re-bake under the active pattern selection (not necessarily the
     // map's own sampler) so the chosen pattern survives density changes.
-    this.g.flowField.buildAsteroidField(this.g.flowSamplerFor(this.g.currentMap));
+    this.g.flowField.buildShardFlowField(this.g.flowSamplerFor(this.g.currentMap));
     // The new grid starts with defaults; push the current cycled
     // values back so they survive density changes.
     this.g.flowField.setKernelR(this.g.ffKernelR);
@@ -1097,7 +1182,7 @@ export class DebugControls {
     const order = FF_PATTERN_CYCLE;
     const idx = order.indexOf(this.g.ffPattern);
     this.g.ffPattern = order[(idx + 1) % order.length];
-    this.g.flowField.buildAsteroidField(this.g.flowSamplerFor(this.g.currentMap));
+    this.g.flowField.buildShardFlowField(this.g.flowSamplerFor(this.g.currentMap));
   }
 
   /**

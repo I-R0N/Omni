@@ -857,15 +857,15 @@ export interface GameEntity {
 
   // ── Tile asteroid-pressure accumulator ───────────────────────────────────
   // Set on STRUCTURE tiles to track repeated sub-crash-threshold asteroid
-  // impacts.  When `asteroidHitCount` reaches STRUCTURE_CONSTANTS
-  // .ASTEROID_PRESSURE_HITS within the decaying `asteroidHitTimer` window,
+  // impacts.  When `tilePressureCount` reaches STRUCTURE_CONSTANTS
+  // .TILE_PRESSURE_HITS within the decaying `tilePressureTimer` window,
   // the tile breaks permanently the same way a single above-threshold
-  // momentum crash would.  `asteroidHitCooldown` debounces multi-substep
+  // momentum crash would.  `tilePressureCooldown` debounces multi-substep
   // re-hits from a single bouncing rock so one glancing bounce counts as
   // one pressure event, not several.
-  asteroidHitCount?: number;
-  asteroidHitTimer?: number;
-  asteroidHitCooldown?: number;
+  tilePressureCount?: number;
+  tilePressureTimer?: number;
+  tilePressureCooldown?: number;
 
   // ── Unified shard-variant identity ──────────────────────────────────────
   // Single source of truth for which SHARD_VARIANTS entry a shard-family
@@ -885,11 +885,11 @@ export interface GameEntity {
   // Tile-break / shatter spawns start implicitly at 1 (undefined ===
   // 1); composeEntities sums the two parents' counts on every merge
   // (rock condense / glass-self / plastic-self).  shatter
-  // AsteroidStyle reads this on death and breaks the shard into ~
+  // PowerlawStyle reads this on death and breaks the shard into ~
   // mergeCount fragments with even per-fragment sizing, so a merged
   // shard always fragments back into roughly the same number of
   // base-sized pieces that built it — applies to every variant going
-  // through shatterAsteroidStyle (rock-shard, glass-shard, plastic-
+  // through shatterPowerlawStyle (rock-shard, glass-shard, plastic-
   // shard); metal-shard.shatter.kind is 'none' so the field exists
   // but the override path doesn't fire there.
   mergeCount?: number;
@@ -1274,8 +1274,93 @@ export interface GameEntity {
   // from the id on first draw.  Mirrors the enemy `glowPhase` seed but
   // for the shared seeded crack pattern in RenderSystem.drawDamageCracks
   // so fractures hold still frame-to-frame and only accrue as HP drops.
-  // Render-only; never read by the sim.
+  // Render-only; never read by the sim.  (Since the voronoi gauntlet the
+  // SAME value also seeds the fracture decomposition below — derived by
+  // the identical pure hash `fracture.seedFromEntityId` — so cracks and
+  // fragments share one pattern; the sim never reads this field, it
+  // re-derives the seed.)
   crackSeed?: number;
+
+  // Seeded Voronoi fracture cache (voronoi gauntlet, V2).  Computed
+  // lazily by ShardSystem.ensureFracture (first damage, or on the spot
+  // for a one-shot kill) for variants carrying a
+  // SHARD_VARIANTS[..].fracture block; cells are entity-LOCAL polygons.
+  // EVERY site that mutates the inputs — polygon deform (dent /
+  // snap-back), size change, merge/compose — must set this back to
+  // undefined.  The render layer reads it for the crack overlay (V3);
+  // the shatter path consumes it on death.
+  fractureCells?: import('./engine/systems/fracture').FractureCell[];
+
+  // The decomposition's interior edges — the entity's CRACKS (V3) —
+  // sorted nearest-impact-first at build so the progressive reveal is
+  // stable.  Derived from fractureCells; cleared wherever it is.
+  fractureEdges?: import('./engine/systems/fracture').FractureEdge[];
+
+  // "This body has already broken apart" (V13).  ShardSystem.shatter
+  // refuses a second call, because with the decomposition cached a
+  // repeat spawns an EXACT copy of every fragment rather than just
+  // extra debris.  Cleared by completeRegen (regen reuses the object).
+  shattered?: boolean;
+
+  // Death-dispatch re-entry guard for STRUCTURE entities (V9).  The
+  // damage-feedback hook (onDamage → progressFracture) can route an
+  // entity through handleEntityDeath MID-HIT via the min-remainder
+  // rule; the outer damage path then sees health <= 0 and raises
+  // onDeath a second time — and with the decomposition cached, the
+  // second shatter spawned an exact duplicate of every fragment.
+  // Set by handleEntityDeath's STRUCTURE branch on first dispatch;
+  // cleared by ShardSystem.completeRegen (regen REUSES the entity
+  // object, so a revived tile must be killable again).
+  deathDispatched?: boolean;
+
+  // The last damaging CONTACT POINT in entity-LOCAL coords (V12) — the
+  // projectile's own position, not a direction proxy.  Stamped by
+  // GameEngine.progressFracture, read by fractureCache to bias the
+  // pattern toward the real hit and to decide which cell was struck.
+  lastImpactLocal?: Vector2;
+  // GRAIN BOUNDARIES (V15).  Damage absorbed by each interior boundary
+  // of the cached decomposition, parallel to `fractureEdges`; an edge is
+  // BROKEN once its entry reaches its strength, and a cell leaves when
+  // every edge still binding it is broken.  `fractureBoundaryHp` is the
+  // pattern's DERIVED total (Σ edge strengths) — the entity's real HP
+  // once the model has taken over, which is why it is cached beside the
+  // fills rather than recomputed.
+  fractureEdgeFill?: number[];
+  // Each boundary's STRENGTH, fixed at model build and parallel to
+  // `fractureEdges`.  Cached rather than derived on read because
+  // per-grain denting (B1) moves boundary endpoints: a strength taken
+  // from the live length would drift the body's derived HP every dent.
+  fractureEdgeNeed?: number[];
+  // Dent steps applied per grain, indexed by the cell's siteIndex, so a
+  // single grain cannot be pulled into itself by sustained fire.
+  fractureGrainDents?: number[];
+  // ELASTIC RECOVERY (user call).  A grain that breaks off DEFORMED keeps
+  // its dented outline — and for an elastic material it then relaxes back
+  // toward `dentRestPolygon` (the shape the grain was cut at, recentred)
+  // over `dentRecoverTimer` seconds.  Absent on rigid materials, which
+  // keep the dent permanently.
+  dentRestPolygon?: Vector2[];
+  dentRecoverTimer?: number;
+  dentRecoverDuration?: number;
+  fractureBoundaryHp?: number;
+  // The HP the entity was SPAWNED with, kept when the grain model
+  // rewrites `maxHealth` to the derived total.  Score and any other
+  // consumer that means "how substantial is this body" must read this,
+  // not the derived number: derived HP is in DAMAGE units over the
+  // body's own boundary set, so scoring off it would pay out on how
+  // finely a tile happened to decompose.
+  authoredMaxHealth?: number;
+
+  // The fracture SHAPE-KNOB generation this entity's cached pattern was
+  // built under (V11).  A DBG cycle bumps the global counter, so a stale
+  // value here forces one recompute; untouched in normal play.
+  fractureGen?: number;
+
+  // Polygon area at the FIRST partial-fracture detach (V4) — the
+  // baseline the min-remainder death rule measures against
+  // (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Never cleared: cumulative
+  // chip-off area drives the break threshold across the entity's life.
+  fractureOriginalArea?: number;
 }
 
 export interface CameraState {
@@ -1421,7 +1506,7 @@ export interface PerfSnapshot {
   // Entity counts (snapshot of most recent sim step)
   totalEntities: number;
   enemyCount: number;
-  asteroidCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
+  mobileShardCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
   projectileCount: number;
   particleCount: number;
   interactableCount: number; // Drops, portals, POIs
@@ -1776,6 +1861,23 @@ export interface EngineStats {
    *  (default) / 'slate' / 'rust' / 'mineral'.  Shades are rolled at spawn,
    *  so a change applies to newly generated rock. */
   rockPaletteName?: string;
+  /** DBG (voronoi gauntlet): the fracture A/B — 'voronoi' (seeded cell
+   *  decomposition) / 'legacy' (the shipped powerlaw + dent-spawn break). */
+  fractureModeName?: string;
+  /** DBG (V11) — the four fracture SHAPE knobs: Lloyd relaxation rounds,
+   *  site min-separation, site-count multiplier, impact-bias override. */
+  fractureRelaxName?: string;
+  boundaryStrengthName?: string;
+  fractureSeparationName?: string;
+  fractureSiteScaleName?: string;
+  /** DBG (Grain) per-material overrides: the selected material, and each
+   *  of the five knobs' live value on it ('table' = defer to the variant
+   *  table).  Paused-only, like every other DBG readout. */
+  damageSpreadName?: string;
+  grainMaterialName?: string;
+  grainKnobNames?: Record<string, string>;
+  grainOverrideCount?: number;
+  fractureBiasName?: string;
   nebulaWakeSpinName?: string;
   // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
   // nearby bodies; false = push off (glow feedback still reacts).
@@ -1837,7 +1939,7 @@ export interface EngineStats {
   // DBG-toggleable to OFF for A/B-testing zero-flow behaviour
   // (asteroids decay toward zero velocity over a few seconds; only
   // collisions / gravity move them after that).
-  asteroidFlowEnabled?: boolean;
+  shardFlowEnabled?: boolean;
   // Snitch catch mode — DBG-toggleable while playtesting which catch
   // interaction feels better.  'collide' (default): fly into the snitch.
   // 'shoot': any player-owned projectile within its catch radius nabs it.

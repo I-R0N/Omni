@@ -48,6 +48,21 @@ const STATIC_TILE_MAX_CANVAS_DIM = 3072;
  *    rendering requires the spatial-grid neighbour lookup; not worth
  *    the extra complexity for the smaller marginal gain.
  */
+/**
+ * A cacheable tile that must NEVER be baked or sprite-fast-pathed right
+ * now because its DAMAGE STATE is visible (V10).  Glass grew a damage
+ * layer and progressive chipping, so a hurt pane carries crack lines AND
+ * a polygon with cells missing — neither of which the hex-sprite stamp
+ * can express; it would paint a pristine full hex over a chipped one.
+ * Dynamic state, so it belongs beside `hitFlash` / `regenPopTimer` in
+ * the acceptance checks rather than in `isStaticTileCacheable` (which is
+ * about the VARIANT), and the same reason rock-tile is excluded outright.
+ * Indestructible never takes damage, so this only ever fires for glass.
+ */
+export function tileShowsDamage(e: GameEntity): boolean {
+    return (e.health ?? 0) < (e.maxHealth ?? 0);
+}
+
 export function isStaticTileCacheable(r: RenderSystem, e: GameEntity): boolean {
     return e.type === EntityType.STRUCTURE
         && e.mass === Infinity
@@ -229,7 +244,7 @@ export function buildStaticTileLayer(r: RenderSystem, entities: GameEntity[], ma
             e._staticCached = false;
             continue;
         }
-        if (!hexReady) { e._staticCached = false; continue; }
+        if (!hexReady || tileShowsDamage(e)) { e._staticCached = false; continue; }
         stampStaticTileToCache(r, e);
     }
 }
@@ -301,7 +316,8 @@ export function prepareStaticTileCacheForFrame(r: RenderSystem, playerPos: Vecto
         const wantsCache = entity.active
             && !entity.hitFlash
             && entity.regenPopTimer === undefined
-            && !inGlowRange;
+            && !inGlowRange
+            && !tileShowsDamage(entity);
         if (wantsCache && entity._staticCached !== true) {
             // BUDGETED (see STATIC_TILE_STAMPS_PER_FRAME): stamping is a
             // clearRect + drawImage on a map-sized offscreen canvas, and

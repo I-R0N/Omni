@@ -10,6 +10,8 @@ import {
   NEBULA_CONSTANTS,
   randomPlasticShardShade,
   getActiveShatterGraceDelay,
+  getActiveFractureMode,
+  GLASS_SHARD_HP,
   METAL_ASSEMBLY,
   METAL_BREAK_SHARDS_PER_TIER,
   rockHitCeiling,
@@ -121,9 +123,19 @@ export class DropSystem {
     const tileDent = entity.shardVariant !== undefined
       ? SHARD_VARIANTS[entity.shardVariant].dent
       : undefined;
-    const isDentTile   = isStaticTile && tileDent !== undefined;
+    // Voronoi gate (voronoi gauntlet, V2) — mirrors the guard on
+    // GameEngine.handleEntityDeath's isDentSpawn: a dent tile whose
+    // shatter.kind is 'voronoi' breaks through ShardSystem.shatter, so
+    // the dent-spawn detour here must stand down or the tile spawns
+    // both sets of debris.  Under the DBG 'legacy' A/B this flag flips
+    // back and breakShards spawn exactly as before.
+    const voronoiShatter = entity.shardVariant !== undefined
+      && SHARD_VARIANTS[entity.shardVariant].shatter.kind === 'voronoi'
+      && getActiveFractureMode() === 'voronoi';
+    const isDentTile   = isStaticTile && tileDent !== undefined && !voronoiShatter;
     const isGlassFamilyTile = isStaticTile
-      && entity.shardVariant === 'glass-tile';
+      && entity.shardVariant === 'glass-tile'
+      && !voronoiShatter; // V5: under voronoi the tile breaks into its cells
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
     if (isDentTile) {
       // Dented-out tile detaches as the shards in variant.dent.breakShards.
@@ -169,7 +181,7 @@ export class DropSystem {
           ? DROP_CONFIG.SALVAGE_DROP_CHANCE_PLASTIC_SHARD
           : isDentShard
             ? DROP_CONFIG.SALVAGE_DROP_CHANCE_DENT_SHARD
-            : DROP_CONFIG.SALVAGE_DROP_CHANCE_ASTEROID;
+            : DROP_CONFIG.SALVAGE_DROP_CHANCE_ROCK_SHARD;
         if (Math.random() < dropChance) {
           this.spawnSalvageDrop(entities, activeDrops, pos, pv);
         }
@@ -256,7 +268,7 @@ export class DropSystem {
         size:         { x: size, y: size },
         rotation:      Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
-        color:         isTile ? '#b4e6fd' : COLORS.ASTEROID,
+        color:         isTile ? '#b4e6fd' : COLORS.ROCK_SHARD,
         active:        true,
         health:        1,
         maxHealth:     1,
@@ -350,8 +362,8 @@ export class DropSystem {
         rotationSpeed:  (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
         color:          '#b4e6fd',   // blue-white tile hue
         active:         true,
-        health:         1,
-        maxHealth:      1,
+        health:         GLASS_SHARD_HP, // V9 damage layer
+        maxHealth:      GLASS_SHARD_HP,
         mass:           SHARD_VARIANTS['glass-shard'].spawn.sizeToMass(size),
         polygonPoints:  pts,
         // Let the debris scatter before the overlap-collapse pass can

@@ -631,7 +631,7 @@ function renderMinimapFlow(
                 for (let k = 0; k < F.STEPS; k++) {
                     // The sampler returns a shared scratch vector — consume it
                     // before the next call (FlowFieldGrid's contract).
-                    const v = flow.sampleAsteroidFlow(px, py);
+                    const v = flow.sampleShardFlow(px, py);
                     px += v.x * step;
                     py += v.y * step;
                     cache.data[w++] = px;

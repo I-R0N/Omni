@@ -135,7 +135,7 @@ export function updateRivals(g: GameEngine, dt: number) {
             const dm = Math.hypot(dirX, dirY) || 1; dirX /= dm; dirY /= dm;
             s.rotation = Math.atan2(ty, tx); // face the target
         } else {
-            const flow = g.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
+            const flow = g.flowField.sampleShardFlow(s.position.x, s.position.y);
             const fm = Math.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
             s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
         }

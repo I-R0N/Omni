@@ -4,7 +4,7 @@
  *  The player-collision shake used to be `min(impactSpeed, HEAVY) *
  *  CAP_MULTIPLIER`: SPEED ALONE, with no mass in it. Every other part of the
  *  collision code weighs mass — the crash gate is `mass * impactSpeed >
- *  ASTEROID_CRASH_MOMENTUM`, the impulse solver splits by (bias-compressed)
+ *  SHARD_CRASH_MOMENTUM`, the impulse solver splits by (bias-compressed)
  *  inverse mass — so shake was the exception, and a 15px chip shook the
  *  camera exactly as hard as a static wall at the same closing speed (user
  *  report: "feels overpowered").

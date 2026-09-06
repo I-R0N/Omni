@@ -23,7 +23,7 @@ import { drawDropShape } from './render/dropShapes';
 import { drawProjectileShape } from './render/projectileShapes';
 import { drawNebulaTileCached, drawNebulaEntity } from './render/nebulaTiles';
 import { drawTileShape } from './render/tileShapes';
-import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer,
+import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer, tileShowsDamage,
          prepareStaticTileCacheForFrame, syncStaticTileCacheAgainstDeaths,
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
@@ -550,34 +550,38 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // applies entity.rotation, so the blit lands at the correct orientation.
   // Bounded like the tinted-sprite cache — the metal palette + density-
   // tier darkening yields only a handful of distinct colours in practice.
-  private _solidTriangleBitmaps: Map<string, HTMLCanvasElement> = new Map();
+  private _solidDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
 
-  getSolidTriangleBitmap(hex: string): HTMLCanvasElement {
-      const cached = this._solidTriangleBitmaps.get(hex);
+  /** Silhouette-NEUTRAL LOD blob — the ONLY cached shard silhouette, and
+   *  deliberately shape-free.  A disc says "something small here" and
+   *  nothing about shape.  There used to be an equilateral-triangle blob
+   *  beside it, on the grounds that a metal shard's spawn polygon really
+   *  was a lattice triangle; rock borrowed it and a shattered tile read
+   *  as a set of identical chips, and once metal took Voronoi fracture
+   *  the claim stopped being true for metal either.  Nothing authored
+   *  goes here again: at a few pixels the honest statement is "a
+   *  fragment", not a shape the body does not have. */
+  getSolidDiscBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._solidDiscBitmaps.get(hex);
       if (cached) return cached;
       const size = SHARD_LOD_CONSTANTS.DISC_BITMAP_SIZE;
       const c = document.createElement('canvas');
       c.width = size; c.height = size;
       const cx = c.getContext('2d')!;
       const center = size / 2;
-      // Inset by 1px so the triangle's anti-aliased edges aren't clipped
-      // by the bitmap bounds when blitted.  Vertices at -90° / 30° / 150°
-      // (apex up) match DropSystem's equilateral-triangle spawn polygon.
-      const R = center - 1;
       cx.fillStyle = hex;
       cx.beginPath();
-      cx.moveTo(center, center - R);
-      cx.lineTo(center + R * Math.cos(Math.PI / 6), center + R * Math.sin(Math.PI / 6));
-      cx.lineTo(center + R * Math.cos(5 * Math.PI / 6), center + R * Math.sin(5 * Math.PI / 6));
-      cx.closePath();
+      cx.arc(center, center, center - 1, 0, Math.PI * 2);
       cx.fill();
-      if (this._solidTriangleBitmaps.size >= 64) {
-          const firstKey = this._solidTriangleBitmaps.keys().next().value;
-          if (firstKey !== undefined) this._solidTriangleBitmaps.delete(firstKey);
+      if (this._solidDiscBitmaps.size >= 64) {
+          const firstKey = this._solidDiscBitmaps.keys().next().value;
+          if (firstKey !== undefined) this._solidDiscBitmaps.delete(firstKey);
       }
-      this._solidTriangleBitmaps.set(hex, c);
+      this._solidDiscBitmaps.set(hex, c);
       return c;
   }
+
+
 
   /**
    * Return a 32×32 offscreen canvas with a soft white star: a radial-gradient
@@ -1540,7 +1544,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined
-          && !inGlowRange) {
+          && !inGlowRange
+          // V10: a damaged glass pane shows crack lines and a chipped
+          // polygon; the sprite draws neither, so it takes the slow path.
+          && !tileShowsDamage(entity)) {
           // Fallback fast path for tiles not currently in the static
           // canvas (e.g. world-canvas allocation failed, hex sprite was
           // still loading at map load, or pre-blit prepare missed an

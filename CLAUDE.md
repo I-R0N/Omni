@@ -252,6 +252,24 @@ engine/
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
+                          (+ ShardFracturePolicy, the voronoi gauntlet's
+                          per-variant fracture axis)
+    fracture.ts           PURE seeded Voronoi fracture core (voronoi
+                          gauntlet) — mulberry32, site placement, cell
+                          decomposition via robust polygon-line
+                          splitting, boundary-cell subtraction, the
+                          union-of-surviving-cells outline, interior
+                          edges.  Zero engine imports; pinned by
+                          tests/fracture.spec.ts via __omniFracture
+    fractureCache.ts      The entity-facing cache policy over fracture.ts
+                          — ensureFractureCells / ensureFractureEdges,
+                          shared by the SIM (shatter consumes cells at
+                          death) and the RENDER layer (cracks draw the
+                          interior edges), so the two cannot disagree.
+                          Also the GRAIN-BOUNDARY damage model (V15):
+                          stampLocalImpact / ensureBoundaryModel /
+                          applyBoundaryDamage / edgeBreakFraction — damage
+                          spent on boundaries, HP derived from them (§8)
     NebulaSystem.ts       Slim nebula adapter: neighbour-count refresh,
                           shard→tile transmutation, regen-completion hook,
                           salvage-drop roll
@@ -259,7 +277,8 @@ engine/
                           seeding only)
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
                           incremental tile-destroy patching
-    EntityIndex.ts        Per-frame filtered lists (enemies, asteroids, …)
+    EntityIndex.ts        Per-frame filtered lists (enemies, mobile
+                          shards, projectiles, …)
     BackgroundManager.ts  Parallax stars + nebula BG layers.  The star
                           field is DATA, not bitmaps: a struct-of-arrays
                           of device-pixel positions/sizes sorted into
@@ -301,7 +320,11 @@ perf/                     Headless capture harness (gauntlet 5c) —
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
                           EXCEPT docs/SFX_INVENTORY.md, which IS current
-                          and IS the source of truth for sound (see §8)
+                          and IS the source of truth for sound (see §8),
+                          and docs/MATERIAL_GRAIN_SPEC.md, which is a
+                          PROPOSED design (explicitly not implemented) —
+                          the generalisation of V15's grain model into a
+                          material system with unified bonding
 .github/workflows/        pr-checks (the merge gate: typecheck + build +
                           Playwright on every PR), pr-preview,
                           publish-standalone
@@ -682,12 +705,31 @@ Notable existing field categories on `GameEntity`:
   (`'glass-tile' | 'plastic-tile' | 'metal-tile' |
   'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
   'glass-shard' | 'plastic-shard' | 'metal-shard' | 'nebula-shard'`),
-  `asteroidHitCount`, `asteroidHitTimer`, `asteroidHitCooldown`,
-  `regenProgress`, `regenPopTimer`.  Per-variant policy
-  (regen / merge / shatter / dent / repel / glow / automata /
-  passThrough) lives in `SHARD_VARIANTS` (see §5).  Shared
+  `tilePressureCount`, `tilePressureTimer`, `tilePressureCooldown`
+  (the tile PRESSURE accumulator — sub-threshold impacts ON a tile;
+  renamed from the `asteroidHit*` misnomer in the voronoi gauntlet's
+  V6), `regenProgress`, `regenPopTimer`.  Per-variant policy
+  (regen / merge / shatter / fracture / dent / repel / glow / automata /
+  passThrough) lives in `SHARD_VARIANTS` (see §5).  FRACTURE cache
+  (voronoi gauntlet): `fractureCells` (the seeded Voronoi decomposition,
+  computed lazily at first damage/death by
+  `fractureCache.ensureFractureCells`), `fractureEdges` (its interior
+  edges, impact-sorted, each knowing the cells it binds — the cracks),
+  `fractureOriginalArea` (the min-remainder death baseline, now only
+  read by LEGACY progressive variants — see the GRAIN BOUNDARY note in
+  §8).  GRAIN BOUNDARIES (V15): `fractureEdgeFill` (damage absorbed per
+  interior boundary, parallel to `fractureEdges`), `fractureBoundaryHp`
+  (Σ boundary strengths — the DERIVED HP) and `authoredMaxHealth` (the
+  HP the body spawned with, kept when the model rewrites `maxHealth`;
+  tile-destruction score reads it).  For
+  PROGRESSIVE variants (rock) the pattern is applied ONCE and FIXED:
+  a detach removes its cell from the cache and the survivors persist
+  (V8) — only compose/merge invalidates (and the dent pull stands down
+  under voronoi so nothing else mutates the polygon).  Non-progressive
+  fracture variants (plastic) still invalidate on dent/snap-back and
+  recompute on the deformed shape at death.  Shared
   merge/density bookkeeping: `mergeCount` (accumulated by
-  `composeEntities`; drives fragment count on asteroid-style
+  `composeEntities`; drives fragment count on powerlaw-style
   shatter), `densityTier` + `densityCachedTint` (tint cache —
   invalidate when tier or neighbour count mutates),
   `materialNeighborCount` (automata input, frozen at map-load
@@ -942,8 +984,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
   twinkle scheduling)
-- `SHARD_VARIANTS` — per-variant regen / merge / shatter / dent /
-  repel / glow / automata / passThrough / renderCache policy.
+- `SHARD_VARIANTS` — per-variant regen / merge / shatter / fracture /
+  dent / repel / glow / automata / passThrough / renderCache policy.
   Source of truth for the shard-family behaviour table.  11 variants
   today:
   glass-tile / plastic-tile / metal-tile / indestructible-tile /
@@ -954,9 +996,78 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`maxNeighbors` + `saturationBrightness` / `saturationOpacity`)
   drives the aggregation-coloring rules.  The optional `blend` block
   (`ShardBlendPolicy`) is the one PRESENTATION entry in the table — how
-  a live cohesion bond is DRAWN (today: plastic-shard; see §8).  See
-  `engine/systems/ShardSystem.types.ts` for the schema and
-  `docs/SHARD_SYSTEM.md` for the design rationale.
+  a live cohesion bond is DRAWN (today: plastic-shard; see §8).
+  The `grain` block (a
+  `GrainSpec` — the MATERIAL GRAIN SPEC's A1 rename of the voronoi
+  gauntlet's `fracture` / `ShardFracturePolicy`; see
+  docs/MATERIAL_GRAIN_SPEC.md) + `shatter.kind: 'voronoi'` opt a variant
+  into the SEEDED VORONOI CELL DECOMPOSITION of its own polygon, and its
+  `bondStrength` (V15) additionally opts it into the GRAIN-BOUNDARY
+  damage model — damage per PIXEL of interior boundary, from which the
+  body's HP is DERIVED rather than authored (see §8): the cells are
+  the fragments at death, the interior cell edges are the cracks it
+  shows as HP falls, and for rock a qualifying hit DETACHES the cell
+  nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
+  holds the min-remainder death rule).
+  SHIPPED GRAIN TABLE (user's play-tested defaults, one row per material,
+  shared by its tile and its shard) — `grainSize` / count min / count max
+  / `regularity` / `bondStrength`, with `damageSpread` 0 everywhere:
+  rock 14/3/16/0.5/0.4, glass 15/6/10/0.5/0.4, plastic 6/8/16/0.55/1.8,
+  metal 8/8/22/0.95/1.8.  TWO consequences are worth knowing because
+  neither is visible in the row: (1) grain size and bond strength
+  COMPOUND into derived HP — a finer grain is more boundary AND each
+  pixel costs more — so at 4 damage a hit a 36px tile now takes rock 14
+  hits, glass 13, plastic 96 and metal 118; and (2) plastic and metal are
+  both held by their `grainCountMax` before their `grainSize` is reached
+  (plastic wants 45 sites and gets 16, metal wants 25 and gets 22), so
+  their EFFECTIVE grain is 10.0 and 8.5 rather than the authored 6 and 8
+  — which is also why metal is still the finer material despite plastic
+  carrying the smaller number.
+  Opted in today: ALL FOUR
+  breakable materials — rock-tile / rock-shard and glass-tile /
+  glass-shard (V10, user call: glass takes rock's breaking behaviour),
+  plus metal-tile and plastic-tile / plastic-shard (A3).  Metal is the
+  fine-grained, near-honeycomb, hardest material and its grain size AND
+  bond strength both track `densityTier`, so a plate's brightness reads
+  its toughness; plastic is large-grained, loosely regular and DEFORMS
+  (`grainDent`, B1) before it breaks.  metal-SHARD keeps its composite
+  lattice for now (spec B2).  GLASS also carries a
+  DAMAGE LAYER (V9, user call): 20-HP tiles / `GLASS_SHARD_HP` (12)
+  shards — five / three base Blaster hits — webbing with BRIGHT
+  hairline cracks (`GLASS_CRACK_STYLE`, `MATERIAL_DAMAGE_CRACKS.glass`)
+  along the exact cells they break into; physical smashes (crash over
+  the momentum threshold, the pressure trigger) still take the whole
+  pane, because the layer meters weapons, not boulders.  A DAMAGED glass
+  tile leaves the static-tile cache and the hex-sprite fast path
+  (`tileShowsDamage`) — neither can express cracks or a chipped polygon.
+  CHIP DEPTH is three constants (V10): `ROCK_BREAK.MIN/MAX_HITS` (8/12
+  — the hits the pattern reveals across), `FRACTURE_DETACH
+  .REVEAL_COMPLETE_FRAC` (0.55 — finish revealing EARLY so the last
+  pieces can leave one by one instead of being dumped at death) and
+  `MIN_REMAINDER_FRAC` (0.10).  Rock's
+  fracture params are tuned to the GLASS look (impact-crowded radial
+  sites) per the same user call.  Metal keeps `decomposeMetalComposite`
+  as its fracture (the lattice IS its cell set — composite cracks stroke
+  the lattice edges); nebula and indestructible are excluded.  The DBG
+  SHAPE of the cells is four DBG knobs beside that A/B (V11, pause ▸
+  Debug Menu ▸ Visual): **Frac relax** (LLOYD RELAXATION rounds — the
+  regularity dial; each round moves every site to its own cell's
+  centroid, so 0 is raw ragged Poisson Voronoi and the shipped 2
+  measured cell-area CV 0.28 / roundness 0.77 against 0.53 / 0.69 at
+  zero, for no net cost since relaxation also stops the sliver-retirement
+  pass re-running), **Frac sep** (blue-noise site spacing before
+  relaxation), **Frac sites** (a multiplier on the variant's site count)
+  and **Frac bias** (force the impact crowding, which pulls AGAINST
+  regularity by construction).  All four bump a tuning GENERATION that
+  invalidates cached patterns, so a knob is visible on the next hit
+  rather than only on fresh terrain.  The
+  A/B (pause ▸ Debug Menu ▸ Visual ▸ Fracture) flips every opted-in
+  variant back to its shipped legacy break — powerlaw spray, dent
+  breakShards, the spawnGlassShards fan, ROCK_CHIP — pending the user's
+  call (`getActiveFractureMode`).  See
+  `engine/systems/ShardSystem.types.ts` for the schema,
+  `docs/SHARD_SYSTEM.md` for the design rationale, and
+  `docs/GAUNTLET_VORONOI_LOG.md` for the gauntlet ledger.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
   count table, and since step 5 (G7) the ACTUAL authority rather than a
   parallel description: every map's rock free-spawn
@@ -1002,7 +1113,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   alive — seeded in `startGame`, topped up offscreen on a timer, suppressed
   while a DBG enemy-test forces another type).  Passive movement
   (`AISystem.updateBubble`) rides the asteroid flow field
-  (`flowField.sampleAsteroidFlow`), peeling OFF the flow to chase + eat the
+  (`flowField.sampleShardFlow`), peeling OFF the flow to chase + eat the
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
   via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
   (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
@@ -1855,6 +1966,38 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   absorbing shards as invisible `metalExcessCells`; its `densityTier`
   (1 tier = 6 shards) drives brightness, HP (×tier), and break count
   (`METAL_BREAK_SHARDS_PER_TIER` × tier — deliberately lossy).
+- **THE LATTICE IS HOW METAL JOINS, NOT HOW METAL BREAKS.**  Metal is the
+  one material whose shards RE-BOND after a break, and under voronoi that
+  made it the last path still putting AUTHORED shapes into the world:
+  `decomposeMetalComposite` handed back one equilateral triangle per
+  lattice cell, so a field that shattered into true grains was a field of
+  identical triangles seconds later (measured on METAL_FIELD: 54 grains at
+  t=0, 6 triangles at t=10).  A dying composite now fractures its own
+  convex hull like any other body; the triangles survive only as the
+  internal look of an ASSEMBLED composite, and `decomposeMetalComposite`
+  stays as the legacy A/B.  Two things are load-bearing: the composite
+  route passes `skipSizeGate`, because a 2-cell composite measures ~30px
+  against the 28.3px mobile-parent floor and would otherwise vanish
+  without debris; and the tell for a regression is that the children are
+  a PATTERN rather than N copies of one template — counting three-sided
+  polygons fails on correct output (at metal's 0.95 regularity triangular
+  Voronoi cells are ordinary) and matching an absolute lattice size fails
+  too, since the lattice pitch scales with the shards that fused.
+- **ONE SPAWN-HP LADDER, AND METAL WAS NOT IN IT.**
+  `ShardSystem.spawnShardHealth` is the single ladder behind all three
+  fracture-spawn sites (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  `shatterPowerlawStyle`).  It existed as three near-copies and metal fell
+  through every one onto the `size > 30 ? 2 : 1` default — a value nothing
+  chose.  That is invisible through a gun and fatal everywhere else: the
+  grain model rewrites `maxHealth` to the DERIVED boundary total at first
+  WEAPON damage (measured spawned/derived/blaster-hits — rock 8/5.3/2,
+  glass 12/3.2/2, plastic 24/17.0/6, metal 1/16.2/6), but the crash and
+  tile-pressure paths in PhysicsSystem decrement `health` DIRECTLY rather
+  than spending on boundaries, so a 1-HP metal grain shrugged off six
+  blaster bolts and died to a single bump.  `METAL_SHARD_HP` is set to the
+  measured derived figure so the authored and derived numbers agree.
+  Glass's authored 12 against its derived 3.2 is a live BALANCE question,
+  not a missing branch — left as shipped.
 - **`mergeCount` drives shatter.** `composeEntities` accumulates
   `mergeCount` on every merge path; the asteroid-style shatter breaks
   a merged parent into ~`mergeCount` fragments (rock additionally
@@ -1867,6 +2010,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   map-load bake (`materialNeighborCount`); `densityCachedTint` must
   be invalidated at every site that mutates its inputs. Master DBG
   `Tile shade` toggle gates both compute and render.
+- **A body shatters at most ONCE, and only the death path breaks it.**
+  `ShardSystem.shatter` refuses a second call per entity
+  (`GameEntity.shattered`, cleared by `completeRegen`).  This is a
+  measured invariant, not padding: a legacy census sweep in
+  `updateGameLogic` used to shatter every rock-shard it found
+  deactivated, so a death that had already shattered through
+  `handleEntityDeath` spawned its fragment set TWICE (4 pieces became 8
+  one frame later), and on a quiet field it shattered FULL-HEALTH shards
+  that a merge had just absorbed.  That sweep now only counts the
+  rock-shard population for the free-spawn respawn target.
 - **EVERY structure death goes through `onDeath` — including collision
   kills.**  `PhysicsSystem.killStructureByImpact` is the one path for a
   tile/shard killed by a COLLISION (player crash, asteroid crash, asteroid
@@ -1890,7 +2043,303 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   enemies, salvage-drop roll via `NebulaSystem.handleDeath()` for nebula
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
-  and the variant isn't a nebula).
+  and the variant isn't a nebula).  A `shatter.kind: 'voronoi'` variant
+  under the voronoi fracture mode routes to `shatterVoronoiStyle` (its
+  cached cells become the fragments) and the legacy detours stand down
+  behind MIRRORED gates — the dent-breakShards spawn is gated at BOTH
+  `handleEntityDeath.isDentSpawn` and `DropSystem.spawnDrops`, and the
+  glass-tile `spawnGlassShards` fan likewise; under the DBG 'legacy'
+  mode every gate flips back and the shipped paths run verbatim.
+- **Cracks ARE the fracture pattern for voronoi materials.**
+  `overlayMaterialCracks` draws the interior cell edges of the cached
+  decomposition (impact-nearest first, revealed by the same
+  `MATERIAL_DAMAGE_CRACKS` freq/cap pacing) for any variant with a
+  `grain` block; everything else — metal tiles, single metal shards,
+  enemy hulls — keeps the seeded radial spokes (`drawDamageCracks`).
+  The metal COMPOSITE strokes its own lattice-cell outlines instead
+  (the exact `decomposeMetalComposite` seams).  The one ordering rule
+  that makes "cracks predict the break" TRUE: `applyDentStep` skips the
+  fracture-cache invalidation on the killing blow (health is
+  decremented before the dent), so the shatter consumes exactly the
+  decomposition whose edges were last drawn.
+- **GRAIN REGULARITY IS A MATERIAL PROPERTY** (material grain spec, A1).
+  A pattern's regularity comes from two knobs — Lloyd relaxation rounds
+  and blue-noise minimum site separation — and both used to be read from
+  GLOBAL DBG accessors, so every material on the map shared whatever the
+  debug knob said and "metal near-honeycomb, plastic ragged" could not be
+  expressed at all.  `GrainSpec.regularity` (0..1) is now the source and
+  the DBG cycles are OVERRIDES: their first entry, `material`, is the
+  default and defers to the table; the numbered entries force one value
+  everywhere so a setting can still be judged across a whole field.
+  `grainRelaxFor` / `grainSeparationFor` are the mapping, calibrated so
+  **regularity 0.5 reproduces the old globals exactly** (2 rounds, 0.45)
+  — which is why A1 was verified to generate BYTE-FOR-BYTE identical
+  patterns to the commit before it, and why rock and glass still carry
+  0.5.  A2 added `sizeSpread` (a POWER DIAGRAM — additive site weights
+  shifting each bisector, because varying a site's SEPARATION was
+  measured to barely move cell areas) and `bondSpread` (a seeded,
+  unbiased ±60% per-boundary wobble).  A3 is the first thing to USE the
+  axes: metal 0.95, plastic 0.55.
+  Vocabulary, since the words are close: a GRAIN is an internal cell of a
+  body's pattern, a SHARD is a mobile entity, and a grain BECOMES a shard
+  when it detaches — grains did not replace shards, and the spec applies
+  to tile and shard variants alike.
+- **DENSITY IS NOT A GRAIN PARAMETER, AND A MATERIAL'S GRAIN GEOMETRY IS
+  SHARED BY ITS TILE AND SHARD** (user call).  Grain size and bond
+  strength were briefly coupled to `densityTier`, so a bright metal plate
+  was finer-grained and harder.  That inverts the model: density is a
+  RESULT of grain size, grain count and regularity, not an input to them,
+  and coupling it made one material behave like several (metal ranged
+  123–384 HP by tier; it is 133 flat now).  Nothing in `GrainSpec` may
+  read `densityTier`.
+  For the same reason a material has ONE grain geometry — `grainSize`,
+  the count clamps, `regularity`, `sizeSpread`, `impactBias` — shared by
+  its tile and its shard rows: a shard is a smaller body of the same
+  stuff, not a different material.  `grainSize` is the GRAIN'S OWN
+  DIAMETER and the site count is `bodyArea / (π·(grainSize/2)²)`, i.e.
+  proportional to AREA.  Counting by DIAMETER instead makes count linear
+  in size, so grains GROW with the body: measured that way a rock tile's
+  grains were ~12.7 units across while the same material's shard had
+  ~8.4 — a shard was quietly a finer-grained material than its own tile.
+  Two documented exceptions bracket it: `grainCountMin` is a FLOOR,
+  because a body small enough to be one or two grains has almost no
+  internal boundary and so almost no derived HP, and `grainCountMax` is
+  a performance CEILING, because decomposition is superlinear in site
+  count.  Constant grain size holds BETWEEN them.  `radialSpeed` is the one deliberate
+  exception (how fast pieces fly apart is about being mobile, not about
+  the grain), and any other divergence needs a comment saying why.
+- **A BREAK CONSERVES, AND THE INVARIANT IS ENFORCED, NOT ASSUMED.**  When
+  a grain detaches, the area the body loses must equal the area the
+  fragment carries away.  `progressFracture` CHECKS that before
+  committing a detach (`|remainderArea − (polyArea − cell.area)|` against
+  a 2% tolerance) and refuses the piece when it fails — it leaves on a
+  later hit, or at death.  This is a check rather than a proof because
+  several geometric cases break conservation quietly and enumerating them
+  was tried twice and failed: an interior grain leaving would punch a
+  hole the outline cannot express, so the union walk traces the outer
+  ring, the body keeps its area, and a full-size shard appears from
+  nothing (measured: a tile GROWING by 9.5 while shedding 164).  Two
+  related rules hold it up: for a grain material the remainder is
+  `unionOfCells` ONLY (the arc splice reconstructs from the cell's
+  outline, which stops matching the body's boundary once grains deform),
+  and a deformed grain must report its LIVE area and centroid — carrying
+  the cut-time values across a dent is what let a shrivelled grain spawn
+  a full-size fragment (2.06× measured).
+- **A CHIP THROWS DUST AS WELL AS THE SOLID PIECE.**  The legacy break
+  paths puffed tinted nebula-shards as a body chipped — rock per hit
+  through `dent.perHitShard`, glass through `spawnGlassShards` — and BOTH
+  stand down under voronoi, so the dust went with them.  Measured over
+  eight tiles broken to nothing: glass produced 3 per tile under legacy
+  and **0** under voronoi; plastic and metal 0; rock kept only its 3-5
+  death burst (all of it big — 13.9-24.2 units — with no small dust at
+  all).  `GRAIN_CHIP_DUST` restores it at the detach seam for EVERY grain
+  material, tinted to the body's own colour (rock keeps
+  `randomRockNebulaComposition` and the `fromRock` flag that lets its dust
+  condense back into a rock-shard).  Two things are deliberate: the
+  `CHANCE` gate exists because every detach now makes a chip and a puff on
+  each reads as a constant cloud trailing the player — the same note the
+  legacy per-hit path carries about its own gate — and `SIZE_FRACTION` is
+  of the CHIP, not the parent, because a grain is ~12 units on a 36px tile
+  and sizing off the parent (as the legacy per-hit puff did) makes the
+  dust bigger than the piece that shed it.
+- **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
+  things happen at the seam in `progressFracture`, and two of them were
+  missing:
+  (1) **RECOIL.**  The chip's velocity used to be created from nothing
+  while the parent's MASS was scaled down and its VELOCITY left alone, so
+  a break destroyed momentum twice over.  Ejecting mass m at relative
+  velocity `(v − V)` now leaves the remainder with `−(m/M′)` of it,
+  clamped by `RECOIL_MAX_RATIO` so a nearly-eroded body shedding a large
+  final piece takes a kick rather than a launch.  STATIC bodies are
+  exempt — a tile is bolted to the map and its infinite mass says so.
+  (2) **RE-CENTRING, MOBILE BODIES ONLY.**  The remainder replaced
+  `polygonPoints` and nothing moved `position` to match, so an eroding
+  shard's centre of area walked away from its own origin (measured −5.9 →
+  −12.3 over five detaches on a 160-unit shard).  The visible symptom is
+  not the offset: it is that the body then ROTATES ABOUT THE WRONG POINT,
+  so a spinning eroded shard orbits its old origin instead of spinning in
+  place.  `recentreFracturedBody` shifts EVERY piece of local-frame state
+  together — outline, surviving cells (live AND cut-time outlines), edge
+  endpoints and midpoints, and `lastImpactLocal` — and compensates
+  `position` in world terms.  Shifting only some of them would leave the
+  pattern no longer tiling the body, which is the invariant
+  `unionOfCells` depends on.  STATIC tiles are excluded because their
+  position IS the hex coordinate the static grid, regen and neighbour
+  counts key on (the dent contract).
+  (3) **THE SHIFT IS QUANTISED TO THE UNION'S OWN EPSILON.**
+  `unionOfCells` identifies coincident vertices by keying ABSOLUTE
+  coordinates (`round(p.x / eps)`), so translating the frame by an
+  arbitrary amount re-quantises which vertices merge and hands back a
+  different ring — measured as a 23.9-area disagreement between a body's
+  outline and the union of its own cells, where the pre-fix build had
+  none.  Moving by an exact multiple of `eps` shifts every key by the same
+  integer, so vertices that keyed together still do.  The pass computes
+  `eps` ONCE and both the union and the re-centre read it, because they
+  must be the same number.  The residual offset is under one eps.
+  The regression test's tiling assertion runs over SIX bodies, not one:
+  the re-quantisation only shows when a vertex sits near a key boundary,
+  and on a single shard the negative control passed.
+- **DEFORMATION IS FLOORED, AND ELASTIC MATERIALS SPRING BACK** (user
+  call).  A grain deforms to no less than `GRAIN_DENT_MIN_AREA_FRAC`
+  (two thirds) of the area it was cut at, or `GRAIN_DENT_MIN_AREA_PX2`,
+  whichever is greater.  A fragment breaks off CARRYING its deformed
+  outline; a material with `grain.dentRecoverSeconds` (plastic) then
+  relaxes back to the shape its grain was cut at, while one without it
+  (metal) keeps the dent for good.  The relaxation must be LINEAR IN TIME
+  — stepping a fraction of the REMAINING distance each tick compounds
+  into an exponential approach that reaches rest long before the timer,
+  making the authored duration a lie.
+- **A SHARD'S LOD BLOB MUST BE SILHOUETTE-NEUTRAL, AND THERE IS ONLY ONE
+  BLOB.**  `SHARD_LOD_CONSTANTS` collapses tiny mobile shards to a cached
+  bitmap instead of a polygon path, and that bitmap is a DISC — the only
+  cached shard silhouette there is.  It says "something small here" and
+  nothing about shape, which is the only honest thing to say at a few
+  pixels.  The rule was learned TWICE, from the same authored
+  equilateral-triangle bitmap:
+  (1) ROCK blitted it, so a tile shattering into 8 grains read as 8
+  identical equilateral chips — the exact Voronoi silhouette the fracture
+  model exists to show, replaced by another material's authored shape.
+  (2) METAL then kept a triangle branch of its own, at
+  `MIN_APPARENT_RADIUS_PX` (9px — THREE TIMES rock's chip gate), on the
+  grounds that a metal shard's spawn polygon genuinely WAS a lattice
+  triangle.  A3 gave metal Voronoi fracture and that stopped being true;
+  the branch stayed.  Measured on METAL_FIELD: a broken tile's 9 grains,
+  real 4-, 5- and 6-gons in the sim, sat at 3.5–4.5px apparent and took 9
+  triangle blits — every grain on screen wearing an authored shape.
+  Fixing the SIM path (a dying composite fractures its own hull, above)
+  did not touch this, which is why the triangles survived a round of
+  "fixed": the sim was correct throughout in BOTH cases, which is also
+  why no simulation test caught either.  The triangle bitmap is now
+  DELETED rather than restricted, so no material can borrow it again, and
+  both regression tests are RENDER tests asserting that a broken tile's
+  grains draw their real polygons rather than a cached blob.
+  `CHIP_LOD_RADIUS_PX` is **2**, and it is the ONE threshold for every
+  grain material.  It has been walked down twice for the same reason: the
+  original 6 was tuned when small rock-shards were the occasional
+  conservation chip, and V15 makes EVERY tile break produce `size/√cells`
+  fragments; 3 then still sat INSIDE the size range a material's own
+  grains occupy.  Measured across 160 rock grains from 20 tiles, sizes ran
+  7.4-18.1 units, so at 3 **12.5% of real grains** collapsed to circles
+  while their siblings drew polygons — visible as odd round pieces in a
+  burst, which is how it was reported.  At 2 the figure is 0% on all four
+  materials (smallest apparent radius: rock 2.22, glass 2.68, metal 2.97,
+  plastic 4.47), so the margin is real but not large — anything that makes
+  grains finer needs re-measuring against it.  The honest cost is that
+  small debris that used to blit now draws its polygon (rock 14%, glass
+  6%, metal 0.7% of grains).  Anything that raises this threshold, or points a grain
+  material at an authored bitmap again, undoes the fracture work at the
+  last step.
+- **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
+  user call).  A variant carrying `grain.bondStrength` does not have
+  an HP pool that damage counts down.  Damage ACCUMULATES ON THE INTERIOR
+  BOUNDARIES of its cached decomposition — grain by grain, nearest the
+  contact first — and a cell breaks off exactly when every boundary still
+  binding it has been broken through.  `bondStrength` is damage per
+  PIXEL of boundary: ONE number per material (rock 0.27, glass 0.16), and
+  deliberately NOT normalised by body size, because normalising cancels
+  scale and would force separate numbers for a material's tiles and its
+  shards.  Absolute length makes a bigger body tougher for free.
+  Two properties FALL OUT of this rather than being written, and both are
+  the reason to prefer it:
+  (1) **HP is derived** — `maxHealth` becomes `Σ (edge length × strength)`
+  over the body's OWN pattern at first damage, so a tile that decomposed
+  into more boundary is genuinely tougher and the number varies tile to
+  tile (a 36px glass pane measured 18.7–21.4).  The SPAWNED value is kept
+  as `authoredMaxHealth`, and anything meaning "how substantial is this
+  body" must read THAT — tile-destruction score does, since paying per
+  derived HP would price a tile by how finely it happened to decompose.
+  (2) **Nothing ends at a limit** — the damage needed to break every
+  boundary IS the derived HP, so "health hit zero" and "the last boundary
+  broke" are the same event by construction.  `FRACTURE_DETACH
+  .MIN_REMAINDER_FRAC` is skipped entirely for grain materials; it was the
+  arbitrary floor this model replaces.  A body also ends the moment
+  NOTHING BINDS ANYTHING (its last grains are held only by boundaries they
+  share with each other) — an ending, not another detach, because two
+  grains touching at a point are not a polygon SAT can carry.
+  Three things are load-bearing and easy to undo by accident:
+  - **SPILL.**  Damage finishing a boundary flows to the next unbroken
+    one.  Without it a hit's remainder is lost and the health readout
+    drifts from the boundary state, which breaks (2).
+  - **HOW WIDE THE SPEND IS, IS A MATERIAL PROPERTY** (A4).
+    `grain.damageSpread` picks between two spends.  0 (every material's
+    shipped value) is SEQUENTIAL: fill the nearest boundary, spill into
+    the next, repeat — so exactly ONE boundary carries partial damage at
+    any instant (measured, pinned at 1 for a body's whole life on both
+    rock and glass), a hit is a needle, and grains leave one at a time.
+    Set, it is a distance-weighted WATER-FILL: every unbroken boundary
+    takes a share `exp(-d / (damageSpread × bodyWidth))`, so a hit
+    pre-charges a whole annulus and the ring holding a group of grains
+    completes at once (measured at 0.2: partial boundaries 1 → 14, and
+    per-hit yields of 2 and 4 replacing a dribble of 1s).  Three things
+    hold it up.  The weight uses CELL distance, not edge-midpoint
+    distance, so every boundary of one grain fills at the same rate —
+    that is the V10 cell-grouping lesson carried into the weights.  The
+    weights are NORMALISED and surplus from a saturating boundary is
+    redistributed, so total absorbed is exactly the damage dealt and
+    derived HP is untouched — a single-pass allocation without
+    redistribution leaks (measured 0.275 HP per hit) and is what the
+    regression test's conservation assertion catches.  And the knob spans
+    a known-good end and a known-BAD one: large values approach the
+    uniform spread V10 measured as the failure mode, visible as pieces
+    arriving later and more of them dumping at death (at 0.8, five of
+    eight came off at death against two at 0.2).  Small values are the
+    useful ones.  DBG ▸ Grain & Fracture ▸ "Dmg spread" forces it
+    globally; "↳ dmg spread" sets one material.  Neither bumps the
+    fracture generation — this changes how damage is SPENT, not how the
+    pattern is BUILT, so a half-broken body keeps the boundaries it has
+    already earned.
+  - **SPEND ORDER IS CELL BY CELL**, nearest the contact first — never a
+    flat nearest-EDGE sort.  This is the V10 reveal-order lesson restated
+    in the damage layer: a flat sort spreads damage over many cells and
+    completes almost none until the end (measured: 3 pieces shed over a
+    rock tile's life, 5 dumped at death).
+  - **THE REMAINDER IS `unionOfCells`, not the arc splice.**
+    `subtractBoundaryCell` is exact where it applies but refuses once a
+    survivor's whole outline lies on the parent boundary — precisely the
+    tail, where instrumenting showed every boundary broken, every
+    remaining cell loose, and none of them able to leave.  Since the cells
+    TILE the original polygon, an edge shared by two survivors is interior
+    and everything else is boundary: walking that gives the outline with
+    no arc bookkeeping and no tail case.  It returns null for a non-ring
+    (an eroded body split into islands) and the arc splice stays the
+    fallback.
+  Every PLAYER damage path feeds the boundaries — projectile, lightning
+  chain, shockwave ring — each stamping its own contact point via the
+  shared `stampLocalImpact`, so splash and chain damage erode from where
+  they arrived.  PHYSICAL smashes (a boulder crash, the pressure trigger)
+  still take the whole body: they meter boulders, not weapons.  DBG ▸
+  Visual ▸ "Bnd strength" is the master multiplier over every material.
+- **Progressive fracture IS the rock damage model under voronoi** (V8 —
+  the boundary-highlight rework).  The decomposition is applied ONCE at
+  first damage and FIXED; each hit reveals more of the impact-sorted
+  edge list (`fractureCache.fractureRevealedEdgeCount` — the ONE
+  formula the crack render and the sim share, floor-paced so the last
+  boundary completes exactly at the hit ceiling), and a cell whose
+  BINDING edges are all revealed — its boundary fully highlighted —
+  BREAKS OFF as that piece (`GameEngine.progressFracture` →
+  `fracture.subtractBoundaryCell`, an exact arc-splice): the parent
+  keeps the spliced remainder (size and position untouched — the dent
+  contract — so the static grid never rebuilds) and the SURVIVING cells
+  of the same pattern stay cached for the next pieces.  An edge stops
+  binding when its partner cell has departed, so interior pieces free
+  up as neighbours leave.  There is NO chip-chance roll — the highlight
+  completing is the trigger — and progressive variants skip the dent
+  pull under voronoi (the pattern must stay stable; the highlight is
+  the damage read).  ONLY THE STRUCK PIECE LEAVES (V12, user call): the
+  damage path stamps the projectile's real contact point in entity-local
+  coords (`lastImpactLocal` — it also biases the pattern, replacing a
+  direction proxy), and a cell may detach only if it is the one that
+  point touches, measured to each cell's OWN OUTLINE (a shot stops at the
+  surface, so a centroid comparison would nominate a piece buried on the
+  far side).  When the struck cell is boundary-complete but not
+  spliceable off the current remainder, the search may walk to a
+  neighbour within `FRACTURE_DETACH.CONTACT_RADIUS_FRAC` (0.45 of the
+  body's size) — never across it, so a piece internal to a shard or
+  buried in a cluster cannot pop off a hit it never received.  Below
+  `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%)
+  of the original area — or at the hit ceiling — the remaining cells
+  break through the normal death path.  `releaseRockChip` survives as
+  the DBG legacy path and as the fallback for degenerate polygons.
 - **A COLOUR MUST NEVER PARSE TO NaN.**  `hexToRgb` (render/drawUtils) feeds
   its channels straight back into `rgb()`/`rgba()` strings for gradient
   stops, and `addColorStop` THROWS on a colour it cannot parse — inside the
@@ -2313,7 +2762,52 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   **Joystick** (Touch / Forced — the widget is touch-only by design, so
   this is the only way to check its layout on a desktop), **Minimap mat**
   (Flow / Dots / Off) and **Rock palette** (mixed / slate / rust /
-  mineral).
+  mineral).  The fracture / grain rows have their OWN section — **Grain &
+  Fracture** — rather than living at the bottom of Visual's ~60 rows: it
+  holds the five GLOBAL knobs (Fracture A/B, Frac relax, Bnd strength,
+  Frac sep, Frac sites, Frac bias) and, under them, the PER-MATERIAL
+  block described below.
+- **PER-MATERIAL GRAIN KNOBS ARE A SELECTOR PLUS FIVE ROWS, NOT TWENTY
+  ROWS.**  Six knobs across four materials is twenty-four values, and that many
+  rows would wreck a panel that already runs ~90.  Instead **Grain mat**
+  picks the material and the `↳` rows below it read and write whichever
+  one is selected — so the surface is a handful of rows and the existing
+  `ctrlRow` idiom is unchanged.  Four rules hold it up:
+  (1) **The key is the MATERIAL, not the variant.**  Writing `rock` moves
+  rock-tile and rock-shard together, because a material's grain geometry
+  is shared by its tile and its shard (see the grain-geometry rule above)
+  — a tile and its own debris decomposing from different patterns is not
+  one material, and is not a setting anyone can judge.
+  (2) **Overrides COMPOSE with the global knobs**, never replace them.
+  `Frac sites` still scales whatever count they produce and `Bnd
+  strength` still multiplies whatever strength they set, so a global
+  sweep keeps working while one material is being tuned.
+  (3) **A LADDER IS A NUMBER LINE WITH THE DEFAULT SPLICED INTO IT.**  The
+  readout shows the table's OWN NUMBER with a `(def)` note (user call) —
+  `0.4 (def)` rather than the word `table`, because a number you can read
+  beats a word — and the note preserves what the word carried: a default
+  and a value someone set to the same number still read differently,
+  since an explicit one shows bare.  `GRAIN_KNOBS` therefore holds only
+  the shared numeric STEPS, and `grainLadder(mat, knob)` inserts that
+  material's default at its sorted position, dropping any step equal to
+  it.  Before this the `null` entry was pinned at index 0, so a rock
+  grain-size cycle read 14 (def) → 6 → 8 → 10 → 13 → 15 — starting at the
+  default and jumping BELOW it before climbing back through, which reads
+  as an unordered list once the numbers are visible.  Ladder length is
+  therefore PER MATERIAL, so nothing may walk one by a fixed step count.
+  Ranges keep a step either side of every shipped default (`damageSpread`
+  excepted: 0 is its floor).  `↳ reset all` drops all twenty-four and
+  shows how many are currently off the table.
+  (4) **`grainSpecFor(variantId)` is the ONE seam** every read of a
+  `grain` block goes through — `ensureFractureCells`, `bondStrengthFor`,
+  the bond-variance read, the dent read.  Reaching into
+  `SHARD_VARIANTS[..].grain` directly would let an override be honoured
+  by one reader and ignored by another, which for this model means cracks
+  drawn from one pattern and a break taken from a different one.  It
+  returns the table object itself when nothing is overridden, so normal
+  play allocates nothing.  Every knob bumps the fracture tuning
+  GENERATION, so a change shows on the next hit rather than only on
+  terrain that spawns afterwards.
 - **The menus carry a CONTROLS & BASICS panel** (`renderHelpPanel`, Pair C
   c1) — one function, hosted by both the main menu and the pause menu with
   separate collapse keys, describing touch, keyboard/mouse, gamepad and the

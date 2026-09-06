@@ -3,18 +3,25 @@ import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
-         computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect } from './constants';
+         computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
+         GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
+         grainSpecFor, grainLadder, grainTableValue, type GrainKnob } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
 import { buildFilletPath, blendAttachRadius, coatMargin } from './engine/systems/render/shardBlend';
 import { roundedPolyPath } from './engine/systems/render/drawUtils';
+import { bondVariance, BOND_SPREAD_RANGE } from './engine/systems/fractureCache';
 import { installMenuNav, pickNext } from './components/menuNav';
 import {
   enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
 } from './engine/systems/render/shipSprites';
 import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
+import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
+         isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
+         subtractBoundaryCell, pointToPolygonDistance2, unionOfCells,
+       } from './engine/systems/fracture';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -83,6 +90,30 @@ const App: React.FC = () => {
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.
     (window as any).__omniMenuNav = { pickNext };
+    // Debug handle #6 (voronoi gauntlet, V1) — the seeded fracture core, on
+    // the __omniHid terms: pure functions with no engine imports, pinned by
+    // tests/fracture.spec.ts for determinism, area conservation, cell
+    // validity and cost.  Nothing in the game reads this handle.
+    (window as any).__omniFracture = {
+      mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
+      isSimplePolygon, placeFractureSites, computeFracture, collectInteriorEdges,
+      subtractBoundaryCell, pointToPolygonDistance2, unionOfCells,
+    };
+    // Debug handle #7 (material grain spec, A1) — the material-side
+    // resolvers, on the __omniFracture terms: pure, and wrong in a way
+    // nothing reports.  If the regularity mapping drifts, every
+    // material's pattern silently changes shape and nothing throws; and
+    // "A1 changes no behaviour" is exactly the claim that needs pinning
+    // against a number rather than against a screenshot.
+    (window as any).__omniGrain = {
+      GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
+      bondVariance, BOND_SPREAD_RANGE,
+      // The per-material DBG override resolver.  Pure, and wrong in a way
+      // nothing reports: an override that lands in the table but never
+      // reaches this resolver reads back perfectly from the panel and
+      // changes nothing on screen.
+      grainSpecFor, grainLadder, grainTableValue,
+    };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
     // above: `enumerateCells` / `resolveTiltCell` / `cellMatrix` are pure,
@@ -355,6 +386,46 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
   };
 
+  const handleCycleFractureMode = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureMode();
+  };
+
+  const handleCycleFractureRelax = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureRelax();
+  };
+
+  const handleCycleFractureSeparation = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureSeparation();
+  };
+
+  const handleCycleFractureSiteScale = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureSiteScale();
+  };
+
+  const handleCycleFractureBias = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleFractureBias();
+  };
+
+  const handleCycleDamageSpread = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleDamageSpread();
+  };
+
+  const handleCycleGrainMaterial = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleGrainMaterial();
+  };
+
+  const handleCycleGrainKnob = (knob: GrainKnob) => {
+      if (engineRef.current) engineRef.current.dbg.cycleGrainKnob(knob);
+  };
+
+  const handleResetGrainOverrides = () => {
+      if (engineRef.current) engineRef.current.dbg.resetGrainOverrides();
+  };
+
+  const handleCycleBoundaryStrength = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleBoundaryStrength();
+  };
+
   const handleCycleNebulaWakeSpin = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaWakeSpin();
   };
@@ -524,8 +595,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleColorBlendInterval();
   };
 
-  const handleToggleAsteroidFlow = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleAsteroidFlow();
+  const handleToggleShardFlow = () => {
+      if (engineRef.current) engineRef.current.dbg.toggleShardFlow();
   };
 
   const handleToggleSnitchCatchMode = () => {
@@ -867,6 +938,16 @@ const App: React.FC = () => {
         onCycleTintMix={handleCycleTintMix}
         onCycleShadowSoftness={handleCycleShadowSoftness}
         onCycleRockPalette={handleCycleRockPalette}
+        onCycleFractureMode={handleCycleFractureMode}
+        onCycleFractureRelax={handleCycleFractureRelax}
+        onCycleFractureSeparation={handleCycleFractureSeparation}
+        onCycleFractureSiteScale={handleCycleFractureSiteScale}
+        onCycleFractureBias={handleCycleFractureBias}
+        onCycleDamageSpread={handleCycleDamageSpread}
+        onCycleGrainMaterial={handleCycleGrainMaterial}
+        onCycleGrainKnob={handleCycleGrainKnob}
+        onResetGrainOverrides={handleResetGrainOverrides}
+        onCycleBoundaryStrength={handleCycleBoundaryStrength}
         onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
         onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
@@ -889,7 +970,7 @@ const App: React.FC = () => {
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
-        onToggleAsteroidFlow={handleToggleAsteroidFlow}
+        onToggleShardFlow={handleToggleShardFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCyclePortalWarp={handleCyclePortalWarp}

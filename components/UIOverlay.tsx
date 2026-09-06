@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype, ControlScheme } from '../types';
-import { CONTROL_SCHEMES, controlSchemeDef } from '../constants';
+import { CONTROL_SCHEMES, controlSchemeDef, type GrainKnob } from '../constants';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
 // single-element "Test Maps" showcases (plus the multi-material Tile Heavy
@@ -108,6 +108,16 @@ interface UIOverlayProps {
   onCycleFog?: () => void;
   onCycleShadowSoftness?: () => void;
   onCycleRockPalette?: () => void;
+  onCycleFractureMode?: () => void;
+  onCycleFractureRelax?: () => void;
+  onCycleFractureSeparation?: () => void;
+  onCycleFractureSiteScale?: () => void;
+  onCycleFractureBias?: () => void;
+  onCycleDamageSpread?: () => void;
+  onCycleGrainMaterial?: () => void;
+  onCycleGrainKnob?: (knob: GrainKnob) => void;
+  onResetGrainOverrides?: () => void;
+  onCycleBoundaryStrength?: () => void;
   onCycleNebulaWakeSpin?: () => void;
   onToggleRumble?: () => void;
   onSetControlScheme?: (scheme: ControlScheme) => void;
@@ -134,7 +144,7 @@ interface UIOverlayProps {
   onCycleColorBlendInterval?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
-  onToggleAsteroidFlow?: () => void;
+  onToggleShardFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCyclePortalWarp?: () => void;
@@ -418,6 +428,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFog,
   onCycleShadowSoftness,
   onCycleRockPalette,
+  onCycleFractureMode,
+  onCycleFractureRelax,
+  onCycleFractureSeparation,
+  onCycleFractureSiteScale,
+  onCycleFractureBias,
+  onCycleDamageSpread,
+  onCycleGrainMaterial,
+  onCycleGrainKnob,
+  onResetGrainOverrides,
+  onCycleBoundaryStrength,
   onCycleNebulaWakeSpin,
   onToggleRumble,
   onSetControlScheme,
@@ -444,7 +464,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleColorBlendInterval,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
-  onToggleAsteroidFlow,
+  onToggleShardFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCyclePortalWarp,
@@ -534,6 +554,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'menuhelp' / 'pausehelp' are the Controls & Basics widget (Pair C, c1)
     // in the two menus that host it.  Two keys rather than one so opening it
     // to read the controls mid-run does not also unfold the front door.
+    grain: true,
     fieldmaps: true, switchmap: true, debug: true, menudebug: true,
     menuhelp: true, pausehelp: true,
   }));
@@ -1754,6 +1775,56 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
               )}
 
+              {/* ── Grain & Fracture ───────────────────────────────── */}
+              {renderSectionHeader('grain', 'Grain & Fracture')}
+              {!collapsed.grain && (<>
+                {ctrlRow('Fracture', onCycleFractureMode,
+                  stats.fractureModeName ?? 'voronoi',
+                  'How fracture-capable materials break (voronoi gauntlet A/B). VORONOI (default): the entity carries a seeded Voronoi cell decomposition of its own polygon - the cells are the fragments, so a break flies apart along its own seams and conserves area. LEGACY: the shipped pre-gauntlet model - fresh random star-polygon fragments (powerlaw) and the rock-tile 3-chunk dent break. Applies at the next break; judge on a rock field.')}
+                {ctrlRow('Frac relax', onCycleFractureRelax,
+                  stats.fractureRelaxName ?? 'material',
+                  'LLOYD RELAXATION rounds, forced across EVERY material - the REGULARITY dial. MATERIAL (default) defers to each material\'s own `regularity` in the grain spec, which is what lets metal be near-honeycomb while plastic stays ragged; the numbered entries override every material at once so a setting can be judged everywhere. Each round moves every Voronoi site to its own cell\'s centroid, which evens the piece SIZES out and pulls the shapes toward convex, near-hexagonal chunks. 0 is raw Poisson Voronoi (ragged, some slivers, wildly uneven); 2 (default) measured a cell-area coefficient of variation of 0.28 and roundness 0.77 against 0.53 / 0.69 at zero rounds; 4 is close to a honeycomb. Effectively free - relaxation also stops the sliver-retirement pass re-running. Takes effect on the next hit (cached patterns rebuild).')}
+                {ctrlRow('Bnd strength', onCycleBoundaryStrength,
+                  stats.boundaryStrengthName ?? 'x1',
+                  'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which puts a 36px rock tile at 9 Blaster hits and a glass pane at 5. Takes effect on the next hit (cached patterns rebuild).')}
+                {ctrlRow('Dmg spread', onCycleDamageSpread,
+                  stats.damageSpreadName ?? 'material',
+                  'How DEEP a hit\u0027s damage reaches into the pattern, forced across every material. OFF (the shipped behaviour) is a SEQUENTIAL spend: damage fills the nearest boundary to completion, spills into the next, and repeats - so only ever ONE boundary carries partial damage, a hit is a needle, and grains come away one at a time. A number is a WEIGHTED spend instead, as a fraction of the body\u0027s width: every unbroken boundary takes a share falling off with distance from the contact, so a hit pre-charges a whole ring and several grains can come free together. Conserving by construction - the weights are normalised and the spend is a water-fill, so the same total damage lands wherever it goes and derived HP is untouched. Small values are the useful ones: a LARGE value approaches the uniform spread V10 measured as the failure mode, where damage spread over every cell completes almost none of them. MATERIAL defers to each material\u0027s own value.')}
+                {ctrlRow('Frac sep', onCycleFractureSeparation,
+                  stats.fractureSeparationName ?? 'material',
+                  'Minimum spacing between fracture sites, as a fraction of the mean cell radius - blue-noise placement BEFORE relaxation. MATERIAL (default) defers to each material\'s own `regularity`; the numbered entries force one value everywhere. Higher means sites refuse to bunch, so cells start out more even. Matters most at Frac relax 0; relaxation largely supersedes it.')}
+                {ctrlRow('Frac sites', onCycleFractureSiteScale,
+                  stats.fractureSiteScaleName ?? 'x1',
+                  'Multiplier on the per-variant fracture site count - fewer, bigger chunks or more, smaller ones, without editing the variant table. Clamped by each variant\'s own min/max, so a big multiplier saturates rather than exploding the piece count.')}
+                {ctrlRow('Frac bias', onCycleFractureBias,
+                  stats.fractureBiasName ?? 'variant',
+                  'Impact bias: the fraction of sites crowded toward the hit point, which is what makes the pattern radiate from the impact the way real glass does. VARIANT uses each material\'s own value (rock and glass ship 0.75). Pulls AGAINST Frac relax by design - crowding sites is precisely what makes cell sizes uneven - so 0 plus relaxation gives the most uniform chunks, and 1 plus relax 0 the most chaotic.')}
+                {ctrlRow('Grain mat', onCycleGrainMaterial,
+                  stats.grainMaterialName ?? 'rock',
+                  'Which MATERIAL the five knob rows below read and write. The knobs above are GLOBAL - they force one value across every material at once, which is what you want for judging a setting and exactly wrong for tuning one material against another. Selecting a material changes nothing on its own. The key is the MATERIAL, not the variant: writing rock moves rock-tile and rock-shard TOGETHER, because a material\u0027s grain geometry is shared by its tile and its shard (a shard is a smaller body of the same stuff, not a different material) - a tile and its own debris drawn from two different patterns is not something that can be judged.')}
+                {ctrlRow('  ↳ grain size', () => onCycleGrainKnob?.('grainSize'),
+                  stats.grainKnobNames?.grainSize ?? '—',
+                  'GRAIN DIAMETER in world units, for the selected material. Site count is bodyArea / (π·(size/2)²), i.e. proportional to AREA, so grains stay the same size whatever body they are in - a tile and its shards are the same material. Smaller means more, finer grains: more interior boundary, so the body is TOUGHER as well as more finely broken, since HP is derived from boundary. A value marked (def) is the variant table\u0027s own; cycling off it shows the number bare, so a default and a deliberately-equal setting still read differently.')}
+                {ctrlRow('  ↳ count min', () => onCycleGrainKnob?.('grainCountMin'),
+                  stats.grainKnobNames?.grainCountMin ?? '—',
+                  'FLOOR on the site count - the documented exception to constant grain size. A body small enough to be one or two grains has almost no internal boundary and therefore almost no derived HP, and would die to a single shot; below this floor grains are finer than the material\u0027s own, deliberately. Raising it makes small shards tougher and finer; dropping it to 1 is how to SEE the collapse the floor exists to prevent.')}
+                {ctrlRow('  ↳ count max', () => onCycleGrainKnob?.('grainCountMax'),
+                  stats.grainKnobNames?.grainCountMax ?? '—',
+                  'CEILING on the site count - a performance guard, not a look. Decomposition is superlinear in site count, so a very large body takes coarser grains rather than hundreds of cells. Constant grain size holds BETWEEN this and the floor. Raise it to let big tiles keep true grain size (and watch the fracture cost in the Perf section); lower it for coarse chunky breaks on everything big.')}
+                {ctrlRow('  ↳ regularity', () => onCycleGrainKnob?.('regularity'),
+                  stats.grainKnobNames?.regularity ?? '—',
+                  'How EVEN the pattern is, 0..1 - one dial over the two knobs that produce regularity (Lloyd relaxation rounds and blue-noise site separation). 0 is raw ragged Poisson Voronoi; 0.95 is metal\u0027s near-honeycomb; plastic ships 0.55, rock and glass 0.5. Calibrated so 0.5 reproduces the old global defaults exactly. This is the per-material counterpart of Frac relax and Frac sep above - those force one value everywhere, this sets one material\u0027s own.')}
+                {ctrlRow('  ↳ bond str', () => onCycleGrainKnob?.('bondStrength'),
+                  stats.grainKnobNames?.bondStrength ?? '—',
+                  'Damage to break through ONE PIXEL of grain boundary, for this material alone. Under the grain model a body has no authored HP: its health is DERIVED as the sum of (edge length × strength) over its own pattern, so raising this makes the material tougher AND makes each grain harder to pop off, and a bigger body is tougher for free because it has more boundary. Deliberately NOT normalised by size, which is what lets one number serve a material\u0027s tiles and its shards. Shipped: rock 0.27, glass 0.16, plastic 0.62, metal 0.85. Bnd strength above multiplies whatever this sets.')}
+                {ctrlRow('  ↳ dmg spread', () => onCycleGrainKnob?.('damageSpread'),
+                  stats.grainKnobNames?.damageSpread ?? '—',
+                  'Damage spread for the selected material alone - see Dmg spread above for what it does. Every material ships 0 (sequential) — shown as \u00270 (def)\u0027 — so this is the row to turn up first when judging the effect. Dmg spread above OVERRIDES this when it is not on MATERIAL, the same way Frac relax and Frac sep override regularity. Changing it does NOT rebuild cached patterns: it changes how damage is spent, not how the pattern is built, so a half-broken body keeps the boundaries it has already earned.')}
+                {ctrlRow('  ↳ reset all', onResetGrainOverrides,
+                  `${stats.grainOverrideCount ?? 0} off table`,
+                  'Drop every per-material override at once and go back to the variant table. The readout counts how many of the twenty values (four materials × five knobs) are currently overridden - with a panel this size there is otherwise no way to tell whether what you are looking at is the shipped tuning or something left set three sessions ago.')}
+              </>)}
+
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
@@ -1974,8 +2045,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Pattern', onCycleFFPattern,
                   stats.ffPatternName ?? 'Map',
                   'Cycle the base-flow pattern: Map (default) → Meander → Circular → Spiral → Well → WavyWell → Outward → Horiz → Vert → WavyH → WavyV. Re-bakes the asteroid field; kernel / tangent / breathing apply on top.')}
-                {ctrlRow('Ast flow', onToggleAsteroidFlow,
-                  stats.asteroidFlowEnabled === false ? 'Off' : 'On',
+                {ctrlRow('Ast flow', onToggleShardFlow,
+                  stats.shardFlowEnabled === false ? 'Off' : 'On',
                   'Toggle the asteroid/shard flow-field velocity nudge. OFF: asteroids decay to zero velocity and from then on only move via collisions / gravity.')}
                 {ctrlRow('Density', onCycleFFDensity,
                   `${stats.ffCellSize ?? 256}u`,
@@ -2020,7 +2091,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {renderSectionHeader('perf', 'Perf')}
                 {!collapsed.perf && (<>
                   {statRow('enemies', perf.enemyCount)}
-                  {statRow('asteroids', perf.asteroidCount)}
+                  {statRow('asteroids', perf.mobileShardCount)}
                   {statRow('projectiles', perf.projectileCount)}
                   {statRow('particles', perf.particleCount)}
                   {statRow('drops/POI', perf.interactableCount)}

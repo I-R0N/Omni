@@ -1714,3 +1714,300 @@ light is blue-green (125, 211, 252), so its green sits 7.7% above its own
 mean and the comparison was tighter than the physical claim it is written to
 make.  It compares green to green now.  That is weaker by exactly that 7.7%,
 and it is the comparison the sentence above it describes.
+
+## Grain `sizeSpread` and `bondSpread` — parked at 0 (user call)
+
+Both axes are implemented, tested and wired end to end; every material is
+authored at **0**, which is the exact identity in both cases
+(`siteWeightsFor` returns null, `bondVariance` returns 1), so the game
+today behaves as if neither existed.
+
+- **`sizeSpread`** varies grain AREA within one body, via a POWER DIAGRAM:
+  each site carries an additive weight and the divider between two sites
+  slides off the midpoint by `(wi - wj) / 2d`.  Alternating the sign by
+  index gives an even mix of coarse and fine.  Measured on a 10-grain
+  body: area CV 0.192 → 0.435 → 0.539 and biggest/smallest 1.97 → 4.99 →
+  7.68 across spread 0 → 0.6 → 1, with the MEAN grain diameter pinned at
+  18 throughout.
+- **`bondSpread`** varies boundary STRENGTH, via a seeded per-boundary
+  multiplier `1 ± 0.6 × spread` keyed on `(bodySeed, boundaryIndex)`.
+  Unbiased, so derived HP is unchanged on average; fixed per body, so a
+  stubborn seam stays stubborn.
+
+**Why parked:** metal and plastic carried non-zero values while rock and
+glass sat at 0, which put the *machined* materials on the varied end and
+the *natural* ones on the uniform end — backwards from the physical
+story, and inconsistent as a rule.  Rather than extend half-considered
+values to rock and glass, both were zeroed pending a deliberate pass.
+
+**To revisit:** the ordering that would make sense is rock most
+heterogeneous → plastic → metal → glass most uniform (a suggestion, not a
+measurement: rock ~0.50/0.35, glass ~0.15/0.10).  This is also the axis
+most likely to fix "rock and glass look too similar at the same
+grainSize", since it is the one built for that distinction.  The piping
+is deliberately retained — the tests
+(`tests/fracture.spec.ts`, "grain size and bond spread (A2)") still pin
+both laws, so the mechanism cannot rot while parked.
+
+---
+
+## Grain clusters: several grains leaving as ONE fragment (A4-B)
+
+**Status:** evaluated, deliberately parked. A4 (damage spread) shipped;
+this is its sibling and was split off from it.
+
+### The two readings of "larger groups break free"
+
+When damage spread was proposed, "allowing larger groups of shards to
+break free from some hits" turned out to have two separable meanings:
+
+- **(A) More shards per hit.** A hit frees several grains, each leaving
+  as its own fragment. This is a DAMAGE-SPEND question and shipped as
+  `grain.damageSpread` — see CLAUDE.md §8. Measured: per-hit yields of
+  2 and 4 replacing a steady dribble of 1s.
+- **(B) One BIGGER shard.** Several grains leave still bonded to each
+  other, as a single larger fragment with the union of their outlines.
+  That is what this entry is.
+
+(A) shipped because it is contained entirely inside `spendOnBoundaries`.
+(B) is a different job and is parked here.
+
+### Why (B) is not a spend-profile change
+
+Under the grain model a cell detaches the moment every boundary still
+binding it has broken, and `progressFracture` already harvests every
+freed cell in one pass. So no spend profile produces a bigger fragment:
+it produces MORE fragments, faster. Making grains leave TOGETHER means
+changing what "a piece" is.
+
+The shape of the work:
+
+1. **Connected components on the surviving-cell graph.** After the
+   boundary spend, partition the freed cells into groups that are still
+   mutually bonded (an unbroken boundary between two freed cells is what
+   keeps them together) but collectively unbound from the parent.
+2. **Union polygon per component.** The fragment's outline is
+   `unionOfCells` over the component — the function already exists and is
+   already the parent's remainder path, so this is reuse rather than new
+   geometry.
+3. **Conservation at the new seam.** `progressFracture` checks that the
+   area the body loses equals the area the fragment carries away, to a 2%
+   tolerance, and REFUSES the detach when it fails. That check has to
+   generalise to a component's total area. This is the risky part: the
+   conservation invariant has been broken twice by geometry that looked
+   obviously correct (an interior grain leaving punches a hole the
+   outline cannot express; a deformed grain reporting its cut-time area
+   spawned a 2.06x oversized fragment), which is precisely why it is
+   enforced rather than assumed.
+4. **Size/mass/HP for a composite fragment.** A component's size is not
+   `parentSize × sqrt(cellArea/refArea)` any more; it is the union's own
+   extent. `ShardSystem.spawnDetachedCell` takes one cell today.
+
+### Estimate and risk
+
+~1 day, higher risk than A4 — the conservation seam is the part that has
+bitten twice. Worth doing only after A4 has been judged in play: a wider
+spend may deliver the intended feel on its own, and if it does not, the
+tuning done on A4 tells you how big a cluster should be before this is
+built.
+
+### Do not do this first
+
+There is a tempting shortcut — detach a fixed-radius blob of cells around
+the impact as one piece. It is wrong for the same reason the arc splice
+was wrong in the tail: the piece that leaves must be the piece the
+BOUNDARIES freed, or the cracks the player was shown stop predicting the
+break, which is the whole property the grain model exists to have.
+
+---
+
+## Polygonal face bonding for metal (replaces the triangular lattice)
+
+**Status:** designed with the user, not built. Supersedes the current
+`tickMetalAssembly` lattice. User call: give up triangular bonding for
+metal entirely.
+
+### Why the lattice has to go
+
+Metal is the one material whose shards RE-BOND after a break, and its
+assembly system is a triangular lattice: integer `(ix, iy, up)` slots at
+`R = HEX_SIZE/sqrt(3)`, six cells making a hexagon that snaps to terrain.
+It was built when a metal shard's spawn polygon genuinely WAS an
+equilateral triangle.
+
+A3 gave metal Voronoi fracture and that stopped being true. Measured:
+real grains are 10-14 units across, ~9 per tile, against a lattice
+triangle of 25.4 — so the lattice is already being stretched, and a
+composite grown from grains ends up with a pitch of ~11 rather than 25.
+The system is protecting geometry that no longer matches the material.
+
+### The design
+
+Metal joins the DEFAULT merge path the other materials use
+(`bondsWith: 'self'` + `defaultOutcome: 'compose'`, area accumulating,
+`TILE_SNAP` on diameter + rest speed), with a face-alignment step on top
+so it still feels mechanical rather than gloopy.
+
+**The payoff — bonding is the INVERSE of fracture, and reuses it.**
+A welded assembly is a body whose `fractureCells` are its member shards
+and whose `fractureEdges` are the welds. Everything falls out:
+
+- Derived HP = sum of (weld length x bond strength) — the V15 model,
+  unchanged.
+- Breaking it apart = the existing grain-boundary damage, unchanged. It
+  comes apart along the seams it was built from.
+- The cracks it shows are the welds — already how
+  `overlayMaterialCracks` works.
+- A weld can carry a LOWER strength than virgin grain boundary.
+  Physically right, and it gives a reason to prefer an intact plate.
+
+A composite's grain pattern is its assembly history. This deletes a
+special case rather than replacing it with another.
+
+### Overlap with more than two shards
+
+The rule: **always bond outline-to-outline, never member-to-member.**
+Once A and B weld, the composite has ONE outline (`unionOfCells`, which
+already exists and is already the fracture-remainder path). C snaps to a
+face of that union, which by definition has no interior — so three-way,
+n-way all work the same. Three residual cases need a runtime CHECK
+rather than a proof (the conservation-check discipline: geometry that
+looks obviously correct has broken this codebase twice):
+
+1. **Snap-into-a-third-party.** The snap transform is rigid and can move
+   C into D. SAT-check the post-snap pose against nearby bodies; refuse
+   and fall back to the soft pull.
+2. **Mismatched face lengths.** A 12-unit face onto an 8-unit face
+   leaves an overhang. Visually GOOD — it reads as a real join — it just
+   notches the union outline.
+3. **Loop closure.** A-B, B-C, then C-A will not line up exactly. Gate on
+   a tolerance; fall back to a cohesion bond with no geometric snap.
+
+### Making it "clicky"
+
+Two stages; the first is what sells it.
+
+- **Approach:** alongside the existing pull, drive `rotationSpeed` toward
+  the face-alignment error, so shards visibly TURN to present a face.
+  Rotation here is purely kinematic (`rotation += rotationSpeed * dt`,
+  no torque in the impulse solver), so this is a direct write.
+- **Capture:** inside a distance-AND-angle window, ease the rigid
+  transform to exact contact over 2-3 frames with a sound and a spark.
+
+### Stretch: magnetic poles
+
+User's idea: alternating poles, only opposite poles attract and bond.
+Two things to resolve first.
+
+**Alternating VERTICES does not produce face polarity.** With vertices
++,-,+,-, every edge joins a + to a -, so all faces are identical. FACES
+are what needs polarity — and alternating edges only works on EVEN-sided
+polygons. Measured on real metal grains, vertex counts were
+[6,5,5,5,6,5,5,6,4]: five of nine were PENTAGONS, so odd is the common
+case, not an edge case. Three ways out:
+
+- Seeded hash per face. Works on anything, loses the alternation, looks
+  the same in play (~half the faces are +).
+- Polarity from face ORIENTATION (sign of the normal's angle), so a
+  shard has a + side and a - side. Spatially coherent.
+- Accept one defect edge on odd polygons — literally a frustrated
+  antiferromagnet, which is real physics.
+
+**Two notes.** Repulsion is the cheaper half and delivers most of the
+feel: same-pole faces pushing apart is what makes shards dance and
+re-orient. And the RENDER TELL is not optional — without a visible
+polarity (a two-tone edge stroke would do) the mechanic reads as
+"bonding is randomly unreliable". With it, a composite visibly has a
+VALENCE: how many + and - faces it still exposes.
+
+### Decisions still open
+
+1. **When does a blob become terrain?** Metal snaps to a tile at 6
+   lattice cells today. Free-form bonding removes that trigger; matching
+   the other materials means diameter + rest speed (`TILE_SNAP`), which
+   is what "area-based like the others" implies — but it changes how
+   fast metal terrain regrows.
+2. **Can a composite fracture THROUGH a member, or only along welds?**
+   Welds-only is simpler and falls out of `fractureCells = members`.
+   Through-member needs nested patterns; avoid.
+
+### Effort
+
+| | |
+|---|---|
+| Face-snap bonding, lattice deleted | 2-3 days |
+| Clicky (turn-to-align + capture) | +0.5 day, rides along |
+| Poles + render tell | +1 day, separate follow-up |
+
+Recommended order: phase 1 + clicky first, poles afterwards once the base
+bonding feels right — poles change how SELECTIVE assembly is, which is
+much easier to tune against something that already feels good.
+
+### The honest trade
+
+The lattice guarantees no overlap BY CONSTRUCTION: integer slots cannot
+collide. Free-form face bonding replaces that guarantee with a runtime
+check. That is a real loss and the most likely source of a subtle bug.
+It is worth it because the guarantee currently protects geometry that no
+longer matches the material — but it is a guarantee being given up.
+
+### Code the change touches / deletes
+
+Deletes: `formMetalComposite`, `growMetalComposite`,
+`mergeMetalComposites`, `nearestMetalHexSlot`, `addCellToComposite`,
+`metalRecomputeBounds`, `decomposeMetalComposite`, `metalConvexHull`,
+`GameEntity.metalCells` / `metalExcessCells` / `metalLatticeR`,
+`METAL_HEX_CELLS`, `METAL_ASSEMBLY`, `TILE_SNAP.METAL_MAX_EXCESS_CELLS`,
+and the metal-composite branches in `tileShapes.ts`
+(`drawMetalDebugOutline`, the lattice-seam crack path).
+Adds: a face-pair search + snap transform in `ShardSystem`, the
+outline-to-outline bond rule, and a weld-strength entry in `GrainSpec`.
+
+---
+
+## Fracture: the erosion cascade (design question)
+
+**Status:** the three MECHANICAL defects found alongside this were fixed
+(detach recoil, centre-of-area re-centring, and the crack gate — see
+CLAUDE.md §8 "A DETACH IS A RIGID-BODY EVENT").  What remains is a design
+question, deliberately left to the user.
+
+### What was measured
+
+A 159.9-unit mobile rock shard, velocity and spin pinned, shot six times
+from +x and then eight from -x.
+
+The user reported that damage keeps propagating at the side first struck.
+**That did not reproduce as stated.** `lastImpactLocal` flips with the
+shot side every hit and the boundaries taking new fill flip with it:
+local x -41..-25 during the +x phase, +46..+25.9 during the -x phase.
+Chips detach on the struck side in both. (An earlier reading that said
+otherwise was a frame error — the impact is in the body's ROTATED frame
+while the chip offsets were world-frame, and the body's rotation was ~pi.)
+
+The pattern's impact bias is not the explanation either: cells near the
+first contact are only 1.24x smaller than far cells and their boundaries
+cost 3.36 against 3.58 — a 7% asymmetry.
+
+### The mechanism that IS real
+
+**THE EROSION CASCADE.** A boundary stops binding once the cell on its
+other side has left.  So the moment one chip comes away, its neighbours
+need FEWER broken boundaries — and they already carry damage from the
+first volley.  The first wound keeps shedding pieces even while the
+player is shooting somewhere else.
+
+Related and correct-but-misleading: **old cracks never fade.**  The
+overlay draws every boundary at its own fill, so the heavily-cracked
+first side stays heavily cracked forever while new far-side damage adds
+only a few faint lines.
+
+### The question
+
+Should a fresh wound on the far side COMPETE with the old one, or should
+erosion keep cascading at the first break?  Real materials do both
+depending on toughness, so either is defensible.  If competition is
+wanted, the lever is the detach rule rather than the damage spend: a cell
+could require a minimum number of ITS OWN boundaries broken (rather than
+merely all of its still-binding ones) so a freed neighbour does not hand
+it a discount.  Answer this before touching the harvest loop.

@@ -279,7 +279,14 @@ export interface ShardBlendPolicy {
 // ── Shatter policy ──────────────────────────────────────────────────
 
 export interface ShardShatterPolicy {
-  kind: 'none' | 'powerlaw';
+  /** 'voronoi' (voronoi gauntlet, V2): on death the entity's cached
+   *  seeded Voronoi decomposition (see `GrainSpec` and
+   *  `engine/systems/fracture.ts`) becomes the children — each cell is a
+   *  fragment with the CELL's polygon.  While the DBG A/B lives
+   *  (`getActiveFractureMode()`), 'legacy' mode routes a 'voronoi'
+   *  variant through its OLD path instead: the powerlaw pipeline for
+   *  mobile shards, the dent breakShards spawn for dent tiles. */
+  kind: 'none' | 'powerlaw' | 'voronoi';
   /** Output count — for nebula today: 2..3, for asteroid: 2..5. */
   countMin: number;
   countMax: number;
@@ -298,19 +305,19 @@ export interface ShardShatterPolicy {
   /** Optional merge cooldown stamped on each child. */
   postShatterMergeCooldown?: number;
   /** Optional non-area-conservative sizing override.  When BOTH
-   *  min/max are set, shatterAsteroidStyle bypasses the power-law
+   *  min/max are set, shatterPowerlawStyle bypasses the power-law
    *  area distribution + MIN_SIZE filter and instead sizes each
    *  child as `parent.size.x × random(min, max)`.  Total child
    *  area can (and usually will) exceed parent area — used by
    *  plastic-shard so a break visibly produces a fixed count of
    *  visible-sized children regardless of parent area math.
    *  Termination comes from the parent-size floor at top of
-   *  shatterAsteroidStyle (parent < MIN_SIZE doesn't shatter),
+   *  shatterPowerlawStyle (parent < MIN_SIZE doesn't shatter),
    *  so a few generations of shrinking children die cleanly. */
   childSizeFractionMin?: number;
   childSizeFractionMax?: number;
   /** Optional size-keyed count override.  When set, shatter
-   *  AsteroidStyle picks `count` from the first entry whose
+   *  PowerlawStyle picks `count` from the first entry whose
    *  `maxSize` strictly exceeds `parent.size.x`.  Lets a variant
    *  scale shatter burst size by the parent's diameter — used
    *  today by plastic-shard for "bigger shards break into more
@@ -332,7 +339,151 @@ export interface ShardShatterPolicy {
    *
    *  Only meaningful when `kind === 'powerlaw'`.  Variants with
    *  `kind === 'none'` ignore this field. */
-  style?: 'asteroid' | 'nebula';
+  style?: 'scatter' | 'nebula';
+}
+
+// ── Voronoi fracture policy ─────────────────────────────────────────
+// The decomposition/crack/detach tuning for a fracture-capable variant
+// (voronoi gauntlet, D1).  Site count is a function of SIZE and MERGE
+// HISTORY only — deliberately NOT of the killing hit's damage, because
+// the decomposition is computed at FIRST damage and the cracks it draws
+// must be the seams the entity later breaks along.  The killing hit
+// still drives scatter speed and (via lastImpactVelocity at compute
+// time) the impact bias of the site distribution.
+
+export interface GrainSpec {
+  /** Site count = clamp(round(size / grainSize), min, max), raised to
+   *  the entity's mergeCount when it was composed from more pieces. */
+  grainCountMin: number;
+  grainCountMax: number;
+  /** The GRAIN's own diameter, in world units.  Site count is
+   *  `bodyArea / (pi * (grainSize/2)^2)`, i.e. proportional to AREA, so a
+   *  material's grains are the same size in a tile and in a shard.  (It
+   *  used to be pixels of body diameter per site, which made count linear
+   *  in size and therefore made grains GROW with the body.)  Bounded by
+   *  grainCountMin/Max — see the floor and ceiling in fractureCache. */
+  grainSize: number;
+  /** Fraction of sites biased toward the impact point (0..1). */
+  impactBias: number;
+  /** GRAIN REGULARITY (A1) — 0 = raw Poisson Voronoi (ragged outlines,
+   *  wildly uneven grain sizes), 1 = near-honeycomb.  ONE dial standing
+   *  for the two that produce the look: Lloyd relaxation rounds and
+   *  blue-noise minimum site separation, both resolved through
+   *  `grainRelaxFor` / `grainSeparationFor`.
+   *
+   *  This is a MATERIAL property and it could not be one before: the
+   *  relaxation and separation values were read from global DBG
+   *  accessors, so every material on the map shared whatever the debug
+   *  knob said.  Metal wanting near-perfect grains while plastic wants
+   *  ragged ones is not expressible without this field.  The DBG cycles
+   *  survive as an OVERRIDE (their 'material' entry, the default, defers
+   *  here).
+   *
+   *  0.5 reproduces the values the globals used to supply (2 relaxation
+   *  rounds, 0.45 separation) exactly, which is why the shipped
+   *  materials carry it and why A1 changes no behaviour. */
+  regularity: number;
+  /** GRAIN SIZE SPREAD (A2) — 0 = every grain the same size, 1 = a wide
+   *  mix of coarse and fine grains in ONE body.  Varies the spread
+   *  around the mean, never the mean itself (that is `grainSize`).
+   *  Optional: absent = 0 = the pre-A2 single-separation placement. */
+  sizeSpread?: number;
+  /** Outward fling along each cell's centroid direction at shatter, so
+   *  the pattern visibly flies apart along its own seams (added on top
+   *  of the shared impact-scatter term). */
+  radialSpeed: number;
+  /** Optional override of the sliver threshold (see fracture.ts). */
+  minAreaFraction?: number;
+  /** PROGRESSIVE FRACTURE (V8 — the user's correction of V4).  When
+   *  true, the decomposition is applied ONCE at first damage and then
+   *  FIXED for the entity's life: damage progressively highlights the
+   *  cell boundaries (the same impact-sorted edge reveal the crack
+   *  overlay draws), and a cell whose binding edges are all revealed —
+   *  its boundary fully highlighted — BREAKS OFF as that piece, the
+   *  parent keeping the spliced remainder and the surviving cells of
+   *  the same pattern.  No chip-chance roll, no recompute between
+   *  detaches; edges shared with departed cells stop binding, so
+   *  interior pieces free up as their neighbours leave.  Death (hit
+   *  ceiling or min-remainder) breaks the REMAINING cells.  Variants
+   *  with progressive fracture skip the dent polygon pull under
+   *  voronoi mode — the pattern must stay stable, and the highlight IS
+   *  the damage read.  Today: rock-tile + rock-shard. */
+  progressive?: boolean;
+  /** GRAIN BOUNDARIES (V15 — the user's model).  When set, damage is
+   *  no longer a countdown on a hand-authored HP pool: it ACCUMULATES
+   *  ON THE BOUNDARIES of the decomposition, nearest the impact first,
+   *  and a cell breaks off exactly when every boundary binding it has
+   *  been broken through.  This number is the damage needed to break a
+   *  boundary AS LONG AS THE BODY IS WIDE, so each edge costs
+   *  `bondStrength × (edgeLength / bodySize)` and a material's
+   *  toughness is ONE number.
+   *
+   *  The entity's HP is then DERIVED — `Σ edge strengths`, computed
+   *  from its own pattern the first time it is damaged — rather than
+   *  declared, so a body with more or longer internal boundaries is
+   *  genuinely tougher and nothing "shatters at an arbitrary limit":
+   *  health reaching zero and the last boundary breaking are the same
+   *  event by construction.  Requires `progressive`. */
+  bondStrength?: number;
+  /** BOND STRENGTH SPREAD (A2) — 0..1 seeded per-BOUNDARY variance
+   *  around `bondStrength`, so within one material some grains come away
+   *  early and some hold on.  Deterministic per (body seed, boundary
+   *  index), so a body's weak seams are a fixed property of that body
+   *  rather than re-rolled every hit.
+   *
+   *  This is the cheap 80% of per-grain composite materials: varied
+   *  breaking WITHIN a material, with no per-grain material id and no
+   *  pair matrix.  Derived HP stays exactly Σ boundary strengths because
+   *  the same function produces both. */
+  bondSpread?: number;
+  /** DAMAGE SPREAD (A4) — how deep a hit's damage reaches into the
+   *  pattern, as a fraction of the body's width.
+   *
+   *  Absent or 0 is SEQUENTIAL spend: damage fills the nearest boundary
+   *  to completion, spills into the next, and repeats, so only ever ONE
+   *  boundary carries partial damage (measured on both rock and glass:
+   *  the partial count is pinned at 1 for the body's whole life).  A hit
+   *  is a needle, and pieces come away one at a time.
+   *
+   *  Set, it becomes a WEIGHTED spend: every unbroken boundary takes a
+   *  share weighted `exp(-d / (damageSpread × bodyWidth))`, where `d` is
+   *  the distance from the contact to the nearest cell the boundary
+   *  binds.  Near boundaries still break first, but far ones accumulate,
+   *  so a whole annulus completes at once and a hit can free several
+   *  grains together.
+   *
+   *  The weights are NORMALISED and the spend is a water-fill, so the
+   *  total damage absorbed is exactly the damage dealt whatever the
+   *  value — this changes WHERE damage lands, never how much.  Derived
+   *  HP is therefore untouched.
+   *
+   *  The knob spans a known-good end and a known-bad one, which is why
+   *  it is a knob: 0 is the shipped behaviour, and a very LARGE value
+   *  approaches the uniform spread that V10 measured as the failure mode
+   *  (damage spread over every cell completes almost none of them, so a
+   *  rock tile shed 3 pieces over its life and dumped 5 at death).  The
+   *  useful settings are small. */
+  damageSpread?: number;
+  /** PER-GRAIN DEFORMATION (B1) — inward pull applied to the STRUCK
+   *  grain's own outline on each hit, as a fraction of that grain's
+   *  radius.  This is what makes a material read as ductile: a plastic
+   *  panel visibly warps where it is being shot before anything breaks
+   *  off, while rock and glass (which leave it unset) do not.
+   *
+   *  It replaces `dent` for grain materials — the old whole-body
+   *  `applyDentStep` pulls the entity's outline and stands down under
+   *  progressive fracture, so before B1 a material could be grained or
+   *  dentable but not both.
+   *
+   *  Only vertices ON THE BODY'S OUTLINE move, and they move in EVERY
+   *  grain that shares them, so the grains still tile the body exactly —
+   *  which is the invariant `unionOfCells` depends on. */
+  grainDent?: number;
+  /** Seconds for a fragment that broke off DEFORMED to relax back to the
+   *  shape its grain was cut at (user call: plastic is elastic and
+   *  should spring back slowly; metal keeps its dent).  Absent → the
+   *  deformation is permanent. */
+  dentRecoverSeconds?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────
@@ -550,6 +701,15 @@ export interface ShardVariantDef {
    *  see g3 material-interactions design), but still feels the
    *  metal-tile field for the queued attraction work. */
   repelImmuneFrom?: ShardVariantId[];
+  /** Seeded Voronoi fracture (voronoi gauntlet).  Present on variants
+   *  whose `shatter.kind === 'voronoi'` (and, later milestones, variants
+   *  whose CRACK RENDER rides the decomposition).  Shallow named fields
+   *  only — ShardSystem reads this, never callbacks.  The decomposition
+   *  itself is computed lazily (first damage / death) and cached on
+   *  `entity.fractureCells`; every site that mutates the polygon, the
+   *  size, or the merge count must invalidate that cache. */
+  grain?: GrainSpec;
+
   /** Pass-through-and-shatter rule (g3 material-interactions).  When
    *  this variant contacts an entity whose variant id is in `targets`,
    *  PhysicsSystem skips collision impulse on the pair (the carrier's
