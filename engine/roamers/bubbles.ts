@@ -26,7 +26,7 @@
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, ConsumeConfig, GameState } from '../../types';
 import {
-    BUBBLE_CONSTANTS, ENEMY_VARIANTS, AI_CONFIG, NEBULA_CONSTANTS,
+    BUBBLE_CONSTANTS, ENEMY_VARIANTS, AI_CONFIG, NEBULA_CONSTANTS, calmBubble,
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import type { WaveSpawnContext } from '../systems/WaveSystem';
@@ -59,6 +59,20 @@ export function updateBubbles(g: GameEngine, dt: number) {
         if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
         if (e.bubbleSickTimer) e.bubbleSickTimer = Math.max(0, e.bubbleSickTimer - dt);
         const sick = (e.bubbleSickTimer ?? 0) > 0;
+
+        // ── A1: the non-aggression timeout — a hunter left alone LOSES INTEREST.
+        // Ticked on SIM time (dt is FIXED_DT) like every other timer here, and
+        // ABOVE the latch/sick early-outs so it runs whatever regime the bubble
+        // is in.  Every fresh act of aggression refreshes the window at the
+        // stamp site (constants.stampBubbleAggro), so this only ever fires on a
+        // bubble that has genuinely been left alone for AGGRO_TIMEOUT_SEC.
+        //
+        // Not while LATCHED: a bubble mid-bite has plainly not lost interest,
+        // and the bite owns its own ending (detachLatch clears aggro anyway).
+        if (e.bubbleAggroTimer !== undefined && e.attachedToId === undefined) {
+            e.bubbleAggroTimer -= dt;
+            if (e.bubbleAggroTimer <= 0) calmBubble(e); // no sick state: it just wandered off
+        }
 
         // ── Digesting a held shard: tick down, then grow + heal (the eat). The
         // shrinking ghost is drawn inside the membrane by RenderSystem. ──
@@ -112,8 +126,7 @@ export function updateBubbles(g: GameEngine, dt: number) {
         if (target) {
             if (!target.active || target.isExploding) {
                 // Attacker gone → calm down (back to ambient drift / breeding).
-                e.aggroTargetId = undefined;
-                e.provoked = false;
+                calmBubble(e);
             } else {
                 const tr = Math.max(target.size.x, target.size.y) / 2;
                 const dx = wrapDeltaX(e.position.x, target.position.x);
@@ -183,8 +196,7 @@ g.audio.play('bubble.detach', { x: e.position.x, y: e.position.y });
     e.attachOffset = undefined;
     e.bubbleLatchTimer = 0;
     e.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
-    e.aggroTargetId = undefined;
-    e.provoked = false; // calm down after the bite
+    calmBubble(e); // calm down after the bite (and disarm the A1 window with it)
     g.spawnParticles(e.position, 12, BUBBLE_CONSTANTS.SICK_COLOR, {
         speedMin: 2, speedMax: 7, sizeMin: 1.5, sizeMax: 3.2,
         lifetimeMin: 0.2, lifetimeMax: 0.55,

@@ -659,6 +659,11 @@ export interface GameEntity {
   // it.  Cleared when the target dies (→ back to passive).
   thirdParty?: boolean;
   aggroTargetId?: string;
+  // A1 non-aggression timeout: SIM seconds of being left alone before the
+  // bubble loses interest and drops back to ambient drift.  Armed and
+  // refreshed by `stampBubbleAggro` at every site that stamps a target;
+  // ticked in `updateBubbles`; cleared by `calmBubble`.  Undefined = calm.
+  bubbleAggroTimer?: number;
   // Firing entity id stamped on a projectile (ProjectileSystem.spawn) so a
   // third-party victim can blame the exact shooter.  'player' for player shots,
   // the enemy's id for enemy shots.

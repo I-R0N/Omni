@@ -61,10 +61,11 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
                           flashlight / nebulaspin / roll / shipsprites /
-                          shardblend,
+                          shardblend, fracture, bubbles (the Phase-A
+                          aggro timeout + the immovability fix),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  265 tests.  All run at
+                          anti-flake rules).  337 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1132,8 +1133,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `PhysicsSystem.maybeBubbleCollisionAggro`) — stamps `aggroTargetId` to the
   attacker/collider (`proj.ownerId`, the AoE ring's `ownerId`, or the rammer's
   id) — so it retaliates against whoever last hit/rammed it, retargeting on each
-  new hit (`AISystem.resolveBubbleTarget`).  It LOSES aggro if the target flees
-  past `AGGRO_LOSE_RANGE` or when the attacker dies.  Once provoked it homes its
+  new hit (`AISystem.resolveBubbleTarget`).  Every one of those stamp sites
+  routes through the single `constants.stampBubbleAggro` seam, and every site
+  that drops aggro through `calmBubble` — so a target can never be set while
+  the timeout below is left unarmed, or cleared while it is left armed.
+  It LOSES aggro FOUR ways: the target flees
+  past `AGGRO_LOSE_RANGE`, the attacker dies, a latch detaches, or —
+  `AGGRO_TIMEOUT_SEC`, the NON-AGGRESSION TIMEOUT — it is simply LEFT ALONE
+  that long (`bubbleAggroTimer`, armed and REFRESHED by every fresh act of
+  aggression at the stamp seam, ticked on SIM time in `updateBubbles`, not
+  while latched since a bite owns its own ending).  Without it aggro had no
+  ending a disengaging player could reach: a hunter that never landed a bite
+  stayed hostile for life and the fauna read as permanently angry.  Expiry is
+  NOT a sick state — losing interest is not an injury — and it applies
+  identically whoever the target is (player, enemy, rival).  Once provoked it homes its
   target and, on contact, LATCHES (`attachedToId` → `updateAttachments`) for
   `LATCH_DURATION`, draining `LATCH_DPS × size/baseSize` (a bigger bubble bites
   harder); on the PLAYER it also EMPs weapon + shield (`'disable'`, re-applied at
@@ -1146,7 +1159,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Locomotion: SLOW while passive (drift / shard-chase); only when
   HUNTING (provoked/aggro) does it move fast — a high sustained cap
   (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can
-  run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
+  run a fleeing enemy/player down.  THOSE CAPS BOUND PROPULSION, NEVER MOTION
+  (`AISystem.updateBubble`): each regime's `capSpeed` is floored at the speed
+  the bubble ARRIVED with, so the step can only ever clamp the thrust the AI
+  itself just added.  Applied to the TOTAL velocity — as it was — the cap
+  deleted the collision recoil the impulse solver had computed from both
+  masses, so the bubble never left the contact, the player re-collided on the
+  very next step, and each contact took ~35% of its speed: a dead stop in ~10
+  frames, reported as "the bubble is a wall".  SICK is the worst case (cap
+  0.66 against a 2.2 drift) and so the one that got noticed, but the bug was
+  never about being sick, and never about MASS — a bubble's `mass` is a
+  constant 9 for its whole life (its `consume` config sets no `massPerEat`, so
+  eating adds none) and its impulse arithmetic was correct throughout.  The
+  floor is monotone — an overshoot can never be topped back up by the AI — so
+  the shove bleeds off through the ordinary friction and flow relaxation every
+  other body uses.  Same rule the player's `overSpeedAllow` states for blast
+  knockback; reading the pre-thrust speed each step IS the decaying allowance,
+  so it needs no stored field.  Brightness tracks AGGRO only — feeding does
   NOT brighten the membrane (the held meal reads instead); calm bubbles render
   faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
   hit-flash always reads.  Renders with NO health bar; its off-screen
