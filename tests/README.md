@@ -171,6 +171,18 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    health, and `updateBosses` stamps a phase one frame after the transition.
    Poll for `bossPhase` instead of reading traits in the same breath as
    setting health.
+11. **A DERIVED quantity has a SPREAD; clear it, don't sit in it.** Under the
+   V15 grain model a body's HP is not authored — it is
+   `Σ (boundary length × bondStrength)` over that body's OWN seeded Voronoi
+   pattern, so it varies body to body. A 36px glass tile measures 44.6–51.2
+   across runs, and `terrain.spec.ts` fired a fixed 50-damage shell at one:
+   it killed the tile ~7 runs in 8 and left it standing on the other (2
+   failures in 16 repetitions). The tell is that the failure has no timing
+   component at all — the same code, the same tile, the same frame, a
+   different pattern. Where killing something is a test's PRECONDITION rather
+   than its claim, overpower it by a margin no pattern can close; where the
+   derived number IS the claim, assert a range or read the entity's own
+   `fractureBoundaryHp`.
 
 ## What is NOT covered
 

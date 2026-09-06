@@ -71,13 +71,23 @@ function breakATile(page: any, how: 'shot' | 'crush') {
     const before = { debris: debris(), score: e.score, alive: t.active === true };
 
     if (mode === 'shot') {
+      // The shell is deliberately far OVERPOWERED, and that is not laziness:
+      // under the V15 grain model a tile's HP is DERIVED from its own Voronoi
+      // pattern (Σ boundary length × bondStrength), so it varies tile to tile
+      // — a 36px glass pane measures 44.6..51.2 across runs.  A 50-damage
+      // shell sits INSIDE that band, so it killed the tile ~7 runs in 8 and
+      // left it standing on the other one (measured: 2 failures in 16
+      // repetitions, both with derived HP just over 50).  Killing the tile is
+      // this test's PRECONDITION, not its claim — the claim is the debris
+      // parity below — so the shell must clear the band by a margin no
+      // pattern can close.
       e.physics.resolveCollision(
         {
           id: 'terrain_shell', type: 'PROJECTILE',
           position: { x: at.x + t.size.x * 0.5 + 4, y: at.y },
           velocity: { x: -900, y: 0 }, rotation: Math.PI,
           size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-          damage: 50, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          damage: 500, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
         },
         t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
       );

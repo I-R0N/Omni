@@ -2366,7 +2366,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   BOUNDARIES of its cached decomposition — grain by grain, nearest the
   contact first — and a cell breaks off exactly when every boundary still
   binding it has been broken through.  `bondStrength` is damage per
-  PIXEL of boundary: ONE number per material (rock 0.27, glass 0.16), and
+  PIXEL of boundary: ONE number per material (see the shipped grain table
+  in §5 — rock and glass 0.4, plastic and metal 1.8), and
   deliberately NOT normalised by body size, because normalising cancels
   scale and would force separate numbers for a material's tiles and its
   shards.  Absolute length makes a bigger body tougher for free.
@@ -2375,7 +2376,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (1) **HP is derived** — `maxHealth` becomes `Σ (edge length × strength)`
   over the body's OWN pattern at first damage, so a tile that decomposed
   into more boundary is genuinely tougher and the number varies tile to
-  tile (a 36px glass pane measured 18.7–21.4).  The SPAWNED value is kept
+  tile (a 36px glass pane measured 44.6–51.2 across sixteen runs — a SPREAD
+  wide enough to straddle a fixed damage figure, which is what made
+  `terrain.spec.ts`'s 50-damage shell flake 2 runs in 16 until it was
+  raised clear of the band).  The SPAWNED value is kept
   as `authoredMaxHealth`, and anything meaning "how substantial is this
   body" must read THAT — tile-destruction score does, since paying per
   derived HP would price a tile by how finely it happened to decompose.
