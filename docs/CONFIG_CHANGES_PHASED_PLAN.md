@@ -40,6 +40,20 @@ That doc uses this plan's element IDs; its §7 is the interface table.
 Where this plan touches portals below, it points at that doc rather than
 restating it.
 
+**Second companion doc (from the PR #91 voronoi/grain gauntlet).**
+`docs/MATERIAL_GRAIN_SPEC.md` owns MATERIALS, FRACTURE and BONDING: the
+grain model (HP *derived* from grain boundaries rather than authored),
+unified bonding, per-grain materials (its Tier C).  Its A1–A3/B1 stages
+are already SHIPPED — see CLAUDE.md §5/§8 — so unlike the portal doc it
+is part reality, part proposal.  It constrains this plan's B1/B2 (mining
+is now a fracture interaction, not an HP race) and E1 (assembly runs on
+its bonding model); those elements point at it below.
+**ID-namespace warning:** that spec's build-order labels (`A1`…`C`) are
+doc-LOCAL and collide with this plan's element IDs (its `A3` is
+"metal+plastic grain rows"; this plan's `A3` is the penetration module).
+Guidance prompts must qualify which doc's IDs they mean; bare IDs default
+to this plan's.
+
 One axis distinction from that doc worth internalising before reading
 Phase G: this plan's **Level-1..4 arena ladder is about visual fidelity
 and player capability** (backdrop → atmosphere → surface walking).  The
@@ -206,14 +220,34 @@ economy curve, both of which need iterated tuning against play.
 
 - **B1 — Miner start.**  New starting loadout: mining-oriented hull +
   a MINING BEAM weapon (or the requested weak Blaster — see §5 D-1
-  contradiction) tuned so a glass tile takes 3–5 shots.  Uses the existing
-  lean-start seam (`resetOutfit`) — the start becomes miner-flavoured
-  config, not new machinery.
+  contradiction).  Uses the existing lean-start seam (`resetOutfit`) —
+  the start becomes miner-flavoured config, not new machinery.
+  **Rebased onto the grain model (PR #91):** the original "3–5 shots per
+  glass tile" spec predates it.  Tile HP is now *derived* from grain
+  boundaries (`GrainSpec.bondStrength` × interior boundary length —
+  MATERIAL_GRAIN_SPEC §1, shipped), and the per-material hits-to-break
+  ladder is already play-tested and ordered (glass lightest → rock →
+  plastic → metal; the shipped table is in CLAUDE.md §5).  So B1's tuning
+  is the *weapon's damage against that ladder*, not a flat tile HP — the
+  starter beam should put glass in the requested 3–5-hit band and let the
+  ladder space the harder materials out above it, which is exactly the
+  progression a mining game wants and the grain table already provides.
+  The beam's *identity* is likewise fracture-shaped now: mining reads as
+  progressively chipping grains off (partial fracture / detach), not
+  draining a bar.
 - **B2 — Mining yields.**  Mining tiles pays salvage (and later,
-  materials).  Seam: `handleEntityDeath`'s shard-family branch +
-  `SCORE_CONSTANTS`' existing `killedByPlayer` attribution — extend to
-  drop salvage/materials scaled by variant (metal > rock > glass…), which
-  `shardRichness` already knows how to rank.
+  materials).  Two seams now, and the second is new with PR #91:
+  `handleEntityDeath`'s shard-family branch + `killedByPlayer`
+  attribution for whole-body breaks, and the **partial-fracture detach
+  path** — a qualifying hit detaches the grain nearest the impact, so
+  mining can pay *per chip carved off*, graded by material, rather than
+  only on the kill.  Rank by variant (metal > rock > glass…), which
+  `shardRichness` already knows how to do.  **Before inventing a
+  materials taxonomy, read MATERIAL_GRAIN_SPEC §4 (Tier C, per-grain
+  materials — proposed, not built):** it is the natural substrate for
+  ore/veins (a rock tile carrying metal grains IS a mining deposit), and
+  B2 either consumes it or must stay compatible with it — §5 decision
+  #13.
 - **B3 — Material buckets + storage.**  New drop/inventory type: mining
   materials held in bucketed inventory tiles (a bucket = one inventory hex
   holding up to N units of one material).  Reuses `DROP_TYPES` registry
@@ -302,7 +336,19 @@ first (don't build an ecology on top of a physics bug).
   shards and PLACE tiles/clusters (routes through the existing shard→tile
   transmutation + `TILE_SNAP` machinery rather than a new builder).
   "Intricate patterns" = a per-hive blueprint over the hex grid
-  (TileGenerator cluster patterns are the vocabulary).
+  (TileGenerator cluster patterns are the vocabulary).  **Grain-model
+  homework before this starts (PR #91):** MATERIAL_GRAIN_SPEC §3's
+  unified bonding ("a boundary IS a bond" — three events replacing seven
+  mechanisms) is the machinery an assembler would drive, and that spec's
+  §6.2 decision was WITHDRAWN with a finding E1 inherits: an assembled
+  body does NOT keep its bond geometry on becoming a static tile — the
+  hex-snap re-shapes it and the pattern is re-decomposed fresh
+  (`position === hexCoord` is load-bearing across three systems).  So
+  bubble-built tiles get fresh grain patterns, and any "you can see what
+  it was built from" ambition waits on Tier C per-grain materials (the
+  "inherit statistics, not geometry" variant).  Related parked items to
+  read first: PARKING_LOT §"Polygonal face bonding for metal" and
+  §"Grain clusters" — both touch how assembled bodies join.
 - **E2 — Sexed lifecycle.**  Male/female + adult/child replace mitosis
   (`multiply` config retires for bubbles).  Behavior rows: males slower
   and stronger, females faster and weaker, male-male competition for
@@ -451,7 +497,14 @@ milestones and decisions, per house pattern.
    per-ship slot model).
 2. **(B1) Mining weapon identity.**  Weak Blaster vs. dedicated Mining
    Beam as the starting gun.  Recommend Mining Beam (distinct identity,
-   leaves the Blaster's tuning alone).
+   leaves the Blaster's tuning alone).  **Updated by PR #91:** under the
+   play-tested grain defaults a glass tile takes ~13 base-Blaster-class
+   hits (CLAUDE.md §5's shipped table), so the requested 3–5-shot band is
+   now *below* current glass toughness, not above it.  Either the band is
+   renegotiated, or — the interesting option — the Mining Beam hits
+   TERRAIN harder than the Blaster while staying weak against enemies,
+   which gives the miner a real identity (a tool, not a gun) and leaves
+   combat balance untouched.  Decide alongside #2's weapon choice.
 3. **(D1) Major modules: gun-transformers or guns?**  Whether
    burst/bounce/spread/homing/etc. become modifiers stacked on a base gun
    or remain the current discrete gun catalog.  This decision shapes all
@@ -491,6 +544,20 @@ argument for each; listed here so the guidance session has one checklist):
     overworld.  Interacts with C1, which currently assumes an isolated
     station; decide before C1's map ships a flavour the layer model has
     to unwrite.
+
+Added from `MATERIAL_GRAIN_SPEC.md` (PR #91):
+
+13. **(B2) Mining materials vs. Tier C per-grain materials.**  The grain
+    spec's Tier C (per-grain materials + pair function — proposed, not
+    built; the spec deliberately holds it as "a separate decision, taken
+    with A and B measured") is the natural substrate for ore/veins: a
+    rock tile carrying metal grains IS a deposit, and mining it is the
+    partial-fracture detach that already ships.  Decide whether B2
+    commissions Tier C, or ships a simpler per-variant yield table that
+    stays forward-compatible with it.  Commissioning it pulls real
+    rendering-cost work into Phase B (the spec's §4 costs it honestly);
+    not commissioning it means B2's material taxonomy must not collide
+    with the one Tier C would introduce.
 
 ## 6. Naming note
 
