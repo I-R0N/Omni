@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
 import { applyBoundaryDamage, stampLocalImpact, bondStrengthFor } from './fractureCache';
 import { pointInPolygon } from './fracture';
 
@@ -2928,8 +2928,10 @@ export class PhysicsSystem {
       const rvx = a.velocity.x - b.velocity.x;
       const rvy = a.velocity.y - b.velocity.y;
       if (rvx * rvx + rvy * rvy < BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED * BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED) return;
-      bubble.provoked = true;
-      bubble.aggroTargetId = other.id; // 'player' for the player, else the enemy id
+      // 'player' for the player, else the enemy id.  Routed through the shared
+      // stamp so the A1 non-aggression window is armed/refreshed here too — a
+      // ram is an act of aggression like a shot is.
+      stampBubbleAggro(bubble, other.id);
   }
 
   /**
@@ -3742,7 +3744,7 @@ export class PhysicsSystem {
                   // Third-party retaliation (Stage 5): the bubble targets its
                   // attacker (player or the firing enemy), retargeting on each
                   // new hit.
-                  if (target.thirdParty && proj.ownerId) target.aggroTargetId = proj.ownerId;
+                  if (target.thirdParty && proj.ownerId) stampBubbleAggro(target, proj.ownerId);
                   // A shot to a LATCHED bubble shakes it loose (→ sick) — read by
                   // GameEngine.updateBubbles.
                   if (target.attachedToId !== undefined) target.bubbleKnockFree = true;

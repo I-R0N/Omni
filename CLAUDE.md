@@ -42,6 +42,9 @@ assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
+                          (= test:smoke — boot + loop, the DEFAULT), plus
+                          test:smoke / test:full.  The smoke set is defined
+                          HERE and nowhere else; CI runs these same scripts
                           (no lint script)
 playwright.config.ts      Test harness: one 390×844 project (the DESIGN
                           TARGET; viewports.spec.ts overrides it per
@@ -61,11 +64,14 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
                           flashlight / nebulaspin / roll / shipsprites /
-                          shardblend and modules (the Phase-A module
-                          families: Penetration, Scanner, hex slots),
+                          shardblend, fracture, bubbles (the Phase-A
+                          aggro timeout + the immovability fix, and
+                          the mouth-size / bite eating rules) and
+                          modules (the Phase-A module families:
+                          Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  352 tests.  All run at
+                          anti-flake rules).  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1116,7 +1122,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`AISystem.updateBubble`) rides the asteroid flow field
   (`flowField.sampleShardFlow`), peeling OFF the flow to chase + eat the
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
-  via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
+  via `GameEngine.updateConsumers`).  IT HAS A MOUTH SIZE (user call): a body
+  is SWALLOWED only while its own diameter is within `consume.swallowMaxFrac`
+  of the BUBBLE'S — it used to engulf whatever its membrane touched, so a
+  15-unit blob absorbed a 160-unit boulder in one action.  Anything bigger it
+  BITES instead (`consume.bite`): one chip off it per `bite.interval`, through
+  `GameEngine.chipStructureAt` — the SAME grain-fracture path a weapon hit
+  uses (stamp the contact, spend the damage on the boundaries nearest it,
+  harvest what that freed), so the cracks a body shows, the piece it sheds and
+  the HP it has left stay ONE model however the damage arrived.  The freed
+  grain is then ordinary mouth-sized food, so a big rock still feeds the
+  bubble — one mouthful at a time — and the mouth grows with the bubble.
+  `bite.tiles` extends it to STATIC tiles, which are never swallowable and are
+  absent from the shard index entirely, so before this a bubble could not
+  interact with terrain at all.  A body with no grain model — indestructible,
+  nebula, or any variant under the DBG legacy fracture mode — is REFUSED by
+  `chipStructureAt` having done nothing (deliberately no fallback: it is the
+  chip path, not a general damage entry point), and the tile walk arms the
+  cadence anyway so a bubble parked on unbreakable terrain cannot re-walk the
+  static grid every tick.  Eating is MASS/ENERGY CONSERVED
   (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
   scaled by size) take proportionally LONGER to digest
   (`DIGEST_DURATION × richness`) and give more growth + maxHealth + heal
@@ -1133,8 +1157,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `PhysicsSystem.maybeBubbleCollisionAggro`) — stamps `aggroTargetId` to the
   attacker/collider (`proj.ownerId`, the AoE ring's `ownerId`, or the rammer's
   id) — so it retaliates against whoever last hit/rammed it, retargeting on each
-  new hit (`AISystem.resolveBubbleTarget`).  It LOSES aggro if the target flees
-  past `AGGRO_LOSE_RANGE` or when the attacker dies.  Once provoked it homes its
+  new hit (`AISystem.resolveBubbleTarget`).  Every one of those stamp sites
+  routes through the single `constants.stampBubbleAggro` seam, and every site
+  that drops aggro through `calmBubble` — so a target can never be set while
+  the timeout below is left unarmed, or cleared while it is left armed.
+  It LOSES aggro FOUR ways: the target flees
+  past `AGGRO_LOSE_RANGE`, the attacker dies, a latch detaches, or —
+  `AGGRO_TIMEOUT_SEC`, the NON-AGGRESSION TIMEOUT — it is simply LEFT ALONE
+  that long (`bubbleAggroTimer`, armed and REFRESHED by every fresh act of
+  aggression at the stamp seam, ticked on SIM time in `updateBubbles`, not
+  while latched since a bite owns its own ending).  Without it aggro had no
+  ending a disengaging player could reach: a hunter that never landed a bite
+  stayed hostile for life and the fauna read as permanently angry.  Expiry is
+  NOT a sick state — losing interest is not an injury — and it applies
+  identically whoever the target is (player, enemy, rival).  Once provoked it homes its
   target and, on contact, LATCHES (`attachedToId` → `updateAttachments`) for
   `LATCH_DURATION`, draining `LATCH_DPS × size/baseSize` (a bigger bubble bites
   harder); on the PLAYER it also EMPs weapon + shield (`'disable'`, re-applied at
@@ -1147,7 +1183,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Locomotion: SLOW while passive (drift / shard-chase); only when
   HUNTING (provoked/aggro) does it move fast — a high sustained cap
   (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can
-  run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
+  run a fleeing enemy/player down.  THOSE CAPS BOUND PROPULSION, NEVER MOTION
+  (`AISystem.updateBubble`): each regime's `capSpeed` is floored at the speed
+  the bubble ARRIVED with, so the step can only ever clamp the thrust the AI
+  itself just added.  Applied to the TOTAL velocity — as it was — the cap
+  deleted the collision recoil the impulse solver had computed from both
+  masses, so the bubble never left the contact, the player re-collided on the
+  very next step, and each contact took ~35% of its speed: a dead stop in ~10
+  frames, reported as "the bubble is a wall".  SICK is the worst case (cap
+  0.66 against a 2.2 drift) and so the one that got noticed, but the bug was
+  never about being sick, and never about MASS — a bubble's `mass` is a
+  constant 9 for its whole life (its `consume` config sets no `massPerEat`, so
+  eating adds none) and its impulse arithmetic was correct throughout.  The
+  floor is monotone — an overshoot can never be topped back up by the AI — so
+  the shove bleeds off through the ordinary friction and flow relaxation every
+  other body uses.  Same rule the player's `overSpeedAllow` states for blast
+  knockback; reading the pre-thrust speed each step IS the decaying allowance,
+  so it needs no stored field.  Brightness tracks AGGRO only — feeding does
   NOT brighten the membrane (the held meal reads instead); calm bubbles render
   faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
   hit-flash always reads.  Renders with NO health bar; its off-screen
@@ -1905,7 +1957,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     NOT type-check** (esbuild strips types without checking them), which
     is how six type errors accumulated unseen before 5b; the build being
     green says nothing about the types.
-  - `npm test` — `playwright test`. The suites in `tests/` drive the
+  - `npm test` — **the SMOKE scope: `boot` + `loop`, ~1 minute.**  This is
+    the DEFAULT on purpose (user call): the full suite is ~13 minutes, and
+    a gate that expensive stops being run.  `npm run test:full` is the
+    whole net, and it belongs at the merge seams — see the scopes below.
+    Add the suites your change touches alongside the smoke
+    (`npx playwright test tests/bubbles.spec.ts`); that pair is the
+    per-commit gate, not the full suite.
+    The suites in `tests/` drive the
     REAL engine in a REAL browser through the `window.__omniEngine` /
     `window.__omniStats` debug handles; nothing is stubbed. The config's
     `webServer` block runs `npm run build` itself and previews the
@@ -1927,21 +1986,34 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   branch protection points at one required check.  The honest trade: a
   regression outside the smoke surfaces at the merge point rather than per
   push — label the PR `full-tests` when it wants the whole net first.
-  LOCAL practice moves the same way, and WHO CALLS THE MOMENT matters
-  (user clarification, 2026-09-06 — the old wording said "before calling a
-  PR ready to merge", which reads as a judgement the session makes and was
-  over-applied to every push).  The rule is:
-  - **PUSHING TO A WORKING BRANCH mid-PR needs typecheck + build + the
-    suites the change touches — NOT the full suite.**  A PR branch is a
-    place to iterate; a ~19-minute suite per push buys nothing and costs
-    the session's momentum.  CI's SMOKE scope is the backstop on every
-    push, which is exactly what it is for.
+  BOTH SCOPES ARE THE npm SCRIPTS (`test:smoke` / `test:full`), so the
+  smoke set is defined ONCE — in `package.json` — and a bare `npm test`
+  on a contributor's machine runs exactly what the per-push gate runs.
+  It was a literal file list inside the workflow, which is how the two
+  halves drifted: CI had the cheap default from 2026-08-21 while `npm
+  test` still meant all 337 tests, so the fast gate existed on paper and
+  every local run still cost thirteen minutes.
+  LOCAL practice mirrors it, and WHO CALLS THE MOMENT matters (user
+  clarification, 2026-09-06 — the earlier wording said "before calling a
+  PR ready to merge", which reads as a judgement the session makes and
+  was over-applied to every push).  The rule is:
+  - **PUSHING TO A WORKING BRANCH mid-PR needs typecheck + build +
+    `npm test` (the SMOKE set) + the suites the change touches — NOT the
+    full suite.**  A PR branch is a place to iterate; a ~19-minute suite
+    per push buys nothing and costs the session's momentum.  CI's SMOKE
+    scope is the backstop on every push, which is exactly what it is for.
   - **THE FULL SUITE RUNS WHEN THE USER SAYS THEY ARE READY TO MERGE** a
-    PR into its parent branch (not always `main`).  That notice is the
+    PR into its parent branch (not always `main`) — the same seam CI
+    reserves it for, alongside the `plan-completion` → `main` promotion
+    and a PR deliberately labelled `full-tests`.  That notice is the
     trigger; the session does not decide it has arrived.  Also run it
     after a base sync, since a merge can break what neither side broke.
   So a red touched-suite blocks a push; a full-suite run without that
-  notice is optional diligence, not a gate to wait behind.  The browser download is CACHED, keyed on the resolved
+  notice is optional diligence, not a gate to wait behind.  And in a
+  software-rendering container a full run is worse than merely slow: the
+  pixel-sampling and frame-counting suites (`fracture`, `lighting`) drop
+  a stray test on most long runs, and with `retries: 0` each one reads as
+  a failure that has to be chased.  The browser download is CACHED, keyed on the resolved
   `@playwright/test` version plus the runner OS; on a cache hit the
   workflow installs only the apt system libraries (`install-deps`),
   because a restored browser with no libraries cannot launch.  A green
@@ -2769,7 +2841,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   This mirrors the LATCH (a held target processed over a timer); the bubble just
   can't engulf the too-big player/enemy, so that path clings to the hull
   (squash-cling render + EMP-arc crackle on the player) and drains instead.
-  Tiles (the future dragon) are eaten instantly (`consumeTile`).  The entity-COUNT
+  Tiles (the future dragon) are eaten instantly (`consumeTile`).  Food too big
+  for the consumer's `swallowMaxFrac` mouth is neither pulled nor swallowed:
+  it is BITTEN (`consume.bite` → `GameEngine.chipStructureAt`), the reusable
+  seam for "damage a structure at a point through the grain model" and the
+  ONE place a non-weapon source may drive the chip path.  The entity-COUNT
   cap for self-replication is a live-subtype census at the child-spawn site
   (`updateBubbles` for the bubble, `updateNests` for nest brood — both
   pattern-match `enforceTypeCap`).

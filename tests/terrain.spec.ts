@@ -24,7 +24,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats } from './helpers';
+import { boot, engine, startRun, waitForStats, quietScene } from './helpers';
 
 /** The GLASS showcase field is glass and nothing else, so "a static tile" is
  *  unambiguous and its break is the well-understood
@@ -40,6 +40,13 @@ async function glassField(page: any) {
     e.player.position.y += 4000;
     e.player.velocity.x = 0; e.player.velocity.y = 0;
   });
+  // ...and stop the FAUNA, which is the other thing on this map that can now
+  // touch a tile: a bubble gnaws terrain it cannot swallow (its `consume.bite`),
+  // so ambient bubbles chip glass while this test is measuring how a tile
+  // breaks.  Caught as an intermittent failure of the SHOT case.  This suite's
+  // whole subject is "a tile breaks the same way whatever killed it", so
+  // something else breaking tiles beside it is contamination by definition.
+  await quietScene(page);
 }
 
 /** Kill one static tile — `how` picks the cause — and report what the world
