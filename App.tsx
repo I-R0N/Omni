@@ -742,7 +742,7 @@ const App: React.FC = () => {
   };
 
   const handleAddCredits = () => {
-      if (engineRef.current) engineRef.current.addDebugCredits(1000);
+      if (engineRef.current) engineRef.current.addDebugCredits(1_000_000);
   };
 
   const handleSpawnDragon = (type: string) => {

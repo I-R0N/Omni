@@ -1623,8 +1623,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderSectionHeader('modules', 'Modules')}
               {!collapsed.modules && (<>
                 {statRow('Salvage', (stats.credits ?? 0).toLocaleString(), 'text-amber-300')}
-                {ctrlRow('+1k Salv', onAddCredits, 'Grant',
-                  'Grant 1000 Salvage for testing the station shops.')}
+                {ctrlRow('+1M Salv', onAddCredits, 'Grant',
+                  'Grant 1,000,000 Salvage for testing the station shops.')}
                 {([
                   ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
                   ['engine', 'Engine'], ['thrusters', 'Thrusters'],

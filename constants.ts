@@ -5215,7 +5215,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
                        // line-deleting punch — same lever as Lightning.
     speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
-    lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
+    lifetime: 4,       // bounded; in a dense field the bounceCount cap ends the
+                       // beam first, in open space this does
     color: '#22c55e',  // Green — beam that bores a few bodies deep and bounces off tiles
     size: 6,
     count: 3,          // 3-beam forward fan
@@ -5230,7 +5231,12 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     // PhysicsSystem) — and it runs the SHARED falloff table: no
     // `pierceFalloffRate` override here, deliberately.
     pierce: 4,
-    bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
+    bounceCount: 15,   // 3 -> 15 (user call): reflects up to 15 times off tiles
+                       // before dissipating.  Bounces buy COVERAGE, never extra
+                       // damage — `pierce` above is a LIFETIME budget of damage
+                       // events that a reflection does not refresh — so a beam
+                       // that ricochets this much still lands at most 4 hits,
+                       // each further down the shared falloff curve.
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
