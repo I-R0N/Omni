@@ -21,8 +21,23 @@
  *      indicative, deltas are evidence).
  */
 
+/*  A NOTE ON `quietScene`, which every test here calls after its map loads.
+ *
+ *  Ambient bubbles GNAW TERRAIN: a bubble bites anything too big to swallow,
+ *  tiles included, through the same grain-fracture path this suite is about
+ *  (`ConsumeConfig.bite` -> `GameEngine.chipStructureAt`).  Measured on a
+ *  fresh PLASTIC_FIELD, four tiles had absorbed boundary damage within EIGHT
+ *  seconds of the map loading — and the deformation test below measures the
+ *  first eight plastic tiles it finds, so some of them were pre-dented by
+ *  fauna before it ever fired a shot.  It failed intermittently in a full run
+ *  for exactly that reason.
+ *
+ *  This suite's whole subject is how a body breaks under a KNOWN impact, so
+ *  anything else breaking bodies beside it is contamination by definition.
+ *  `quietScene` stops the fauna and the ladder; it does not touch shards or
+ *  tiles, so no assertion here changes meaning. */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, stats, waitForStats, waitForEngine } from './helpers';
+import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
@@ -224,6 +239,7 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -283,6 +299,7 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -342,6 +359,7 @@ test.describe('cracks are the pattern (V3)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // Damage a big rock-shard parked ON SCREEN through the real
     // projectile path (rock is hit-counted: −1 HP per hit; the first hit
@@ -457,6 +475,7 @@ test.describe('partial fracture (V4)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const fr = (window as any).__omniFracture;
@@ -579,6 +598,7 @@ test.describe('partial fracture (V4)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       // Rock's LIVE bondStrength, read from the variant table rather than
@@ -681,6 +701,7 @@ test.describe('partial fracture (V4)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -729,6 +750,7 @@ test.describe('death is dispatched once (V9 regression)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const fr = (window as any).__omniFracture;
@@ -802,6 +824,7 @@ test.describe('a body shatters exactly once (V13 regression)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // The bug: a legacy census sweep in the sim loop shattered every
     // rock-shard it found deactivated, on top of the death path's own
@@ -843,6 +866,7 @@ test.describe('a body shatters exactly once (V13 regression)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -873,6 +897,7 @@ test.describe('a body shatters exactly once (V13 regression)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // The same census sweep also shattered FULL-HEALTH shards that a
     // merge had just absorbed (measured: 10/10 and 11/11 hp bodies), so
@@ -906,6 +931,7 @@ test.describe('the glass damage layer (V9)', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
     await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -994,6 +1020,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const Physics = Object.getPrototypeOf(e.physics).constructor;
@@ -1040,6 +1067,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
     // rock-shard one.
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -1102,6 +1130,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
     await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -1177,6 +1206,7 @@ test.describe('materials through the cells (V5)', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const fr = (window as any).__omniFracture;
@@ -1252,6 +1282,7 @@ test.describe('only the struck piece chips (V12)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -1329,6 +1360,7 @@ test.describe('only the struck piece chips (V12)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -1369,6 +1401,7 @@ test.describe('only the struck piece chips (V12)', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
     await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -1454,6 +1487,7 @@ test.describe('only the struck piece chips (V12)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -1583,6 +1617,7 @@ test.describe('grain boundaries (V15)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any, src: any) => {
       // eslint-disable-next-line no-new-func
@@ -1640,6 +1675,7 @@ test.describe('grain boundaries (V15)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any, src: any) => {
       // eslint-disable-next-line no-new-func
@@ -1707,6 +1743,7 @@ test.describe('grain boundaries (V15)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // Rock and glass ship different strengths per pixel of boundary, so on
     // comparable patterns rock takes measurably more damage to consume.
@@ -1933,6 +1970,7 @@ test.describe('per-material grain regularity (A1)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // The shipped default: the game takes regularity from the material
     // table, not from a debug knob.  This is the half of A1 that matters
@@ -2062,6 +2100,7 @@ test.describe('grain size and bond spread (A2)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // Spec §6.3 asked whether a grain should carry half-broken bonds out
     // as pre-existing damage.  It should — but measured at the moment of
@@ -2179,6 +2218,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
     await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const metal = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -2215,6 +2255,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     const plastic = await (async () => {
       await startRun(page, 'PLASTIC_FIELD');
       await waitForStats(page, s => s.currentMapType === 'PLASTIC_FIELD', 'the plastic field');
+      await quietScene(page); // ambient bubbles now gnaw terrain — see the header
       return engine(page, (e: any) => {
         const ents = e.currentMap.entities;
         const rows: any[] = [];
@@ -2261,6 +2302,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
     await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // DENSITY IS NOT A GRAIN PARAMETER (user call).  It was briefly one:
     // grain size and bond strength each scaled with `densityTier`, so a
@@ -2387,6 +2429,7 @@ test.describe('a fragment is drawn as its own shape (LOD)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -2497,6 +2540,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
     const watch = await boot(page);
     await startRun(page, 'PLASTIC_FIELD');
     await waitForStats(page, s => s.currentMapType === 'PLASTIC_FIELD', 'the plastic field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -2569,6 +2613,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
     const watch = await boot(page);
     await startRun(page, 'PLASTIC_FIELD');
     await waitForStats(page, s => s.currentMapType === 'PLASTIC_FIELD', 'the plastic field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -2873,6 +2918,7 @@ test.describe('cell regularity (V11)', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -3162,6 +3208,7 @@ test.describe('metal grains are DRAWN as themselves', () => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
     await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // The silhouette-neutrality rule, second occurrence.  Metal kept an
     // equilateral-triangle LOD branch of its own at MIN_APPARENT_RADIUS_PX
@@ -3597,6 +3644,7 @@ test.describe('chip LOD gate', () => {
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock field');
+    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // The disc blob is silhouette-NEUTRAL on purpose, and that is only
     // honest for genuine dust.  `CHIP_LOD_RADIUS_PX` was 3, which sits

@@ -27,7 +27,8 @@ import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { GameEntity, EntityType, Vector2, WeaponType } from '../types';
 import {
     EXPLOSION_CONSTANTS, PHYSICS_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS,
-    noteTraitDamage, hitReactStrength, WEAPONS, markDamaged, markShieldDamaged} from '../constants';
+    noteTraitDamage, hitReactStrength, WEAPONS, markDamaged, markShieldDamaged,
+    stampBubbleAggro } from '../constants';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
 import { nextId } from './systems/IdAllocator';
 
@@ -199,7 +200,7 @@ export function updateExplosionRings(g: GameEngine) {
                 if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
                 // Third-party retaliation (Stage 5): an AoE that catches a
                 // bubble makes it target the blast's owner.
-                if (e.thirdParty && ring.ownerId) e.aggroTargetId = ring.ownerId;
+                if (e.thirdParty && ring.ownerId) stampBubbleAggro(e, ring.ownerId);
                 markDamaged(e, 0.12);
                 e.hitReact = hitReactStrength(applied, e.maxHealth ?? e.health);
                 g.spawnDamageText(e.position, applied, e);

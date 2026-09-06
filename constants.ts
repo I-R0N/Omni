@@ -7143,6 +7143,47 @@ export function markShieldDamaged(entity: { healthBarTimer?: number }) {
   entity.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
 }
 
+/**
+ * Stamp a third party's retaliation target, and arm its non-aggression window.
+ *
+ * The ONE seam every act of aggression against a bubble goes through — the
+ * projectile-damage path, the shockwave ring, and the collision ram — so the
+ * A1 timeout cannot be refreshed by two of them and forgotten by the third.
+ * Same shape and the same reason as `noteTraitDamage` below: a one-line stamp
+ * that several unrelated systems have to agree on lives here rather than being
+ * copied into each of them.
+ *
+ * REFRESHING is the point, not merely arming: a bubble already hunting you
+ * that takes another hit buys its attacker a full fresh window, so sustained
+ * pressure keeps it angry and only genuine disengagement calms it.
+ *
+ * The call sites gate on `thirdParty`, which the DRAGON head also carries, so
+ * a dragon can reach this too.  It gets the target stamp it always got plus an
+ * INERT `bubbleAggroTimer`: only `updateBubbles` ticks that field and it walks
+ * BUBBLE-subtype enemies only, so a provoked dragon stays provoked exactly as
+ * before.  Giving the dragon its own timeout is a deliberate decision nobody
+ * has made — not something to fall out of this helper by accident.
+ */
+export function stampBubbleAggro(entity: GameEntity, attackerId: string) {
+  entity.provoked = true;
+  entity.aggroTargetId = attackerId;
+  entity.bubbleAggroTimer = BUBBLE_CONSTANTS.AGGRO_TIMEOUT_SEC;
+}
+
+/**
+ * Lose interest — back to ambient drift / eating / breeding.
+ *
+ * The inverse of `stampBubbleAggro`, and the ONE place aggro is dropped, so a
+ * caller cannot clear the target while leaving the window armed (which would
+ * re-calm the bubble a second time later, for a target it no longer has).
+ * Deliberately NOT a sick state: giving up is not an injury.
+ */
+export function calmBubble(entity: GameEntity) {
+  entity.provoked = false;
+  entity.aggroTargetId = undefined;
+  entity.bubbleAggroTimer = undefined;
+}
+
 // ── Enemy variant configs ─────────────────────────────────────────────────────
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
 // Three tiers per role — each tier is strictly faster/tougher than the last.
@@ -7377,7 +7418,17 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     // growthPerEat / hpPerEat / the digest time are all SCALED per-eat by the
     // shard's richness (mass/energy conserved — see shardRichness): denser/
     // stronger shards take longer to digest and give more growth + health.
-    consume: { eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14 },
+    // `swallowMaxFrac: 1` — a bubble swallows a shard up to its OWN diameter
+    // and no more (user call: it used to engulf boulders several times its
+    // size in one action).  Anything bigger, tiles included, it BITES: a chip
+    // off through the shared grain-fracture path, which it can then eat.  So
+    // a small bubble works a big rock down instead of inhaling it, and the
+    // mouth grows with the bubble.
+    consume: {
+      eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14,
+      swallowMaxFrac: 1,
+      bite: { damage: 3, interval: 1.2, reach: 8, tiles: true },
+    },
     multiply: { atSize: 50, maxPopulation: 14 },
     ambient: true, thirdParty: true,
   },
@@ -7517,6 +7568,16 @@ export const BUBBLE_CONSTANTS = {
   SICK_COLOR: '#84cc16',  // queasy lime — membrane tint while sick
   // Aggro leash: a hunting bubble gives up if its target gets this far away.
   AGGRO_LOSE_RANGE: 950,
+  // NON-AGGRESSION TIMEOUT (A1).  A bubble that is left alone LOSES INTEREST.
+  // Before this, aggro only ever ended three ways — the target died, it fled
+  // past AGGRO_LOSE_RANGE, or a latch detached — so a hunter that never
+  // managed a bite stayed hostile for the rest of its life and the fauna read
+  // as permanently angry.  The window is armed AND REFRESHED by every fresh
+  // act of aggression against it (stampBubbleAggro: a damaging projectile, an
+  // AoE ring, a qualifying ram), so keeping a bubble angry means keeping at
+  // it; walk away and it goes back to drifting and eating.  No sick state on
+  // expiry — losing interest is not an injury.  A knob: expect retuning.
+  AGGRO_TIMEOUT_SEC: 6,
   // Mass/energy-conserved eating: each eat's digest time, growth and health are
   // scaled by the shard's RICHNESS (shardRichness), clamped to this band.  A
   // dense metal shard (high) takes longer + feeds more than a light glass one.
