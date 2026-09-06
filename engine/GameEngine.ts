@@ -3185,6 +3185,16 @@ export class GameEngine {
       if (entity.type === EntityType.STRUCTURE) {
           if (entity.deathDispatched === true) return;
           entity.deathDispatched = true;
+          // A TRACKED TILE MUST NOT OUTLIVE ITS ROCK.  The terrain layer is
+          // an accumulating record of specific tiles now, so a destroyed one
+          // has to be taken off it — the layer used to be baked once at map
+          // load and never touched, which did not show while it was an
+          // all-or-nothing reveal and would show immediately now.  Static
+          // only: a mobile shard is filtered by its own `found` flag in the
+          // buffer fill and simply stops being pushed once inactive.
+          if (entity.mass === Infinity && entity.found === true) {
+              this.renderer.unstampMinimapTile(entity);
+          }
       }
       const death = entity.isExploding ? { fx: null, sfx: null } : this.deathFx(entity);
       if (death.sfx) {
@@ -6325,6 +6335,51 @@ export class GameEngine {
       for (let i = 0; i < this.stations.length; i++) this.encounterOne(this.stations[i], px, py, now);
       for (let i = 0; i < this.portals.length; i++) this.encounterOne(this.portals[i], px, py, now);
       if (this.snitch) this.encounterOne(this.snitch, px, py, now);
+      // TERRAIN and MATERIALS are discovered as OBJECTS, not as regions (user
+      // call) — see `discoverStructures`.  Cadenced: pure bookkeeping with no
+      // physical consequence.
+      if (this.perfController.shouldRun('discover')) {
+          this.discoverStructures(px, py, SCANNER.ENCOUNTER_RANGE);
+      }
+  }
+
+  /** Mark every static TILE and every LARGE mobile shard within `radius` as
+   *  FOUND — permanently, for the life of the map instance.
+   *
+   *  OBJECTS, NOT REGIONS (user call).  An earlier pass remembered the
+   *  GROUND the player had crossed and drew whatever happened to be standing
+   *  on it, which meant a drifting shard appeared when it wandered into
+   *  mapped space and went quiet when it left.  That reads as "mapping areas
+   *  I can track things in" rather than as finding things.  Now the flag
+   *  rides the OBJECT: once met, a rock is on the map wherever it goes.
+   *
+   *  Only shards at or above `SCANNER.TRACK_MIN_SHARD_SIZE` qualify.  Small
+   *  debris is not a landmark, there is a great deal of it, and the flag is
+   *  permanent — so the threshold is what keeps both the map and the
+   *  per-frame draw set legible.
+   *
+   *  A found TILE is stamped into the pre-rendered terrain layer as it is
+   *  found, so the minimap's blit stays one draw call however much has been
+   *  discovered — the layer IS the discovered set.  Shards carry the flag
+   *  instead and are filtered in the buffer fill, because they move. */
+  private discoverStructures(px: number, py: number, radius: number) {
+      if (!this.currentMap || radius <= 0) return;
+      this.physics.forEachStaticInRadius(px, py, radius, t => {
+          if (t.found === true) return;
+          t.found = true;
+          this.renderer.stampMinimapTile(t);
+      });
+      const shards = this.entityIndex.shardCandidates;
+      const r2 = radius * radius;
+      const minSize = SCANNER.TRACK_MIN_SHARD_SIZE;
+      for (let i = 0; i < shards.length; i++) {
+          const sh = shards[i];
+          if (sh.found === true || !sh.active) continue;
+          if (Math.max(sh.size.x, sh.size.y) < minSize) continue;
+          const dx = wrapDeltaX(px, sh.position.x);
+          const dy = wrapDeltaY(py, sh.position.y);
+          if (dx * dx + dy * dy <= r2) sh.found = true;
+      }
   }
 
   /** Advance the AUTO sweep — and start one when the timer comes round.
@@ -6394,10 +6449,12 @@ export class GameEngine {
           this.scanPingRadius = 0;
           this.materialRevealAt = now;
           this.materialRevealRadius = this.scanRanges[1] ?? 0;
-          // WHERE it happened.  A scan is a thing that happened at a place;
-          // without a centre the reveal applied to every shard on the map.
           this.materialRevealX = px;
           this.materialRevealY = py;
+          // The whole bubble is DISCOVERED at once — the instrument's
+          // navigational job, and the reason it is worth pressing: it maps
+          // ground and rocks the ship has not flown to.
+          this.discoverStructures(px, py, this.materialRevealRadius);
       }
   }
 

@@ -1881,11 +1881,6 @@ export function cycleFog(): string {
  *  together so the mirror cannot drift. */
 export const PLAYER_LIGHT_PEAK = 0.34;
 
-/** CHARTED MEMORY cell size, world units (render/charted.ts).  Matches the
- *  fog memory's grain: fine enough that a flown corridor reads as a corridor,
- *  coarse enough that a 12k map is a 250x250 alpha surface. */
-export const CHARTED_CELL = 48;
-
 export const FOG = {
   /** The fog's own colour: BLACK.
    *
@@ -2750,6 +2745,11 @@ export const PERF_TASKS = {
   flowField:        { minInterval: 1, maxInterval: 2,   costWeight: 1.0, autoCurve: 1.0 },
   nebulaNeighbors:  { minInterval: 1, maxInterval: 4,   costWeight: 0.9, autoCurve: 1.0 },
   dropScan:         { minInterval: 1, maxInterval: 2,   costWeight: 0.6, autoCurve: 1.0 },
+  // MINIMAP DISCOVERY — the walk that marks tiles and large shards `found`
+  // as the player passes them.  Cadenced because it is pure bookkeeping with
+  // no physical consequence: a tile appearing on the map two frames late is
+  // invisible, where a collision two frames late is not.
+  discover:         { minInterval: 2, maxInterval: 12,  costWeight: 0.7, autoCurve: 1.0 },
   // O(N²) drop merge pass (DropSystem.mergeDrops).  Up to
   // DROP_CONFIG.MAX_ACTIVE_DROPS² pair-ops + damping + nudges per
   // step; not time-critical (drops settle over many frames), so a
@@ -5813,6 +5813,13 @@ export const SCANNER = {
    *  circumference — so a long scan ends by dissolving rather than by
    *  stopping. */
   RING_MIN_ALPHA_FRAC: 0.15,
+
+  /** Only shards THIS BIG are tracked on the minimap (user call).  Small
+   *  debris is not a landmark, there is a great deal of it, and tracking is
+   *  permanent — so the threshold is what keeps the map legible and the
+   *  per-frame set bounded.  Roughly a tile's own size, which is the scale at
+   *  which a rock reads as a thing rather than as gravel. */
+  TRACK_MIN_SHARD_SIZE: 40,
 
   /** NATURAL ENCOUNTER (user call).  A contact this close is seen with the
    *  naked eye — no scanner required, no mark required.  It is what makes

@@ -71,7 +71,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  370 tests.  All run at
+                          anti-flake rules).  374 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -229,14 +229,6 @@ engine/
                           joystick, fitFontPx
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
-      charted.ts      CHARTED MEMORY — which ground the player has met.
-                          A per-map alpha surface at `CHARTED_CELL` world
-                          units, stamped around the ship each drawn frame
-                          and wherever a scan completes; the minimap's
-                          terrain blit is masked to it, so the map fills
-                          in as the player flies.  The fog's `_fogMem`
-                          pattern applied to a different question, and a
-                          SEPARATE surface on purpose (see §5's SCANNER)
       shardBlend.ts   The bonded-pair "goo" layer: one metaball
                       connector per live cohesion bond, filled
                       UNDER both hulls so a stuck pair reads as
@@ -1740,41 +1732,39 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
      RARE a find is, and rarity is not visibility — a rival sits at tier 3
      because it is uncommon, not because it is hard to see, and gating sight
      on the tier made a rival parked beside the ship invisible.
-     TERRAIN is CHARTED the same way (`engine/systems/render/charted.ts`):
-     a per-map alpha memory at `CHARTED_CELL` world units, stamped once per
-     DRAWN frame around the ship and again wherever a scan completes, and the
-     minimap's pre-rendered terrain blit is masked to it.  It used to be
-     all-or-nothing — gated on merely OWNING a scanner, so the map was either
-     blank or complete, and neither reads as exploration.  It is the FOG's
-     `_fogMem` pattern applied to a different question, and deliberately a
-     SEPARATE surface: the fog's memory is written only while the fog cycle is
-     on (it ships off) and has nothing to do with scans, so sharing it would
-     tie the minimap to a debug cycle.  Two rules hold it up — the blit is
-     masked in a POOLED SCRATCH canvas rather than in place (a
-     `destination-in` against the map itself would erase the ground and
-     border it has already painted), and a missing memory surface charts
-     NOTHING rather than everything, since failing open would hand the player
-     the whole map for free.
-     MATERIALS READ THE SAME MEMORY (user call): a shard draws if the ground
-     it is on is CHARTED, so material is remembered exactly as the terrain
-     around it is — permanently, per map — rather than following the ship or
-     fading with a bubble.  It is the one contact class asked by POSITION
-     rather than by a per-entity stamp, because there can be thousands of
-     mobile shards; `RenderSystem.materialCharted` is an ARRAY index into the
-     charted grid, which is why charted memory keeps a `Uint8Array` beside its
-     canvas (a canvas answer would mean `getImageData` per shard per frame).
-     A drifting shard therefore appears when it wanders into mapped space and
-     goes quiet when it leaves — the honest reading of a remembered REGION
-     rather than a remembered object.  Two consequences: materials are CULLED
-     to `MINIMAP_CONSTANTS.RANGE` in the buffer fill, since charting grows to
-     most of the map and without the cull every shard in the world would be
-     collected every frame (the cost the old reveal bubble was accidentally
-     avoiding); and `materialRevealAt/Radius/X/Y` survive only as the trigger
-     that CHARTS a completed ping's bubble, which is why its centre still
-     matters — without one, charting followed the ship and a scan's whole
-     navigational value went with it.  The FLOW layer is the documented
-     exception and stays gated on owning a scanner: a streamline is an
-     inferred FIELD rather than a set of seen objects.
+     TERRAIN and MATERIALS are tracked as OBJECTS, not as regions (user
+     call).  `GameEngine.discoverStructures` marks every static TILE and
+     every mobile shard at or above `SCANNER.TRACK_MIN_SHARD_SIZE` within
+     range as `found`, permanently for the life of the map instance, on the
+     cadenced `discover` task — and a completed scan runs the same pass over
+     its whole bubble, which is the instrument's navigational job.
+     A REGION model was built first and REPLACED: it remembered the GROUND
+     the player had crossed and drew whatever stood on it, so a drifting
+     shard appeared when it wandered into mapped space and went quiet when it
+     left.  That reads as "mapping areas I can track things in" rather than
+     as finding things (user report).  The flag now rides the OBJECT.
+     Three rules fall out.  A found TILE is STAMPED into the pre-rendered
+     terrain layer as it is found (`RenderSystem.stampMinimapTile`), so the
+     layer IS the discovered set and the minimap's blit stays one draw call
+     however much has been met — `buildMinimapStaticLayer` therefore builds
+     an EMPTY canvas at map load.  A destroyed tile is UNSTAMPED from the
+     death path, because the layer is now a record of specific objects and a
+     tracked tile must not outlive its rock (the layer used to be baked once
+     at map load and never touched, which did not show while it was an
+     all-or-nothing reveal).  And `found` SURVIVES A MERGE
+     (`ShardSystem.composeEntities`): a shard absorbing a tracked partner is
+     still that rock, only bigger, so the survivor inherits the flag —
+     without it a tracked boulder eating gravel could blink off the map,
+     which reads as the tracking failing when it is the merge doing its job,
+     and that confusion is exactly what prompted this rule.
+     The SIZE THRESHOLD is what keeps this affordable and legible: small
+     debris is not a landmark, there is a great deal of it, and the flag is
+     permanent.  Shards are additionally CULLED to `MINIMAP_CONSTANTS.RANGE`
+     in the buffer fill, since tracking accumulates and without the cull the
+     buffer would carry every found shard in the world every frame.  The
+     FLOW layer is the documented exception and stays gated on owning a
+     scanner: a streamline is an inferred FIELD rather than a set of seen
+     objects.
   2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
      at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
      `GameEntity.detectedAt` on whatever it crosses, and a mark holds for
@@ -3835,10 +3825,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   added a rule ABOVE the three below: with no scanner aboard the widget
   draws neither the pre-rendered terrain layer nor any contact — only the
   two `isAlwaysCharted` landmarks.  TERRAIN is gated on merely OWNING a
-  scanner.  TERRAIN IS NOW CHARTED instead (user call): the pre-rendered
-  layer is masked to `render/charted.ts`'s per-map memory, so the map fills
-  in as the player flies and a scan charts a bubble at range.  The FLOW
-  layer keeps the owning-a-scanner gate, since it is an inferred field.
+  scanner.  TERRAIN IS NOW TRACKED TILE BY TILE (user call): the
+  pre-rendered layer starts EMPTY and accumulates each tile as the player
+  meets it, so the map fills in as they fly and a scan adds a whole bubble.
+  The FLOW layer keeps the owning-a-scanner gate, since it is an inferred
+  field rather than a set of seen objects.
   Three rules under that, all decided in step 5 G5 (user directive,
   decision #43):
   1. **Nebula is off it entirely.**  Nebula tiles are skipped by

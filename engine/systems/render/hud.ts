@@ -29,11 +29,10 @@ import {
     INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
     computeMinimapRect, computeIndicatorRect,
     FOG,
-    SCANNER, CHARTED_CELL,
+    SCANNER,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
-import { chartedPeriodX, chartedPeriodY } from './charted';
 import { fogMemoryPeriodX, fogMemoryPeriodY, fogEffectiveDark } from './fog';
 
 /**
@@ -67,26 +66,61 @@ export function buildMinimapStaticLayer(r: RenderSystem, entities: GameEntity[],
     // the streamline cache so it retraces against the new obstacles.
     r._minimapFlowCache = null;
 
-    for (let i = 0; i < entities.length; i++) {
-        const e = entities[i];
-        // Stage 5 fix: only static tiles render via the minimap
-        // STRUCTURE pass.  Mobile shards (STRUCTURE+finite mass) are
-        // not pinned to grid cells.
-        if (!e.active || e.type !== EntityType.STRUCTURE || e.mass !== Infinity) continue;
-        // NEBULA IS OFF THE MINIMAP ENTIRELY (user directive, decision #43).
-        // It is a soft, drifting, low-contrast cloud that the map rendered as
-        // hard 2px dots — the densest thing on the map standing in for the
-        // vaguest thing in the world.  Nebula shards were already excluded
-        // from the dynamic buffer; this is the other half.
-        if (e.shardVariant === 'nebula-tile') continue;
-        cx.fillStyle = e.color;
-        // Map space: entity position is absolute.  Map center = (0,0).
-        const dotX = center + e.position.x * scale;
-        const dotY = center + e.position.y * scale;
-        cx.fillRect(dotX, dotY, 2, 2);
-    }
-
+    // THE LAYER STARTS EMPTY (user call).  Terrain is TRACKED PER TILE now,
+    // not revealed by region: `stampMinimapTile` adds one tile the moment the
+    // player meets it, and this canvas accumulates exactly the tiles that have
+    // been met.  It used to be baked complete here and then masked by a
+    // charted-region memory, which is what made the map read as "areas I can
+    // track entities in" rather than as objects I have found.
+    //
+    // `entities` is still taken so the signature and the map-load call site
+    // are unchanged, and so a future pre-charted map (a hub you start knowing)
+    // is one loop away.
+    void entities;
     r._minimapStaticCanvas = c;
+}
+
+/** Where one tile sits on the pre-rendered terrain layer.  The two stamp
+ *  helpers below and the build above must agree on this exactly, or a tile
+ *  would be added at one place and erased at another. */
+function minimapTileRect(r: RenderSystem, e: GameEntity): { x: number; y: number } | null {
+    const c = r._minimapStaticCanvas;
+    if (c === null) return null;
+    const scale = (c.width / 2) / r._minimapStaticRange;
+    const center = c.width / 2;
+    return { x: center + e.position.x * scale, y: center + e.position.y * scale };
+}
+
+/** Add one discovered tile to the terrain layer.  Idempotent in effect — a
+ *  tile stamped twice draws the same 2px dot — so callers do not have to
+ *  track whether they have already done it. */
+export function stampMinimapTile(r: RenderSystem, e: GameEntity): void {
+    const c = r._minimapStaticCanvas;
+    if (c === null) return;
+    // NEBULA IS OFF THE MINIMAP ENTIRELY (user directive, decision #43): a
+    // soft, drifting, low-contrast cloud drawn as the hardest dot on the map.
+    if (e.shardVariant === 'nebula-tile') return;
+    const at = minimapTileRect(r, e);
+    if (at === null) return;
+    const cx = c.getContext('2d');
+    if (cx === null) return;
+    cx.fillStyle = e.color;
+    cx.fillRect(at.x, at.y, 2, 2);
+}
+
+/** Remove one tile from the terrain layer, for a tile that has been
+ *  destroyed.  Without this a tracked tile would outlive the rock it stands
+ *  for — the layer used to be baked once at map load and never touched, which
+ *  did not show while it was an all-or-nothing reveal and does now that it is
+ *  a record of specific objects. */
+export function unstampMinimapTile(r: RenderSystem, e: GameEntity): void {
+    const c = r._minimapStaticCanvas;
+    if (c === null) return;
+    const at = minimapTileRect(r, e);
+    if (at === null) return;
+    const cx = c.getContext('2d');
+    if (cx === null) return;
+    cx.clearRect(at.x, at.y, 2, 2);
 }
 
 export function renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {
@@ -771,27 +805,6 @@ function wrapBlit(
  *  frame, and a minimap that lit and unlit itself at walking pace would
  *  strobe.  The world fog is the live layer; the map is the remembered one.
  */
-/** A scratch surface the size of the minimap, for layers that have to be
- *  composited (masked) before they reach the map.  Pooled on the renderer:
- *  allocating a canvas per frame in a draw path is the one thing this widget
- *  cannot afford. */
-function ensureMinimapScratch(
-    r: RenderSystem, size: number,
-): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
-    if (typeof document === 'undefined') return null;
-    if (r._minimapScratch === null) {
-        r._minimapScratch = document.createElement('canvas');
-        r._minimapScratchCtx = r._minimapScratch.getContext('2d');
-        if (r._minimapScratchCtx === null) { r._minimapScratch = null; return null; }
-    }
-    const res = Math.max(1, Math.round(size));
-    if (r._minimapScratch.width !== res || r._minimapScratch.height !== res) {
-        r._minimapScratch.width = res;
-        r._minimapScratch.height = res;
-    }
-    return { canvas: r._minimapScratch, ctx: r._minimapScratchCtx! };
-}
-
 function renderMinimapFog(
     r: RenderSystem, ctx: CanvasRenderingContext2D, camera: CameraState,
     mapX: number, mapY: number, size: number, range: number,
@@ -891,12 +904,11 @@ export function renderMinimap(
     // source rect may straddle the canvas edge and we split it into
     // up to four drawImage calls so the minimap seamlessly shows both
     // sides of a seam when the camera is near the edge.
-    // TERRAIN IS CHARTED, NOT GIVEN (user call).  It used to be all-or-nothing
-    // — gated on merely OWNING a scanner, so the map was either blank or
-    // complete, and neither reads as exploration.  It is now masked to the
-    // ground the player has actually met: flown past (natural encounter) or
-    // swept by a scan.  That is what makes the map fill in as you play, and
-    // what gives the instrument a visible navigational job.
+    // TERRAIN IS TRACKED PER TILE (user call).  The layer holds exactly the
+    // tiles the player has met — see `stampMinimapTile` — so it is blitted
+    // straight, with no mask.  It was briefly a complete bake filtered by a
+    // charted REGION, and that read as mapping areas rather than finding
+    // objects, which is the distinction this replaces.
     const staticCanvas = r._minimapStaticCanvas;
     if (staticCanvas) {
         const staticRange = r._minimapStaticRange;
@@ -912,50 +924,10 @@ export function renderMinimap(
         const syRaw = srcCenterY - srcHalf;
         const sw = srcHalf * 2;
         const sh = srcHalf * 2;
-        // The terrain layer's period IS its canvas size — it was baked to
+        // The terrain layer's period IS its canvas size — it was sized to
         // cover exactly one wrap unit (see buildMinimapStaticLayer).
-        //
-        // Drawn into a SCRATCH surface and masked to the charted memory
-        // before it reaches the map.  It cannot be masked in place: the
-        // minimap has already painted its ground and its border, and a
-        // `destination-in` against those would erase them too.
-        const scratch = ensureMinimapScratch(r, currentSize);
-        if (scratch === null) {
-            wrapBlit(ctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
-                     mapX, mapY, currentSize, currentSize);
-        } else {
-            const { canvas: mc, ctx: mctx } = scratch;
-            mctx.setTransform(1, 0, 0, 1, 0, 0);
-            mctx.globalCompositeOperation = 'source-over';
-            mctx.globalAlpha = 1;
-            mctx.clearRect(0, 0, mc.width, mc.height);
-            wrapBlit(mctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
-                     0, 0, mc.width, mc.height);
-            // Keep only what has been charted.  The memory is in map-cell
-            // space and wraps, so it is blitted with the same nine-offset
-            // helper the terrain itself uses.
-            const mem = r._chartedMem;
-            if (mem !== null) {
-                mctx.globalCompositeOperation = 'destination-in';
-                mctx.imageSmoothingEnabled = true;   // a charted edge is soft
-                const half = range / CHARTED_CELL;
-                wrapBlit(mctx, mem,
-                         camera.position.x / CHARTED_CELL - half,
-                         camera.position.y / CHARTED_CELL - half,
-                         half * 2, half * 2,
-                         chartedPeriodX(), chartedPeriodY(),
-                         0, 0, mc.width, mc.height);
-                mctx.globalCompositeOperation = 'source-over';
-            } else {
-                // No memory surface at all (no 2D context): chart nothing
-                // rather than everything — failing OPEN would hand the player
-                // the whole map for free.
-                mctx.globalCompositeOperation = 'destination-in';
-                mctx.clearRect(0, 0, mc.width, mc.height);
-                mctx.globalCompositeOperation = 'source-over';
-            }
-            ctx.drawImage(mc, mapX, mapY, currentSize, currentSize);
-        }
+        wrapBlit(ctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
+                 mapX, mapY, currentSize, currentSize);
     }
 
     // ── Material layer (decision #43, G5) ──────────────────────────────

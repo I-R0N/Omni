@@ -29,7 +29,7 @@
  * which is precisely the work a GPU renderer moves off the CPU.
  * See docs/GAUNTLET_WEBGPU_LOG.md.
  */
-import type { TrailShape } from '../../types';
+import type { TrailShape, GameEntity } from '../../types';
 
 export interface RendererDiagnostics {
   // ── Debug flags (written by DebugControls) ───────────────────────────────
@@ -67,6 +67,11 @@ export interface RendererDiagnostics {
   materialRevealRadius: number;
   materialRevealX: number;
   materialRevealY: number;
+  /** Add / remove one DISCOVERED tile on the pre-rendered terrain layer.
+   *  Terrain is tracked per tile, so the layer is built up as the player
+   *  meets tiles rather than baked complete at map load. */
+  stampMinimapTile(e: GameEntity): void;
+  unstampMinimapTile(e: GameEntity): void;
   /** The rift the player arrived through, charted without a scanner. */
   arrivalPortalId: string | null;
   /** Discard generated background content so the next frame rebuilds it.

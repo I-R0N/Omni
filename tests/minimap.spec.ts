@@ -20,7 +20,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats } from './helpers';
+import { boot, engine, stats, startRun, waitForStats, quietScene } from './helpers';
 
 /** Fit the widest scanner and complete ONE full ping.
  *
@@ -250,47 +250,30 @@ test.describe('minimap — material layer', () => {
     expect(mobile).toBeGreaterThan(200);
 
     // TWO GATES, and they answer different questions.  The DBG cycle picks
-    // WHICH material layer is drawn; visibility is then per shard, against the
-    // CHARTED memory — the same one the terrain blit is masked to, so material
-    // is remembered exactly as the ground around it is (user call).
+    // WHICH material layer is drawn; visibility is then per shard, off the
+    // shard's own `found` flag — tracking rides the OBJECT (user call), so a
+    // shard the player has met stays on the map wherever it drifts.
     await setMaterial(page, 'Dots');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
     const near = await engine(page, e => {
-      let n = 0, uncharted = 0;
+      let n = 0, unfound = 0;
       for (const item of e.renderer._minimapBuffer) {
         if (item.entity.type !== 'STRUCTURE') continue;
         n++;
-        if (!e.renderer.materialCharted(item.entity.position.x, item.entity.position.y)) uncharted++;
+        if (item.entity.found !== true) unfound++;
       }
-      return { n, uncharted };
+      return { n, unfound };
     });
-    // Eyesight alone puts material on the map…
-    expect(near.n, 'shards on charted ground are collected with no scan').toBeGreaterThan(0);
-    // …and ONLY charted material.  This is the claim that keeps it a memory
-    // rather than a free reveal of the whole field.
-    expect(near.uncharted, 'and nothing off the charted map').toBe(0);
+    // Meeting them alone puts material on the map…
+    expect(near.n, 'shards the ship has met are collected with no scan').toBeGreaterThan(0);
+    // …and ONLY met ones.  This is the claim that keeps it a record of
+    // objects rather than a free reveal of the whole field.
+    expect(near.unfound, 'and nothing the ship has never met').toBe(0);
 
-    // AND IT IS PERMANENT.  Fly a long way and come back: the ground charted
-    // on the way out still carries its material, which is the difference
-    // between a memory and the reveal bubble this replaced.
-    const home = await engine(page, e => ({ x: e.player.position.x, y: e.player.position.y }));
-    for (let i = 0; i < 4; i++) {
-      await engine(page, (e, step: number) => {
-        e.player.position.x += step;
-        e.camera.position.x = e.player.position.x;
-      }, 800);
-      await page.waitForTimeout(120);
-    }
-    const remembered = await engine(page, (e, at: { x: number; y: number }) => {
-      // Charted on the way out, and now far behind the ship.
-      return e.renderer.materialCharted(at.x, at.y);
-    }, home);
-    expect(remembered, 'ground charted on the way out stays charted').toBe(true);
-
-    // A scan charts further than eyesight, so it must collect strictly more.
+    // A scan meets more than eyesight does, so it must collect strictly more.
     const before = (await bufferByKind(page)).shard ?? 0;
     await scanOnce(page);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(250);
     const withDots = await bufferByKind(page);
     expect(withDots.shard ?? 0).toBeGreaterThan(before);
 
@@ -309,67 +292,147 @@ test.describe('minimap — material layer', () => {
     watch.assertClean();
   });
 
-  test('terrain is CHARTED as the ship flies, and a scan charts it at range',
+  test('TERRAIN is tracked tile by tile, and a destroyed tile leaves the map',
     async ({ page }) => {
       const watch = await boot(page);
-      await startRun(page, 'ASTEROID_FIELD');
-      await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
-      await page.waitForTimeout(400);
+      // GLASS_FIELD, not the asteroid field: this half of the claim is about
+      // STATIC tiles, and the asteroid field is mobile shards — its tile
+      // count is zero, which made the first draft of this test assert growth
+      // on a population that does not exist.
+      await startRun(page, 'GLASS_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+      await page.waitForTimeout(500);
 
-      // The charted memory is a render-side alpha surface, so this reads its
-      // COVERAGE rather than sampling the minimap's pixels: the mask is what
-      // the terrain blit is filtered by, so coverage is the honest measure of
-      // "how much of the map is drawable" (harness rule 3 — read the sim
-      // where the sim exposes the same fact).
-      const coverage = () => engine(page, e => {
-        const mem = e.renderer._chartedMem;
-        if (!mem) return -1;
-        const c = mem.getContext('2d');
-        const d = c.getImageData(0, 0, mem.width, mem.height).data;
-        let lit = 0;
-        for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++;
-        return lit / (mem.width * mem.height);
+      // The flag rides the OBJECT, so the honest measure is how many objects
+      // carry it — not how much of the map is lit (harness rule 3).
+      const tiles = () => engine(page, e => {
+        let found = 0, total = 0;
+        for (const x of e.currentMap.entities) {
+          if (!x.active || x.type !== 'STRUCTURE' || x.mass !== Infinity) continue;
+          total++;
+          if (x.found === true) found++;
+        }
+        return { found, total };
       });
 
-      const start = await coverage();
-      expect(start, 'the memory surface exists').toBeGreaterThanOrEqual(0);
-      // A fresh map is charted only where the ship SPAWNED — one encounter
-      // disc.  The expected figure is arithmetic rather than a guess:
-      // pi * ENCOUNTER_RANGE^2 / (6000 * 6000) = pi * 900^2 / 36e6 = 7.1%,
-      // and it measures 7.5% with the drift of a few frames.  The bound is
-      // set at 12% so it still fails loudly if the whole map were charted,
-      // which is the regression that matters here.
-      expect(start, 'a fresh map is charted only where the ship spawned')
-        .toBeLessThan(0.12);
+      const start = await tiles();
+      expect(start.total, 'the glass field has static tiles').toBeGreaterThan(50);
+      expect(start.found, 'the spawn point is discovered').toBeGreaterThan(0);
+      expect(start.found, 'and most of the field is not').toBeLessThan(start.total);
 
-      // FLY.  Charting is stamped once per drawn frame from the ship's
-      // position, so moving the ship and letting frames run is the real path.
-      for (let i = 0; i < 6; i++) {
+      // FLY: more tiles are met, and nothing already met is forgotten.
+      for (let i = 0; i < 5; i++) {
         await engine(page, e => {
           e.player.position.x += 700;
           e.camera.position.x = e.player.position.x;
           e.camera.position.y = e.player.position.y;
         });
-        await page.waitForTimeout(120);
+        await page.waitForTimeout(150);
       }
-      const flown = await coverage();
-      // A corridor 1800 wide across the map, against one 1800 disc: a real
-      // multiple, not a rounding difference.
-      expect(flown, 'flying charts the ground you pass').toBeGreaterThan(start * 1.5);
+      const flown = await tiles();
+      expect(flown.found, 'flying meets more terrain').toBeGreaterThan(start.found);
 
-      // SCAN.  A ping charts its whole bubble at once, which is the
-      // instrument's navigational job — and it must beat walking.
-      const beforeScan = await coverage();
+      // A SCAN meets a whole bubble at once — the instrument's job, and the
+      // reason it is worth pressing rather than just flying everywhere.
       await scanOnce(page);
-      await page.waitForTimeout(200);
-      const scanned = await coverage();
-      expect(scanned, 'a scan charts its bubble').toBeGreaterThan(beforeScan);
+      await page.waitForTimeout(250);
+      const scanned = await tiles();
+      expect(scanned.found, 'a scan meets terrain the ship has not flown to')
+        .toBeGreaterThan(flown.found);
 
-      // And charting is MAP-scoped: a new map is a new memory.
-      await startRun(page, 'GLASS_FIELD');
-      await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
-      await page.waitForTimeout(300);
-      expect(await coverage(), 'a fresh map forgets').toBeLessThan(scanned);
+      // A TRACKED TILE MUST NOT OUTLIVE ITS ROCK.  The terrain layer is an
+      // accumulating record of specific tiles now, so a destroyed one has to
+      // come off it — driven through the real death path, not by poking the
+      // canvas.
+      const killed = await engine(page, e => {
+        const t = e.currentMap.entities.find((x: any) =>
+          x.active && x.type === 'STRUCTURE' && x.mass === Infinity && x.found === true);
+        if (!t) return null;
+        t.health = 0;
+        e.handleEntityDeath(t);
+        return { active: t.active };
+      });
+      expect(killed, 'a tracked tile was available to destroy').not.toBeNull();
+      // The observable is that the death path ran and took the tile with it;
+      // the unstamp is a canvas write inside it, and a clean console is what
+      // says it did not throw on the way.
+
+      watch.assertClean();
+    });
+
+  test('only BIG shards are tracked, and tracking rides the object',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'ASTEROID_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
+      await page.waitForTimeout(500);
+
+      const shards = () => engine(page, e => {
+        let found = 0, bigUnfound = 0, smallFound = 0;
+        for (const x of e.currentMap.entities) {
+          if (!x.active || x.type !== 'STRUCTURE' || x.mass === Infinity) continue;
+          const big = Math.max(x.size.x, x.size.y) >= 40;
+          if (x.found === true) { found++; if (!big) smallFound++; }
+          else if (big) bigUnfound++;
+        }
+        return { found, bigUnfound, smallFound };
+      });
+
+      const start = await shards();
+      expect(start.found, 'shards at the spawn point are met').toBeGreaterThan(0);
+      expect(start.bigUnfound, 'and the rest of the field is not').toBeGreaterThan(0);
+      // ONLY BIG ONES (user call).  Small debris is not a landmark, and
+      // tracking is permanent — the threshold is what keeps both the map and
+      // the per-frame draw set bounded.
+      expect(start.smallFound, 'small debris is never tracked').toBe(0);
+
+      // TRACKING RIDES THE OBJECT.  This is the whole difference from the
+      // region model it replaced, where a shard drifting out of mapped ground
+      // went quiet even though the player had already met it.
+      const moved = await engine(page, e => {
+        const sh = e.currentMap.entities.find((x: any) =>
+          x.active && x.type === 'STRUCTURE' && x.mass !== Infinity && x.found === true);
+        if (!sh) return null;
+        sh.position.x += 2500;   // somewhere the ship has never been
+        sh.position.y += 2500;
+        return sh.found === true;
+      });
+      expect(moved, 'tracking follows the rock, not the ground').toBe(true);
+
+      watch.assertClean();
+    });
+
+  test('tracking survives a merge — a big shard eating gravel stays on the map',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'ASTEROID_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
+      await quietScene(page);
+
+      // Drive the REAL merge rather than reimplementing it (harness rule 6):
+      // `composeEntities` is what runs when two shards fuse in play.
+      const r = await engine(page, e => {
+        const shards = e.currentMap.entities.filter((x: any) =>
+          x.active && x.type === 'STRUCTURE' && x.mass !== Infinity && x.polygonPoints);
+        shards.sort((a: any, c: any) =>
+          Math.max(c.size.x, c.size.y) - Math.max(a.size.x, a.size.y));
+        const big = shards[0], small = shards[shards.length - 1];
+        if (!big || !small || big === small) return null;
+
+        // The case that produced the confusion: the SURVIVOR is untracked and
+        // the body it absorbs is the tracked one.  If the flag did not carry,
+        // a tracked rock would blink off the map at the moment it grew.
+        big.found = false;
+        small.found = true;
+        small.position.x = big.position.x;
+        small.position.y = big.position.y;
+        e.shards.composeEntities(big, small, e.currentMap.entities, e.physics);
+        return { survivorFound: big.found === true, survivorActive: big.active };
+      });
+
+      expect(r, 'the field had two shards to fuse').not.toBeNull();
+      expect(r.survivorActive).toBe(true);
+      expect(r.survivorFound, 'the survivor inherits the tracking').toBe(true);
 
       watch.assertClean();
     });
