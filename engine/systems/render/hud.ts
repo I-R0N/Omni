@@ -29,10 +29,11 @@ import {
     INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
     computeMinimapRect, computeIndicatorRect,
     FOG,
-    SCANNER,
+    SCANNER, CHARTED_CELL,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
+import { chartedPeriodX, chartedPeriodY } from './charted';
 import { fogMemoryPeriodX, fogMemoryPeriodY, fogEffectiveDark } from './fog';
 
 /**
@@ -770,6 +771,27 @@ function wrapBlit(
  *  frame, and a minimap that lit and unlit itself at walking pace would
  *  strobe.  The world fog is the live layer; the map is the remembered one.
  */
+/** A scratch surface the size of the minimap, for layers that have to be
+ *  composited (masked) before they reach the map.  Pooled on the renderer:
+ *  allocating a canvas per frame in a draw path is the one thing this widget
+ *  cannot afford. */
+function ensureMinimapScratch(
+    r: RenderSystem, size: number,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+    if (typeof document === 'undefined') return null;
+    if (r._minimapScratch === null) {
+        r._minimapScratch = document.createElement('canvas');
+        r._minimapScratchCtx = r._minimapScratch.getContext('2d');
+        if (r._minimapScratchCtx === null) { r._minimapScratch = null; return null; }
+    }
+    const res = Math.max(1, Math.round(size));
+    if (r._minimapScratch.width !== res || r._minimapScratch.height !== res) {
+        r._minimapScratch.width = res;
+        r._minimapScratch.height = res;
+    }
+    return { canvas: r._minimapScratch, ctx: r._minimapScratchCtx! };
+}
+
 function renderMinimapFog(
     r: RenderSystem, ctx: CanvasRenderingContext2D, camera: CameraState,
     mapX: number, mapY: number, size: number, range: number,
@@ -869,13 +891,13 @@ export function renderMinimap(
     // source rect may straddle the canvas edge and we split it into
     // up to four drawImage calls so the minimap seamlessly shows both
     // sides of a seam when the camera is near the edge.
-    // NO SCANNER, NO GROUND (rework, user call).  Without a scanner aboard the
-    // minimap is blank but for the two always-charted landmarks — the terrain
-    // layer is a sensor readout like everything else on this widget, not a
-    // free map of the arena.  ANY scanner turns it on whole: the ping's own
-    // radius reveals CONTACTS, and masking the pre-rendered terrain bitmap to
-    // a scanned bubble is a different (and much larger) feature.
-    const staticCanvas = r.scannerMk > 0 ? r._minimapStaticCanvas : null;
+    // TERRAIN IS CHARTED, NOT GIVEN (user call).  It used to be all-or-nothing
+    // — gated on merely OWNING a scanner, so the map was either blank or
+    // complete, and neither reads as exploration.  It is now masked to the
+    // ground the player has actually met: flown past (natural encounter) or
+    // swept by a scan.  That is what makes the map fill in as you play, and
+    // what gives the instrument a visible navigational job.
+    const staticCanvas = r._minimapStaticCanvas;
     if (staticCanvas) {
         const staticRange = r._minimapStaticRange;
         const sRes = staticCanvas.width;
@@ -892,8 +914,48 @@ export function renderMinimap(
         const sh = srcHalf * 2;
         // The terrain layer's period IS its canvas size — it was baked to
         // cover exactly one wrap unit (see buildMinimapStaticLayer).
-        wrapBlit(ctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
-                 mapX, mapY, currentSize, currentSize);
+        //
+        // Drawn into a SCRATCH surface and masked to the charted memory
+        // before it reaches the map.  It cannot be masked in place: the
+        // minimap has already painted its ground and its border, and a
+        // `destination-in` against those would erase them too.
+        const scratch = ensureMinimapScratch(r, currentSize);
+        if (scratch === null) {
+            wrapBlit(ctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
+                     mapX, mapY, currentSize, currentSize);
+        } else {
+            const { canvas: mc, ctx: mctx } = scratch;
+            mctx.setTransform(1, 0, 0, 1, 0, 0);
+            mctx.globalCompositeOperation = 'source-over';
+            mctx.globalAlpha = 1;
+            mctx.clearRect(0, 0, mc.width, mc.height);
+            wrapBlit(mctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
+                     0, 0, mc.width, mc.height);
+            // Keep only what has been charted.  The memory is in map-cell
+            // space and wraps, so it is blitted with the same nine-offset
+            // helper the terrain itself uses.
+            const mem = r._chartedMem;
+            if (mem !== null) {
+                mctx.globalCompositeOperation = 'destination-in';
+                mctx.imageSmoothingEnabled = true;   // a charted edge is soft
+                const half = range / CHARTED_CELL;
+                wrapBlit(mctx, mem,
+                         camera.position.x / CHARTED_CELL - half,
+                         camera.position.y / CHARTED_CELL - half,
+                         half * 2, half * 2,
+                         chartedPeriodX(), chartedPeriodY(),
+                         0, 0, mc.width, mc.height);
+                mctx.globalCompositeOperation = 'source-over';
+            } else {
+                // No memory surface at all (no 2D context): chart nothing
+                // rather than everything — failing OPEN would hand the player
+                // the whole map for free.
+                mctx.globalCompositeOperation = 'destination-in';
+                mctx.clearRect(0, 0, mc.width, mc.height);
+                mctx.globalCompositeOperation = 'source-over';
+            }
+            ctx.drawImage(mc, mapX, mapY, currentSize, currentSize);
+        }
     }
 
     // ── Material layer (decision #43, G5) ──────────────────────────────
@@ -901,14 +963,17 @@ export function renderMinimap(
     // (handled in the entity loop below); 'off' draws neither.  Drawn after
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
-    // The DBG cycle picks WHICH material layer; the scan's material bubble
-    // decides whether it is drawn at all.  See RenderSystem.minimapShardDots
-    // — the dots half of this same answer, which the buffer fill reads.
-    const materialMode = r.materialRevealAlpha > 0 ? getActiveMinimapMaterial() : 'off';
+    // The DBG cycle picks WHICH material layer is drawn.  The DOTS half is
+    // then filtered PER SHARD by `materialAlphaAt` (encounter or scan bubble),
+    // in the buffer fill.  The FLOW half cannot be: a streamline is an
+    // inferred FIELD rather than a set of seen objects, so it is gated on
+    // owning the instrument that infers it.
+    const materialMode = getActiveMinimapMaterial();
+    const flowAllowed = r.scannerMk > 0;
     // Hoisted: ONE lookup for the whole pass, not one per contact — the
     // buffer can hold a few thousand mobile shards in dots mode.
     const shardDots = r.minimapShardDots;
-    if (materialMode === 'flow') {
+    if (materialMode === 'flow' && flowAllowed) {
         renderMinimapFlow(r, ctx, camera, centerX, centerY, scale, range);
     }
 

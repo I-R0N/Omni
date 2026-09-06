@@ -71,7 +71,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  369 tests.  All run at
+                          anti-flake rules).  370 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -229,6 +229,14 @@ engine/
                           joystick, fitFontPx
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
+      charted.ts      CHARTED MEMORY — which ground the player has met.
+                          A per-map alpha surface at `CHARTED_CELL` world
+                          units, stamped around the ship each drawn frame
+                          and wherever a scan completes; the minimap's
+                          terrain blit is masked to it, so the map fills
+                          in as the player flies.  The fog's `_fogMem`
+                          pattern applied to a different question, and a
+                          SEPARATE surface on purpose (see §5's SCANNER)
       shardBlend.ts   The bonded-pair "goo" layer: one metaball
                       connector per live cohesion bond, filled
                       UNDER both hulls so a stuck pair reads as
@@ -1704,8 +1712,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   player operates.  A4 shipped it as a gate that quietly widened two
   readouts which were already full, and the play-test verdict was that
   nothing about it read.  Four rules, every one a reversal of A4:
-  1. **THE MAP IS FOUND, NOT GIVEN.**  With no scanner the minimap draws no
-     TERRAIN (that is gated on merely owning one) and the HUD carries NO
+  1. **THE MAP IS FOUND, NOT GIVEN.**  With no scanner the HUD carries NO
      off-screen arrows at all — A4's rule was the exact opposite ("no
      scanner degrades to today's behaviour exactly"), which is what made the
      module invisible.  What a scannerless ship DOES get is what it has
@@ -1722,8 +1729,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
      "charted by flying past" cannot drift into meaning two things.  Found
      gets a MINIMAP mark and never an ARROW: arrows are transient by design,
      since they say "something is there NOW".
-  1b. **NATURAL ENCOUNTER.**  Anything within `SCANNER.ENCOUNTER_RANGE` is
-     seen with the naked eye — no scanner, no mark.  That is what makes the
+  1b. **NATURAL ENCOUNTER, and it covers TERRAIN and MATERIALS too** (user
+     call).  Anything within `SCANNER.ENCOUNTER_RANGE` is seen with the naked
+     eye — no scanner, no mark.  That is what makes the
      scanner's value RANGE (finding a thing before you fly into it) rather
      than sight itself, and it is why the minimap fills in as the player
      plays.  The one exception is a CONCEALED POI (`poiTier` above
@@ -1732,6 +1740,29 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
      RARE a find is, and rarity is not visibility — a rival sits at tier 3
      because it is uncommon, not because it is hard to see, and gating sight
      on the tier made a rival parked beside the ship invisible.
+     TERRAIN is CHARTED the same way (`engine/systems/render/charted.ts`):
+     a per-map alpha memory at `CHARTED_CELL` world units, stamped once per
+     DRAWN frame around the ship and again wherever a scan completes, and the
+     minimap's pre-rendered terrain blit is masked to it.  It used to be
+     all-or-nothing — gated on merely OWNING a scanner, so the map was either
+     blank or complete, and neither reads as exploration.  It is the FOG's
+     `_fogMem` pattern applied to a different question, and deliberately a
+     SEPARATE surface: the fog's memory is written only while the fog cycle is
+     on (it ships off) and has nothing to do with scans, so sharing it would
+     tie the minimap to a debug cycle.  Two rules hold it up — the blit is
+     masked in a POOLED SCRATCH canvas rather than in place (a
+     `destination-in` against the map itself would erase the ground and
+     border it has already painted), and a missing memory surface charts
+     NOTHING rather than everything, since failing open would hand the player
+     the whole map for free.
+     MATERIALS follow the same two radii through `RenderSystem.materialAlphaAt`
+     — encounter around the ship now, or the bubble left by the last completed
+     scan.  That bubble is centred where the ping was FIRED
+     (`materialRevealX/Y`): before it had a centre at all the alpha applied to
+     every shard on the map, so one press revealed material everywhere.  The
+     FLOW layer is the documented exception and stays gated on owning a
+     scanner: a streamline is an inferred FIELD rather than a set of seen
+     objects.
   2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
      at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
      `GameEntity.detectedAt` on whatever it crosses, and a mark holds for
@@ -3792,9 +3823,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   added a rule ABOVE the three below: with no scanner aboard the widget
   draws neither the pre-rendered terrain layer nor any contact — only the
   two `isAlwaysCharted` landmarks.  TERRAIN is gated on merely OWNING a
-  scanner (`r.scannerMk > 0`) rather than on a fresh ping, because
-  masking a pre-rendered bitmap to a scanned bubble is a different and
-  much larger feature; buying a scanner is what visibly turns the map on.
+  scanner.  TERRAIN IS NOW CHARTED instead (user call): the pre-rendered
+  layer is masked to `render/charted.ts`'s per-map memory, so the map fills
+  in as the player flies and a scan charts a bubble at range.  The FLOW
+  layer keeps the owning-a-scanner gate, since it is an inferred field.
   Three rules under that, all decided in step 5 G5 (user directive,
   decision #43):
   1. **Nebula is off it entirely.**  Nebula tiles are skipped by

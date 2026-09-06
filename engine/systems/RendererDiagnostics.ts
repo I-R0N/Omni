@@ -65,6 +65,8 @@ export interface RendererDiagnostics {
   simClock: number;
   materialRevealAt: number;
   materialRevealRadius: number;
+  materialRevealX: number;
+  materialRevealY: number;
   /** The rift the player arrived through, charted without a scanner. */
   arrivalPortalId: string | null;
   /** Discard generated background content so the next frame rebuilds it.

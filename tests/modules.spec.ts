@@ -795,10 +795,13 @@ test.describe('scanner module', () => {
       mk: e.scannerMk,
       ranges: e.scanRanges,
       arrows: e.renderer._indicatorBuffer.length,
-      // Contacts on the map, EXCLUDING the landmarks a run STARTS charted
-      // with — those are the one thing a scannerless ship is given.
+      // CONTACTS on the map, excluding two things that are not the
+      // instrument's doing: the landmarks a run starts charted with, and
+      // MATERIALS, which are eyesight — a shard within encounter range is
+      // seen, scanner or no scanner, and `minimap.spec.ts` owns that claim.
       uncharted: e.renderer._minimapBuffer.filter((i: any) =>
-        !(i.entity.isStation && i.entity.stationKind === 'home')
+        i.entity.type !== 'STRUCTURE'
+        && !(i.entity.isStation && i.entity.stationKind === 'home')
         && !(i.entity.isPortal && i.entity.id === e.arrivalPortalId)).length,
       scannerStat: (window as any).__omniStats?.scanner,
     }));

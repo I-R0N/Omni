@@ -249,19 +249,34 @@ test.describe('minimap — material layer', () => {
       .filter((x: any) => x.active && x.type === 'STRUCTURE' && x.mass !== Infinity).length);
     expect(mobile).toBeGreaterThan(200);
 
-    // The DBG cycle and the SCAN both have to say yes now (rework): the cycle
-    // picks WHICH material layer is drawn, the scan decides whether there is
-    // anything to draw it for.  So the un-scanned field collects nothing even
-    // in Dots mode — which is the first thing asserted, because it is the new
-    // half of the rule.
+    // TWO GATES, and they answer different questions (rework + the encounter
+    // pass).  The DBG cycle picks WHICH material layer is drawn; visibility is
+    // then per shard — NEAR ones are seen with the naked eye, and a scan
+    // reveals a wider bubble around where it was fired.
     await setMaterial(page, 'Dots');
     await page.waitForTimeout(300);
-    expect((await bufferByKind(page)).shard ?? 0,
-      'Dots alone reveals nothing — a scan is what finds materials').toBe(0);
+    const near = await engine(page, e => {
+      const px = e.player.position.x, py = e.player.position.y;
+      let worst = 0, n = 0;
+      for (const item of e.renderer._minimapBuffer) {
+        if (item.entity.type !== 'STRUCTURE') continue;
+        n++;
+        const d = Math.hypot(item.entity.position.x - px, item.entity.position.y - py);
+        if (d > worst) worst = d;
+      }
+      return { n, worst };
+    });
+    // Eyesight alone puts material on the map…
+    expect(near.n, 'shards within eyeshot are collected with no scan').toBeGreaterThan(0);
+    // …and ONLY nearby material, which is what makes it a radius rather than
+    // a free reveal of the whole field.  (Slack for the frame of drift
+    // between the buffer fill and this read.)
+    expect(near.worst, 'and only the near ones').toBeLessThan(1100);
 
+    // A scan reaches further than eyesight, so it must collect strictly more.
     await scanOnce(page);
     const withDots = await bufferByKind(page);
-    expect(withDots.shard ?? 0).toBeGreaterThan(100);
+    expect(withDots.shard ?? 0).toBeGreaterThan(near.n);
 
     // In FLOW mode they are not collected at all — the cost of the dot layer
     // is the per-frame push, not just the fill, which is what makes the mode
@@ -277,6 +292,71 @@ test.describe('minimap — material layer', () => {
     await setMaterial(page, 'Flow');
     watch.assertClean();
   });
+
+  test('terrain is CHARTED as the ship flies, and a scan charts it at range',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'ASTEROID_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
+      await page.waitForTimeout(400);
+
+      // The charted memory is a render-side alpha surface, so this reads its
+      // COVERAGE rather than sampling the minimap's pixels: the mask is what
+      // the terrain blit is filtered by, so coverage is the honest measure of
+      // "how much of the map is drawable" (harness rule 3 — read the sim
+      // where the sim exposes the same fact).
+      const coverage = () => engine(page, e => {
+        const mem = e.renderer._chartedMem;
+        if (!mem) return -1;
+        const c = mem.getContext('2d');
+        const d = c.getImageData(0, 0, mem.width, mem.height).data;
+        let lit = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++;
+        return lit / (mem.width * mem.height);
+      });
+
+      const start = await coverage();
+      expect(start, 'the memory surface exists').toBeGreaterThanOrEqual(0);
+      // A fresh map is charted only where the ship SPAWNED — one encounter
+      // disc.  The expected figure is arithmetic rather than a guess:
+      // pi * ENCOUNTER_RANGE^2 / (6000 * 6000) = pi * 900^2 / 36e6 = 7.1%,
+      // and it measures 7.5% with the drift of a few frames.  The bound is
+      // set at 12% so it still fails loudly if the whole map were charted,
+      // which is the regression that matters here.
+      expect(start, 'a fresh map is charted only where the ship spawned')
+        .toBeLessThan(0.12);
+
+      // FLY.  Charting is stamped once per drawn frame from the ship's
+      // position, so moving the ship and letting frames run is the real path.
+      for (let i = 0; i < 6; i++) {
+        await engine(page, e => {
+          e.player.position.x += 700;
+          e.camera.position.x = e.player.position.x;
+          e.camera.position.y = e.player.position.y;
+        });
+        await page.waitForTimeout(120);
+      }
+      const flown = await coverage();
+      // A corridor 1800 wide across the map, against one 1800 disc: a real
+      // multiple, not a rounding difference.
+      expect(flown, 'flying charts the ground you pass').toBeGreaterThan(start * 1.5);
+
+      // SCAN.  A ping charts its whole bubble at once, which is the
+      // instrument's navigational job — and it must beat walking.
+      const beforeScan = await coverage();
+      await scanOnce(page);
+      await page.waitForTimeout(200);
+      const scanned = await coverage();
+      expect(scanned, 'a scan charts its bubble').toBeGreaterThan(beforeScan);
+
+      // And charting is MAP-scoped: a new map is a new memory.
+      await startRun(page, 'GLASS_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+      await page.waitForTimeout(300);
+      expect(await coverage(), 'a fresh map forgets').toBeLessThan(scanned);
+
+      watch.assertClean();
+    });
 
   test('drops stay off the minimap in every mode', async ({ page }) => {
     const watch = await boot(page);

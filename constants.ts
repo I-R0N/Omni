@@ -1881,6 +1881,11 @@ export function cycleFog(): string {
  *  together so the mirror cannot drift. */
 export const PLAYER_LIGHT_PEAK = 0.34;
 
+/** CHARTED MEMORY cell size, world units (render/charted.ts).  Matches the
+ *  fog memory's grain: fine enough that a flown corridor reads as a corridor,
+ *  coarse enough that a 12k map is a 250x250 alpha surface. */
+export const CHARTED_CELL = 48;
+
 export const FOG = {
   /** The fog's own colour: BLACK.
    *

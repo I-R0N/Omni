@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, SCANNER, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { CHARTED_CELL, COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, SCANNER, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -32,6 +32,7 @@ import { renderPortalWarpVeil } from './render/portalWarp';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
+import { ensureCharted, resetCharted, stampCharted } from './render/charted';
 import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
 import { renderFogLayer, resetFogMemory } from './render/fog';
 import { renderShardBlends } from './render/shardBlend';
@@ -116,6 +117,22 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   public simClock: number = 0;
   public materialRevealAt: number = -1e9;
   public materialRevealRadius: number = 0;
+  /** Where the last completed ping was fired from.  The material reveal is a
+   *  BUBBLE, and a bubble needs a centre: without one the alpha applied to
+   *  every shard on the map, so a single scan revealed material everywhere. */
+  public materialRevealX: number = 0;
+  public materialRevealY: number = 0;
+  /** CHARTED MEMORY (render/charted.ts) — which ground the player has met.
+   *  `_lastChartedScan` is the reveal timestamp already stamped into it, so a
+   *  completed scan is charted exactly once. */
+  /** Scratch surface for minimap layers that must be masked before they land
+   *  on the map (the charted terrain blit).  Pooled — a canvas per frame in a
+   *  draw path is the one allocation this widget cannot afford. */
+  _minimapScratch: HTMLCanvasElement | null = null;
+  _minimapScratchCtx: CanvasRenderingContext2D | null = null;
+  _chartedMem: HTMLCanvasElement | null = null;
+  _chartedMemCtx: CanvasRenderingContext2D | null = null;
+  _lastChartedScan: number = -1e9;
 
   /** Does the minimap draw a dot per mobile shard this frame?  TWO callers
    *  have to agree — the per-entity buffer fill here and the draw in
@@ -128,7 +145,30 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  on, because its shipped default is already 'dots' — that would make the
    *  material reveal free and Mk I worthless. */
   public get minimapShardDots(): boolean {
-    return getActiveMinimapMaterial() === 'dots' && this.materialRevealAlpha > 0;
+    return getActiveMinimapMaterial() === 'dots';
+  }
+  /** How strongly a MATERIAL contact at world `(x, y)` draws on the minimap.
+   *
+   *  Materials are revealed by RADIUS rather than by a per-entity stamp —
+   *  there can be thousands of mobile shards — and there are two radii, the
+   *  same two every other contact has: NATURAL ENCOUNTER around the ship right
+   *  now, and the bubble left by the last completed scan, which fades.
+   *  Whichever is stronger wins.
+   *
+   *  The scan bubble is centred where the ping was FIRED, not on the ship: a
+   *  scan is a thing that happened at a place, and following the ship would
+   *  make one press reveal material forever.  Before this had a centre at all
+   *  the alpha applied to every shard on the map. */
+  public materialAlphaAt(x: number, y: number, px: number, py: number): number {
+    const near = SCANNER.ENCOUNTER_RANGE;
+    const ex = wrapDeltaX(px, x), ey = wrapDeltaY(py, y);
+    if (ex * ex + ey * ey <= near * near) return 1;
+    const a = this.materialRevealAlpha;
+    const rad = this.materialRevealRadius;
+    if (a <= 0 || rad <= 0) return 0;
+    const sx = wrapDeltaX(this.materialRevealX, x);
+    const sy = wrapDeltaY(this.materialRevealY, y);
+    return sx * sx + sy * sy <= rad * rad ? a : 0;
   }
   /** How strongly the material bubble draws, 0 once it has gone stale. */
   public get materialRevealAlpha(): number {
@@ -879,6 +919,24 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  `GameEngine.loadMap` calls it — it is the renderer's public API. */
   public buildMinimapStaticLayer(entities: GameEntity[], mapWidth: number, mapHeight: number) {
       buildMinimapStatic(this, entities, mapWidth, mapHeight);
+      // Charting is MAP-scoped, the same rule destroyed tiles and contact
+      // `found` flags follow, and this is the one call every map load makes.
+      ensureCharted(this);
+      resetCharted(this);
+      this._lastChartedScan = -1e9;
+  }
+
+  /** Chart the ground the ship is passing, and the ground the last completed
+   *  scan swept.  Called once per drawn frame — charting is a RENDER-side
+   *  memory, exactly like the fog's, and stamping it per sim substep would
+   *  redraw the same disc 120 times a second for no gain. */
+  private tickCharting(playerPos: Vector2) {
+      stampCharted(this, playerPos.x, playerPos.y, SCANNER.ENCOUNTER_RANGE);
+      if (this.materialRevealAt > this._lastChartedScan) {
+          this._lastChartedScan = this.materialRevealAt;
+          stampCharted(this, this.materialRevealX, this.materialRevealY,
+                       this.materialRevealRadius);
+      }
   }
 
   public setMapType(type: MapType) {
@@ -1095,7 +1153,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // Everything else goes through `mapAlpha`, which is where the
             // found / encountered / auto-tracked rules meet.
             const detect = entity.type === EntityType.STRUCTURE
-                ? this.materialRevealAlpha
+                ? this.materialAlphaAt(entity.position.x, entity.position.y,
+                                       playerPos.x, playerPos.y)
                 : this.mapAlpha(entity);
             if (detect > 0) this._minimapBuffer.push({ entity, dx, dy, detect });
         }
@@ -1318,6 +1377,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     if (waveAnnouncements && waveAnnouncements.length > 0) {
         renderWaveAnnouncements(ctx, waveAnnouncements, width, height, minimapExpanded);
     }
+
+    // 5d. Chart the ground the ship is passing.  BEFORE the minimap draws,
+    // so the frame the player arrives somewhere is the frame it appears.
+    this.tickCharting(playerPos);
 
     // 6. Render POI Indicators (Screen Space)
     renderIndicators(this, ctx, this._indicatorBuffer, camera, width, height);

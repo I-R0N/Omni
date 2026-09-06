@@ -6394,6 +6394,10 @@ export class GameEngine {
           this.scanPingRadius = 0;
           this.materialRevealAt = now;
           this.materialRevealRadius = this.scanRanges[1] ?? 0;
+          // WHERE it happened.  A scan is a thing that happened at a place;
+          // without a centre the reveal applied to every shard on the map.
+          this.materialRevealX = px;
+          this.materialRevealY = py;
       }
   }
 
@@ -6402,6 +6406,8 @@ export class GameEngine {
    *  the player was, rather than a stamp on each of a few thousand shards. */
   public materialRevealAt: number = -1e9;
   public materialRevealRadius: number = 0;
+  public materialRevealX: number = 0;
+  public materialRevealY: number = 0;
 
   public cycleShipLight(): boolean {
       if (!this.flashlightEquipped) return false;
@@ -7000,6 +7006,8 @@ export class GameEngine {
       this.renderer.simClock = this.simClock;
       this.renderer.materialRevealAt = this.materialRevealAt;
       this.renderer.materialRevealRadius = this.materialRevealRadius;
+      this.renderer.materialRevealX = this.materialRevealX;
+      this.renderer.materialRevealY = this.materialRevealY;
       this.renderer.arrivalPortalId = this.arrivalPortalId;
       const lightOn = this.flashlightEquipped && this.flashlightLevel > 0;
       this.renderer.playerLightToolHalfDeg =
