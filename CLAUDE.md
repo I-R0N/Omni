@@ -65,7 +65,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           families: Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  346 tests.  All run at
+                          anti-flake rules).  352 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1567,11 +1567,52 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `cooldownMult` take, so nothing downstream of the gun knows a module
   exists.  The bonus applies to EVERY gun UNIFORMLY (guidance call):
   Lightning and Cannon are `pierce: 0` because their identity is chain
-  and splash and they take it anyway with eyes open, and the sum is
-  clamped to `MAX_PIERCE` — 99, the value the Laser already ships as
-  "effectively infinite" — so the ceiling is the one the Laser defines
-  rather than a number nothing means anything by.  A burst SUB-shot
-  takes it too (`tickPlayerBurst` re-derives its config per shot).
+  and splash and they take it anyway with eyes open.  A burst SUB-shot
+  takes it too (`tickPlayerBurst` re-derives its config per shot), and
+  the sum is clamped to `MAX_PIERCE` — 99, a plain SANITY ceiling
+  against an authoring mistake and NOT anchored to any weapon.  It used
+  to be, and the anchor rotted: it was "the value the Laser already ships
+  as effectively infinite", and the Laser ships `pierce: 4` now.
+  WHAT A CHARGE BUYS is the part the first version got wrong (user
+  review, "option C").  Three rules replace "one charge, one body":
+  - **DAMAGE FALLS OFF PER HIT.**  `PIERCE_FALLOFF` (`[1, 0.90, 0.75,
+    0.65, 0.40]`, beside `MAX_PIERCE`) is indexed by HIT ORDINAL, and
+    the LAST entry is the TAIL for anything deeper, so a deep bore has a
+    defined answer instead of running off the end of the array.  A TABLE
+    rather than a rate because the user's ratios are irregular (0.90,
+    0.83, 0.87, 0.62 of the step before) and no single multiplier
+    expresses them.  It rides the projectile as `pierceHits` (a count UP,
+    so the curve is read forwards — `pierceCount` counts DOWN and would
+    read it backwards) and an optional per-weapon override
+    `WeaponConfig.pierceFalloff`, stamped at spawn on the SAME seam
+    `pierce` is (both spawn paths, and the pooled one clears the field
+    when the new config has none — a recycled shot must never inherit a
+    stale curve).  No weapon overrides it today.  DIRECT damage only: the
+    Cannon's AoE splash and the Lightning chain are applied in
+    `GameEngine` and deliberately unscaled, pending a decision.
+  - **INSIDE A GRAIN BODY A CHARGE BUYS A GRAIN, NOT A TILE** — the bore
+    track; see §8.
+  - **AN INDESTRUCTIBLE TILE STOPS THE BOLT DEAD** and costs it nothing.
+    It took no damage, so it may not take a charge either; the shipped
+    build let a bolt through it AND charged for the privilege, which was
+    the worst artifact of the body-level rule.
+  `PIERCE_SPEED_RETAIN` is the second axis, shipped at `1.0` (a no-op)
+  behind DBG ▸ Player ▸ "Pierce spd" so the user can feel a decaying
+  bolt against the falloff curve before either is tuned; one factor per
+  charge actually spent, so a four-grain bore slows four times.
+  THE LASER'S OWN BUDGET went 99 → 4 in the same pass (user call).
+  "Effectively infinite" pre-dated there being any COST to piercing;
+  with the curve in place a beam already gives up damage per body, so an
+  unbounded budget just made the Laser the answer to every line of
+  targets.  A RICOCHET MAY RE-HIT what it already struck, with no cap —
+  bought by CLEARING `hitEntityIds` at the bounce site rather than by
+  weakening the `alreadyHit` guard in the projectile branch, which is
+  load-bearing for an unrelated reason (it is what stops a bolt in
+  SUSTAINED OVERLAP re-damaging a body every substep at 120Hz).  Pierce
+  therefore stays a LIFETIME budget: a bouncing beam still gets at most
+  `pierceCount` damage events across its whole flight however many times
+  it turns around, each stepping further down the curve.  Bounces buy
+  COVERAGE, not extra damage events.
   **PURCHASABLE HEX SLOTS** (A5): how many hexes of each flower are
   UNLOCKED is a run field (`GameEngine.shipSlotsUnlocked` /
   `weaponSlotsUnlocked`, reset by `resetOutfit`), and
@@ -2372,6 +2413,40 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   they arrived.  PHYSICAL smashes (a boulder crash, the pressure trigger)
   still take the whole body: they meter boulders, not weapons.  DBG ▸
   Visual ▸ "Bnd strength" is the master multiplier over every material.
+- **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
+  "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
+  the body-level penetration rule spent one charge to carry a bolt through
+  a whole 36px pane and pour its entire shot into the entry cell.  For a
+  body running the boundary model — the predicate is
+  `bondStrengthFor(e) !== null`, the same one the derived HP comes from —
+  the bolt instead walks its own CHORD, one `grainSpecFor(variant)
+  .grainSize` at a time, spending a charge and a falloff step per GRAIN.
+  Five things hold it up:
+  - **The step is read through `grainSpecFor`, never
+    `SHARD_VARIANTS[..].grain`** (the §5 rule): a DBG per-material
+    override that reached the pattern but not the track would step at a
+    pitch the decomposition is not built at.
+  - **Each step stamps its OWN contact point** (`stampLocalImpact`) before
+    spending (`applyBoundaryDamage`).  With every material's shipped
+    `damageSpread: 0` the spend runs sequentially outward from that point,
+    which is exactly what makes successive stamps erode successive grains
+    rather than saturating the entry cell — the bore is a consequence of
+    the damage-spread model, not a second mechanism beside it.
+  - **The walk runs in the body's LOCAL frame**, because `polygonPoints`
+    are stored unrotated and `pointInPolygon` has to be asked in those
+    coords; only the world stamp rotates back out.  The entry offset is
+    `wrapDelta`'d, so a body on the seam is not stepped a map-width away.
+  - **Out of charges INSIDE the body, the bolt stops there; out of BODY
+    with charges left, it flies on** and may strike the next thing.  That
+    is the whole difference from the body-level rule, and it is what makes
+    penetration read as depth rather than as a pass.
+  - **It allocates nothing and is bounded by the charges bought** — one
+    reused scratch point, and `charges` strictly decreases each iteration.
+  Bodies with no grain model (nebula, metal-shard composites, enemies,
+  the player) fall through to the single spend they always took, with the
+  falloff applied.  Measured on a 36px glass pane at 4 damage a hit: one
+  charge bores 2 grains for 7.6 (4 + 3.6) and stops inside, where the old
+  rule crossed the whole tile for one bite of 4.
 - **Progressive fracture IS the rock damage model under voronoi** (V8 —
   the boundary-highlight rework).  The decomposition is applied ONCE at
   first damage and FIXED; each hit reveals more of the impact-sorted

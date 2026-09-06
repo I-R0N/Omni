@@ -276,6 +276,12 @@ export interface WeaponConfig {
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
   pierce: number; // How many entities the projectile passes through after the first hit
+  // Per-hit damage falloff for a PIERCING shot, indexed by hit ordinal
+  // (0 = the first contact, so entry 0 is 1 by construction).  Absent →
+  // the shared PIERCE_FALLOFF curve.  Sits beside `pierce` because it is
+  // the same seam: ProjectileSystem.spawn stamps both onto the shot and
+  // nothing downstream of the gun knows a module or a table exists.
+  pierceFalloff?: readonly number[];
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
   // commitment; charged shots cost only the charge-time hold.
@@ -457,6 +463,14 @@ export interface GameEntity {
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
   pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
+  // How many bodies (or GRAINS — see the bore track in PhysicsSystem) this
+  // bolt has already struck.  The index into the falloff table, so it is
+  // separate from `pierceCount`, which counts DOWN and would read the
+  // table backwards.
+  pierceHits?: number;
+  // The falloff table this shot flies with, copied from its WeaponConfig
+  // at spawn.  Absent → the shared curve.
+  pierceFalloff?: readonly number[];
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
@@ -1906,6 +1920,8 @@ export interface EngineStats {
   shardBlendCount?: number;
   /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
   shardCoatName?: string;
+  // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
+  pierceSpeedRetainName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.

@@ -185,6 +185,14 @@ export class ProjectileSystem {
         pooled.ownerType = ownerType;
         pooled.ownerId = shooter.id; // for third-party retaliation (Stage 5)
         pooled.pierceCount = config.pierce;
+        // Both halves of the penetration state, on the SAME hazard the
+        // rival flags below carry: a recycled shot that kept a previous
+        // gun's falloff table — or a previous shot's hit count — would
+        // start part-way down a curve it never fired through.  Assigning
+        // `config.pierceFalloff` unconditionally is what CLEARS it when
+        // the new config has none (undefined → the shared curve).
+        pooled.pierceFalloff = config.pierceFalloff;
+        pooled.pierceHits = 0;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
         pooled.isBouncer = isBnc;
@@ -229,6 +237,8 @@ export class ProjectileSystem {
           ownerType,
           ownerId: shooter.id, // for third-party retaliation (Stage 5)
           pierceCount: config.pierce,
+          pierceFalloff: config.pierceFalloff,
+          pierceHits: 0,
           trail: [],
           isLightningProjectile: isLight,
           isBouncer: isBnc,

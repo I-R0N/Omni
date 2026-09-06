@@ -127,6 +127,7 @@ interface UIOverlayProps {
   onToggleRepelPush?: () => void;
   onToggleShardBlend?: () => void;
   onCycleShardCoat?: () => void;
+  onCyclePierceSpeedRetain?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -451,6 +452,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleRepelPush,
   onToggleShardBlend,
   onCycleShardCoat,
+  onCyclePierceSpeedRetain,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -1558,6 +1560,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Which wire encoding the trigger effects are sent in. TWO conventions are in wide use and a DualSense silently discards the one its firmware does not understand, so this is a diagnostic rather than a preference. "zones" = modes 0x21/0x25, parameters packed into ten travel zones (what the console appears to use). "simple" = modes 0x01/0x02, raw byte parameters (what most samples send). If one gives no resistance, try the other.')}
                 {ctrlRow('  ↳ HID buzz', onTestTriggerLink, 'Test',
                   'Pulses the pad MOTORS through the HID output report — the same framing and CRC the trigger effects ride, but with an encoding that is not in dispute. If this buzzes and the triggers stay limp, the transport is fine and the effect encoding is wrong (try "trig enc"). If it does not buzz, nothing is reaching the pad at all — read the error on the triggers row.')}
+                {ctrlRow('Pierce spd', onCyclePierceSpeedRetain,
+                  stats.pierceSpeedRetainName ?? '1.00x (def)',
+                  'Speed a PIERCING bolt keeps per hit (1.00 / 0.95 / 0.90 / 0.80x). Ships at 1.00, i.e. off — the shipped change is the DAMAGE falloff table (1 / 0.90 / 0.75 / 0.65 / 0.40 by hit ordinal, the last entry tailing anything deeper), and this is the second axis to feel against it. One factor per charge actually spent, so inside a grain material — where penetration is spent per GRAIN, not per tile — a bolt that drilled four grains slows four times. Indestructible tiles stop a bolt dead whatever it carries, and spend nothing.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

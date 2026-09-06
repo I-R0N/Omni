@@ -23,7 +23,7 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
  *   - BLASTER: 5× damage slug, pierces 3, no recoil
  *   - BURST:   5-shot piercing burst (vs 3) with pierce 3
  *   - SHOTGUN: 12-pellet wide cone (50°), each pellet pierces 2
- *   - BOUNCER: 3-beam fan (±15°) — beams keep their per-shot pierce/bounce
+ *   - BOUNCER: 8-beam 360° nova — beams keep their per-shot pierce/bounce
  *   - LIGHTNING: chain doubles to 4 hops over 2× range (read on the projectile)
  *   - HOMING:  4-missile volley with weaker tracking (homingStrength 0.5),
  *              each missile pierces 1
@@ -82,8 +82,9 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
  *  Lightning are `pierce: 0` because their identity is splash and chain, and
  *  they take the bonus anyway with eyes open — the weapon x trait table in
  *  docs/WEAPONS_AMMO_PLAN.md §7 stays the balance reference.  The sum is
- *  clamped to MAX_PIERCE so the Laser's already-effectively-infinite 99 is a
- *  ceiling rather than a number to overflow past.
+ *  clamped to MAX_PIERCE, which is a sanity ceiling against an authoring
+ *  mistake rather than a balance statement — the largest reachable stack is
+ *  the Laser's 4 plus Mk III's +3.
  *
  *  Applied to the COPY, never to the shared WEAPONS table — same rule the
  *  damage/cooldown folds above it follow. */

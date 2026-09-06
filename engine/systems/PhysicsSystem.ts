@@ -1,8 +1,9 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture } from '../../constants';
-import { applyBoundaryDamage, stampLocalImpact } from './fractureCache';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
+import { applyBoundaryDamage, stampLocalImpact, bondStrengthFor } from './fractureCache';
+import { pointInPolygon } from './fracture';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1313,6 +1314,101 @@ export class PhysicsSystem {
       const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
       const hitsTaken = ceiling - target.health;
       if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
+  }
+
+  // ── PENETRATION: THE BORE TRACK ─────────────────────────────────────
+  // Scratch for `borePierceTrack`.  One reused point, never a fresh
+  // {x,y} per step — the walk runs inside the collision path.
+  private readonly _borePoint: Vector2 = { x: 0, y: 0 };
+  /** Set by `borePierceTrack`: did the bolt come out the FAR SIDE of the
+   *  body it just bored, or did it run out of charges inside it?  A
+   *  scratch flag rather than a returned object so the walk allocates
+   *  nothing. */
+  private _boreExited = false;
+
+  /**
+   * OPTION C — PENETRATION IS SPENT PER GRAIN, NOT PER BODY.
+   *
+   * A tile is ONE entity, so the body-level rule ("one charge, one
+   * target") let a single pierce charge carry a bolt through a whole
+   * 36px pane.  For a body running the GRAIN-BOUNDARY model (a variant
+   * whose `grain` block carries `bondStrength` — rock, glass, plastic,
+   * metal today) the bolt instead BORES A TRACK: it walks its own chord
+   * through the body a grain diameter at a time, spending one charge and
+   * one falloff step per grain, and comes out the far side only if it
+   * still has charges when the chord runs out.
+   *
+   * Each step stamps its own contact point and spends through
+   * `applyBoundaryDamage`, which with every material's shipped
+   * `damageSpread: 0` fills boundaries sequentially outward from that
+   * point — so successive stamps erode successive grains rather than
+   * pouring the whole shot into the entry cell.
+   *
+   * Returns the number of grain steps taken; 0 means this body is not
+   * running the model (or the bolt has no charges), and the caller
+   * applies the ordinary single-body spend it always did.  Bounded by
+   * the remaining pierce count, which strictly decreases, so the loop is
+   * as cheap as the charge the player bought.
+   */
+  private borePierceTrack(proj: GameEntity, target: GameEntity, baseDmg: number): number {
+      this._boreExited = false;
+      if ((proj.pierceCount ?? 0) <= 0) return 0;
+      if (target.shardVariant === undefined) return 0;
+      // The one honest predicate for "this body runs the boundary model"
+      // — the same one fractureCache derives its HP from.
+      if (bondStrengthFor(target) === null) return 0;
+      // Through the accessor, never SHARD_VARIANTS[..].grain: a DBG
+      // per-material override has to reach the bore or the track would
+      // step at a pitch the pattern is not built at (CLAUDE.md §8).
+      const grain = grainSpecFor(target.shardVariant)?.grainSize;
+      if (grain === undefined || grain <= 0) return 0;
+      const poly = target.polygonPoints;
+      if (poly === undefined || poly.length < 3) return 0;
+      const v = proj.velocity;
+      if (v === undefined) return 0;
+      const vm = Math.hypot(v.x, v.y);
+      if (vm <= 1e-3) return 0;
+
+      // Walk in the body's LOCAL frame: `polygonPoints` are stored
+      // unrotated, so pointInPolygon has to be asked in those coords.
+      // Only the world stamp rotates back out.
+      const cs = Math.cos(-target.rotation), sn = Math.sin(-target.rotation);
+      const ex = wrapDeltaX(target.position.x, proj.position.x);
+      const ey = wrapDeltaY(target.position.y, proj.position.y);
+      let lx = ex * cs - ey * sn;
+      let ly = ex * sn + ey * cs;
+      const ldx = (v.x / vm) * cs - (v.y / vm) * sn;
+      const ldy = (v.x / vm) * sn + (v.y / vm) * cs;
+      const cw = Math.cos(target.rotation), sw = Math.sin(target.rotation);
+
+      const p = this._borePoint;
+      let ordinal = proj.pierceHits ?? 0;
+      let charges = proj.pierceCount ?? 0;
+      let steps = 0;
+      for (;;) {
+          p.x = target.position.x + (lx * cw - ly * sw);
+          p.y = target.position.y + (lx * sw + ly * cw);
+          stampLocalImpact(target, p);
+          if (!applyBoundaryDamage(target, baseDmg * pierceFalloffAt(ordinal, proj.pierceFalloff))) {
+              // The model went away under us (an empty decomposition).
+              // Nothing has been spent yet on the first step, so hand the
+              // body back to the ordinary path rather than eating the hit.
+              if (steps === 0) return 0;
+              break;
+          }
+          ordinal++; steps++;
+          // The body died under the drill — the bolt is through it.
+          if ((target.health ?? 0) <= 0) { this._boreExited = true; break; }
+          // Out of charges: the bolt stops HERE, inside the body.
+          if (charges <= 0) break;
+          charges--;
+          lx += ldx * grain; ly += ldy * grain;
+          if (!pointInPolygon(lx, ly, poly)) { this._boreExited = true; break; }
+          if (steps > MAX_PIERCE) break; // belt and braces; charges already bound it
+      }
+      proj.pierceHits = ordinal;
+      proj.pierceCount = charges;
+      return steps;
   }
 
   /**
@@ -3370,6 +3466,28 @@ export class PhysicsSystem {
                       proj.bouncesRemaining -= 1;
                   }
 
+                  // A RICOCHET MAY RE-HIT WHAT IT ALREADY STRUCK (user call).
+                  // A reflection is a discrete "the beam left and is coming
+                  // back" event, so the struck-ID list is cleared HERE rather
+                  // than by weakening the `alreadyHit` guard in the projectile
+                  // branch — that guard is load-bearing for an unrelated
+                  // reason (it stops a bolt in SUSTAINED OVERLAP with a body
+                  // from re-damaging it every substep at 120Hz), and the list
+                  // simply refills after the bounce, so same-contact dedup is
+                  // preserved on both legs of the flight.
+                  //
+                  // The semantics this produces are the intended reading:
+                  // pierce stays a LIFETIME budget, so a bouncing beam still
+                  // gets at most `pierceCount` damage events across its whole
+                  // flight however many times it reflects, each one stepping
+                  // further down the falloff curve.  Bounces buy COVERAGE,
+                  // not extra damage events — do not "fix" that by refreshing
+                  // pierce on bounce.
+                  //
+                  // Length-reset, not a fresh array (CLAUDE.md §8's refill
+                  // rule): this runs inside the collision path.
+                  if (proj.hitEntityIds !== undefined) proj.hitEntityIds.length = 0;
+
                   // Fire the impact callback AFTER the reflection so sparks spawn
                   // on the tile's surface and spray along the outgoing (reflected)
                   // velocity direction — away from the tile, not into it.
@@ -3378,7 +3496,25 @@ export class PhysicsSystem {
               }
           }
 
-          let projDmg = proj.damage || 1;
+          // PENETRATION FALLOFF (option C): the SECOND body a bolt passes
+          // through takes less than the first, the third less again.  The
+          // ordinal is a count UP (`pierceHits`), never the count-down
+          // `pierceCount`, so the curve is read forwards whatever the
+          // shot's capacity is.  Ordinal 0 is 1 by construction, so a
+          // non-piercing bolt is untouched by this.
+          //
+          // DIRECT damage only, deliberately: the Cannon's AoE splash and
+          // the Lightning chain are applied in GameEngine from
+          // `explosionDamage` / the chain constants and are NOT scaled
+          // here — whether a pierced shot should also carry a weaker
+          // blast is an open decision the user has not made.
+          const falloff = pierceFalloffAt(proj.pierceHits ?? 0, proj.pierceFalloff);
+          let projDmg = (proj.damage || 1) * falloff;
+          // Hoisted: the bore below must respect it too, so a bolt that
+          // re-contacts a body it already pierced does not drill it again.
+          const alreadyHit = proj.hitEntityIds?.includes(target.id) ?? false;
+          // How many GRAINS the bore walked (0 = it did not run).
+          let boredSteps = 0;
 
           // Shield absorbs damage — generalized from player-only to ANY
           // shielded entity (Stage 0 Bulwark): the enemy shield soaks the hit
@@ -3518,9 +3654,20 @@ export class PhysicsSystem {
                   // exact by applyBoundaryDamage.  Stamp the contact point
                   // FIRST so the pattern is biased by, and the damage poured
                   // from, where the shot actually landed.
-                  stampLocalImpact(target, proj.position);
-                  if (!applyBoundaryDamage(target, projDmg)) {
-                      target.health -= isHitCounted ? 1 : projDmg;
+                  //
+                  // OPTION C: with charges in hand and a grain body under
+                  // the muzzle, the bolt bores a TRACK — one charge and
+                  // one falloff step per grain — instead of spending the
+                  // whole shot on the entry cell for the price of one
+                  // charge.  It returns 0 for everything else (nebula,
+                  // metal-shard composites, enemies), which is the
+                  // single-spend path this always was.
+                  if (!alreadyHit) boredSteps = this.borePierceTrack(proj, target, projDmg);
+                  if (boredSteps === 0) {
+                      stampLocalImpact(target, proj.position);
+                      if (!applyBoundaryDamage(target, projDmg)) {
+                          target.health -= isHitCounted ? 1 : projDmg;
+                      }
                   }
                   // Dent-policy entities deform on every damage event,
                   // even the killing blow — the spawned mobile shard
@@ -3632,7 +3779,10 @@ export class PhysicsSystem {
           if (onHit) onHit(proj.position, proj, target);
           // Armored enemies show the REDUCED number (chip feedback); others
           // show the raw projectile damage.
-          const shownDmg = target.armor ? projDmg : (proj.damage || 1);
+          // `projDmg` already carries the falloff, so an unarmored target
+          // shows the raw shot scaled by the same curve — a pierced hit
+          // that lands for less must not print the full number.
+          const shownDmg = target.armor ? projDmg : (proj.damage || 1) * falloff;
           if (onDamage) onDamage(target.position, shownDmg, target, proj.position);
 
           if (target.health <= 0) {
@@ -3656,16 +3806,47 @@ export class PhysicsSystem {
               }
           }
 
-          // Penetration: if the projectile still has pierce capacity, let it continue
-          // through the target rather than stopping. Track struck IDs to avoid
-          // hitting the same entity multiple times on consecutive frames.
+          // PENETRATION ACCOUNTING — three answers, one place.  Track struck
+          // IDs either way so the same entity is not hit twice on
+          // consecutive frames.
+          //
+          // (1) IMPENETRABLE.  An indestructible tile stops the bolt DEAD
+          //     however much penetration it carries, and spends nothing —
+          //     it took no damage, so it may not cost a charge either.
+          //     THIS IS THE SEAM a future ricochet would replace: the user
+          //     may later have these turn EVERY projectile away, which is
+          //     one branch here (deflectProjectile off the struck face)
+          //     rather than a special case scattered through the path.
+          // (2) BORED.  The grain bore already spent charges grain by
+          //     grain, so it also decided whether the bolt came out the
+          //     far side; re-charging it here would double-count.
+          // (3) Everything else: one charge per body, as it always was.
+          const impenetrable = target.type === EntityType.STRUCTURE
+              && target.shardVariant === 'indestructible-tile';
           const pierce = proj.pierceCount ?? 0;
-          const alreadyHit = proj.hitEntityIds?.includes(target.id) ?? false;
+          const carriesOn = impenetrable ? false
+              : boredSteps > 0 ? this._boreExited
+              : (!alreadyHit && pierce > 0);
 
-          if (!alreadyHit && pierce > 0 && !target.isExploding) {
-              proj.pierceCount = pierce - 1;
+          if (carriesOn && !target.isExploding) {
+              if (boredSteps === 0) {
+                  proj.pierceCount = pierce - 1;
+                  // One body, one step down the falloff curve.  The bore
+                  // advances the ordinal itself, once per grain.
+                  proj.pierceHits = (proj.pierceHits ?? 0) + 1;
+              }
               if (!proj.hitEntityIds) proj.hitEntityIds = [];
               proj.hitEntityIds.push(target.id);
+              // SPEED DECAY — boring through matter costs momentum as well
+              // as damage.  Ships at 1.0 (a no-op); the DBG "Pierce spd"
+              // cycle is what makes it felt against the falloff curve.
+              // One factor per charge actually spent, so a bolt that drilled
+              // four grains slows four times.
+              const retain = getActivePierceSpeedRetain();
+              if (retain !== 1 && proj.velocity) {
+                  const k = Math.pow(retain, boredSteps > 0 ? boredSteps : 1);
+                  proj.velocity.x *= k; proj.velocity.y *= k;
+              }
               // Still impart momentum impulse even when piercing
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;

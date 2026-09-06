@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -892,6 +892,14 @@ export class DebugControls {
    *  both AI speed states live so the chase feel can be tuned in-game. */
   cycleSnitchSpeed() {
     cycleSnitchSpeed();
+  }
+
+  /** Cycle the PIERCE SPEED DECAY (DBG "Pierce spd") — the per-hit
+   *  multiplier a piercing bolt's speed keeps as it bores through.  Ships
+   *  at 1.00 (a no-op), so this is the only way to feel a decaying bolt
+   *  against the falloff table before either is tuned. */
+  cyclePierceSpeedRetain() {
+    cyclePierceSpeedRetain();
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────

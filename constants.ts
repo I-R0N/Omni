@@ -5048,13 +5048,67 @@ export const DAMAGE_TEXT_CONSTANTS = {
 };
 
 // PIERCE CEILING (A3).  The Penetration module adds +1 pierce per mark to
-// EVERY gun uniformly (guidance call), and the Laser already ships
-// `pierce: 99` as its "effectively infinite enemy penetration".  Rather than
-// letting the bonus run past that into a number nothing else in the codebase
-// means anything by, the sum is clamped here: 99 stays the ceiling the Laser
-// defines, so the bonus is a real upgrade on every other gun and a no-op on
-// the one that was already at the top.
+// EVERY gun uniformly (guidance call), and this clamps the sum.
+//
+// It is a plain SANITY ceiling against an authoring mistake, and nothing
+// more — it is deliberately NOT anchored to any weapon.  It used to be, and
+// the anchor rotted: 99 was "the ceiling the Laser already defines", and the
+// Laser now ships `pierce: 4`.  The largest reachable stack today is that 4
+// plus Penetration Mk III's +3 = 7, so nothing comes near this and no
+// balance statement should be read into the number.
 export const MAX_PIERCE = 99;
+
+// PENETRATION FALLOFF (A3 follow-up, user "option C").  A pierced bolt no
+// longer delivers full damage to everything on its line: each successive
+// body — or, inside a grain material, each successive GRAIN — takes a
+// smaller bite.  Authored as a TABLE rather than a per-hit rate because
+// the ratios the user picked are irregular (0.90, 0.83, 0.87, 0.62 of the
+// step before), which no single multiplier can express.
+//
+// Indexed by HIT ORDINAL, 0-based, so index 0 is the contact hit and is 1
+// by construction — a bolt with no penetration is untouched by any of
+// this.  The LAST entry is the TAIL for anything deeper: a bolt boring
+// through a grain material spends a step per GRAIN, so "how much does the
+// ninth hit do" has to have a defined answer rather than falling off the
+// end of the array.
+export const PIERCE_FALLOFF: readonly number[] = [1, 0.90, 0.75, 0.65, 0.40];
+
+/** The damage multiplier for the `ordinal`-th hit of one bolt (0 = the
+ *  first contact).  `table` is a weapon's own override (WeaponConfig
+ *  .pierceFalloff, stamped onto the projectile at spawn); absent → the
+ *  shared curve.  Past the end of whichever table applies, the last entry
+ *  is the tail. */
+export function pierceFalloffAt(ordinal: number, table?: readonly number[]): number {
+  const t = (table !== undefined && table.length > 0) ? table : PIERCE_FALLOFF;
+  if (ordinal <= 0) return t[0];
+  return ordinal < t.length ? t[ordinal] : t[t.length - 1];
+}
+
+// PIERCE SPEED DECAY.  A per-hit multiplier on a piercing bolt's speed —
+// boring through matter should cost momentum as well as damage.  SHIPPED
+// AT 1.0, i.e. no behaviour change: the falloff table is the change the
+// user asked for, and this is the second axis they want to FEEL against
+// it before either is tuned.  The DBG cycle below is how.
+export const PIERCE_SPEED_RETAIN = 1.0;
+
+export const PIERCE_SPEED_RETAIN_CYCLE: ReadonlyArray<number> = [
+  PIERCE_SPEED_RETAIN, 0.95, 0.9, 0.8,
+] as const;
+
+let activePierceSpeedRetainIndex = 0; // 1.0 — what ships
+
+export function getActivePierceSpeedRetain(): number {
+  return PIERCE_SPEED_RETAIN_CYCLE[activePierceSpeedRetainIndex];
+}
+export function getActivePierceSpeedRetainName(): string {
+  const v = getActivePierceSpeedRetain();
+  return v === PIERCE_SPEED_RETAIN ? `${v.toFixed(2)}x (def)` : `${v.toFixed(2)}x`;
+}
+export function cyclePierceSpeedRetain(): number {
+  activePierceSpeedRetainIndex =
+    (activePierceSpeedRetainIndex + 1) % PIERCE_SPEED_RETAIN_CYCLE.length;
+  return activePierceSpeedRetainIndex;
+}
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 //
@@ -5124,12 +5178,20 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
     lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
-    color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
+    color: '#22c55e',  // Green — beam that bores a few bodies deep and bounces off tiles
     size: 6,
     count: 3,          // 3-beam forward fan
     spread: 30,        // ±15° cone
     recoil: 0.5,
-    pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
+    // 99 → 4 (user call, penetration rework).  "Effectively infinite" was a
+    // number that pre-dated any cost to piercing: with the shared
+    // PIERCE_FALLOFF curve in place a beam already gives up damage per body,
+    // so an unbounded budget just made the Laser the answer to every line of
+    // targets.  Four DAMAGE EVENTS is the budget for the whole flight —
+    // bounces do not refresh it (see the reflection branch in
+    // PhysicsSystem) — and it runs the SHARED falloff table: no
+    // `pierceFalloff` override here, deliberately.
+    pierce: 4,
     bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
   },
   [WeaponType.LIGHTNING]: {
