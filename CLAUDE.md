@@ -1755,14 +1755,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
      border it has already painted), and a missing memory surface charts
      NOTHING rather than everything, since failing open would hand the player
      the whole map for free.
-     MATERIALS follow the same two radii through `RenderSystem.materialAlphaAt`
-     — encounter around the ship now, or the bubble left by the last completed
-     scan.  That bubble is centred where the ping was FIRED
-     (`materialRevealX/Y`): before it had a centre at all the alpha applied to
-     every shard on the map, so one press revealed material everywhere.  The
-     FLOW layer is the documented exception and stays gated on owning a
-     scanner: a streamline is an inferred FIELD rather than a set of seen
-     objects.
+     MATERIALS READ THE SAME MEMORY (user call): a shard draws if the ground
+     it is on is CHARTED, so material is remembered exactly as the terrain
+     around it is — permanently, per map — rather than following the ship or
+     fading with a bubble.  It is the one contact class asked by POSITION
+     rather than by a per-entity stamp, because there can be thousands of
+     mobile shards; `RenderSystem.materialCharted` is an ARRAY index into the
+     charted grid, which is why charted memory keeps a `Uint8Array` beside its
+     canvas (a canvas answer would mean `getImageData` per shard per frame).
+     A drifting shard therefore appears when it wanders into mapped space and
+     goes quiet when it leaves — the honest reading of a remembered REGION
+     rather than a remembered object.  Two consequences: materials are CULLED
+     to `MINIMAP_CONSTANTS.RANGE` in the buffer fill, since charting grows to
+     most of the map and without the cull every shard in the world would be
+     collected every frame (the cost the old reveal bubble was accidentally
+     avoiding); and `materialRevealAt/Radius/X/Y` survive only as the trigger
+     that CHARTS a completed ping's bubble, which is why its centre still
+     matters — without one, charting followed the ship and a scan's whole
+     navigational value went with it.  The FLOW layer is the documented
+     exception and stays gated on owning a scanner: a streamline is an
+     inferred FIELD rather than a set of seen objects.
   2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
      at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
      `GameEntity.detectedAt` on whatever it crosses, and a mark holds for

@@ -25,6 +25,17 @@ import { CHARTED_CELL } from '../../../constants';
 export function chartedPeriodX(): number { return MAP_WIDTH / CHARTED_CELL; }
 export function chartedPeriodY(): number { return MAP_HEIGHT / CHARTED_CELL; }
 
+/*  TWO SURFACES, ONE MEMORY, and the duplication is deliberate.
+ *
+ *  The CANVAS is what the terrain blit is masked against — a compositing
+ *  operation needs a bitmap, and it gets a soft charted edge for free.  The
+ *  Uint8Array beside it is what POINT QUERIES read, because materials ask
+ *  "is this shard on charted ground?" once per shard per frame and there can
+ *  be thousands of them: answering that from the canvas would mean
+ *  `getImageData`, which forces a readback and is the one thing a per-frame
+ *  path must not do.  Both are written by the same stamp, so they cannot
+ *  disagree about what is charted.  */
+
 /** Allocate / resize the memory.  Returns false if a 2D context is
  *  unavailable, in which case every caller degrades to "nothing charted"
  *  rather than throwing inside a draw. */
@@ -43,12 +54,18 @@ export function ensureCharted(r: RenderSystem): boolean {
         r._chartedMem.width = mw;
         r._chartedMem.height = mh;
     }
+    if (r._chartedBits === null || r._chartedW !== mw || r._chartedH !== mh) {
+        r._chartedBits = new Uint8Array(mw * mh);
+        r._chartedW = mw;
+        r._chartedH = mh;
+    }
     return true;
 }
 
 /** Forget everything.  Called on map load — charting is MAP-scoped, the same
  *  rule destroyed tiles and contact `found` flags already follow. */
 export function resetCharted(r: RenderSystem): void {
+    if (r._chartedBits !== null) r._chartedBits.fill(0);
     const mem = r._chartedMem, ctx = r._chartedMemCtx;
     if (mem === null || ctx === null) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -80,23 +97,45 @@ export function stampCharted(r: RenderSystem, px: number, py: number, radius: nu
             ctx.fill();
         }
     }
+    stampBits(r, cx, cy, rad);
 }
 
-/** Is this world point charted?  A per-CONTACT test (materials use it), read
- *  back one pixel at a time — cheap because the callers are already
- *  distance-filtered, and honest because it asks the same surface the
- *  terrain mask draws from, so a shard cannot appear over unmapped ground. */
-export function isCharted(r: RenderSystem, x: number, y: number): boolean {
-    const mem = r._chartedMem, ctx = r._chartedMemCtx;
-    if (mem === null || ctx === null) return false;
-    const cx = Math.floor(((x % MAP_WIDTH) + MAP_WIDTH) % MAP_WIDTH / CHARTED_CELL);
-    const cy = Math.floor(((y % MAP_HEIGHT) + MAP_HEIGHT) % MAP_HEIGHT / CHARTED_CELL);
-    if (cx < 0 || cy < 0 || cx >= mem.width || cy >= mem.height) return false;
-    try {
-        return ctx.getImageData(cx, cy, 1, 1).data[3] > 0;
-    } catch {
-        // A tainted or zero-sized surface: fail CLOSED rather than throwing
-        // inside the draw loop.
-        return false;
+/** The same disc into the query grid.  Rasterized directly rather than read
+ *  back off the canvas: this runs once per drawn frame over a radius of a
+ *  couple of dozen cells, which is a few hundred writes — cheaper than any
+ *  readback, and it keeps the grid authoritative rather than derived. */
+function stampBits(r: RenderSystem, cx: number, cy: number, rad: number): void {
+    const bits = r._chartedBits;
+    if (bits === null) return;
+    const W = r._chartedW, H = r._chartedH;
+    const r2 = rad * rad;
+    const y0 = Math.floor(cy - rad), y1 = Math.ceil(cy + rad);
+    const x0 = Math.floor(cx - rad), x1 = Math.ceil(cx + rad);
+    for (let y = y0; y <= y1; y++) {
+        const dy = y + 0.5 - cy;
+        // The grid wraps like the map does, so a disc near the seam writes
+        // the cells on the far side rather than being clipped away.
+        const wy = ((y % H) + H) % H;
+        for (let x = x0; x <= x1; x++) {
+            const dx = x + 0.5 - cx;
+            if (dx * dx + dy * dy > r2) continue;
+            const wx = ((x % W) + W) % W;
+            bits[wy * W + wx] = 1;
+        }
     }
+}
+
+/** Is this world point charted?
+ *
+ *  An ARRAY INDEX, not a canvas read: materials ask this once per shard per
+ *  frame.  Fails CLOSED when the memory does not exist, because failing open
+ *  would hand the player the whole field for free. */
+export function isCharted(r: RenderSystem, x: number, y: number): boolean {
+    const bits = r._chartedBits;
+    if (bits === null) return false;
+    const W = r._chartedW, H = r._chartedH;
+    const cx = Math.floor((((x % MAP_WIDTH) + MAP_WIDTH) % MAP_WIDTH) / CHARTED_CELL);
+    const cy = Math.floor((((y % MAP_HEIGHT) + MAP_HEIGHT) % MAP_HEIGHT) / CHARTED_CELL);
+    if (cx < 0 || cy < 0 || cx >= W || cy >= H) return false;
+    return bits[cy * W + cx] === 1;
 }

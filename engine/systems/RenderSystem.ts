@@ -32,7 +32,7 @@ import { renderPortalWarpVeil } from './render/portalWarp';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic } from './render/hud';
-import { ensureCharted, resetCharted, stampCharted } from './render/charted';
+import { ensureCharted, resetCharted, stampCharted, isCharted } from './render/charted';
 import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
 import { renderFogLayer, resetFogMemory } from './render/fog';
 import { renderShardBlends } from './render/shardBlend';
@@ -115,11 +115,14 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  tier-1 reveal.  See `GameEngine.updateScan` for why materials are a
    *  radius and contacts are stamps. */
   public simClock: number = 0;
+  /** The last completed ping: WHEN, HOW FAR and WHERE FROM.  These are no
+   *  longer a draw input — materials read the charted memory like the terrain
+   *  does — but they remain the trigger that CHARTS the ping's bubble, which
+   *  is why the centre matters.  Without one, charting followed the ship and
+   *  a scan's whole navigational value (mapping ground you have not flown)
+   *  went with it. */
   public materialRevealAt: number = -1e9;
   public materialRevealRadius: number = 0;
-  /** Where the last completed ping was fired from.  The material reveal is a
-   *  BUBBLE, and a bubble needs a centre: without one the alpha applied to
-   *  every shard on the map, so a single scan revealed material everywhere. */
   public materialRevealX: number = 0;
   public materialRevealY: number = 0;
   /** CHARTED MEMORY (render/charted.ts) — which ground the player has met.
@@ -132,6 +135,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   _minimapScratchCtx: CanvasRenderingContext2D | null = null;
   _chartedMem: HTMLCanvasElement | null = null;
   _chartedMemCtx: CanvasRenderingContext2D | null = null;
+  /** The same memory as a query grid — see the note in render/charted.ts for
+   *  why there are two surfaces. */
+  _chartedBits: Uint8Array | null = null;
+  _chartedW: number = 0;
+  _chartedH: number = 0;
   _lastChartedScan: number = -1e9;
 
   /** Does the minimap draw a dot per mobile shard this frame?  TWO callers
@@ -147,32 +155,24 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   public get minimapShardDots(): boolean {
     return getActiveMinimapMaterial() === 'dots';
   }
-  /** How strongly a MATERIAL contact at world `(x, y)` draws on the minimap.
+  /** Does a MATERIAL contact at world `(x, y)` draw on the minimap?
    *
-   *  Materials are revealed by RADIUS rather than by a per-entity stamp —
-   *  there can be thousands of mobile shards — and there are two radii, the
-   *  same two every other contact has: NATURAL ENCOUNTER around the ship right
-   *  now, and the bubble left by the last completed scan, which fades.
-   *  Whichever is stronger wins.
+   *  THE SAME MEMORY THE TERRAIN USES (user call): a shard shows if the
+   *  ground it is on has been CHARTED, so material is remembered exactly as
+   *  the terrain around it is, permanently and per map.  Both routes onto the
+   *  map still work and both are now permanent, because both write charting:
+   *  flying past (natural encounter) and scanning (the ping's bubble).
    *
-   *  The scan bubble is centred where the ping was FIRED, not on the ship: a
-   *  scan is a thing that happened at a place, and following the ship would
-   *  make one press reveal material forever.  Before this had a centre at all
-   *  the alpha applied to every shard on the map. */
-  public materialAlphaAt(x: number, y: number, px: number, py: number): number {
-    const near = SCANNER.ENCOUNTER_RANGE;
-    const ex = wrapDeltaX(px, x), ey = wrapDeltaY(py, y);
-    if (ex * ex + ey * ey <= near * near) return 1;
-    const a = this.materialRevealAlpha;
-    const rad = this.materialRevealRadius;
-    if (a <= 0 || rad <= 0) return 0;
-    const sx = wrapDeltaX(this.materialRevealX, x);
-    const sy = wrapDeltaY(this.materialRevealY, y);
-    return sx * sx + sy * sy <= rad * rad ? a : 0;
-  }
-  /** How strongly the material bubble draws, 0 once it has gone stale. */
-  public get materialRevealAlpha(): number {
-    return detectionAlpha(this.simClock - this.materialRevealAt);
+   *  Materials are the one contact class asked by POSITION rather than by a
+   *  per-entity stamp — there can be thousands of mobile shards, and a stamp
+   *  each is the wrong shape.  Asking the charted grid is an array index, so
+   *  it stays affordable at that count.
+   *
+   *  A drifting shard therefore appears when it wanders into mapped space and
+   *  goes quiet when it leaves it, which is the honest reading of a remembered
+   *  region rather than a remembered object. */
+  public materialCharted(x: number, y: number): boolean {
+    return isCharted(this, x, y);
   }
   /** How strongly a contact detected at `at` should draw right now — the ONE
    *  freshness test, so a mark cannot fade differently on two readouts. */
@@ -1152,10 +1152,20 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // them make stamping the wrong shape (GameEngine.updateScan).
             // Everything else goes through `mapAlpha`, which is where the
             // found / encountered / auto-tracked rules meet.
-            const detect = entity.type === EntityType.STRUCTURE
-                ? this.materialAlphaAt(entity.position.x, entity.position.y,
-                                       playerPos.x, playerPos.y)
-                : this.mapAlpha(entity);
+            // MATERIALS are culled to the minimap's own reach before anything
+            // else is asked.  Charting is permanent and grows to most of the
+            // map, so without this the buffer would carry every shard in the
+            // world every frame — which is the cost the old reveal-bubble was
+            // accidentally avoiding.  Contacts are NOT culled: they clamp to
+            // the minimap border instead of vanishing.
+            let detect: number;
+            if (entity.type === EntityType.STRUCTURE) {
+                const mmR = MINIMAP_CONSTANTS.RANGE;
+                detect = (dx * dx + dy * dy <= mmR * mmR)
+                    && this.materialCharted(entity.position.x, entity.position.y) ? 1 : 0;
+            } else {
+                detect = this.mapAlpha(entity);
+            }
             if (detect > 0) this._minimapBuffer.push({ entity, dx, dy, detect });
         }
 

@@ -249,34 +249,50 @@ test.describe('minimap — material layer', () => {
       .filter((x: any) => x.active && x.type === 'STRUCTURE' && x.mass !== Infinity).length);
     expect(mobile).toBeGreaterThan(200);
 
-    // TWO GATES, and they answer different questions (rework + the encounter
-    // pass).  The DBG cycle picks WHICH material layer is drawn; visibility is
-    // then per shard — NEAR ones are seen with the naked eye, and a scan
-    // reveals a wider bubble around where it was fired.
+    // TWO GATES, and they answer different questions.  The DBG cycle picks
+    // WHICH material layer is drawn; visibility is then per shard, against the
+    // CHARTED memory — the same one the terrain blit is masked to, so material
+    // is remembered exactly as the ground around it is (user call).
     await setMaterial(page, 'Dots');
     await page.waitForTimeout(300);
     const near = await engine(page, e => {
-      const px = e.player.position.x, py = e.player.position.y;
-      let worst = 0, n = 0;
+      let n = 0, uncharted = 0;
       for (const item of e.renderer._minimapBuffer) {
         if (item.entity.type !== 'STRUCTURE') continue;
         n++;
-        const d = Math.hypot(item.entity.position.x - px, item.entity.position.y - py);
-        if (d > worst) worst = d;
+        if (!e.renderer.materialCharted(item.entity.position.x, item.entity.position.y)) uncharted++;
       }
-      return { n, worst };
+      return { n, uncharted };
     });
     // Eyesight alone puts material on the map…
-    expect(near.n, 'shards within eyeshot are collected with no scan').toBeGreaterThan(0);
-    // …and ONLY nearby material, which is what makes it a radius rather than
-    // a free reveal of the whole field.  (Slack for the frame of drift
-    // between the buffer fill and this read.)
-    expect(near.worst, 'and only the near ones').toBeLessThan(1100);
+    expect(near.n, 'shards on charted ground are collected with no scan').toBeGreaterThan(0);
+    // …and ONLY charted material.  This is the claim that keeps it a memory
+    // rather than a free reveal of the whole field.
+    expect(near.uncharted, 'and nothing off the charted map').toBe(0);
 
-    // A scan reaches further than eyesight, so it must collect strictly more.
+    // AND IT IS PERMANENT.  Fly a long way and come back: the ground charted
+    // on the way out still carries its material, which is the difference
+    // between a memory and the reveal bubble this replaced.
+    const home = await engine(page, e => ({ x: e.player.position.x, y: e.player.position.y }));
+    for (let i = 0; i < 4; i++) {
+      await engine(page, (e, step: number) => {
+        e.player.position.x += step;
+        e.camera.position.x = e.player.position.x;
+      }, 800);
+      await page.waitForTimeout(120);
+    }
+    const remembered = await engine(page, (e, at: { x: number; y: number }) => {
+      // Charted on the way out, and now far behind the ship.
+      return e.renderer.materialCharted(at.x, at.y);
+    }, home);
+    expect(remembered, 'ground charted on the way out stays charted').toBe(true);
+
+    // A scan charts further than eyesight, so it must collect strictly more.
+    const before = (await bufferByKind(page)).shard ?? 0;
     await scanOnce(page);
+    await page.waitForTimeout(200);
     const withDots = await bufferByKind(page);
-    expect(withDots.shard ?? 0).toBeGreaterThan(near.n);
+    expect(withDots.shard ?? 0).toBeGreaterThan(before);
 
     // In FLOW mode they are not collected at all — the cost of the dot layer
     // is the per-frame push, not just the fill, which is what makes the mode

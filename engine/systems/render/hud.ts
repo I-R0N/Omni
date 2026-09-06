@@ -964,9 +964,10 @@ export function renderMinimap(
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
     // The DBG cycle picks WHICH material layer is drawn.  The DOTS half is
-    // then filtered PER SHARD by `materialAlphaAt` (encounter or scan bubble),
-    // in the buffer fill.  The FLOW half cannot be: a streamline is an
-    // inferred FIELD rather than a set of seen objects, so it is gated on
+    // then filtered PER SHARD in the buffer fill, against the same CHARTED
+    // memory the terrain blit is masked to — material is remembered exactly
+    // as the ground around it is.  The FLOW half cannot be: a streamline is
+    // an inferred FIELD rather than a set of seen objects, so it is gated on
     // owning the instrument that infers it.
     const materialMode = getActiveMinimapMaterial();
     const flowAllowed = r.scannerMk > 0;
