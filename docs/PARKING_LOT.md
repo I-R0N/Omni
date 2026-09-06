@@ -2092,3 +2092,64 @@ boundary model's own measured lessons still hold (spend order is cell by
 cell; a flat nearest-edge sort completes almost nothing until the end),
 and any generalisation has to re-measure against them rather than assume
 the bore's success transfers.
+
+---
+
+## Hex-slot outfitting — the UI needs a pass (2026-09-06) — user call
+
+**Play-test verdict: the MECHANIC is functional, the SCREEN is not.**  A5
+shipped purchasable hex slots and the user tested them working end to end —
+a locked hex refuses every way in, the shop offers the next one, the price
+ladder climbs, a run reset puts the counts back.  What is missing is the
+part that tells the player any of that.
+
+Parked deliberately rather than patched now: the user expects this to be
+addressed **during the mining implementation**, which is when the outfitting
+screen gets its next real look anyway.  Fixing it twice is the waste.
+
+### What is wrong today
+
+A locked hex is drawn INERT — no `data-tile`, so a drag cannot land on it —
+which is correct behaviour and almost no communication.  It reads as a hex
+that is simply not there, rather than as one that can be bought.  Nothing on
+the OUTFIT tab connects the empty space to the "+1 Hex Slot" line in the
+SHOP tab, and nothing names the price without switching tabs.
+
+The underlying design is deliberately minimal and should NOT be re-opened to
+fix this — a LOCKED hex is an EMPTY hex that cannot be filled, which is why
+the feature needed no change to `HEX_ADJACENCY` or `computeActiveSlots`.  The
+work is presentational.
+
+### Open questions for that pass
+
+1. **How does a locked hex read?**  A dashed outline plus a padlock and a
+   price is the obvious answer; the risk is that seven of them turn the
+   flower into a shopping list and bury the modules the player actually has.
+2. **Should the flower itself be the buy button?**  Tapping a locked hex
+   could offer the purchase in the detail strip — the same strip that already
+   describes a module — instead of routing through the SHOP tab.  That keeps
+   one gesture (tap a hex, read about it) meaning one thing.
+3. **Where does the ship's GROWTH show?**  There is no readout anywhere for
+   "5 of 7 ship hexes" — the count exists on `EngineStats.outfitting`
+   (`shipUnlocked` / `weaponUnlocked` / `maxSlots`) and nothing renders it.
+   The header already carries `◈` balance and `⬢` cargo; a third chip is the
+   cheap answer.
+4. **Does the shop entry survive?**  If the flower becomes the buy surface,
+   the SHOP tab's "+1 Hex Slot" row is a second path to one action.  Two
+   paths is not automatically wrong — the shop is where money is spent — but
+   they must not disagree about price or availability, and `slotUnlockCost`
+   through the `modulePrice` seam is what keeps that true.
+5. **`MODULE_SLOT_UNLOCK.START` is the cap TODAY**, so none of this is
+   reachable in a shipped run without DBG ▸ Modules ▸ "Lock slots".  The
+   balance call — what a hull actually starts with — belongs to the economy
+   pass, and this UI work should not settle it by accident.
+
+### Related
+
+- **Ship classes** — `SHIP_WEIGHT.HULL_BASE` (0 today) and the slot count are
+  the same seam from two directions: a heavier hull that starts with more
+  hexes is one table row, and this screen is where the difference would have
+  to read.
+- The two competing ship-design directions (ship catalog CHOSEN vs modular
+  physical ship SUPERSEDED) recorded elsewhere in this file bound how much
+  of the flower is worth investing in before that is settled.

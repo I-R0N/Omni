@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActivePierceSpeedRetainName, getActivePierceFalloffName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActivePierceSpeedRetainName, getActivePierceFalloffName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, SCANNER, detectTierFor, isAlwaysCharted } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -852,12 +852,42 @@ export class GameEngine {
   public flashlightEquipped: boolean = false;
   public flashlightLevel: number = 0;
 
-  /** SCANNER tier (A4): the highest MARK of any installed-and-ACTIVE Scanner
-   *  module, 0 = none.  Folded by `applyModuleEffects` (marks do not stack —
-   *  the best one aboard wins) and pushed to the renderer once per frame in
-   *  `draw`, exactly the way the Light's cone override travels.  Every reveal
-   *  gate is `mk >= n`, so 0 is today's behaviour to the pixel. */
+  /** SCANNER: the highest MARK of any installed-and-ACTIVE Scanner module,
+   *  0 = none.  This says which CATEGORIES the ship can find at all (a mark
+   *  sees its own detection tier and every tier below it).  How FAR it finds
+   *  them is `scanRanges` — a separate question, because marks STACK in
+   *  range and do not in category.  Both are folded by `applyModuleEffects`
+   *  and pushed to the renderer once per frame in `draw`, the same channel
+   *  the Light's cone override takes. */
   public scannerMk: number = 0;
+  /** Scan radius PER DETECTION TIER, index 1..SCANNER.MAX_MARK (0 unused).
+   *  Built by `scannerRangesFor` from the marks actually aboard: a tier's
+   *  reach is the SUM of the own-ranges of every scanner that can see it, so
+   *  low tiers accumulate the whole rack and high tiers only the few marks
+   *  that reach them. */
+  public scanRanges: number[] = [];
+  /** MONOTONIC sim seconds.  Detection freshness is `simClock - detectedAt`,
+   *  which is why this exists and `runTimeSec` (which deliberately stops
+   *  while dead) cannot serve: a clock that pauses would freeze every mark on
+   *  the map at whatever age it had. */
+  public simClock: number = 0;
+  /** The live ping's wavefront radius, world units; 0 = no ping in flight.
+   *  One ping at a time — a second scan restarts the front rather than
+   *  running two, so the ring on screen is never ambiguous about which
+   *  press it belongs to. */
+  public scanPingRadius: number = 0;
+  /** How far this ping will travel: the TIER-1 range, which is always the
+   *  largest (every scanner aboard can see tier 1).  Shorter-tier contacts
+   *  simply stop lighting up past their own reach, so ONE ring is honest
+   *  about the whole scan. */
+  public scanPingMax: number = 0;
+  /** Seconds until another scan is allowed. */
+  public scanCooldown: number = 0;
+  /** The rift the player arrived through in THIS map, if any — one of the
+   *  two landmarks charted without a scanner.  Cached at map load beside
+   *  `portals` because `isAlwaysCharted` is asked once per contact per frame
+   *  and must not run a find() to answer. */
+  public arrivalPortalId: string | null = null;
 
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B.
    *  The one debug row that stayed a method on the engine: the 5b trait
@@ -1115,6 +1145,12 @@ export class GameEngine {
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: Math.round(this.player.maxShield ?? 0),
       },
+      scanner: this.scannerMk > 0 ? {
+        mk: this.scannerMk,
+        range: Math.round(this.scanRanges[1] ?? 0),
+        cooldown: this.scanCooldown,
+        ready: 1 - Math.min(1, this.scanCooldown / SCANNER.COOLDOWN_SEC),
+      } : undefined,
       playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -1531,6 +1567,13 @@ export class GameEngine {
       // arrival, and the player is the one thing that must never have to
       // fight its way out of the door.
       const exitMouth = this.exitMouthFor(fromId);
+      // The rift the player just came out of is one of the two landmarks a
+      // SCANNERLESS ship still has on its minimap (user call: "that return
+      // portal will appear on the minimap").  Cached here, off the same
+      // `exitMouthFor` every other consumer of "the rift you came out of"
+      // reads, so where you land, which way you are thrown, where your debris
+      // re-emerges and what is charted cannot disagree.
+      this.arrivalPortalId = exitMouth ? exitMouth.id : null;
       if (exitMouth) {
           const ex = wrapDeltaX(exitMouth.position.x, this.player.position.x);
           const ey = wrapDeltaY(exitMouth.position.y, this.player.position.y);
@@ -2224,6 +2267,12 @@ export class GameEngine {
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: Math.round(this.player.maxShield ?? 0),
       },
+      scanner: this.scannerMk > 0 ? {
+        mk: this.scannerMk,
+        range: Math.round(this.scanRanges[1] ?? 0),
+        cooldown: this.scanCooldown,
+        ready: 1 - Math.min(1, this.scanCooldown / SCANNER.COOLDOWN_SEC),
+      } : undefined,
       playerStats: menuOpen ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -3515,6 +3564,11 @@ export class GameEngine {
     // The highest wave reached is sampled here rather than at wave start so a
     // wave-free hub visit can't stomp the arena high-water mark.
     if (!this.deathPending && this.deathDelay <= 0) this.runTimeSec += dt;
+    // MONOTONIC sim clock + the scan ping.  Both run ABOVE the isExploding
+    // early-return below: a ping already in flight must finish its arc even
+    // if the player dies mid-scan, or the ring freezes on screen forever.
+    this.simClock += dt;
+    this.updateScan(dt);
     // Death beat: the wreck has finished and the sim is STILL running so the
     // field keeps moving; when it expires the summary fades in over a live
     // map.  Ticked here (before the isExploding early-return below) because
@@ -4348,7 +4402,7 @@ export class GameEngine {
       this.shipSlots[2] = 'plating_mk3';
       this.shipSlots[3] = 'engine_mk3';
       this.shipSlots[4] = 'thrusters_mk3';
-      this.shipSlots[5] = 'scanner_mk3';       // A4 — touches the hull core
+      this.shipSlots[5] = 'scanner_mk5';       // every detection tier — touches the hull core
 
       // Weapon flower: two guns + the four mods around the center gun.
       this.weaponSlots[0] = 'wpn_blaster';
@@ -4605,7 +4659,22 @@ export class GameEngine {
         else this.cycleShipLight();
     }
     this.dockKeyHeld = eDown;
+
+    // ── SCAN: its own control, on all three devices ────────────────────────
+    // Deliberately NOT part of the arbitration above.  That gesture already
+    // has three claimants (dock, portal, Light) and adding a fourth would
+    // make "tap your ship" mean whatever happened to be nearest.  A tool the
+    // player operates needs a control that only ever does that.
+    //
+    // The pad latch is drained every step whether or not it is spendable, on
+    // the same rule as INTERACT: a press made while docked must not fire a
+    // scan on undock.
+    const padScan = this.input.consumeScanPress();
+    const qDown = this.input.isKeyDown('KeyQ');
+    if (padScan || (qDown && !this.scanKeyHeld)) this.fireScan();
+    this.scanKeyHeld = qDown;
   }
+  private scanKeyHeld: boolean = false;
 
   /** Dock at the nearest in-range station: freeze the sim and open its
    *  station UI (panels per STATION_VARIANTS services).  The ship parks
@@ -6080,6 +6149,106 @@ export class GameEngine {
    *  FALLBACK when neither of those is in range — the arbitration in
    *  updateInteractables stays nearest-wins, the light just claims the
    *  gesture nothing else wanted. */
+  /** Fire a scan (scanner rework, user call).  The scanner is a TOOL the
+   *  player operates rather than a passive reveal, so this is the whole
+   *  contract: a wavefront leaves the ship, and whatever it crosses is
+   *  revealed for `SCANNER.LINGER_SEC`.
+   *
+   *  Refuses with no scanner aboard (or one that is adjacency-OFFLINE, since
+   *  `scanRanges` is folded from ACTIVE modules only) and while the cooldown
+   *  runs.  Returns whether a ping actually left, so the caller can tell a
+   *  spent press from a swallowed one. */
+  public fireScan(): boolean {
+      const max = this.scanRanges[1] ?? 0;
+      if (this.scannerMk <= 0 || max <= 0) return false;
+      if (this.scanCooldown > 0) return false;
+      // A second scan RESTARTS the front rather than running two: one ring on
+      // screen can only mean one press.
+      this.scanPingRadius = 0.0001;
+      this.scanPingMax = max;
+      this.scanCooldown = SCANNER.COOLDOWN_SEC;
+      this.audio.play('ui.confirm');
+      return true;
+  }
+
+  /** One band test: a contact is crossed this step if its distance falls in
+   *  [prev, cur) AND its own detection tier reaches that far.
+   *
+   *  A METHOD, not a closure inside `updateScan`, because that runs per sim
+   *  substep and a function constructed there is rebuilt 120x/s — the
+   *  captures travel as parameters instead (see `applyFlowTo`, which carries
+   *  the canonical note). */
+  private stampIfCrossed(
+      e: GameEntity, px: number, py: number,
+      prev: number, cur: number, now: number,
+  ) {
+      if (!e.active) return;
+      const tier = detectTierFor(e);
+      // MATERIALS (also tier 1) never reach here — the sweep is only given the
+      // small contact lists, and materials are revealed by radius at draw
+      // time.  A station or portal IS tier 1 and does want the stamp, which
+      // is why the split is by which list you are in, not by tier.
+      if (tier <= 0 || tier > this.scannerMk) return;
+      const reach = this.scanRanges[tier] ?? 0;
+      if (reach <= 0) return;
+      const dx = wrapDeltaX(px, e.position.x);
+      const dy = wrapDeltaY(py, e.position.y);
+      const d = Math.hypot(dx, dy);
+      if (d >= prev && d < cur && d <= reach) e.detectedAt = now;
+  }
+
+  private sweepScan(
+      list: GameEntity[], px: number, py: number,
+      prev: number, cur: number, now: number,
+  ) {
+      for (let i = 0; i < list.length; i++) {
+          this.stampIfCrossed(list[i], px, py, prev, cur, now);
+      }
+  }
+
+  /** Advance the live ping and stamp what its wavefront crossed this step.
+   *
+   *  THE COST MODEL is the reason this is shaped the way it is.  Contacts
+   *  are stamped INDIVIDUALLY (`detectedAt`) because there are tens of them
+   *  and a stale mark left behind by a contact that moved is the whole point
+   *  of a sonar reveal.  MATERIALS are not: there can be thousands of mobile
+   *  shards, so tier 1 is revealed as a RADIUS the minimap tests at draw
+   *  time (`materialRevealRadius`), which costs nothing per shard.  The two
+   *  halves are different because the entity counts are different by three
+   *  orders of magnitude, not because they mean different things.
+   *
+   *  Nothing here allocates, and there is no per-entity countdown anywhere:
+   *  freshness is a subtraction against `simClock`. */
+  private updateScan(dt: number) {
+      if (this.scanCooldown > 0) this.scanCooldown = Math.max(0, this.scanCooldown - dt);
+      if (this.scanPingRadius <= 0) return;
+      const prev = this.scanPingRadius;
+      const cur = prev + SCANNER.PING_SPEED * dt;
+      const px = this.player.position.x, py = this.player.position.y;
+      const now = this.simClock;
+
+      this.sweepScan(this.entityIndex.enemies, px, py, prev, cur, now);
+      this.sweepScan(this.stations, px, py, prev, cur, now);
+      this.sweepScan(this.portals, px, py, prev, cur, now);
+      if (this.snitch) this.stampIfCrossed(this.snitch, px, py, prev, cur, now);
+
+      this.scanPingRadius = cur;
+      if (cur >= this.scanPingMax) {
+          // The front has run its course.  `materialRevealAt` is when it
+          // FINISHED, so the material bubble fades on the same clock a
+          // stamped contact does.
+          this.scanPingRadius = 0;
+          this.materialRevealAt = now;
+          this.materialRevealRadius = this.scanRanges[1] ?? 0;
+      }
+  }
+
+  /** When the last completed ping finished, and how far its tier-1 reach
+   *  went.  Together these are the MATERIAL reveal — a bubble around where
+   *  the player was, rather than a stamp on each of a few thousand shards. */
+  public materialRevealAt: number = -1e9;
+  public materialRevealRadius: number = 0;
+
   public cycleShipLight(): boolean {
       if (!this.flashlightEquipped) return false;
       this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
@@ -6601,6 +6770,15 @@ export class GameEngine {
       this.dockInRange = false;
       this.nearestStation = null;
       this.nearestPortal = null;
+      // No rift was arrived through unless a TRANSIT says so — a fresh run or
+      // a debug map switch has no way home to chart.  `transitionToMap` sets
+      // it immediately after this returns.
+      this.arrivalPortalId = null;
+      // A new map's contacts have never been scanned.  The material bubble is
+      // pushed back out of range rather than cleared to 0, so a scan that was
+      // in flight when the player transited cannot leave a stale reveal.
+      this.scanPingRadius = 0;
+      this.materialRevealAt = -1e9;
   }
 
   private draw() {
@@ -6638,6 +6816,13 @@ export class GameEngine {
       // The SCANNER's reveal tier — one field write per frame, read by the
       // minimap + indicator gates in the render layer (A4).
       this.renderer.scannerMk = this.scannerMk;
+      this.renderer.scanRanges = this.scanRanges;
+      this.renderer.scanPingRadius = this.scanPingRadius;
+      this.renderer.scanPingMax = this.scanPingMax;
+      this.renderer.simClock = this.simClock;
+      this.renderer.materialRevealAt = this.materialRevealAt;
+      this.renderer.materialRevealRadius = this.materialRevealRadius;
+      this.renderer.arrivalPortalId = this.arrivalPortalId;
       const lightOn = this.flashlightEquipped && this.flashlightLevel > 0;
       this.renderer.playerLightToolHalfDeg =
           lightOn ? FLASHLIGHT_TOOL_LEVELS[this.flashlightLevel].halfDeg : null;

@@ -26,9 +26,10 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial, enemyIndicatorAlpha,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
     computeMinimapRect, computeIndicatorRect,
     FOG,
+    SCANNER,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -120,7 +121,7 @@ export function renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageTe
 export function renderIndicators(
   r: RenderSystem,
   ctx: CanvasRenderingContext2D, 
-  targets: { entity: GameEntity, distSq: number, onScreen: boolean }[], 
+  targets: { entity: GameEntity, distSq: number, onScreen: boolean, detect: number }[], 
   camera: CameraState, 
   width: number, 
   height: number
@@ -134,11 +135,11 @@ export function renderIndicators(
         SIZE_NEAR, SIZE_FAR, NEAR_DIST, FAR_DIST, BOSS_SCALE, AGGRO_BLINK_HZ,
         COLORS,
     } = UI_CONSTANTS.INDICATORS;
-    // SCANNER Mk II — extended-range enemy indicators (A4).  The ramp itself
-    // lives in `enemyIndicatorAlpha` (constants.ts), pure and published on
-    // __omniHud, because it exists only as a globalAlpha here and so is wrong
-    // in a way nothing reports.  Tier 0 returns today's curve exactly.
-    const scannerMk = r.scannerMk;
+    // Every arrow on this pass was put there by a SCAN (rework): the buffer
+    // is gated on the detection stamp upstream, and `item.detect` is how
+    // fresh that stamp is.  A mark going soft is what tells the player the
+    // contact has had time to move — see `detectionAlpha`, pure and published
+    // on __omniHud because it exists only as a globalAlpha here.
     const H = UI_CONSTANTS.HUD;
 
     if (targets.length === 0) return;
@@ -252,7 +253,7 @@ export function renderIndicators(
         // distant straggler doesn't shout like a closing threat.  A boss
         // never fades: it is the thing you are supposed to be flying toward.
         if (t.type === EntityType.ENEMY && !isBoss) {
-            ctx.globalAlpha = enemyIndicatorAlpha(dist, scannerMk);
+            ctx.globalAlpha = item.detect;
         }
         ctx.translate(ix, iy);
         ctx.rotate(angle);
@@ -822,7 +823,7 @@ function renderMinimapFog(
 export function renderMinimap(
     r: RenderSystem,
     ctx: CanvasRenderingContext2D,
-    items: { entity: GameEntity, dx: number, dy: number }[],
+    items: { entity: GameEntity, dx: number, dy: number, detect: number }[],
     camera: CameraState,
     screenWidth: number,
     screenHeight: number,
@@ -868,7 +869,13 @@ export function renderMinimap(
     // source rect may straddle the canvas edge and we split it into
     // up to four drawImage calls so the minimap seamlessly shows both
     // sides of a seam when the camera is near the edge.
-    const staticCanvas = r._minimapStaticCanvas;
+    // NO SCANNER, NO GROUND (rework, user call).  Without a scanner aboard the
+    // minimap is blank but for the two always-charted landmarks — the terrain
+    // layer is a sensor readout like everything else on this widget, not a
+    // free map of the arena.  ANY scanner turns it on whole: the ping's own
+    // radius reveals CONTACTS, and masking the pre-rendered terrain bitmap to
+    // a scanned bubble is a different (and much larger) feature.
+    const staticCanvas = r.scannerMk > 0 ? r._minimapStaticCanvas : null;
     if (staticCanvas) {
         const staticRange = r._minimapStaticRange;
         const sRes = staticCanvas.width;
@@ -894,7 +901,10 @@ export function renderMinimap(
     // (handled in the entity loop below); 'off' draws neither.  Drawn after
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
-    const materialMode = getActiveMinimapMaterial();
+    // The DBG cycle picks WHICH material layer; the scan's material bubble
+    // decides whether it is drawn at all.  See RenderSystem.minimapShardDots
+    // — the dots half of this same answer, which the buffer fill reads.
+    const materialMode = r.materialRevealAlpha > 0 ? getActiveMinimapMaterial() : 'off';
     // Hoisted: ONE lookup for the whole pass, not one per contact — the
     // buffer can hold a few thousand mobile shards in dots mode.
     const shardDots = r.minimapShardDots;
@@ -904,6 +914,24 @@ export function renderMinimap(
 
     // ── The FOG's memory, over the terrain and under the contacts ────────
     renderMinimapFog(r, ctx, camera, mapX, mapY, currentSize, range);
+
+    // ── The live scan ping ────────────────────────────────────────────────
+    // The SAME event the world pass draws, at minimap scale, so the two
+    // readouts obviously show one scan rather than two effects that happen to
+    // look alike.  Drawn under the contacts: the ring is the instrument, the
+    // marks it turns up are the information.
+    if (r.scanPingRadius > 0 && r.scanPingMax > 0) {
+        const pr = r.scanPingRadius * scale;
+        const frac = r.scanPingRadius / r.scanPingMax;
+        ctx.globalAlpha = SCANNER.RING_ALPHA
+            * (SCANNER.RING_MIN_ALPHA_FRAC + (1 - SCANNER.RING_MIN_ALPHA_FRAC) * (1 - frac));
+        ctx.strokeStyle = SCANNER.RING_COLOR;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, pr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
 
     // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
     // Enemy blips pulse so they pop against the static layer; the phase

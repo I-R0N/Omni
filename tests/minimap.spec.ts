@@ -22,6 +22,42 @@
 import { test, expect } from '@playwright/test';
 import { boot, engine, stats, startRun, waitForStats } from './helpers';
 
+/** Fit the widest scanner and complete ONE full ping.
+ *
+ *  Every readout this suite measures is now gated on a SCAN (scanner rework):
+ *  with no scanner the minimap draws neither terrain nor contacts and the HUD
+ *  carries no arrows at all, so a test that does not scan is measuring the
+ *  blank baseline rather than the thing it names.
+ *
+ *  The ping is driven to completion by POLLING the engine's own wavefront
+ *  rather than by sleeping a computed duration — this environment renders in
+ *  software, so sim-seconds and wall-seconds are not the same and a sleep
+ *  long enough here would be a coin flip (harness rule 1).  `scanPingRadius`
+ *  returns to 0 exactly when the front finishes. */
+async function scanOnce(page: any) {
+  // The cooldown is cleared first and the fire is ASSERTED.  Without both,
+  // a refused scan makes this helper a silent no-op: `scanPingRadius` is
+  // already 0 when no ping started, so the wait below would return
+  // immediately and the test would go on to measure an unscanned world and
+  // report it as a reveal failure.  (That is not hypothetical — it is how the
+  // category-ladder test first "failed": its second scan landed inside the
+  // cooldown left by its first.)  The cooldown has its own test.
+  const fired = await engine(page, e => {
+    // Fit ONE scanner, not one per call.  Marks STACK in range now, so a
+    // helper that granted unconditionally would silently widen the ship's
+    // reach every time a test scanned — which is exactly how the far-side
+    // assertion below first 'passed' a rift 6000 units away.
+    if (e.scannerMk <= 0) e.debugGrantModule('scanner_mk5');
+    e.scanCooldown = 0;
+    return e.fireScan();
+  });
+  if (!fired) throw new Error('fireScan refused — is a scanner installed and ACTIVE?');
+  await page.waitForFunction(
+    () => (window as any).__omniEngine?.scanPingRadius === 0,
+    undefined, { timeout: 15000 },
+  );
+}
+
 /** Count the per-frame minimap contacts by kind. */
 function bufferByKind(page: any) {
   return engine(page, e => {
@@ -97,32 +133,57 @@ test.describe('off-screen indicators — portals', () => {
     }, target);
   }
 
-  test('the arrow is bracketed: close enough to matter, not yet visible', async ({ page }) => {
+  test('the arrow is bracketed: within scan reach, not yet visible', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
 
+    // THE ARROWS BELONG TO THE SCANNER now (rework).  With nothing fitted the
+    // HUD carries no arrows at any distance — that is the baseline, and it is
+    // asserted first because everything below is a departure from it.
+    expect((await standOff(page, 900)).present,
+      'a scannerless ship gets no arrow, however close').toBe(false);
+
     // This asserts the INPUTS the suppression rule reads — presence in the
-    // buffer (the range gate) and the `onScreen` flag (the redundancy gate).
-    // The rule that consumes them is one line inside a canvas draw and is not
-    // reachable from here; it is stated plainly rather than pretended at.
+    // buffer (now the detection stamp) and the `onScreen` flag (the
+    // redundancy gate).  The rule that consumes them is one line inside a
+    // canvas draw and is not reachable from here; it is stated plainly
+    // rather than pretended at.
 
-    // Far side of the map: no arrow at all. A rift across the map is not
-    // navigation, and this is the half of the old behaviour that stays.
-    expect((await standOff(page, 6000)).present).toBe(false);
-
-    // Inside INDICATOR_RANGE but well outside the viewport: this is the case
-    // the arrow exists for.
+    // Inside scan reach but well outside the viewport: the case the arrow
+    // exists for.  The scan has to happen at THIS standoff — a stamp records
+    // where the front crossed the rift, so scanning from elsewhere would
+    // measure a stale mark.
+    await standOff(page, 900);
+    await scanOnce(page);
     const approach = await standOff(page, 900);
     expect(approach.present).toBe(true);
     expect(approach.onScreen).toBe(false);
 
     // On top of it: still buffered, but now flagged on-screen — which is what
-    // now suppresses it (G6). The rift and its own world-space tag are right
+    // suppresses it (G6). The rift and its own world-space tag are right
     // there; a third naming of the same place was the complaint.
+    await standOff(page, 40);
+    await scanOnce(page);
     const arrived = await standOff(page, 40);
     expect(arrived.present).toBe(true);
     expect(arrived.onScreen).toBe(true);
+
+    // A MARK OUTLIVES THE PING that made it — that is the whole reveal-and-
+    // fade model, and it is why the far-side check below has to clear the
+    // stamps first rather than just flying away.  Retreating out of reach
+    // leaves the arrow up until the mark goes stale.
+    expect((await standOff(page, 6000)).present,
+      'a mark persists after the contact leaves scan reach').toBe(true);
+
+    // Far side of the map, scanned FRESH: still no arrow, and now for a
+    // reason the player can act on — it is past what the scanner reaches (a
+    // single Mk V tops out near 3200 units) rather than past a fixed
+    // INDICATOR_RANGE.  Fitting more scanners is what moves this line.
+    await engine(page, e => { for (const p of e.portals) p.detectedAt = undefined; });
+    await standOff(page, 6000);
+    await scanOnce(page);
+    expect((await standOff(page, 6000)).present).toBe(false);
 
     watch.assertClean();
   });
@@ -185,8 +246,17 @@ test.describe('minimap — material layer', () => {
       .filter((x: any) => x.active && x.type === 'STRUCTURE' && x.mass !== Infinity).length);
     expect(mobile).toBeGreaterThan(200);
 
+    // The DBG cycle and the SCAN both have to say yes now (rework): the cycle
+    // picks WHICH material layer is drawn, the scan decides whether there is
+    // anything to draw it for.  So the un-scanned field collects nothing even
+    // in Dots mode — which is the first thing asserted, because it is the new
+    // half of the rule.
     await setMaterial(page, 'Dots');
     await page.waitForTimeout(300);
+    expect((await bufferByKind(page)).shard ?? 0,
+      'Dots alone reveals nothing — a scan is what finds materials').toBe(0);
+
+    await scanOnce(page);
     const withDots = await bufferByKind(page);
     expect(withDots.shard ?? 0).toBeGreaterThan(100);
 
@@ -234,6 +304,9 @@ test.describe('minimap — material layer', () => {
     const watch = await boot(page);
     await startRun(page);
     await setMaterial(page, 'Flow');
+    // The flow layer only runs while a scan's material bubble is fresh, so
+    // the cache this test is about does not exist until something scans.
+    await scanOnce(page);
     await page.waitForTimeout(400);
 
     const first = await engine(page, e => {

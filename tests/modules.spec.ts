@@ -700,181 +700,305 @@ test.describe('penetration module', () => {
   });
 });
 
-// ── A4 — Scanner ────────────────────────────────────────────────────────────
+// ── Scanner (rework) ────────────────────────────────────────────────────────
+//
+// The A4 suite asserted the OPPOSITE contract and is replaced wholesale
+// rather than extended: A4's rule was "no scanner degrades to today's
+// behaviour exactly", and the rework's is that a scannerless ship sees
+// NOTHING.  A test written for the first cannot be adapted into a test for
+// the second; keeping it would pin the behaviour the rework removed.
 
 /** Is a portal in the off-screen indicator buffer this frame? */
 const portalIndicated = (page: any) => engine(page, e =>
   e.renderer._indicatorBuffer.some((i: any) => i.entity.isPortal === true));
 
+/** Complete one full ping, polling the wavefront rather than sleeping — this
+ *  environment renders in software, so sim-seconds run slower than wall
+ *  seconds and any computed sleep is a coin flip (harness rule 1). */
+async function scanOnce(page: any) {
+  // The cooldown is cleared first and the fire is ASSERTED.  Without both,
+  // a refused scan makes this helper a silent no-op: `scanPingRadius` is
+  // already 0 when no ping started, so the wait below would return
+  // immediately and the test would go on to measure an unscanned world and
+  // report it as a reveal failure.  (That is not hypothetical — it is how the
+  // category-ladder test first "failed": its second scan landed inside the
+  // cooldown left by its first.)  The cooldown has its own test.
+  const fired = await engine(page, e => { e.scanCooldown = 0; return e.fireScan(); });
+  if (!fired) throw new Error('fireScan refused — is a scanner installed and ACTIVE?');
+  await page.waitForFunction(
+    () => (window as any).__omniEngine?.scanPingRadius === 0,
+    undefined, { timeout: 15000 },
+  );
+}
+
 test.describe('scanner module', () => {
-  test('no scanner: the reveal gates are exactly today\'s', async ({ page }) => {
+  test('no scanner: nothing is on either readout', async ({ page }) => {
     const watch = await boot(page);
-    await quietField(page);
+    await startRun(page);
+    await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+    await page.waitForTimeout(400);
 
     const r = await engine(page, e => ({
       mk: e.scannerMk,
-      pushed: e.renderer.scannerMk,
-      dots: e.renderer.minimapShardDots,
+      ranges: e.scanRanges,
+      arrows: e.renderer._indicatorBuffer.length,
+      // Contacts on the map, EXCLUDING the two always-charted landmarks —
+      // those are the one thing a scannerless ship is given.
+      uncharted: e.renderer._minimapBuffer.filter((i: any) =>
+        !(i.entity.isStation && i.entity.stationKind === 'home')
+        && !(i.entity.isPortal && i.entity.id === e.arrivalPortalId)).length,
+      scannerStat: (window as any).__omniStats?.scanner,
     }));
-    const s0 = await stats(page);
+
     expect(r.mk, 'a lean outfit carries no scanner').toBe(0);
-    expect(r.pushed, 'and the renderer is told so every frame').toBe(0);
-    // The shipped material default is DOTS (user call), so the honest
-    // baseline claim is "the DBG cycle alone decides" — not "off".
-    expect(r.dots, 'the minimap layer follows the DBG cycle and nothing else')
-      .toBe(s0.minimapMaterialName === 'Dots');
+    // Tier 1 is the widest reach there is, so zero there is zero everywhere.
+    expect(r.ranges[1] ?? 0, 'no scanner reaches nowhere').toBe(0);
+    expect(r.arrows, 'THE HUD CARRIES NO ARROWS AT ALL without a scanner').toBe(0);
+    expect(r.uncharted, 'and the minimap carries nothing but the landmarks').toBe(0);
+    // The HUD's scan button is absent, not merely disabled: a control for a
+    // tool you do not own is a control that does nothing.
+    expect(r.scannerStat, 'no scanner, no scan button').toBeUndefined();
+
+    // And the tool refuses to fire, so there is no ping to draw either.
+    expect(await engine(page, e => e.fireScan()), 'nothing to scan with').toBe(false);
+    expect(await engine(page, e => e.scanPingRadius)).toBe(0);
 
     watch.assertClean();
   });
 
-  test('Mk I reveals materials on the minimap, whatever the DBG cycle says',
+  test('the home station and the arrival rift are charted without a scanner',
     async ({ page }) => {
       const watch = await boot(page);
-      // The HUB, not a showcase field: MAP_POPULATION only gives the natural
-      // maps free-spawn rock SHARDS, and mobile shards are the whole contact
-      // class this mark reveals.
       await startRun(page);
       await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
-      await quietScene(page);
+      await page.waitForTimeout(400);
 
-      // Force the cycle off the dots layer so the scanner is unambiguously
-      // the cause.  With no scanner installed, `minimapShardDots` IS the
-      // cycle's answer, so it is the honest thing to poll on.
+      // In the HUB the landmark is the home station.  There is no arrival
+      // rift — the run started here rather than arriving through anything —
+      // which is itself the rule: `arrivalPortalId` is set by a TRANSIT.
+      const hub = await engine(page, e => ({
+        arrival: e.arrivalPortalId,
+        home: e.renderer._minimapBuffer.some((i: any) =>
+          i.entity.isStation && i.entity.stationKind === 'home'),
+      }));
+      expect(hub.arrival, 'a fresh run arrived through nothing').toBeNull();
+      expect(hub.home, 'home is on the map with no scanner').toBe(true);
+
+      // Travel through a rift.  The return portal in the destination — the
+      // one pointing back at the hub — is then charted, and it is the ONLY
+      // portal that is.
+      // Driven through `transitionToMap` — which is what `enterPortal` is a
+      // two-line wrapper over, and the thing that actually resolves the
+      // arrival rift.  Parking on a hub portal and using the real gesture was
+      // tried and is not sound here: the hub's TEST RACK sits beside the home
+      // station, so the shared nearest-wins arbitration hands the press to
+      // the STATION and the rift never becomes `nearestPortal`.  Fighting the
+      // arbitration would be testing station proximity, not charting.
       await engine(page, e => {
-        for (let i = 0; i < 4 && e.renderer.minimapShardDots; i++) e.dbg.cycleMinimapMaterial();
+        const p = e.portals.find((x: any) => x.portalTargetId && !x.isDescent);
+        e.transitionToMap(p.portalTargetId);
       });
-      expect(await engine(page, e => e.renderer.minimapShardDots),
-        'baseline: the cycle is off the dots layer').toBe(false);
-      await waitForEngine(page, e =>
-        !e.renderer._minimapBuffer.some((i: any) => i.entity.type === 'STRUCTURE'),
-        'the shard dots to leave the minimap buffer');
+      // The transit freezes the loop for the warp beat, so poll the map
+      // rather than sleeping through it.
+      await waitForStats(page, s => s.currentMapType !== 'OVERWORLD', 'the destination');
+      await page.waitForTimeout(300);
 
-      const g = await grant(page, 'scanner_mk1');
-      expect(g.active).toBe(true);
-      await waitForEngine(page, e => e.renderer.scannerMk === 1,
-        'the tier to reach the renderer');
-      expect(await engine(page, e => e.renderer.minimapShardDots),
-        'Mk I draws them on top of the cycle').toBe(true);
-      await waitForEngine(page, e =>
-        e.renderer._minimapBuffer.some((i: any) => i.entity.type === 'STRUCTURE'),
-        'shards to reach the minimap buffer');
-
-      // …and losing it puts the gate straight back.
-      await engine(page, e => e.resetOutfit());
-      await waitForEngine(page, e => e.renderer.scannerMk === 0, 'the tier to clear');
-      expect(await engine(page, e => e.renderer.minimapShardDots)).toBe(false);
-      await waitForEngine(page, e =>
-        !e.renderer._minimapBuffer.some((i: any) => i.entity.type === 'STRUCTURE'),
-        'and the dots to go with it');
+      const after = await engine(page, e => ({
+        map: e.currentMap.type,
+        arrival: e.arrivalPortalId,
+        charted: e.renderer._minimapBuffer.filter((i: any) => i.entity.isPortal)
+          .map((i: any) => i.entity.id),
+        portals: e.portals.length,
+        arrows: e.renderer._indicatorBuffer.length,
+      }));
+      expect(after.map, 'the transit happened').not.toBe('OVERWORLD');
+      expect(after.arrival, 'the rift we came out of is remembered').not.toBeNull();
+      expect(after.charted, 'exactly the arrival rift, charted with no scanner')
+        .toEqual([after.arrival]);
+      // The user's own words: "no arrows will point to it still on the HUD".
+      expect(after.arrows, 'a charted landmark gets a MAP mark, never an arrow').toBe(0);
 
       watch.assertClean();
     });
 
-  test('Mk II pushes the enemy chevron\'s fade ramp out', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-
-    /*  Enemy chevrons are range-UNLIMITED already, so the range gate that
-     *  actually exists for them is the FADE ramp — and it exists ONLY as a
-     *  globalAlpha inside the draw.  `enemyIndicatorAlpha` is the ramp,
-     *  pulled out pure and published on __omniHud for exactly that reason
-     *  (the same terms computeIndicatorRect is published on): a tier that
-     *  reveals nothing, or reveals at the wrong mark, throws nothing. */
-    const ramp = (mk: number, dist: number) => page.evaluate(
-      ([m, d]) => (window as any).__omniHud.enemyIndicatorAlpha(d, m) as number,
-      [mk, dist] as [number, number]);
-
-    // Inside the base ramp nothing changes at any tier — a near contact was
-    // already at full strength and there is nothing to reveal.
-    expect(await ramp(0, 400)).toBe(1);
-    expect(await ramp(2, 400)).toBe(1);
-
-    // Past the base ramp's END a contact sits on the alpha floor; Mk II is
-    // still well up the curve there.  This is the reveal.
-    const farBase = await ramp(0, 6000);
-    const farMk2 = await ramp(2, 6000);
-    expect(farBase, 'baseline: a 6000-unit contact is on the floor').toBeCloseTo(0.35, 5);
-    expect(farMk2, 'Mk II holds it near full strength').toBeGreaterThan(farBase * 1.5);
-    expect(farMk2).toBeLessThanOrEqual(1);
-
-    // The marks are CUMULATIVE and ordered — Mk I must not buy the enemy tier.
-    expect(await ramp(1, 6000), 'Mk I is materials only').toBeCloseTo(farBase, 5);
-    expect(await ramp(3, 6000), 'Mk III keeps everything below it').toBeCloseTo(farMk2, 5);
-
-    // And the renderer is actually handed the tier the ramp is a function of.
-    await grant(page, 'scanner_mk2');
-    await waitForEngine(page, e => e.renderer.scannerMk === 2,
-      'the tier to reach the renderer');
-
-    watch.assertClean();
-  });
-
-  test('Mk III lifts the portal chevron\'s range gate; below it, nothing moves',
-    async ({ page }) => {
-      const watch = await boot(page);
-      // The hub is the map with rifts on it.
-      await startRun(page);
-      await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
-      await quietScene(page);
-
-      // Park the player far from every rift — PORTAL_CONSTANTS.INDICATOR_RANGE
-      // is 1500, so 6000 out is well past the gate for all of them.
-      await engine(page, e => {
-        let far = { x: 0, y: 0 }, best = -1;
-        for (const p of e.portals) {
-          let d = Infinity;
-          for (const q of e.portals) {
-            if (q === p) continue;
-            const dx = q.position.x - p.position.x, dy = q.position.y - p.position.y;
-            d = Math.min(d, Math.hypot(dx, dy));
-          }
-          if (d > best) { best = d; far = p.position; }
-        }
-        e.player.position.x = far.x + 6000;
-        e.player.position.y = far.y + 6000;
-        e.player.velocity.x = 0; e.player.velocity.y = 0;
-      });
-
-      await waitForEngine(page, e => e.renderer._indicatorBuffer.length >= 0, 'a frame');
-      expect(await portalIndicated(page),
-        'baseline: a rift 6000 units out is past INDICATOR_RANGE').toBe(false);
-
-      // Mk I and Mk II must not touch this gate — the marks are cumulative,
-      // not interchangeable.
-      await grant(page, 'scanner_mk2');
-      await waitForEngine(page, e => e.renderer.scannerMk === 2, 'Mk II');
-      expect(await portalIndicated(page), 'Mk II still leaves portals gated').toBe(false);
-
-      await grant(page, 'scanner_mk3');
-      await waitForEngine(page, e => e.renderer.scannerMk === 3, 'Mk III');
-      await waitForEngine(page, e =>
-        e.renderer._indicatorBuffer.some((i: any) => i.entity.isPortal === true),
-        'the rift arrow to appear from across the map');
-
-      watch.assertClean();
-    });
-
-  test('scanner marks do not stack, and an offline scanner is the baseline',
+  test('the mark is a CATEGORY ladder: the same contact, one mark apart',
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
 
-      await grant(page, 'scanner_mk1');
-      await grant(page, 'scanner_mk1');
-      expect(await engine(page, e => e.scannerMk),
-        'two Mk I are still a Mk I — the best aboard wins').toBe(1);
+      // A RIVAL is tier 3 (rare), so it is the cleanest ladder probe there
+      // is: the SAME contact at the SAME distance is invisible to a Mk II and
+      // found by a Mk III.  Spawned through the real engine path and then
+      // parked beside the player, rather than hand-rolled — the detection
+      // sweep walks `entityIndex.enemies`, and a synthetic entity would be
+      // asserting that the test agrees with itself (harness rule 6).
+      const park = async () => engine(page, e => {
+        const r = e.entityIndex.enemies.find((x: any) => x.isRival === true);
+        if (!r) return false;
+        r.position.x = e.player.position.x + 500;
+        r.position.y = e.player.position.y;
+        r.velocity.x = 0; r.velocity.y = 0;
+        r.detectedAt = undefined;
+        return true;
+      });
 
+      await engine(page, e => { e.resetOutfit(); e.debugSpawnRival('neutral'); });
+      await waitForEngine(page, e =>
+        e.entityIndex.enemies.some((x: any) => x.isRival === true), 'a rival');
+
+      // Mk II: its ladder stops at enemies, and a rival is a rung above.
+      await engine(page, e => e.debugGrantModule('scanner_mk2'));
+      await waitForEngine(page, e => e.scannerMk === 2, 'Mk II');
+      expect(await park(), 'the rival is parked in reach').toBe(true);
+      await scanOnce(page);
+      const mk2 = await engine(page, e => e.entityIndex.enemies
+        .some((x: any) => x.isRival === true && x.detectedAt !== undefined));
+      expect(mk2, 'a Mk II does not find a rival').toBe(false);
+
+      // Mk III: same scene, same distance, one mark higher.
       await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk3'); });
-      expect(await engine(page, e => e.scannerMk)).toBe(3);
-
-      const iso = await isolate(page, 'ship', 'hull_base', 'scanner_mk3');
-      expect(iso.modActive, 'isolated from the hull').toBe(false);
-      expect(await engine(page, e => e.scannerMk),
-        'an OFFLINE scanner is no scanner').toBe(0);
-      await waitForEngine(page, e => e.renderer.scannerMk === 0, 'the renderer to follow');
+      await waitForEngine(page, e => e.scannerMk === 3, 'Mk III');
+      expect(await park()).toBe(true);
+      await scanOnce(page);
+      const mk3 = await engine(page, e => e.entityIndex.enemies
+        .some((x: any) => x.isRival === true && x.detectedAt !== undefined));
+      expect(mk3, 'a Mk III does').toBe(true);
 
       watch.assertClean();
     });
+
+  test('marks STACK in range: a tier reaches as far as every scanner that sees it',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+
+      // The user's own worked example: a Mk III plus two Mk I should reach
+      // ~3x as far for Mk I features as for Mk III ones, because all three
+      // scanners can see tier 1 and only the Mk III sees tier 3.
+      await engine(page, e => {
+        e.resetOutfit();
+        e.debugGrantModule('scanner_mk3');
+        e.debugGrantModule('scanner_mk1');
+        e.debugGrantModule('scanner_mk1');
+      });
+      await waitForEngine(page, e => e.scannerMk === 3, 'the rack');
+
+      const r = await engine(page, e => ({
+        mk: e.scannerMk,
+        t1: e.scanRanges[1], t2: e.scanRanges[2], t3: e.scanRanges[3],
+        t4: e.scanRanges[4],
+      }));
+
+      // CATEGORY is still the highest mark aboard — stacking buys range, not
+      // tiers.  Three scanners do not add up to a Mk IV.
+      expect(r.mk).toBe(3);
+      expect(r.t4, 'no scanner aboard reaches tier 4').toBe(0);
+
+      // Tier 1 collects all three; tiers 2 and 3 collect only the Mk III, so
+      // they are equal to each other and about a third of tier 1.
+      expect(r.t2).toBeCloseTo(r.t3, 5);
+      expect(r.t1 / r.t3).toBeGreaterThan(2.5);
+      expect(r.t1 / r.t3).toBeLessThan(3.1);
+
+      // A SECOND Mk III widens every tier it can see, which is the point of
+      // stacking — and leaves tier 4 alone, which is the point of the ladder.
+      const before = r.t3;
+      await engine(page, e => e.debugGrantModule('scanner_mk3'));
+      await waitForEngine(page, e => e.scanRanges[3] > 0, 'the fold');
+      const after = await engine(page, e => ({ t3: e.scanRanges[3], t4: e.scanRanges[4] }));
+      expect(after.t3, 'a second Mk III doubles tier-3 reach').toBeCloseTo(before * 2, 3);
+      expect(after.t4).toBe(0);
+
+      watch.assertClean();
+    });
+
+  test('a mark fades, and an OFFLINE scanner is no scanner', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+
+    await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk5'); });
+    await waitForEngine(page, e => e.scannerMk === 5, 'Mk V');
+    // Park on a rift so the ping is certain to cross it.
+    await engine(page, e => {
+      const p = e.portals[0];
+      e.player.position.x = p.position.x + 600;
+      e.player.position.y = p.position.y;
+      e.camera.position.x = e.player.position.x;
+      e.camera.position.y = e.player.position.y;
+    });
+    await scanOnce(page);
+
+    // FRESH: full strength.  The alpha ramp is the ONE freshness definition
+    // and both readouts call it, so measuring it here covers both.
+    const fresh = await engine(page, e =>
+      e.renderer.detectAlpha(e.portals[0].detectedAt));
+    expect(fresh).toBeCloseTo(1, 2);
+
+    // STALE: past LINGER_SEC the mark is gone entirely, so "faded out" and
+    // "not drawn" are the same state rather than two that can disagree.
+    const stale = await engine(page, e =>
+      e.renderer.detectAlpha(e.simClock - 1000));
+    expect(stale).toBe(0);
+
+    // An adjacency-OFFLINE scanner contributes nothing at all — the same
+    // rule every other module obeys, and the reason the fold reads ACTIVE
+    // slots rather than filled ones.
+    await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk3'); });
+    await waitForEngine(page, e => e.scannerMk === 3, 'a scanner to isolate');
+    const iso = await isolate(page, 'ship', 'hull_base', 'scanner_mk3');
+    expect(iso.modActive, 'the arrangement really did isolate it').toBe(false);
+    const off = await engine(page, e => ({ mk: e.scannerMk, t1: e.scanRanges[1] ?? 0 }));
+    expect(off.mk, 'an OFFLINE scanner is no scanner').toBe(0);
+    expect(off.t1, 'and reaches nowhere').toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('the cooldown is real, and the ping is one at a time', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk3'); });
+    await waitForEngine(page, e => e.scannerMk === 3, 'a scanner');
+
+    const first = await engine(page, e => e.fireScan());
+    expect(first, 'the first press scans').toBe(true);
+    const second = await engine(page, e => e.fireScan());
+    expect(second, 'the second press is refused while the cooldown runs').toBe(false);
+
+    // The stat the HUD button reads agrees with the engine that refused it.
+    const st = await stats(page);
+    expect(st.scanner?.cooldown ?? 0).toBeGreaterThan(0);
+    expect(st.scanner?.mk).toBe(3);
+
+    watch.assertClean();
+  });
+
+  test('a portal arrow needs a scan, whatever the mark', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+
+    await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk5'); });
+    await waitForEngine(page, e => e.scannerMk === 5, 'Mk V');
+    await engine(page, e => {
+      const p = e.portals[0];
+      e.player.position.x = p.position.x + 700;
+      e.player.position.y = p.position.y;
+      e.camera.position.x = e.player.position.x;
+      e.camera.position.y = e.player.position.y;
+    });
+    await page.waitForTimeout(250);
+
+    // Fitted but not fired: still nothing.  The scanner is a TOOL — owning it
+    // is not using it, which is the whole reversal from A4.
+    expect(await portalIndicated(page), 'a scanner you never fire reveals nothing').toBe(false);
+
+    await scanOnce(page);
+    expect(await portalIndicated(page), 'the ping is what puts it there').toBe(true);
+
+    watch.assertClean();
+  });
 });
 
 // ── A5 — purchasable hex slots ──────────────────────────────────────────────

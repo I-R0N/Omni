@@ -810,6 +810,16 @@ export interface GameEntity {
   // EntityIndex excludes it from the shard indices so ShardSystem / flow-drift /
   // consume leave it alone.  Cleared when it's severed off (→ free shard).
   dragonSegment?: boolean;
+
+  // ── SCANNER detection (scanner rework) ────────────────────────────────
+  /** Sim-clock time this contact was last crossed by a scan wavefront.
+   *  Freshness is `engine.simClock - detectedAt`, so there is NO per-frame
+   *  countdown to tick over every entity on the map — a stamp and a
+   *  subtraction. Undefined = never detected this run. */
+  detectedAt?: number;
+  /** Which scanner mark finds this POI.  Overrides `detectTierFor`'s default
+   *  of COMMON for stations and portals; the seam a hidden wormhole uses. */
+  poiTier?: number;
   // Dragon leave animation (Stage 6): the head has crossed its exit portal and
   // is being swallowed tail-first — RenderSystem stops drawing it while the body
   // segments collapse through the portal one by one.
@@ -1619,6 +1629,20 @@ export interface EngineStats {
   vitals?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
+  };
+  /** SCANNER, every frame (like `vitals`, unlike `playerStats`): the in-game
+   *  HUD's scan button needs all three during play.  `mk` is 0 with no
+   *  scanner aboard, which is what hides the button entirely — a control for
+   *  a tool you do not own is a control that does nothing. */
+  scanner?: {
+    mk: number;
+    /** Widest reach (tier 1), world units — the headline range. */
+    range: number;
+    /** Seconds until another scan is allowed; 0 = ready. */
+    cooldown: number;
+    /** Cooldown as a 0..1 fill, so the button can show it without knowing
+     *  SCANNER.COOLDOWN_SEC. */
+    ready: number;
   };
   playerStats?: {
     health: number; maxHealth: number;

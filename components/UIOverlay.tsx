@@ -50,6 +50,7 @@ interface UIOverlayProps {
   onCycleWeapon?: () => void;
   onStart?: () => void;
   onPause?: () => void;
+  onScan?: () => void;
   onResume?: () => void;
   onRestart?: () => void;
   /** Death / run-summary screen (Phase 3 Pair A) — RESPAWN continues the run
@@ -384,6 +385,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleWeapon,
   onStart,
   onPause,
+  onScan,
   onResume,
   onRestart,
   onRespawn,
@@ -1371,6 +1373,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Hold 1s, release', 'Charged shot (needs an Overcharge core installed).'],
           ['Tap your ship', 'Dock at a station, or enter a portal you are next to.'],
           ['Tap the minimap', 'Expand it. Tap a weapon slot to switch weapons.'],
+          ['Scan button', 'Sweeps for contacts (needs a Scanner). Top right, beside pause.'],
         ], null, ['touch'])}
 
         {group('Joystick touch', 'text-sky-300', [
@@ -1379,6 +1382,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Fire button', 'Shoot. Hold it for a charged shot — the ring shows the charge.'],
           ['Handedness', 'Two versions: stick left + fire right, or the mirror of it.'],
           ['Tap your ship', 'Dock, or enter a portal. Tapping elsewhere does not shoot.'],
+          ['Scan button', 'Sweeps for contacts (needs a Scanner). Top right, beside pause.'],
         ], null, ['joystick-left', 'joystick-right'])}
 
         {group('Keyboard & mouse', 'text-emerald-300', [
@@ -1386,6 +1390,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Mouse', 'Aims. Click to shoot.'],
           ['Hold 1s, release', 'Charged shot.'],
           ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
+          ['Q', 'Scan — sweeps for contacts. Needs a Scanner module installed.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], null, ['keyboard'])}
 
@@ -1396,6 +1401,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Bottom face button', 'Shoot. The only gun on the left-stick and trigger-thrust schemes, where the triggers are doing something else or may not exist. ✕ on PlayStation, A on Xbox.'],
           ['Left trigger', 'Throttle, on the trigger-thrust scheme: the stick steers, the trigger decides how hard.'],
           ['Left face button', 'Dock, enter a portal, or undock. □ on PlayStation, X on Xbox.'],
+          ['Left shoulder', 'Scan — sweeps for contacts. Needs a Scanner. (Right face button too.)'],
           ['Right shoulder', 'Switch weapon. (Top face button too.)'],
           ['Start / Options', 'Pause.'],
           ['In menus', 'D-pad moves, bottom face button selects, right face button goes back.'],
@@ -1407,6 +1413,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ) : null, ['gamepad', 'gamepad-thrust', 'gamepad-left'])}
 
         {group('The run', 'text-amber-300', [
+          ['Scanner', 'Nothing shows on the minimap or the screen edge until you scan for it. Higher marks find rarer things; fitting more of them scans further.'],
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
           ['Stations', 'Dock to repair, buy modules, and outfit the ship. Outfitting needs a drydock.'],
           ['Portals', 'The rifts on the hub lead to wave arenas. The return rift brings you home.'],
@@ -1629,12 +1636,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
                   ['engine', 'Engine'], ['thrusters', 'Thrusters'],
                   ['gunnery', 'Gunnery'], ['autoloader', 'Autoloader'],
-                  ['piercing', 'Penetration'], ['scanner', 'Scanner'],
+                  ['piercing', 'Penetration'],
+                  // The scanner is the one family with FIVE marks — each adds a
+                  // detection tier — so its row is derived from the catalog
+                  // rather than from a hardcoded [1,2,3] like the rest.
+                  ['scanner', 'Scanner'],
                 ] as const).map(([fam, label]) => (
                   <div key={fam} className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                     <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{label}</span>
                     <span className="flex gap-0.5">
-                      {[1, 2, 3].map(mk => (
+                      {(fam === 'scanner' ? [1, 2, 3, 4, 5] : [1, 2, 3]).map(mk => (
                         <button
                           key={mk}
                           onClick={() => onGrantModule?.(`${fam}_mk${mk}`)}
@@ -2455,6 +2466,35 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </>
           )}
         </div>
+
+          {/* SCAN button — the touch device's dedicated scan control (the
+              keyboard has Q, the pad has L1/Circle).  Rendered ONLY with a
+              scanner aboard: a control for a tool you do not own is a control
+              that does nothing.  It sits beside PAUSE, outside the wrapping
+              readout band and `shrink-0` for the same reason pause is — an
+              unshrinkable middle pushes the last item off a 320px screen.
+              Its ring fills as the cooldown runs down, so "not yet" is
+              visible without a number. */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && stats.scanner && (
+            <button
+              onClick={onScan}
+              disabled={stats.scanner.cooldown > 0}
+              className={`pointer-events-auto shrink-0 rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border backdrop-blur-[2px] transition-all active:scale-95 ${
+                stats.scanner.cooldown > 0
+                  ? 'bg-slate-900/25 border-slate-700/30 text-slate-500'
+                  : 'bg-slate-900/35 hover:bg-slate-700/70 border-cyan-500/40 text-cyan-300'
+              }`}
+              aria-label={`Scan (Mk ${'I'.repeat(stats.scanner.mk)}, range ${stats.scanner.range})`}
+              title={`Scan · Mk ${'I'.repeat(stats.scanner.mk)} · range ${stats.scanner.range}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+                <circle cx="12" cy="12" r="6" opacity={stats.scanner.ready > 0.5 ? 1 : 0.25} />
+                <circle cx="12" cy="12" r="10" opacity={stats.scanner.ready >= 1 ? 1 : 0.25} />
+              </svg>
+            </button>
+          )}
 
           {/* Pause button — hidden while docked or dead (the station UI and
               the run-summary screen already freeze the sim and own the

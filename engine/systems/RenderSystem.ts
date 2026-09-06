@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, scannerShowsMaterials, scannerShowsPortalsMapWide, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, isAlwaysCharted, SCANNER, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -91,20 +91,53 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  state, deliberately — the canvas layer must not start measuring React's
    *  layout, but "is a capstone alive" is something the sim already knows. */
   public bossBarActive: boolean = false;
-  /** SCANNER tier (A4) — 0..3, pushed once per frame by `GameEngine.draw`
-   *  from the module fold.  The two contact readouts read it through the
-   *  pure `scanner*` predicates in constants.ts, so "no scanner" is
-   *  structurally today's behaviour: every one of them is `mk >= n`. */
+  /** SCANNER, pushed once per frame in `GameEngine.draw` — the same channel
+   *  the Light's cone override takes.  `scannerMk` says which detection
+   *  TIERS the ship can find; `scanRanges` says how far each reaches; the
+   *  three `scan*` fields below carry the live ping and the material bubble.
+   *
+   *  THE BASELINE IS NOTHING (rework, user call).  With no scanner there are
+   *  no off-screen arrows at all and the minimap draws neither terrain nor
+   *  contacts — only the two always-charted landmarks.  Every gate below is
+   *  therefore "was this detected", not "is the mark high enough". */
   public scannerMk: number = 0;
+  public scanRanges: number[] = [];
+  /** Live ping wavefront radius (0 = none) and its target radius. */
+  public scanPingRadius: number = 0;
+  public scanPingMax: number = 0;
+  /** Sim clock + the last completed ping's material bubble, for the minimap's
+   *  tier-1 reveal.  See `GameEngine.updateScan` for why materials are a
+   *  radius and contacts are stamps. */
+  public simClock: number = 0;
+  public materialRevealAt: number = -1e9;
+  public materialRevealRadius: number = 0;
+
   /** Does the minimap draw a dot per mobile shard this frame?  TWO callers
    *  have to agree — the per-entity buffer fill here and the draw in
-   *  `render/hud.ts` — and they used to agree by both calling
-   *  `getActiveMinimapMaterial()`.  A Scanner Mk I forces the layer on top of
-   *  whatever that cycle says, so the OR lives in one place rather than in
-   *  both. */
+   *  `render/hud.ts` — so the answer has exactly one definition.
+   *
+   *  The DBG "Minimap mat" cycle and the SCAN answer different questions and
+   *  BOTH have to say yes: the cycle picks WHICH material layer is drawn
+   *  (dots / flow / off) and the scan decides whether there is anything to
+   *  draw it for.  The cycle cannot be a dev override that forces the layer
+   *  on, because its shipped default is already 'dots' — that would make the
+   *  material reveal free and Mk I worthless. */
   public get minimapShardDots(): boolean {
-    return getActiveMinimapMaterial() === 'dots' || scannerShowsMaterials(this.scannerMk);
+    return getActiveMinimapMaterial() === 'dots' && this.materialRevealAlpha > 0;
   }
+  /** How strongly the material bubble draws, 0 once it has gone stale. */
+  public get materialRevealAlpha(): number {
+    return detectionAlpha(this.simClock - this.materialRevealAt);
+  }
+  /** How strongly a contact detected at `at` should draw right now — the ONE
+   *  freshness test, shared by the arrows and the minimap so a mark cannot
+   *  be on one readout and gone from the other. */
+  public detectAlpha(at: number | undefined): number {
+    return at === undefined ? 0 : detectionAlpha(this.simClock - at);
+  }
+  /** The rift the player arrived through, charted without a scanner. */
+  public arrivalPortalId: string | null = null;
+
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -369,7 +402,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
-  private _indicatorBuffer: { entity: GameEntity, distSq: number, onScreen: boolean }[] = [];
+  private _indicatorBuffer: { entity: GameEntity, distSq: number, onScreen: boolean, detect: number }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
   // Pre-rendered nebula twinkle star (created once, reused for every nebula
@@ -439,7 +472,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   private _nebulaShardEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _trailEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particleBuffer: { entity: GameEntity, rx: number, ry: number }[] = [];
-  private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
+  private _minimapBuffer: { entity: GameEntity, dx: number, dy: number, detect: number }[] = [];
   /** Transit-warp progress 0->1, pushed per frame by GameEngine.draw; null
    *  when no transit is in flight.  A number rather than a timer because the
    *  beat is a pure function of progress — see render/portalWarp.ts. */
@@ -983,54 +1016,65 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             this.pushSlot(this._playerDraw, this._playerDrawPool, entity, rx, ry);
         }
 
-        // Off-screen indicator arrows — for enemies and non-drop POIs.  Gnats
-        // (diesOnContact, Swarm) are EXCLUDED: a cloud of them would crowd the
-        // screen with arrows and they aren't threats the player needs steering
-        // toward; the minimap still shows them for finding stragglers.
-        // Bubbles ARE included (purple, blinking red once they hunt you) under
-        // their own small MAX_VISIBLE_BUBBLE budget, so ambient fauna can never
-        // starve the enemy arrows.
+        // Off-screen indicator arrows — for enemies and non-drop POIs.
+        //
+        // THE ARROWS ARE THE SCANNER'S (rework, user call).  An arrow now
+        // means "the scan found this", so the gate is the detection stamp:
+        // with no scanner nothing is ever stamped and the HUD carries no
+        // arrows at all, and an always-charted landmark deliberately does NOT
+        // qualify — the home rift is on the MAP without a scanner, never on
+        // the edge of the screen.
+        //
+        // Gnats (diesOnContact, Swarm) stay excluded whatever the scan finds:
+        // a cloud of them would crowd the screen and they are not threats the
+        // player needs steering toward.  Bubbles are included (purple,
+        // blinking red once they hunt you) under their own small budget.
         if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
                 || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
-            // Enemies are range-UNLIMITED here (live count is capped by the
-            // wave concurrency cap): the maps are big and the chevrons are
-            // how the player finds the stragglers.  renderIndicators fades
-            // far chevrons instead of culling them.
-            const distSq = dx*dx + dy*dy;
-            // Whether the entity is currently within the true (unpadded)
-            // viewport — its half-size lets an entity peeking in at the edge
-            // count as visible.  renderIndicators uses this to suppress the
-            // (redundant) chevron for on-screen entities when the DBG
-            // "Chevrons: Offscreen" mode is on.
-            const halfSize = Math.max(entity.size.x, entity.size.y) * 0.5;
-            const onScreen = rx >= camX - halfW - halfSize && rx <= camX + halfW + halfSize
-                          && ry >= camY - halfH - halfSize && ry <= camY + halfH + halfSize;
-            // Map portals are RANGE-GATED (roadmap step (k)): a rift is a
-            // fixed landmark, so a chevron for one across the map is noise
-            // rather than navigation.  Gate the INDICATOR only — the portal
-            // keeps its minimap dot at every distance (the pushes below are
-            // deliberately left alone).
-            // A Scanner Mk III lifts the range gate entirely (A4) — the two
-            // OTHER portal-arrow rules are untouched: an on-screen rift still
-            // suppresses its arrow, and the arrow still carries a name and no
-            // distance.  With no scanner this is the shipped expression.
-            const farPortal = entity.isPortal === true
-                && !scannerShowsPortalsMapWide(this.scannerMk)
-                && distSq > PORTAL_CONSTANTS.INDICATOR_RANGE * PORTAL_CONSTANTS.INDICATOR_RANGE;
-            if (!farPortal) this._indicatorBuffer.push({ entity, distSq, onScreen });
+            const detect = this.detectAlpha(entity.detectedAt);
+            if (detect > 0) {
+                const distSq = dx*dx + dy*dy;
+                // Whether the entity is currently within the true (unpadded)
+                // viewport — its half-size lets an entity peeking in at the
+                // edge count as visible.  renderIndicators uses this to
+                // suppress the (redundant) chevron for on-screen entities.
+                const halfSize = Math.max(entity.size.x, entity.size.y) * 0.5;
+                const onScreen = rx >= camX - halfW - halfSize && rx <= camX + halfW + halfSize
+                              && ry >= camY - halfH - halfSize && ry <= camY + halfH + halfSize;
+                // The portal's own INDICATOR_RANGE gate is GONE: detection
+                // range has replaced it, and it is the scanner's to set.  A
+                // rift you have not scanned has no arrow at any distance; one
+                // you have keeps the two rules that were always about
+                // legibility rather than range — an on-screen rift still
+                // suppresses its arrow, and the arrow still carries a name
+                // and no distance readout.
+                this._indicatorBuffer.push({ entity, distSq, onScreen, detect });
+            }
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
         // here to avoid ~22k per-frame object allocations + fillRect calls.
-        // MOBILE shards still reach this buffer, but only in the DBG 'dots'
-        // material mode (G5): the shipped default traces the flow field
-        // instead, and a few thousand pushes per frame for dots nobody is
-        // drawing is the kind of cost that hides in a profile.
+        // MOBILE shards still reach this buffer, but only while the material
+        // layer is actually being drawn (a fresh scan, or the DBG override):
+        // a few thousand pushes per frame for dots nobody is drawing is the
+        // kind of cost that hides in a profile.
+        //
+        // CONTACTS ARE GATED ON DETECTION (rework).  The two always-charted
+        // landmarks — the home station and the rift the player arrived
+        // through — are the standing exception, and the only thing a
+        // scannerless ship has on its map.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
                 && entity.shardVariant !== 'nebula-tile' && entity.shardVariant !== 'nebula-shard'
                 && !(entity.type === EntityType.STRUCTURE && minimapDots === false)
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
-            this._minimapBuffer.push({ entity, dx, dy });
+            // A mobile shard is a MATERIAL contact and is revealed by the
+            // ping's radius rather than a per-entity stamp — thousands of
+            // them make stamping the wrong shape (GameEngine.updateScan).
+            const charted = isAlwaysCharted(entity, this.arrivalPortalId);
+            const detect = entity.type === EntityType.STRUCTURE
+                ? this.materialRevealAlpha
+                : charted ? 1 : this.detectAlpha(entity.detectedAt);
+            if (detect > 0) this._minimapBuffer.push({ entity, dx, dy, detect });
         }
 
         if (rx < left || rx > right || ry < top || ry > bottom) {
@@ -1223,6 +1267,27 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             }
             this.renderEntities(ctx, this._playerDraw, camera, playerPos);
             ctx.restore();
+        }
+    }
+
+    // 5b'''. THE SCAN PING — a world-space ring, drawn over the world and
+    // under the HUD.  It is centred on the SHIP rather than on the camera
+    // because the scan left the ship, and at a large radius those are not the
+    // same point.  Screen-space arithmetic (one arc, no transform push) since
+    // the ring is a circle in world units and the camera has no rotation.
+    if (this.scanPingRadius > 0 && this.scanPingMax > 0) {
+        const sp = this.worldToScreen(camera, playerPos);
+        const frac = this.scanPingRadius / this.scanPingMax;
+        if (sp) {
+        ctx.save();
+        ctx.globalAlpha = SCANNER.RING_ALPHA
+            * (SCANNER.RING_MIN_ALPHA_FRAC + (1 - SCANNER.RING_MIN_ALPHA_FRAC) * (1 - frac));
+        ctx.strokeStyle = SCANNER.RING_COLOR;
+        ctx.lineWidth = SCANNER.RING_WIDTH;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, this.scanPingRadius * camera.zoom, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
         }
     }
 

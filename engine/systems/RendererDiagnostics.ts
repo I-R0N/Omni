@@ -50,10 +50,20 @@ export interface RendererDiagnostics {
   lastWarpVeilAlpha: number;
   stageDepth: number;
   playerLightToolHalfDeg: number | null;
-  /** SCANNER tier 0..3 (A4) — pushed per frame by GameEngine.draw from the
-   *  module fold; widens what the minimap and the off-screen indicators
-   *  reveal.  0 = no scanner = today's gating exactly. */
+  /** SCANNER — pushed per frame by GameEngine.draw from the module fold and
+   *  the live ping.  `scannerMk` is the highest mark aboard (which detection
+   *  TIERS are reachable) and `scanRanges` is the per-tier reach; the rest
+   *  carry the ping and the material bubble.  With no scanner the minimap and
+   *  the off-screen arrows show nothing but the always-charted landmarks. */
   scannerMk: number;
+  scanRanges: number[];
+  scanPingRadius: number;
+  scanPingMax: number;
+  simClock: number;
+  materialRevealAt: number;
+  materialRevealRadius: number;
+  /** The rift the player arrived through, charted without a scanner. */
+  arrivalPortalId: string | null;
   /** Discard generated background content so the next frame rebuilds it.
    *
    *  Here rather than in the seam by this file's own rule: its only callers

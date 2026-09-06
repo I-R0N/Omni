@@ -32,7 +32,7 @@ import {
     INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS,
     slotUnlockCost,
     HEX_ADJACENCY, WEAPONS, WEAPON_LIST, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
-    SHIELD_CONSTANTS,
+    SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
 } from '../constants';
 
 /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
@@ -74,6 +74,7 @@ export function applyModuleEffects(g: GameEngine) {
     computeActiveSlots(g, g.weaponSlots, g.activeWeapon);
     let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
     let pierce = 0, scanner = 0;
+    const scannerMarks: number[] = [];
     let shieldCore = false, overcharge = false, flashlight = false;
     // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
     // module's weight is a contribution to the SHIP's attribute, not an
@@ -98,7 +99,14 @@ export function applyModuleEffects(g: GameEngine) {
             // Scanner tiers do NOT stack: the ship's scanner is the BEST one
             // aboard, so two Mk I stay a Mk I.  (Every other family sums,
             // which is why this one says so out loud.)
-            if (e.scannerMk !== undefined && e.scannerMk > scanner) scanner = e.scannerMk;
+            // MARKS STACK NOW (rework): every active scanner contributes its
+            // own range to every tier it can see, so the fold COLLECTS them
+            // rather than keeping the best.  `scannerMk` stays the highest
+            // mark aboard — it is what says which CATEGORIES are reachable.
+            if (e.scannerMk !== undefined) {
+                scannerMarks.push(e.scannerMk);
+                if (e.scannerMk > scanner) scanner = e.scannerMk;
+            }
             if (e.shieldCore) shieldCore = true;
             if (e.overcharge) overcharge = true;
             if (e.flashlight) flashlight = true;
@@ -138,6 +146,7 @@ export function applyModuleEffects(g: GameEngine) {
     // written per frame in draw(), the same channel the Light's cone override
     // takes — the sim never grows a second path to the render layer.
     g.scannerMk = scanner;
+    g.scanRanges = scannerRangesFor(scannerMarks);
     g.player.overchargeUnlocked = overcharge;
     // Flashlight Kit: the ship-tap light tool exists only while the kit is
     // installed and ACTIVE (touching a hull, like every utility).  Losing
@@ -351,23 +360,14 @@ export function statBreakdown(g: GameEngine) {
         }
     }
 
-    // Scanner tiers do not stack (applyModuleEffects takes the MAX), so every
-    // scanner but the best one aboard contributes nothing.  `active` means
-    // "this is IN the total", so the also-rans are marked inactive — but with
-    // a SUPERSEDED display rather than a `requires`, which is the adjacency
-    // vocabulary ("offline · needs hull") and would read as nonsense here.
-    let bestScan = 0;
-    for (const c of scan) if (c.active) {
-        const mk = moduleDef(c.moduleId!)?.effect?.scannerMk ?? 0;
-        if (mk > bestScan) bestScan = mk;
-    }
-    let bestSeen = false;
+    // Scanner marks STACK now (rework), so there is no superseded pass any
+    // more — every scanner aboard contributes.  What each one contributes is
+    // RANGE, to every tier its own mark can see, so the display names the
+    // mark and the reach it adds rather than a bare tier.
     for (const c of scan) {
         if (!c.active) continue;
         const mk = moduleDef(c.moduleId!)?.effect?.scannerMk ?? 0;
-        if (mk === bestScan && !bestSeen) { bestSeen = true; continue; }
-        c.active = false;
-        c.display = 'superseded';
+        if (mk > 0) c.display = `Mk ${'I'.repeat(mk)} · +${Math.round(scannerMarkRange(mk))}`;
     }
 
     // Fire RATE is the inverse of the cooldown multiplier, so the per-module
@@ -421,9 +421,17 @@ export function statBreakdown(g: GameEngine) {
              'hull + everything mounted; drags Acceleration'),
         line('pierce', 'Penetration', `+${g.player.pierceBonus ?? 0}`, '+0', pierce,
              'extra targets each shot passes through, on top of the gun\'s own'),
+        // The HEADLINE is the reach at tier 1 — the widest the ship scans, and
+        // the number every mark aboard contributes to.  The MARK is named
+        // beside it because that is what says which categories are findable
+        // at all; range and category are the scanner's two axes and one
+        // number cannot carry both.
         line('scanner', 'Scanner',
-             bestScan > 0 ? `Mk ${'I'.repeat(bestScan)}` : 'None', 'None', scan,
-             'what the minimap and edge arrows reveal; only the best scanner aboard counts'),
+             g.scannerMk > 0
+                 ? `Mk ${'I'.repeat(g.scannerMk)} · ${Math.round(g.scanRanges[1] ?? 0)}`
+                 : 'None',
+             'None', scan,
+             'range is the SUM of every scanner that reaches a tier; the mark sets which tiers'),
         line('overcharge', 'Charged shots',
              g.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
     ];

@@ -1646,31 +1646,82 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   for the current hull is a balance call for the economy pass.  DBG ▸
   Modules ▸ "Lock slots" (7 / 5 / 4 / 3) is what makes the locked state
   and the shop's "+1 Hex Slot" entry reachable in play.
-- `SCANNER` / `scannerShowsMaterials()` / `scannerEnemyRangeMult()` /
-  `scannerShowsPortalsMapWide()` — the SCANNER module's reveal tiers
-  (A4).  A ship module (`scanner` family, hull-adjacent like every
-  utility) whose MARK widens what the two existing contact readouts are
-  willing to show; it is a GATE/EXTENDER over display plumbing that
-  already exists, never a new render system.  Mk I = MATERIALS
-  (mobile-shard dots on the minimap, on top of whatever the DBG "Minimap
-  mat" cycle is drawing), Mk II = + ENEMIES at extended range (see the
-  fade-ramp note in §8), Mk III = + PORTALS map-wide (lifts
-  `PORTAL_CONSTANTS.INDICATOR_RANGE`).  Marks do NOT stack — the ship's
-  tier is the highest ACTIVE mark aboard, so two Mk I stay a Mk I, which
-  is the one place the module system deliberately departs from summing.
-  The tier rides `GameEngine.scannerMk` → `RenderSystem.scannerMk`, one
-  field write per frame in `draw`, the SAME channel the Light's cone
-  override takes; the sim grows no second path to the render layer.
-  Three rules are load-bearing: every gate is `mk >= n`, so NO scanner
-  degrades to today's behaviour exactly (the existing indicator / minimap
-  / portal suites are written against that gating and must keep passing);
-  colours stay the `UI_CONSTANTS.INDICATORS` type legend's — a scanner
-  reveals MORE contacts, never a new KIND of mark; and there is NO
-  "discovered" state anywhere in it, because discovered-ness is per NODE
-  and belongs to the later persistence work.  That last one is also a
-  FORWARD INTERFACE: the phased plan's hidden wormholes (G4) are meant to
-  use the Mk III tier as their reveal mechanism, and A4 ships long before
-  they exist, so nothing here may assume them.
+- `SCANNER` / `DETECT_TIER` / `detectTierFor()` / `scannerRangesFor()` /
+  `scannerMarkRange()` / `detectionAlpha()` / `isAlwaysCharted()` — the
+  SCANNER, reworked (user call) from A4's passive reveal into a TOOL the
+  player operates.  A4 shipped it as a gate that quietly widened two
+  readouts which were already full, and the play-test verdict was that
+  nothing about it read.  Four rules, every one a reversal of A4:
+  1. **NOTHING IS ON THE READOUTS FOR FREE.**  With no scanner the HUD
+     carries NO off-screen arrows at all and the minimap draws neither
+     terrain nor contacts.  A4's rule was the exact opposite ("no scanner
+     degrades to today's behaviour exactly"), which is what made the
+     module invisible.  The standing exception is `isAlwaysCharted` — the
+     HOME station and the rift the player ARRIVED THROUGH
+     (`GameEngine.arrivalPortalId`, resolved off the same `exitMouthFor`
+     that decides where you land and where your debris re-emerges).  Those
+     two get a MINIMAP mark and never an ARROW: the arrows are the
+     scanner's alone.
+  2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
+     at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
+     `GameEntity.detectedAt` on whatever it crosses, and a mark holds for
+     `LINGER_SEC` and fades over the last `FADE_SEC` (`detectionAlpha`,
+     the ONE freshness definition both readouts call).  Freshness is
+     `simClock − detectedAt`, so there is NO per-entity countdown ticking
+     over the map — a stamp and a subtraction.  `GameEngine.simClock` is
+     MONOTONIC sim seconds and exists because `runTimeSec` deliberately
+     stops while dead, which would freeze every mark on the map.
+     CONTACTS are stamped individually (tens of them, and a stale mark
+     left by something that moved is the point); MATERIALS are not
+     (thousands of mobile shards) — tier 1 is revealed as a RADIUS the
+     minimap tests at draw time (`materialRevealAt` / `materialRevealRadius`
+     / `RenderSystem.materialRevealAlpha`).  The two halves differ because
+     the entity counts differ by three orders of magnitude, not because
+     they mean different things.
+  3. **MARKS STACK, IN RANGE ONLY.**  A tier's reach is the SUM of the
+     own-ranges of every ACTIVE scanner whose mark is at least that tier
+     (`scannerRangesFor`), so low tiers accumulate the whole rack and high
+     tiers only the few marks that reach them.  The user's worked example:
+     a Mk III plus two Mk I gives ~3× reach for Mk I features and ~1× for
+     Mk III ones.  CATEGORY does not stack — `scannerMk` stays the highest
+     mark aboard, so three scanners never add up to a Mk IV.  This
+     REVERSES A4's "marks do not stack", which was documented there as a
+     deliberate departure from summing; it is now the ordinary rule.
+  4. **FIVE MARKS, each adding a CATEGORY and ~10% of its own range.**
+     `DETECT_TIER` is the ONE table saying what finds what, and a mark
+     sees its own tier and every tier below: Mk I common POIs +
+     MATERIALS, Mk II uncommon POIs + ENEMIES (a boss is an enemy), Mk III
+     rare POIs + RIVALS + FAUNA, Mk IV secret POIs + DRAGONS, Mk V hidden
+     POIs + the SNITCH.  Range is the headline and stacking is how it
+     really grows; categories are what makes a specific mark worth buying.
+     The POI rungs are deliberately populated ahead of the things that will
+     fill them — `GameEntity.poiTier` lets a POI declare its own rung and
+     defaults to COMMON, so the phased plan's hidden wormholes (G4) become
+     a FIELD ON A PORTAL rather than a change here.
+  SCAN IS ITS OWN CONTROL on every device (user call): **Q**, the pad's
+  **L1 / Circle** (`INPUT_CONSTANTS.GAMEPAD.BUTTONS.SCAN`), and a HUD
+  button beside PAUSE that renders only with a scanner aboard.  It
+  deliberately did NOT join the ship-tap gesture — that is already
+  arbitrated between docking, portals and the Light tool, and a fourth
+  claimant would make "tap your ship" mean whatever happened to be
+  nearest.  The pad latch is DRAINED every step like INTERACT, so a press
+  made while docked cannot fire a scan on undock.
+  Two A4 rules SURVIVE unchanged: colours stay the
+  `UI_CONSTANTS.INDICATORS` type legend's (a scanner reveals more
+  contacts, never a new KIND of mark), and there is NO "discovered" state
+  anywhere in it — a stamp expires, so nothing here is persistence, which
+  belongs per NODE to the later work.  What is GONE with A4: the
+  `scannerShows*` predicates, `enemyIndicatorAlpha`'s distance ramp (the
+  detection stamp replaced the fade as the range gate) and the portal
+  arrow's `PORTAL_CONSTANTS.INDICATOR_RANGE` bracket — a rift you have
+  not scanned has no arrow at any distance, and the two rules that were
+  always about legibility rather than range are untouched (an on-screen
+  rift still suppresses its arrow; the arrow still carries a name and no
+  distance).  The DBG "Minimap mat" cycle and the scan now BOTH have to
+  say yes: the cycle picks WHICH material layer draws, the scan decides
+  whether there is anything to draw it for — the cycle cannot be a dev
+  override that forces the layer on, because its shipped default is
+  already 'dots' and that would make the material reveal free.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -3151,7 +3202,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's PURE
   layout functions — `fitFontPx`, `computeMinimapRect`,
   `computeLoadoutHUDLayout`, `computeIndicatorRect`, and (A4)
-  `enemyIndicatorAlpha` — on exactly the
+  `detectionAlpha` — on exactly the
   `__omniHid` rationale: they are
   pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
   320px, a minimap rect disagreeing with the tap handler that catches its
@@ -3605,25 +3656,32 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   indicated now (they used to be excluded as clutter) — the small separate
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
-  ENEMY chevrons have NO range cull, so the only range gate they have is
-  the FADE: `enemyIndicatorAlpha(dist, scannerMk)` (constants.ts, pure and
-  published on `__omniHud`) ramps them from full strength at
-  `ENEMY_FADE_START` down to `ENEMY_MIN_ALPHA` at `ENEMY_FADE_END`.  A
-  SCANNER Mk II (§5) multiplies both ends by `SCANNER.ENEMY_RANGE_MULT`,
-  which is what "extended-range enemy indicators" can honestly mean for a
-  readout that never culled anything — the per-type BUDGETS are untouched,
-  so a scanner makes far contacts LEGIBLE rather than putting more arrows
-  on the edge.  Tier 0 returns today's curve exactly.  The ramp is pulled
-  out pure because it exists only as a `globalAlpha` inside the draw: a
-  tier that reveals nothing, or reveals at the wrong mark, throws nothing
-  and logs nothing.  A SCANNER Mk III likewise lifts the PORTAL range gate
-  (`RenderSystem`'s `farPortal` test) so a rift arrow appears from
-  anywhere; the other two portal-arrow rules — on-screen suppression and
-  no distance readout — are deliberately untouched by it.
+  EVERY ARROW ON THE EDGE WAS PUT THERE BY A SCAN (scanner rework, §5).
+  The buffer is gated on `GameEntity.detectedAt`, so a scannerless ship
+  has NO arrows at all, and `item.detect` — `detectionAlpha(simClock −
+  detectedAt)`, pure and published on `__omniHud` — is the `globalAlpha`
+  each one draws at, so a mark going soft is what says the contact has had
+  time to move.  This REPLACED two range gates rather than joining them:
+  `enemyIndicatorAlpha`'s distance fade (enemy chevrons never culled, so
+  the fade WAS their range gate) and the portal arrow's
+  `PORTAL_CONSTANTS.INDICATOR_RANGE` bracket.  Detection range is now the
+  one range gate there is, and it is the scanner's to set.  The per-type
+  BUDGETS are untouched — a scanner decides WHAT is on the edge, never how
+  many.  The two portal-arrow rules that were always about legibility
+  rather than range survive verbatim: an on-screen rift still suppresses
+  its arrow, and the arrow still carries a name and no distance readout.
 
 - **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
-  object.**  (The shipped material default is DOTS, not flow — user call;
-  flow is one step of the DBG cycle away.  Screen shake likewise ships ON.)  Three rules, all decided in step 5 G5 (user directive,
+  object, and NONE of it without a scanner.**  (The shipped material
+  default is DOTS, not flow — user call; flow is one step of the DBG
+  cycle away.  Screen shake likewise ships ON.)  The scanner rework (§5)
+  added a rule ABOVE the three below: with no scanner aboard the widget
+  draws neither the pre-rendered terrain layer nor any contact — only the
+  two `isAlwaysCharted` landmarks.  TERRAIN is gated on merely OWNING a
+  scanner (`r.scannerMk > 0`) rather than on a fresh ping, because
+  masking a pre-rendered bitmap to a scanned bubble is a different and
+  much larger feature; buying a scanner is what visibly turns the map on.
+  Three rules under that, all decided in step 5 G5 (user directive,
   decision #43):
   1. **Nebula is off it entirely.**  Nebula tiles are skipped by
      `buildMinimapStaticLayer` and nebula shards never enter the
@@ -3634,13 +3692,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
      (`MINIMAP_CONSTANTS.FLOW`); the old per-shard dots are still
      available behind the DBG cycle Visual ▸ "Minimap mat"
      (Flow / Dots / Off), and in any mode but `dots` mobile shards are
-     not even collected into `_minimapBuffer`.  A SCANNER Mk I (§5)
-     forces the dots layer ON TOP of whatever the cycle says, and the
-     answer has exactly ONE definition — `RenderSystem.minimapShardDots`
-     — because TWO callers have to agree on it: the per-entity buffer
-     fill in `RenderSystem` and the draw in `render/hud.ts`.  They used
-     to agree by both calling `getActiveMinimapMaterial()`; with a second
-     input, the OR could not stay duplicated.  Two things to know
+     not even collected into `_minimapBuffer`.  The SCAN is the second
+     gate (§5) and BOTH have to say yes — the cycle picks WHICH layer
+     draws, the scan decides whether there is anything to draw it for —
+     and the answer has exactly ONE definition,
+     `RenderSystem.minimapShardDots`, because TWO callers have to agree
+     on it: the per-entity buffer fill in `RenderSystem` and the draw in
+     `render/hud.ts`.  They used to agree by both calling
+     `getActiveMinimapMaterial()`; with a second input, the AND could not
+     stay duplicated.  Note the cycle canNOT be a dev override that
+     forces the layer on regardless: its shipped default is already
+     'dots', so that would make the material reveal free and Mk I
+     worthless.  Two things to know
      before touching it: the streamline geometry is cached in WORLD
      space and keyed on the seed CELL (panning must not retrace), and
      the polyline needs a SEAM BREAK — per-point torus math is not

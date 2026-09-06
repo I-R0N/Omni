@@ -1363,6 +1363,12 @@ export const INPUT_CONSTANTS = {
        *  The face button covers it, which is what a one-stick pad has. */
       FIRE_FACE:    [0],
       INTERACT:     [2],      // Square — dock / enter portal / undock (the `selected` flag)
+      /** SCAN — its OWN control on every device (user call).  It could not
+       *  join INTERACT: that gesture is already arbitrated between docking,
+       *  portals and the Light tool, and a scanner is a fourth thing wanting
+       *  the same press.  L1 and Circle are both unbound in flight, and
+       *  offering both means a pad missing either still scans. */
+      SCAN:         [4, 1],   // L1, Circle
       CYCLE_WEAPON: [5, 3],   // R1, Triangle
       PAUSE:        [9],      // Options
       DPAD:         [12, 13, 14, 15], // up, down, left, right — digital thrust
@@ -5728,7 +5734,7 @@ export const HEX_ADJACENCY: readonly (readonly number[])[] = [
 // Mk pricing ≈ the CUMULATIVE cost of the old per-level curve at that
 // level (rounded) so the salvage economy is unchanged in total: reaching
 // "Mk III power" costs about what L3 used to.
-const MK = ['', ' Mk I', ' Mk II', ' Mk III'];
+const MK = ['', ' Mk I', ' Mk II', ' Mk III', ' Mk IV', ' Mk V'];
 /** `mk1Weight` is the Mk I mass; Mk II/III scale linearly with the mark, the
  *  same way their effects and prices do — a bigger plate is a heavier plate. */
 const statMks = (
@@ -5741,63 +5747,156 @@ const statMks = (
   weight: +(mk1Weight * (i + 1)).toFixed(1),
 }));
 
-// ── Scanner (A4) ────────────────────────────────────────────────────────────
-// A ship module whose MARK widens what the two existing contact readouts —
-// the minimap and the off-screen indicator arrows — are willing to reveal.
-// It is a GATE/EXTENDER over display plumbing that already exists, never a
-// new render system: every mark below names an existing gate and relaxes it.
+// ── SCANNER — a TOOL the player operates (rework, user call 2026-09-06) ───
 //
-// Three rules make it safe to ship long before the things it will eventually
-// reveal exist (the hidden wormholes of the phased plan's G4):
-//   · NO scanner (or one that is adjacency-OFFLINE) degrades to today's
-//     behaviour EXACTLY — every threshold below is `mk >= n`, so 0 relaxes
-//     nothing and the suites written against the current gating still hold.
-//   · Colours stay the INDICATORS type legend's.  A scanner reveals MORE
-//     contacts, never a new KIND of mark.
-//   · There is NO "discovered" state anywhere in here.  The effect is purely
-//     "while installed and active" — discovered-ness is per NODE and belongs
-//     to the later persistence work, so nothing here may grow a flag it
-//     would have to fight.
+// A4 shipped the scanner as a passive gate: install it, and two readouts
+// quietly showed more.  Play-test verdict was that nothing about it read —
+// "unclear what I am unlocking".  The rework makes the scanner the thing
+// that puts contacts on the screen AT ALL, and makes using it an ACTION.
+//
+// Four rules, and all four are reversals of A4:
+//
+//  1. **NOTHING is on the readouts for free.**  With no scanner the HUD has
+//     no off-screen arrows at all and the minimap is blank but for two
+//     landmarks (see SCAN_ALWAYS below).  A4's rule was the opposite — "no
+//     scanner degrades to today's behaviour exactly" — which is what made
+//     the module invisible: it added to a readout that was already full.
+//  2. **A scan is a PING, not a state.**  `GameEngine.fireScan` sends a
+//     wavefront out from the ship at PING_SPEED; a contact the front crosses
+//     is revealed for LINGER_SEC and fades over the last FADE_SEC.  Between
+//     pings the screen is quiet, which is what gives the ping something to
+//     say.
+//  3. **MARKS STACK.**  A4 made the ship's tier the single highest mark
+//     aboard and called the departure from summing deliberate.  It is now
+//     the ordinary summing rule, in the one dimension that matters: RANGE.
+//     See `scanRanges` below for the arithmetic and the worked example.
+//  4. **Every mark adds a CATEGORY and a little RANGE.**  Range is the
+//     headline (a mark is +MARK_RANGE_STEP over the one below, and stacking
+//     is how range really grows); categories are what makes a specific mark
+//     worth buying.
 export const SCANNER = {
-  /** Mk I — MATERIALS: mobile-shard dots on the minimap, on top of whatever
-   *  the DBG "Minimap mat" cycle is drawing (the dots layer already exists
-   *  behind that cycle; the scanner just stops the cycle being the only way
-   *  to get it). */
-  MATERIALS_MK: 1,
-  /** Mk II — ENEMIES at extended range.  Enemy chevrons are range-UNLIMITED
-   *  already (CLAUDE.md §8), so their real range gate is the FADE ramp:
-   *  past ENEMY_FADE_START they dim toward ENEMY_MIN_ALPHA. The scanner
-   *  pushes that ramp out, which is what "extended-range enemy indicators"
-   *  can honestly mean here.  The per-type BUDGETS are untouched — a scanner
-   *  makes far contacts legible, it does not put more arrows on the edge. */
-  ENEMIES_MK: 2,
-  ENEMY_RANGE_MULT: 3,
-  /** Mk III — PORTALS map-wide: lifts PORTAL_CONSTANTS.INDICATOR_RANGE so a
-   *  rift arrow appears from anywhere.  The other two portal-arrow rules are
-   *  deliberately untouched — an on-screen rift still suppresses its arrow,
-   *  and the arrow still prints a NAME and no distance. */
-  PORTALS_MK: 3,
-};
+  /** Marks run I..V.  `statMks` derives the module rows from the cost
+   *  array, so this is the number of entries that array must have. */
+  MAX_MARK: 5,
+  /** Mk I's OWN scan radius, world units.  Every other mark is this scaled
+   *  by MARK_RANGE_STEP per mark above I. */
+  BASE_RANGE: 2200,
+  /** A mark's radius over the mark below it.  Deliberately small (~10%,
+   *  user call): a single mark is a modest reach improvement, and the way a
+   *  player actually buys range is by fitting MORE scanners. */
+  MARK_RANGE_STEP: 1.10,
+  /** How fast the wavefront travels, world units per second.  Sized so the
+   *  longest realistic scan takes a beat rather than a wait — the ring is
+   *  feedback, not a loading bar. */
+  PING_SPEED: 3200,
+  /** How long a contact stays revealed after the front crosses it … */
+  LINGER_SEC: 7,
+  /** … of which this much is spent fading out.  A mark going soft is what
+   *  tells the player it is STALE — the contact has had that long to move. */
+  FADE_SEC: 2.5,
+  /** Minimum seconds between pings.  Short enough not to be a chore, long
+   *  enough that spamming it is not the same as leaving it on. */
+  COOLDOWN_SEC: 2.5,
+  /** The expanding ring's look, shared by the world pass and the minimap so
+   *  the two obviously show the same event.  Deliberately NOT a colour from
+   *  the INDICATORS type legend: the ring is not a contact, it is the
+   *  instrument, and giving it a contact's colour would say it is one. */
+  RING_COLOR: '#67e8f9',
+  RING_ALPHA: 0.55,
+  RING_WIDTH: 3,
+  /** The ring thins as it expands — the same energy over a longer
+   *  circumference — so a long scan ends by dissolving rather than by
+   *  stopping. */
+  RING_MIN_ALPHA_FRAC: 0.15,
+} as const;
 
-/** Shop/inventory blurb per mark — each line names what that mark ADDS on
- *  top of the ones below it, since the marks are cumulative. */
+/** DETECTION TIERS — what each mark adds, and the ONE table that says so.
+ *
+ *  A mark detects its own tier AND every tier below it (user call), so these
+ *  are cumulative by construction: a Mk III sees tiers 1–3.
+ *
+ *  The POI rungs are deliberately populated ahead of the things that will
+ *  fill them.  `GameEntity.poiTier` lets any POI declare its own rung, and
+ *  the default (COMMON) is what every station and portal in the game is
+ *  today — so the hidden wormholes of the phased plan's G4 become a field on
+ *  a portal rather than a change here. */
+export const DETECT_TIER = {
+  /** Mk I — common POIs (every station and portal today) and MATERIALS. */
+  MATERIAL: 1,
+  POI_COMMON: 1,
+  /** Mk II — uncommon POIs and ENEMIES (a boss is an enemy). */
+  ENEMY: 2,
+  POI_UNCOMMON: 2,
+  /** Mk III — rare POIs, RIVALS and FAUNA (bubbles). */
+  RIVAL: 3,
+  FAUNA: 3,
+  POI_RARE: 3,
+  /** Mk IV — secret POIs and DRAGONS (and equivalents to come). */
+  DRAGON: 4,
+  POI_SECRET: 4,
+  /** Mk V — top-secret POIs and the SNITCH (and equivalents to come). */
+  SNITCH: 5,
+  POI_HIDDEN: 5,
+} as const;
+
+/** Shop/inventory blurb per mark.  Each line names what that mark ADDS, since
+ *  a mark carries every tier below it. */
 const SCANNER_MK_DESC: Record<number, string> = {
-  1: 'Material contacts on the minimap',
-  2: '+ long-range enemy indicators',
-  3: '+ portal indicators map-wide',
+  1: 'Detects common POIs + materials',
+  2: '+ enemies, uncommon POIs',
+  3: '+ rivals, fauna, rare POIs',
+  4: '+ dragons, secret POIs',
+  5: '+ snitches, hidden POIs',
 };
 
-/** Does an `mk`-tier scanner draw mobile-shard dots on the minimap? */
-export function scannerShowsMaterials(mk: number): boolean {
-  return mk >= SCANNER.MATERIALS_MK;
+/** One mark's OWN scan radius. */
+export function scannerMarkRange(mk: number): number {
+  return SCANNER.BASE_RANGE * Math.pow(SCANNER.MARK_RANGE_STEP, mk - 1);
 }
-/** Multiplier over the enemy-chevron fade ramp (1 = today's behaviour). */
-export function scannerEnemyRangeMult(mk: number): number {
-  return mk >= SCANNER.ENEMIES_MK ? SCANNER.ENEMY_RANGE_MULT : 1;
+
+/** The ship's scan radius PER TIER, from the marks actually installed and
+ *  active.  Index 0 is unused; 1..MAX_MARK are the tiers.
+ *
+ *  THE RULE: a tier's range is the SUM of the own-ranges of every scanner
+ *  aboard that can see that tier — i.e. every scanner whose mark is at
+ *  least the tier.  Since a high mark sees the low tiers too, low tiers
+ *  accumulate every scanner on the ship and high tiers accumulate only the
+ *  few that reach them, which is the user's stated shape: "these should
+ *  stack their lowest feature's distance as well".
+ *
+ *  Worked example (the user's own): a Mk III plus two Mk I.
+ *    tier 1 — all three qualify → 1.21R + R + R  = 3.21 R
+ *    tier 2 — only the Mk III     → 1.21R          = 1.21 R
+ *    tier 3 — only the Mk III     → 1.21R          = 1.21 R
+ *  … i.e. ~3x reach for Mk I features and ~1x for Mk III features.
+ *
+ *  Returns a fresh array; call it when the outfit changes, never per frame. */
+export function scannerRangesFor(marks: readonly number[]): number[] {
+  const out = new Array<number>(SCANNER.MAX_MARK + 1).fill(0);
+  for (let tier = 1; tier <= SCANNER.MAX_MARK; tier++) {
+    let sum = 0;
+    for (let i = 0; i < marks.length; i++) {
+      if (marks[i] >= tier) sum += scannerMarkRange(marks[i]);
+    }
+    out[tier] = sum;
+  }
+  return out;
 }
-/** Does an `mk`-tier scanner lift the portal chevron's range gate entirely? */
-export function scannerShowsPortalsMapWide(mk: number): boolean {
-  return mk >= SCANNER.PORTALS_MK;
+
+/** How strongly a contact detected `age` seconds ago should draw: full until
+ *  the fade window, then down to nothing at LINGER_SEC.  Past that it is not
+ *  drawn at all, so this returning 0 and the caller skipping agree.
+ *
+ *  Pure and published on `__omniHud` for exactly the `computeIndicatorRect`
+ *  reason: it exists only as a `globalAlpha`, so a wrong ramp — marks that
+ *  never fade, or that vanish the instant they appear — throws nothing and
+ *  logs nothing. */
+export function detectionAlpha(age: number): number {
+  const { LINGER_SEC, FADE_SEC } = SCANNER;
+  if (age < 0 || age >= LINGER_SEC) return 0;
+  const solid = LINGER_SEC - FADE_SEC;
+  if (age <= solid) return 1;
+  return 1 - (age - solid) / FADE_SEC;
 }
 
 export const MODULE_DEFS: readonly ModuleDef[] = [
@@ -5810,7 +5909,11 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
   { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
-  ...statMks('scanner', 'ship', 'ship', 'Scanner', mk => SCANNER_MK_DESC[mk], [7000, 17500, 32000], mk => ({ scannerMk: mk }), 0.25),
+  // FIVE marks (rework).  Prices climb steeply because marks STACK now:
+  // a second Mk I is a real range purchase, so the high marks have to be
+  // priced against buying several low ones rather than against each other.
+  ...statMks('scanner', 'ship', 'ship', 'Scanner', mk => SCANNER_MK_DESC[mk],
+    [7000, 17500, 32000, 55000, 90000], mk => ({ scannerMk: mk }), 0.25),
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
@@ -7231,28 +7334,45 @@ export function computeIndicatorRect(
   return { left, right, top, bottom };
 }
 
-/** Opacity of one off-screen ENEMY chevron at world distance `dist`, for a
- *  ship carrying an `mk`-tier Scanner (0 = none).
+/** Which DETECTION TIER a contact belongs to — the ONE place that answers
+ *  "what mark of scanner finds this", so the arrows and the minimap cannot
+ *  disagree about it.  0 means "not a scannable contact" (drops, debris,
+ *  projectiles, the player's own hull).
  *
- *  Enemy chevrons are range-UNLIMITED by design (CLAUDE.md §8) — every live
- *  enemy is findable — so the range gate they actually have is this FADE:
- *  full strength inside ENEMY_FADE_START, dimming to ENEMY_MIN_ALPHA by
- *  ENEMY_FADE_END.  A Scanner Mk II pushes both ends out, which is what
- *  "extended-range enemy indicators" (A4) can honestly mean for a readout
- *  that never culled anything in the first place.  Budgets are untouched.
+ *  A POI may name its own rung via `GameEntity.poiTier`; everything shipped
+ *  today is COMMON, and that field is the seam a hidden wormhole would use.
  *
- *  Pure and exported on exactly the `computeIndicatorRect` rationale: it
- *  exists only as a `globalAlpha` inside a draw call, so a wrong ramp — a
- *  scanner tier that reveals nothing, or one that reveals at the wrong
- *  mark — throws nothing and logs nothing.  `__omniHud` publishes it. */
-export function enemyIndicatorAlpha(dist: number, mk: number): number {
-  const { ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA } = UI_CONSTANTS.INDICATORS;
-  const mult = scannerEnemyRangeMult(mk);
-  const start = ENEMY_FADE_START * mult;
-  const end = ENEMY_FADE_END * mult;
-  if (dist <= start) return 1;
-  const ff = Math.min(1, (dist - start) / (end - start));
-  return 1 - ff * (1 - ENEMY_MIN_ALPHA);
+ *  Order matters — the specific roamers are tested BEFORE the generic ENEMY
+ *  arm, because a dragon head, a rival and a bubble are all `EntityType.ENEMY`
+ *  and each is a rarer find than an ordinary hostile. */
+export function detectTierFor(e: GameEntity): number {
+  if (e.isStation === true || e.isPortal === true) return e.poiTier ?? DETECT_TIER.POI_COMMON;
+  if (e.isSnitch === true) return DETECT_TIER.SNITCH;
+  if (e.type === EntityType.ENEMY) {
+    if (e.enemySubtype === EnemySubtype.DRAGON) return DETECT_TIER.DRAGON;
+    if (e.isRival === true) return DETECT_TIER.RIVAL;
+    if (e.enemyShape === 'bubble') return DETECT_TIER.FAUNA;
+    return DETECT_TIER.ENEMY;
+  }
+  // MATERIALS: mobile shards only.  A static tile is terrain, not a contact
+  // — the minimap draws it as the pre-rendered ground layer and no arrow has
+  // ever pointed at one.
+  if (e.type === EntityType.STRUCTURE && Number.isFinite(e.mass)
+      && e.dragonSegment !== true) return DETECT_TIER.MATERIAL;
+  return 0;
+}
+
+/** The two landmarks that are on the minimap WITHOUT a scanner (user call):
+ *  the player's home station, and the rift they arrived through — "if the
+ *  player finds a portal in the home arena and travels through it, that
+ *  return portal will appear on the minimap".
+ *
+ *  Note what this does NOT grant: an always-charted landmark gets a minimap
+ *  mark and never an ARROW.  The HUD's off-screen arrows are the scanner's
+ *  alone, so a scannerless ship is told where home is and nothing else. */
+export function isAlwaysCharted(e: GameEntity, arrivalPortalId: string | null): boolean {
+  if (e.isStation === true && e.stationKind === 'home') return true;
+  return e.isPortal === true && arrivalPortalId !== null && e.id === arrivalPortalId;
 }
 
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {

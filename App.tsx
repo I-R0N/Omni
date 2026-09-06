@@ -4,7 +4,7 @@ import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
-         enemyIndicatorAlpha,
+         detectionAlpha,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
          grainSpecFor, grainLadder, grainTableValue, type GrainKnob } from './constants';
 import UIOverlay from './components/UIOverlay';
@@ -86,11 +86,11 @@ const App: React.FC = () => {
     // visible at the one viewport the suites used to run at.  Exposing the
     // three functions lets the viewport matrix pin them at every width without
     // sampling pixels off a starfield.  Nothing in the game reads this.
-    // `enemyIndicatorAlpha` (A4) joins them on identical terms: the Scanner's
+    // `detectionAlpha` (A4) joins them on identical terms: the Scanner's
     // extended enemy range is a FADE ramp that exists only as a globalAlpha
     // inside the draw, so a tier that reveals nothing — or reveals at the
     // wrong mark — is silent.
-    (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect, enemyIndicatorAlpha };
+    (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect, detectionAlpha };
     // Debug handle #4: the menu driver's geometric step rule, so a suite can
     // pin it against a synthetic layout instead of against whatever the menu
     // happens to contain this week.
@@ -741,6 +741,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.resetOutfit();
   };
 
+  const handleScan = () => {
+      if (engineRef.current) engineRef.current.fireScan();
+  };
+
   const handleAddCredits = () => {
       if (engineRef.current) engineRef.current.addDebugCredits(1_000_000);
   };
@@ -1021,6 +1025,7 @@ const App: React.FC = () => {
         onCycleSlotLock={() => engineRef.current?.dbg.cycleSlotLock()}
         onOutfitAll={handleOutfitAll}
         onResetOutfit={handleResetOutfit}
+        onScan={handleScan}
         onAddCredits={handleAddCredits}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
