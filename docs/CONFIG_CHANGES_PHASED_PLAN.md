@@ -236,10 +236,12 @@ and the hex-flower UI rendering locked hexes for unpurchased slots.
 semantics; if it starts pulling the adjacency table apart, park it into
 Phase D where the ship catalog will rebuild that layer anyway.
 
-**Phase A exit gate**: all three validation gates green (`typecheck`,
-`build`, full `npm test`), `CLAUDE.md` updated per element, then merge this
-branch to `claude/plan-completion` and proceed with the `plan-completion` →
-`main` merge.
+**Phase A exit gate**: all three validation gates green — `typecheck`,
+`build`, and the FULL test suite, which since PR #97 is
+**`npm run test:full`** (`npm test` now runs only the boot/loop SMOKE
+scope; do not read a green `npm test` as full validation) — `CLAUDE.md`
+updated per element, then merge this branch to `claude/plan-completion`
+and proceed with the `plan-completion` → `main` merge.
 
 ---
 
@@ -399,8 +401,12 @@ first (don't build an ecology on top of a physics bug).
   ecology will either die out or explode (measure in the gauntlet).
 - **E3 — Hive.**  A hive structure entity per bubble family; adults
   periodically return and deposit growth (size shed → hive growth).
-  This is also the natural fix-forever for A2's mass concern: growth
-  leaves the bubble and enters the hive.
+  **Corrected by A2's landed finding:** there was no runaway-mass concern
+  for the hive to fix — a bubble's `mass` is a CONSTANT (9) at every size,
+  because the consume config never set `massPerEat`; the immovability bug
+  was the AI speed cap deleting collision recoil, and it is fixed.  What
+  the hive design inherits instead is a deliberate open question: §5
+  decision #14 (should mass scale with size at all?).
 - **E4 — Invasive elders + storyline.**  Slow, extremely-high-HP (finite,
   ~"hard even for the best loadout") elder assemblers seeded in overworld
   + home arena.  Tie into the C2 colony-defense pressure loop.
@@ -598,6 +604,17 @@ Added from `MATERIAL_GRAIN_SPEC.md` (PR #91):
     rendering-cost work into Phase B (the spec's §4 costs it honestly);
     not commissioning it means B2's material taxonomy must not collide
     with the one Tier C would introduce.
+
+Added from A2's landed root-cause finding (PR #97):
+
+14. **(E2/E3) Bubble mass model.**  Measured during A2: a bubble's `mass`
+    is a constant 9 for its whole life — a 58-unit blob weighs exactly
+    what a 15-unit one does, because the consume config never set
+    `massPerEat`.  Phase E must decide deliberately whether mass scales
+    with size (and if so, whether hive deposits shed it) or stays
+    decoupled; today's behaviour is an accident, not a choice, and the
+    dimorphism design (males stronger/slower, females faster/weaker)
+    wants a real answer.
 
 ## 6. Naming note
 
