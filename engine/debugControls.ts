@@ -29,7 +29,8 @@ import {
     NEBULA_CONSTANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS,
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
-    cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize, togglePlasticAutomataBrighten,
+    cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
+    cycleNebulaDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
@@ -790,6 +791,33 @@ export class DebugControls {
    */
   cycleNebulaStretch() {
     cycleNebulaStretch();
+  }
+
+  /**
+   * DBG: how fast a nebula shard bleeds off speed (NEBULA_DAMP_CYCLE).
+   *
+   * A multiplier on the per-step velocity LOSS, applied where PhysicsSystem
+   * reads the damping factor — so a click slows every puff already drifting,
+   * not just the next shatter.  Nebula-only: the damping fields are generic
+   * and other shard families set them too.
+   */
+  cycleNebulaDamp() {
+    cycleNebulaDamp();
+  }
+
+  /**
+   * DBG: how hard a touching pair of nebula shards grips (NEBULA_BOND_CYCLE).
+   *
+   * Named steps rather than one number, because three terms have to move
+   * together to produce a readable behaviour: the cohesion blend rate (does
+   * the pair come to a shared velocity), the break distance (does the bond
+   * survive), and an inner range inside which the self-gravity stops pulling
+   * so cohesion is not fighting it at contact — the last being the trick
+   * plastic already carries and nebula never had.  'strong' is plastic's own
+   * shipped pair, so the two materials can be compared at the same grip.
+   */
+  cycleNebulaBond() {
+    cycleNebulaBond();
   }
 
   /**

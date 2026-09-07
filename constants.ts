@@ -4695,6 +4695,112 @@ export function cycleNebulaSpriteSize(): number {
   return activeNebulaSpriteIndex;
 }
 
+// ── NEBULA FEEL: DAMPING AND BONDING (user call) ───────────────────
+// Two knobs for one complaint — nebula shards read as a jittery swarm
+// rather than a fluid cloud — because MEASUREMENT says it has two causes
+// and they need separating on a device.
+//
+// What was measured, on NEBULA_FIELD with 40 tiles broken at the player:
+// shard speed does NOT settle.  Mean speed over 8 s went 2.25 -> 1.30 ->
+// 1.36 -> 1.53 -> 1.69 -> 1.70, with a MAX around 20 (the player's own
+// cruise is ~33).  Damping alone cannot be the whole story, because
+// something keeps putting the speed back: the variant's own self-gravity
+// (`attractedTo: 'self'`, strength 380 over a 380 range) accelerates every
+// puff toward its neighbours right up to the moment of contact.  Live bond
+// count over the same window went 7 -> 11 -> 13 -> 102 -> 42 -> 20: bonds
+// form in crowds and then snap, because a pair arriving at speed separates
+// past the break distance before its cohesion can pull it into step.
+//
+// PLASTIC ALREADY SOLVED THE SECOND HALF and nebula never got it.  Its
+// merge config carries `pullInnerRange: 80` with the comment "turns the
+// gravity OFF inside ~contact distance ... so bond cohesion takes over
+// cleanly at close range instead of fighting the pull", plus the strong
+// tier's cohesion and break-distance multipliers.  Nebula has no inner
+// range at all, so its pull and its cohesion fight all the way in.
+//
+// Hence: DAMP is the "how fast does a puff bleed off speed" dial, BOND is
+// the "does a touching pair behave as one body" dial, and they are
+// separate because the fix might be either or both.
+//
+// BOTH ARE APPLIED AT THE READ, never baked onto a shard at spawn — the
+// same rule the portal knobs follow — so a click re-tunes every puff
+// already drifting instead of only the next shatter.
+
+interface NebulaDampStep { readonly name: string; readonly lossMult: number; }
+
+// A multiplier on the per-step velocity LOSS, not on the retention factor:
+// damping is `v *= d^timeScale` with d = LINEAR_DAMPING, so the thing that
+// means "more damping" is (1 - d) going up.  Stated this way the ladder is
+// a plain number line — 2x really is twice the drag — where multiplying `d`
+// itself would be backwards and non-linear.
+export const NEBULA_DAMP_CYCLE: ReadonlyArray<NebulaDampStep> = [
+  { name: '1x (old)', lossMult: 1   },
+  { name: '1.5x',     lossMult: 1.5 },
+  { name: '2x',       lossMult: 2   },
+  { name: '3x',       lossMult: 3   },
+  { name: '5x',       lossMult: 5   },
+];
+let activeNebulaDampIndex = 0;
+
+export function getActiveNebulaDampMult(): number {
+  return NEBULA_DAMP_CYCLE[activeNebulaDampIndex].lossMult;
+}
+export function getActiveNebulaDampName(): string {
+  return NEBULA_DAMP_CYCLE[activeNebulaDampIndex].name;
+}
+export function cycleNebulaDamp(): number {
+  activeNebulaDampIndex = (activeNebulaDampIndex + 1) % NEBULA_DAMP_CYCLE.length;
+  return activeNebulaDampIndex;
+}
+
+/** The damping factor a nebula shard actually gets, from the authored base
+ *  and the live knob.  Clamped above 0 so a large multiplier cannot invert
+ *  the sign of the retention factor and fling a puff backwards. */
+export function nebulaDampingFor(base: number): number {
+  const m = getActiveNebulaDampMult();
+  if (m === 1) return base;
+  return Math.max(0.001, 1 - (1 - base) * m);
+}
+
+interface NebulaBondStep {
+  readonly name: string;
+  /** Multiplier on the cohesion blend rate — how fast a bonded pair comes
+   *  to a shared velocity.  This is the "behaves as one body" term. */
+  readonly cohesionMul: number;
+  /** Multiplier on the break distance — how far a bonded pair may separate
+   *  before the bond snaps. */
+  readonly breakMul: number;
+  /** Distance inside which the self-gravity stops pulling, so cohesion has
+   *  the close range to itself (plastic's `pullInnerRange` trick).  0 keeps
+   *  today's behaviour: pull all the way to contact. */
+  readonly pullInner: number;
+}
+
+// Named steps rather than a bare multiplier, because the three terms move
+// together and a pair of them alone does not produce a readable behaviour:
+// a long break distance with weak cohesion just means a pair that stays
+// nominally bonded while still jittering.  'strong' is deliberately
+// plastic's own shipped pair (3.0 / 4.0) so the two materials can be
+// compared at the same grip.
+export const NEBULA_BOND_CYCLE: ReadonlyArray<NebulaBondStep> = [
+  { name: 'off (old)', cohesionMul: 1, breakMul: 1, pullInner: 0   },
+  { name: 'firm',      cohesionMul: 2, breakMul: 2, pullInner: 60  },
+  { name: 'strong',    cohesionMul: 3, breakMul: 4, pullInner: 80  },
+  { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110 },
+];
+let activeNebulaBondIndex = 0;
+
+export function getActiveNebulaBond(): NebulaBondStep {
+  return NEBULA_BOND_CYCLE[activeNebulaBondIndex];
+}
+export function getActiveNebulaBondName(): string {
+  return NEBULA_BOND_CYCLE[activeNebulaBondIndex].name;
+}
+export function cycleNebulaBond(): number {
+  activeNebulaBondIndex = (activeNebulaBondIndex + 1) % NEBULA_BOND_CYCLE.length;
+  return activeNebulaBondIndex;
+}
+
 // ── DBG: SCANNING OFF, EVERYTHING REVEALED ─────────────────────────
 // A perf A/B, not a gameplay knob.  The scanner does a lot of continuous
 // work — `discoverStructures` walks a 900-unit radius of the static grid

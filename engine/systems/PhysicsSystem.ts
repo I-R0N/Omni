@@ -3,6 +3,7 @@
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
+import { nebulaDampingFor } from '../../constants';
 import { pointInPolygon } from './fracture';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
@@ -593,8 +594,18 @@ export class PhysicsSystem {
             // today, future variants opt in via the same per-entity
             // field at spawn time).  Falls back to NEBULA_CONSTANTS
             // values for entities that don't set them.
-            const linearD = entity.linearDamping;
-            const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
+            // DBG "Neb damp" applies HERE, at the read, so a click re-tunes
+            // every puff already drifting rather than only the next shatter.
+            // Nebula-only: the damping fields are generic and plastic /
+            // metal shards set them too, so the knob has to name its
+            // material or it becomes a global drag dial.
+            const isNebulaBody = entity.shardVariant === 'nebula-shard';
+            const linearD = isNebulaBody
+                ? nebulaDampingFor(entity.linearDamping)
+                : entity.linearDamping;
+            const angularD = isNebulaBody
+                ? nebulaDampingFor(entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING)
+                : (entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING);
             const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
             const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;
             const lin = Math.pow(linearD, timeScale);

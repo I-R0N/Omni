@@ -142,6 +142,8 @@ interface UIOverlayProps {
   onCycleNebulaStretch?: () => void;
   onCycleNebulaSpriteSize?: () => void;
   onToggleScanReveal?: () => void;
+  onCycleNebulaDamp?: () => void;
+  onCycleNebulaBond?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
@@ -472,6 +474,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaStretch,
   onCycleNebulaSpriteSize,
   onToggleScanReveal,
+  onCycleNebulaDamp,
+  onCycleNebulaBond,
   onCycleShatterGrace,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
@@ -2068,6 +2072,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Scan off', onToggleScanReveal,
                   stats.scanRevealAll === true ? 'REVEALED' : 'Off',
                   'PERF A/B. Stops the scanner\u2019s periodic work \u2014 the discovery walk (a 900-unit sweep of the static grid plus the whole mobile-shard list, on the discover cadence) and the auto sweep \u2014 and reveals every tile and contact on the minimap in exchange, so you are not measuring blind. Off-screen arrows and a pressed scan still work.')}
+                {ctrlRow('Neb damp', onCycleNebulaDamp,
+                  stats.nebulaDampName ?? '1x (old)',
+                  'How fast a nebula shard bleeds off speed \u2014 a multiplier on the per-step velocity LOSS (1x / 1.5x / 2x / 3x / 5x). Applied where the damping factor is read, so a click slows every puff already drifting. Measured baseline: shard speed does not settle, hovering ~1.3-1.7 with a max near 20.')}
+                {ctrlRow('Neb bond', onCycleNebulaBond,
+                  stats.nebulaBondName ?? 'off (old)',
+                  'How hard a touching pair of nebula shards grips: cohesion blend rate, break distance, and an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact. \u201cstrong\u201d is plastic\u2019s own shipped grip. Measured baseline: live bonds churn 7 \u2192 102 \u2192 20 as pairs form and snap.')}
                 {ctrlRow('Neb sprite', onCycleNebulaSpriteSize,
                   stats.nebulaSpriteName ?? '1x (ships)',
                   'Cycle how far a nebula sprite overhangs the body it belongs to — a multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE (0.75× / 1× / 1.25× / 1.5× / 2×). Every puff is drawn at its own size × this, so the whole cloud layer scales together and a click lands on clouds already in the world.')}

@@ -33,7 +33,7 @@ import {
   HOTSPOT_COLLAPSE,
   METAL_ASSEMBLY,
   METAL_MAX_DENSITY_TIER,
-  getActiveShatterGraceDelay,
+  getActiveShatterGraceDelay, getActiveNebulaBond,
   getActiveFractureMode,
   GLASS_SHARD_HP,
   METAL_SHARD_HP,
@@ -1791,7 +1791,16 @@ export class ShardSystem {
       // Per-bond break-factor multiplier — 'strong' tier partners
       // (set at formation time) tolerate larger separation before
       // the bond snaps.
-      const breakFactor = BREAK_FACTOR * (bond.breakFactorMul ?? 1);
+      //
+      // DBG "Neb bond" rides on top, AT THE READ rather than at formation:
+      // the per-bond multipliers above are stamped when a bond forms, so a
+      // knob that only wrote them would leave every bond already in the
+      // world at the old grip and take a full shatter to show.  A
+      // nebula-to-nebula pair is the only thing it touches.
+      const nebPair = a.shardVariant === 'nebula-shard' && b.shardVariant === 'nebula-shard';
+      const nebBond = nebPair ? getActiveNebulaBond() : null;
+      const breakFactor = BREAK_FACTOR * (bond.breakFactorMul ?? 1)
+          * (nebBond !== null ? nebBond.breakMul : 1);
       if (dist > contactDist * breakFactor) continue; // bond broken
 
       // Velocity cohesion: nudge both toward shared momentum centre.
@@ -1805,7 +1814,8 @@ export class ShardSystem {
       // bleeds toward zero (the tile's "shared velocity").  The
       // mass-weighted formula would NaN with ∞, so we branch.
       if (applyCohesion) {
-        const cohesionRate = COHESION * (bond.cohesionMul ?? 1);
+        const cohesionRate = COHESION * (bond.cohesionMul ?? 1)
+            * (nebBond !== null ? nebBond.cohesionMul : 1);
         const blend        = Math.min(1, cohesionRate * dt);
         if (a.mass === Infinity && b.mass !== Infinity) {
           b.velocity.x += (0 - b.velocity.x) * blend;
@@ -2095,7 +2105,13 @@ export class ShardSystem {
             if (wantsPull && bVariantId !== null) {
               const pullRange  = aVariant!.merge.pullRange ?? CELL;
               const pullRangeSq = pullRange * pullRange;
-              const pullInner    = aVariant!.merge.pullInnerRange ?? 0;
+              // DBG "Neb bond" can hand nebula the inner range plastic already
+              // has: inside it the self-gravity stops pulling, so cohesion
+              // owns the close range instead of fighting a pull that is still
+              // accelerating the pair together at the moment they touch.
+              const nebPull = a.shardVariant === 'nebula-shard'
+                  ? getActiveNebulaBond().pullInner : 0;
+              const pullInner    = Math.max(aVariant!.merge.pullInnerRange ?? 0, nebPull);
               const pullInnerSq  = pullInner * pullInner;
               const targetCooldownOk = (b.nebulaMergeCooldown ?? 0) <= 0;
               const matchesPull = aVariant!.merge.attractedTo !== 'none'

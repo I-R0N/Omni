@@ -2040,6 +2040,10 @@ export interface EngineStats {
   nebulaSpriteName?: string;
   /** DBG readout: true while scanning is off and the whole map is revealed. */
   scanRevealAll?: boolean;
+  /** DBG readout: the nebula damping step (NEBULA_DAMP_CYCLE). */
+  nebulaDampName?: string;
+  /** DBG readout: the nebula bonding step (NEBULA_BOND_CYCLE). */
+  nebulaBondName?: string;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards
   // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
   shatterGraceName?: string;
