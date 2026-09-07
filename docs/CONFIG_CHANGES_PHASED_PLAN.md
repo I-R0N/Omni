@@ -106,7 +106,9 @@ or (b) drops cleanly into an existing seam without prejudging the Phase B–D
 redesigns.  Everything here is a bounded session, **not** a gauntlet —
 except that A1+A2 together may warrant a short bubble-behavior mini-gauntlet
 if the A2 root-cause turns out to be systemic.  (It did not — see A2 below.
-A1+A2 have LANDED; A3 and A4 follow in their own sessions.)
+A1+A2 have LANDED via PR #97, and A3+A4+A5 via PR #96 — **Phase A is
+COMPLETE**; what remains is the `plan-completion` → `main` merge, with the
+FULL suite run at that seam per the clarified rule in CLAUDE.md §7.)
 
 ### ~~A1 — Bubble aggro timeout~~  *(bug/behavior fix, small)*  — **LANDED**
 
@@ -178,7 +180,16 @@ root, add a regression test that pins the post-detach collision impulse on
 the player (the physics handles let a test call
 `physics.resolveCollision` in situ).
 
-### A3 — Penetration module  *(module catalog row, small)*
+### ~~A3 — Penetration module~~  *(module catalog row, small)*  — **LANDED**
+
+> **Shipped** via PR #96.  As briefed (+1 pierce per mark, Mk I–III,
+> uniform across every gun, `statBreakdown` attribution, adjacency), plus
+> a richer spend model the session grew under user review: inside a grain
+> body a charge buys a GRAIN, not a tile; damage falloff is a DBG-tunable
+> RATE that SHIPS AT 0 (a thing to be judged, not a balance statement);
+> the Laser's own pierce went 99 → 4 now that piercing can carry a cost;
+> and pierce is a lifetime budget — ricochets buy coverage, never extra
+> damage events.  Full detail in CLAUDE.md §5.
 
 `pierce` already exists per-weapon (`WEAPONS[*].pierce`,
 `GameEntity.pierceCount` / `hitEntityIds` in ProjectileSystem).  **Change**:
@@ -196,7 +207,33 @@ should either be excluded or accept the bonus with eyes open (recommend:
 bonus applies to all guns uniformly; the weapon×trait table in
 WEAPONS_AMMO_PLAN §7 stays the balance reference).
 
-### A4 — Scanner module family  *(module + HUD gating, medium)*
+### ~~A4 — Scanner module family~~  *(module + HUD gating, medium)*  — **LANDED, REWORKED**
+
+> **Shipped** via PR #96 — but the brief below did not survive play-test
+> (user verdict: a passive gate that widened two already-full readouts
+> "read as nothing"), and the landed scanner deliberately REVERSES most
+> of it.  Read CLAUDE.md §5 (`SCANNER` / `DETECT_TIER`) as the truth;
+> the reversals worth knowing here:
+> - **The map is FOUND, not given.**  With no scanner there are NO
+>   off-screen arrows at all — the exact opposite of this element's
+>   "degrade to today's behaviour exactly" rule.  A scannerless ship gets
+>   natural encounter (naked-eye range) plus retained landmarks; the
+>   minimap's terrain layer starts EMPTY and is charted as played.
+> - **A scan is a PING** the player fires (Q / pad L1 / HUD button), with
+>   freshness fade — plus an auto-sweep at Mk II+.
+> - **Range STACKS across scanners** (reversing the no-stack rule);
+>   category does not — highest mark aboard wins.
+> - **Five marks (Mk I–V)**, each adding a detection CATEGORY —
+>   and the top rungs are populated AHEAD of content: Mk IV = secret
+>   POIs, Mk V = hidden POIs, via a `GameEntity.poiTier` field.
+>   **Consequence for G4** (hidden wormholes): the reveal mechanism now
+>   already exists — G4 becomes a `poiTier` FIELD ON A PORTAL plus the
+>   discovery-cue work, not a scanner change.  Concealment
+>   (`ENCOUNTER_MAX_POI_TIER`) already exempts high-tier POIs from
+>   natural encounter, so "hidden" has a mechanism today.
+> - The forward constraint below half-survives: there is deliberately NO
+>   discovered-state persistence in it (`found` lives per map instance;
+>   stamps expire) — per-NODE memory still belongs to G1/F as planned.
 
 A ship module (`utility` family, like the Light) whose levels widen what
 the minimap + off-screen indicators reveal.  The display plumbing all
@@ -224,7 +261,16 @@ state is **per node**, so when G4 lands it becomes a consumer of node
 identity (G1) and persistence (F1/F2), never a render-side flag — don't
 build A4 state anywhere that would fight that.
 
-### A5 — Purchasable module slots (stretch, only if Phase A goes fast)
+### ~~A5 — Purchasable module slots~~ (stretch)  — **LANDED**
+
+> **Shipped** via PR #96, and the abort rule was never triggered: a
+> LOCKED hex is an empty hex, and empty hexes were always invisible to
+> the adjacency fixpoint — so `HEX_ADJACENCY` / `computeActiveSlots` are
+> untouched and the whole feature is one destination guard plus inert UI
+> hexes.  `MODULE_SLOT_UNLOCK.START` equals the cap today, so a shipped
+> run is unchanged; the unlock count is the SEAM for Phase D's ship
+> catalog (D2), exactly as `SHIP_WEIGHT.HULL_BASE` is.  DBG ▸ Modules ▸
+> "Lock slots" makes the locked state reachable in play.
 
 The request ("stations sell new module slots, capped per ship") is really
 the first brick of Phase D's ship catalog.  A pre-merge version can stay
@@ -477,8 +523,15 @@ section says where each piece sits in the phase order and points there.
   The leaf-node door: a portal with no label, no off-screen chevron and no
   minimap blip until discovered — found from the physics the engine
   already simulates (matter spiralling in, ejected objects flung back
-  out, the star lens, the pull).  A4's scanner is the reveal mechanism;
-  discovered-state is per node (G1 + F1/F2).  Known tension to resolve by
+  out, the star lens, the pull).  **Scope shrank with PR #96's scanner
+  rework:** the reveal mechanism already ships — `GameEntity.poiTier`
+  rungs Mk IV (secret) / Mk V (hidden) exist in `DETECT_TIER`, and
+  `ENCOUNTER_MAX_POI_TIER` already exempts high-tier POIs from natural
+  encounter — so the mechanical half of G4 is stamping `poiTier` on a
+  wormhole portal.  What remains G4's real work is the discovery-cue
+  tuning below and per-node discovered-state (the landed scanner
+  deliberately keeps no persistence; `found` dies with the map instance,
+  so remembering a found wormhole across visits needs G1 + F1/F2).  Known tension to resolve by
   play-test, not on paper: the shipped well was retuned DOWN (SIZE 70 /
   g1500 / range 525; peak pull 0.15 px/step) because it read as too
   powerful, and the same subtlety makes a rift hard to spot — the portal
