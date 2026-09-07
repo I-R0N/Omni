@@ -852,6 +852,14 @@ export class ShardSystem {
       }
       const dent = variant.dent;
       if (dent !== undefined && dent.breakShards.length > 0) return;
+      // A 'voronoi' variant under the legacy A/B falls back to the path it
+      // had BEFORE it was opted in, which for nebula is its own rear-cone
+      // fan — not the generic scatter pipeline.  `style` is what says so,
+      // and it is why nebula keeps carrying its powerlaw fields.
+      if (variant.shatter.style === 'nebula') {
+        this.shatterNebulaStyle(parent, variant, entities);
+        return;
+      }
       this.shatterPowerlawStyle(parent, variant, entities);
       return;
     }
@@ -896,6 +904,14 @@ export class ShardSystem {
     if (dentOverride !== undefined) return dentOverride;
     if (childVariantId === 'glass-shard') return GLASS_SHARD_HP;
     if (childVariantId === 'metal-shard') return METAL_SHARD_HP;
+    // Nebula is 1 HP by design, at every size: a cloud shard is
+    // indestructible from the player's side (`shatter.kind: 'none'`) and
+    // dies only to the contact-shatter path, which does not read a pool.
+    // Named here rather than left to the size-keyed default below —
+    // falling through that default with no branch is exactly what gave
+    // metal a 1-HP grain, and a 2-HP nebula shard would make it eligible
+    // for a damage-crack overlay it has no way to draw.
+    if (childVariantId === 'nebula-shard') return 1;
     const baseHp = newSize > 30 ? 2 : 1;
     return densityTier !== undefined
       ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
@@ -1024,7 +1040,7 @@ export class ShardSystem {
       }
 
       const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
-      entities.push({
+      const child: GameEntity = {
         id:            nextId('shard'),
         type:          EntityType.STRUCTURE,
         shardVariant:  childVariant.id,
@@ -1051,10 +1067,51 @@ export class ShardSystem {
         restSpeed:      childSpawn.restSpeed,
         restSpin:       childSpawn.restSpin,
         collapseGraceTimer: getActiveShatterGraceDelay(),
-      });
+      };
+      if (childVariant.id === 'nebula-shard') {
+        ShardSystem.stampNebulaChild(parent, child, parentVariant, impactSpeed);
+      }
+      entities.push(child);
     }
 
     this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
+  }
+
+  /**
+   * Carry a nebula parent's OWN state onto a voronoi fragment.
+   *
+   * The voronoi child recipe above is deliberately material-agnostic —
+   * geometry, mass, HP, motion — and nebula is the one family whose
+   * identity does not live in any of those: its colour is per-BODY
+   * (`nebulaColorComposition`, blended from a palette rather than
+   * declared by the variant), its birth is a FADE rather than a pop, and
+   * its merge pipeline reads a cooldown and a grid coordinate.  Without
+   * this stamp a fragment would spawn the right shape in the wrong
+   * colour, pop in, and be eligible to re-merge on the frame it was born.
+   *
+   * The fade duration is scaled by the impact exactly as
+   * `shatterNebulaStyle` scales it, so a fast smash still fades in fast:
+   * the parent's own fade-OUT rate is scaled the same way in
+   * PhysicsSystem, and the two crossfade.
+   */
+  private static stampNebulaChild(
+    parent: GameEntity,
+    child: GameEntity,
+    parentVariant: ShardVariantDef,
+    impactSpeed: number,
+  ): void {
+    const composition = parent.nebulaColorComposition;
+    if (composition !== undefined) {
+      child.nebulaColorComposition = cloneComposition(composition);
+      child.color = blendCompositionToHex(composition) || child.color;
+    }
+    const fadeInBase = parentVariant.shatter.fadeInSeconds ?? NEBULA_CONSTANTS.FADE_IN_DURATION;
+    const duration = fadeInBase / nebulaFadeRateScale(impactSpeed);
+    child.nebulaSpawnTimer = duration;
+    child.nebulaSpawnDuration = duration;
+    child.nebulaMergeCooldown = parentVariant.shatter.postShatterMergeCooldown ?? 0;
+    child.nebulaGridCol = parent.nebulaGridCol;
+    child.nebulaGridRow = parent.nebulaGridRow;
   }
 
   /**

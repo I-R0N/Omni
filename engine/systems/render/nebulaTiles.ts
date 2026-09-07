@@ -24,9 +24,8 @@
  */
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity } from '../../../types';
-import { NEBULA_CONSTANTS, getActiveNebulaStretchK } from '../../../constants';
+import { NEBULA_CONSTANTS, getActiveNebulaStretchK, nebulaSpriteSize } from '../../../constants';
 import { blendCompositionToHex } from '../../NebulaColor';
-import { HEX_AREA } from '../../maps/TileGenerator';
 import { hexToRgb, densityTintForRender } from './drawUtils';
 
 /** FAST PATH for a steady-state nebula tile.  Returns true when it drew, so
@@ -220,20 +219,17 @@ export function drawNebulaEntity(
         }
         if (tinted) {
             const isTile = entity.shardVariant === 'nebula-tile';
-            // Sprite size is proportional to the effective nebula
-            // area the entity carries.  A fresh shard from a 5-way
-            // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
-            // half-merged shard draws ≈ 68; a full tile draws at
-            // the reference size (96).  Using sqrt keeps visual
-            // area (∝ sprite²) proportional to effective area, so
-            // what the player sees matches the conserved mass
-            // accounting used for merge → transmutation.  Legacy
-            // entities without nebulaTileArea fall back to a full
-            // tile sprite.
-            const effArea = entity.nebulaTileArea ?? HEX_AREA;
-            const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
-            const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                * Math.sqrt(areaRatio);
+            // THE SPRITE IS SIZED FROM THE BODY IT BELONGS TO — its own
+            // diameter times the authored overhang (see
+            // NEBULA_CONSTANTS.SPRITE_OVERSIZE, which also carries why the
+            // old `nebulaTileArea` rule was replaced: that field is set at
+            // exactly one site and no shard ever had one, so every shard
+            // drew a full-tile sprite whatever its size).  Since the
+            // shatter conserves size² across the pieces, visual area still
+            // tracks the mass accounting the merge → transmutation path
+            // uses — the same property the area rule was reaching for,
+            // now from an input that is always present.
+            const drawSize = nebulaSpriteSize(entity);
             // Content-centroid correction: shift the draw so the
             // sprite's visible-pixel centroid lands on the pivot.
             // Without this, asymmetric source PNGs appear to orbit
@@ -382,13 +378,11 @@ export function drawNebulaEntity(
                     const star = rs.getTwinkleBitmap();
                     // Place the star within the sprite footprint —
                     // half-extent × placement-range keeps it inside.
-                    // Same area-proportional draw-size formula the
-                    // sprite render uses above, so the twinkle
-                    // scales with the shard/tile as it merges.
-                    const effArea = entity.nebulaTileArea ?? HEX_AREA;
-                    const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
-                    const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                        * Math.sqrt(areaRatio);
+                    // The SAME `nebulaSpriteSize` the sprite above draws
+                    // at, which is why that is a shared function: the two
+                    // sites carried the formula twice, so a change to one
+                    // silently put the star outside the puff.
+                    const drawSize = nebulaSpriteSize(entity);
                     const halfExtent = (drawSize / 2) * NEBULA_CONSTANTS.TWINKLE_PLACEMENT_RANGE;
                     const tx = (entity.nebulaTwinkleX ?? 0) * halfExtent;
                     const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;

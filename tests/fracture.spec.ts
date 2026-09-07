@@ -3787,3 +3787,284 @@ test.describe('grain knob ladders', () => {
     watch.assertClean();
   });
 });
+
+/** NEBULA: THE VORONOI GEOMETRY, WITHOUT THE DAMAGE MODEL (user call).
+ *
+ *  Nebula is the fifth grain material and the only one that takes the
+ *  decomposition and NOT the boundary damage layer.  Its `grain` block
+ *  carries no `bondStrength` and no `progressive`, which is what "boundary
+ *  strength zero" means in practice — expressed as the model's own opt-out
+ *  rather than as a literal 0, which would derive a maxHealth of 0 and kill
+ *  every cloud on sight.
+ *
+ *  Three claims, and the third is the one that was actually broken before
+ *  any of this: a nebula sprite is deliberately larger than the body under
+ *  it, so a sizing rule that stops tracking the body does not LOOK wrong —
+ *  it looks like a cloud.  The old rule keyed off `nebulaTileArea`, a field
+ *  set at exactly one site (the map-load tile factory) that no shard ever
+ *  carried, so every shard fell through the `?? HEX_AREA` default and drew a
+ *  FULL-TILE sprite whatever its size.  Measured on the shipped build: 102
+ *  shards spanning 9.2..43.6 in body size, every one of them drawing 120.
+ */
+test.describe('nebula: voronoi geometry without the damage model', () => {
+  /** Break `n` real nebula tiles on the nebula showcase field and return the
+   *  children, with everything the claims below need read off them in ONE
+   *  page evaluation (`prepareFrameEntities` compacts the entity list on the
+   *  next frame, so nothing here survives a round trip). */
+  const breakTiles = (page: any, n: number) => engine(page, (e: any, count: number) => {
+    const ents = e.currentMap.entities;
+    const circumD = (pts: any[]) => {
+      if (!pts) return 0;
+      let m = 0;
+      for (const q of pts) m = Math.max(m, Math.hypot(q.x, q.y));
+      return m * 2;
+    };
+    const area = (pts: any[]) => {
+      if (!pts || pts.length < 3) return 0;
+      let a = 0;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+      }
+      return Math.abs(a) * 0.5;
+    };
+    const sprite = (window as any).__omniNebula.nebulaSpriteSize;
+    const tiles = ents.filter((x: any) => x.active && x.shardVariant === 'nebula-tile')
+      .slice(0, count);
+    if (tiles.length === 0) throw new Error('no nebula tiles on the field');
+    const parent = {
+      size: Math.max(tiles[0].size.x, tiles[0].size.y),
+      polyD: circumD(tiles[0].polygonPoints),
+      polyArea: area(tiles[0].polygonPoints),
+      sprite: sprite(tiles[0]),
+      maxHealth: tiles[0].maxHealth,
+    };
+    const perShatter: number[] = [];
+    const rows: any[] = [];
+    for (const t of tiles) {
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const tArea = area(t.polygonPoints);
+      t.health = 0;
+      t.lastImpactVelocity = { x: 5, y: 0 };
+      t.lastImpactDamage = 2;
+      e.handleEntityDeath(t);
+      const kids = e.currentMap.entities.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'nebula-shard');
+      perShatter.push(kids.length);
+      let childArea = 0;
+      for (const k of kids) {
+        childArea += area(k.polygonPoints);
+        rows.push({
+          size: Math.max(k.size.x, k.size.y),
+          polyD: circumD(k.polygonPoints),
+          sprite: sprite(k),
+          verts: k.polygonPoints ? k.polygonPoints.length : 0,
+          maxHealth: k.maxHealth,
+          // The grain DAMAGE model must never have engaged.
+          boundaryModel: k.fractureEdgeFill !== undefined,
+          comp: !!k.nebulaColorComposition,
+          fade: k.nebulaSpawnDuration ?? 0,
+          cooldown: k.nebulaMergeCooldown ?? 0,
+        });
+      }
+      if (kids.length > 0) rows[rows.length - 1].areaRatio = childArea / tArea;
+    }
+    return { parent, perShatter, rows };
+  }, n);
+
+  test('a tile breaks into its OWN cells — many varied pieces, not a flat 2-3',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 20);
+
+      // The old power-law path produced `2 + floor(random × 2)` children —
+      // 2 or 3 — from an area budget FIXED at 121 regardless of the parent.
+      const counts: number[] = r.perShatter;
+      expect(Math.min(...counts), 'every tile sheds more than the old maximum of 3')
+        .toBeGreaterThan(3);
+
+      // Real cells, not the generated 4..6-gon blobs the old spawn shape made:
+      // a Voronoi decomposition of a hexagon contains triangles.
+      const verts = r.rows.map((x: any) => x.verts);
+      expect(Math.min(...verts), 'cells are real polygons').toBeGreaterThanOrEqual(3);
+
+      // AND THE SIZES VARY, which is the point.  The old path varied them too
+      // (a power law over a fixed budget); what it could not do is vary them
+      // against the parent, because it never looked at the parent.
+      const sizes = r.rows.map((x: any) => x.size);
+      expect(Math.max(...sizes) / Math.min(...sizes),
+        'the pieces differ several-fold in size').toBeGreaterThan(2.5);
+
+      // The cells TILE the parent: their areas add up to it.  This is the
+      // property the fixed-121 budget did not have at all.
+      const ratios = r.rows.filter((x: any) => x.areaRatio !== undefined)
+        .map((x: any) => x.areaRatio);
+      expect(ratios.length).toBeGreaterThan(5);
+      for (const q of ratios) expect(q).toBeGreaterThan(0.85);
+      for (const q of ratios) expect(q).toBeLessThan(1.05);
+
+      watch.assertClean();
+    });
+
+  test('the sprite is sized from the body, and is always bigger than its shape',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 20);
+
+      // THE REGRESSION.  Every shard used to draw the same 120-unit sprite
+      // whatever its size, because the rule read a field no shard carried.
+      const sprites = r.rows.map((x: any) => x.sprite);
+      expect(Math.max(...sprites) / Math.min(...sprites),
+        'sprite sizes vary as much as the bodies do').toBeGreaterThan(2.5);
+
+      // …and they vary WITH the body, not merely alongside it: the overhang
+      // over each body's own outline is one constant.
+      const overhang = r.rows.map((x: any) => x.sprite / x.polyD);
+      const lo = Math.min(...overhang), hi = Math.max(...overhang);
+      expect(hi - lo, 'the overhang is the same multiple on every body')
+        .toBeLessThan(0.05);
+      // THE USER'S STANDING REQUIREMENT: a nebula sprite still reads as a
+      // cloud around the shard, never as a chip.
+      expect(lo, 'and every sprite overhangs its own polygon').toBeGreaterThan(1.5);
+
+      // A full tile is UNCHANGED: `SPRITE_OVERSIZE` is calibrated so the hex
+      // tile still draws at the 120 world units it always did.
+      expect(r.parent.sprite, 'a full tile still draws at 120').toBeCloseTo(120, 0);
+
+      watch.assertClean();
+    });
+
+  test('the grain DAMAGE model never engages — nebula takes geometry only',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 12);
+
+      // No derived HP, no boundary fill, no crack budget: nebula carries a
+      // `grain` block for its CELLS and nothing else.  A literal
+      // `bondStrength: 0` would have produced the opposite — derived HP is
+      // `Σ(edge length × strength)`, so zero strength is zero health.
+      expect(r.parent.maxHealth, 'a tile is 1 HP, as it always was').toBe(1);
+      for (const row of r.rows) {
+        expect(row.boundaryModel, 'no boundary model was ever built').toBe(false);
+        expect(row.maxHealth, 'every shard spawns at 1 HP').toBe(1);
+      }
+
+      // The crash path added by the unified-impact work must skip nebula for
+      // the same reason — it asks `ensureBoundaryModel` and falls back to the
+      // whole-body decrement when it declines.
+      const crash: any = await engine(page, (e: any) => {
+        const t = e.currentMap.entities.find((x: any) => x.active
+          && x.shardVariant === 'nebula-tile' && x.mass === Infinity);
+        if (!t) throw new Error('no nebula tile left');
+        const rock: any = {
+          id: 'neb_crash_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
+          position: { x: t.position.x + t.size.x, y: t.position.y },
+          velocity: { x: -600, y: 0 }, rotation: 0,
+          size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+          health: 50, maxHealth: 50,
+        };
+        e.currentMap.entities.push(rock);
+        e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
+        const out = { boundaryModel: t.fractureEdgeFill !== undefined, maxHealth: t.maxHealth };
+        rock.active = false;
+        return out;
+      });
+      expect(crash.boundaryModel, 'a crush on a cloud builds no boundary model').toBe(false);
+      expect(crash.maxHealth, 'and leaves its HP alone').toBe(1);
+
+      watch.assertClean();
+    });
+
+  test('children carry the parent cloud with them — colour, fade-in, cooldown',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 12);
+
+      // The voronoi child recipe is material-agnostic — geometry, mass, HP,
+      // motion — and nebula is the one family whose identity lives in none of
+      // those: its colour is per-BODY, its birth is a fade, and its merge
+      // pipeline reads a cooldown.  Without the stamp a fragment spawns the
+      // right shape in the wrong colour, pops in, and can re-merge on the
+      // frame it was born.
+      for (const row of r.rows) {
+        expect(row.comp, 'the palette composition came along').toBe(true);
+        expect(row.fade, 'and the birth fade-in').toBeGreaterThan(0);
+        expect(row.cooldown, 'and the post-shatter merge cooldown').toBeGreaterThan(0);
+      }
+
+      watch.assertClean();
+    });
+
+  test('the legacy A/B still gives nebula its OWN fan, not the generic scatter',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      // A 'voronoi' variant under the legacy A/B falls back to the path it
+      // had BEFORE it was opted in.  For nebula that is `shatterNebulaStyle`
+      // — its rear-cone fan of 2-3 — and the dispatch has to say so, or it
+      // drops through to the generic scatter pipeline every other material
+      // uses.
+      const r: any = await engine(page, (e: any) => {
+        e.dbg.cycleFractureMode();                    // → legacy
+        try {
+          const ents = e.currentMap.entities;
+          const counts: number[] = [];
+          const payload: boolean[] = [];
+          for (const t of ents.filter((x: any) => x.active
+            && x.shardVariant === 'nebula-tile').slice(0, 10)) {
+            const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+            t.health = 0;
+            t.lastImpactVelocity = { x: 5, y: 0 };
+            t.lastImpactDamage = 2;
+            e.handleEntityDeath(t);
+            const kids = e.currentMap.entities.filter((x: any) => x.active
+              && !before.has(x.id) && x.shardVariant === 'nebula-shard');
+            counts.push(kids.length);
+            for (const k of kids) {
+              payload.push(!!k.nebulaColorComposition && (k.nebulaSpawnDuration ?? 0) > 0);
+            }
+          }
+          return { counts, payload };
+        } finally {
+          e.dbg.cycleFractureMode();                  // → back to voronoi
+        }
+      });
+
+      expect(r.counts.length).toBeGreaterThan(5);
+      for (const c of r.counts) {
+        expect(c, 'legacy keeps the 2-3 rear-cone fan').toBeGreaterThan(0);
+        expect(c).toBeLessThanOrEqual(3);
+      }
+      // The COUNT alone does not tell the two apart — the generic scatter
+      // reads the same `countMin`/`countMax` off the same variant, so it
+      // also hands back 2-3 (verified: this assertion passed with the
+      // dispatch removed).  What separates them is the CLOUD PAYLOAD: only
+      // `shatterNebulaStyle` carries the parent's palette and birth fade
+      // onto its children, so a nebula tile that fell through to the
+      // generic path spawns colourless shards that pop in.
+      expect(r.payload.length).toBeGreaterThan(5);
+      for (const ok of r.payload) {
+        expect(ok, 'legacy children are still real cloud, not generic debris').toBe(true);
+      }
+
+      watch.assertClean();
+    });
+});

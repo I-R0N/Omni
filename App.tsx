@@ -6,7 +6,8 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
          detectionAlpha,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
-         grainSpecFor, grainLadder, grainTableValue, type GrainKnob } from './constants';
+         grainSpecFor, grainLadder, grainTableValue, type GrainKnob,
+         nebulaSpriteSize } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -134,6 +135,16 @@ const App: React.FC = () => {
     (window as any).__omniShip = {
       enumerateCells, resolveTiltCell, cellIndex, cellMatrix, drawPlayerCube, SHIP_SHEETS,
     };
+
+    // Debug handle #8 — the nebula sprite scale, on the __omniHid terms.
+    // `nebulaSpriteSize` is pure, and it is WRONG IN A WAY NOTHING
+    // REPORTS: the sprite is deliberately larger than the body under it,
+    // so a rule that stops tracking the body's size does not look broken
+    // — it looks like a cloud.  That is exactly how the rule it replaced
+    // rotted unnoticed (it keyed off `nebulaTileArea`, which no shard
+    // ever carried, so every shard drew a full-tile sprite whatever its
+    // size).  Nothing in the game reads this handle.
+    (window as any).__omniNebula = { nebulaSpriteSize };
 
     // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
     // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
@@ -580,6 +591,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaStretch();
   };
 
+  const handleCycleNebulaSpriteSize = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaSpriteSize();
+  };
+
   const handleCycleShatterGrace = () => {
       if (engineRef.current) engineRef.current.dbg.cycleShatterGrace();
   };
@@ -987,6 +1002,7 @@ const App: React.FC = () => {
         onCycleNebulaPalette={handleCycleNebulaPalette}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
+        onCycleNebulaSpriteSize={handleCycleNebulaSpriteSize}
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlayerThrust={handleCyclePlayerThrust}
         onCyclePlayerSpeed={handleCyclePlayerSpeed}

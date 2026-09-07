@@ -71,7 +71,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  376 tests.  All run at
+                          anti-flake rules).  381 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -995,7 +995,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
-  twinkle scheduling)
+  twinkle scheduling; `SPRITE_OVERSIZE` — how far a cloud sprite
+  overhangs the body it belongs to, with `nebulaSpriteSize()` beside it
+  as the ONE definition both render sites call, and
+  `NEBULA_SPRITE_CYCLE` as its live DBG A/B)
 - `SHARD_VARIANTS` — per-variant regen / merge / shatter / fracture /
   dent / repel / glow / automata / passThrough / renderCache policy.
   Source of truth for the shard-family behaviour table.  11 variants
@@ -1038,7 +1041,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Opted in today: ALL FOUR
   breakable materials — rock-tile / rock-shard and glass-tile /
   glass-shard (V10, user call: glass takes rock's breaking behaviour),
-  plus metal-tile and plastic-tile / plastic-shard (A3).  Metal is the
+  plus metal-tile and plastic-tile / plastic-shard (A3) — and NEBULA,
+  which takes the GEOMETRY ONLY (see §8).  Nebula's row is
+  `grainSize` 14 / 3 / 14 / regularity **0.15** / `sizeSpread` **0.6**
+  and NO `bondStrength`: the raggedest and most size-varied pattern in
+  the game, and the only one that opts out of the damage layer.  Metal is the
   fine-grained, near-honeycomb, hardest material and its grain size AND
   bond strength both track `densityTier`, so a plate's brightness reads
   its toughness; plastic is large-grained, loosely regular and DEFORMS
@@ -2992,6 +2999,68 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
   (angular momentum in the impulse solver, off-centre impact torque) are
   parked for their own session — docs/PARKING_LOT.md.
+- **NEBULA TAKES THE VORONOI GEOMETRY AND NOT THE DAMAGE MODEL** (user
+  call).  `nebula-tile` and `nebula-shard` carry a `grain` block and
+  `shatter.kind: 'voronoi'`, so a broken tile hands back the cells its own
+  pattern says.  What they deliberately do NOT carry is `bondStrength` or
+  the `progressive` it requires — and that ABSENCE is what "boundary
+  strength zero" means here.  A literal `bondStrength: 0` would be the
+  opposite of harmless: derived HP is `Σ (edge length × strength)`, so
+  zero strength derives zero health and every cloud dies on sight.  With
+  the fields absent, `isProgressiveFracture` stays false for nebula,
+  `bondStrengthFor` returns null, and every consumer of the damage layer
+  — the crash paths, the pierce bore, the bubble's bite, the crack
+  overlay — skips nebula exactly as before.  `passThrough` is untouched:
+  still no collisions, on the tile or the shard.  Three consequences:
+  the tile keeps its 1-HP whole-body death (and `spawnShardHealth` names
+  nebula explicitly rather than letting it fall through the size-keyed
+  default, which is the mistake that gave metal a 1-HP grain); the
+  `nebula-shard` grain block is LATENT, because that variant's shatter is
+  deliberately `'none'`, and it is written down anyway so a material
+  cannot come to mean two patterns; and the legacy fracture A/B has to
+  dispatch on `shatter.style === 'nebula'` to send a nebula tile back to
+  its own rear-cone fan — the generic scatter reads the same
+  `countMin`/`countMax` and so produces the same COUNT, which is why the
+  regression for it asserts on the cloud payload instead.
+  MEASURED: a tile went from 2-3 children over a fixed 121-unit area
+  budget that ignored the parent entirely, to 6-8 cells that tile the
+  parent's own polygon (child area / parent area 0.85..1.05), with body
+  sizes spanning 4.99..20.2 — a 4× range.
+- **A NEBULA SPRITE IS SIZED FROM THE BODY IT BELONGS TO, and is always
+  bigger than it.**  `nebulaSpriteSize(entity)` (constants.ts) is the ONE
+  definition — the cloud sprite and the twinkle star placed inside its
+  footprint both call it, and they used to carry the formula twice.  The
+  base is `max(size.x, size.y, polygonDiameter)` and the multiplier is
+  `NEBULA_CONSTANTS.SPRITE_OVERSIZE` (2.727, calibrated so a full hex
+  tile still draws at the 120 world units it always did).  Three things
+  are load-bearing:
+  - **The polygon is the FLOOR, not the base.**  `size` is the
+    area-equivalent diameter every other system means by "how big is
+    this", but a Voronoi cell is ragged and its circumradius reaches
+    further: measured over 306 fresh grains the polygon was 1.68× the
+    body diameter on average and 2.4× at worst, so a flat overhang on
+    `size` alone left the raggedest few with a sprite SMALLER than their
+    own outline (0.95×).  A nebula sprite must never be smaller than the
+    shape it belongs to.
+  - **The rule it replaced had rotted invisibly.**  It was
+    `120 × sqrt(nebulaTileArea / HEX_AREA)`, and `nebulaTileArea` is set
+    at exactly ONE site — the map-load tile factory.  No shatter child
+    and no merge survivor ever set one, so every shard fell through the
+    `?? HEX_AREA` default and drew a FULL-TILE sprite whatever its size
+    (measured on the shipped build: 102 shards spanning 9.2..43.6 in body
+    size, every one drawing 120).  A sprite deliberately larger than its
+    body does not LOOK wrong when it stops tracking it — it looks like a
+    cloud, which is why this survived.
+  - **`_nebulaSpriteR` is cached and never invalidated**, and that is
+    safe rather than lazy: a nebula body's polygon is fixed for its life
+    — no dent policy, no progressive fracture, and its merge is
+    PAIR-CONSUMING (both inputs retire and a new body appears), so
+    nothing rewrites `polygonPoints` in place.
+  The visible consequence is that a shatter now leaves ~1.9× the tile's
+  own cloud instead of ~3.0× (three full-size sprites), so DBG ▸ Visual ▸
+  **"Neb sprite"** is the live A/B on the overhang — a MULTIPLIER over
+  the authored constant, the same relationship `SHARD_COAT_CYCLE` has
+  with a variant's `envelope`.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
@@ -3419,6 +3488,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   WRONG pose — nothing throws and nothing logs.  Exposing the pure
   resolver also lets `scripts/gen-ship-sheet.mjs` render placeholder art
   against the very table the engine indexes.
+  `__omniNebula` (the nebula sprite scale) joins on
+  identical terms, and its motive is the sharpest of the set: the sprite
+  is deliberately larger than the body under it, so a rule that stops
+  tracking the body does not look broken — it looks like a cloud, which
+  is exactly how the rule it replaced rotted unnoticed.
   `__omniHid` is the same idea with a sharper
   motive: those builders are the one place in the input layer that can be
   wrong with NO symptom to read (a pad discards a malformed report in

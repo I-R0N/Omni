@@ -1185,6 +1185,10 @@ export interface GameEntity {
   // Cached polygon area (used as merge target for shards).  Shards inherit
   // this from their parent tile so they know the reassembly threshold.
   nebulaTileArea?: number;
+  /** Cached polygon circumradius, for `nebulaSpriteSize` only.  Never
+   *  invalidated: a nebula body's polygon is fixed for its life (no dent
+   *  policy, no progressive fracture, and a pair-consuming merge). */
+  _nebulaSpriteR?: number;
   // Hex grid coordinate (odd-r offset) of the source tile — preserved on
   // shards so coalescence can snap back to the same column/row layout.
   nebulaGridCol?: number;
@@ -2032,6 +2036,8 @@ export interface EngineStats {
   // DBG stiffness step for the nebula-shard velocity stretch
   // (VEL_STRETCH_K_CYCLE name).  off → soft → med → firm → stiff.
   nebulaStretchName?: string;
+  /** DBG readout: the nebula sprite-oversize A/B step (NEBULA_SPRITE_CYCLE). */
+  nebulaSpriteName?: string;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards
   // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
   shatterGraceName?: string;

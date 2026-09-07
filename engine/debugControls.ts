@@ -29,7 +29,7 @@ import {
     NEBULA_CONSTANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS,
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
-    cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
+    cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
@@ -790,6 +790,23 @@ export class DebugControls {
    */
   cycleNebulaStretch() {
     cycleNebulaStretch();
+  }
+
+  /**
+   * Cycle how far a nebula sprite overhangs the body it belongs to
+   * (NEBULA_SPRITE_CYCLE) — a MULTIPLIER over the authored
+   * NEBULA_CONSTANTS.SPRITE_OVERSIZE, so the constant stays the
+   * statement of how oversized a puff is and this is the live A/B on it.
+   *
+   * It exists because tying the sprite to the body's own size changed
+   * how much cloud a shatter leaves behind (a tile used to hand back
+   * three FULL-tile sprites; it now hands back pieces that add up to
+   * about one), and that is a judgement to make on a screen.  Both
+   * render sites read `nebulaSpriteSize` fresh each frame, so a click
+   * lands immediately on every cloud already in the world.
+   */
+  cycleNebulaSpriteSize() {
+    cycleNebulaSpriteSize();
   }
 
   /**

@@ -1715,12 +1715,20 @@ mean and the comparison was tighter than the physical claim it is written to
 make.  It compares green to green now.  That is weaker by exactly that 7.7%,
 and it is the comparison the sentence above it describes.
 
-## Grain `sizeSpread` and `bondSpread` — parked at 0 (user call)
+## Grain `sizeSpread` and `bondSpread` — parked at 0 for the four (user call)
 
-Both axes are implemented, tested and wired end to end; every material is
-authored at **0**, which is the exact identity in both cases
-(`siteWeightsFor` returns null, `bondVariance` returns 1), so the game
-today behaves as if neither existed.
+Both axes are implemented, tested and wired end to end; all four of the
+materials this entry is about — rock, glass, plastic, metal — are authored at
+**0**, which is the exact identity in both cases (`siteWeightsFor` returns
+null, `bondVariance` returns 1), so those four behave as if neither existed.
+
+**One material does use `sizeSpread`, and it is not one of the four: NEBULA,
+at 0.6** (2026-09-07, added with the nebula voronoi work).  It is authored
+deliberately rather than inherited: a cloud wants the widest possible mix of
+puff sizes in one body, which is precisely what this axis is for, and nebula
+is not part of the ordering question below — that is about four materials
+whose relative heterogeneity has to be decided together.  `bondSpread` stays
+unused everywhere, nebula included (it carries no `bondStrength` at all).
 
 - **`sizeSpread`** varies grain AREA within one body, via a POWER DIAGRAM:
   each site carries an additive weight and the divider between two sites

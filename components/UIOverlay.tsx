@@ -140,6 +140,7 @@ interface UIOverlayProps {
   onCycleNebulaPalette?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
+  onCycleNebulaSpriteSize?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
@@ -468,6 +469,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaPalette,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
+  onCycleNebulaSpriteSize,
   onCycleShatterGrace,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
@@ -2061,6 +2063,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Neb stretch', onCycleNebulaStretch,
                   stats.nebulaStretchName ?? '0.07',
                   'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10. The squash axis aligns to velocity while the sprite keeps its own rotation.')}
+                {ctrlRow('Neb sprite', onCycleNebulaSpriteSize,
+                  stats.nebulaSpriteName ?? '1x (ships)',
+                  'Cycle how far a nebula sprite overhangs the body it belongs to — a multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE (0.75× / 1× / 1.25× / 1.5× / 2×). Every puff is drawn at its own size × this, so the whole cloud layer scales together and a click lands on clouds already in the world.')}
                 {ctrlRow('Shard↔tile', onToggleShardTileCollisions,
                   stats.shardTileCollisionsEnabled === true ? 'On' : 'Off',
                   'Toggle the mobile-shard ↔ static-tile collision pass.')}

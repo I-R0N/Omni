@@ -4552,18 +4552,34 @@ export const NEBULA_CONSTANTS = {
   // 1 tile shatter produces ≤1 new tile via transmutation.  Clusters
   // can SHRINK (player kills shards mid-merge) but never GROW.
   TILE_REGEN_ENABLED: false,
-  // Reference sprite world size for a FULL nebula tile (effective area
-  // = HEX_AREA).  Every nebula sprite — tile or shard — is drawn at
-  //     drawSize = TILE_SPRITE_WORLD_SIZE × sqrt(nebulaTileArea / HEX_AREA)
-  // so visual size scales proportionally with the effective area the
-  // entity carries.  A fresh shard from a 3-way shatter draws at
-  //   120 × sqrt(1/3) ≈ 69 world units
-  // and grows as it merges:
-  //   half-merged → 120 × sqrt(0.5) ≈ 85
-  //   fully-merged (about to transmute) → 120
-  // Tune this one number to make nebula tiles visually bigger or smaller;
-  // shard sprites follow automatically.
-  TILE_SPRITE_WORLD_SIZE: 120,
+  // HOW MUCH BIGGER THE CLOUD DRAWS THAN THE BODY IT BELONGS TO.
+  //
+  // Every nebula sprite — tile or shard — is drawn at
+  //     drawSize = bodyExtent × SPRITE_OVERSIZE
+  // where `bodyExtent` is the larger of the entity's own diameter and
+  // its polygon's, so the cloud can never be smaller than the shape
+  // (`nebulaSpriteSize` below is the ONE definition; two render sites
+  // call it).  A nebula sprite is deliberately LARGER than the polygon
+  // underneath it — a cloud has no edge, and the puff has to overhang
+  // the shape it is drawn from or the body reads as a solid chip — so
+  // this number is that overhang, stated directly.  2.727 keeps a full
+  // hex tile (polygon circumradius HEX_SIZE = 22, so a 44-unit extent)
+  // drawing at the 120 world units it always did; tune it to make the
+  // whole cloud layer bigger or smaller and every shard follows.
+  //
+  // IT USED TO BE KEYED TO `nebulaTileArea` INSTEAD, and that quietly
+  // stopped working.  The rule was
+  //     drawSize = 120 × sqrt(nebulaTileArea / HEX_AREA)
+  // with the intent that a shard from a 3-way shatter drew at ≈69.  But
+  // `nebulaTileArea` is set at exactly ONE site — the map-load tile
+  // factory — and nothing on a shatter child or a merge survivor ever
+  // sets it, so every shard fell through the `?? HEX_AREA` default and
+  // drew at the FULL tile size.  Measured over 102 shards from real
+  // tile shatters: entity size ranged 9.2..43.6 and every single one
+  // drew a 120-unit sprite — 13× the small ones, 2.8× the large.  The
+  // body's own size is the honest input, it is always set, and it is
+  // what merges and fracture already move.
+  SPRITE_OVERSIZE: 2.727,
   // Cluster generation moved to MAP_POPULATION (Stage 7) — see the
   // 'nebula-tile' tileCluster entries per map for cluster counts +
   // size ranges.  Inner / outer split lives on the per-map record.
@@ -4640,6 +4656,86 @@ export const NEBULA_CONSTANTS = {
     { maxCount: 9999, interval: 16 },
   ] as const,
 };
+
+// ── Nebula sprite oversize (DBG "Neb sprite") ──────────────────────
+// A live A/B on how far the cloud overhangs the body, because tying the
+// sprite to `size` changed the total cloud a shatter leaves behind and
+// that is a judgement to make on a screen, not in a table.  It
+// MULTIPLIES `NEBULA_CONSTANTS.SPRITE_OVERSIZE` rather than replacing
+// it — the same relationship SHARD_COAT_CYCLE has with a variant's
+// authored `envelope` — so the constant stays the statement of how
+// oversized a nebula puff is.  Sorted as a number line with the shipped
+// value marked, and the cycle STARTS there (the grain-ladder lesson:
+// once the numbers are visible, an unordered list reads as noise).
+interface NebulaSpriteStep { readonly name: string; readonly mult: number; }
+
+export const NEBULA_SPRITE_CYCLE: ReadonlyArray<NebulaSpriteStep> = [
+  { name: '0.75x',      mult: 0.75 },
+  { name: '1x (ships)', mult: 1.0  },
+  { name: '1.25x',      mult: 1.25 },
+  { name: '1.5x',       mult: 1.5  },
+  { name: '2x',         mult: 2.0  },
+];
+const NEBULA_SPRITE_DEFAULT_INDEX = 1;
+let activeNebulaSpriteIndex = NEBULA_SPRITE_DEFAULT_INDEX;
+
+/** Active oversize multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE. */
+export function getActiveNebulaSpriteMult(): number {
+  return NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].mult;
+}
+
+/** Active step name for the DBG row readout. */
+export function getActiveNebulaSpriteName(): string {
+  return NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].name;
+}
+
+/** Advance the oversize A/B by one, wrapping.  Returns the new index. */
+export function cycleNebulaSpriteSize(): number {
+  activeNebulaSpriteIndex = (activeNebulaSpriteIndex + 1) % NEBULA_SPRITE_CYCLE.length;
+  return activeNebulaSpriteIndex;
+}
+
+/** THE WORLD DIAMETER A NEBULA BODY'S SPRITE DRAWS AT — the ONE
+ *  definition, because TWO render sites have to agree on it: the cloud
+ *  sprite itself and the twinkle star placed inside its footprint.  They
+ *  used to carry the formula twice, so a change to one silently put the
+ *  star outside the puff.
+ *
+ *  The base is the body's OWN extent, and it takes the LARGER of two
+ *  readings of that.  `size` is the area-equivalent diameter every other
+ *  system means by "how big is this" — it is what merges move and what
+ *  `getCollisionR` reports — but a Voronoi cell is ragged, so its
+ *  circumradius reaches further than an area-equivalent radius: measured
+ *  over 306 fresh nebula grains the polygon was 1.68x the body diameter
+ *  on average and 2.4x at worst, which at a flat 2.87 overhang left the
+ *  raggedest 5% with a sprite SMALLER than their own outline (worst
+ *  0.95x).  A nebula sprite must never be smaller than the shape it
+ *  belongs to, so the polygon is the floor.
+ *
+ *  The polygon extent is cached on the entity and never invalidated,
+ *  which is safe because a nebula body's polygon is fixed for its life:
+ *  nebula has no dent policy, no progressive fracture, and its merge is
+ *  PAIR-CONSUMING (both inputs retire and a new body appears), so
+ *  nothing ever rewrites `polygonPoints` in place. */
+export function nebulaSpriteSize(e: GameEntity): number {
+  let polyR = e._nebulaSpriteR;
+  if (polyR === undefined) {
+    polyR = 0;
+    const pts = e.polygonPoints;
+    if (pts !== undefined) {
+      for (let i = 0; i < pts.length; i++) {
+        const d2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+        if (d2 > polyR) polyR = d2;
+      }
+      polyR = Math.sqrt(polyR);
+    }
+    e._nebulaSpriteR = polyR;
+  }
+  return Math.max(e.size.x, e.size.y, polyR * 2)
+    * NEBULA_CONSTANTS.SPRITE_OVERSIZE
+    * getActiveNebulaSpriteMult();
+}
+
 
 /**
  * Map an impact speed (px/frame) to a nebula fade rate scale in
@@ -8958,6 +9054,52 @@ export const NEBULA_CONDENSE: Record<
 // materials), so mass and colour are conserved.
 export const NEBULA_CONDENSE_STALL_BONDS = 6;
 
+// ── Nebula's grain (user call: voronoi fractures for the cloud) ────
+// ONE spec, shared by `nebula-tile` and `nebula-shard`, because a
+// material has ONE grain geometry (CLAUDE.md §8) and a shard is a
+// smaller body of the same stuff.
+//
+// It is the odd one out of the five materials in TWO deliberate ways:
+//
+//  1. NO `bondStrength` AND NO `progressive`.  Those two are what opt a
+//     variant into the grain-BOUNDARY DAMAGE model, and nebula wants the
+//     GEOMETRY only — the cells as the fragments at death, and nothing
+//     else.  Their absence is what "boundary strength zero" means in
+//     practice: `isProgressiveFracture` stays false for nebula, so
+//     `bondStrengthFor` returns null and every consumer of the damage
+//     model (the crash paths, the pierce bore, the bubble's bite, the
+//     crack overlay) skips nebula exactly as it did before.  A literal
+//     `bondStrength: 0` would be the opposite of harmless: derived HP is
+//     `Sum(edge length x strength)`, so it would come out 0 and kill
+//     every cloud the moment anything touched it.
+//
+//  2. THE RAGGEDEST SETTINGS IN THE GAME, on purpose.  Regularity 0.15
+//     against rock/glass 0.5 and metal 0.95 puts nebula at the raw
+//     Poisson end (0 Lloyd rounds, minimum blue-noise separation), where
+//     cell areas are wildly uneven — which for cloud is the point, not a
+//     defect.  `sizeSpread` 0.6 stacks the power diagram on top: measured
+//     on a 10-grain body it takes cell-area CV from 0.19 to 0.44 and the
+//     biggest/smallest ratio from 2.0 to 5.0, with the MEAN grain size
+//     unmoved.  That axis is parked at 0 for the other four materials
+//     pending a deliberate pass over all of them (docs/PARKING_LOT.md);
+//     this is nebula's own authored value and does not pre-empt that
+//     pass, since nebula is not one of the four it is about.
+//
+// `grainSize` 14 against a full hex tile's ~1257 area gives ~8 sites, so
+// a tile breaks into a handful of unevenly sized puffs rather than the
+// flat 2-3 the old power-law budget produced.  `radialSpeed` is the
+// lowest of any material: cloud drifts apart, it does not spall.
+const NEBULA_GRAIN: GrainSpec = {
+  grainCountMin: 3,
+  grainCountMax: 14,
+  grainSize: 14,
+  impactBias: 0.5,        // crowd toward the striker that punched through
+  regularity: 0.15,       // the raggedest material in the game
+  sizeSpread: 0.6,        // a wide mix of coarse and fine puffs in one body
+  radialSpeed: 0.5,       // drifts apart; every other material is 0.8..1.5
+};
+
+
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -9377,8 +9519,27 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       attractedTo: 'none', bondsWith: 'none',
       defaultOutcome: 'compose',
     },
+    // NEBULA IS A GRAIN MATERIAL FOR ITS GEOMETRY ONLY (user call).  The
+    // `grain` block + `shatter.kind: 'voronoi'` opt it into the seeded
+    // cell decomposition, so a broken tile hands back the pieces its own
+    // pattern says rather than 2-3 shards drawn from a power-law over a
+    // budget that ignored the parent entirely.  What it deliberately does
+    // NOT opt into is the GRAIN-BOUNDARY DAMAGE MODEL: `bondStrength`
+    // (and the `progressive` it requires) are ABSENT, which is what
+    // "boundary strength zero" means here — expressed as the model's own
+    // opt-out rather than as a 0 that would derive a maxHealth of 0 and
+    // kill every cloud on sight.  `isProgressiveFracture` therefore stays
+    // false for nebula, so `bondStrengthFor` returns null and the crash
+    // paths, the pierce bore and the bubble's bite all leave nebula on
+    // its 1-HP whole-body death exactly as before.  `passThrough` is
+    // untouched: still no collisions.
+    grain: NEBULA_GRAIN,
     shatter: {
-      kind: 'powerlaw',
+      // 'voronoi': the cached decomposition becomes the children.  The
+      // powerlaw fields below STAY — they are the DBG 'legacy' A/B path,
+      // and `style: 'nebula'` is what routes that fallback back to
+      // `shatterNebulaStyle` rather than the generic scatter pipeline.
+      kind: 'voronoi',
       style: 'nebula',
       countMin: 2, countMax: 3,                 // count = 2 + floor(rand*2)
       alphaMin: 1.0, alphaMax: 1.0,
@@ -9837,6 +9998,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
     },
+    // A MATERIAL HAS ONE GRAIN GEOMETRY, shared by its tile and its
+    // shard (CLAUDE.md §8) — a shard is a smaller body of the same
+    // stuff.  Nebula's is LATENT on this row today, because the shatter
+    // below is deliberately 'none', and it is written down anyway so the
+    // material cannot come to mean two different patterns the day a
+    // shard does break.  Like the tile's, it carries no `bondStrength`
+    // and no `progressive`: geometry only, no damage model.
+    grain: NEBULA_GRAIN,
     // No-op shatter: nebula-shards are indestructible from the
     // player's perspective.  They glide past the ship under the
     // applyNebulaPlayerPull gravity field; contact does not destroy
