@@ -3416,6 +3416,15 @@ export class ShardSystem {
   ): void {
     if (!a.active || !b.active) return;
 
+    // TRACKING SURVIVES A MERGE (user call).  `found` is the minimap's record
+    // that the player has met this rock; a shard that absorbs a tracked
+    // partner is still that rock, only bigger, so the survivor inherits the
+    // flag.  Without this a tracked boulder eating gravel could come out
+    // untracked and blink off the map, which reads as the tracking failing
+    // when it is the merge doing exactly its job — the confusion this rule
+    // exists to remove.
+    if (b.found === true) a.found = true;
+
     // A compose mutates the survivor's size / mass / merge count (and,
     // through condense, sometimes its polygon), all inputs of the
     // fracture decomposition — drop both caches up front (voronoi

@@ -66,10 +66,12 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           flashlight / nebulaspin / roll / shipsprites /
                           shardblend, fracture, bubbles (the Phase-A
                           aggro timeout + the immovability fix, and
-                          the mouth-size / bite eating rules),
+                          the mouth-size / bite eating rules) and
+                          modules (the Phase-A module families:
+                          Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  342 tests.  All run at
+                          anti-flake rules).  374 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1487,13 +1489,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
 - `MODULE_DEFS` / `moduleDef()` / `moduleFitsSlot()` /
-  `MODULE_SLOT_COUNT` / `WEAPON_GUN_SLOTS` / `INVENTORY_CAPACITY` /
+  `MODULE_SLOT_COUNT` / `MODULE_SLOT_UNLOCK` / `slotUnlockCost()` /
+  `WEAPON_GUN_SLOTS` / `INVENTORY_CAPACITY` /
   `MODULE_REQUIREMENTS` / `HEX_ADJACENCY` — the hex-slot outfitting
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
   Mk I/II/III varieties (own price ≈ the cumulative old level-curve
   cost, own fixed effect — no levels, no in-place upgrades), guns and
-  Shield/Overcharge are single varieties.  Purchases land in the
+  Shield/Overcharge/Light are single varieties.  The Mk families today
+  are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
+  (ship) and Gunnery / Autoloader / **Penetration** (weapon-mod).  Purchases land in the
   INVENTORY (12 tiles rendered as a honeycomb of hex tiles, duplicates
   allowed and stacking); outfitting is moving hex tiles between the
   inventory and the two 7-hex groups — SHIP and WEAPON.  GUN placement
@@ -1573,8 +1578,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `applyModuleEffects` folds — the UI renders, it never recomputes, so
   the panel cannot disagree with the sim.  A contributor's `active`
   means "this amount is IN the total": false for an adjacency-OFFLINE
-  module (`requires` names the family it must touch) AND for shield
-  plating with no shield core (connected but with nothing to plate).  A
+  module (`requires` names the family it must touch), for shield
+  plating with no shield core (connected but with nothing to plate),
+  and for a SUPERSEDED scanner — marks do not stack, so every scanner
+  but the best one aboard reports `superseded` rather than a
+  `requires`, which is the adjacency vocabulary and would read as
+  nonsense on a module that is perfectly well connected.  A
   contributor with no `area`/`idx` is a DERIVED row with no hex behind
   it — today the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE over
   the ship's total weight and so belongs to no hex, and the FIRE-RATE
@@ -1603,6 +1612,236 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate
   (UPGRADE_DEFS / UNLOCK_DEFS / upgradeCost / upgradeLevels /
   unlockedWeapons) is DELETED.
+  **PENETRATION** (`piercing`, weapon-mod, A3) is the model MINOR module:
+  `+1 pierce per mark`, summed into `player.pierceBonus` by
+  `applyModuleEffects` and folded into the shot config by
+  `WeaponSystem.withPierceBonus` — the same channel `damageMult` and
+  `cooldownMult` take, so nothing downstream of the gun knows a module
+  exists.  The bonus applies to EVERY gun UNIFORMLY (guidance call):
+  Lightning and Cannon are `pierce: 0` because their identity is chain
+  and splash and they take it anyway with eyes open.  A burst SUB-shot
+  takes it too (`tickPlayerBurst` re-derives its config per shot), and
+  the sum is clamped to `MAX_PIERCE` — 99, a plain SANITY ceiling
+  against an authoring mistake and NOT anchored to any weapon.  It used
+  to be, and the anchor rotted: it was "the value the Laser already ships
+  as effectively infinite", and the Laser ships `pierce: 4` now.
+  WHAT A CHARGE BUYS is the part the first version got wrong (user
+  review, "option C").  Three rules replace "one charge, one body":
+  - **DAMAGE FALLS OFF PER HIT, AT A RATE — AND IT SHIPS OFF.**  Damage at
+    hit ordinal `n` is `base × (1 - PIERCE_FALLOFF_RATE)^n`, and the
+    shipped rate is **0**: every penetration hit lands FULL projectile
+    damage unless someone turns the knob up (user call — the decay is a
+    thing to be judged, not a balance statement to inherit).  Ordinal 0 —
+    the contact hit — is always 1, so a bolt with no penetration is
+    untouched by any of this.  A RATE, not the authored table it replaced:
+    the table could express an irregular shape but could not be TUNED IN
+    PLAY, and tuning is what this needs.  DBG ▸ Player ▸ "Pierce falloff"
+    sweeps it (off / 0.05 / 0.10 / 0.20 / 0.35 / 0.50).  The number matters
+    more than it looks once on, because the reachable stack is large (six
+    Penetration Mk III in the weapon flower is +18, and inside a grain
+    material every GRAIN spends a charge) and a geometric decay has no
+    floor — at 0.05 the 18th hit still lands 40%, at 0.20 under 2%.
+    EVERY WEAPON IS AFFECTED EQUALLY, and so is every damage path ONE HIT
+    produces: the direct bite, the Cannon's AoE splash and the Lightning
+    chain all take the same factor.  The splash and the chain are applied
+    in `GameEngine` from a callback that fires LATER in `resolveCollision`,
+    by which point the grain bore may already have advanced `pierceHits`
+    past this hit's ordinal — so the factor is STASHED on the projectile
+    (`GameEntity.hitFalloff`) and those consumers READ it rather than
+    re-deriving an ordinal that no longer means the same thing.  The
+    ordinal itself rides the projectile as `pierceHits` (a count UP, so
+    the curve is read forwards — `pierceCount` counts DOWN and would read
+    it backwards) and an optional per-weapon override
+    `WeaponConfig.pierceFalloffRate`, stamped at spawn on the SAME seam
+    `pierce` is (both spawn paths, and the pooled one clears the field
+    when the new config has none — a recycled shot must never inherit a
+    stale rate).  Nothing overrides it today.
+  - **INSIDE A GRAIN BODY A CHARGE BUYS A GRAIN, NOT A TILE** — the bore
+    track; see §8.
+  - **AN INDESTRUCTIBLE TILE STOPS THE BOLT DEAD** and costs it nothing.
+    It took no damage, so it may not take a charge either; the shipped
+    build let a bolt through it AND charged for the privilege, which was
+    the worst artifact of the body-level rule.
+  `PIERCE_SPEED_RETAIN` is the second axis, shipped at `1.0` (a no-op)
+  behind DBG ▸ Player ▸ "Pierce spd" so the user can feel a decaying
+  bolt against the falloff rate before either is tuned; one factor per
+  charge actually spent, so a four-grain bore slows four times.
+  THE LASER'S OWN BUDGET went 99 → 4 in the same pass (user call).
+  "Effectively infinite" pre-dated there being any COST to piercing;
+  with a falloff available at all a beam can be made to give up damage per
+  body, so an
+  unbounded budget just made the Laser the answer to every line of
+  targets.  A RICOCHET MAY RE-HIT what it already struck, with no cap —
+  bought by CLEARING `hitEntityIds` at the bounce site rather than by
+  weakening the `alreadyHit` guard in the projectile branch, which is
+  load-bearing for an unrelated reason (it is what stops a bolt in
+  SUSTAINED OVERLAP re-damaging a body every substep at 120Hz).  Pierce
+  therefore stays a LIFETIME budget: a bouncing beam still gets at most
+  `pierceCount` damage events across its whole flight however many times
+  it turns around, each stepping further down the curve.  Bounces buy
+  COVERAGE, not extra damage events.
+  **PURCHASABLE HEX SLOTS** (A5): how many hexes of each flower are
+  UNLOCKED is a run field (`GameEngine.shipSlotsUnlocked` /
+  `weaponSlotsUnlocked`, reset by `resetOutfit`), and
+  `purchaseSlot(group)` sells the next one — gated on the matching SHOP
+  being docked, priced by `slotUnlockCost` through the `modulePrice`
+  seam, capped at `MODULE_SLOT_COUNT`.  The reason this needed no change
+  to `HEX_ADJACENCY` or `computeActiveSlots` is the whole design: a
+  LOCKED hex is an EMPTY hex that cannot be filled, and an empty hex was
+  always invisible to the adjacency fixpoint — so the feature is ONE
+  destination guard in `moveModuleInternal` plus a skip in
+  `firstFreeSlotFor`, and the UI drawing those hexes inert (no
+  `data-tile`, so a drag cannot even land on one).
+  `MODULE_SLOT_UNLOCK.START` equals the cap TODAY, so nothing is locked
+  and a shipped run is unchanged: the count is the SEAM for the ship
+  catalog (the same way `SHIP_WEIGHT.HULL_BASE` is 0), and lowering it
+  for the current hull is a balance call for the economy pass.  DBG ▸
+  Modules ▸ "Lock slots" (7 / 5 / 4 / 3) is what makes the locked state
+  and the shop's "+1 Hex Slot" entry reachable in play.
+- `SCANNER` / `DETECT_TIER` / `detectTierFor()` / `scannerRangesFor()` /
+  `scannerMarkRange()` / `detectionAlpha()` / `isAlwaysCharted()` — the
+  SCANNER, reworked (user call) from A4's passive reveal into a TOOL the
+  player operates.  A4 shipped it as a gate that quietly widened two
+  readouts which were already full, and the play-test verdict was that
+  nothing about it read.  Four rules, every one a reversal of A4:
+  1. **THE MAP IS FOUND, NOT GIVEN.**  With no scanner the HUD carries NO
+     off-screen arrows at all — A4's rule was the exact opposite ("no
+     scanner degrades to today's behaviour exactly"), which is what made the
+     module invisible.  What a scannerless ship DOES get is what it has
+     actually met: `isRetainedContact` splits contacts in two (user call).
+     A FIXED LANDMARK — a station or a portal — is flagged
+     `GameEntity.found` the first time anything discovers it and stays on
+     the minimap for the life of the map instance; anything that MOVES is
+     tracked for a few seconds and drops off both readouts, because a stale
+     dot where an enemy used to be is worse than no dot.  `found` is seeded
+     at map load by `isAlwaysCharted` (the HOME station and the rift the
+     player ARRIVED THROUGH, off the same `exitMouthFor` that decides where
+     you land) and set thereafter by an encounter or a scan — a SEEDING rule
+     rather than a per-frame predicate, so "charted from the start" and
+     "charted by flying past" cannot drift into meaning two things.  Found
+     gets a MINIMAP mark and never an ARROW: arrows are transient by design,
+     since they say "something is there NOW".
+  1b. **NATURAL ENCOUNTER, and it covers TERRAIN and MATERIALS too** (user
+     call).  Anything within `SCANNER.ENCOUNTER_RANGE` is seen with the naked
+     eye — no scanner, no mark.  That is what makes the
+     scanner's value RANGE (finding a thing before you fly into it) rather
+     than sight itself, and it is why the minimap fills in as the player
+     plays.  The one exception is a CONCEALED POI (`poiTier` above
+     `ENCOUNTER_MAX_POI_TIER`), or "secret" and "hidden" would be words with
+     no mechanism.  It is a POI rule, NOT a tier rule: the tiers rank how
+     RARE a find is, and rarity is not visibility — a rival sits at tier 3
+     because it is uncommon, not because it is hard to see, and gating sight
+     on the tier made a rival parked beside the ship invisible.
+     TERRAIN and MATERIALS are tracked as OBJECTS, not as regions (user
+     call).  `GameEngine.discoverStructures` marks every static TILE and
+     every mobile shard at or above `SCANNER.TRACK_MIN_SHARD_SIZE` within
+     range as `found`, permanently for the life of the map instance, on the
+     cadenced `discover` task — and a completed scan runs the same pass over
+     its whole bubble, which is the instrument's navigational job.
+     A REGION model was built first and REPLACED: it remembered the GROUND
+     the player had crossed and drew whatever stood on it, so a drifting
+     shard appeared when it wandered into mapped space and went quiet when it
+     left.  That reads as "mapping areas I can track things in" rather than
+     as finding things (user report).  The flag now rides the OBJECT.
+     Three rules fall out.  A found TILE is STAMPED into the pre-rendered
+     terrain layer as it is found (`RenderSystem.stampMinimapTile`), so the
+     layer IS the discovered set and the minimap's blit stays one draw call
+     however much has been met — `buildMinimapStaticLayer` therefore builds
+     an EMPTY canvas at map load.  A destroyed tile is UNSTAMPED from the
+     death path, because the layer is now a record of specific objects and a
+     tracked tile must not outlive its rock (the layer used to be baked once
+     at map load and never touched, which did not show while it was an
+     all-or-nothing reveal).  And `found` SURVIVES A MERGE
+     (`ShardSystem.composeEntities`): a shard absorbing a tracked partner is
+     still that rock, only bigger, so the survivor inherits the flag —
+     without it a tracked boulder eating gravel could blink off the map,
+     which reads as the tracking failing when it is the merge doing its job,
+     and that confusion is exactly what prompted this rule.
+     The SIZE THRESHOLD is what keeps this affordable and legible: small
+     debris is not a landmark, there is a great deal of it, and the flag is
+     permanent.  Shards are additionally CULLED to `MINIMAP_CONSTANTS.RANGE`
+     in the buffer fill, since tracking accumulates and without the cull the
+     buffer would carry every found shard in the world every frame.  The
+     FLOW layer is the documented exception and stays gated on owning a
+     scanner: a streamline is an inferred FIELD rather than a set of seen
+     objects.
+  2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
+     at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
+     `GameEntity.detectedAt` on whatever it crosses, and a mark holds for
+     `LINGER_SEC` and fades over the last `FADE_SEC` (`detectionAlpha`,
+     the ONE freshness definition both readouts call).  Freshness is
+     `simClock − detectedAt`, so there is NO per-entity countdown ticking
+     over the map — a stamp and a subtraction.  `GameEngine.simClock` is
+     MONOTONIC sim seconds and exists because `runTimeSec` deliberately
+     stops while dead, which would freeze every mark on the map.
+     CONTACTS are stamped individually (tens of them, and a stale mark
+     left by something that moved is the point); MATERIALS are not
+     (thousands of mobile shards) — tier 1 is revealed as a RADIUS the
+     minimap tests at draw time (`materialRevealAt` / `materialRevealRadius`
+     / `RenderSystem.materialRevealAlpha`).  The two halves differ because
+     the entity counts differ by three orders of magnitude, not because
+     they mean different things.
+  3. **MARKS STACK, IN RANGE ONLY.**  A tier's reach is the SUM of the
+     own-ranges of every ACTIVE scanner whose mark is at least that tier
+     (`scannerRangesFor`), so low tiers accumulate the whole rack and high
+     tiers only the few marks that reach them.  The user's worked example:
+     a Mk III plus two Mk I gives ~3× reach for Mk I features and ~1× for
+     Mk III ones.  CATEGORY does not stack — `scannerMk` stays the highest
+     mark aboard, so three scanners never add up to a Mk IV.  This
+     REVERSES A4's "marks do not stack", which was documented there as a
+     deliberate departure from summing; it is now the ordinary rule.
+  4. **FIVE MARKS, each adding a CATEGORY and ~10% of its own range.**
+     `DETECT_TIER` is the ONE table saying what finds what, and a mark
+     sees its own tier and every tier below: Mk I common POIs +
+     MATERIALS, Mk II uncommon POIs + ENEMIES (a boss is an enemy), Mk III
+     rare POIs + RIVALS + FAUNA, Mk IV secret POIs + DRAGONS, Mk V hidden
+     POIs + the SNITCH.  Range is the headline and stacking is how it
+     really grows; categories are what makes a specific mark worth buying.
+     The POI rungs are deliberately populated ahead of the things that will
+     fill them — `GameEntity.poiTier` lets a POI declare its own rung and
+     defaults to COMMON, so the phased plan's hidden wormholes (G4) become
+     a FIELD ON A PORTAL rather than a change here.
+  **AUTO-SCAN** (user call) is the QUIET half of the tool: a background sweep
+  every `SCANNER.AUTO.INTERVAL_SEC`, Mk II and above
+  (`SCANNER.AUTO.MIN_MARK` — Mk I stays fully manual, so auto-tracking is
+  something a mark buys), switched from the PAUSE menu rather than the debug
+  menu because it changes how the game plays.  It differs from a pressed
+  scan in three deliberate ways: it stamps `trackedAt` rather than
+  `detectedAt`, so it feeds the MINIMAP and can never put a chevron on screen
+  the player did not ask for; it skips RETAINED contacts, since a landmark is
+  `found` for good once discovered and re-finding it every few seconds is
+  work with no output; and its ring draws on the minimap ONLY, dimmer, since
+  a sweep painting the game screen every few seconds is exactly the nag the
+  manual button exists to avoid.  What the button still buys is arrows, the
+  on-screen ring, and discovering landmarks.
+  `RenderSystem.mapAlpha` is where the three routes onto the minimap meet —
+  `found` (permanent), `detectedAt` (a press or an encounter) and `trackedAt`
+  (the sweep), the last two taking whichever is fresher because they are the
+  same claim arriving differently.  The ARROWS read `detectAlpha` alone.
+  SCAN IS ITS OWN CONTROL on every device (user call): **Q**, the pad's
+  **L1 / Circle** (`INPUT_CONSTANTS.GAMEPAD.BUTTONS.SCAN`), and a HUD
+  button beside PAUSE that renders only with a scanner aboard.  It
+  deliberately did NOT join the ship-tap gesture — that is already
+  arbitrated between docking, portals and the Light tool, and a fourth
+  claimant would make "tap your ship" mean whatever happened to be
+  nearest.  The pad latch is DRAINED every step like INTERACT, so a press
+  made while docked cannot fire a scan on undock.
+  Two A4 rules SURVIVE unchanged: colours stay the
+  `UI_CONSTANTS.INDICATORS` type legend's (a scanner reveals more
+  contacts, never a new KIND of mark), and there is NO "discovered" state
+  anywhere in it — a stamp expires, so nothing here is persistence, which
+  belongs per NODE to the later work.  What is GONE with A4: the
+  `scannerShows*` predicates, `enemyIndicatorAlpha`'s distance ramp (the
+  detection stamp replaced the fade as the range gate) and the portal
+  arrow's `PORTAL_CONSTANTS.INDICATOR_RANGE` bracket — a rift you have
+  not scanned has no arrow at any distance, and the two rules that were
+  always about legibility rather than range are untouched (an on-screen
+  rift still suppresses its arrow; the arrow still carries a name and no
+  distance).  The DBG "Minimap mat" cycle and the scan now BOTH have to
+  say yes: the cycle picks WHICH material layer draws, the scan decides
+  whether there is anything to draw it for — the cycle cannot be a dev
+  override that forces the layer on, because its shipped default is
+  already 'dots' and that would make the material reveal free.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -1822,16 +2061,27 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   halves drifted: CI had the cheap default from 2026-08-21 while `npm
   test` still meant all 337 tests, so the fast gate existed on paper and
   every local run still cost thirteen minutes.
-  LOCAL practice mirrors it EXACTLY (user call): per-commit, run
-  typecheck + build + `npm test` + the suites the change touches.  The
-  FULL suite is for the same seam CI reserves it for — the
-  `plan-completion` → `main` promotion, or a PR deliberately labelled
-  `full-tests` — NOT for every PR into `plan-completion`.  A full run
-  before an ordinary feature PR is wasted time, and in a software-
-  rendering container it is worse than wasted: the pixel-sampling and
-  frame-counting suites (`fracture`, `lighting`) drop a stray test on
-  most long runs, and with `retries: 0` each one reads as a failure that
-  has to be chased.  The browser download is CACHED, keyed on the resolved
+  LOCAL practice mirrors it, and WHO CALLS THE MOMENT matters (user
+  clarification, 2026-09-06 — the earlier wording said "before calling a
+  PR ready to merge", which reads as a judgement the session makes and
+  was over-applied to every push).  The rule is:
+  - **PUSHING TO A WORKING BRANCH mid-PR needs typecheck + build +
+    `npm test` (the SMOKE set) + the suites the change touches — NOT the
+    full suite.**  A PR branch is a place to iterate; a ~19-minute suite
+    per push buys nothing and costs the session's momentum.  CI's SMOKE
+    scope is the backstop on every push, which is exactly what it is for.
+  - **THE FULL SUITE RUNS WHEN THE USER SAYS THEY ARE READY TO MERGE** a
+    PR into its parent branch (not always `main`) — the same seam CI
+    reserves it for, alongside the `plan-completion` → `main` promotion
+    and a PR deliberately labelled `full-tests`.  That notice is the
+    trigger; the session does not decide it has arrived.  Also run it
+    after a base sync, since a merge can break what neither side broke.
+  So a red touched-suite blocks a push; a full-suite run without that
+  notice is optional diligence, not a gate to wait behind.  And in a
+  software-rendering container a full run is worse than merely slow: the
+  pixel-sampling and frame-counting suites (`fracture`, `lighting`) drop
+  a stray test on most long runs, and with `retries: 0` each one reads as
+  a failure that has to be chased.  The browser download is CACHED, keyed on the resolved
   `@playwright/test` version plus the runner OS; on a cache hit the
   workflow installs only the apt system libraries (`install-deps`),
   because a restored browser with no libraries cannot launch.  A green
@@ -2307,7 +2557,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   BOUNDARIES of its cached decomposition — grain by grain, nearest the
   contact first — and a cell breaks off exactly when every boundary still
   binding it has been broken through.  `bondStrength` is damage per
-  PIXEL of boundary: ONE number per material (rock 0.27, glass 0.16), and
+  PIXEL of boundary: ONE number per material (see the shipped grain table
+  in §5 — rock and glass 0.4, plastic and metal 1.8), and
   deliberately NOT normalised by body size, because normalising cancels
   scale and would force separate numbers for a material's tiles and its
   shards.  Absolute length makes a bigger body tougher for free.
@@ -2316,7 +2567,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (1) **HP is derived** — `maxHealth` becomes `Σ (edge length × strength)`
   over the body's OWN pattern at first damage, so a tile that decomposed
   into more boundary is genuinely tougher and the number varies tile to
-  tile (a 36px glass pane measured 18.7–21.4).  The SPAWNED value is kept
+  tile (a 36px glass pane measured 44.6–51.2 across sixteen runs — a SPREAD
+  wide enough to straddle a fixed damage figure, which is what made
+  `terrain.spec.ts`'s 50-damage shell flake 2 runs in 16 until it was
+  raised clear of the band).  The SPAWNED value is kept
   as `authoredMaxHealth`, and anything meaning "how substantial is this
   body" must read THAT — tile-destruction score does, since paying per
   derived HP would price a tile by how finely it happened to decompose.
@@ -2381,6 +2635,43 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   they arrived.  PHYSICAL smashes (a boulder crash, the pressure trigger)
   still take the whole body: they meter boulders, not weapons.  DBG ▸
   Visual ▸ "Bnd strength" is the master multiplier over every material.
+- **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
+  "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
+  the body-level penetration rule spent one charge to carry a bolt through
+  a whole 36px pane and pour its entire shot into the entry cell.  For a
+  body running the boundary model — the predicate is
+  `bondStrengthFor(e) !== null`, the same one the derived HP comes from —
+  the bolt instead walks its own CHORD, one `grainSpecFor(variant)
+  .grainSize` at a time, spending a charge and a falloff step per GRAIN.
+  Five things hold it up:
+  - **The step is read through `grainSpecFor`, never
+    `SHARD_VARIANTS[..].grain`** (the §5 rule): a DBG per-material
+    override that reached the pattern but not the track would step at a
+    pitch the decomposition is not built at.
+  - **Each step stamps its OWN contact point** (`stampLocalImpact`) before
+    spending (`applyBoundaryDamage`).  With every material's shipped
+    `damageSpread: 0` the spend runs sequentially outward from that point,
+    which is exactly what makes successive stamps erode successive grains
+    rather than saturating the entry cell — the bore is a consequence of
+    the damage-spread model, not a second mechanism beside it.
+  - **The walk runs in the body's LOCAL frame**, because `polygonPoints`
+    are stored unrotated and `pointInPolygon` has to be asked in those
+    coords; only the world stamp rotates back out.  The entry offset is
+    `wrapDelta`'d, so a body on the seam is not stepped a map-width away.
+  - **Out of charges INSIDE the body, the bolt stops there; out of BODY
+    with charges left, it flies on** and may strike the next thing.  That
+    is the whole difference from the body-level rule, and it is what makes
+    penetration read as depth rather than as a pass.
+  - **It allocates nothing and is bounded by the charges bought** — one
+    reused scratch point, and `charges` strictly decreases each iteration.
+  Bodies with no grain model (nebula, metal-shard composites, enemies,
+  the player) fall through to the single spend they always took, with the
+  falloff applied.  Measured on a 36px glass pane at 4 damage a hit: one
+  charge bores 2 grains and stops inside — 8.0 at the shipped rate (which
+  is 0, so both grains take full damage), or 7.8 with the decay cycled to
+  0.05 — where the body-level rule crossed the whole tile for one bite of
+  4.  The pane is ~3 grains deep on that chord, so 4+ charges bore 3 and
+  carry on: terrain costs about three charges per body, not a budget.
 - **Progressive fracture IS the rock damage model under voronoi** (V8 —
   the boundary-highlight rework).  The decomposition is applied ONCE at
   first damage and FIXED; each hit reveals more of the impact-sorted
@@ -3054,7 +3345,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
   `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's PURE
   layout functions — `fitFontPx`, `computeMinimapRect`,
-  `computeLoadoutHUDLayout`, `computeIndicatorRect` — on exactly the
+  `computeLoadoutHUDLayout`, `computeIndicatorRect`, and (A4)
+  `detectionAlpha` — on exactly the
   `__omniHid` rationale: they are
   pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
   320px, a minimap rect disagreeing with the tap handler that catches its
@@ -3508,10 +3800,37 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   indicated now (they used to be excluded as clutter) — the small separate
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
+  EVERY ARROW ON THE EDGE IS TRANSIENT, AND NONE OF THEM COME FROM `found`
+  OR FROM THE AUTO SWEEP (scanner rework, §5).  An arrow says "something is
+  there NOW", so a charted landmark gets a map dot and no chevron, and the
+  background sweep feeds the minimap only.
+  The buffer is gated on `GameEntity.detectedAt`, so a scannerless ship
+  has NO arrows at all, and `item.detect` — `detectionAlpha(simClock −
+  detectedAt)`, pure and published on `__omniHud` — is the `globalAlpha`
+  each one draws at, so a mark going soft is what says the contact has had
+  time to move.  This REPLACED two range gates rather than joining them:
+  `enemyIndicatorAlpha`'s distance fade (enemy chevrons never culled, so
+  the fade WAS their range gate) and the portal arrow's
+  `PORTAL_CONSTANTS.INDICATOR_RANGE` bracket.  Detection range is now the
+  one range gate there is, and it is the scanner's to set.  The per-type
+  BUDGETS are untouched — a scanner decides WHAT is on the edge, never how
+  many.  The two portal-arrow rules that were always about legibility
+  rather than range survive verbatim: an on-screen rift still suppresses
+  its arrow, and the arrow still carries a name and no distance readout.
 
 - **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
-  object.**  (The shipped material default is DOTS, not flow — user call;
-  flow is one step of the DBG cycle away.  Screen shake likewise ships ON.)  Three rules, all decided in step 5 G5 (user directive,
+  object, and NONE of it without a scanner.**  (The shipped material
+  default is DOTS, not flow — user call; flow is one step of the DBG
+  cycle away.  Screen shake likewise ships ON.)  The scanner rework (§5)
+  added a rule ABOVE the three below: with no scanner aboard the widget
+  draws neither the pre-rendered terrain layer nor any contact — only the
+  two `isAlwaysCharted` landmarks.  TERRAIN is gated on merely OWNING a
+  scanner.  TERRAIN IS NOW TRACKED TILE BY TILE (user call): the
+  pre-rendered layer starts EMPTY and accumulates each tile as the player
+  meets it, so the map fills in as they fly and a scan adds a whole bubble.
+  The FLOW layer keeps the owning-a-scanner gate, since it is an inferred
+  field rather than a set of seen objects.
+  Three rules under that, all decided in step 5 G5 (user directive,
   decision #43):
   1. **Nebula is off it entirely.**  Nebula tiles are skipped by
      `buildMinimapStaticLayer` and nebula shards never enter the
@@ -3522,7 +3841,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
      (`MINIMAP_CONSTANTS.FLOW`); the old per-shard dots are still
      available behind the DBG cycle Visual ▸ "Minimap mat"
      (Flow / Dots / Off), and in any mode but `dots` mobile shards are
-     not even collected into `_minimapBuffer`.  Two things to know
+     not even collected into `_minimapBuffer`.  The SCAN is the second
+     gate (§5) and BOTH have to say yes — the cycle picks WHICH layer
+     draws, the scan decides whether there is anything to draw it for —
+     and the answer has exactly ONE definition,
+     `RenderSystem.minimapShardDots`, because TWO callers have to agree
+     on it: the per-entity buffer fill in `RenderSystem` and the draw in
+     `render/hud.ts`.  They used to agree by both calling
+     `getActiveMinimapMaterial()`; with a second input, the AND could not
+     stay duplicated.  Note the cycle canNOT be a dev override that
+     forces the layer on regardless: its shipped default is already
+     'dots', so that would make the material reveal free and Mk I
+     worthless.  Two things to know
      before touching it: the streamline geometry is cached in WORLD
      space and keyed on the seed CELL (panning must not retrace), and
      the polyline needs a SEAM BREAK — per-point torus math is not
@@ -3625,8 +3955,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - **`PR checks` is the default gate on every PR and the final step before
   a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
   merge seams and on the `full-tests` label (§7).  Locally: typecheck +
-  build + the touched suites per commit, the FULL `npm test` before
-  calling a PR ready to merge.  Never merge past a pending or failing
+  build + the touched suites per commit AND per push to a working branch;
+  the FULL `npm test` when the USER gives notice they are ready to merge
+  the PR into its parent branch, not on the session's own judgement that
+  it looks ready (§7).  Never merge past a pending or failing
   `typecheck · build · test`.  The other two workflows still gate
   nothing — a preview build or a standalone release is not validation.
 

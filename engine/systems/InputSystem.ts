@@ -118,6 +118,7 @@ export class InputSystem {
   /** Latched edge presses, drained by the engine. Counters, not booleans, so
    *  two presses inside one frame cannot silently become one. */
   private padInteractPresses: number = 0;
+  private padScanPresses: number = 0;
   private padCyclePresses: number = 0;
   private padPausePresses: number = 0;
   /** Connect / disconnect, drained once by the engine to raise a HUD hint. */
@@ -1178,6 +1179,7 @@ export class InputSystem {
     if (this.padGroupEdge(snap, G.BUTTONS.BACK)) this.padBackPresses++;
     this.tickMenuNav(snap);
     if (this.padGroupEdge(snap, G.BUTTONS.INTERACT)) this.padInteractPresses++;
+    if (this.padGroupEdge(snap, G.BUTTONS.SCAN)) this.padScanPresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.CYCLE_WEAPON)) this.padCyclePresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.PAUSE)) this.padPausePresses++;
 
@@ -1336,6 +1338,15 @@ export class InputSystem {
     const e = this.padConnectionEvent;
     this.padConnectionEvent = null;
     return e;
+  }
+
+  /** One latched SCAN press from the pad, or false.  DRAINED every step like
+   *  the interact latch, whether or not it can be spent: a press made while
+   *  docked must not bank a scan that fires on undock. */
+  public consumeScanPress(): boolean {
+    if (this.padScanPresses <= 0) return false;
+    this.padScanPresses--;
+    return true;
   }
 
   public consumeInteractPress(): boolean {

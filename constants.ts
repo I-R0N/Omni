@@ -1363,6 +1363,12 @@ export const INPUT_CONSTANTS = {
        *  The face button covers it, which is what a one-stick pad has. */
       FIRE_FACE:    [0],
       INTERACT:     [2],      // Square — dock / enter portal / undock (the `selected` flag)
+      /** SCAN — its OWN control on every device (user call).  It could not
+       *  join INTERACT: that gesture is already arbitrated between docking,
+       *  portals and the Light tool, and a scanner is a fourth thing wanting
+       *  the same press.  L1 and Circle are both unbound in flight, and
+       *  offering both means a pad missing either still scans. */
+      SCAN:         [4, 1],   // L1, Circle
       CYCLE_WEAPON: [5, 3],   // R1, Triangle
       PAUSE:        [9],      // Options
       DPAD:         [12, 13, 14, 15], // up, down, left, right — digital thrust
@@ -2739,6 +2745,11 @@ export const PERF_TASKS = {
   flowField:        { minInterval: 1, maxInterval: 2,   costWeight: 1.0, autoCurve: 1.0 },
   nebulaNeighbors:  { minInterval: 1, maxInterval: 4,   costWeight: 0.9, autoCurve: 1.0 },
   dropScan:         { minInterval: 1, maxInterval: 2,   costWeight: 0.6, autoCurve: 1.0 },
+  // MINIMAP DISCOVERY — the walk that marks tiles and large shards `found`
+  // as the player passes them.  Cadenced because it is pure bookkeeping with
+  // no physical consequence: a tile appearing on the map two frames late is
+  // invisible, where a collision two frames late is not.
+  discover:         { minInterval: 2, maxInterval: 12,  costWeight: 0.7, autoCurve: 1.0 },
   // O(N²) drop merge pass (DropSystem.mergeDrops).  Up to
   // DROP_CONFIG.MAX_ACTIVE_DROPS² pair-ops + damping + nudges per
   // step; not time-critical (drops settle over many frames), so a
@@ -5047,6 +5058,107 @@ export const DAMAGE_TEXT_CONSTANTS = {
   DAMAGE_FONT_SCALE: 0.8, // damage chips render small vs. points popups
 };
 
+// PIERCE CEILING (A3).  The Penetration module adds +1 pierce per mark to
+// EVERY gun uniformly (guidance call), and this clamps the sum.
+//
+// It is a plain SANITY ceiling against an authoring mistake, and nothing
+// more — it is deliberately NOT anchored to any weapon.  It used to be, and
+// the anchor rotted: 99 was "the ceiling the Laser already defines", and the
+// Laser now ships `pierce: 4`.  The largest reachable stack today is that 4
+// plus Penetration Mk III's +3 = 7, so nothing comes near this and no
+// balance statement should be read into the number.
+export const MAX_PIERCE = 99;
+
+// PENETRATION FALLOFF — a RATE, not a table (user call, superseding the
+// authored curve).  Damage at hit ordinal `n` is `base x (1 - rate)^n`, so
+// ONE number describes the whole decay and the DBG cycle below can sweep it
+// live.  The authored table it replaces could express an irregular shape but
+// could not be tuned in play, which is what the tuning actually needs.
+//
+// RATE 0 IS A FIRST-CLASS SETTING (user call): every penetration hit then
+// deals full projectile damage, which is the control for judging whether the
+// decay is carrying its weight at all.
+//
+// SHIPPED OFF (user call).  The decay is a knob to be judged, not a balance
+// statement to inherit: at 0 every penetration hit lands FULL projectile
+// damage, so what ships is the honest ceiling and the rate is what a tuning
+// pass turns up.  The step below it in the cycle is 0.05, which is the value
+// the retired table's tail worked out to at depth — a sensible first click.
+//
+// The number matters more than it looks once turned on, because the
+// reachable stack is large: six Penetration Mk III in the weapon flower is
+// +18, and inside a grain material every GRAIN spends a charge.  A geometric
+// decay has no floor, so the rate mostly decides what a DEEP bore is worth —
+// at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.
+//
+// It applies to EVERY WEAPON EQUALLY (user call), and to every damage path a
+// hit produces: the direct bite, the Cannon's AoE splash and the Lightning
+// chain all take the same factor.  `WeaponConfig.pierceFalloffRate` is kept
+// as the per-weapon seam for when that changes; nothing overrides it today.
+export const PIERCE_FALLOFF_RATE = 0;
+
+/** DBG "Pierce falloff" — index 0 is what ships, so the first click is the
+ *  A/B.  0 is the no-decay control; the top of the range is deliberately
+ *  past useful, because a range whose top is not too far cannot show where
+ *  too far is. */
+export const PIERCE_FALLOFF_CYCLE: ReadonlyArray<number> = [
+  PIERCE_FALLOFF_RATE, 0.05, 0.10, 0.20, 0.35, 0.50,
+] as const;
+
+let activePierceFalloffIndex = 0; // 0 — what ships: the decay is OFF
+
+export function getActivePierceFalloffRate(): number {
+  return PIERCE_FALLOFF_CYCLE[activePierceFalloffIndex];
+}
+export function getActivePierceFalloffName(): string {
+  const v = getActivePierceFalloffRate();
+  if (v === 0) return 'off (full dmg, def)';
+  return v.toFixed(2);
+}
+export function cyclePierceFalloff(): number {
+  activePierceFalloffIndex =
+    (activePierceFalloffIndex + 1) % PIERCE_FALLOFF_CYCLE.length;
+  return activePierceFalloffIndex;
+}
+
+/** The damage multiplier for the `ordinal`-th hit of one bolt (0 = the
+ *  first contact, always 1 — a bolt with no penetration is untouched by any
+ *  of this).  `rate` is a weapon's own override (WeaponConfig
+ *  .pierceFalloffRate, stamped onto the projectile at spawn); absent → the
+ *  live DBG rate.  Rate 0 returns 1 at every depth. */
+export function pierceFalloffAt(ordinal: number, rate?: number): number {
+  if (ordinal <= 0) return 1;
+  const r = rate !== undefined ? rate : getActivePierceFalloffRate();
+  if (r <= 0) return 1;
+  return Math.pow(1 - r, ordinal);
+}
+
+// PIERCE SPEED DECAY.  A per-hit multiplier on a piercing bolt's speed —
+// boring through matter should cost momentum as well as damage.  SHIPPED
+// AT 1.0, i.e. no behaviour change: the falloff table is the change the
+// user asked for, and this is the second axis they want to FEEL against
+// it before either is tuned.  The DBG cycle below is how.
+export const PIERCE_SPEED_RETAIN = 1.0;
+
+export const PIERCE_SPEED_RETAIN_CYCLE: ReadonlyArray<number> = [
+  PIERCE_SPEED_RETAIN, 0.95, 0.9, 0.8,
+] as const;
+
+let activePierceSpeedRetainIndex = 0; // 1.0 — what ships
+
+export function getActivePierceSpeedRetain(): number {
+  return PIERCE_SPEED_RETAIN_CYCLE[activePierceSpeedRetainIndex];
+}
+export function getActivePierceSpeedRetainName(): string {
+  const v = getActivePierceSpeedRetain();
+  return v === PIERCE_SPEED_RETAIN ? `${v.toFixed(2)}x (def)` : `${v.toFixed(2)}x`;
+}
+export function cyclePierceSpeedRetain(): number {
+  activePierceSpeedRetainIndex =
+    (activePierceSpeedRetainIndex + 1) % PIERCE_SPEED_RETAIN_CYCLE.length;
+  return activePierceSpeedRetainIndex;
+}
+
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 //
 // Stat budgeting (d2 weapon overhaul):
@@ -5114,14 +5226,28 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
                        // line-deleting punch — same lever as Lightning.
     speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
-    lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
-    color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
+    lifetime: 4,       // bounded; in a dense field the bounceCount cap ends the
+                       // beam first, in open space this does
+    color: '#22c55e',  // Green — beam that bores a few bodies deep and bounces off tiles
     size: 6,
     count: 3,          // 3-beam forward fan
     spread: 30,        // ±15° cone
     recoil: 0.5,
-    pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
-    bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
+    // 99 → 4 (user call, penetration rework).  "Effectively infinite" was a
+    // number that pre-dated any cost to piercing: with the shared
+    // falloff rate in place a beam already gives up damage per body,
+    // so an unbounded budget just made the Laser the answer to every line of
+    // targets.  Four DAMAGE EVENTS is the budget for the whole flight —
+    // bounces do not refresh it (see the reflection branch in
+    // PhysicsSystem) — and it runs the SHARED falloff table: no
+    // `pierceFalloffRate` override here, deliberately.
+    pierce: 4,
+    bounceCount: 15,   // 3 -> 15 (user call): reflects up to 15 times off tiles
+                       // before dissipating.  Bounces buy COVERAGE, never extra
+                       // damage — `pierce` above is a LIFETIME budget of damage
+                       // events that a reflection does not refresh — so a beam
+                       // that ricochets this much still lands at most 4 hits,
+                       // each further down the shared falloff curve.
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -5459,7 +5585,8 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge' | 'utility';
+  | 'gun' | 'gunnery' | 'autoloader' | 'piercing' | 'overcharge'
+  | 'utility' | 'scanner';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
  *  Base values modified: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
@@ -5472,6 +5599,11 @@ export interface ModuleEffect {
   accelFrac?: number;       // thrusters
   damageFrac?: number;      // gunnery
   cooldownFrac?: number;    // autoloader
+  pierceBonus?: number;     // piercing — +N projectile penetrations (A3)
+  // scanner — the MARK of one Scanner module (A4).  Summed nowhere: the
+  // ship's scanner TIER is the highest active mark, so two Mk I do not add
+  // up to a Mk II.  See applyModuleEffects.
+  scannerMk?: number;
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
   flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
@@ -5495,6 +5627,37 @@ export interface ModuleDef {
 }
 
 export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
+// ── Purchasable hex slots (A5) ──────────────────────────────────────────────
+// A flower has MODULE_SLOT_COUNT hexes; how many of them are UNLOCKED is a
+// run field on GameEngine, and a station sells the rest.  A locked hex holds
+// nothing and accepts nothing — which is why this needed no change to
+// HEX_ADJACENCY or `computeActiveSlots`: an empty hex is already invisible to
+// the adjacency fixpoint, and "locked" is just an empty hex that cannot be
+// filled.  The ONE new rule is a destination guard in `moveModuleInternal`.
+//
+// START equals the cap TODAY, so nothing is locked and shipped behaviour is
+// unchanged — this is the seam, exactly the way `SHIP_WEIGHT.HULL_BASE` is 0:
+// the ship catalog (phased plan Phase D) is what will start different hulls
+// at different counts, and lowering the number for the CURRENT hull is a
+// balance call for the economy pass rather than something to slip in here.
+// DBG ▸ Modules ▸ "Lock slots" walks it down so the purchase can be flown.
+export const MODULE_SLOT_UNLOCK = {
+  START: MODULE_SLOT_COUNT,
+  MAX: MODULE_SLOT_COUNT,
+  /** Price of the NEXT unlock, indexed by how many hexes the group already
+   *  has.  Rising steeply at the top: the last hex on a flower is worth more
+   *  than anything that could sit in it.  Entries below a plausible start are
+   *  there so the table is total — a group can never ask for a price the
+   *  table has no answer for. */
+  PRICES: [30000, 30000, 30000, 30000, 30000, 60000, 120000] as readonly number[],
+};
+/** Catalog cost of the next hex for a group that has `unlocked` of them, or
+ *  null when the group is already full.  Routed through `modulePrice` by the
+ *  caller like every other price — that seam stays the only one. */
+export function slotUnlockCost(unlocked: number): number | null {
+  if (unlocked >= MODULE_SLOT_UNLOCK.MAX) return null;
+  return MODULE_SLOT_UNLOCK.PRICES[Math.max(0, Math.min(unlocked, MODULE_SLOT_UNLOCK.PRICES.length - 1))];
+}
 export const MAX_INSTALLED_GUNS = 2;  // gun COUNT limit in the weapon group (slot-agnostic)
 export const INVENTORY_CAPACITY = 12; // inventory tile count (future ships vary this)
 // Module resale: SELL-BACK pays 90% of cost but needs a station (any —
@@ -5560,8 +5723,10 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   capacitor:  ['shield'],
   gunnery:    ['gun'],
   autoloader: ['gun'],
+  piercing:   ['gun'],
   overcharge: ['gun'],
   utility:    ['hull'],
+  scanner:    ['hull'],
 };
 
 /** Neighbour indices per hex slot in the 7-flower: 0 = center (touches
@@ -5574,7 +5739,7 @@ export const HEX_ADJACENCY: readonly (readonly number[])[] = [
 // Mk pricing ≈ the CUMULATIVE cost of the old per-level curve at that
 // level (rounded) so the salvage economy is unchanged in total: reaching
 // "Mk III power" costs about what L3 used to.
-const MK = ['', ' Mk I', ' Mk II', ' Mk III'];
+const MK = ['', ' Mk I', ' Mk II', ' Mk III', ' Mk IV', ' Mk V'];
 /** `mk1Weight` is the Mk I mass; Mk II/III scale linearly with the mark, the
  *  same way their effects and prices do — a bigger plate is a heavier plate. */
 const statMks = (
@@ -5587,6 +5752,194 @@ const statMks = (
   weight: +(mk1Weight * (i + 1)).toFixed(1),
 }));
 
+// ── SCANNER — a TOOL the player operates (rework, user call 2026-09-06) ───
+//
+// A4 shipped the scanner as a passive gate: install it, and two readouts
+// quietly showed more.  Play-test verdict was that nothing about it read —
+// "unclear what I am unlocking".  The rework makes the scanner the thing
+// that puts contacts on the screen AT ALL, and makes using it an ACTION.
+//
+// Four rules, and all four are reversals of A4:
+//
+//  1. **NOTHING is on the readouts for free.**  With no scanner the HUD has
+//     no off-screen arrows at all and the minimap is blank but for two
+//     landmarks (see SCAN_ALWAYS below).  A4's rule was the opposite — "no
+//     scanner degrades to today's behaviour exactly" — which is what made
+//     the module invisible: it added to a readout that was already full.
+//  2. **A scan is a PING, not a state.**  `GameEngine.fireScan` sends a
+//     wavefront out from the ship at PING_SPEED; a contact the front crosses
+//     is revealed for LINGER_SEC and fades over the last FADE_SEC.  Between
+//     pings the screen is quiet, which is what gives the ping something to
+//     say.
+//  3. **MARKS STACK.**  A4 made the ship's tier the single highest mark
+//     aboard and called the departure from summing deliberate.  It is now
+//     the ordinary summing rule, in the one dimension that matters: RANGE.
+//     See `scanRanges` below for the arithmetic and the worked example.
+//  4. **Every mark adds a CATEGORY and a little RANGE.**  Range is the
+//     headline (a mark is +MARK_RANGE_STEP over the one below, and stacking
+//     is how range really grows); categories are what makes a specific mark
+//     worth buying.
+export const SCANNER = {
+  /** Marks run I..V.  `statMks` derives the module rows from the cost
+   *  array, so this is the number of entries that array must have. */
+  MAX_MARK: 5,
+  /** Mk I's OWN scan radius, world units.  Every other mark is this scaled
+   *  by MARK_RANGE_STEP per mark above I. */
+  BASE_RANGE: 2200,
+  /** A mark's radius over the mark below it.  Deliberately small (~10%,
+   *  user call): a single mark is a modest reach improvement, and the way a
+   *  player actually buys range is by fitting MORE scanners. */
+  MARK_RANGE_STEP: 1.10,
+  /** How fast the wavefront travels, world units per second.  Sized so the
+   *  longest realistic scan takes a beat rather than a wait — the ring is
+   *  feedback, not a loading bar. */
+  PING_SPEED: 3200,
+  /** How long a contact stays revealed after the front crosses it … */
+  LINGER_SEC: 7,
+  /** … of which this much is spent fading out.  A mark going soft is what
+   *  tells the player it is STALE — the contact has had that long to move. */
+  FADE_SEC: 2.5,
+  /** Minimum seconds between pings.  Short enough not to be a chore, long
+   *  enough that spamming it is not the same as leaving it on. */
+  COOLDOWN_SEC: 2.5,
+  /** The expanding ring's look, shared by the world pass and the minimap so
+   *  the two obviously show the same event.  Deliberately NOT a colour from
+   *  the INDICATORS type legend: the ring is not a contact, it is the
+   *  instrument, and giving it a contact's colour would say it is one. */
+  RING_COLOR: '#67e8f9',
+  RING_ALPHA: 0.55,
+  RING_WIDTH: 3,
+  /** The ring thins as it expands — the same energy over a longer
+   *  circumference — so a long scan ends by dissolving rather than by
+   *  stopping. */
+  RING_MIN_ALPHA_FRAC: 0.15,
+
+  /** Only shards THIS BIG are tracked on the minimap (user call).  Small
+   *  debris is not a landmark, there is a great deal of it, and tracking is
+   *  permanent — so the threshold is what keeps the map legible and the
+   *  per-frame set bounded.  Roughly a tile's own size, which is the scale at
+   *  which a rock reads as a thing rather than as gravel. */
+  TRACK_MIN_SHARD_SIZE: 40,
+
+  /** NATURAL ENCOUNTER (user call).  A contact this close is seen with the
+   *  naked eye — no scanner required, no mark required.  It is what makes
+   *  the minimap fill in as the player flies rather than staying blank until
+   *  they buy an instrument, and it is why the scanner's value is RANGE:
+   *  finding a thing before you fly into it. */
+  ENCOUNTER_RANGE: 900,
+  /** …except that a CONCEALED POI is not seen by flying past it, or "secret"
+   *  and "hidden" would be words with no mechanism behind them.
+   *
+   *  A POI rule, NOT a tier rule.  The detection tiers rank how RARE a find
+   *  is, and rarity is not visibility: a rival, a bubble and a dragon sit at
+   *  tiers 3 and 4 because they are uncommon, but each is a large object in
+   *  plain sight and flying into one obviously counts as meeting it.  Gating
+   *  natural sight on the detection tier conflated the two and made a rival
+   *  parked beside the ship invisible — caught by the tracking test. */
+  ENCOUNTER_MAX_POI_TIER: 2,
+
+  /** AUTO-SCAN (user call): a background sweep that keeps the MINIMAP
+   *  populated with moving contacts, so the player is not pressing the
+   *  button to stay merely aware.  Deliberately the QUIET half of the
+   *  tool — see `GameEngine.updateAutoScan` for what it does not do. */
+  AUTO: {
+    /** Mk I is the entry instrument and stays fully manual; auto-tracking is
+     *  what a mark buys on top. */
+    MIN_MARK: 2,
+    /** Seconds between background sweeps. */
+    INTERVAL_SEC: 6,
+  },
+} as const;
+
+/** DETECTION TIERS — what each mark adds, and the ONE table that says so.
+ *
+ *  A mark detects its own tier AND every tier below it (user call), so these
+ *  are cumulative by construction: a Mk III sees tiers 1–3.
+ *
+ *  The POI rungs are deliberately populated ahead of the things that will
+ *  fill them.  `GameEntity.poiTier` lets any POI declare its own rung, and
+ *  the default (COMMON) is what every station and portal in the game is
+ *  today — so the hidden wormholes of the phased plan's G4 become a field on
+ *  a portal rather than a change here. */
+export const DETECT_TIER = {
+  /** Mk I — common POIs (every station and portal today) and MATERIALS. */
+  MATERIAL: 1,
+  POI_COMMON: 1,
+  /** Mk II — uncommon POIs and ENEMIES (a boss is an enemy). */
+  ENEMY: 2,
+  POI_UNCOMMON: 2,
+  /** Mk III — rare POIs, RIVALS and FAUNA (bubbles). */
+  RIVAL: 3,
+  FAUNA: 3,
+  POI_RARE: 3,
+  /** Mk IV — secret POIs and DRAGONS (and equivalents to come). */
+  DRAGON: 4,
+  POI_SECRET: 4,
+  /** Mk V — top-secret POIs and the SNITCH (and equivalents to come). */
+  SNITCH: 5,
+  POI_HIDDEN: 5,
+} as const;
+
+/** Shop/inventory blurb per mark.  Each line names what that mark ADDS, since
+ *  a mark carries every tier below it. */
+const SCANNER_MK_DESC: Record<number, string> = {
+  1: 'Detects common POIs + materials',
+  2: '+ enemies, uncommon POIs',
+  3: '+ rivals, fauna, rare POIs',
+  4: '+ dragons, secret POIs',
+  5: '+ snitches, hidden POIs',
+};
+
+/** One mark's OWN scan radius. */
+export function scannerMarkRange(mk: number): number {
+  return SCANNER.BASE_RANGE * Math.pow(SCANNER.MARK_RANGE_STEP, mk - 1);
+}
+
+/** The ship's scan radius PER TIER, from the marks actually installed and
+ *  active.  Index 0 is unused; 1..MAX_MARK are the tiers.
+ *
+ *  THE RULE: a tier's range is the SUM of the own-ranges of every scanner
+ *  aboard that can see that tier — i.e. every scanner whose mark is at
+ *  least the tier.  Since a high mark sees the low tiers too, low tiers
+ *  accumulate every scanner on the ship and high tiers accumulate only the
+ *  few that reach them, which is the user's stated shape: "these should
+ *  stack their lowest feature's distance as well".
+ *
+ *  Worked example (the user's own): a Mk III plus two Mk I.
+ *    tier 1 — all three qualify → 1.21R + R + R  = 3.21 R
+ *    tier 2 — only the Mk III     → 1.21R          = 1.21 R
+ *    tier 3 — only the Mk III     → 1.21R          = 1.21 R
+ *  … i.e. ~3x reach for Mk I features and ~1x for Mk III features.
+ *
+ *  Returns a fresh array; call it when the outfit changes, never per frame. */
+export function scannerRangesFor(marks: readonly number[]): number[] {
+  const out = new Array<number>(SCANNER.MAX_MARK + 1).fill(0);
+  for (let tier = 1; tier <= SCANNER.MAX_MARK; tier++) {
+    let sum = 0;
+    for (let i = 0; i < marks.length; i++) {
+      if (marks[i] >= tier) sum += scannerMarkRange(marks[i]);
+    }
+    out[tier] = sum;
+  }
+  return out;
+}
+
+/** How strongly a contact detected `age` seconds ago should draw: full until
+ *  the fade window, then down to nothing at LINGER_SEC.  Past that it is not
+ *  drawn at all, so this returning 0 and the caller skipping agree.
+ *
+ *  Pure and published on `__omniHud` for exactly the `computeIndicatorRect`
+ *  reason: it exists only as a `globalAlpha`, so a wrong ramp — marks that
+ *  never fade, or that vanish the instant they appear — throws nothing and
+ *  logs nothing. */
+export function detectionAlpha(age: number): number {
+  const { LINGER_SEC, FADE_SEC } = SCANNER;
+  if (age < 0 || age >= LINGER_SEC) return 0;
+  const solid = LINGER_SEC - FADE_SEC;
+  if (age <= solid) return 1;
+  return 1 - (age - solid) / FADE_SEC;
+}
+
 export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Ship group ──
   // Every run STARTS with the free Base Hull mounted on the center ship
@@ -5597,6 +5950,11 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
   { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
+  // FIVE marks (rework).  Prices climb steeply because marks STACK now:
+  // a second Mk I is a real range purchase, so the high marks have to be
+  // priced against buying several low ones rather than against each other.
+  ...statMks('scanner', 'ship', 'ship', 'Scanner', mk => SCANNER_MK_DESC[mk],
+    [7000, 17500, 32000, 55000, 90000], mk => ({ scannerMk: mk }), 0.25),
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
   ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
@@ -5614,6 +5972,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
   ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
   ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
+  ...statMks('piercing', 'weapon', 'weapon-mod', 'Penetration', mk => `+${mk} shot penetration`, [9000, 22500, 43000], mk => ({ pierceBonus: mk }), 0.2),
   { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 
@@ -7014,6 +7373,64 @@ export function computeIndicatorRect(
     bottom = Math.min(screenHeight, mid + MIN_BAND * 0.5);
   }
   return { left, right, top, bottom };
+}
+
+/** Which DETECTION TIER a contact belongs to — the ONE place that answers
+ *  "what mark of scanner finds this", so the arrows and the minimap cannot
+ *  disagree about it.  0 means "not a scannable contact" (drops, debris,
+ *  projectiles, the player's own hull).
+ *
+ *  A POI may name its own rung via `GameEntity.poiTier`; everything shipped
+ *  today is COMMON, and that field is the seam a hidden wormhole would use.
+ *
+ *  Order matters — the specific roamers are tested BEFORE the generic ENEMY
+ *  arm, because a dragon head, a rival and a bubble are all `EntityType.ENEMY`
+ *  and each is a rarer find than an ordinary hostile. */
+export function detectTierFor(e: GameEntity): number {
+  if (e.isStation === true || e.isPortal === true) return e.poiTier ?? DETECT_TIER.POI_COMMON;
+  if (e.isSnitch === true) return DETECT_TIER.SNITCH;
+  if (e.type === EntityType.ENEMY) {
+    if (e.enemySubtype === EnemySubtype.DRAGON) return DETECT_TIER.DRAGON;
+    if (e.isRival === true) return DETECT_TIER.RIVAL;
+    if (e.enemyShape === 'bubble') return DETECT_TIER.FAUNA;
+    return DETECT_TIER.ENEMY;
+  }
+  // MATERIALS: mobile shards only.  A static tile is terrain, not a contact
+  // — the minimap draws it as the pre-rendered ground layer and no arrow has
+  // ever pointed at one.
+  if (e.type === EntityType.STRUCTURE && Number.isFinite(e.mass)
+      && e.dragonSegment !== true) return DETECT_TIER.MATERIAL;
+  return 0;
+}
+
+/** Is this contact RETAINED once found?
+ *
+ *  THE SPLIT (user call): a fixed landmark stays on the minimap for good once
+ *  discovered — "flag everything as found or not" — while anything that MOVES
+ *  is tracked for a few seconds and then drops off both readouts.  A stale dot
+ *  where an enemy used to be is worse than no dot; a station does not go
+ *  anywhere, so forgetting it is just annoying.
+ *
+ *  Stations and portals are the fixed landmarks today.  Everything else —
+ *  enemies, rivals, fauna, dragons, the snitch, materials — is transient. */
+export function isRetainedContact(e: GameEntity): boolean {
+  return e.isStation === true || e.isPortal === true;
+}
+
+/** The landmarks a run STARTS knowing, seeded as `found` at map load: the
+ *  player's home station, and the rift they arrived through — "if the player
+ *  finds a portal in the home arena and travels through it, that return
+ *  portal will appear on the minimap".
+ *
+ *  A SEEDING rule, not a per-frame test: `GameEntity.found` is the one thing
+ *  the minimap reads, so being charted from the start and being charted by
+ *  flying past cannot end up meaning two different things.
+ *
+ *  Note what it does NOT grant: found gets a minimap MARK and never an ARROW.
+ *  Arrows are transient by design — they say "something is over there NOW". */
+export function isAlwaysCharted(e: GameEntity, arrivalPortalId: string | null): boolean {
+  if (e.isStation === true && e.stationKind === 'home') return true;
+  return e.isPortal === true && arrivalPortalId !== null && e.id === arrivalPortalId;
 }
 
 export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {

@@ -292,6 +292,13 @@ export interface WeaponConfig {
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
   pierce: number; // How many entities the projectile passes through after the first hit
+  // Per-hit damage falloff for a PIERCING shot, indexed by hit ordinal
+  // (0 = the first contact, so entry 0 is 1 by construction).  Absent →
+  // the shared falloff RATE.  Sits beside `pierce` because it is the same
+  // seam: per-weapon, stamped onto the projectile at spawn.  Absent → the
+  // live global rate (DBG "Pierce falloff"), which is what every weapon
+  // uses today.
+  pierceFalloffRate?: number;
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
   // commitment; charged shots cost only the charge-time hold.
@@ -473,6 +480,20 @@ export interface GameEntity {
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
   pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
+  // How many bodies (or GRAINS — see the bore track in PhysicsSystem) this
+  // bolt has already struck.  The index into the falloff table, so it is
+  // separate from `pierceCount`, which counts DOWN and would read the
+  // table backwards.
+  pierceHits?: number;
+  // The falloff table this shot flies with, copied from its WeaponConfig
+  // at spawn.  Absent → the shared curve.
+  /** The falloff factor actually applied to THIS hit, stashed by
+   *  PhysicsSystem so the on-hit consumers in GameEngine (the Cannon's AoE
+   *  splash, the Lightning chain) scale by the same number the direct
+   *  damage did.  They cannot re-derive it: the grain bore may have
+   *  advanced `pierceHits` before their callback runs. */
+  hitFalloff?: number;
+  pierceFalloffRate?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
@@ -509,6 +530,10 @@ export interface GameEntity {
   //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
   damageMult?: number;
   cooldownMult?: number;
+  //  - pierceBonus: extra projectile penetrations from Penetration modules
+  //    (A3), added to the weapon's own `pierce` in WeaponSystem and clamped
+  //    to MAX_PIERCE; default 0.
+  pierceBonus?: number;
   shieldRechargeRate?: number;
   // Unlock + loadout gating (player only; set by GameEngine
   // .syncUnlocksToPlayer):
@@ -811,6 +836,29 @@ export interface GameEntity {
   // EntityIndex excludes it from the shard indices so ShardSystem / flow-drift /
   // consume leave it alone.  Cleared when it's severed off (→ free shard).
   dragonSegment?: boolean;
+
+  // ── SCANNER detection (scanner rework) ────────────────────────────────
+  /** Sim-clock time this contact was last crossed by a scan wavefront.
+   *  Freshness is `engine.simClock - detectedAt`, so there is NO per-frame
+   *  countdown to tick over every entity on the map — a stamp and a
+   *  subtraction. Undefined = never detected this run. */
+  detectedAt?: number;
+  /** Which scanner mark finds this POI.  Overrides `detectTierFor`'s default
+   *  of COMMON for stations and portals; the seam a hidden wormhole uses. */
+  poiTier?: number;
+  /** FOUND — a permanent discovery flag, set once and never cleared for the
+   *  life of the map instance.  Only RETAINED contacts (fixed landmarks —
+   *  `isRetainedContact`) ever get it: a thing that moves is tracked for a
+   *  few seconds, because a stale dot where an enemy used to be is worse
+   *  than no dot.  Map-scoped, not run-scoped: entities are rebuilt per map
+   *  load, so re-entering an arena rediscovers it — the same rule destroyed
+   *  tiles already follow. */
+  found?: boolean;
+  /** Stamped by the AUTO-scan, which is the quiet half of the tool: it feeds
+   *  the MINIMAP only.  Separate from `detectedAt` on purpose — the arrows
+   *  read that one, so a background sweep cannot put chevrons on the screen
+   *  the player never asked for. */
+  trackedAt?: number;
   // Dragon leave animation (Stage 6): the head has crossed its exit portal and
   // is being swallowed tail-first — RenderSystem stops drawing it while the body
   // segments collapse through the portal one by one.
@@ -1621,6 +1669,25 @@ export interface EngineStats {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
   };
+  /** SCANNER, every frame (like `vitals`, unlike `playerStats`): the in-game
+   *  HUD's scan button needs all three during play.  `mk` is 0 with no
+   *  scanner aboard, which is what hides the button entirely — a control for
+   *  a tool you do not own is a control that does nothing. */
+  scanner?: {
+    mk: number;
+    /** Widest reach (tier 1), world units — the headline range. */
+    range: number;
+    /** Seconds until another scan is allowed; 0 = ready. */
+    cooldown: number;
+    /** Cooldown as a 0..1 fill, so the button can show it without knowing
+     *  SCANNER.COOLDOWN_SEC. */
+    ready: number;
+    /** Is the mark high enough for AUTO-SCAN?  The pause-menu switch renders
+     *  only when it is — a toggle for something that would not happen either
+     *  way is worse than no toggle. */
+    autoCapable: boolean;
+    autoOn: boolean;
+  };
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
@@ -1660,6 +1727,16 @@ export interface EngineStats {
      *  must touch) and for shield plating with no shield core.  A contributor
      *  with no `area`/`idx` is a DERIVED row with no hex behind it (today:
      *  the weapon-weight drag factor), so it highlights nothing. */
+    /** Hex UNLOCK state (A5).  A hex at index >= `shipUnlocked` /
+     *  `weaponUnlocked` is LOCKED: it renders inert and refuses drops.  Both
+     *  equal `maxSlots` on a shipped run, so nothing is locked by default.
+     *  The `*SlotOffer` pair is the next hex a station would sell for that
+     *  group — absent once the flower is full. */
+    shipUnlocked: number;
+    weaponUnlocked: number;
+    maxSlots: number;
+    shipSlotOffer?: { cost: number; available: boolean; affordable: boolean };
+    weaponSlotOffer?: { cost: number; available: boolean; affordable: boolean };
     statLines: {
       id: string;
       label: string;
@@ -1918,6 +1995,9 @@ export interface EngineStats {
   shardBlendCount?: number;
   /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
   shardCoatName?: string;
+  // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
+  pierceSpeedRetainName?: string;
+  pierceFalloffName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.

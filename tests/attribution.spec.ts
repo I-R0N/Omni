@@ -129,7 +129,7 @@ const OUTFITS = {
 };
 
 test.describe('stat attribution', () => {
-  test('all nine stat lines are present, in both the pause menu and the station', async ({ page }) => {
+  test('all eleven stat lines are present, in both the pause menu and the station', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -142,9 +142,14 @@ test.describe('stat attribution', () => {
     await engine(page, e => e.pauseGame());
     const paused = await engine(page, e => e.outfittingSnapshot().statLines.map((l: any) => l.id));
 
+    // The FULL row set, in order.  Pinned exactly rather than loosely,
+    // because a line that quietly stops being built is invisible in play —
+    // the panel just shows one fewer row.  `pierce` and `scanner` are the
+    // Phase-A module families (A3 / A4); both are always present, reading
+    // '+0' / 'None' on a ship carrying neither.
     const expected = [
       'hull', 'shield', 'shieldRegen', 'damage', 'cooldown',
-      'speed', 'accel', 'weight', 'overcharge',
+      'speed', 'accel', 'weight', 'pierce', 'scanner', 'overcharge',
     ];
     expect(docked).toEqual(expected);
     // Same widget, same rows — a divergence here means the two call sites

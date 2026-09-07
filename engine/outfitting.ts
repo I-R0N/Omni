@@ -30,8 +30,9 @@ import {
     MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot,
     MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT,
     INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS,
+    slotUnlockCost,
     HEX_ADJACENCY, WEAPONS, WEAPON_LIST, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
-    SHIELD_CONSTANTS,
+    SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
 } from '../constants';
 
 /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
@@ -72,6 +73,8 @@ export function applyModuleEffects(g: GameEngine) {
     computeActiveSlots(g, g.shipSlots, g.activeShip);
     computeActiveSlots(g, g.weaponSlots, g.activeWeapon);
     let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
+    let pierce = 0, scanner = 0;
+    const scannerMarks: number[] = [];
     let shieldCore = false, overcharge = false, flashlight = false;
     // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
     // module's weight is a contribution to the SHIP's attribute, not an
@@ -92,6 +95,18 @@ export function applyModuleEffects(g: GameEngine) {
             accel += e.accelFrac ?? 0;
             dmg += e.damageFrac ?? 0;
             cool += e.cooldownFrac ?? 0;
+            pierce += e.pierceBonus ?? 0;
+            // Scanner tiers do NOT stack: the ship's scanner is the BEST one
+            // aboard, so two Mk I stay a Mk I.  (Every other family sums,
+            // which is why this one says so out loud.)
+            // MARKS STACK NOW (rework): every active scanner contributes its
+            // own range to every tier it can see, so the fold COLLECTS them
+            // rather than keeping the best.  `scannerMk` stays the highest
+            // mark aboard — it is what says which CATEGORIES are reachable.
+            if (e.scannerMk !== undefined) {
+                scannerMarks.push(e.scannerMk);
+                if (e.scannerMk > scanner) scanner = e.scannerMk;
+            }
             if (e.shieldCore) shieldCore = true;
             if (e.overcharge) overcharge = true;
             if (e.flashlight) flashlight = true;
@@ -123,6 +138,15 @@ export function applyModuleEffects(g: GameEngine) {
     g.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE * (1 + regen);
     g.player.damageMult = 1 + dmg;
     g.player.cooldownMult = Math.max(COOLDOWN_FLOOR, 1 - cool);
+    // Penetration (A3): the summed bonus rides the PLAYER entity, exactly
+    // like damageMult / cooldownMult, so WeaponSystem folds it into the shot
+    // config without reaching into the engine.
+    g.player.pierceBonus = pierce;
+    // Scanner (A4): the renderer's reveal gates read this through one field
+    // written per frame in draw(), the same channel the Light's cone override
+    // takes — the sim never grows a second path to the render layer.
+    g.scannerMk = scanner;
+    g.scanRanges = scannerRangesFor(scannerMarks);
     g.player.overchargeUnlocked = overcharge;
     // Flashlight Kit: the ship-tap light tool exists only while the kit is
     // installed and ACTIVE (touching a hull, like every utility).  Losing
@@ -167,11 +191,14 @@ export function syncLoadoutFromSlots(g: GameEngine) {
     applyModuleEffects(g);
 }
 
-/** First empty slot of the module's group that accepts its kind, or -1. */
+/** First empty UNLOCKED slot of the module's group that accepts its kind,
+ *  or -1.  A locked hex (A5) is an empty hex nothing may fill, so it is not
+ *  a candidate here any more than a full one is. */
 export function firstFreeSlotFor(g: GameEngine, def: ModuleDef): number {
     const slots = def.group === 'ship' ? g.shipSlots : g.weaponSlots;
     for (let i = 0; i < slots.length; i++) {
-        if (slots[i] === null && moduleFitsSlot(def, def.group, i)) return i;
+        if (slots[i] === null && g.slotUnlocked(def.group, i)
+            && moduleFitsSlot(def, def.group, i)) return i;
     }
     return -1;
 }
@@ -206,6 +233,11 @@ export function moveModuleInternal(
     if (from.idx < 0 || from.idx >= fromSlots.length) return false;
     if (to.idx < 0 || to.idx >= toSlots.length) return false;
     if (from.area === to.area && from.idx === to.idx) return false;
+    // A LOCKED hex (A5) accepts nothing.  This is the ONLY rule the feature
+    // adds to the move path — and the only one it adds anywhere, since a
+    // locked hex is empty and the adjacency fixpoint never sees empty hexes.
+    // The source side needs no check: nothing can be in a locked hex to move.
+    if (!g.slotUnlocked(to.area, to.idx)) return false;
     const id = fromSlots[from.idx];
     if (id === null) return false;
     const def = moduleDef(id);
@@ -269,6 +301,7 @@ export function statBreakdown(g: GameEngine) {
     const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
     const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
     const cool: Contrib[] = [], charge: Contrib[] = [], weight: Contrib[] = [];
+    const pierce: Contrib[] = [], scan: Contrib[] = [];
     let shipWeight = SHIP_WEIGHT.HULL_BASE, shieldCore = false;
 
     const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
@@ -308,6 +341,8 @@ export function statBreakdown(g: GameEngine) {
             if (e.accelFrac)       accel.push({ ...base, display: pct(e.accelFrac) });
             if (e.damageFrac)      dmg.push({ ...base, display: pct(e.damageFrac) });
             if (e.cooldownFrac)    cool.push({ ...base, display: pct(-e.cooldownFrac) });
+            if (e.pierceBonus)     pierce.push({ ...base, display: `+${e.pierceBonus}` });
+            if (e.scannerMk)       scan.push({ ...base, display: `Mk ${'I'.repeat(e.scannerMk)}` });
             if (e.overcharge)      charge.push({ ...base, display: on ? 'enabled' : 'offline' });
         }
     };
@@ -323,6 +358,16 @@ export function statBreakdown(g: GameEngine) {
             c.active = false;
             c.requires = 'shield core';
         }
+    }
+
+    // Scanner marks STACK now (rework), so there is no superseded pass any
+    // more — every scanner aboard contributes.  What each one contributes is
+    // RANGE, to every tier its own mark can see, so the display names the
+    // mark and the reach it adds rather than a bare tier.
+    for (const c of scan) {
+        if (!c.active) continue;
+        const mk = moduleDef(c.moduleId!)?.effect?.scannerMk ?? 0;
+        if (mk > 0) c.display = `Mk ${'I'.repeat(mk)} · +${Math.round(scannerMarkRange(mk))}`;
     }
 
     // Fire RATE is the inverse of the cooldown multiplier, so the per-module
@@ -374,6 +419,19 @@ export function statBreakdown(g: GameEngine) {
         line('weight', 'Ship weight', shipWeight.toFixed(1),
              SHIP_WEIGHT.HULL_BASE.toFixed(1), weight,
              'hull + everything mounted; drags Acceleration'),
+        line('pierce', 'Penetration', `+${g.player.pierceBonus ?? 0}`, '+0', pierce,
+             'extra targets each shot passes through, on top of the gun\'s own'),
+        // The HEADLINE is the reach at tier 1 — the widest the ship scans, and
+        // the number every mark aboard contributes to.  The MARK is named
+        // beside it because that is what says which categories are findable
+        // at all; range and category are the scanner's two axes and one
+        // number cannot carry both.
+        line('scanner', 'Scanner',
+             g.scannerMk > 0
+                 ? `Mk ${'I'.repeat(g.scannerMk)} · ${Math.round(g.scanRanges[1] ?? 0)}`
+                 : 'None',
+             'None', scan,
+             'range is the SUM of every scanner that reaches a tier; the mark sets which tiers'),
         line('overcharge', 'Charged shots',
              g.player.overchargeUnlocked ? 'Enabled' : 'Locked', 'Locked', charge),
     ];
@@ -392,9 +450,30 @@ export function outfittingSnapshot(g: GameEngine) {
     });
     const gunsMounted = g.weaponSlots.reduce(
         (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
+    const svc = g.dockedServices();
+    const slotOffer = (group: 'ship' | 'weapon') => {
+        const cost = slotUnlockCost(g.slotsUnlocked(group));
+        if (cost === null) return undefined;                    // flower full
+        const price = modulePrice(cost);
+        return {
+            cost: price,
+            // The purchase gate, mirrored so the UI can disable rather than
+            // offer a button that will be refused: the matching shop, docked.
+            available: !!svc && (group === 'ship' ? svc.shipShop : svc.weaponShop),
+            affordable: g.credits >= price,
+        };
+    };
     return {
         ship: hexSnap(g.shipSlots, g.activeShip),
         weapon: hexSnap(g.weaponSlots, g.activeWeapon),
+        // Hex UNLOCK state (A5).  A hex at index >= `unlocked` is LOCKED: it
+        // renders inert and refuses drops.  Both equal MODULE_SLOT_COUNT on a
+        // shipped run, so the UI draws exactly what it drew before.
+        shipUnlocked: g.slotsUnlocked('ship'),
+        weaponUnlocked: g.slotsUnlocked('weapon'),
+        maxSlots: MODULE_SLOT_COUNT,
+        shipSlotOffer: slotOffer('ship'),
+        weaponSlotOffer: slotOffer('weapon'),
         gunsMounted,
         maxGuns: MAX_INSTALLED_GUNS,
         inventory: g.inventory.map(id => {

@@ -50,6 +50,8 @@ interface UIOverlayProps {
   onCycleWeapon?: () => void;
   onStart?: () => void;
   onPause?: () => void;
+  onScan?: () => void;
+  onSetAutoScan?: (on: boolean) => void;
   onResume?: () => void;
   onRestart?: () => void;
   /** Death / run-summary screen (Phase 3 Pair A) — RESPAWN continues the run
@@ -127,6 +129,8 @@ interface UIOverlayProps {
   onToggleRepelPush?: () => void;
   onToggleShardBlend?: () => void;
   onCycleShardCoat?: () => void;
+  onCyclePierceFalloff?: () => void;
+  onCyclePierceSpeedRetain?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -180,6 +184,7 @@ interface UIOverlayProps {
   // levels): grant a variety into the inventory (auto-installs if a hex
   // is free), outfit a full canonical loadout, or reset to the lean start.
   onGrantModule?: (id: string) => void;
+  onCycleSlotLock?: () => void;
   onOutfitAll?: () => void;
   onResetOutfit?: () => void;
   onAddCredits?: () => void;
@@ -200,6 +205,9 @@ interface UIOverlayProps {
     to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ) => void;
   onPurchaseModule?: (id: string) => void;
+  /** A5 — buy the next hex of one flower.  Station commerce like a module
+   *  purchase; the engine gates it on the matching shop. */
+  onPurchaseSlot?: (group: 'ship' | 'weapon') => void;
   // Module resale, INVENTORY tiles only: sell-back (90% of cost) needs a
   // station — any, every station drydocks; scrap (9%) works from anywhere
   // on the map (the pause-menu cargo panel's only cash-out).
@@ -378,6 +386,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleWeapon,
   onStart,
   onPause,
+  onScan,
+  onSetAutoScan,
   onResume,
   onRestart,
   onRespawn,
@@ -447,6 +457,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleRepelPush,
   onToggleShardBlend,
   onCycleShardCoat,
+  onCyclePierceFalloff,
+  onCyclePierceSpeedRetain,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -497,6 +509,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onApplyDisable,
   onToggleTraits,
   onGrantModule,
+  onCycleSlotLock,
   onOutfitAll,
   onResetOutfit,
   onAddCredits,
@@ -508,6 +521,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPerfRecExport,
   onMoveModule,
   onPurchaseModule,
+  onPurchaseSlot,
   onSellModule,
   onScrapModule,
   onUndock,
@@ -744,6 +758,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    *  source and no [data-tile] drop target. */
   const renderHexGroup = (g: 'ship' | 'weapon', title: string, accentText: string, accentBg: string, interactive: boolean) => {
     const slots = g === 'ship' ? (out?.ship ?? []) : (out?.weapon ?? []);
+    // A5: hexes at or past the unlocked count are LOCKED — empty hexes that
+    // cannot be filled.  Defaults to every hex unlocked, so a stats payload
+    // without the field (or a shipped run) draws exactly what it always did.
+    const unlocked = (g === 'ship' ? out?.shipUnlocked : out?.weaponUnlocked) ?? slots.length;
     const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
     return (
       <div className="flex flex-col items-center gap-1.5">
@@ -770,6 +788,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             const isGun = m?.kind === 'weapon';
             const sel = selSlot?.g === g && selSlot.i === i;
             const offline = m !== null && !m.active;
+            const locked = i >= unlocked;
             const lifted = dragging?.moved === true && dragging.area === g && dragging.idx === i;
             return (
               <button
@@ -778,21 +797,28 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                    exists on interactive flowers; `data-hex` is a stable
                    identity for every hex (read-only flowers included). */
                 data-hex={`${g}:${i}`}
-                data-tile={interactive ? `${g}:${i}` : undefined}
-                onPointerDown={interactive && m !== null ? beginDrag(g, i, m.label) : undefined}
-                onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
+                /* A LOCKED hex carries no [data-tile], so the drag resolver
+                   simply cannot land a module on it — the engine's move guard
+                   is the second line, not the only one. */
+                data-tile={interactive && !locked ? `${g}:${i}` : undefined}
+                onPointerDown={interactive && !locked && m !== null ? beginDrag(g, i, m.label) : undefined}
+                onClick={() => { if (suppressClickRef.current || locked) return; setSelSlot(sel ? null : { g, i }); }}
+                disabled={locked}
                 className="absolute transition-transform active:scale-95"
                 style={{
                   width: HEXW, height: HEXH, touchAction: 'none',
-                  opacity: lifted ? 0.35 : undefined,
+                  opacity: lifted ? 0.35 : locked ? 0.4 : undefined,
                   left: cw / 2 + off.x * HEXW - HEXW / 2,
                   top: ch / 2 + off.y * HEXH - HEXH / 2,
                   clipPath: HEX_CLIP,
-                  background: sel ? '#f8fafc'
+                  background: locked ? '#1e293b'
+                    : sel ? '#f8fafc'
                     : offline ? '#9f1239'
                     : m ? (isGun ? '#f59e0b' : accentBg) : '#475569',
                 }}
-                title={m
+                title={locked
+                  ? `Locked ${g} slot — buy it at a station that stocks ${g === 'ship' ? 'ship' : 'weapon'} modules`
+                  : m
                   ? (m.active ? m.label : `${m.label} — OFFLINE: must touch ${m.requires ?? 'its requirement'}`)
                   : `Empty ${g} slot`}
               >
@@ -803,7 +829,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {/* 9px is the readability floor on glass; these two were
                       7px before 5d U2 (audit finding C4). */}
                   {isGun && <span className={`${T_MICRO} font-bold text-amber-400/90 tracking-widest leading-none mb-0.5`}>W{(gunOrder.get(i) ?? 0) + 1}</span>}
-                  {m ? (
+                  {locked ? (
+                    <span className="text-slate-600 text-base font-bold leading-none">🔒</span>
+                  ) : m ? (
                     <>
                       <span className={`${T_MICRO} font-bold uppercase tracking-tight leading-tight px-1 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
                       {offline && <span className={`${T_MICRO} text-rose-400/90 font-bold leading-none mt-0.5`}>OFFLINE</span>}
@@ -1347,6 +1375,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Hold 1s, release', 'Charged shot (needs an Overcharge core installed).'],
           ['Tap your ship', 'Dock at a station, or enter a portal you are next to.'],
           ['Tap the minimap', 'Expand it. Tap a weapon slot to switch weapons.'],
+          ['Scan button', 'Sweeps for contacts (needs a Scanner). Top right, beside pause.'],
         ], null, ['touch'])}
 
         {group('Joystick touch', 'text-sky-300', [
@@ -1355,6 +1384,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Fire button', 'Shoot. Hold it for a charged shot — the ring shows the charge.'],
           ['Handedness', 'Two versions: stick left + fire right, or the mirror of it.'],
           ['Tap your ship', 'Dock, or enter a portal. Tapping elsewhere does not shoot.'],
+          ['Scan button', 'Sweeps for contacts (needs a Scanner). Top right, beside pause.'],
         ], null, ['joystick-left', 'joystick-right'])}
 
         {group('Keyboard & mouse', 'text-emerald-300', [
@@ -1362,6 +1392,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Mouse', 'Aims. Click to shoot.'],
           ['Hold 1s, release', 'Charged shot.'],
           ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
+          ['Q', 'Scan — sweeps for contacts. Needs a Scanner module installed.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], null, ['keyboard'])}
 
@@ -1372,6 +1403,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Bottom face button', 'Shoot. The only gun on the left-stick and trigger-thrust schemes, where the triggers are doing something else or may not exist. ✕ on PlayStation, A on Xbox.'],
           ['Left trigger', 'Throttle, on the trigger-thrust scheme: the stick steers, the trigger decides how hard.'],
           ['Left face button', 'Dock, enter a portal, or undock. □ on PlayStation, X on Xbox.'],
+          ['Left shoulder', 'Scan — sweeps for contacts. Needs a Scanner. (Right face button too.)'],
           ['Right shoulder', 'Switch weapon. (Top face button too.)'],
           ['Start / Options', 'Pause.'],
           ['In menus', 'D-pad moves, bottom face button selects, right face button goes back.'],
@@ -1383,6 +1415,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ) : null, ['gamepad', 'gamepad-thrust', 'gamepad-left'])}
 
         {group('The run', 'text-amber-300', [
+          ['Scanner', 'Finds things beyond what you can see. Higher marks find rarer things; fitting more scans further. Mk II and up also sweeps on its own — switch it in the pause menu.'],
+          ['Found', 'Stations and rifts stay on the minimap once you find them — by flying past, or by scanning. Anything that MOVES is only tracked for a few seconds.'],
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
           ['Stations', 'Dock to repair, buy modules, and outfit the ship. Outfitting needs a drydock.'],
           ['Portals', 'The rifts on the hub lead to wave arenas. The return rift brings you home.'],
@@ -1538,6 +1572,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Which wire encoding the trigger effects are sent in. TWO conventions are in wide use and a DualSense silently discards the one its firmware does not understand, so this is a diagnostic rather than a preference. "zones" = modes 0x21/0x25, parameters packed into ten travel zones (what the console appears to use). "simple" = modes 0x01/0x02, raw byte parameters (what most samples send). If one gives no resistance, try the other.')}
                 {ctrlRow('  ↳ HID buzz', onTestTriggerLink, 'Test',
                   'Pulses the pad MOTORS through the HID output report — the same framing and CRC the trigger effects ride, but with an encoding that is not in dispute. If this buzzes and the triggers stay limp, the transport is fine and the effect encoding is wrong (try "trig enc"). If it does not buzz, nothing is reaching the pad at all — read the error on the triggers row.')}
+                {ctrlRow('Pierce falloff', onCyclePierceFalloff,
+                  stats.pierceFalloffName ?? 'off (full dmg, def)',
+                  'Per-hit DAMAGE decay on a piercing bolt. SHIPS OFF, so every penetration hit lands FULL projectile damage; the cycle steps off / 0.05 / 0.10 / 0.20 / 0.35 / 0.50. Damage at hit ordinal n is base x (1 - rate)^n, so the first contact is always full and only penetration hits decay. It reaches EVERY damage path a hit produces — the direct bite, the Cannon AoE splash and the Lightning chain all take the same factor — and every weapon equally. The reachable stack is large (six Penetration Mk III = +18, and inside a grain material every GRAIN spends a charge), so the rate mostly decides what a DEEP bore is worth: at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.')}
+                {ctrlRow('Pierce spd', onCyclePierceSpeedRetain,
+                  stats.pierceSpeedRetainName ?? '1.00x (def)',
+                  'Speed a PIERCING bolt keeps per hit (1.00 / 0.95 / 0.90 / 0.80x). Ships at 1.00, i.e. off — the second axis to feel against the damage falloff above. One factor per charge actually spent, so inside a grain material — where penetration is spent per GRAIN, not per tile — a bolt that drilled four grains slows four times. Indestructible tiles stop a bolt dead whatever it carries, and spend nothing.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
@@ -1593,17 +1633,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderSectionHeader('modules', 'Modules')}
               {!collapsed.modules && (<>
                 {statRow('Salvage', (stats.credits ?? 0).toLocaleString(), 'text-amber-300')}
-                {ctrlRow('+1k Salv', onAddCredits, 'Grant',
-                  'Grant 1000 Salvage for testing the station shops.')}
+                {ctrlRow('+1M Salv', onAddCredits, 'Grant',
+                  'Grant 1,000,000 Salvage for testing the station shops.')}
                 {([
                   ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
                   ['engine', 'Engine'], ['thrusters', 'Thrusters'],
                   ['gunnery', 'Gunnery'], ['autoloader', 'Autoloader'],
+                  ['piercing', 'Penetration'],
+                  // The scanner is the one family with FIVE marks — each adds a
+                  // detection tier — so its row is derived from the catalog
+                  // rather than from a hardcoded [1,2,3] like the rest.
+                  ['scanner', 'Scanner'],
                 ] as const).map(([fam, label]) => (
                   <div key={fam} className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                     <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{label}</span>
                     <span className="flex gap-0.5">
-                      {[1, 2, 3].map(mk => (
+                      {(fam === 'scanner' ? [1, 2, 3, 4, 5] : [1, 2, 3]).map(mk => (
                         <button
                           key={mk}
                           onClick={() => onGrantModule?.(`${fam}_mk${mk}`)}
@@ -1622,6 +1667,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Grant the Overcharge module (DBG). Needs to touch a gun on the weapon flower to function.')}
                 {ctrlRow('Light', () => onGrantModule?.('flashlight_kit'), 'Grant',
                   'Grant the Light module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high (the beam style at the medium / high lighting tiers).')}
+                {ctrlRow('Lock slots', onCycleSlotLock,
+                  out ? `${out.shipUnlocked}/${out.maxSlots}` : '—',
+                  'A5 — lock hexes off BOTH flowers (7 / 5 / 4 / 3) so the station\'s "+1 Hex Slot" purchase can be flown. A shipped run starts with every hex unlocked, so this is the only way to see the locked state. Modules in a hex that locks go back to the hold (scrapped if it is full — DBG).')}
                 {ctrlRow('Outfit all', onOutfitAll, 'Max',
                   'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).')}
                 {ctrlRow('Reset', onResetOutfit, 'Lean',
@@ -2422,6 +2470,35 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           )}
         </div>
 
+          {/* SCAN button — the touch device's dedicated scan control (the
+              keyboard has Q, the pad has L1/Circle).  Rendered ONLY with a
+              scanner aboard: a control for a tool you do not own is a control
+              that does nothing.  It sits beside PAUSE, outside the wrapping
+              readout band and `shrink-0` for the same reason pause is — an
+              unshrinkable middle pushes the last item off a 320px screen.
+              Its ring fills as the cooldown runs down, so "not yet" is
+              visible without a number. */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && !stats.runSummary && stats.scanner && (
+            <button
+              onClick={onScan}
+              disabled={stats.scanner.cooldown > 0}
+              className={`pointer-events-auto shrink-0 rounded-lg p-2.5 ${TAP} min-w-[40px] flex items-center justify-center shadow-lg border backdrop-blur-[2px] transition-all active:scale-95 ${
+                stats.scanner.cooldown > 0
+                  ? 'bg-slate-900/25 border-slate-700/30 text-slate-500'
+                  : 'bg-slate-900/35 hover:bg-slate-700/70 border-cyan-500/40 text-cyan-300'
+              }`}
+              aria-label={`Scan (Mk ${'I'.repeat(stats.scanner.mk)}, range ${stats.scanner.range})`}
+              title={`Scan · Mk ${'I'.repeat(stats.scanner.mk)} · range ${stats.scanner.range}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+                <circle cx="12" cy="12" r="6" opacity={stats.scanner.ready > 0.5 ? 1 : 0.25} />
+                <circle cx="12" cy="12" r="10" opacity={stats.scanner.ready >= 1 ? 1 : 0.25} />
+              </svg>
+            </button>
+          )}
+
           {/* Pause button — hidden while docked or dead (the station UI and
               the run-summary screen already freeze the sim and own the
               screen) */}
@@ -2651,6 +2728,33 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       Shop · {g === 'ship' ? 'Ship Modules' : 'Weapon Modules'}
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {/*  A5 — the next HEX of this flower, sold beside the
+                           things that go in it.  Absent once the flower is
+                           full, which is every shipped run today, so the
+                           grid is unchanged unless something locked a hex.
+                           It costs no cargo: a slot is not an item. */}
+                      {(() => {
+                        const o = g === 'ship' ? out.shipSlotOffer : out.weaponSlotOffer;
+                        if (!o) return null;
+                        const buyable = o.available && o.affordable;
+                        return (
+                          <button
+                            disabled={!buyable}
+                            onClick={() => onPurchaseSlot?.(g)}
+                            title={o.available
+                              ? 'Unlock one more hex on this flower — it holds no cargo and needs no room'
+                              : 'This station does not stock hardware for that flower'}
+                            className={`${BTN_COMPACT} flex items-center justify-between gap-2 ${
+                              buyable
+                                ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100'
+                                : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            <span className="font-bold">+1 Hex Slot</span>
+                            <span className="tabular-nums">◈{o.cost.toLocaleString()}</span>
+                          </button>
+                        );
+                      })()}
                       {out.catalog.filter(c => c.group === g).map(c => (
                         <button
                           key={c.id}
@@ -3091,6 +3195,37 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderSchemeDropdown()}
               {renderAdaptiveTriggers()}
             </div>
+
+            {/* Scanner — the one setting the instrument has.  A player-facing
+                row rather than a debug one (user call): auto-scan changes how
+                the game plays, not how it is developed.  Rendered only with a
+                scanner aboard that can actually do it, so the row is never a
+                switch for something that would not happen either way. */}
+            {stats.scanner && stats.scanner.autoCapable && (
+              <div className={`${PANEL} flex flex-col gap-2`}>
+                <h3 className={`text-sky-300 ${HEADING}`}>Scanner</h3>
+                <div className={`flex items-center justify-between gap-3 ${PANEL_ROW}`}>
+                  <span className="text-left">
+                    <span className={`block text-slate-200 ${T_ROW}`}>Auto-scan</span>
+                    <span className={`block text-slate-400 ${T_MICRO}`}>
+                      Sweeps for moving contacts on its own. Minimap only — no arrows.
+                    </span>
+                  </span>
+                  <button
+                    data-testid="auto-scan-toggle"
+                    onClick={() => onSetAutoScan?.(!stats.scanner!.autoOn)}
+                    aria-pressed={stats.scanner.autoOn}
+                    className={`${BTN_COMPACT} shrink-0 ${
+                      stats.scanner.autoOn
+                        ? 'bg-cyan-600/80 border-cyan-400/60 text-white'
+                        : 'bg-slate-800/70 border-slate-600/60 text-slate-300'
+                    }`}
+                  >
+                    {stats.scanner.autoOn ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Controls & basics — the same widget the main menu shows, so
                 the answer is in the same words wherever you look for it. */}

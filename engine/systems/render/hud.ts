@@ -26,8 +26,10 @@ import {
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
-    INPUT_CONSTANTS, getActiveMinimapMaterial, computeMinimapRect, computeIndicatorRect,
+    INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
+    computeMinimapRect, computeIndicatorRect,
     FOG,
+    SCANNER,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -64,26 +66,61 @@ export function buildMinimapStaticLayer(r: RenderSystem, entities: GameEntity[],
     // the streamline cache so it retraces against the new obstacles.
     r._minimapFlowCache = null;
 
-    for (let i = 0; i < entities.length; i++) {
-        const e = entities[i];
-        // Stage 5 fix: only static tiles render via the minimap
-        // STRUCTURE pass.  Mobile shards (STRUCTURE+finite mass) are
-        // not pinned to grid cells.
-        if (!e.active || e.type !== EntityType.STRUCTURE || e.mass !== Infinity) continue;
-        // NEBULA IS OFF THE MINIMAP ENTIRELY (user directive, decision #43).
-        // It is a soft, drifting, low-contrast cloud that the map rendered as
-        // hard 2px dots — the densest thing on the map standing in for the
-        // vaguest thing in the world.  Nebula shards were already excluded
-        // from the dynamic buffer; this is the other half.
-        if (e.shardVariant === 'nebula-tile') continue;
-        cx.fillStyle = e.color;
-        // Map space: entity position is absolute.  Map center = (0,0).
-        const dotX = center + e.position.x * scale;
-        const dotY = center + e.position.y * scale;
-        cx.fillRect(dotX, dotY, 2, 2);
-    }
-
+    // THE LAYER STARTS EMPTY (user call).  Terrain is TRACKED PER TILE now,
+    // not revealed by region: `stampMinimapTile` adds one tile the moment the
+    // player meets it, and this canvas accumulates exactly the tiles that have
+    // been met.  It used to be baked complete here and then masked by a
+    // charted-region memory, which is what made the map read as "areas I can
+    // track entities in" rather than as objects I have found.
+    //
+    // `entities` is still taken so the signature and the map-load call site
+    // are unchanged, and so a future pre-charted map (a hub you start knowing)
+    // is one loop away.
+    void entities;
     r._minimapStaticCanvas = c;
+}
+
+/** Where one tile sits on the pre-rendered terrain layer.  The two stamp
+ *  helpers below and the build above must agree on this exactly, or a tile
+ *  would be added at one place and erased at another. */
+function minimapTileRect(r: RenderSystem, e: GameEntity): { x: number; y: number } | null {
+    const c = r._minimapStaticCanvas;
+    if (c === null) return null;
+    const scale = (c.width / 2) / r._minimapStaticRange;
+    const center = c.width / 2;
+    return { x: center + e.position.x * scale, y: center + e.position.y * scale };
+}
+
+/** Add one discovered tile to the terrain layer.  Idempotent in effect — a
+ *  tile stamped twice draws the same 2px dot — so callers do not have to
+ *  track whether they have already done it. */
+export function stampMinimapTile(r: RenderSystem, e: GameEntity): void {
+    const c = r._minimapStaticCanvas;
+    if (c === null) return;
+    // NEBULA IS OFF THE MINIMAP ENTIRELY (user directive, decision #43): a
+    // soft, drifting, low-contrast cloud drawn as the hardest dot on the map.
+    if (e.shardVariant === 'nebula-tile') return;
+    const at = minimapTileRect(r, e);
+    if (at === null) return;
+    const cx = c.getContext('2d');
+    if (cx === null) return;
+    cx.fillStyle = e.color;
+    cx.fillRect(at.x, at.y, 2, 2);
+}
+
+/** Remove one tile from the terrain layer, for a tile that has been
+ *  destroyed.  Without this a tracked tile would outlive the rock it stands
+ *  for — the layer used to be baked once at map load and never touched, which
+ *  did not show while it was an all-or-nothing reveal and does now that it is
+ *  a record of specific objects. */
+export function unstampMinimapTile(r: RenderSystem, e: GameEntity): void {
+    const c = r._minimapStaticCanvas;
+    if (c === null) return;
+    const at = minimapTileRect(r, e);
+    if (at === null) return;
+    const cx = c.getContext('2d');
+    if (cx === null) return;
+    cx.clearRect(at.x, at.y, 2, 2);
 }
 
 export function renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {
@@ -119,7 +156,7 @@ export function renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageTe
 export function renderIndicators(
   r: RenderSystem,
   ctx: CanvasRenderingContext2D, 
-  targets: { entity: GameEntity, distSq: number, onScreen: boolean }[], 
+  targets: { entity: GameEntity, distSq: number, onScreen: boolean, detect: number }[], 
   camera: CameraState, 
   width: number, 
   height: number
@@ -129,10 +166,15 @@ export function renderIndicators(
 
     const {
         TEXT_THRESHOLD_POI, MAX_VISIBLE, MAX_VISIBLE_ENEMY,
-        MAX_VISIBLE_BUBBLE, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
+        MAX_VISIBLE_BUBBLE,
         SIZE_NEAR, SIZE_FAR, NEAR_DIST, FAR_DIST, BOSS_SCALE, AGGRO_BLINK_HZ,
         COLORS,
     } = UI_CONSTANTS.INDICATORS;
+    // Every arrow on this pass was put there by a SCAN (rework): the buffer
+    // is gated on the detection stamp upstream, and `item.detect` is how
+    // fresh that stamp is.  A mark going soft is what tells the player the
+    // contact has had time to move — see `detectionAlpha`, pure and published
+    // on __omniHud because it exists only as a globalAlpha here.
     const H = UI_CONSTANTS.HUD;
 
     if (targets.length === 0) return;
@@ -245,9 +287,8 @@ export function renderIndicators(
         // Far enemies fade toward an alpha floor — still findable, but a
         // distant straggler doesn't shout like a closing threat.  A boss
         // never fades: it is the thing you are supposed to be flying toward.
-        if (t.type === EntityType.ENEMY && !isBoss && dist > ENEMY_FADE_START) {
-            const ff = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
-            ctx.globalAlpha = 1 - ff * (1 - ENEMY_MIN_ALPHA);
+        if (t.type === EntityType.ENEMY && !isBoss) {
+            ctx.globalAlpha = item.detect;
         }
         ctx.translate(ix, iy);
         ctx.rotate(angle);
@@ -817,7 +858,7 @@ function renderMinimapFog(
 export function renderMinimap(
     r: RenderSystem,
     ctx: CanvasRenderingContext2D,
-    items: { entity: GameEntity, dx: number, dy: number }[],
+    items: { entity: GameEntity, dx: number, dy: number, detect: number }[],
     camera: CameraState,
     screenWidth: number,
     screenHeight: number,
@@ -863,6 +904,11 @@ export function renderMinimap(
     // source rect may straddle the canvas edge and we split it into
     // up to four drawImage calls so the minimap seamlessly shows both
     // sides of a seam when the camera is near the edge.
+    // TERRAIN IS TRACKED PER TILE (user call).  The layer holds exactly the
+    // tiles the player has met — see `stampMinimapTile` — so it is blitted
+    // straight, with no mask.  It was briefly a complete bake filtered by a
+    // charted REGION, and that read as mapping areas rather than finding
+    // objects, which is the distinction this replaces.
     const staticCanvas = r._minimapStaticCanvas;
     if (staticCanvas) {
         const staticRange = r._minimapStaticRange;
@@ -878,7 +924,7 @@ export function renderMinimap(
         const syRaw = srcCenterY - srcHalf;
         const sw = srcHalf * 2;
         const sh = srcHalf * 2;
-        // The terrain layer's period IS its canvas size — it was baked to
+        // The terrain layer's period IS its canvas size — it was sized to
         // cover exactly one wrap unit (see buildMinimapStaticLayer).
         wrapBlit(ctx, staticCanvas, sxRaw, syRaw, sw, sh, sRes, sRes,
                  mapX, mapY, currentSize, currentSize);
@@ -889,13 +935,46 @@ export function renderMinimap(
     // (handled in the entity loop below); 'off' draws neither.  Drawn after
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
+    // The DBG cycle picks WHICH material layer is drawn.  The DOTS half is
+    // then filtered PER SHARD in the buffer fill, against the same CHARTED
+    // memory the terrain blit is masked to — material is remembered exactly
+    // as the ground around it is.  The FLOW half cannot be: a streamline is
+    // an inferred FIELD rather than a set of seen objects, so it is gated on
+    // owning the instrument that infers it.
     const materialMode = getActiveMinimapMaterial();
-    if (materialMode === 'flow') {
+    const flowAllowed = r.scannerMk > 0;
+    // Hoisted: ONE lookup for the whole pass, not one per contact — the
+    // buffer can hold a few thousand mobile shards in dots mode.
+    const shardDots = r.minimapShardDots;
+    if (materialMode === 'flow' && flowAllowed) {
         renderMinimapFlow(r, ctx, camera, centerX, centerY, scale, range);
     }
 
     // ── The FOG's memory, over the terrain and under the contacts ────────
     renderMinimapFog(r, ctx, camera, mapX, mapY, currentSize, range);
+
+    // ── The live scan ping ────────────────────────────────────────────────
+    // The SAME event the world pass draws, at minimap scale, so the two
+    // readouts obviously show one scan rather than two effects that happen to
+    // look alike.  Drawn under the contacts: the ring is the instrument, the
+    // marks it turns up are the information.
+    // Both rings draw here; only the MANUAL one also draws on the game screen.
+    // The auto sweep is deliberately dimmer — it is ambient instrumentation,
+    // not an event the player caused.
+    const ring = (radius: number, max: number, dim: number) => {
+        if (radius <= 0 || max <= 0) return;
+        const frac = radius / max;
+        ctx.globalAlpha = SCANNER.RING_ALPHA * dim
+            * (SCANNER.RING_MIN_ALPHA_FRAC + (1 - SCANNER.RING_MIN_ALPHA_FRAC) * (1 - frac));
+        ctx.strokeStyle = SCANNER.RING_COLOR;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius * scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    };
+    ring(r.scanPingRadius, r.scanPingMax, 1);
+    ring(r.autoPingRadius, r.autoPingMax, 0.55);
 
     // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
     // Enemy blips pulse so they pop against the static layer; the phase
@@ -1034,7 +1113,10 @@ export function renderMinimap(
         // grey wash, and it answers a question ("where is that rock") the
         // player never asks of a 75px map.
         if (entity.type === EntityType.STRUCTURE) {
-            if (materialMode !== 'dots') continue;
+            // A Scanner Mk I (A4) draws the dots on top of whatever the cycle
+            // is doing.  ONE definition of the answer, shared with the buffer
+            // fill in RenderSystem — see RenderSystem.minimapShardDots.
+            if (!shardDots) continue;
             ctx.globalAlpha = 1;
             ctx.fillStyle = entity.color;
             ctx.beginPath();
