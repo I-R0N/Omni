@@ -2038,6 +2038,8 @@ export interface EngineStats {
   nebulaStretchName?: string;
   /** DBG readout: the nebula sprite-oversize A/B step (NEBULA_SPRITE_CYCLE). */
   nebulaSpriteName?: string;
+  /** DBG readout: true while scanning is off and the whole map is revealed. */
+  scanRevealAll?: boolean;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards
   // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
   shatterGraceName?: string;

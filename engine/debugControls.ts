@@ -793,6 +793,19 @@ export class DebugControls {
   }
 
   /**
+   * DBG: stop the scanner's periodic work AND reveal the whole map.
+   *
+   * A perf A/B rather than a gameplay knob — `discoverStructures` walks a
+   * 900-unit radius of the static grid plus the entire mobile-shard list on
+   * the `discover` cadence, and that is the first thing to take away when a
+   * frame-rate report points at scanning.  The reveal half is what makes the
+   * measurement usable: without it you would be measuring a blind map.
+   */
+  toggleScanReveal() {
+    this.g.toggleScanReveal();
+  }
+
+  /**
    * Cycle how far a nebula sprite overhangs the body it belongs to
    * (NEBULA_SPRITE_CYCLE) — a MULTIPLIER over the authored
    * NEBULA_CONSTANTS.SPRITE_OVERSIZE, so the constant stays the

@@ -4695,6 +4695,39 @@ export function cycleNebulaSpriteSize(): number {
   return activeNebulaSpriteIndex;
 }
 
+// ── DBG: SCANNING OFF, EVERYTHING REVEALED ─────────────────────────
+// A perf A/B, not a gameplay knob.  The scanner does a lot of continuous
+// work — `discoverStructures` walks a 900-unit radius of the static grid
+// AND the whole mobile-shard list on the `discover` cadence, and the AUTO
+// sweep advances a wavefront over the contacts — and a frame-rate report
+// needs a way to take all of it away without also taking the minimap away,
+// or the game is unplayable while you measure.
+//
+// So this is ONE switch with TWO halves, and they belong together:
+//   - the scanning WORK stops (no discovery walk, no auto sweep), and
+//   - the minimap REVEALS EVERYTHING, so nothing is lost by stopping it.
+//
+// It deliberately does NOT touch the cheap per-contact encounter stamp
+// (a handful of O(1) distance checks for enemies, stations, portals and
+// the snitch), because that is what feeds the off-screen ARROWS and
+// silently emptying the screen edge would make the A/B measure two things
+// at once.  A pressed scan still works too.
+let activeScanRevealAll = false;
+
+/** True while the DBG "Scan off" switch is on: skip the scanner's periodic
+ *  work and draw every contact and every tile on the minimap. */
+export function getScanRevealAll(): boolean {
+  return activeScanRevealAll;
+}
+
+/** Flip the switch.  Returns the new state.  The caller must rebuild the
+ *  minimap terrain layer, which is a CACHE of what has been discovered and
+ *  so has to be re-derived when the definition of "discovered" changes. */
+export function toggleScanRevealAll(): boolean {
+  activeScanRevealAll = !activeScanRevealAll;
+  return activeScanRevealAll;
+}
+
 /** THE WORLD DIAMETER A NEBULA BODY'S SPRITE DRAWS AT — the ONE
  *  definition, because TWO render sites have to agree on it: the cloud
  *  sprite itself and the twinkle star placed inside its footprint.  They
