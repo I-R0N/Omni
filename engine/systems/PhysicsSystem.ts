@@ -2,7 +2,7 @@
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
-import { applyBoundaryDamage, stampLocalImpact, bondStrengthFor } from './fractureCache';
+import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
 import { pointInPolygon } from './fracture';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
@@ -2348,6 +2348,84 @@ export class PhysicsSystem {
    * there (DropSystem.spawnGlassShards for glass-tile, ShardSystem
    * .shatter tier chain for glass-shard).
    */
+  // ── CRASHES SPEND ON GRAIN BOUNDARIES TOO ───────────────────────────
+  /**
+   * The world point on `target`'s hull that this collision actually touched.
+   *
+   * `nx`/`ny` is the MTV normal, which points from `a` toward `b` (the
+   * positional correction a few lines up pushes `b` along it), so the
+   * impactor lies in +n from the target when the target is `a` and in -n
+   * when it is `b`.
+   *
+   * The crash paths used to hand the IMPACTOR'S CENTRE to `onDamage` as the
+   * contact point, which is a fine approximation for a 6px bolt and a bad
+   * one for a 460-unit boulder crushing a 36px tile: the "contact" then sits
+   * a couple of hundred units outside the tile, and both halves of the grain
+   * model read it — the boundary spend pours from it, and the harvest orders
+   * its candidates by distance to it.
+   */
+  private static crashContactOn(target: GameEntity, nx: number, ny: number, targetIsA: boolean): Vector2 {
+      // A fresh point rather than the file's usual reused scratch: the value
+      // OUTLIVES this call (it is handed on to `onDamage`, where the harvest
+      // re-stamps from it), so a shared buffer would be an aliasing trap —
+      // and it would save nothing measurable, since `stampLocalImpact` on the
+      // very next line allocates one of these per damage event anyway.
+      const s = targetIsA ? 1 : -1;
+      const r = Math.max(target.size.x, target.size.y) * 0.5;
+      return { x: target.position.x + s * nx * r, y: target.position.y + s * ny * r };
+  }
+
+  /**
+   * Spend a CRASH on the target's grain boundaries — the same mechanism a
+   * weapon hit and the bubble's bite use, so a crushed tile cracks and sheds
+   * grains the way a shot one does.
+   *
+   * Returns false HAVING DONE NOTHING for a body that is not running the
+   * grain model (indestructible, nebula, or any variant under the DBG legacy
+   * fracture mode).  Unlike `GameEngine.chipStructureAt` — which refuses such
+   * a body outright, because it is the chip path — the crash paths MUST still
+   * destroy it, so every caller falls back to the whole-body decrement.
+   *
+   * HOW MUCH a crash spends is deliberately NOT kinetic.  Making impact
+   * damage an energy is step 3 of the unified-impact sequencing
+   * (docs/PARKING_LOT.md) and re-prices the whole weapon roster; this step is
+   * routing only.  So a crash spends the SAME FRACTION OF THE BODY it always
+   * did — one authored HP, expressed in the derived boundary budget the model
+   * replaced it with (`derived / authored`).  That keeps "how many crashes
+   * break this tile" exactly what it shipped as, and removes the defect that
+   * motivated the change: because the crash paths decremented `health`
+   * directly while the first weapon hit rewrote `maxHealth` to the derived
+   * total, SHOOTING A TILE ONCE used to make it 4-50x harder to ram through
+   * (measured, `perf/impact-audit.mjs` §5: rock 9 -> 50 crashes, plastic
+   * 8 -> 400, metal 120 -> 468).  Nothing about the tile got tougher; the
+   * unit it was counted in changed.
+   *
+   * `whole` is the glass rule (V9), unchanged in meaning: its damage layer
+   * meters WEAPON hits, and a hull or a boulder over the crash threshold
+   * takes the whole pane.  Here that is a spend of the entire remaining
+   * boundary budget rather than a bypass, so the pane still dies THROUGH the
+   * grain model and shatters along the cells its cracks were drawn from.
+   */
+  private static crashBoundaryDamage(structure: GameEntity, contact: Vector2, whole: boolean): boolean {
+      // Stamp BEFORE the model is built: the pattern's impact bias is read at
+      // cell-build time (V12), so a stamp afterwards biases nothing.
+      stampLocalImpact(structure, contact);
+      if (ensureBoundaryModel(structure) === null) return false;
+      const authored = Math.max(1, structure.authoredMaxHealth ?? structure.maxHealth ?? 1);
+      const unit = (structure.maxHealth ?? 0) / authored;
+      const budget = structure.health ?? 0;
+      // THE LAST CRASH OVERSPENDS, on purpose.  `spendOnBoundaries`
+      // saturates each boundary exactly and returns only what it could
+      // absorb, so asking for more than is left is harmless — and it is the
+      // only way to land the budget on a clean zero.  A spend that lands
+      // exactly on the final boundary otherwise leaves a one-ULP residue
+      // (measured 8.9e-16 on rock's ninth crash), and `health <= 0` then
+      // reads false, costing one phantom extra ram.
+      const spend = (whole || budget <= unit * (1 + 1e-9)) ? budget + 1 : unit;
+      applyBoundaryDamage(structure, spend);
+      return true;
+  }
+
   /**
    * A structure killed by a COLLISION, routed through the SAME death
    * pipeline a projectile kill takes.
@@ -4109,18 +4187,30 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }
-              // Glass is BRITTLE to physical smashes (V9): its damage
-              // layer meters WEAPON hits, but a hull over the crash
-              // threshold takes the whole pane — the pre-damage-layer
-              // behaviour, kept on purpose.
-              structure.health -= structure.shardVariant === 'glass-tile'
-                  ? Math.max(1, structure.health)
-                  : 1;
+              // A CRASH SPENDS ON THE GRAIN BOUNDARIES, like every other
+              // damage path (unified impact physics, step 2).  Glass is
+              // BRITTLE to physical smashes (V9): its damage layer meters
+              // WEAPON hits, but a hull over the crash threshold takes the
+              // whole pane — the pre-damage-layer behaviour, kept on purpose,
+              // and now spent THROUGH the model rather than around it.  A
+              // body with no grain model falls back to the whole-body
+              // decrement this always was.
+              const crashWhole = structure.shardVariant === 'glass-tile';
+              const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
+              if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
+                  structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+              }
               PhysicsSystem.applyDentStep(structure, player.position);
               // A crash is a hit too — let rock break early on the same
               // rising-odds roll as a blaster shot (no-op for other tiles).
               PhysicsSystem.maybeRockEarlyBreak(structure);
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
+              // The CONTACT POINT, not the impactor's centre: `onDamage` is
+              // where the harvest runs (GameEngine.spawnDamageText ->
+              // progressFracture), and it re-stamps from whatever it is
+              // handed.  Handing it the hull's centre would order the
+              // harvest's candidates from a point outside the tile and
+              // disagree with the spend above.
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
               if (structure.health <= 0) {
                   // Same helper as the two asteroid sites, so all three
                   // collision kills break identically; only the attribution
@@ -4197,13 +4287,15 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
-                  // Glass shatters under any qualifying smash (V9 — see
-                  // the player-crash site).
-                  structure.health -= structure.shardVariant === 'glass-tile'
-                      ? Math.max(1, structure.health)
-                      : 1;
+                  // Boundary spend + the glass whole-pane rule, exactly as
+                  // the player-crash site above — one mechanism, two callers.
+                  const crashWhole = structure.shardVariant === 'glass-tile';
+                  const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
+                  if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
+                      structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+                  }
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
                   if (structure.health <= 0) {
                       // How HARD it was hit decides how finely it breaks: a
                       // bare-threshold nudge leaves a few big chunks, a slam
@@ -4235,12 +4327,18 @@ export class PhysicsSystem {
               structure.tilePressureCooldown = STRUCTURE_CONSTANTS.TILE_PRESSURE_COOLDOWN;
               if (structure.tilePressureCount >= STRUCTURE_CONSTANTS.TILE_PRESSURE_HITS) {
                   structure.tilePressureCount = 0;
-                  structure.health -= structure.shardVariant === 'glass-tile'
-                      ? Math.max(1, structure.health)
-                      : 1; // glass still "dies in one" pressure trigger (V9)
+                  // The SLOW kill spends on boundaries too: a tile ground
+                  // down by repeated nudges should crack where it is being
+                  // nudged, not lose an abstract point of health.  Glass
+                  // still "dies in one" pressure trigger (V9).
+                  const crashWhole = structure.shardVariant === 'glass-tile';
+                  const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
+                  if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
+                      structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+                  }
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
                   if (structure.health <= 0) {
                       // Pressure is the SLOW kill — a tile ground down by
                       // repeated sub-threshold nudges rather than smashed —

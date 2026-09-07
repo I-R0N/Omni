@@ -71,7 +71,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  374 tests.  All run at
+                          anti-flake rules).  376 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -319,7 +319,12 @@ perf/                     Headless capture harness (gauntlet 5c) —
                           capture.mjs (scene matrix: worst-frame / p99 /
                           allocation attribution), simbench.mjs (low-noise
                           ms-per-sim-substep), probe.mjs (targeted in-page
-                          micro-probes), scenes.mjs, README.md.
+                          micro-probes), impact-audit.mjs (what a weapon's
+                          authored `damage` is worth in ENERGY and MOMENTUM
+                          against each material's DERIVED HP, and what the
+                          crash gates correspond to in the same units —
+                          step 1 of the unified-impact sequencing),
+                          scenes.mjs, README.md.
                           Deliberately NOT part of `npm test`: runs take
                           minutes and are noise-prone; the test suite is a
                           merge gate.  Read perf/README.md before quoting
@@ -2629,12 +2634,58 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     no arc bookkeeping and no tail case.  It returns null for a non-ring
     (an eroded body split into islands) and the arc splice stays the
     fallback.
-  Every PLAYER damage path feeds the boundaries — projectile, lightning
-  chain, shockwave ring — each stamping its own contact point via the
-  shared `stampLocalImpact`, so splash and chain damage erode from where
-  they arrived.  PHYSICAL smashes (a boulder crash, the pressure trigger)
-  still take the whole body: they meter boulders, not weapons.  DBG ▸
-  Visual ▸ "Bnd strength" is the master multiplier over every material.
+  EVERY damage path feeds the boundaries — projectile, lightning chain,
+  shockwave ring, the bubble's bite, AND the three CRASH paths (player
+  into a tile, both `killStructureByImpact` sites, the tile-pressure
+  trigger) — each stamping its own contact point via the shared
+  `stampLocalImpact`, so splash, chain, bite and crush damage all erode
+  from where they arrived.  DBG ▸ Visual ▸ "Bnd strength" is the master
+  multiplier over every material.
+- **A CRUSH SPENDS ON THE BOUNDARIES TOO, AND IT SPENDS THE SAME FRACTION
+  IT ALWAYS DID** (`PhysicsSystem.crashBoundaryDamage` /
+  `crashContactOn`; step 2 of the unified-impact sequencing in
+  docs/PARKING_LOT.md).  The crash paths used to decrement `health`
+  DIRECTLY while the boundary model rewrote `maxHealth` to the derived
+  total at the first weapon hit, so the two spoke different units and the
+  same crash was worth a wildly different fraction of a tile depending on
+  its history: SHOOTING A TILE ONCE MADE IT 4-50× HARDER TO RAM THROUGH
+  (measured through the real collision branch, `perf/impact-audit.mjs`
+  §5 — rock 9 → 50 crashes, plastic 8 → 400, metal 120 → 468).  Nothing
+  about the tile got tougher; the unit it was counted in changed.  Four
+  things hold the fix up:
+  - **HOW MUCH a crash spends is deliberately NOT kinetic.**  Making
+    impact damage an energy is step 3 of that sequencing and re-prices
+    the whole weapon roster (the implied constant is not one: 9..90 KE
+    per point of damage across the shipped guns, a 10× spread).  This is
+    ROUTING only, so a crash spends one authored HP expressed in the
+    derived budget (`maxHealth / authoredMaxHealth`), which keeps every
+    ram count exactly what it shipped as and makes virgin and once-shot
+    identical.
+  - **THE CONTACT POINT IS ON THE HULL, not the impactor's centre.**
+    Both halves of the grain model read it — the spend pours from it and
+    the harvest orders its candidates by distance to it — and a 460-unit
+    boulder's centre sits a couple of hundred units outside the 36px tile
+    it is crushing.  `crashContactOn` puts it on the target's surface
+    along the MTV normal, and the SAME point is handed to `onDamage`,
+    where `progressFracture` re-stamps.
+  - **THE LAST CRASH OVERSPENDS.**  `spendOnBoundaries` saturates each
+    boundary exactly and returns only what it could absorb, so asking for
+    more than is left is harmless — and is the only way to land on a
+    clean zero.  A spend that lands exactly on the final boundary leaves
+    a one-ULP residue (measured 8.9e-16 on rock's ninth crash) and
+    `health <= 0` then reads false, costing one phantom extra ram.
+  - **A BODY WITH NO GRAIN MODEL STILL BREAKS.**  Indestructible, nebula
+    and every variant under the DBG legacy fracture A/B fall back to the
+    whole-body decrement.  This is where the crash paths differ from
+    `GameEngine.chipStructureAt`, which refuses such a body outright:
+    that is the chip path and may do nothing, a crash may not.
+  The GLASS rule (V9) is unchanged in meaning and now runs THROUGH the
+  model rather than around it: a hull or a boulder over the crash
+  threshold spends the pane's entire remaining boundary budget, so it
+  still dies in one and still shatters along the cells its cracks were
+  drawn from.  Score attribution is untouched — `killedByPlayer` is still
+  set only by the player's own crash, so ambient destruction pays
+  nothing.
 - **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
   "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
   the body-level penetration rule spent one charge to carry a bolt through
