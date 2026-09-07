@@ -4,6 +4,31 @@ Headless performance capture for the Omni engine. Not part of `npm test`
 (see DECISIONS D1 in `docs/GAUNTLET_5C_LOG.md`): these runs take minutes and
 are deliberately noise-prone, while `npm test` is a merge gate.
 
+## impact-audit.mjs — not a performance capture
+
+The odd one out in this directory, and it is here because it shares the
+harness rather than the subject: `impact-audit.mjs` measures BALANCE, not
+frame time.  It reads what a shipped weapon's authored `damage` is worth in
+ENERGY and MOMENTUM against each material's DERIVED HP, and what the crash
+gates correspond to in the same units — step 1 of the unified-impact-physics
+sequencing in `docs/PARKING_LOT.md`.
+
+    npx vite preview --port 4183 --strictPort &
+    node perf/impact-audit.mjs [--samples 60]
+
+Everything is read out of the REAL engine: derived HP through
+`applyBoundaryDamage`'s own model build (driven at zero damage via
+`GameEngine.chipStructureAt`), weapon numbers off a LIVE spawned projectile,
+the collision velocity step from `PhysicsSystem.impactStrength` itself, and
+the ram counts through the real player-crash branch of `resolveCollision`.
+Nothing in it re-derives the arithmetic — that is the whole point, since the
+question it answers is what the game DOES, not what the tables say.
+
+Its results are recorded in `docs/PARKING_LOT.md` §7 of the unified-impact
+entry.  Re-run it rather than quoting those numbers after any grain, weapon
+or crash-gate change; a run is a few seconds and the derived-HP figures are
+pattern-dependent (tiles vary ±2..11% body to body, shards ±17..38%).
+
 ## Lighting columns and scenes
 
 The frame table carries `lit p99 / lit max / fog p99` — the shadow-casting
