@@ -3,7 +3,7 @@
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
-import { nebulaDampingFor } from '../../constants';
+import { nebulaDampingFor, nebulaSpinDampingFor } from '../../constants';
 import { pointInPolygon } from './fracture';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
@@ -603,8 +603,11 @@ export class PhysicsSystem {
             const linearD = isNebulaBody
                 ? nebulaDampingFor(entity.linearDamping)
                 : entity.linearDamping;
+            // Spin reads its OWN knob (DBG "Neb spin damp"), whose first
+            // step defers to the linear one — so the shipped build still
+            // moves both halves together and a click is the A/B.
             const angularD = isNebulaBody
-                ? nebulaDampingFor(entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING)
+                ? nebulaSpinDampingFor(entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING)
                 : (entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING);
             const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
             const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;

@@ -603,6 +603,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaDamp();
   };
 
+  const handleCycleNebulaSpinDamp = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaSpinDamp();
+  };
+
   const handleCycleNebulaBond = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaBond();
   };
@@ -1017,6 +1021,7 @@ const App: React.FC = () => {
         onCycleNebulaSpriteSize={handleCycleNebulaSpriteSize}
         onToggleScanReveal={handleToggleScanReveal}
         onCycleNebulaDamp={handleCycleNebulaDamp}
+        onCycleNebulaSpinDamp={handleCycleNebulaSpinDamp}
         onCycleNebulaBond={handleCycleNebulaBond}
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlayerThrust={handleCyclePlayerThrust}

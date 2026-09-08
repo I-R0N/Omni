@@ -143,6 +143,7 @@ interface UIOverlayProps {
   onCycleNebulaSpriteSize?: () => void;
   onToggleScanReveal?: () => void;
   onCycleNebulaDamp?: () => void;
+  onCycleNebulaSpinDamp?: () => void;
   onCycleNebulaBond?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
@@ -475,6 +476,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaSpriteSize,
   onToggleScanReveal,
   onCycleNebulaDamp,
+  onCycleNebulaSpinDamp,
   onCycleNebulaBond,
   onCycleShatterGrace,
   onCyclePlayerThrust,
@@ -1900,6 +1902,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Neb damp', onCycleNebulaDamp,
                   stats.nebulaDampName ?? '1x (old)',
                   'How fast a nebula shard bleeds off speed \u2014 a multiplier on the per-step velocity LOSS (1x / 1.5x / 2x / 3x / 5x). Applied where the damping factor is read, so a click slows every puff already drifting. Measured baseline: shard speed does not settle, hovering ~1.3-1.7 with a max near 20.')}
+                {ctrlRow('Neb spin damp', onCycleNebulaSpinDamp,
+                  stats.nebulaSpinDampName ?? 'match',
+                  'How fast a nebula shard bleeds off SPIN \u2014 its own ladder, separate from \u201cNeb damp\u201d, because linear drag decides how far a puff travels and spin decay decides how long it tumbles where it sits. \u201cmatch\u201d (the shipped default) defers to the linear knob, so the first click is the A/B.')}
                 {ctrlRow('Neb bond', onCycleNebulaBond,
                   stats.nebulaBondName ?? 'off (old)',
                   'How hard a touching pair of nebula shards grips: cohesion blend rate, break distance, and an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact. \u201cstrong\u201d is plastic\u2019s own shipped grip. Measured baseline: live bonds churn 7 \u2192 102 \u2192 20 as pairs form and snap.')}

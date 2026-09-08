@@ -2999,6 +2999,54 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
   (angular momentum in the impulse solver, off-centre impact torque) are
   parked for their own session — docs/PARKING_LOT.md.
+- **A MATERIAL'S DRAG IS DECLARED ON ITS SPAWN SHAPE, or the material has
+  no drag at all.**  PhysicsSystem's custom-damping branch is gated on the
+  entity carrying a `linearDamping` FIELD, and a STRUCTURE without one
+  matches neither that branch nor the player/enemy/POI branch under it — so
+  it free-drifts with NO friction and NO rest-snap.  The generic child
+  recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the
+  fragment, which makes `SHARD_SPAWN_SHAPE_*` the ONE place a material says
+  how draggy it is.  `SHARD_SPAWN_SHAPE_NEBULA` used to NAME both damping
+  fields in its own comment without declaring them, and that was invisible
+  for as long as nebula shattered only through `shatterNebulaStyle` — which
+  hardcodes the same `NEBULA_CONSTANTS` locally, as the DropSystem dust path
+  still does.  Routing nebula through the shared voronoi recipe made every
+  puff undamped (measured: 311 of 311 live shards with `linearDamping ===
+  undefined`) and took the DBG "Neb damp" knob with it, since that knob is
+  read INSIDE the branch that was never entered.  The lesson generalises: a
+  knob applied at the read is only as live as the branch it is read in, so
+  "the knob does nothing" is first a question about whether the branch runs.
+- **NEBULA'S TWO DRAG KNOBS ARE SEPARATE BECAUSE THE COMPLAINTS ARE.**
+  `nebulaDampingFor` (DBG "Neb damp") and `nebulaSpinDampingFor` (DBG "Neb
+  spin damp") are both a multiplier on the per-step velocity LOSS — `1 - d`
+  going up, so the ladder is a plain number line and 2x really is twice the
+  drag — but linear drag decides how far a puff TRAVELS after a kick while
+  spin decay decides how long it TUMBLES where it sits, and a cloud that
+  slides to a halt still pinwheeling can only be diagnosed by moving them
+  apart.  The spin ladder's index 0 is `match`, which DEFERS to the linear
+  knob: that is the shipped behaviour (one knob moved both halves), so an
+  untouched build is unchanged and the first click is the A/B.
+- **"GOO" IS `cohesionOnly`, AND THAT IS THE WHOLE DIFFERENCE.**  A nebula
+  bond's shipped outcome is `compose` — the pair is CONSUMED after the
+  contact threshold and one new body appears — so the DBG "Neb bond" cohesion
+  and break multipliers only ever act inside that pre-merge window, and
+  turning them up mostly makes pairs vanish into merges SOONER.  That is why
+  the top step read as changing nothing (user report).  Its `cohesionOnly`
+  flag is plastic's own rule: `tickBonds` skips the merge pipeline entirely
+  and the pair PERSISTS as two bodies moving as one.  Three things go with
+  it.  It is read from the LIVE knob and never stamped at formation, so a
+  click re-tunes the pairs already stuck together and stepping off hands them
+  back mid-timer — the same at-the-read rule the multipliers follow.  It is
+  confined to the TOP step rather than made the default, because it switches
+  OFF nebula's self-coalesce, which is also how shards transmute back into
+  tiles — a real gameplay change that waits on a user call.  And the tell is
+  NOT the bond COUNT: that churns hard as pairs form and break (measured
+  15 → 150 → 19 → 58 → 21 → 13 on the off step), so a count-based regression
+  passes by coincidence and did, against a build with the flag reverted.
+  What separates the steps is whether a GIVEN bond is ever spent, so the
+  suite identifies specific pairs and reads `bond.timer`, which under
+  `cohesionOnly` is frozen at the zero it formed with.
 - **NEBULA TAKES THE VORONOI GEOMETRY AND NOT THE DAMAGE MODEL** (user
   call).  `nebula-tile` and `nebula-shard` carry a `grain` block and
   `shatter.kind: 'voronoi'`, so a broken tile hands back the cells its own

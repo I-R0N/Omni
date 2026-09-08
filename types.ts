@@ -2046,6 +2046,8 @@ export interface EngineStats {
   scanRevealAll?: boolean;
   /** DBG readout: the nebula damping step (NEBULA_DAMP_CYCLE). */
   nebulaDampName?: string;
+  /** DBG "Neb spin damp" step name (NEBULA_SPIN_DAMP_CYCLE). */
+  nebulaSpinDampName?: string;
   /** DBG readout: the nebula bonding step (NEBULA_BOND_CYCLE). */
   nebulaBondName?: string;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards

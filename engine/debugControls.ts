@@ -30,7 +30,7 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
-    cycleNebulaDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
+    cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
@@ -803,6 +803,20 @@ export class DebugControls {
    */
   cycleNebulaDamp() {
     cycleNebulaDamp();
+  }
+
+  /**
+   * DBG: how fast a nebula shard bleeds off SPIN (NEBULA_SPIN_DAMP_CYCLE).
+   *
+   * Separate from `cycleNebulaDamp` because the two answer different
+   * complaints — linear drag decides how far a puff travels after a kick,
+   * spin decay decides how long it tumbles where it sits — and a cloud that
+   * slides to a halt while still pinwheeling can only be diagnosed by moving
+   * them apart.  Step 0 (`match`) defers to the linear knob, which is the
+   * shipped behaviour, so an untouched build is unchanged.
+   */
+  cycleNebulaSpinDamp() {
+    cycleNebulaSpinDamp();
   }
 
   /**

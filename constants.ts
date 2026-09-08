@@ -4781,11 +4781,56 @@ export function cycleNebulaDamp(): number {
   return activeNebulaDampIndex;
 }
 
-/** The damping factor a nebula shard actually gets, from the authored base
- *  and the live knob.  Clamped above 0 so a large multiplier cannot invert
- *  the sign of the retention factor and fling a puff backwards. */
+/** The LINEAR damping factor a nebula shard actually gets, from the authored
+ *  base and the live knob.  Clamped above 0 so a large multiplier cannot
+ *  invert the sign of the retention factor and fling a puff backwards. */
 export function nebulaDampingFor(base: number): number {
   const m = getActiveNebulaDampMult();
+  if (m === 1) return base;
+  return Math.max(0.001, 1 - (1 - base) * m);
+}
+
+// ── Nebula ROTATIONAL damping (DBG "Neb spin damp") ───────────────────
+//
+// Its own ladder rather than a share of "Neb damp", because the two are
+// different complaints with different answers: linear drag decides how far
+// a puff TRAVELS after a kick, spin decay decides how long it TUMBLES
+// where it sits.  A cloud that slides to a halt while still pinwheeling
+// reads as wrong in a way neither knob alone can diagnose, so tuning
+// needs to move them independently.  Same "multiplier on the LOSS"
+// statement as the linear ladder, so 2x is twice the drag on both.
+export const NEBULA_SPIN_DAMP_CYCLE: ReadonlyArray<NebulaDampStep> = [
+  { name: 'match',  lossMult: -1  },
+  { name: '1x',     lossMult: 1   },
+  { name: '1.5x',   lossMult: 1.5 },
+  { name: '2x',     lossMult: 2   },
+  { name: '3x',     lossMult: 3   },
+  { name: '5x',     lossMult: 5   },
+  { name: '10x',    lossMult: 10  },
+];
+let activeNebulaSpinDampIndex = 0;
+
+export function getActiveNebulaSpinDampName(): string {
+  return NEBULA_SPIN_DAMP_CYCLE[activeNebulaSpinDampIndex].name;
+}
+export function cycleNebulaSpinDamp(): number {
+  activeNebulaSpinDampIndex = (activeNebulaSpinDampIndex + 1) % NEBULA_SPIN_DAMP_CYCLE.length;
+  return activeNebulaSpinDampIndex;
+}
+/** The multiplier the spin ladder is on. Index 0 is `match`, which DEFERS
+ *  to the linear knob — that is the shipped behaviour (one knob moved both
+ *  halves together), so an untouched build is unchanged and the first click
+ *  is the A/B. */
+export function getActiveNebulaSpinDampMult(): number {
+  const m = NEBULA_SPIN_DAMP_CYCLE[activeNebulaSpinDampIndex].lossMult;
+  return m < 0 ? getActiveNebulaDampMult() : m;
+}
+
+/** The ANGULAR damping factor a nebula shard actually gets.  Same clamp and
+ *  same loss-multiplier arithmetic as the linear half; only the ladder it
+ *  reads differs. */
+export function nebulaSpinDampingFor(base: number): number {
+  const m = getActiveNebulaSpinDampMult();
   if (m === 1) return base;
   return Math.max(0.001, 1 - (1 - base) * m);
 }
@@ -4798,6 +4843,25 @@ interface NebulaBondStep {
   /** Multiplier on the break distance — how far a bonded pair may separate
    *  before the bond snaps. */
   readonly breakMul: number;
+  /** Make the bond COHESION-ONLY — plastic's own rule, and the thing that
+   *  separates "goo" from merely "a firm grip".
+   *
+   *  A nebula bond's shipped outcome is `compose`: after the contact
+   *  threshold the pair is CONSUMED and one new body appears.  So the grip
+   *  multipliers above only ever act inside that pre-merge window, and the
+   *  louder they are set the sooner the pair vanishes into a merge —
+   *  measured as a bond population churning 0 → 139 → 15 with `cohesionOnly`
+   *  never once set, which is why the top step read as doing nothing.
+   *  Cohesion-only bonds skip the merge pipeline entirely, so the pair
+   *  PERSISTS as two bodies moving as one: the plastic behaviour the goo
+   *  step is named after.
+   *
+   *  It is deliberately confined to the top step rather than made the
+   *  default, because it switches OFF nebula's self-coalesce — bonded
+   *  shards stop composing, which is also how they transmute back into
+   *  tiles.  That is a real gameplay change and belongs behind an opt-in
+   *  until the user calls it. */
+  readonly cohesionOnly?: boolean;
   /** Distance inside which the self-gravity stops pulling, so cohesion has
    *  the close range to itself (plastic's `pullInnerRange` trick).  0 keeps
    *  today's behaviour: pull all the way to contact. */
@@ -4814,7 +4878,7 @@ export const NEBULA_BOND_CYCLE: ReadonlyArray<NebulaBondStep> = [
   { name: 'off (old)', cohesionMul: 1, breakMul: 1, pullInner: 0   },
   { name: 'firm',      cohesionMul: 2, breakMul: 2, pullInner: 60  },
   { name: 'strong',    cohesionMul: 3, breakMul: 4, pullInner: 80  },
-  { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110 },
+  { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110, cohesionOnly: true },
 ];
 let activeNebulaBondIndex = 0;
 
@@ -9106,6 +9170,22 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   // angularDamping fields the shard reads as "cloud being shoved
   // aside" without slowing the striker.
   sizeToMass: () => 0.01,
+  // NEBULA'S DRAG IS DECLARED HERE, and it has to be: the generic child
+  // recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  // `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the
+  // fragment, and PhysicsSystem's custom-damping branch is gated on the
+  // FIELD being present — a STRUCTURE with no `linearDamping` matches
+  // neither that branch nor the player/enemy/POI one, so it free-drifts
+  // with NO drag whatsoever.  This block used to name the two fields in
+  // its own comment without declaring them, which was invisible for as
+  // long as nebula shattered ONLY through `shatterNebulaStyle` (which
+  // hardcodes the same constants locally).  Routing nebula through the
+  // shared voronoi recipe made every puff undamped — measured 311 of 311
+  // live shards with `linearDamping === undefined` — and took the DBG
+  // "Neb damp" knob with it, since that knob is read INSIDE the branch
+  // that was never entered.
+  linearDamping:  NEBULA_CONSTANTS.LINEAR_DAMPING,
+  angularDamping: NEBULA_CONSTANTS.ANGULAR_DAMPING,
 };
 
 // Plastic shards: 4-vertex polygon with mild jitter — distinct

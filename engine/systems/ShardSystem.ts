@@ -1834,10 +1834,17 @@ export class ShardSystem {
         }
       }
 
-      // Cohesion-only bonds (today: plastic-shard) skip the merge
-      // pipeline entirely — no timer accumulation, no compose call.
-      // Re-push and continue.
-      if (bond.cohesionOnly) {
+      // Cohesion-only bonds (today: plastic-shard, plus nebula under the
+      // DBG "Neb bond" goo step) skip the merge pipeline entirely — no
+      // timer accumulation, no compose call.  Re-push and continue.
+      //
+      // The nebula half is read from the LIVE knob rather than from a flag
+      // stamped at formation, so a click re-tunes the pairs already stuck
+      // together instead of only the next ones — the same at-the-read rule
+      // the cohesion and break multipliers above follow.  Stepping OFF goo
+      // hands its bonds straight back to the merge pipeline with their
+      // timers where they were.
+      if (bond.cohesionOnly || (nebBond !== null && nebBond.cohesionOnly === true)) {
         this.bonds[writeIdx++] = bond;
         continue;
       }
