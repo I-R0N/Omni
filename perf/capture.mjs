@@ -84,6 +84,20 @@ const ABLATIONS = {
   // Same body, but with the per-shard lane jitter (the only branch in
   // applyFlow that WRITES a new property onto an entity) disabled.
   lanejitter0: `() => { window.__omniEngine.ffLaneJitter = 0; }`,
+  // Cut the UNCONDITIONAL nebula-shard vs nebula-tile collision pass.  It is
+  // the one broadphase pass with no PerfController cadence behind it — its
+  // siblings (`resolveShardPairs`, `resolveShardTilePairs`) both skip on
+  // off-frames — and it walks 9 static cells per nebula shard per SUBSTEP.
+  // On a map whose every tile is a nebula tile that is a lot of SAT calls,
+  // and nebula's voronoi shatter tripled the shard count feeding it.
+  // Difference = what cadencing (or narrowing) that pass would be worth.
+  nebtilepass: `() => { window.__omniEngine.physics.resolveNebulaShardTilePairs = () => {}; }`,
+  // Send nebula back to its legacy rear-cone shatter (2-3 children per tile
+  // instead of the voronoi decomposition's 6-8).  Difference = the cost of
+  // the ENTITY COUNT the voronoi change introduced, as distinct from any
+  // per-entity work.  Note this flips the fracture mode GLOBALLY, so read it
+  // only on a nebula-only scene.
+  nebshatterlegacy: `() => { window.__omniEngine.dbg.cycleFractureMode(); }`,
   // Keep React, cut the payload build: isolates the cost of assembling the
   // ~120-field stats object (and its nested snapshots) from the cost of
   // React consuming it.

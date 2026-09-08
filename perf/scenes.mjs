@@ -63,6 +63,18 @@ export const SCENES = [
   },
 
   {
+    id: 'nebula-storm',
+    map: 'NEBULA_FIELD',
+    windowSec: DEFAULT_WINDOW_SEC,
+    notes: 'Nebula tiles broken on a cadence — the population the voronoi shatter produces, and the scene the "frame rate dropped" report is about. Read `ents` alongside `frame`: nebula\'s cost is entity COUNT, not per-entity work, so a frame-time delta here is only meaningful next to the shard population that produced it.',
+    setup: (e) => { e.startGame(); },
+    during: (e, frac, api) => {
+      if (!api.everyMs(400)) return;
+      api.shatterNearestTiles(12);
+    },
+  },
+
+  {
     id: 'boss-capstone',
     map: 'UNIVERSE',
     windowSec: DEFAULT_WINDOW_SEC,
