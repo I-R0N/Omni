@@ -237,6 +237,11 @@ const HOOK_API = `
     s._every[k] = now;
     return true;
   },
+  /* Per-run scratch, reset when the sample window opens.  A scene that has
+     to remember something across its during() calls (a saved original
+     method, a phase accumulator) keeps it here rather than on the engine.
+     No backticks in this block: HOOK_API is itself a template literal. */
+  get state() { return window.__perfCap.state; },
   once(key, cond) {
     const s = window.__perfCap.state;
     if (!s._once) s._once = {};

@@ -546,6 +546,19 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   private _nebulaShardPool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _trailPool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particlePool: { entity: GameEntity, rx: number, ry: number }[] = [];
+  /** Pool behind `_minimapBuffer`.  Its own because the minimap slot carries
+   *  `{dx, dy, detect}` rather than the `{rx, ry}` every render bucket uses —
+   *  which is exactly why this bucket was left out of the pooling above and
+   *  went on allocating a literal per entity per frame.
+   *
+   *  That was survivable while the buffer held only DISCOVERED structures,
+   *  and stopped being survivable when the scan reveal started shipping ON:
+   *  every structure within minimap range now reaches it, so the one
+   *  unpooled bucket became the largest allocator in the frame.  Measured on
+   *  OVERWORLD while flying: 805 KB/frame with the reveal up against 590 with
+   *  it off — and the pauses that buys are the "periodic large drops" this
+   *  pooling was introduced to kill in the first place (see the note above). */
+  private _minimapPool: { entity: GameEntity, dx: number, dy: number, detect: number }[] = [];
 
   /**
    * Append `entity` to a live render bucket by reusing a pooled slot.
@@ -563,6 +576,20 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     if (s === undefined) { s = { entity, rx, ry }; pool[n] = s; }
     else { s.entity = entity; s.rx = rx; s.ry = ry; }
     live.push(s);
+  }
+
+  /**
+   * `pushSlot` for the minimap bucket.  Same contract exactly — `live` and
+   * `pool` stay index-aligned, `live` is appended only through here and
+   * cleared only via `.length = 0`, and the pool keeps every slot it has
+   * handed out — but for the `{entity, dx, dy, detect}` shape.
+   */
+  private pushMinimapSlot(entity: GameEntity, dx: number, dy: number, detect: number): void {
+    const n = this._minimapBuffer.length;
+    let s = this._minimapPool[n];
+    if (s === undefined) { s = { entity, dx, dy, detect }; this._minimapPool[n] = s; }
+    else { s.entity = entity; s.dx = dx; s.dy = dy; s.detect = detect; }
+    this._minimapBuffer.push(s);
   }
 
   // ── Pre-rendered static minimap layer ─────────────────────────────────
@@ -1130,7 +1157,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             } else {
                 detect = this.mapAlpha(entity);
             }
-            if (detect > 0) this._minimapBuffer.push({ entity, dx, dy, detect });
+            if (detect > 0) this.pushMinimapSlot(entity, dx, dy, detect);
         }
 
         if (rx < left || rx > right || ry < top || ry > bottom) {

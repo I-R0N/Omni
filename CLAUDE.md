@@ -3040,6 +3040,31 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   apart.  The spin ladder's index 0 is `match`, which DEFERS to the linear
   knob: that is the shipped behaviour (one knob moved both halves), so an
   untouched build is unchanged and the first click is the A/B.
+- **EVERY PER-FRAME RENDER BUCKET IS POOLED, AND THE MINIMAP ONE WAS NOT.**
+  `RenderSystem.pushSlot` exists because pushing a fresh `{entity, rx, ry}`
+  literal per visible entity was measured as the dominant driver of the
+  periodic GC pauses that read as tail-frame hitches — the note beside the
+  pools says so.  `_minimapBuffer` was left out of it for a mundane reason:
+  its slot carries `{dx, dy, detect}` rather than `{rx, ry}`, so it did not
+  fit the shared helper, and it went on allocating a literal per entity per
+  frame.
+  That was survivable only because the buffer held DISCOVERED structures
+  alone.  It stopped being survivable the moment the scan reveal began
+  shipping ON, since every structure inside `MINIMAP_CONSTANTS.RANGE` then
+  reaches it: measured on OVERWORLD **while flying**, 805 KB/frame with the
+  reveal up against 590 with it off, and the pauses that buys are exactly the
+  symptom the pooling was introduced to remove.  `pushMinimapSlot` is the
+  same contract for that shape.  The rule generalises: a NEW per-frame bucket
+  is pooled, or it is a GC regression waiting for the day something makes it
+  hot.
+  Two things to know before chasing this further.  A HITCH is not a p99 —
+  `perf/capture.mjs` reports the steady state, and a healthy p99 can hide a
+  stall every second, so `perf/spike.mjs` reports the SERIES instead (outlier
+  frames, their spacing, and whether sim, render or the RESIDUAL dominates
+  them; residual is GC and rasterisation, which making the sim faster cannot
+  help).  And `hub-idle` cannot see any of it: a parked camera never
+  re-culls, never re-stamps the static tile cache and never scrolls the star
+  field, which is why `hub-move` exists.
 - **NEBULA'S GRAIN SIZE IS SET BY FRAME TIME, AND THE LEVER IS `grainSize`
   RATHER THAN `grainCountMax`** (user call).  Giving nebula the voronoi
   shatter cost frame time through sheer ENTITY COUNT, and the cost is

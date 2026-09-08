@@ -63,6 +63,28 @@ export const SCENES = [
   },
 
   {
+    id: 'hub-move',
+    map: 'OVERWORLD',
+    windowSec: DEFAULT_WINDOW_SEC,
+    notes: 'The hub with the ship FLYING a slow circle. `hub-idle` parks the camera, which never re-culls, never re-stamps the static tile cache and never scrolls the star field — so it cannot see anything that only costs while moving. This is the scene for a "hitches as soon as I move" report, and its interesting column is ALLOCATION, not p99.',
+    setup: (e) => { e.startGame(); },
+    during: (e, frac, api) => {
+      // Drive the SAME channel every input device writes, so nothing
+      // downstream knows this is not a player. Circling rather than a
+      // straight line keeps the camera entering fresh terrain.
+      const s = api.state;
+      if (s._realMove === undefined) {
+        s._realMove = e.input.getMovementVector.bind(e.input);
+        s._t = 0;
+        e.input.getMovementVector = () => {
+          s._t += 0.016;
+          return { x: Math.cos(s._t * 0.6), y: Math.sin(s._t * 0.6) };
+        };
+      }
+    },
+  },
+
+  {
     id: 'nebula-storm',
     map: 'NEBULA_FIELD',
     windowSec: DEFAULT_WINDOW_SEC,

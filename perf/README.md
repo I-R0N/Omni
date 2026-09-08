@@ -45,6 +45,32 @@ the DELTAS between the three are the evidence.  The in-game counterpart is
 the DBG Perf REC report's `light … · fog …` line, which is the tool for
 on-device numbers.
 
+## spike.mjs — hitches, not steady state
+
+    npx vite build
+    npx vite preview --port 4183 --strictPort &
+    node perf/spike.mjs --map OVERWORLD --sec 25 [--pre '<js against window.__omniEngine>']
+
+`capture.mjs` answers "how heavy is the steady state".  A user-visible HITCH
+is a different question: a few frames per second many times the median, with
+everything between them fine.  A p99 can look healthy while every second
+contains a stall, so this reports the SERIES — which frames are outliers, how
+far apart they are (a stable gap is a cadence, a scattered one is not), and
+what dominates them.
+
+ATTRIBUTION is the point.  The RESIDUAL (frame - sim - render) is time the
+engine did not spend in its own code: GC, rasterisation, layout.  A residual
+spike is not fixed by making the sim faster, and a sim spike is not fixed by
+allocating less.
+
+The player MOVES throughout, which `hub-idle` never does — a parked camera
+re-culls nothing, re-stamps no static tiles and scrolls no stars.  `--pre`
+runs one expression against the live engine before the window opens, which is
+how a suspected cost gets ablated without building the ablation into the app.
+
+Levels are indicative (software raster) as everywhere here; the DELTA between
+two builds is the evidence, and `heapKB/f` is exact.
+
 ## Usage
 
     npx vite build                    # the harness serves dist/
