@@ -1212,6 +1212,10 @@ export interface GameEntity {
   // regenerated), or tile area (merge).  Mirrors the same per-entity
   // caching pattern `nebulaBlendedHex` already uses.
   nebulaCachedTinted?: HTMLCanvasElement;
+  /** The `getNebulaSpriteGen()` value the cached draw size was computed at.
+   *  A cache whose stamp is stale is refused, so the DBG oversize knob
+   *  reaches clouds already on screen. */
+  nebulaCachedGen?: number;
   nebulaCachedDx?: number;
   nebulaCachedDy?: number;
   nebulaCachedSize?: number;

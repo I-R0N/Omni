@@ -3145,11 +3145,21 @@ export function cycleDamageSpread(): number {
 // `Frac sites` still scales whatever count these produce, and
 // `Bnd strength` still multiplies whatever strength they set, so a
 // global sweep keeps working while one material is being tuned.
-export const GRAIN_MATERIALS = ['rock', 'glass', 'plastic', 'metal'] as const;
+// NEBULA IS IN THE LIST (user call) even though it is the one material that
+// takes the grain GEOMETRY without the grain DAMAGE model.  Everything these
+// knobs move — grain size, the count clamps, regularity, size spread — is
+// geometry, which nebula does use; and a material whose pattern cannot be
+// tuned from the panel is a material that has to be tuned by editing the
+// table and rebuilding.  The one row that does nothing for it is `bond str`:
+// nebula carries no `progressive`, so `isProgressiveFracture` stays false and
+// `bondStrengthFor` returns null however that knob is set.  That is the
+// honest behaviour rather than a special case — see the nebula rule in
+// CLAUDE.md §8.
+export const GRAIN_MATERIALS = ['rock', 'glass', 'plastic', 'metal', 'nebula'] as const;
 export type GrainMaterial = typeof GRAIN_MATERIALS[number];
 
 /** The material a shard-family variant belongs to, or null for the ones
- *  with no grain model (nebula, indestructible). */
+ *  that carry no grain block at all (indestructible). */
 export function grainMaterialOf(variantId: ShardVariantId): GrainMaterial | null {
   const dash = variantId.indexOf('-');
   const head = dash < 0 ? variantId : variantId.slice(0, dash);
@@ -3175,6 +3185,12 @@ export const GRAIN_KNOBS = {
   regularity:    [0, 0.25, 0.5, 0.75, 0.95, 1],
   bondStrength:  [0.05, 0.1, 0.16, 0.27, 0.4, 0.62, 0.85, 1.2, 1.8, 2.5, 3.5],
   damageSpread:  [0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2],
+  // The axis that varies grain AREA within one body — the one nebula
+  // actually uses (0.6), and parked at 0 on the other four pending a
+  // deliberate pass (docs/PARKING_LOT.md).  Tunable per material because
+  // "how mixed are the piece sizes" is exactly the question a cloud raises
+  // and a machined plate does not.
+  sizeSpread:    [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1],
 } as const satisfies Record<string, ReadonlyArray<number>>;
 export type GrainKnob = keyof typeof GRAIN_KNOBS;
 export const GRAIN_KNOB_LIST = Object.keys(GRAIN_KNOBS) as ReadonlyArray<GrainKnob>;
@@ -3211,14 +3227,16 @@ function defaultIndex(mat: GrainMaterial, knob: GrainKnob): number {
   return grainLadder(mat, knob).indexOf(null);
 }
 
-const startKnobIndices = (mat: GrainMaterial): GrainKnobIndices => ({
-  grainSize:     defaultIndex(mat, 'grainSize'),
-  grainCountMin: defaultIndex(mat, 'grainCountMin'),
-  grainCountMax: defaultIndex(mat, 'grainCountMax'),
-  regularity:    defaultIndex(mat, 'regularity'),
-  bondStrength:  defaultIndex(mat, 'bondStrength'),
-  damageSpread:  defaultIndex(mat, 'damageSpread'),
-});
+// Derived from GRAIN_KNOB_LIST rather than listed by hand: the hand-written
+// literal is what fell out of date the moment a knob was added, and a missing
+// entry here means that knob rests at index 0 (the ladder's LOWEST value)
+// instead of at the material's own default — a silent retune of every
+// material, not a compile error, if the type ever loosens.
+const startKnobIndices = (mat: GrainMaterial): GrainKnobIndices => {
+  const out = {} as GrainKnobIndices;
+  for (const knob of GRAIN_KNOB_LIST) out[knob] = defaultIndex(mat, knob);
+  return out;
+};
 
 // Built lazily: `grainTableValue` reads SHARD_VARIANTS, which is declared
 // further down this module, so filling these at module scope would run
@@ -4689,9 +4707,19 @@ export function getActiveNebulaSpriteName(): string {
   return NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].name;
 }
 
+/** Bumped whenever anything that feeds a CACHED nebula draw size changes.
+ *  Both nebula fast paths stamp it alongside the cache and refuse a cache
+ *  whose stamp is stale — without which the oversize knob would move only
+ *  the clouds that happen to redraw slowly, and read as a knob that does
+ *  nothing on a settled field.  That is the whole promise of applying it
+ *  at the read. */
+let nebulaSpriteGen = 0;
+export function getNebulaSpriteGen(): number { return nebulaSpriteGen; }
+
 /** Advance the oversize A/B by one, wrapping.  Returns the new index. */
 export function cycleNebulaSpriteSize(): number {
   activeNebulaSpriteIndex = (activeNebulaSpriteIndex + 1) % NEBULA_SPRITE_CYCLE.length;
+  nebulaSpriteGen++;
   return activeNebulaSpriteIndex;
 }
 

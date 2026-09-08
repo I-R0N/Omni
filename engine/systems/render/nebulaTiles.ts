@@ -24,7 +24,7 @@
  */
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity } from '../../../types';
-import { NEBULA_CONSTANTS, getActiveNebulaStretchK, nebulaSpriteSize } from '../../../constants';
+import { NEBULA_CONSTANTS, getActiveNebulaStretchK, nebulaSpriteSize, getNebulaSpriteGen } from '../../../constants';
 import { blendCompositionToHex } from '../../NebulaColor';
 import { hexToRgb, densityTintForRender } from './drawUtils';
 
@@ -72,6 +72,7 @@ export function drawNebulaTileCached(
         && entity.nebulaSpawnTimer === undefined
         && entity.regenPopTimer === undefined
         && entity.nebulaCachedTinted !== undefined
+        && entity.nebulaCachedGen === getNebulaSpriteGen()
         && entity.nebulaTwinkleNextAt !== undefined
         && perfNowSec < entity.nebulaTwinkleNextAt) {
         ctx.globalAlpha = 0.55;
@@ -122,12 +123,114 @@ export function drawNebulaTileCached(
  *  entity loop's own frame bookkeeping rather than part of drawing a
  *  nebula, so it stayed behind.
  */
+/** Draw a nebula SHARD from its per-entity cache — the shard counterpart of
+ *  `drawNebulaTileCached`.
+ *
+ *  Called from inside `renderEntities`' per-entity transform, so rotation is
+ *  already applied and this never touches it.  What it still does per frame
+ *  is exactly what genuinely changes per frame:
+ *
+ *   - the three alpha terms (fade-out, birth fade-in, speed translucency),
+ *     which is why a fading or newly-born shard is excluded from the cache
+ *     path at the call site above rather than handled here; and
+ *   - the velocity-aligned stretch, which is a function of the shard's
+ *     current velocity and cannot be cached by definition.
+ *
+ *  Everything else — the blended hex, the density tint, the tinted-canvas
+ *  lookup, the sprite centroid and the draw size — is read from the fields
+ *  the slow path left behind. */
+function drawNebulaShardFromCache(
+    rs: RenderSystem,
+    ctx: CanvasRenderingContext2D,
+    entity: GameEntity,
+): void {
+    const tinted = entity.nebulaCachedTinted;
+    if (tinted === undefined) return;
+    rs.lastNebulaFastCount++;
+
+    // Speed translucency — a fast shard reads a little thinner ("wind-torn
+    // cloud").  Speed² so no sqrt; the same curve the slow path uses.
+    const vx = entity.velocity.x, vy = entity.velocity.y;
+    const speedSq = vx * vx + vy * vy;
+    const speedMul = Math.max(
+        NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_MIN,
+        1 - speedSq * NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_K,
+    );
+
+    const stretchK = getActiveNebulaStretchK();
+    const stretching = stretchK > 0 && speedSq > NEBULA_CONSTANTS.VEL_STRETCH_REST_SPEED_SQ;
+    if (stretching) {
+        const stretch = Math.min(NEBULA_CONSTANTS.VEL_STRETCH_MAX, Math.sqrt(speedSq) * stretchK);
+        const delta = Math.atan2(vy, vx) - entity.rotation;
+        ctx.rotate(delta);
+        ctx.scale(1 + stretch, 1 - stretch * NEBULA_CONSTANTS.VEL_STRETCH_SQUASH_RATIO);
+        ctx.rotate(-delta);
+    }
+
+    const size = entity.nebulaCachedSize ?? 0;
+    ctx.globalAlpha = 0.45 * speedMul * (entity.nebulaAlphaMul ?? 1);
+    ctx.drawImage(tinted, entity.nebulaCachedDx ?? 0, entity.nebulaCachedDy ?? 0, size, size);
+    ctx.globalAlpha = 1.0;
+
+    // Undo the stretch so the caller's transform is handed back unchanged —
+    // `renderEntities` resets with setTransform per entity, but leaving a
+    // scaled frame behind would be a trap for anything drawn after this in
+    // the same frame (the debug outline below, for one).
+    if (stretching) {
+        const stretch = Math.min(NEBULA_CONSTANTS.VEL_STRETCH_MAX, Math.sqrt(speedSq) * stretchK);
+        const delta = Math.atan2(vy, vx) - entity.rotation;
+        ctx.rotate(delta);
+        ctx.scale(1 / (1 + stretch), 1 / (1 - stretch * NEBULA_CONSTANTS.VEL_STRETCH_SQUASH_RATIO));
+        ctx.rotate(-delta);
+    }
+
+    if (rs.debugMode && entity.polygonPoints && entity.polygonPoints.length > 0) {
+        const pts = entity.polygonPoints;
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+    }
+}
+
 export function drawNebulaEntity(
     rs: RenderSystem,
     ctx: CanvasRenderingContext2D,
     entity: GameEntity,
     perfNowSec: number,
 ): void {
+    // THE SHARD CACHE (user call).  A nebula TILE has had a one-drawImage
+    // fast path since Stage 5; a shard never did, and after the voronoi
+    // change a broken tile leaves 6-8 of them instead of 2-3, so the slow
+    // path became the dominant nebula cost (measured: 234 slow draws and a
+    // 27.1 ms median frame against 95 and 16.7 ms under the legacy shatter).
+    //
+    // A shard cannot take the TILE fast path — that one draws in world space
+    // with no transform, because a tile's rotation is always 0, while a shard
+    // spins, fades on speed and stretches along its velocity.  So this is the
+    // other half of the same idea: keep the per-frame work that genuinely
+    // varies (rotation is already in the caller's transform, plus alpha and
+    // the stretch) and cache the part that does not — the tint chain, the
+    // tinted-canvas lookup, the sprite centroid and the draw size.
+    //
+    // Validity is the single `nebulaCachedTinted` flag, invalidated at every
+    // site that moves an input (composition, density tier, neighbour count),
+    // exactly as for tiles.  A shard's SIZE cannot drift out from under it:
+    // nebula's merge is pair-consuming, so a shard is never resized in place.
+    if (entity.shardVariant === 'nebula-shard'
+        && entity.nebulaCachedTinted !== undefined
+        && entity.nebulaCachedGen === getNebulaSpriteGen()
+        && !entity.hitFlash
+        && entity.mergeFadeTimer === undefined
+        && entity.nebulaSpawnTimer === undefined) {
+        drawNebulaShardFromCache(rs, ctx, entity);
+        return;
+    }
     rs.lastNebulaSlowCount++;
     // Per-entity blended-hex cache: populated lazily on first render
     // and invalidated by NebulaSystem when composition mutates
@@ -293,12 +396,15 @@ export function drawNebulaEntity(
             // fields are non-undefined, subsequent frames bypass
             // this whole slow path until NebulaSystem invalidates
             // them (composition / neighbour-count / area changes).
-            if (entity.shardVariant === 'nebula-tile') {
-                entity.nebulaCachedTinted = tinted;
-                entity.nebulaCachedDx = dx;
-                entity.nebulaCachedDy = dy;
-                entity.nebulaCachedSize = drawSize;
-            }
+            // Both variants now: the tile's cache feeds its world-space fast
+            // path above, the shard's feeds `drawNebulaShardFromCache`.  Same
+            // four fields and the same invalidation sites, so there is one
+            // cache to reason about rather than two.
+            entity.nebulaCachedTinted = tinted;
+            entity.nebulaCachedDx = dx;
+            entity.nebulaCachedDy = dy;
+            entity.nebulaCachedSize = drawSize;
+            entity.nebulaCachedGen = getNebulaSpriteGen();
         } else {
             // Fallback: procedural soft circle in the tint colour
             // while the nebula sprite is still loading.
