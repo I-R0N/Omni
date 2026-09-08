@@ -1043,9 +1043,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   glass-shard (V10, user call: glass takes rock's breaking behaviour),
   plus metal-tile and plastic-tile / plastic-shard (A3) — and NEBULA,
   which takes the GEOMETRY ONLY (see §8).  Nebula's row is
-  `grainSize` 14 / 3 / 14 / regularity **0.15** / `sizeSpread` **0.6**
+  `grainSize` **20** / 3 / 14 / regularity **0.15** / `sizeSpread` **0.6**
   and NO `bondStrength`: the raggedest and most size-varied pattern in
-  the game, and the only one that opts out of the damage layer.  Metal is the
+  the game, and the only one that opts out of the damage layer.  Its grain
+  size is the one number in the table set by a PERF measurement rather than
+  a look: see the nebula grain-size note in §8.  Metal is the
   fine-grained, near-honeycomb, hardest material and its grain size AND
   bond strength both track `densityTier`, so a plate's brightness reads
   its toughness; plastic is large-grained, loosely regular and DEFORMS
@@ -1854,6 +1856,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   whether there is anything to draw it for — the cycle cannot be a dev
   override that forces the layer on, because its shipped default is
   already 'dots' and that would make the material reveal free.
+  **ALL OF THAT NOW SHIPS BYPASSED** (user call): `activeScanRevealAll`
+  defaults to TRUE, so a fresh run draws the whole minimap and runs neither
+  the discovery walk nor the auto sweep.  The subsystem above is untouched
+  and still exactly what the DBG ▸ Visual ▸ "Scan off" row switches back to;
+  what moved is which side of the switch a run starts on.  The consequence
+  to know before changing it back: with the reveal up, the SCANNER module
+  still buys off-screen arrows and the pressed ping but no longer buys the
+  MAP, which is most of why a mark is worth its price — so anything tuning
+  scanner economics has to turn the reveal off first.  Every suite that
+  tests the scanner does exactly that, through `tests/helpers.ts`
+  `useScanner(page)`.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -3027,6 +3040,30 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   apart.  The spin ladder's index 0 is `match`, which DEFERS to the linear
   knob: that is the shipped behaviour (one knob moved both halves), so an
   untouched build is unchanged and the first click is the A/B.
+- **NEBULA'S GRAIN SIZE IS SET BY FRAME TIME, AND THE LEVER IS `grainSize`
+  RATHER THAN `grainCountMax`** (user call).  Giving nebula the voronoi
+  shatter cost frame time through sheer ENTITY COUNT, and the cost is
+  SUPERLINEAR: on the `nebula-storm` perf scene `sim/stp99` ran 3.60 at the
+  original `grainSize` 14 against 2.00 with the legacy shatter — +80% per
+  substep for +25% entities — with heap churn 676 vs 432 KB/frame.  Two
+  findings are worth keeping because both were counter-intuitive:
+  - **`grainCountMax` is the wrong knob.**  The cap rarely binds — the count
+    is really set by `grainSize` against body area — so dropping it 14 → 8
+    recovered almost nothing (3.60 → 3.35).
+  - **The uncadenced `PhysicsSystem.resolveNebulaShardTilePairs` is NOT the
+    cause**, which was the obvious suspicion since it is the one broadphase
+    pass with no PerfController cadence behind it.  Ablating it made things
+    slightly WORSE (4.45), because shards then stop being pushed clear of
+    tiles and the population grows.  Do not revive that theory without new
+    evidence.
+  `grainSize` 20 lands exactly on the legacy floor (2.00, 1358 ents) while
+  keeping most of what the voronoi change bought — 3.95 children per tile
+  and a 3.07× size spread, against 7.7 / 4.02× at 14 and ~2-3 children with
+  NO parent-related size variety at all on legacy.  26 buys nothing further,
+  so 20 is the knee.  Size VARIETY is `sizeSpread` and `regularity`, which
+  this does not touch; what a larger grain gives up is the NUMBER of pieces.
+  `perf/scenes.mjs` carries the scene and `perf/capture.mjs` the two
+  ablations (`nebtilepass`, `nebshatterlegacy`) that sized each cause.
 - **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
   call).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
   the contact threshold and one new body appears — so at the shipped ~5 s

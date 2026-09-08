@@ -3454,10 +3454,23 @@ test.describe('fracture physics — recoil and re-centring', () => {
         }
         // Closed form: ejecting mass m at relative velocity (v - V) leaves
         // the remainder with -(m / M') of it.
+        //
+        // It is exact for ONE ejection and only for one.  A single hit can
+        // occasionally free TWO grains (measured 0.097% of detaches over
+        // 4117), and the recoils are then applied SEQUENTIALLY — each
+        // against the parent's velocity and mass at that moment, neither of
+        // which is observable from the end state.  So `kids` is recorded
+        // and the caller checks the closed form on the single-chip case and
+        // a weaker directional property on the rest.  Modelling a two-chip
+        // detach with kids[0] alone is what made this test flake ~1 in 20:
+        // `expected` counted one ejection while `actual` carried both.
         const k = Math.min(0.6, (kids[0].mass ?? 0) / Math.max(1e-3, t.mass));
+        let chipMomentum = 0;
+        for (const kd of kids) chipMomentum += (kd.mass ?? 0) * (kd.velocity.x - vBefore);
         detaches.push({
           expected: -k * (kids[0].velocity.x - vBefore),
           actual: t.velocity.x - vBefore,
+          kids: kids.length, chipMomentum,
           chipMass: kids[0].mass, parentMassBefore: mBefore,
         });
       }
@@ -3488,15 +3501,37 @@ test.describe('fracture physics — recoil and re-centring', () => {
     // relative).  A first draft asserted < 0.001, which passed only on the
     // runs that happened to land on exactly 0.
     expect(r!.worstTiling).toBeLessThan(0.5);
-    // (3) MOMENTUM: every detach matches the closed form.  Pre-fix this
-    // was 0 on every detach — the chip's momentum came from nowhere.
-    for (const d of r!.detaches) {
+    // (3) MOMENTUM.  Pre-fix the parent's velocity change was 0 on every
+    // detach — the chip's momentum came from nowhere — so the property under
+    // test is that a break pushes back at all, and by the right amount.
+    //
+    // Split by how many grains came away, because the closed form is exact
+    // for one ejection and underdetermined for more (see the note at the
+    // measurement).  Nearly every detach is single, so the precise check
+    // keeps its teeth; asserting it on multi-chip detaches is what made this
+    // flake.  A momentum-conservation check over the whole family was
+    // considered as a uniform replacement and REJECTED on measurement: chip
+    // mass and the parent's area-scaled mass disagree by up to 15% (p99
+    // 2.9%), so the invariant is not tight enough to assert on.
+    const single = r!.detaches.filter((d: any) => d.kids === 1);
+    const multi  = r!.detaches.filter((d: any) => d.kids > 1);
+    expect(single.length).toBeGreaterThan(1);
+
+    for (const d of single) {
       expect(Math.abs(d.actual)).toBeGreaterThan(1e-4);
       expect(Math.abs(d.actual - d.expected)).toBeLessThan(1e-3);
+    }
+    // Multi-chip detaches still have to RECOIL, and in the direction the
+    // ejected mass did not go — the half of the property that survives
+    // without the intermediate state.
+    for (const d of multi) {
+      expect(Math.abs(d.actual)).toBeGreaterThan(1e-4);
+      expect(Math.sign(d.actual)).toBe(-Math.sign(d.chipMomentum));
     }
 
     console.log(`[fracture physics] detaches ${r!.detaches.length},`
       + ` worst centroid ${r!.worstCentroid}, worst tiling gap ${r!.worstTiling},`
+      + ` single ${single.length} multi ${multi.length},`
       + ` recoil ${r!.detaches.map((d: any) => d.actual.toFixed(3)).join(' ')}`);
 
     watch.assertClean();

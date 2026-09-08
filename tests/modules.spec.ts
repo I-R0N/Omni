@@ -36,7 +36,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
+import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats } from './helpers';
 
 /** WEAPONS[BOUNCER].pierce and the falloff cycle, hard-coded (harness rule:
  *  a test that imports the constant it is checking pins nothing).
@@ -782,6 +782,9 @@ test.describe('scanner module', () => {
     await startRun(page);
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
     await page.waitForTimeout(400);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+    // this suite has to switch the subsystem it tests back on.
+    await useScanner(page);
 
     // Park well clear of EVERY contact.  NATURAL ENCOUNTER is deliberately
     // not scanner-gated, so a test about what a scannerless ship can see has
@@ -1039,6 +1042,9 @@ test.describe('scanner module', () => {
       const watch = await boot(page);
       await startRun(page);
       await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       // A rift the player has never been near: not found, not on the map.
       await parkAwayFromContacts(page);
@@ -1097,6 +1103,9 @@ test.describe('scanner module', () => {
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       await engine(page, e => { e.resetOutfit(); e.debugSpawnRival('neutral'); });
       await waitForEngine(page, e =>
@@ -1139,6 +1148,9 @@ test.describe('scanner module', () => {
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       // Mk I is fully manual — auto-tracking is what a mark buys.
       await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk1'); });

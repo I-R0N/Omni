@@ -350,3 +350,29 @@ export async function enableTilt(page: Page) {
   await engine(page, e => { e.dbg.cyclePlayerRoll(); e.dbg.cyclePlayerRoll(); });
   await waitForStats(page, s => s.rollFeelName === 'Default', 'the tilt enabled');
 }
+
+/** Put the engine into SCANNER mode — i.e. turn the DBG "Scan off" reveal
+ *  OFF, so discovery, the auto sweep and the `found` bookkeeping all run.
+ *
+ *  That switch now ships ON (constants.ts `activeScanRevealAll`), which draws
+ *  the whole minimap and skips the scanner's periodic work.  Every suite that
+ *  tests the SCANNER SUBSYSTEM has to opt back in, because with the reveal up
+ *  there is nothing for a scanner to discover — the map is already drawn.
+ *  The behaviour under test is unchanged and still shipped; only the default
+ *  starting state moved, so this is a setup step rather than a weakening of
+ *  the assertions.
+ *
+ *  Idempotent: reads the live state and only flips when it needs to. */
+export async function useScanner(page: Page): Promise<void> {
+  const revealed = () => page.evaluate(
+    () => (window as unknown as { __omniStats?: { scanRevealAll?: boolean } })
+      .__omniStats?.scanRevealAll === true);
+  if (await revealed()) {
+    await engine(page, (e: Engine) => { e.toggleScanReveal(); });
+  }
+  // The reveal is also a CACHE invalidation (the minimap terrain layer is a
+  // record of what has been discovered), so confirm the flip actually landed
+  // rather than assuming it — a silent no-op here would make every scanner
+  // assertion below it meaningless.
+  expect(await revealed()).toBe(false);
+}

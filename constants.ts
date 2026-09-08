@@ -4927,7 +4927,14 @@ export function cycleNebulaBond(): number {
 // the snitch), because that is what feeds the off-screen ARROWS and
 // silently emptying the screen edge would make the A/B measure two things
 // at once.  A pressed scan still works too.
-let activeScanRevealAll = false;
+// SHIPPED ON (user call).  The switch defaults to revealing everything and
+// skipping the scanner's periodic work, so a fresh run draws the whole
+// minimap and runs no discovery walk or auto sweep.  Consequence worth
+// knowing: this is the half of the SCANNER module that makes it worth
+// buying, so with this on a scanner buys arrows and the pressed ping but no
+// longer the map itself.  Clicking the DBG row restores the scanner
+// behaviour the module system was designed around.
+let activeScanRevealAll = true;
 
 /** True while the DBG "Scan off" switch is on: skip the scanner's periodic
  *  work and draw every contact and every tile on the minimap. */
@@ -9356,7 +9363,20 @@ export const NEBULA_CONDENSE_STALL_BONDS = 6;
 const NEBULA_GRAIN: GrainSpec = {
   grainCountMin: 3,
   grainCountMax: 14,
-  grainSize: 14,
+  // 20, not the 14 this shipped at, and the number is MEASURED (user call).
+  // The voronoi shatter cost frame time through sheer entity count, and the
+  // cost is superlinear: on the `nebula-storm` perf scene sim/stp99 ran 3.60
+  // at 14 against 2.00 with the legacy shatter, for +25% entities.
+  //
+  // grainSize is the lever, NOT grainCountMax — the cap rarely binds, and
+  // dropping it 14 -> 8 recovered almost nothing.  At 20 the scene lands
+  // exactly on the legacy floor (2.00, 1358 ents) while keeping most of what
+  // the voronoi change bought: 3.95 children per tile and a 3.07x size
+  // spread, against 7.7 / 4.02x at 14 and ~2-3 children with no
+  // parent-related size variety at all on legacy.  26 buys nothing further,
+  // so 20 is the knee.  Size VARIETY — the thing actually asked for — lives
+  // in `sizeSpread` and `regularity` below and is untouched.
+  grainSize: 20,
   impactBias: 0.5,        // crowd toward the striker that punched through
   regularity: 0.15,       // the raggedest material in the game
   sizeSpread: 0.6,        // a wide mix of coarse and fine puffs in one body
