@@ -564,10 +564,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, tilt: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
-    portal: true,
-    // 'nebula' is deliberately ABSENT (so undefined -> falsy -> OPEN), the
-    // same as 'grain': both are the sections a material pass lives in, and
-    // a knob nobody can find is a knob that does not exist.
+    portal: true, nebula: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -1555,9 +1552,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* ── Player ─────────────────────────────────────────── */}
               {renderSectionHeader('player', 'Player')}
               {!collapsed.player && (<>
-                {ctrlRow('Scan off', onToggleScanReveal,
-                  stats.scanRevealAll === true ? 'REVEALED' : 'Off',
-                  'PERF A/B. Stops the scanner\u2019s periodic work \u2014 the discovery walk (a 900-unit sweep of the static grid plus the whole mobile-shard list, on the discover cadence) and the auto sweep \u2014 and reveals every tile and contact on the minimap in exchange, so you are not measuring blind. Off-screen arrows and a pressed scan still work.')}
                 {ctrlRow('Thrust', onCyclePlayerThrust, stats.playerThrustName ?? '0.75×',
                   'Player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration. Terminal cruise = acceleration/(1−friction), so this is the knob that actually changes everyday top speed.')}
                 {ctrlRow('Speed', onCyclePlayerSpeed, stats.playerSpeedName ?? '1×',
@@ -1890,12 +1884,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Drop every per-material override at once and go back to the variant table. The readout counts how many of the twenty values (four materials × five knobs) are currently overridden - with a panel this size there is otherwise no way to tell whether what you are looking at is the shipped tuning or something left set three sessions ago.')}
               </>)}
               {/* ── Nebula ─────────────────────────────────────────── */}
-              {/* Its OWN section, and open by default, for the reason the
-                  Grain & Fracture section exists: these rows were scattered
-                  across the bottom of Visual and Shards & Physics, where
-                  nobody found them.  Ordered by what a nebula pass actually
-                  tunes — how a cloud LOOKS, then how it MOVES, then what it
-                  is made of. */}
+              {/* Its OWN section, for the reason the Grain & Fracture section
+                  exists: these rows were scattered across the bottom of Visual
+                  and Shards & Physics, where nobody found them.  Ordered by
+                  what a nebula pass actually tunes — how a cloud LOOKS, then
+                  how it MOVES, then what it is made of.  COLLAPSED by default
+                  like every other section (user call): a named header in the
+                  list is enough to find it, and the panel already runs ~90
+                  rows without one section holding itself open. */}
               {renderSectionHeader('nebula', 'Nebula')}
               {!collapsed.nebula && (<>
                 {ctrlRow('Neb sprite', onCycleNebulaSpriteSize,
@@ -1924,6 +1920,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
+                {ctrlRow('Scan off', onToggleScanReveal,
+                  stats.scanRevealAll === true ? 'REVEALED' : 'Off',
+                  'PERF A/B. Stops the scanner\u2019s periodic work \u2014 the discovery walk (a 900-unit sweep of the static grid plus the whole mobile-shard list, on the discover cadence) and the auto sweep \u2014 and reveals every tile and contact on the minimap in exchange, so you are not measuring blind. Off-screen arrows and a pressed scan still work.')}
                 {ctrlRow('Star density', onCycleStarDensity, stats.starDensityName ?? 'Auto',
                   'Star density in stars per 10,000 CSS px². AUTO (default) uses THIS MAP\u0027s own density and shows it beside the label — every map has its own sky, from 90 near a planet up to 729 in deep space (STAR_DENSITY_BY_MAP). The other steps are overrides for comparing two settings on one map. 1200/1800/2700 run PAST the top of the per-map range on purpose — 2700 is roughly the density the field carried before it was derived from area, so the ceiling can be judged by looking at it on a device rather than argued about. The count is DERIVED from viewport area, so a phone and a desktop show the same sky per unit area. Regenerates immediately.')}
                 {ctrlRow('Star size', onCycleStarSize, stats.starSizeName ?? 'Device px',
