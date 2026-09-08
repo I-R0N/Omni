@@ -186,134 +186,111 @@ test.describe('nebula drag', () => {
   });
 });
 
-/** Nebula BONDING — what the "goo" step actually buys.
+/** Nebula BONDING — what the "Neb bond" steps actually buy.
  *
- *  A nebula bond's shipped outcome is `compose`: the pair is CONSUMED after
- *  the contact threshold and one new body appears.  So the cohesion and
- *  break multipliers only ever act inside that pre-merge window, and turning
- *  them up mostly just makes pairs vanish into merges sooner — which is why
- *  the top step read as changing nothing (user report).
+ *  A nebula bond's outcome is `compose`: after the contact threshold the
+ *  pair is CONSUMED and one new body appears.  At the shipped ~5 s (scaled
+ *  by pair size) that window is short enough that the cohesion and break
+ *  multipliers barely get to act — and the harder they grip, the sooner the
+ *  pair holds together well enough to vanish into a merge.  So "grip harder"
+ *  read as changing nothing (user report).
  *
- *  `goo` now carries `cohesionOnly`, plastic's own rule: the bond skips the
- *  merge pipeline entirely and the pair PERSISTS as two bodies moving as
- *  one.
+ *  `bondTimeMul` stretches the threshold instead.  The pair sticks and moves
+ *  as one for as long as the multiplier says, and then it STILL coalesces —
+ *  which matters because compose is also how nebula shards transmute back
+ *  into tiles, so suppressing it outright would switch off the whole
+ *  self-coalesce loop.
  *
  *  WHAT THESE TESTS ASSERT, AND WHY IT IS NOT THE BOND COUNT.  The obvious
- *  reading — "goo should accumulate bonds" — was written first and it does
- *  not discriminate: the live count churns hard as pairs form and break
- *  (measured 15 → 150 → 19 → 58 → 21 → 13 on the OFF step), so a
+ *  reading — "a stickier step should accumulate bonds" — was written first
+ *  and it does not discriminate: the live count churns hard as pairs form
+ *  and break (measured 15 → 150 → 19 → 58 → 21 → 13 on the OFF step), so a
  *  tail-beats-head assertion passes by coincidence, and it did, against a
- *  build with the flag reverted.  What separates the steps is not how many
- *  bonds exist but whether a GIVEN bond is ever spent, so both tests below
- *  identify specific pairs and measure how many of those exact pairs are
- *  still bonded later.
+ *  build with the feature reverted.  These read `timer / threshold` on live
+ *  bonds instead.  `bond.threshold` is the BASE stamped at formation and the
+ *  multiplier is applied at the read, so a live bond whose ratio exceeds 1
+ *  is precisely one the shipped step would already have merged away — a
+ *  direct read of the line that changed, with no population dynamics in it.
  */
 test.describe('nebula bonding', () => {
-  /** Stable identity for a bond, order-independent (the pass may re-push a
-   *  bond with its two entities either way round). */
-  const PAIRS = `(e) => e.shards.liveBonds
-      .filter((b) => b.a.shardVariant === 'nebula-shard'
-                  && b.b.shardVariant === 'nebula-shard')
-      .map((b) => [b.a.id, b.b.id].sort().join('~'))`;
-
-  const pairKeys = (page: any): Promise<string[]> =>
-    engine(page, new Function('e', `return (${PAIRS})(e);`) as any);
-
   const breakTiles = (page: any) => engine(page, (e: any) => {
     const tiles = e.currentMap.entities
       .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, 30);
     for (const t of tiles) { t.health = 0; e.handleEntityDeath(t); }
   });
 
-  /** Fraction of the bonds standing at t0 that are STILL standing after
-   *  `seconds` of sim — comfortably past the compose threshold, so under any
-   *  step that composes, a bond alive at t0 has had its chance to be spent. */
-  const survival = async (page: any, seconds = 12) => {
-    await breakTiles(page);
-    await advanceSim(page, 2);          // let contacts settle into bonds
-    const before = new Set(await pairKeys(page));
-    if (before.size === 0) return { before: 0, survived: 0, frac: 0 };
-    await advanceSim(page, seconds);
-    const after = new Set(await pairKeys(page));
-    let survived = 0;
-    for (const k of before) if (after.has(k)) survived++;
-    return { before: before.size, survived, frac: survived / before.size };
-  };
+  /** Live nebula↔nebula bonds, as {n, maxRatio, overdue} where `overdue`
+   *  counts bonds already past their BASE compose threshold. */
+  const bondState = (page: any) => engine(page, (e: any) => {
+    const b = e.shards.liveBonds.filter((x: any) =>
+      x.a.shardVariant === 'nebula-shard' && x.b.shardVariant === 'nebula-shard');
+    const ratios = b.map((x: any) => x.timer / x.threshold);
+    return {
+      n: b.length,
+      maxRatio: ratios.length ? Math.max(...ratios) : 0,
+      overdue: ratios.filter((r: number) => r > 1).length,
+    };
+  });
 
-  test('goo bonds SURVIVE where the shipped step spends them on a merge', async ({ page }) => {
+  test('a stretched threshold holds pairs the shipped step would have merged', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
 
-    /*  Both phases run on the same map from the same restart, so the only
-     *  variable is the knob.  A cohesion-only bond is never consumed, so its
-     *  pairs are still there twelve sim-seconds later; a composing bond is
-     *  eaten by the merge that is its whole purpose. */
+    /*  OFF first.  A bond is composed in the same iteration its timer
+     *  crosses `threshold` — and the merge-budget deferral clamps to
+     *  `threshold - dt` — so no bond that is still ALIVE can ever be past
+     *  its base threshold.  That makes ratio ≤ 1 an invariant of the
+     *  shipped step, and the control for the assertion below. */
     await dialByName(page, 'nebulaBondName', 'off (old)',
       (e: any) => e.dbg.cycleNebulaBond(), 4);
-    const off = await survival(page);
+    await breakTiles(page);
+    await advanceSim(page, 6, 180_000);
+    const off = await bondState(page);
+    expect(off.n).toBeGreaterThan(0);
+    expect(off.overdue).toBe(0);
 
-    await engine(page, (e: any) => { e.restartGame(); });
-    await startRun(page, 'NEBULA_FIELD');
-    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+    // GOO: 12× the threshold, so pairs sail past the base one and hold.
     await dialByName(page, 'nebulaBondName', 'goo',
       (e: any) => e.dbg.cycleNebulaBond(), 4);
-    const goo = await survival(page);
+    await breakTiles(page);
+    await advanceSim(page, 6, 180_000);
+    const goo = await bondState(page);
 
-    // Both phases must actually have produced bonds, or the comparison is
-    // between two empty sets and means nothing.
-    expect(off.before).toBeGreaterThan(0);
-    expect(goo.before).toBeGreaterThan(0);
-    expect(goo.frac).toBeGreaterThan(off.frac);
+    expect(goo.n).toBeGreaterThan(0);
+    expect(goo.overdue).toBeGreaterThan(0);
+    expect(goo.maxRatio).toBeGreaterThan(1);
 
     watch.assertClean();
   });
 
-  test('stepping off goo hands the standing bonds back to the merge pipeline', async ({ page }) => {
+  test('merging is delayed, never removed — stepping down composes the held pairs', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
 
-    /*  This one asserts the BRANCH rather than a population, because the
-     *  population route flaked: bonds also break by DISTANCE, so a held set
-     *  can drain to nothing on its own and leave the comparison with no
-     *  baseline to beat.
-     *
-     *  `tickBonds` puts the cohesion-only `continue` immediately BEFORE
-     *  `bond.timer += dt`, so under goo a bond's contact timer is frozen at
-     *  the zero it formed with — it is never counted toward its compose
-     *  threshold at all.  That is a direct, low-variance read of exactly the
-     *  line this change touches, and it is what "the bond is never spent"
-     *  means mechanically.
-     *
-     *  Stepping off then has to UNFREEZE the bonds already standing, not
-     *  merely the next ones to form: `cohesionOnly` is read from the live
-     *  knob and never stamped at formation, which is the at-the-read rule.  */
-    const maxTimer = (page: any): Promise<number> => engine(page, (e: any) => {
-      const b = e.shards.liveBonds.filter((x: any) =>
-        x.a.shardVariant === 'nebula-shard' && x.b.shardVariant === 'nebula-shard');
-      return b.length ? Math.max(...b.map((x: any) => x.timer)) : -1;
-    });
-
+    /*  This is the property that separates a long timer from plastic's
+     *  `cohesionOnly`, and it is the whole reason nebula takes the former:
+     *  the pairs are not exempt from merging, only deferred.  Pile up bonds
+     *  past their base threshold under goo, then step back down — the
+     *  multiplier is read at the compose gate rather than stamped at
+     *  formation, so every one of them is instantly due and composes. */
     await dialByName(page, 'nebulaBondName', 'goo',
       (e: any) => e.dbg.cycleNebulaBond(), 4);
     await breakTiles(page);
-    await advanceSim(page, 2);
+    await advanceSim(page, 8, 180_000);
 
-    // There must be bonds to talk about, or the rest measures nothing.
-    expect(await maxTimer(page)).toBeGreaterThanOrEqual(0);
-
-    await advanceSim(page, 6);
-    const frozen = await maxTimer(page);
-    expect(frozen).toBeGreaterThanOrEqual(0);   // still bonded
-    expect(frozen).toBeLessThan(0.05);          // and not one tick accumulated
+    const held = await bondState(page);
+    expect(held.overdue).toBeGreaterThan(0);
 
     await dialByName(page, 'nebulaBondName', 'off (old)',
       (e: any) => e.dbg.cycleNebulaBond(), 4);
-    await advanceSim(page, 3);
+    await advanceSim(page, 4, 180_000);
 
-    // The standing bonds are counting again.
-    expect(await maxTimer(page)).toBeGreaterThan(0.5);
+    // Nothing overdue survives: each was consumed by the merge it was
+    // waiting on.  New bonds keep forming, so this is not "no bonds".
+    const after = await bondState(page);
+    expect(after.overdue).toBe(0);
 
     watch.assertClean();
   });

@@ -4843,25 +4843,27 @@ interface NebulaBondStep {
   /** Multiplier on the break distance — how far a bonded pair may separate
    *  before the bond snaps. */
   readonly breakMul: number;
-  /** Make the bond COHESION-ONLY — plastic's own rule, and the thing that
-   *  separates "goo" from merely "a firm grip".
+  /** Multiplier on the COMPOSE THRESHOLD — how long a bonded pair has to
+   *  stay in contact before it merges into one body.  This is what makes
+   *  the grip above legible.
    *
    *  A nebula bond's shipped outcome is `compose`: after the contact
-   *  threshold the pair is CONSUMED and one new body appears.  So the grip
-   *  multipliers above only ever act inside that pre-merge window, and the
-   *  louder they are set the sooner the pair vanishes into a merge —
-   *  measured as a bond population churning 0 → 139 → 15 with `cohesionOnly`
-   *  never once set, which is why the top step read as doing nothing.
-   *  Cohesion-only bonds skip the merge pipeline entirely, so the pair
-   *  PERSISTS as two bodies moving as one: the plastic behaviour the goo
-   *  step is named after.
+   *  threshold the pair is CONSUMED and one new body appears.  At the
+   *  shipped ~5 s (scaled by pair size) that window is short enough that
+   *  the cohesion and break multipliers barely get to act — and the louder
+   *  they are set, the sooner the pair holds together well enough to
+   *  vanish into a merge.  Measured: the live bond population churns
+   *  15 → 150 → 19 → 58 → 21 → 13 while the shard count collapses 311 → 93.
+   *  So "grip harder" read as changing nothing (user report).
    *
-   *  It is deliberately confined to the top step rather than made the
-   *  default, because it switches OFF nebula's self-coalesce — bonded
-   *  shards stop composing, which is also how they transmute back into
-   *  tiles.  That is a real gameplay change and belongs behind an opt-in
-   *  until the user calls it. */
-  readonly cohesionOnly?: boolean;
+   *  Stretching the threshold is the fix that keeps the material intact:
+   *  the pair STICKS and moves as one for as long as the multiplier says,
+   *  which is the fluid, gooey read — and then it still coalesces.  That
+   *  matters because compose is also how nebula shards transmute back into
+   *  TILES, so suppressing it outright (plastic's `cohesionOnly`) would
+   *  quietly switch off nebula's whole self-coalesce loop.  A long timer
+   *  buys the look without buying that. */
+  readonly bondTimeMul: number;
   /** Distance inside which the self-gravity stops pulling, so cohesion has
    *  the close range to itself (plastic's `pullInnerRange` trick).  0 keeps
    *  today's behaviour: pull all the way to contact. */
@@ -4874,11 +4876,26 @@ interface NebulaBondStep {
 // nominally bonded while still jittering.  'strong' is deliberately
 // plastic's own shipped pair (3.0 / 4.0) so the two materials can be
 // compared at the same grip.
+// `bondTimeMul` stretches the compose threshold, whose base is ~5 s at a
+// ref-size pair and scales with (avgSize / 20)^1.5 — so a small pair sits
+// near 1.8 s and a large one well past 10 s before any multiplier.  The
+// ladder is geometric because the thing being judged is an ORDER of
+// magnitude ("does a clump hold together long enough to read as one blob"),
+// not a few seconds either way.  `off (old)` is exactly 1 on every term, so
+// the shipped build is untouched and the first click is the A/B.
+//
+// THE TOP OF THE RANGE IS SET BY WHAT A BOND SURVIVES, not by taste.  A
+// pair can also break by DISTANCE, and measured over a live field the
+// highest timer/threshold ratio any live bond reaches saturates around
+// 11-12 however high the multiplier goes: at 40x the observed peak was
+// 11.2, against 11.8 at 12x — i.e. the two were the same step, because no
+// bond lives long enough to spend a 40x timer.  Past ~12x the knob stops
+// buying stickiness and only makes the ladder read as broken.
 export const NEBULA_BOND_CYCLE: ReadonlyArray<NebulaBondStep> = [
-  { name: 'off (old)', cohesionMul: 1, breakMul: 1, pullInner: 0   },
-  { name: 'firm',      cohesionMul: 2, breakMul: 2, pullInner: 60  },
-  { name: 'strong',    cohesionMul: 3, breakMul: 4, pullInner: 80  },
-  { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110, cohesionOnly: true },
+  { name: 'off (old)', cohesionMul: 1, breakMul: 1, pullInner: 0,   bondTimeMul: 1  },
+  { name: 'firm',      cohesionMul: 2, breakMul: 2, pullInner: 60,  bondTimeMul: 2  },
+  { name: 'strong',    cohesionMul: 3, breakMul: 4, pullInner: 80,  bondTimeMul: 5  },
+  { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110, bondTimeMul: 12 },
 ];
 let activeNebulaBondIndex = 0;
 

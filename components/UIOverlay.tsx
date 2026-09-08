@@ -1907,7 +1907,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'How fast a nebula shard bleeds off SPIN \u2014 its own ladder, separate from \u201cNeb damp\u201d, because linear drag decides how far a puff travels and spin decay decides how long it tumbles where it sits. \u201cmatch\u201d (the shipped default) defers to the linear knob, so the first click is the A/B.')}
                 {ctrlRow('Neb bond', onCycleNebulaBond,
                   stats.nebulaBondName ?? 'off (old)',
-                  'How hard a touching pair of nebula shards grips: cohesion blend rate, break distance, and an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact. \u201cstrong\u201d is plastic\u2019s own shipped grip. Measured baseline: live bonds churn 7 \u2192 102 \u2192 20 as pairs form and snap.')}
+                  'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (1x / 2x / 5x / 12x). Stretching the timer is what makes the grip legible \u2014 at the shipped ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles.')}
                 {ctrlRow('Neb stretch', onCycleNebulaStretch,
                   stats.nebulaStretchName ?? '0.07',
                   'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10. The squash axis aligns to velocity while the sprite keeps its own rotation.')}

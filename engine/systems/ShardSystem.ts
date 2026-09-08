@@ -1834,17 +1834,16 @@ export class ShardSystem {
         }
       }
 
-      // Cohesion-only bonds (today: plastic-shard, plus nebula under the
-      // DBG "Neb bond" goo step) skip the merge pipeline entirely — no
-      // timer accumulation, no compose call.  Re-push and continue.
+      // Cohesion-only bonds (today: plastic-shard) skip the merge
+      // pipeline entirely — no timer accumulation, no compose call.
+      // Re-push and continue.
       //
-      // The nebula half is read from the LIVE knob rather than from a flag
-      // stamped at formation, so a click re-tunes the pairs already stuck
-      // together instead of only the next ones — the same at-the-read rule
-      // the cohesion and break multipliers above follow.  Stepping OFF goo
-      // hands its bonds straight back to the merge pipeline with their
-      // timers where they were.
-      if (bond.cohesionOnly || (nebBond !== null && nebBond.cohesionOnly === true)) {
+      // Nebula deliberately does NOT take this route even at the top "Neb
+      // bond" step: compose is how its shards transmute back into TILES, so
+      // suppressing it would switch off the whole self-coalesce loop.  It
+      // stretches the THRESHOLD instead (see the bondTimeMul read below),
+      // which buys the same stuck-together read and still coalesces.
+      if (bond.cohesionOnly) {
         this.bonds[writeIdx++] = bond;
         continue;
       }
@@ -1866,14 +1865,23 @@ export class ShardSystem {
       }
       bond.timer += dt * bondRate;
 
-      if (bond.timer >= bond.threshold) {
+      // DBG "Neb bond" stretches the compose threshold for a nebula pair.
+      // Applied HERE, at the read, rather than baked into `bond.threshold`
+      // at formation — so a click re-tunes the pairs already stuck together
+      // and stepping back down lets a long-held bond compose immediately,
+      // the same at-the-read rule the cohesion and break multipliers follow.
+      const threshold = nebBond !== null
+          ? bond.threshold * nebBond.bondTimeMul
+          : bond.threshold;
+
+      if (bond.timer >= threshold) {
         // Per-frame merge budget — surplus bonds defer to next tick
         // so a cluster of bonds whose timers all elapse in the same
         // frame compacts visibly over several frames instead of in
         // one.  Defer by clamping timer just below threshold so the
         // bond stays alive and re-checks next tick.
         if (mergeBudget <= 0) {
-          bond.timer = bond.threshold - dt;
+          bond.timer = threshold - dt;
           this.bonds[writeIdx++] = bond;
           continue;
         }

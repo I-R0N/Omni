@@ -3027,26 +3027,46 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   apart.  The spin ladder's index 0 is `match`, which DEFERS to the linear
   knob: that is the shipped behaviour (one knob moved both halves), so an
   untouched build is unchanged and the first click is the A/B.
-- **"GOO" IS `cohesionOnly`, AND THAT IS THE WHOLE DIFFERENCE.**  A nebula
-  bond's shipped outcome is `compose` — the pair is CONSUMED after the
-  contact threshold and one new body appears — so the DBG "Neb bond" cohesion
-  and break multipliers only ever act inside that pre-merge window, and
-  turning them up mostly makes pairs vanish into merges SOONER.  That is why
-  the top step read as changing nothing (user report).  Its `cohesionOnly`
-  flag is plastic's own rule: `tickBonds` skips the merge pipeline entirely
-  and the pair PERSISTS as two bodies moving as one.  Three things go with
-  it.  It is read from the LIVE knob and never stamped at formation, so a
-  click re-tunes the pairs already stuck together and stepping off hands them
-  back mid-timer — the same at-the-read rule the multipliers follow.  It is
-  confined to the TOP step rather than made the default, because it switches
-  OFF nebula's self-coalesce, which is also how shards transmute back into
-  tiles — a real gameplay change that waits on a user call.  And the tell is
-  NOT the bond COUNT: that churns hard as pairs form and break (measured
-  15 → 150 → 19 → 58 → 21 → 13 on the off step), so a count-based regression
-  passes by coincidence and did, against a build with the flag reverted.
-  What separates the steps is whether a GIVEN bond is ever spent, so the
-  suite identifies specific pairs and reads `bond.timer`, which under
-  `cohesionOnly` is frozen at the zero it formed with.
+- **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
+  call).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
+  the contact threshold and one new body appears — so at the shipped ~5 s
+  (scaled by pair size) the DBG "Neb bond" cohesion and break multipliers
+  barely get to act, and the harder they grip the sooner the pair holds
+  together well enough to vanish into a merge.  That is why the top step
+  read as changing nothing (user report).  `bondTimeMul` stretches the
+  THRESHOLD instead: the pair sticks and moves as one for as long as the
+  multiplier says, and then it still coalesces.  Plastic's `cohesionOnly`
+  was tried first and REVERSED — nebula's compose is also how its shards
+  transmute back into TILES, so suppressing it switches off the whole
+  self-coalesce loop, which is a much larger change than the fluid look
+  being asked for.  Four things go with it:
+  - **Applied AT THE READ, on the compose gate** (`bond.threshold ×
+    bondTimeMul`), never baked in at formation — so a click re-tunes pairs
+    already stuck together, and stepping back DOWN makes every long-held
+    bond instantly due and composes it.  That last property is the one that
+    proves merging was deferred rather than removed.
+  - **THE TOP OF THE LADDER IS SET BY WHAT A BOND SURVIVES, not by taste.**
+    A pair also breaks by DISTANCE, so the highest timer/threshold ratio a
+    live bond ever reaches saturates: at 40× the measured peak was 11.2
+    against 11.8 at 12× — the two were the SAME step, because no bond lives
+    long enough to spend a 40× timer.  The shipped ladder (1 / 2 / 5 / 12)
+    sits inside that ceiling and each step lands on its own multiplier
+    (measured maxRatio 0.44 / 1.84 / 4.88 / 11.76).
+  - **DELAYING MERGES COSTS ENTITY COUNT**, which is frame time.  Measured
+    over the same window the live shard population ran 28 / 75 / 307 / 597
+    across the four steps — at the top the field was heavy enough that sim
+    time barely advanced.  Anything baked in above `firm` needs a perf
+    number beside it.
+  - **The tell is NOT the bond COUNT.**  That churns hard as pairs form and
+    break (measured 15 → 150 → 19 → 58 → 21 → 13 on the off step), so a
+    count-based regression passes by coincidence and did, against a build
+    with the feature reverted.  What separates the steps is `timer /
+    threshold` on a LIVE bond: a bond is composed in the same iteration its
+    timer crosses `threshold` and the merge-budget deferral clamps to
+    `threshold - dt`, so under the shipped step a surviving bond can never
+    be past its base threshold.  Ratio ≤ 1 is therefore an invariant of
+    `off`, and a live overdue bond is exactly one the shipped step would
+    already have merged away.
 - **NEBULA TAKES THE VORONOI GEOMETRY AND NOT THE DAMAGE MODEL** (user
   call).  `nebula-tile` and `nebula-shard` carry a `grain` block and
   `shatter.kind: 'voronoi'`, so a broken tile hands back the cells its own
