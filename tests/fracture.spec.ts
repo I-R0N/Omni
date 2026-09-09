@@ -3601,7 +3601,7 @@ test.describe('per-material knob readouts', () => {
 });
 
 test.describe('chip dust', () => {
-  test('a chipping body throws small nebula dust, not just the solid piece',
+  test('a chipping body throws nebula dust, not just the solid piece',
     async ({ page }) => {
     test.setTimeout(180_000);
     const watch = await boot(page);
@@ -3654,15 +3654,20 @@ test.describe('chip dust', () => {
     expect(r).not.toBeNull();
     // The run has to have actually chipped, or "dust appeared" is vacuous.
     expect(r!.chips).toBeGreaterThan(10);
-    // THE BUG: pre-fix this was exactly 0.  Gated at 0.35 per chip, so
-    // assert a rate rather than a count — the gate exists because a puff
-    // on every chip reads as a cloud trailing the player.
+    // THE BUG: pre-fix this was exactly 0.  Dust is POOLED now — banked
+    // per chip and thrown every `getChipDustPool()` chips — so assert a
+    // rate rather than a count, and one well under the chip count: the
+    // pooling exists because a puff on every chip reads as a cloud
+    // trailing the player AND makes each one a speck.
     expect(r!.dust).toBeGreaterThan(2);
-    expect(r!.dust).toBeLessThan(r!.chips);
-    // SMALL dust: sized off the CHIP, not the parent.  Sizing off the
-    // parent (as the legacy per-hit puff did) would make the dust bigger
-    // than the piece that shed it — a grain is ~12 units on a 36px tile.
-    expect(r!.maxDustSize).toBeLessThan(r!.tileSize * 0.5);
+    expect(r!.dust * 2).toBeLessThan(r!.chips);
+    // A PUFF IS SIZED OFF THE MATERIAL THAT CAME OFF, and can never
+    // exceed the body that shed it.  The bank is an area and it empties
+    // every pool, so the biggest puff a 36px tile can throw is the ~6
+    // grains of one pool — about 0.6 of the tile — not the tile itself.
+    // Sizing off the PARENT (as the legacy per-hit puff did) is what this
+    // still catches: that put a full-tile cloud behind every chip.
+    expect(r!.maxDustSize).toBeLessThan(r!.tileSize * 0.8);
 
     console.log(`[chip dust] ${r!.tiles} glass tiles, ${r!.chips} chips ->`
       + ` ${r!.dust} dust, largest ${r!.maxDustSize.toFixed(1)}`
@@ -3917,9 +3922,21 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
 
       // The old power-law path produced `2 + floor(random × 2)` children —
       // 2 or 3 — from an area budget FIXED at 121 regardless of the parent.
+      //
+      // Asserted on the MEAN, not the minimum.  This read `min > 3` when
+      // nebula's `grainSize` was 14 and a tile shed ~7.7 pieces; the perf
+      // pass that took the grain to 20 (see the nebula grain-size note in
+      // CLAUDE.md §8) took the yield to ~3.95, so individual tiles now land
+      // on 3 legitimately and the floor was failing ~3 runs in 4 on a
+      // property nothing had broken.  The count is not the discriminating
+      // claim anyway — the old path could produce 3 as well — the TILING
+      // below is, since a budget fixed at 121 cannot add up to its parent.
       const counts: number[] = r.perShatter;
-      expect(Math.min(...counts), 'every tile sheds more than the old maximum of 3')
+      const meanCount = counts.reduce((a, b) => a + b, 0) / counts.length;
+      expect(meanCount, 'a tile sheds more than the old maximum of 3 on average')
         .toBeGreaterThan(3);
+      expect(Math.min(...counts), 'and never fewer than the old minimum')
+        .toBeGreaterThanOrEqual(2);
 
       // Real cells, not the generated 4..6-gon blobs the old spawn shape made:
       // a Voronoi decomposition of a hexagon contains triangles.
@@ -3931,7 +3948,7 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
       // against the parent, because it never looked at the parent.
       const sizes = r.rows.map((x: any) => x.size);
       expect(Math.max(...sizes) / Math.min(...sizes),
-        'the pieces differ several-fold in size').toBeGreaterThan(2.5);
+        'the pieces differ several-fold in size').toBeGreaterThan(2.0);
 
       // The cells TILE the parent: their areas add up to it.  This is the
       // property the fixed-121 budget did not have at all.
@@ -3955,9 +3972,14 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
 
       // THE REGRESSION.  Every shard used to draw the same 120-unit sprite
       // whatever its size, because the rule read a field no shard carried.
+      // The bug's signature is a ratio of exactly 1.0 — every shard drawing
+      // the same 120 — so any large spread catches it, and the OVERHANG
+      // assertion below is the precise one.  The bound is 2.0 rather than
+      // the 2.5 it was written at because grain size 20 measures 2.4-3.1
+      // (it was 4.02x at grain 14), which straddled the old figure.
       const sprites = r.rows.map((x: any) => x.sprite);
       expect(Math.max(...sprites) / Math.min(...sprites),
-        'sprite sizes vary as much as the bodies do').toBeGreaterThan(2.5);
+        'sprite sizes vary as much as the bodies do').toBeGreaterThan(2.0);
 
       // …and they vary WITH the body, not merely alongside it: the overhang
       // over each body's own outline is one constant.
@@ -4102,4 +4124,151 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
 
       watch.assertClean();
     });
+});
+
+/** CHIP DUST IS POOLED (user call).
+ *
+ *  A grain detach throws pulverised material as well as the solid piece.
+ *  That puff used to be rolled per chip and sized off that one chip, which
+ *  made a speck — a grain is ~12 units where the tile is 36 — and once a
+ *  nebula sprite was sized off the body it belongs to instead of always
+ *  drawing a full tile, the specks stopped reading as cloud at all
+ *  (reported as "the nebula shards released from chipping are very small").
+ *
+ *  Dust is now BANKED as AREA on the body and thrown every
+ *  `getChipDustPool()` chips, which is what makes it ONE knob for both
+ *  halves of "larger, less frequently": pooling N chips multiplies the
+ *  puff's diameter by sqrt(N) and divides how often one appears by N,
+ *  while the TOTAL material thrown is unchanged.  That last property is
+ *  the one worth pinning — a size knob and a frequency knob set
+ *  independently can be made to contradict each other, and this cannot.
+ *
+ *  Pool 1 IS the per-chip behaviour this replaced, so the ladder carries
+ *  its own negative control and the A/B is the same scenario at pool 6 and
+ *  at pool 1, against fresh bodies, with nothing shared but the knob.
+ *  Chip dust is told apart from the OTHER nebula-shard spawns (the rock
+ *  death burst, dent debris) by its exact authored `sizeFraction` — every
+ *  other caller randomises one.
+ *
+ *  MEASURED on 24 rock tiles a side: 24 puffs averaging 17.2 units at the
+ *  shipped pool against 92 averaging 8.6 at pool 1, and the smallest
+ *  pooled puff (11.9) is bigger than the largest per-chip one (12.2). */
+test.describe('chip dust pools into fewer, bigger puffs', () => {
+  test('pooling trades frequency for size and conserves the material thrown', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page);
+
+    // The spy and the batch driver live on `window` so the two batches can
+    // straddle the evaluate boundary the DBG cycle needs: `__omniStats` is
+    // republished by the rAF loop, so "we landed on pool 1" can only be
+    // read after a frame.
+    await engine(page, () => {
+      const e: any = (window as any).__omniEngine;
+      const fr: any = (window as any).__omniFracture;
+      const w: any = window as any;
+      w.__dust = [];
+      const orig = e.drops.spawnColoredNebulaShard.bind(e.drops);
+      e.drops.spawnColoredNebulaShard = (...a: any[]) => {
+        w.__dust.push({ size: a[2], frac: a[4] });
+        return orig(...a);
+      };
+      // Break a batch of identical rock tiles; return the chip-dust puffs
+      // it produced as DIAMETERS (base size x the authored fraction),
+      // which is the quantity the look is judged on.
+      w.__dustBatch = (tag: string, n: number, row: number): number[] => {
+        const ents: any[] = e.currentMap.entities;
+        const W = 36;
+        const first = w.__dust.length;
+        for (let i = 0; i < n; i++) {
+          const pts: any[] = [];
+          for (let k = 0; k < 8; k++) {
+            const ang = (k / 8) * Math.PI * 2;
+            pts.push({ x: Math.cos(ang) * W * 0.5, y: Math.sin(ang) * W * 0.5 });
+          }
+          const tile: any = {
+            id: 'dust_' + tag + '_' + i, type: 'STRUCTURE', shardVariant: 'rock-tile',
+            position: { x: 400 + i * 300, y: row }, velocity: { x: 0, y: 0 },
+            rotation: 0, size: { x: W, y: W }, mass: Infinity, active: true,
+            color: '#8a8a8a', health: 20, maxHealth: 20, polygonPoints: pts,
+          };
+          tile.fractureOriginalArea = fr.polygonArea(pts);
+          tile.lastImpactVelocity = { x: -9, y: 0 };
+          ents.push(tile);
+          for (let h = 0; h < 60 && tile.active; h++) {
+            e.physics.resolveCollision(
+              {
+                id: 'sh_' + tag + i + '_' + h, type: 'PROJECTILE',
+                position: { x: tile.position.x + W * 0.5 + 4,
+                            y: tile.position.y + ((h % 5) - 2) * 4 },
+                velocity: { x: -900, y: 0 }, rotation: Math.PI,
+                size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+                damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+              },
+              tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+            );
+          }
+        }
+        return w.__dust.slice(first)
+          .filter((p: any) => Math.abs(p.frac - 0.7) < 1e-9)
+          .map((p: any) => p.size * p.frac);
+      };
+    });
+
+    const shippedName = (await stats(page)).chipDustPoolName;
+    const pooled: number[] = await page.evaluate(
+      () => (window as any).__dustBatch('pooled', 24, 3000));
+
+    // Walk the ladder round to 1 — the per-chip behaviour this replaced —
+    // and CONFIRM the step off the readout rather than trusting a fixed
+    // number of clicks to land there.
+    // The readout marks whichever step ships, so match the NUMBER rather
+    // than the whole label — otherwise moving the shipped default would
+    // fail this on its caption instead of on its behaviour.
+    const isPerChip = (n?: string) => /^1\b/.test(n ?? '');
+    for (let i = 0; i < 12; i++) {
+      if (isPerChip((await stats(page)).chipDustPoolName)) break;
+      await engine(page, e => e.dbg.cycleChipDustPool());
+      await page.waitForTimeout(40);
+    }
+    expect(isPerChip((await stats(page)).chipDustPoolName),
+      'the ladder carries the per-chip step as its own negative control').toBe(true);
+
+    const perChip: number[] = await page.evaluate(
+      () => (window as any).__dustBatch('perchip', 24, 5000));
+
+    const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+    // Material thrown is an AREA, so that is what conservation is measured
+    // in — the sum of the squared diameters, not of the diameters.
+    const area = (a: number[]) => a.reduce((x, y) => x + y * y, 0);
+
+    expect(shippedName, 'the shipped step is marked in the readout').toMatch(/\(ships\)/);
+    expect(pooled.length, 'the pooled batch still throws dust').toBeGreaterThan(10);
+    expect(perChip.length).toBeGreaterThan(10);
+
+    // FEWER, and BIGGER.  Both halves come from the one knob, so both are
+    // asserted: a change that moved only one of them would be a different
+    // feature wearing this one's name.
+    expect(perChip.length / pooled.length,
+      'a pool of 6 throws dust several times less often').toBeGreaterThan(2.5);
+    expect(mean(pooled) / mean(perChip),
+      'and each puff is about sqrt(6) times across').toBeGreaterThan(1.6);
+    // The sharp version of "bigger": the two size distributions do not
+    // overlap at all on this scenario.
+    expect(Math.min(...pooled),
+      'the smallest pooled puff beats the biggest per-chip one')
+      .toBeGreaterThan(Math.max(...perChip));
+
+    // CONSERVATION.  Banking area is what lets one number move size and
+    // frequency together without inventing or destroying material; the
+    // tolerance is loose because the per-tile grain count varies and a
+    // body that dies under half a pool drops its remainder by design.
+    const ratio = area(pooled) / area(perChip);
+    expect(ratio, `total dust area is preserved (pooled/perChip = ${ratio.toFixed(2)})`)
+      .toBeGreaterThan(0.6);
+    expect(ratio).toBeLessThan(1.6);
+
+    watch.assertClean();
+  });
 });

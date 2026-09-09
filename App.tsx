@@ -595,6 +595,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaSpriteSize();
   };
 
+  const handleCycleChipDustPool = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleChipDustPool();
+  };
+
   const handleToggleScanReveal = () => {
       if (engineRef.current) engineRef.current.dbg.toggleScanReveal();
   };
@@ -998,6 +1002,7 @@ const App: React.FC = () => {
         onCycleFractureSiteScale={handleCycleFractureSiteScale}
         onCycleFractureBias={handleCycleFractureBias}
         onCycleDamageSpread={handleCycleDamageSpread}
+        onCycleChipDustPool={handleCycleChipDustPool}
         onCycleGrainMaterial={handleCycleGrainMaterial}
         onCycleGrainKnob={handleCycleGrainKnob}
         onResetGrainOverrides={handleResetGrainOverrides}

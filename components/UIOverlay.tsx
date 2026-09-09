@@ -116,6 +116,7 @@ interface UIOverlayProps {
   onCycleFractureSiteScale?: () => void;
   onCycleFractureBias?: () => void;
   onCycleDamageSpread?: () => void;
+  onCycleChipDustPool?: () => void;
   onCycleGrainMaterial?: () => void;
   onCycleGrainKnob?: (knob: GrainKnob) => void;
   onResetGrainOverrides?: () => void;
@@ -449,6 +450,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFractureSiteScale,
   onCycleFractureBias,
   onCycleDamageSpread,
+  onCycleChipDustPool,
   onCycleGrainMaterial,
   onCycleGrainKnob,
   onResetGrainOverrides,
@@ -1857,6 +1859,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Frac bias', onCycleFractureBias,
                   stats.fractureBiasName ?? 'variant',
                   'Impact bias: the fraction of sites crowded toward the hit point, which is what makes the pattern radiate from the impact the way real glass does. VARIANT uses each material\'s own value (rock and glass ship 0.75). Pulls AGAINST Frac relax by design - crowding sites is precisely what makes cell sizes uneven - so 0 plus relaxation gives the most uniform chunks, and 1 plus relax 0 the most chaotic.')}
+                {ctrlRow('Chip dust', onCycleChipDustPool,
+                  stats.chipDustPoolName ?? '6 (ships)',
+                  'How many chips\u2019 worth of pulverised material bank into ONE dust puff (1 / 2 / 4 / 6 / 9 / 14). Dust is banked as AREA, so this moves both halves at once: pooling N chips makes each puff sqrt(N) times bigger and one appear a third as often at N=9 \u2014 larger and less frequent from one number, and FEWER entities than a puff per chip. 1 is the per-chip behaviour it replaced, which read as specks once a nebula sprite was sized off the body it belongs to. A body that breaks before it fills a pool flushes what it has banked, so short-lived debris still throws dust.')
+                }
                 {ctrlRow('Grain mat', onCycleGrainMaterial,
                   stats.grainMaterialName ?? 'rock',
                   'Which MATERIAL the knob rows below read and write. NEBULA is in the list and every geometry knob reaches it; only \u2018bond str\u2019 does nothing there, because nebula takes the grain GEOMETRY without the grain DAMAGE model. The knobs above are GLOBAL - they force one value across every material at once, which is what you want for judging a setting and exactly wrong for tuning one material against another. Selecting a material changes nothing on its own. The key is the MATERIAL, not the variant: writing rock moves rock-tile and rock-shard TOGETHER, because a material\u0027s grain geometry is shared by its tile and its shard (a shard is a smaller body of the same stuff, not a different material) - a tile and its own debris drawn from two different patterns is not something that can be judged.')}

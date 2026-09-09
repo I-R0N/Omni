@@ -3127,6 +3127,48 @@ export function cycleDamageSpread(): number {
   return activeDamageSpreadIndex;
 }
 
+// ── CHIP-DUST POOLING (DBG "Chip dust", user call) ─────────────────
+// How many chips' worth of pulverised material accumulate into ONE dust
+// puff.  It exists because the per-chip puff it replaced was a SPECK: a
+// grain is ~12 units where the tile is 36, and once a nebula sprite was
+// sized off the body it belongs to (rather than always drawing a full
+// tile) those specks stopped reading as cloud at all — reported as
+// "the nebula shards released from chipping are very small".
+//
+// POOLING IS ONE KNOB FOR BOTH HALVES OF THE ASK.  Dust is banked as
+// AREA, so pooling N chips multiplies the puff's diameter by sqrt(N)
+// and divides how often one appears by N — "larger, less frequently"
+// falls out of the arithmetic instead of needing a size knob and a
+// frequency knob that can be set to contradict each other.
+//
+// The ladder is absolute counts rather than a multiplier over an
+// authored constant (the SHARD_COAT_CYCLE relationship) because a pool
+// is a COUNT: 6 x 1.5 is not a thing a ledger can hold, and the count
+// itself is the readable statement.  So this table IS the default, at
+// CHIP_DUST_DEFAULT_INDEX, and there is no second copy of 6 to drift.
+export const CHIP_DUST_POOL_CYCLE: ReadonlyArray<number> = [1, 2, 4, 6, 9, 14] as const;
+const CHIP_DUST_DEFAULT_INDEX = 3; // 6
+let activeChipDustIndex = CHIP_DUST_DEFAULT_INDEX;
+
+/** Chips' worth of dust banked into one puff. */
+export function getChipDustPool(): number {
+  return CHIP_DUST_POOL_CYCLE[activeChipDustIndex];
+}
+/** DBG row readout, with the shipped step marked. */
+export function getChipDustPoolName(): string {
+  const v = CHIP_DUST_POOL_CYCLE[activeChipDustIndex];
+  return activeChipDustIndex === CHIP_DUST_DEFAULT_INDEX ? v + ' (ships)' : String(v);
+}
+/** Advance the pool ladder by one, wrapping.  Returns the new index. */
+export function cycleChipDustPool(): number {
+  activeChipDustIndex = (activeChipDustIndex + 1) % CHIP_DUST_POOL_CYCLE.length;
+  // No fracture-generation bump, for the damage-spread reason above: this
+  // changes what a detach THROWS, not how the pattern is built.  It is read
+  // at the detach seam, so a click lands on the next chip off any body —
+  // including one already half broken.
+  return activeChipDustIndex;
+}
+
 // ── Per-material grain overrides (DBG) ──────────────────────────────
 // The four knobs above are GLOBAL: they force one value across every
 // material at once, which is what you want for judging a setting and

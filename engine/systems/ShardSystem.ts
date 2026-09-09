@@ -732,6 +732,9 @@ export class ShardSystem {
     entity.regenProgress = undefined;
     entity.deathDispatched = undefined; // revived — killable again (V9)
     entity.shattered = undefined;       // ...and breakable again (V13)
+    // The chip-dust bank is per LIFE: a revived tile has shed nothing.
+    entity.grainDustArea = undefined;
+    entity.grainDustChips = undefined;
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +

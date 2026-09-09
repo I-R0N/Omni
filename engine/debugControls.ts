@@ -38,7 +38,7 @@ import {
     MODULE_SLOT_UNLOCK, cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
     cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
-    cycleDamageSpread,
+    cycleDamageSpread, cycleChipDustPool,
     cycleBoundaryStrength,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
@@ -446,6 +446,16 @@ export class DebugControls {
    *  real forced value here rather than "unset". */
   cycleDamageSpread() {
     cycleDamageSpread();
+  }
+
+  /** DBG (Grain & Fracture): step how many chips' worth of dust bank into
+   *  one puff.  Pooling banks AREA, so the step moves the puff's size and
+   *  its frequency together — sqrt(N) bigger, 1/N as often — which is the
+   *  "larger, less frequently" the per-chip speck it replaced could not
+   *  give.  Read at the detach seam, so a click lands on the next chip off
+   *  any body, including one already half broken. */
+  cycleChipDustPool() {
+    cycleChipDustPool();
   }
 
   cycleGrainMaterial() {

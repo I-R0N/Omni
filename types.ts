@@ -1438,6 +1438,16 @@ export interface GameEntity {
   // value here forces one recompute; untouched in normal play.
   fractureGen?: number;
 
+  // CHIP-DUST BANK (user call).  Dust from grain detaches is POOLED
+  // rather than thrown per chip — see GRAIN_CHIP_DUST — so the body
+  // carries the footprint AREA it has shed since the last puff and the
+  // number of chips that went into it.  Area because pooling then
+  // conserves material: N chips of diameter d bank N·d² and come out as
+  // one puff of diameter d·sqrt(N).  Cleared when a puff is thrown, and
+  // again on regen revival, which reuses the entity object.
+  grainDustArea?: number;
+  grainDustChips?: number;
+
   // Polygon area at the FIRST partial-fracture detach (V4) — the
   // baseline the min-remainder death rule measures against
   // (FRACTURE_DETACH.MIN_REMAINDER_FRAC).  Never cleared: cumulative
@@ -2042,6 +2052,8 @@ export interface EngineStats {
   nebulaStretchName?: string;
   /** DBG readout: the nebula sprite-oversize A/B step (NEBULA_SPRITE_CYCLE). */
   nebulaSpriteName?: string;
+  /** DBG readout: chips banked per dust puff (CHIP_DUST_POOL_CYCLE). */
+  chipDustPoolName?: string;
   /** DBG readout: true while scanning is off and the whole map is revealed. */
   scanRevealAll?: boolean;
   /** DBG readout: the nebula damping step (NEBULA_DAMP_CYCLE). */

@@ -71,7 +71,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the
-                          anti-flake rules).  381 tests.  All run at
+                          anti-flake rules).  387 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -2482,13 +2482,58 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   all).  `GRAIN_CHIP_DUST` restores it at the detach seam for EVERY grain
   material, tinted to the body's own colour (rock keeps
   `randomRockNebulaComposition` and the `fromRock` flag that lets its dust
-  condense back into a rock-shard).  Two things are deliberate: the
-  `CHANCE` gate exists because every detach now makes a chip and a puff on
-  each reads as a constant cloud trailing the player — the same note the
-  legacy per-hit path carries about its own gate — and `SIZE_FRACTION` is
-  of the CHIP, not the parent, because a grain is ~12 units on a 36px tile
-  and sizing off the parent (as the legacy per-hit puff did) makes the
-  dust bigger than the piece that shed it.
+  condense back into a rock-shard).  `SIZE_FRACTION` is of the material
+  that CAME OFF, never of the parent, because a grain is ~12 units on a
+  36px tile and sizing off the parent (as the legacy per-hit puff did)
+  makes the dust bigger than the piece that shed it.
+- **AND IT IS POOLED: LARGER, LESS OFTEN** (user call).  The first version
+  rolled a `CHANCE` per detach and sized the puff off that ONE chip, and
+  the result was a speck — reported as "the nebula shards released from
+  chipping are very small".  It got worse rather than better as the rest
+  of the nebula work landed: a puff used to draw a FULL-TILE sprite
+  whatever its size, so the rule that sizes a cloud off its own body (see
+  the nebula-sprite note above) is what made the specks visible as specks.
+  Each detach now BANKS its chip's footprint on the body
+  (`GameEntity.grainDustArea` / `grainDustChips`) and one larger puff is
+  thrown every `getChipDustPool()` chips.  Four things to know:
+  - **BANKING AN AREA IS WHY IT IS ONE KNOB.**  Pooling N chips
+    multiplies the puff's DIAMETER by √N and divides its FREQUENCY by N
+    ALONG THE LADDER, so "bigger" and "rarer" cannot be set to contradict
+    each other the way a size knob beside a frequency knob can.  Measured
+    over 24 rock tiles a side: 24 puffs averaging 17.2 units at the
+    shipped pool of 6 against 92 averaging 8.6 at pool 1, and the
+    SMALLEST pooled puff (11.9) beats the LARGEST per-chip one (12.2) —
+    the sharp way to say the two distributions do not overlap.
+    Conservation holds ALONG THE LADDER, which is what the regression
+    asserts and is NOT the same as "unchanged from what shipped before":
+    the 0.35-per-chip roll this replaced threw 0.35 of a puff where pool 1
+    throws a whole one, so the world now carries **2.8× the dust MASS**
+    (measured) in **30% FEWER entities** (34 puffs → 24).  More cloud,
+    fewer bodies — deliberate, and the number to re-check if dust ever
+    reads as too much.
+  - **A SMALL TILE THROWS ITS DUST AT THE BREAK, NOT MID-LIFE.**  A 36px
+    rock tile sheds only 3-4 grains before it dies (measured; the rest go
+    at death through the shatter), so at the shipped pool it never fills
+    one and every puff comes from the DEATH FLUSH in `handleEntityDeath`'s
+    STRUCTURE branch.  The mid-life path is for bodies that shed many
+    grains — a 160-unit boulder sheds ~11.5 and throws two puffs
+    averaging 56 units.  Both paths are live; neither is the common case
+    for both body sizes.
+  - **THE FLUSH IS GATED, AND THAT IS THE POINT.**  A body that dies
+    mid-pool is still owed the material it shed, but flushing a one-chip
+    remainder puts back exactly the speck the pooling exists to remove —
+    so `FLUSH_MIN_FRAC` (half a pool) drops the smallest remainders.  The
+    bank is per LIFE: `ShardSystem.completeRegen` clears it, since regen
+    reuses the entity object.
+  - **`CHIP_DUST_POOL_CYCLE` (DBG ▸ Grain & Fracture ▸ "Chip dust") IS
+    THE TABLE**, not a multiplier over an authored constant — a pool is a
+    COUNT, and 6 × 1.5 is not something a ledger can hold — so the
+    shipped value lives at `CHIP_DUST_DEFAULT_INDEX` and there is no
+    second copy of it to drift.  Its step **1 IS the per-chip behaviour**
+    this replaced, which makes the ladder its own negative control (and is
+    what `tests/fracture.spec.ts` runs the A/B against).  It bumps no
+    fracture generation, for the `damageSpread` reason: this changes what
+    a detach THROWS, not how the pattern is BUILT.
 - **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
   things happen at the seam in `progressFracture`, and two of them were
   missing:
@@ -3089,6 +3134,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   this does not touch; what a larger grain gives up is the NUMBER of pieces.
   `perf/scenes.mjs` carries the scene and `perf/capture.mjs` the two
   ablations (`nebtilepass`, `nebshatterlegacy`) that sized each cause.
+  IT ALSO MOVED TWO TEST MARGINS, which is the part that was missed: the
+  nebula fracture suite asserted `min children > 3` and a `> 2.5` size
+  spread against the grain-14 yield (7.7 children, 4.02× spread), and at
+  grain 20 (3.95 / 3.07×) both sat ON the boundary — measured failing 3
+  runs in 8 with the product perfectly correct.  A default that moves a
+  measured quantity has to be walked past the assertions written against
+  it; a floor is not a claim unless there is margin under it.
 - **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
   call).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
   the contact threshold and one new body appears — so at the shipped ~5 s
