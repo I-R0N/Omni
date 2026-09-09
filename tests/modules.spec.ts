@@ -1036,7 +1036,12 @@ test.describe('scanner module', () => {
     expect(second, 'the second press is refused while the cooldown runs').toBe(false);
 
     // The stat the HUD button reads agrees with the engine that refused it.
-    const st = await stats(page);
+    // WAIT for the payload rather than reading it once: the engine wait above
+    // returns on LIVE state, while `stats` is the last PUSHED snapshot, and
+    // `scanner` is published conditionally — so a one-frame lag shows up as
+    // `undefined` rather than as a wrong number (README rule 12).
+    const st = await waitForStats(page, s => s.scanner?.mk === 3,
+      'the payload to carry the Mk III scanner');
     expect(st.scanner?.cooldown ?? 0).toBeGreaterThan(0);
     expect(st.scanner?.mk).toBe(3);
 
@@ -1161,7 +1166,11 @@ test.describe('scanner module', () => {
       // Mk I is fully manual — auto-tracking is what a mark buys.
       await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk1'); });
       await waitForEngine(page, e => e.scannerMk === 1, 'Mk I');
-      const mk1 = await stats(page);
+      // Wait for the PAYLOAD to carry it — see rule 12.  `autoCapable` is
+      // asserted `false`, and a lagging payload gives `undefined`, which is
+      // not false and fails for the wrong reason.
+      const mk1 = await waitForStats(page, s => s.scanner?.mk === 1,
+        'the payload to carry the Mk I scanner');
       expect(mk1.scanner?.autoCapable, 'Mk I cannot auto-scan').toBe(false);
       // …so the pause-menu switch does not render for it either.
       await page.waitForTimeout(300);
@@ -1170,7 +1179,8 @@ test.describe('scanner module', () => {
 
       await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk3'); });
       await waitForEngine(page, e => e.scannerMk === 3, 'Mk III');
-      expect((await stats(page)).scanner?.autoCapable).toBe(true);
+      expect((await waitForStats(page, s => s.scanner?.mk === 3,
+        'the payload to carry the Mk III scanner')).scanner?.autoCapable).toBe(true);
 
       // Plant a contact and let the background sweep find it WITHOUT any
       // press.  The sweep is driven directly rather than waited out: its

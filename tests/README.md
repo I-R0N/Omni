@@ -217,6 +217,17 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    clicking again and takes a PREDICATE as well as an exact label — several
    readouts mark the shipped step with a suffix (`1 (ships)`), so a test
    that wants a specific rung matches the number, not the caption.
+
+   **The same lag straddles `waitForEngine` and `stats`**, and that pairing
+   is the trap's nastiest form. `waitForEngine` polls the LIVE engine and
+   returns the instant its condition holds; `__omniStats` is a snapshot from
+   the last push. So "wait for the engine to reach X, then read the payload"
+   can read a payload from before X — and where a field is published
+   conditionally (`enemiesRemaining` is `undefined` unless `waveState ===
+   'active'`) the symptom is a matcher error about `undefined`, which reads
+   like a missing field rather than a one-frame lag. It passed locally and
+   failed in CI, because the slower the frames the wider the window. Wait on
+   the payload you are going to assert against.
 13. **MAKE THE PRECONDITION A SELECTION CRITERION, not the assertion.** A
    test that grabs the first candidate it finds and asserts a property that
    candidate need not have is asserting on the harness's luck. Four flakes
