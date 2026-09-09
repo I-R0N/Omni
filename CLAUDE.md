@@ -3156,6 +3156,35 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   budget that ignored the parent entirely, to 6-8 cells that tile the
   parent's own polygon (child area / parent area 0.85..1.05), with body
   sizes spanning 4.99..20.2 — a 4× range.
+- **A NEBULA FRAGMENT ROLLS ITS OWN SPRITE** (user call), and
+  `randomNebulaSprite()` in `assets.ts` is the ONE definition three sites
+  share: the map-load tile factory, the shatter dust, and every fragment a
+  break produces.  The generic voronoi child recipe copies `parent.sprite`,
+  which is correct for every OTHER material — rock, glass, metal and plastic
+  draw polygons and carry no sprite worth varying — and wrong for the one
+  family whose whole look IS the sprite: a tile decomposing into its cells
+  handed back that many copies of one cloud image, so a burst read as the
+  same puff stamped out repeatedly rather than as a cloud coming apart.  The
+  roll therefore lives in `ShardSystem.stampNebulaChild` (which runs AFTER the
+  child literal, so it overwrites the inherited value) rather than in the
+  shared recipe.  Three things worth knowing:
+  - **The other two `sprite: parent.sprite` sites are deliberately left
+    alone.**  `spawnDetachedCell` and `shatterPowerlawStyle` cannot be reached
+    by nebula — the chip path requires the grain model nebula does not carry,
+    and the legacy fracture A/B dispatches nebula to its own rear-cone fan —
+    so randomising there would only touch materials that do not want it.
+  - **THE TELL IS PER PARENT, NOT POPULATION-WIDE.**  The parents already roll
+    random sprites at map load, so breaking thirty tiles yields ~16 distinct
+    child sprites EITHER WAY (measured 16 inherited vs 20 rolled) and a
+    population count cannot tell the builds apart.  What separates them is
+    whether ONE parent's children differ from each other: measured 1.0
+    distinct sprite per parent and 30/30 parents uniform before, 3.6 and 0/30
+    after.  A regression written the obvious way would pass on both.
+  - **It costs tint-cache entries**, since the store keys on
+    `spriteSrc|quantisedTint`: measured 9 entries before and 40 after over the
+    same thirty-tile break, against a 256 cap.  Anything that multiplies
+    nebula sprite variety again should re-check that number rather than assume
+    the headroom is still there.
 - **A NEBULA SPRITE IS SIZED FROM THE BODY IT BELONGS TO, and is always
   bigger than it.**  `nebulaSpriteSize(entity)` (constants.ts) is the ONE
   definition — the cloud sprite and the twinkle star placed inside its

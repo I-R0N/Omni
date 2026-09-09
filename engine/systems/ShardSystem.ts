@@ -44,6 +44,7 @@ import {
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
+import { randomNebulaSprite } from '../../assets';
 import {
   wrapDeltaX, wrapDeltaY, wrapPosition, wrapX, wrapY,
   MAP_WIDTH, MAP_HEIGHT,
@@ -1105,6 +1106,15 @@ export class ShardSystem {
       child.nebulaColorComposition = cloneComposition(composition);
       child.color = blendCompositionToHex(composition) || child.color;
     }
+    // A FRAGMENT GETS ITS OWN SPRITE (user call).  The generic child recipe
+    // copies `parent.sprite`, which is right for every other material — rock,
+    // glass, metal and plastic draw polygons and carry no sprite worth
+    // varying — and wrong for the one family whose whole look IS the sprite:
+    // a tile broken into 6-8 cells produced 6-8 copies of one cloud image,
+    // so a burst read as the same puff stamped out repeatedly rather than as
+    // a cloud coming apart.  Rolled per child from the ACTIVE set, the same
+    // way the map-load tile factory and the shatter dust already roll theirs.
+    child.sprite = randomNebulaSprite();
     const fadeInBase = parentVariant.shatter.fadeInSeconds ?? NEBULA_CONSTANTS.FADE_IN_DURATION;
     const duration = fadeInBase / nebulaFadeRateScale(impactSpeed);
     child.nebulaSpawnTimer = duration;
@@ -1698,7 +1708,7 @@ export class ShardSystem {
         maxHealth:       1,
         mass:            childSpawn.sizeToMass(size),
         polygonPoints:   points,
-        sprite:          parent.sprite,
+        sprite:          randomNebulaSprite(),   // per-child, see stampNebulaChild
         nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
         nebulaGridCol:   parent.nebulaGridCol,
         nebulaGridRow:   parent.nebulaGridRow,

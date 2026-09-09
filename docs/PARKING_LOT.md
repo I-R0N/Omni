@@ -751,6 +751,54 @@ Knobs: `PERF_TASKS` (`consume`), `PhysicsSystem` grids, `EXPLOSION_CONSTANTS` /
 
 ---
 
+## Edge vs Safari frame pacing on iOS — is any of it ours? (parked 2026-09-09)
+
+**A reported "severe periodic frame drop" turned out to be the BROWSER, not
+the game.** The same build on the same device ran silky smooth in Safari and
+hitched badly in Edge (user finding, after four Perf REC captures).
+
+What the captures established before that came out, worth keeping because it
+is all still true and bounds any future investigation:
+
+| candidate | test | result |
+|---|---|---|
+| render path | every capture | **1.90–2.73 ms avg**, and only 1–3 ms on the spike frames themselves |
+| sim / substeps | Sim rate 120 → 60 Hz | spike period **unchanged** (~1.05 s) |
+| cadenced tasks | PerfController tier idle → light | period **unchanged** |
+| `EngineStats` payload | HUD rate 60 → 15 Hz | period **unchanged**, p99 51 vs 53 ms |
+| static tile stamping | every capture | `0 tiles · 0.00 ms` |
+| React hand-off | every capture | 0.00 (correct for a non-profiling build) |
+
+The pauses sat **entirely in `other`** (48–63 ms of a 67 ms frame, with render
+2–3 and sim 1–3), i.e. outside every bracket the engine instruments — which is
+exactly the shape a browser-level stall has, and why no engine knob could
+move it.
+
+TWO observations survive and are the actual open questions:
+
+1. **The rate scaled with activity**: ~1.05 s period while flying, ~2.1 s
+   parked, and the pauses were bigger while moving (p99 51–53 vs 31 ms).
+   Something the game does feeds it even if the game is not the one stalling.
+   A GC in a browser whose collector is tuned differently would do that.
+2. **The tint cache tracked movement exactly**: 0 misses parked, 41–62 while
+   flying (`peak 3–6 ms`). Each miss allocates a tinted canvas. Cheap on a
+   256-entry cache, but it IS movement-scaled heap churn and the one engine
+   contribution the captures actually caught.
+
+So the question to answer is narrow: does Edge's collector (or its canvas
+compositor) turn our ordinary per-frame churn into visible stalls where
+Safari's does not — and if so, is the churn worth reducing anyway for the
+worst-case browser? The decisive instrument is a **Safari Web Inspector
+timeline attached to the device**, which marks GC events explicitly; the
+container harness is NOT adequate (measured ±40% run-to-run on `heapKB/f`,
+enough that a 4× reduction in stats-payload allocation came back *higher*).
+
+Do NOT start from the engine again without new evidence. In particular the
+5c-gauntlet residual (`applyGravity`, `handleEntityCollisions`,
+`PhysicsSystem.update`, `EntityIndex.rebuild`) was NOT shown to be the cause,
+and CLAUDE.md §4 records that the intuitive fix there — normalising entity
+hidden classes — measured **1.9× slower** on the real population.
+
 ## Physics / shard broadphase at high entity counts (separate perf pass)
 
 **Partly addressed on the `physics-shard-broadphase` branch (PR #70).** What

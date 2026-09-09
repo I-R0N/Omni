@@ -21,7 +21,7 @@ import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
 import { HEX_SIZE } from '../maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
-import { NEBULA_IMAGES, ASSETS } from '../../assets';
+import { ASSETS, randomNebulaSprite } from '../../assets';
 import {
   blendCompositionToHex,
   cloneComposition,
@@ -1020,9 +1020,7 @@ export class DropSystem {
     // _tintedSprites cache).  Without sprite the shard renders only
     // its polygon outline (visible only in debug mode).  Falls back
     // to the procedural puff marker if the manifest is empty.
-    const sprite = NEBULA_IMAGES.length > 0
-      ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
-      : ASSETS.NEBULA_PUFF;
+    const sprite = randomNebulaSprite();
 
     const impactSpeed = inheritVelocity
       ? Math.sqrt(inheritVelocity.x * inheritVelocity.x + inheritVelocity.y * inheritVelocity.y)

@@ -169,3 +169,23 @@ export const SHIP_SHEET_BASE: ShipSpriteSheet = {
 export const SHIP_SHEETS: Record<string, ShipSpriteSheet> = {
   base: SHIP_SHEET_BASE,
 };
+
+/**
+ * A nebula sprite chosen at random from the ACTIVE set.
+ *
+ * The ONE definition, because three sites need it and they all had their own
+ * copy of the same two lines: the map-load tile factory, the shatter-dust
+ * puff, and (as of the child-sprite change) every nebula fragment a break
+ * produces.  Reading `NEBULA_IMAGES` rather than a captured list is
+ * load-bearing — the DBG set cycle mutates that array IN PLACE, so a helper
+ * holding its own copy would keep handing out sprites from the retired set.
+ *
+ * Falls back to the procedural puff marker when the manifest is empty, which
+ * is what the copies did and is what keeps a nebula body from rendering as a
+ * bare polygon outline.
+ */
+export function randomNebulaSprite(): string {
+  return NEBULA_IMAGES.length > 0
+    ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
+    : ASSETS.NEBULA_PUFF;
+}

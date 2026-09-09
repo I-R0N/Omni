@@ -295,3 +295,70 @@ test.describe('nebula bonding', () => {
     watch.assertClean();
   });
 });
+
+/** A nebula fragment gets its OWN sprite, not its parent's (user call).
+ *
+ *  The generic voronoi child recipe copies `parent.sprite`, which is right
+ *  for every other material — rock, glass, metal and plastic draw polygons
+ *  and carry no sprite worth varying — and wrong for the one family whose
+ *  whole look IS the sprite.  A tile decomposing into 6-8 cells handed back
+ *  6-8 copies of one cloud image, so a burst read as the same puff stamped
+ *  out repeatedly rather than as a cloud coming apart.
+ *
+ *  The assertion is PER PARENT rather than over the whole population,
+ *  because the population-wide count cannot tell the two builds apart: the
+ *  parents themselves already roll random sprites at map load, so breaking
+ *  thirty tiles yields ~16 distinct child sprites EITHER WAY (measured 16
+ *  inherited vs 20 rolled).  What separates them is whether one parent's
+ *  children differ from EACH OTHER — measured 1.0 distinct per parent and
+ *  30/30 parents uniform before, 3.6 and 0/30 after.
+ */
+test.describe('nebula fragment sprites', () => {
+  test('one tile’s children do not all wear the same sprite', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+
+    const r = await engine(page, (e: any) => {
+      const live = () => e.currentMap.entities
+        .filter((x: any) => x.active && x.shardVariant === 'nebula-shard');
+      const before = live().length;
+      const tiles = e.currentMap.entities
+        .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, 30);
+      for (const t of tiles) { t.health = 0; e.handleEntityDeath(t); }
+
+      // Children inherit their parent's grid coords (stampNebulaChild), which
+      // is what lets a fragment be traced back to the tile it came off.
+      const byParent = new Map<string, Set<string>>();
+      for (const k of live().slice(before)) {
+        const key = `${k.nebulaGridCol},${k.nebulaGridRow}`;
+        let set = byParent.get(key);
+        if (set === undefined) { set = new Set(); byParent.set(key, set); }
+        set.add(k.sprite);
+      }
+      const counts = [...byParent.values()].map(s => s.size);
+      return {
+        parents: byParent.size,
+        children: live().length - before,
+        uniformParents: counts.filter(n => n === 1).length,
+        meanDistinct: counts.length
+          ? counts.reduce((a, b) => a + b, 0) / counts.length : 0,
+        spritesSet: live().slice(before).every((k: any) => typeof k.sprite === 'string' && k.sprite.length > 0),
+      };
+    });
+
+    // The break has to have produced enough fragments for the question to
+    // mean anything — one child per parent is trivially uniform.
+    expect(r.parents).toBeGreaterThan(5);
+    expect(r.children).toBeGreaterThan(r.parents);
+    // EVERY fragment still HAS a sprite: falling back to no sprite would
+    // render a nebula body as a bare polygon outline, which would also
+    // trivially satisfy a "not the parent's" assertion.
+    expect(r.spritesSet).toBe(true);
+    // The property: parents whose whole brood shares one sprite. 30/30 before.
+    expect(r.uniformParents / r.parents).toBeLessThan(0.5);
+    expect(r.meanDistinct).toBeGreaterThan(1.5);
+
+    watch.assertClean();
+  });
+});
