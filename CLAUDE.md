@@ -3317,7 +3317,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   own cloud instead of ~3.0× (three full-size sprites), so DBG ▸ Visual ▸
   **"Neb sprite"** is the live A/B on the overhang — a MULTIPLIER over
   the authored constant, the same relationship `SHARD_COAT_CYCLE` has
-  with a variant's `envelope`.
+  with a variant's `envelope`.  **IT SHIPS AT 1.25×** (user call): the
+  calibration above is what a full hex tile draws at **1×**, so a shipped
+  run draws that tile at 150 and every other body 25% larger in
+  proportion.  Anything asserting the 120 figure has to DIAL THE LADDER TO
+  1× rather than assume it — `tests/fracture.spec.ts` does, and the
+  assertion would otherwise have failed on the default instead of on the
+  rule it protects.  The "(ships)" marker is applied from
+  `NEBULA_SPRITE_DEFAULT_INDEX` rather than written into a step's name; it
+  WAS written in, and this move is exactly what would have left it on the
+  wrong step.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when

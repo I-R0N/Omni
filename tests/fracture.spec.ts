@@ -3970,6 +3970,22 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
       await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
       await quietScene(page);
 
+      // DIAL THE OVERSIZE LADDER TO 1x.  `SPRITE_OVERSIZE` is calibrated so
+      // a full hex tile draws 120 at 1x, and the DBG multiplier scales every
+      // sprite on the map — so the 120 assertion below is a claim about the
+      // CALIBRATION, not about whatever step happens to ship.  It shipped at
+      // 1x when this was written and now ships at 1.25x, which would have
+      // failed this on the default rather than on the rule.  Match the
+      // NUMBER: the readout marks the shipped step with a suffix.
+      const isBase = (n?: string) => /^1x\b/.test(n ?? '');
+      for (let i = 0; i < 8; i++) {
+        if (isBase((await stats(page)).nebulaSpriteName)) break;
+        await engine(page, e => e.dbg.cycleNebulaSpriteSize());
+        await page.waitForTimeout(40);
+      }
+      expect(isBase((await stats(page)).nebulaSpriteName),
+        'the oversize ladder carries a 1x step').toBe(true);
+
       const r: any = await breakTiles(page, 20);
 
       // THE REGRESSION.  Every shard used to draw the same 120-unit sprite

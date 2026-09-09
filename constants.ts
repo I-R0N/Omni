@@ -4742,13 +4742,23 @@ export const NEBULA_CONSTANTS = {
 interface NebulaSpriteStep { readonly name: string; readonly mult: number; }
 
 export const NEBULA_SPRITE_CYCLE: ReadonlyArray<NebulaSpriteStep> = [
-  { name: '0.75x',      mult: 0.75 },
-  { name: '1x (ships)', mult: 1.0  },
-  { name: '1.25x',      mult: 1.25 },
-  { name: '1.5x',       mult: 1.5  },
-  { name: '2x',         mult: 2.0  },
+  { name: '0.75x', mult: 0.75 },
+  { name: '1x',    mult: 1.0  },
+  { name: '1.25x', mult: 1.25 },
+  { name: '1.5x',  mult: 1.5  },
+  { name: '2x',    mult: 2.0  },
 ];
-const NEBULA_SPRITE_DEFAULT_INDEX = 1;
+// The "(ships)" marker is applied from THIS index rather than written into a
+// step's name, so moving the default cannot leave the label on the old step.
+// It was written in, and this move is exactly what would have rotted it.
+//
+// SHIPPED AT 1.25x (user call).  Note what the base means: `SPRITE_OVERSIZE`
+// is calibrated so a full hex tile draws at 1x the 120 world units it always
+// did, so a shipped run now draws that tile at 150 and every other body 25%
+// larger in proportion.  Anything asserting the 120 calibration has to read
+// this multiplier out, not assume it — `tests/fracture.spec.ts` dials the
+// ladder to 1x for exactly that assertion.
+const NEBULA_SPRITE_DEFAULT_INDEX = 2; // 1.25x
 let activeNebulaSpriteIndex = NEBULA_SPRITE_DEFAULT_INDEX;
 
 /** Active oversize multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE. */
@@ -4756,9 +4766,10 @@ export function getActiveNebulaSpriteMult(): number {
   return NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].mult;
 }
 
-/** Active step name for the DBG row readout. */
+/** Active step name for the DBG row readout, with the shipped step marked. */
 export function getActiveNebulaSpriteName(): string {
-  return NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].name;
+  const n = NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].name;
+  return activeNebulaSpriteIndex === NEBULA_SPRITE_DEFAULT_INDEX ? n + ' (ships)' : n;
 }
 
 /** Bumped whenever anything that feeds a CACHED nebula draw size changes.

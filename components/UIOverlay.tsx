@@ -1903,8 +1903,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderSectionHeader('nebula', 'Nebula')}
               {!collapsed.nebula && (<>
                 {ctrlRow('Neb sprite', onCycleNebulaSpriteSize,
-                  stats.nebulaSpriteName ?? '1x (ships)',
-                  'Cycle how far a nebula sprite overhangs the body it belongs to — a multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE (0.75× / 1× / 1.25× / 1.5× / 2×). Every puff is drawn at its own size × this, so the whole cloud layer scales together and a click lands on clouds already in the world.')}
+                  stats.nebulaSpriteName ?? '1.25x (ships)',
+                  'Cycle how far a nebula sprite overhangs the body it belongs to — a multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE (0.75× / 1× / 1.25× ships / 1.5× / 2×). The constant is calibrated so a full hex tile draws 120 world units at 1×, so the shipped step draws it at 150. Every puff is drawn at its own size × this, so the whole cloud layer scales together and a click lands on clouds already in the world.')}
                 {ctrlRow('Neb damp', onCycleNebulaDamp,
                   stats.nebulaDampName ?? '1x (old)',
                   'How fast a nebula shard bleeds off speed \u2014 a multiplier on the per-step velocity LOSS (1x / 1.5x / 2x / 3x / 5x). Applied where the damping factor is read, so a click slows every puff already drifting. Measured baseline: shard speed does not settle, hovering ~1.3-1.7 with a max near 20.')}
