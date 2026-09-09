@@ -1860,8 +1860,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.fractureBiasName ?? 'variant',
                   'Impact bias: the fraction of sites crowded toward the hit point, which is what makes the pattern radiate from the impact the way real glass does. VARIANT uses each material\'s own value (rock and glass ship 0.75). Pulls AGAINST Frac relax by design - crowding sites is precisely what makes cell sizes uneven - so 0 plus relaxation gives the most uniform chunks, and 1 plus relax 0 the most chaotic.')}
                 {ctrlRow('Chip dust', onCycleChipDustPool,
-                  stats.chipDustPoolName ?? '6 (ships)',
-                  'How many chips\u2019 worth of pulverised material bank into ONE dust puff (1 / 2 / 4 / 6 / 9 / 14). Dust is banked as AREA, so this moves both halves at once: pooling N chips makes each puff sqrt(N) times bigger and one appear a third as often at N=9 \u2014 larger and less frequent from one number, and FEWER entities than a puff per chip. 1 is the per-chip behaviour it replaced, which read as specks once a nebula sprite was sized off the body it belongs to. A body that breaks before it fills a pool flushes what it has banked, so short-lived debris still throws dust.')
+                  stats.chipDustPoolName ?? '1 (ships)',
+                  'How many chips\u2019 worth of pulverised material bank into ONE dust puff (1 ships / 2 / 4 / 6 / 9 / 14). Dust is banked as AREA, so this moves both halves at once: pooling N chips makes each puff sqrt(N) times bigger and one appear 1/N as often \u2014 larger and less frequent from one number, and FEWER entities than a puff per chip. 1 is a puff per chip: small and constant, which is what ships. Step up for bigger, rarer kicks of dust. A body that breaks before it fills a pool flushes what it has banked, so short-lived debris still throws dust.')
                 }
                 {ctrlRow('Grain mat', onCycleGrainMaterial,
                   stats.grainMaterialName ?? 'rock',
@@ -1912,11 +1912,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.nebulaSpinDampName ?? 'match',
                   'How fast a nebula shard bleeds off SPIN \u2014 its own ladder, separate from \u201cNeb damp\u201d, because linear drag decides how far a puff travels and spin decay decides how long it tumbles where it sits. \u201cmatch\u201d (the shipped default) defers to the linear knob, so the first click is the A/B.')}
                 {ctrlRow('Neb bond', onCycleNebulaBond,
-                  stats.nebulaBondName ?? 'off (old)',
-                  'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (1x / 2x / 5x / 12x). Stretching the timer is what makes the grip legible \u2014 at the shipped ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles.')}
+                  stats.nebulaBondName ?? 'goo',
+                  'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (off 1x / firm 2x / strong 5x / goo 12x). GOO ships; \u2018off (old)\u2019 is one click away because the cycle wraps, so the A/B against pre-feature nebula is still the first press. Stretching the timer is what makes the grip legible \u2014 at the base ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles. It COSTS entity count, which is frame time: live shard population measured 28 / 75 / 307 / 597 across the four steps.')}
                 {ctrlRow('Neb stretch', onCycleNebulaStretch,
-                  stats.nebulaStretchName ?? '0.07',
-                  'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10. The squash axis aligns to velocity while the sprite keeps its own rotation.')}
+                  stats.nebulaStretchName ?? '0.010',
+                  'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.010 ships / 0.05 / 0.07 / 0.085 / 0.10. The squash axis aligns to velocity while the sprite keeps its own rotation. The shipped step is deliberately far below the rest \u2014 a lean into the drift rather than a smear \u2014 with a true zero one step below it to A/B against.')}
                 {ctrlRow('Neb spin', onCycleNebulaWakeSpin,
                   stats.nebulaWakeSpinName ?? 'physical',
                   'Which way the player\'s wake spins a passing nebula shard. PHYSICAL: the wake shear — a shard passed on the STARBOARD side turns clockwise, port-side counter-clockwise. INVERTED: the same cross product negated (the A/B). RANDOM: the old per-shard id-parity vortices, with no consistent handedness. Proper rotational mechanics are parked for their own session.')}

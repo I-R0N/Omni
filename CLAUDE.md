@@ -2486,10 +2486,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   that CAME OFF, never of the parent, because a grain is ~12 units on a
   36px tile and sizing off the parent (as the legacy per-hit puff did)
   makes the dust bigger than the piece that shed it.
-- **AND IT IS POOLED: LARGER, LESS OFTEN** (user call).  The first version
-  rolled a `CHANCE` per detach and sized the puff off that ONE chip, and
-  the result was a speck — reported as "the nebula shards released from
-  chipping are very small".  It got worse rather than better as the rest
+- **AND IT IS POOLED: LARGER, LESS OFTEN — BUT IT SHIPS AT 1** (user call).
+  Pooling exists and is the whole ladder; the play-test call was to start a
+  run at the per-chip end of it, so `CHIP_DUST_DEFAULT_INDEX` is 0 and the
+  shipped look is a small puff per chip.  Everything below still describes
+  what a step UP buys, and nothing about the mechanism is bypassed at 1: the
+  bank still fills and empties every chip, so the flush, the conservation and
+  the ladder's arithmetic are all live at the default rather than dormant.
+  The history is worth keeping because it is the reason the ladder exists.
+  The first version rolled a `CHANCE` per detach and sized the puff off that
+  ONE chip, and the result was a speck — reported as "the nebula shards
+  released from chipping are very small".  It got worse rather than better as the rest
   of the nebula work landed: a puff used to draw a FULL-TILE sprite
   whatever its size, so the rule that sizes a cloud off its own body (see
   the nebula-sprite note above) is what made the specks visible as specks.
@@ -2506,16 +2513,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the sharp way to say the two distributions do not overlap.
     Conservation holds ALONG THE LADDER, which is what the regression
     asserts and is NOT the same as "unchanged from what shipped before":
-    the 0.35-per-chip roll this replaced threw 0.35 of a puff where pool 1
-    throws a whole one, so the world now carries **2.8× the dust MASS**
-    (measured) in **30% FEWER entities** (34 puffs → 24).  More cloud,
-    fewer bodies — deliberate, and the number to re-check if dust ever
-    reads as too much.
-  - **A SMALL TILE THROWS ITS DUST AT THE BREAK, NOT MID-LIFE.**  A 36px
-    rock tile sheds only 3-4 grains before it dies (measured; the rest go
-    at death through the shatter), so at the shipped pool it never fills
-    one and every puff comes from the DEATH FLUSH in `handleEntityDeath`'s
-    STRUCTURE branch.  The mid-life path is for bodies that shed many
+    the 0.35-per-chip ROLL this replaced threw 0.35 of a puff where pool 1
+    throws a whole one.  So at the shipped step the world carries **2.9×
+    the dust MASS** of the pre-pooling build in the SAME number of puffs —
+    the roll is gone, and a chip that used to have a 35% chance of dust now
+    always throws some.  That, not the pooling, is what changed at the
+    default; the pooling is what the ladder above 1 buys.
+  - **A SMALL TILE THROWS ITS DUST AT THE BREAK, NOT MID-LIFE — ABOVE A
+    POOL OF ABOUT 4.**  A 36px rock tile sheds only 3-4 grains before it
+    dies (measured; the rest go at death through the shatter), so past that
+    it never fills a pool and every puff comes from the DEATH FLUSH in
+    `handleEntityDeath`'s STRUCTURE branch.  At the shipped 1 the flush is
+    a no-op and every puff is mid-life.  The mid-life path is for bodies that shed many
     grains — a 160-unit boulder sheds ~11.5 and throws two puffs
     averaging 56 units.  Both paths are live; neither is the common case
     for both body sizes.
@@ -2529,9 +2538,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     THE TABLE**, not a multiplier over an authored constant — a pool is a
     COUNT, and 6 × 1.5 is not something a ledger can hold — so the
     shipped value lives at `CHIP_DUST_DEFAULT_INDEX` and there is no
-    second copy of it to drift.  Its step **1 IS the per-chip behaviour**
-    this replaced, which makes the ladder its own negative control (and is
-    what `tests/fracture.spec.ts` runs the A/B against).  It bumps no
+    second copy of it to drift.  Its step **1 IS the per-chip behaviour**,
+    and it is what SHIPS — so the ladder's negative control is also its
+    default, and `tests/fracture.spec.ts` therefore dials BOTH arms of its
+    A/B to a named step rather than letting either read the default.  A
+    test that takes the shipped default as one of its two arms compares a
+    step against itself the day that default moves, which is exactly what
+    this move would have done to it.  It bumps no
     fracture generation, for the `damageSpread` reason: this changes what
     a detach THROWS, not how the pattern is BUILT.
 - **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
@@ -3132,8 +3145,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   NO parent-related size variety at all on legacy.  26 buys nothing further,
   so 20 is the knee.  Size VARIETY is `sizeSpread` and `regularity`, which
   this does not touch; what a larger grain gives up is the NUMBER of pieces.
-  `perf/scenes.mjs` carries the scene and `perf/capture.mjs` the two
-  ablations (`nebtilepass`, `nebshatterlegacy`) that sized each cause.
+  `perf/scenes.mjs` carries the scene and `perf/capture.mjs` the three
+  nebula ablations (`nebtilepass`, `nebshatterlegacy`, `nebbondoff`) that
+  sized each cause.
   IT ALSO MOVED TWO TEST MARGINS, which is the part that was missed: the
   nebula fracture suite asserted `min children > 3` and a `> 2.5` size
   spread against the grain-14 yield (7.7 children, 4.02× spread), and at
@@ -3141,8 +3155,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   runs in 8 with the product perfectly correct.  A default that moves a
   measured quantity has to be walked past the assertions written against
   it; a floor is not a claim unless there is margin under it.
+- **NEBULA'S VELOCITY STRETCH SHIPS AT 0.010, WHICH IS OFF THE OLD LADDER**
+  (user call).  `VEL_STRETCH_K_CYCLE` maps a shard's speed to how far its
+  sprite squashes along its own velocity, and its softest non-zero step used
+  to be 0.05 with 0.085 shipping.  The play-tested answer is a NEW step five
+  times below that floor: at 0.010 a drifting puff leans into its travel
+  rather than smearing along it, which is the read the effect was after and
+  which the old range could not express — every step it offered was a smear
+  of some size.  `off` stays the step below it, so the ladder still carries
+  a true zero to A/B the effect against, and the four larger steps are kept
+  rather than dropped: a range whose top is not too far cannot show where
+  too far is.  Presentation only — the squash axis follows velocity while
+  the sprite keeps its own rotation, and nothing in the sim reads it.
 - **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
-  call).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
+  call; `goo` is what SHIPS, and `off (old)` is one click away because the
+  cycle wraps, so the A/B against pre-feature nebula is still the first
+  press).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
   the contact threshold and one new body appears — so at the shipped ~5 s
   (scaled by pair size) the DBG "Neb bond" cohesion and break multipliers
   barely get to act, and the harder they grip the sooner the pair holds
@@ -3166,11 +3194,29 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     long enough to spend a 40× timer.  The shipped ladder (1 / 2 / 5 / 12)
     sits inside that ceiling and each step lands on its own multiplier
     (measured maxRatio 0.44 / 1.84 / 4.88 / 11.76).
-  - **DELAYING MERGES COSTS ENTITY COUNT**, which is frame time.  Measured
-    over the same window the live shard population ran 28 / 75 / 307 / 597
-    across the four steps — at the top the field was heavy enough that sim
-    time barely advanced.  Anything baked in above `firm` needs a perf
-    number beside it.
+  - **`goo` SHIPS, AND ITS PERF NUMBER IS "NO MEASURABLE COST"** (user
+    call).  The rule this note used to carry — *delaying merges costs
+    entity count, so anything above `firm` needs a perf number beside
+    it* — stands as a rule, and this is that number.  Measured on
+    `nebula-storm`, three A/B pairs, shipped against the `nebbondoff`
+    ablation (which walks the ladder back to `off (old)` in-page):
+
+    | | ents | sim/stp99 | heap KB/f |
+    |---|---|---|---|
+    | goo (ships) | 1332 / 1331 / 1396 | 1.95 / 2.10 / 2.55 | 462 / 484 / 511 |
+    | off (old) | 1436 / 1387 / 1367 | 2.50 / 2.55 / 2.40 | 497 / 521 / 522 |
+
+    Goo is marginally AHEAD on all three, but the ranges overlap (its worst
+    substep equals off's typical), so the honest reading is that the step
+    costs nothing here — not that it is faster.
+    THE OLD FIGURE IS NOT WRONG, IT IS NO LONGER THE SAME BUILD.  The
+    28 / 75 / 307 / 597 populations recorded across the four steps were
+    LIVE NEBULA SHARDS (not total entities) and were taken BEFORE
+    `grainSize` went to 20, which cut children per tile from 7.7 to 3.95 —
+    so the population goo was holding open was about twice what it holds
+    open now.  Two lessons: a cost measured against one population does not
+    survive a change to that population, and a ladder step's price has to be
+    re-measured after anything that moves entity count, not inherited.
   - **The tell is NOT the bond COUNT.**  That churns hard as pairs form and
     break (measured 15 → 150 → 19 → 58 → 21 → 13 on the off step), so a
     count-based regression passes by coincidence and did, against a build

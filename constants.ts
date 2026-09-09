@@ -602,13 +602,20 @@ interface NebulaStretchStep {
 
 export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
   { name: 'off',   k: 0     },
+  { name: '0.010', k: 0.010 },
   { name: '0.05',  k: 0.05  },
   { name: '0.07',  k: 0.07  },
   { name: '0.085', k: 0.085 },
   { name: '0.10',  k: 0.10  },
 ] as const;
 
-let activeNebulaStretchKIndex = 3; // 0.085
+// SHIPPED AT 0.010 (user call).  That is a NEW step, five times below what
+// was previously the ladder's softest non-zero value and an eighth of the
+// old default — a stretch you read as a body leaning into its drift rather
+// than as a smear.  `off` is still the step below it, so the ladder keeps a
+// true zero to A/B against.
+const VEL_STRETCH_DEFAULT_INDEX = 1; // 0.010
+let activeNebulaStretchKIndex = VEL_STRETCH_DEFAULT_INDEX;
 
 /** Active stretch multiplier K (in speed → stretch).  Read by
  *  RenderSystem nebula-shard render each frame. */
@@ -3147,7 +3154,12 @@ export function cycleDamageSpread(): number {
 // itself is the readable statement.  So this table IS the default, at
 // CHIP_DUST_DEFAULT_INDEX, and there is no second copy of 6 to drift.
 export const CHIP_DUST_POOL_CYCLE: ReadonlyArray<number> = [1, 2, 4, 6, 9, 14] as const;
-const CHIP_DUST_DEFAULT_INDEX = 3; // 6
+// SHIPPED AT 1 — the per-chip behaviour (user call, after play-testing the
+// pooled default).  Pooling stays fully live and is the rest of the ladder;
+// what moved is which side of the A/B a run starts on.  Everything the
+// pooling note in CLAUDE.md says still holds — a step up is sqrt(N) bigger
+// and 1/N as often — it just starts from the small, frequent end now.
+const CHIP_DUST_DEFAULT_INDEX = 0; // 1 — a puff per chip
 let activeChipDustIndex = CHIP_DUST_DEFAULT_INDEX;
 
 /** Chips' worth of dust banked into one puff. */
@@ -4939,7 +4951,18 @@ export const NEBULA_BOND_CYCLE: ReadonlyArray<NebulaBondStep> = [
   { name: 'strong',    cohesionMul: 3, breakMul: 4, pullInner: 80,  bondTimeMul: 5  },
   { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110, bondTimeMul: 12 },
 ];
-let activeNebulaBondIndex = 0;
+// SHIPPED AT 'goo' (user call).  The step names are deliberately NOT
+// re-marked: `off (old)` already says which step is the pre-feature
+// behaviour, and it is one click away because the cycle wraps — so the A/B
+// against what nebula used to do is still the first press.
+//
+// KNOW THE COST BEFORE MOVING THIS.  Stretching the compose threshold keeps
+// pairs alive as pairs, and live shard population is frame time: measured
+// 28 / 75 / 307 / 597 across off / firm / strong / goo over one window.  See
+// the nebula-bonding note in CLAUDE.md §8 for the measurement and the scene
+// that produces it.
+const NEBULA_BOND_DEFAULT_INDEX = 3; // goo
+let activeNebulaBondIndex = NEBULA_BOND_DEFAULT_INDEX;
 
 export function getActiveNebulaBond(): NebulaBondStep {
   return NEBULA_BOND_CYCLE[activeNebulaBondIndex];

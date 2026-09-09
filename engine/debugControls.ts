@@ -840,8 +840,14 @@ export class DebugControls {
    * plastic already carries and nebula never had.  'strong' is plastic's own
    * shipped pair, so the two materials can be compared at the same grip.
    */
-  cycleNebulaBond() {
-    cycleNebulaBond();
+  /** Returns the new ladder INDEX.  A caller that needs to land on a
+   *  specific step cannot read `__omniStats` to check: the readout arrives
+   *  on the next stats push, so a synchronous loop over it never sees its
+   *  own clicks (measured — it wraps the ladder and lands back where it
+   *  started).  The index is the only answer available in the same tick,
+   *  and `perf/capture.mjs`'s `nebbondoff` ablation is what needs it. */
+  cycleNebulaBond(): number {
+    return cycleNebulaBond();
   }
 
   /**

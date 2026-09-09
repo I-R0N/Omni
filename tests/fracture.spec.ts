@@ -3654,19 +3654,21 @@ test.describe('chip dust', () => {
     expect(r).not.toBeNull();
     // The run has to have actually chipped, or "dust appeared" is vacuous.
     expect(r!.chips).toBeGreaterThan(10);
-    // THE BUG: pre-fix this was exactly 0.  Dust is POOLED now — banked
-    // per chip and thrown every `getChipDustPool()` chips — so assert a
-    // rate rather than a count, and one well under the chip count: the
-    // pooling exists because a puff on every chip reads as a cloud
-    // trailing the player AND makes each one a speck.
+    // THE BUG: pre-fix this was exactly 0.  Assert a RATE rather than a
+    // count, and bound it only from ABOVE by the chip count — dust is
+    // banked per chip and thrown every `getChipDustPool()` chips, and the
+    // shipped pool is 1, so at the default there is about one puff per
+    // chip.  A tighter bound here would encode the shipped step, which is
+    // a play-test call that has already moved once; the pooling ARITHMETIC
+    // is pinned by its own test below, against explicit steps.
     expect(r!.dust).toBeGreaterThan(2);
-    expect(r!.dust * 2).toBeLessThan(r!.chips);
+    expect(r!.dust).toBeLessThanOrEqual(r!.chips);
     // A PUFF IS SIZED OFF THE MATERIAL THAT CAME OFF, and can never
     // exceed the body that shed it.  The bank is an area and it empties
-    // every pool, so the biggest puff a 36px tile can throw is the ~6
-    // grains of one pool — about 0.6 of the tile — not the tile itself.
-    // Sizing off the PARENT (as the legacy per-hit puff did) is what this
-    // still catches: that put a full-tile cloud behind every chip.
+    // every pool, so even at the ladder's deepest step the biggest puff a
+    // 36px tile can throw is well under the tile.  Sizing off the PARENT
+    // (as the legacy per-hit puff did) is what this still catches: that
+    // put a full-tile cloud behind every chip.
     expect(r!.maxDustSize).toBeLessThan(r!.tileSize * 0.8);
 
     console.log(`[chip dust] ${r!.tiles} glass tiles, ${r!.chips} chips ->`
@@ -4216,25 +4218,31 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
       };
     });
 
+    // BOTH batches dial to a NAMED step; neither relies on the shipped
+    // default.  The default is a play-test call that has already moved once
+    // (pooled → per-chip), and a test that reads it as one of its two arms
+    // silently compares a step against itself the day it moves again.
+    // The readout marks whichever step ships, so match the NUMBER, not the
+    // whole label.
+    const dialPool = async (want: number) => {
+      const isStep = (n?: string) => new RegExp('^' + want + '\\b').test(n ?? '');
+      for (let i = 0; i < 12; i++) {
+        if (isStep((await stats(page)).chipDustPoolName)) break;
+        await engine(page, e => e.dbg.cycleChipDustPool());
+        await page.waitForTimeout(40);
+      }
+      expect(isStep((await stats(page)).chipDustPoolName),
+        `the ladder carries a pool of ${want}`).toBe(true);
+    };
+
     const shippedName = (await stats(page)).chipDustPoolName;
+    await dialPool(6);
     const pooled: number[] = await page.evaluate(
       () => (window as any).__dustBatch('pooled', 24, 3000));
 
-    // Walk the ladder round to 1 — the per-chip behaviour this replaced —
-    // and CONFIRM the step off the readout rather than trusting a fixed
-    // number of clicks to land there.
-    // The readout marks whichever step ships, so match the NUMBER rather
-    // than the whole label — otherwise moving the shipped default would
-    // fail this on its caption instead of on its behaviour.
-    const isPerChip = (n?: string) => /^1\b/.test(n ?? '');
-    for (let i = 0; i < 12; i++) {
-      if (isPerChip((await stats(page)).chipDustPoolName)) break;
-      await engine(page, e => e.dbg.cycleChipDustPool());
-      await page.waitForTimeout(40);
-    }
-    expect(isPerChip((await stats(page)).chipDustPoolName),
-      'the ladder carries the per-chip step as its own negative control').toBe(true);
-
+    // Pool 1 IS the per-chip behaviour, and the ladder's own negative
+    // control for everything asserted below.
+    await dialPool(1);
     const perChip: number[] = await page.evaluate(
       () => (window as any).__dustBatch('perchip', 24, 5000));
 
@@ -4244,6 +4252,8 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
     const area = (a: number[]) => a.reduce((x, y) => x + y * y, 0);
 
     expect(shippedName, 'the shipped step is marked in the readout').toMatch(/\(ships\)/);
+    expect(shippedName, 'and the shipped step is a real rung of this ladder')
+      .toMatch(/^(1|2|4|6|9|14)\b/);
     expect(pooled.length, 'the pooled batch still throws dust').toBeGreaterThan(10);
     expect(perChip.length).toBeGreaterThan(10);
 

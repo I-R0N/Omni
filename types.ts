@@ -2048,7 +2048,8 @@ export interface EngineStats {
   // tile/shard blend alphas.  Default true.
   plasticBlendEnabled?: boolean;
   // DBG stiffness step for the nebula-shard velocity stretch
-  // (VEL_STRETCH_K_CYCLE name).  off → soft → med → firm → stiff.
+  // (VEL_STRETCH_K_CYCLE name): off / 0.010 (ships) / 0.05 / 0.07 /
+  // 0.085 / 0.10.
   nebulaStretchName?: string;
   /** DBG readout: the nebula sprite-oversize A/B step (NEBULA_SPRITE_CYCLE). */
   nebulaSpriteName?: string;

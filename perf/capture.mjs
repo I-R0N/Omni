@@ -98,6 +98,21 @@ const ABLATIONS = {
   // per-entity work.  Note this flips the fracture mode GLOBALLY, so read it
   // only on a nebula-only scene.
   nebshatterlegacy: `() => { window.__omniEngine.dbg.cycleFractureMode(); }`,
+  // Walk the nebula-bond ladder back to 'off (old)' — the pre-feature
+  // compose threshold.  Difference = what SHIPPING 'goo' costs, which is
+  // the number CLAUDE.md's nebula-bonding note requires beside any step
+  // above `firm`: stretching the threshold keeps pairs alive as pairs, and
+  // live shard population is frame time.  Reads the DBG readout rather
+  // than clicking a fixed number of times, so it survives a re-ordered
+  // ladder; give it a moment, since the readout arrives on a stats push.
+  nebbondoff: `() => {
+    const e = window.__omniEngine;
+    // Step until the ladder reports index 0 ('off (old)').  The RETURNED
+    // index is the only reading available inside one tick — __omniStats
+    // updates on the next stats push, so a loop reading it would wrap the
+    // ladder and land back on the shipped step.
+    for (let i = 0; i < 8 && e.dbg.cycleNebulaBond() !== 0; i++) {}
+  }`,
   // Keep React, cut the payload build: isolates the cost of assembling the
   // ~120-field stats object (and its nested snapshots) from the cost of
   // React consuming it.
