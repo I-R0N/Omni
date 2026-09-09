@@ -108,6 +108,15 @@ export function engine<R, A = undefined>(
 /** Poll `pred` against successive stats payloads until it holds.
  *  ALWAYS use this instead of a fixed wait: the sim's clock is not the
  *  wall clock here. */
+/** THE PREDICATE RUNS IN THE PAGE, NOT IN NODE.  It is shipped across as
+ *  `pred.toString()` and rebuilt with `new Function`, so it may reference
+ *  ONLY its own argument and page globals — a closure over a test-side
+ *  constant is `undefined` in there, the predicate throws, and the wait
+ *  times out on a condition that was true all along.  That is a silent trap
+ *  and it has been paid for: two `waitForStats` calls closing over module
+ *  constants turned six green module tests red with "timed out waiting for".
+ *  Inline the literal, or use `dialByName`/`waitForStatsKeyChange`, which
+ *  compare in NODE. */
 export async function waitForStats(
   page: Page,
   pred: (s: EngineStats) => boolean,
@@ -291,23 +300,60 @@ export async function quietScene(page: Page) {
 export async function dialByName(
   page: Page,
   statsKey: string,
-  label: string,
+  label: string | ((v: string) => boolean),
   click: (e: Engine) => void,
   steps: number,
 ): Promise<void> {
   const read = () => page.evaluate(
     k => (window as unknown as { __omniStats?: Record<string, unknown> }).__omniStats?.[k],
     statsKey) as Promise<unknown>;
+  // A PREDICATE, not just an exact string.  Several readouts mark the SHIPPED
+  // step with a suffix ("1 (ships)", "1.25x (ships)"), so a caller that wants
+  // a specific rung has to match the NUMBER — otherwise moving a default
+  // fails the test on its caption instead of on its behaviour, which is a
+  // thing that has actually happened here more than once.
+  const hit = (v: unknown) => typeof label === 'function'
+    ? typeof v === 'string' && label(v)
+    : v === label;
   for (let i = 0; i <= steps; i++) {
     const now = await read();
-    if (now === label) return;
+    if (hit(now)) return;
     await engine(page, click as (e: Engine) => void);
+    // WAIT for the readout to move before clicking again.  `__omniStats` is
+    // republished by the rAF loop, so deciding the next click from a value
+    // read in the same breath as the last one over-clicks and walks straight
+    // past the wanted step.  This is THE race that bit `useScanner` and the
+    // pierce-decay dial in full-suite runs; every dial belongs here.
     for (let f = 0; f < 40; f++) {
       if (await read() !== now) break;
       await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r(null))));
     }
   }
-  throw new Error(`could not reach ${statsKey} "${label}"`);
+  throw new Error(`could not reach ${statsKey} "${String(label)}"`);
+}
+
+/** Wait until one `EngineStats` readout STOPS equalling `from`.
+ *
+ *  The comparison happens in NODE, so `from` may be any value the test has
+ *  to hand — which is the whole point: the equivalent `waitForStats`
+ *  predicate would have to close over it and would silently never fire (see
+ *  the note on that function).  Use this for "the knob moved off whatever it
+ *  was" and `dialByName` for "the knob reached this step". */
+export async function waitForStatsKeyChange(
+  page: Page,
+  statsKey: string,
+  from: unknown,
+  what: string,
+  frames = 90,
+): Promise<void> {
+  const read = () => page.evaluate(
+    k => (window as unknown as { __omniStats?: Record<string, unknown> }).__omniStats?.[k],
+    statsKey) as Promise<unknown>;
+  for (let f = 0; f < frames; f++) {
+    if (await read() !== from) return;
+    await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r(null))));
+  }
+  throw new Error(`timed out waiting for: ${what}`);
 }
 
 /** Put the player next to a station of `kind` and dock.  Flies nothing —
@@ -374,5 +420,11 @@ export async function useScanner(page: Page): Promise<void> {
   // record of what has been discovered), so confirm the flip actually landed
   // rather than assuming it — a silent no-op here would make every scanner
   // assertion below it meaningless.
-  expect(await revealed()).toBe(false);
+  //
+  // WAIT for it rather than reading once.  `__omniStats` is republished by
+  // the rAF loop, so a read taken in the same breath as the toggle can still
+  // carry the pre-toggle payload — which is not a no-op, it is a race, and it
+  // failed a full-suite run on a loaded machine while the product was fine.
+  await waitForStats(page, s => s.scanRevealAll !== true,
+    'the scan reveal to switch off');
 }

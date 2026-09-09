@@ -36,7 +36,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats } from './helpers';
+import { boot, dialByName, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats, waitForStatsKeyChange } from './helpers';
 
 /** WEAPONS[BOUNCER].pierce and the falloff cycle, hard-coded (harness rule:
  *  a test that imports the constant it is checking pins nothing).
@@ -131,10 +131,14 @@ function isolate(page: any, group: 'ship' | 'weapon', rootId: string, modId: str
 /** Turn the decay ON.  It SHIPS OFF, so a test about the curve has to click
  *  the DBG cycle once — index 0 is the shipped 0, index 1 is 0.05. */
 async function decayOn(page: any) {
-  await engine(page, e => { e.dbg.cyclePierceFalloff(); });
-  const s = await stats(page);
-  expect(s.pierceFalloffName, 'one click reaches the first real rate')
-    .toBe(FIRST_CLICK_RATE.toFixed(2));
+  // WAIT for the readout rather than reading it once.  `__omniStats` is
+  // republished by the rAF loop, so a read taken in the same breath as the
+  // click that changes it can still carry the pre-click payload — measured
+  // failing a full-suite run with "off (full dmg, def)", the value from
+  // BEFORE the click, while the cycle itself was fine.  That is a race in
+  // the harness, not a knob that did not move.
+  await dialByName(page, 'pierceFalloffName', FIRST_CLICK_RATE.toFixed(2),
+    e => e.dbg.cyclePierceFalloff(), 1);
 }
 
 // ── A3 — Penetration ────────────────────────────────────────────────────────
@@ -661,9 +665,11 @@ test.describe('penetration module', () => {
       .toBeCloseTo(900, 6);
 
     await engine(page, e => e.dbg.cyclePierceSpeedRetain());
-    const stepped = await stats(page);
-    expect(stepped.pierceSpeedRetainName, 'the cycle moves off the default')
-      .not.toBe(shipped.pierceSpeedRetainName);
+    // Wait for the readout to move; reading it in the same breath as the
+    // click can still return the pre-click payload.  Compared in NODE, since
+    // a `waitForStats` predicate cannot close over `shipped`.
+    await waitForStatsKeyChange(page, 'pierceSpeedRetainName',
+      shipped.pierceSpeedRetainName, 'the retain cycle to move off the default');
     const slowed = await retained();
     expect(slowed, 'and the bolt now leaves the body slower').toBeLessThan(900);
     expect(slowed, 'by exactly one step of the cycle').toBeCloseTo(900 * 0.95, 6);

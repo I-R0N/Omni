@@ -37,7 +37,7 @@
  *  `quietScene` stops the fauna and the ladder; it does not touch shards or
  *  tiles, so no assertion here changes meaning. */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
+import { boot, dialByName, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
@@ -2621,6 +2621,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
         for (let i = 0; i < p.length; i++) { const q = p[i], n = p[(i + 1) % p.length];
           a += q.x * n.y - n.x * q.y; } return Math.abs(a / 2); };
       const out: any[] = [];
+      const seen = new Set<string>();
       for (const t of ents.filter((x: any) => x.active
           && x.shardVariant === 'plastic-tile' && x.mass === Infinity).slice(0, 8)) {
         e.player.position.x = t.position.x + 6000;
@@ -2639,11 +2640,24 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
           const fresh = ents.filter((x: any) => x.active && !before.has(x.id)
-            && x.shardVariant === 'plastic-shard' && x.dentRecoverTimer !== undefined);
+            && x.shardVariant === 'plastic-shard' && x.dentRecoverTimer !== undefined
+            && !seen.has(x.id));
           if (fresh.length > 0) {
             const c = fresh[0];
+            seen.add(c.id);
             const atBreak = area(c.polygonPoints);
             const rest = area(c.dentRestPolygon);
+            // A DEFORMED fragment is the PRECONDITION, not the finding.  A
+            // grain can legitimately come away barely dented — nothing floors
+            // how much deformation a break must carry — and the springback
+            // claims below say nothing about such a piece.  Taking whichever
+            // fragment happened to appear first and asserting it was squashed
+            // is the premise error the bubbles and recoil flakes were: it
+            // failed 2 full-suite runs with the product perfectly correct.
+            // Skipping undeformed candidates cannot hide a regression, because
+            // "deformation never happens" then yields NO rows and the
+            // `r.length > 0` assertion catches it.
+            if (atBreak >= rest * 0.99) continue;
             const samples: number[] = [];
             for (let i = 0; i < 200; i++) {
               e.shards.update(ents, 1 / 60, e.physics, false);
@@ -2660,11 +2674,13 @@ test.describe('deformation is bounded, conserving and elastic', () => {
       return out;
     });
 
-    expect(r.length).toBeGreaterThan(0);
+    // Deformed fragments EXIST — before this, a fragment was spawned at the
+    // cut size no matter how squashed its grain was, so this count would be
+    // zero.  That is where the "it came away deformed" claim now lives; the
+    // per-row assertion moved into the selection above, since a fragment that
+    // is not deformed has no springback to make claims about.
+    expect(r.length, 'at least one fragment breaks off deformed').toBeGreaterThan(0);
     for (const row of r) {
-      // It came away DEFORMED — smaller than the shape its grain was cut
-      // at.  Before this the fragment was spawned at the cut size no
-      // matter how squashed the grain was.
       expect(row.atBreak).toBeLessThan(row.rest * 0.99);
       // ...and relaxes back, monotonically and in time order...
       expect(row.mid[0]).toBeGreaterThan(row.atBreak);
@@ -3976,15 +3992,12 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
       // CALIBRATION, not about whatever step happens to ship.  It shipped at
       // 1x when this was written and now ships at 1.25x, which would have
       // failed this on the default rather than on the rule.  Match the
-      // NUMBER: the readout marks the shipped step with a suffix.
-      const isBase = (n?: string) => /^1x\b/.test(n ?? '');
-      for (let i = 0; i < 8; i++) {
-        if (isBase((await stats(page)).nebulaSpriteName)) break;
-        await engine(page, e => e.dbg.cycleNebulaSpriteSize());
-        await page.waitForTimeout(40);
-      }
-      expect(isBase((await stats(page)).nebulaSpriteName),
-        'the oversize ladder carries a 1x step').toBe(true);
+      // NUMBER: the readout marks the shipped step with a suffix.  Dialled
+      // through the shared helper, which waits for the readout to MOVE before
+      // clicking again — deciding the next click from a stale `__omniStats`
+      // over-clicks and walks straight past the wanted step.
+      await dialByName(page, 'nebulaSpriteName', (n: string) => /^1x\b/.test(n),
+        (e: any) => e.dbg.cycleNebulaSpriteSize(), 6);
 
       const r: any = await breakTiles(page, 20);
 
@@ -4240,16 +4253,10 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
     // silently compares a step against itself the day it moves again.
     // The readout marks whichever step ships, so match the NUMBER, not the
     // whole label.
-    const dialPool = async (want: number) => {
-      const isStep = (n?: string) => new RegExp('^' + want + '\\b').test(n ?? '');
-      for (let i = 0; i < 12; i++) {
-        if (isStep((await stats(page)).chipDustPoolName)) break;
-        await engine(page, e => e.dbg.cycleChipDustPool());
-        await page.waitForTimeout(40);
-      }
-      expect(isStep((await stats(page)).chipDustPoolName),
-        `the ladder carries a pool of ${want}`).toBe(true);
-    };
+    const dialPool = (want: number) => dialByName(
+      page, 'chipDustPoolName',
+      (n: string) => new RegExp('^' + want + '\\b').test(n),
+      (e: any) => e.dbg.cycleChipDustPool(), 7);
 
     const shippedName = (await stats(page)).chipDustPoolName;
     await dialPool(6);

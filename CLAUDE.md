@@ -70,8 +70,9 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           modules (the Phase-A module families:
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
-                          handles) and README.md (suite map + the
-                          anti-flake rules).  387 tests.  All run at
+                          handles) and README.md (suite map + the 13
+                          anti-flake rules — read 9, 12 and 13 before
+                          writing a DBG-knob test).  387 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
