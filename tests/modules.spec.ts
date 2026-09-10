@@ -36,7 +36,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
+import { boot, dialByName, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats, waitForStatsKeyChange } from './helpers';
 
 /** WEAPONS[BOUNCER].pierce and the falloff cycle, hard-coded (harness rule:
  *  a test that imports the constant it is checking pins nothing).
@@ -131,10 +131,14 @@ function isolate(page: any, group: 'ship' | 'weapon', rootId: string, modId: str
 /** Turn the decay ON.  It SHIPS OFF, so a test about the curve has to click
  *  the DBG cycle once — index 0 is the shipped 0, index 1 is 0.05. */
 async function decayOn(page: any) {
-  await engine(page, e => { e.dbg.cyclePierceFalloff(); });
-  const s = await stats(page);
-  expect(s.pierceFalloffName, 'one click reaches the first real rate')
-    .toBe(FIRST_CLICK_RATE.toFixed(2));
+  // WAIT for the readout rather than reading it once.  `__omniStats` is
+  // republished by the rAF loop, so a read taken in the same breath as the
+  // click that changes it can still carry the pre-click payload — measured
+  // failing a full-suite run with "off (full dmg, def)", the value from
+  // BEFORE the click, while the cycle itself was fine.  That is a race in
+  // the harness, not a knob that did not move.
+  await dialByName(page, 'pierceFalloffName', FIRST_CLICK_RATE.toFixed(2),
+    e => e.dbg.cyclePierceFalloff(), 1);
 }
 
 // ── A3 — Penetration ────────────────────────────────────────────────────────
@@ -661,9 +665,11 @@ test.describe('penetration module', () => {
       .toBeCloseTo(900, 6);
 
     await engine(page, e => e.dbg.cyclePierceSpeedRetain());
-    const stepped = await stats(page);
-    expect(stepped.pierceSpeedRetainName, 'the cycle moves off the default')
-      .not.toBe(shipped.pierceSpeedRetainName);
+    // Wait for the readout to move; reading it in the same breath as the
+    // click can still return the pre-click payload.  Compared in NODE, since
+    // a `waitForStats` predicate cannot close over `shipped`.
+    await waitForStatsKeyChange(page, 'pierceSpeedRetainName',
+      shipped.pierceSpeedRetainName, 'the retain cycle to move off the default');
     const slowed = await retained();
     expect(slowed, 'and the bolt now leaves the body slower').toBeLessThan(900);
     expect(slowed, 'by exactly one step of the cycle').toBeCloseTo(900 * 0.95, 6);
@@ -782,6 +788,9 @@ test.describe('scanner module', () => {
     await startRun(page);
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
     await page.waitForTimeout(400);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+    // this suite has to switch the subsystem it tests back on.
+    await useScanner(page);
 
     // Park well clear of EVERY contact.  NATURAL ENCOUNTER is deliberately
     // not scanner-gated, so a test about what a scannerless ship can see has
@@ -1027,7 +1036,12 @@ test.describe('scanner module', () => {
     expect(second, 'the second press is refused while the cooldown runs').toBe(false);
 
     // The stat the HUD button reads agrees with the engine that refused it.
-    const st = await stats(page);
+    // WAIT for the payload rather than reading it once: the engine wait above
+    // returns on LIVE state, while `stats` is the last PUSHED snapshot, and
+    // `scanner` is published conditionally — so a one-frame lag shows up as
+    // `undefined` rather than as a wrong number (README rule 12).
+    const st = await waitForStats(page, s => s.scanner?.mk === 3,
+      'the payload to carry the Mk III scanner');
     expect(st.scanner?.cooldown ?? 0).toBeGreaterThan(0);
     expect(st.scanner?.mk).toBe(3);
 
@@ -1039,6 +1053,9 @@ test.describe('scanner module', () => {
       const watch = await boot(page);
       await startRun(page);
       await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       // A rift the player has never been near: not found, not on the map.
       await parkAwayFromContacts(page);
@@ -1097,6 +1114,9 @@ test.describe('scanner module', () => {
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       await engine(page, e => { e.resetOutfit(); e.debugSpawnRival('neutral'); });
       await waitForEngine(page, e =>
@@ -1139,11 +1159,18 @@ test.describe('scanner module', () => {
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       // Mk I is fully manual — auto-tracking is what a mark buys.
       await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk1'); });
       await waitForEngine(page, e => e.scannerMk === 1, 'Mk I');
-      const mk1 = await stats(page);
+      // Wait for the PAYLOAD to carry it — see rule 12.  `autoCapable` is
+      // asserted `false`, and a lagging payload gives `undefined`, which is
+      // not false and fails for the wrong reason.
+      const mk1 = await waitForStats(page, s => s.scanner?.mk === 1,
+        'the payload to carry the Mk I scanner');
       expect(mk1.scanner?.autoCapable, 'Mk I cannot auto-scan').toBe(false);
       // …so the pause-menu switch does not render for it either.
       await page.waitForTimeout(300);
@@ -1152,7 +1179,8 @@ test.describe('scanner module', () => {
 
       await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk3'); });
       await waitForEngine(page, e => e.scannerMk === 3, 'Mk III');
-      expect((await stats(page)).scanner?.autoCapable).toBe(true);
+      expect((await waitForStats(page, s => s.scanner?.mk === 3,
+        'the payload to carry the Mk III scanner')).scanner?.autoCapable).toBe(true);
 
       // Plant a contact and let the background sweep find it WITHOUT any
       // press.  The sweep is driven directly rather than waited out: its

@@ -70,8 +70,9 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           modules (the Phase-A module families:
                           Penetration, Scanner, hex slots),
                           helpers.ts (the shared harness over the debug
-                          handles) and README.md (suite map + the
-                          anti-flake rules).  374 tests.  All run at
+                          handles) and README.md (suite map + the 13
+                          anti-flake rules — read 9, 12 and 13 before
+                          writing a DBG-knob test).  387 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -319,7 +320,12 @@ perf/                     Headless capture harness (gauntlet 5c) —
                           capture.mjs (scene matrix: worst-frame / p99 /
                           allocation attribution), simbench.mjs (low-noise
                           ms-per-sim-substep), probe.mjs (targeted in-page
-                          micro-probes), scenes.mjs, README.md.
+                          micro-probes), impact-audit.mjs (what a weapon's
+                          authored `damage` is worth in ENERGY and MOMENTUM
+                          against each material's DERIVED HP, and what the
+                          crash gates correspond to in the same units —
+                          step 1 of the unified-impact sequencing),
+                          scenes.mjs, README.md.
                           Deliberately NOT part of `npm test`: runs take
                           minutes and are noise-prone; the test suite is a
                           merge gate.  Read perf/README.md before quoting
@@ -990,7 +996,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
-  twinkle scheduling)
+  twinkle scheduling; `SPRITE_OVERSIZE` — how far a cloud sprite
+  overhangs the body it belongs to, with `nebulaSpriteSize()` beside it
+  as the ONE definition both render sites call, and
+  `NEBULA_SPRITE_CYCLE` as its live DBG A/B)
 - `SHARD_VARIANTS` — per-variant regen / merge / shatter / fracture /
   dent / repel / glow / automata / passThrough / renderCache policy.
   Source of truth for the shard-family behaviour table.  11 variants
@@ -1033,7 +1042,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Opted in today: ALL FOUR
   breakable materials — rock-tile / rock-shard and glass-tile /
   glass-shard (V10, user call: glass takes rock's breaking behaviour),
-  plus metal-tile and plastic-tile / plastic-shard (A3).  Metal is the
+  plus metal-tile and plastic-tile / plastic-shard (A3) — and NEBULA,
+  which takes the GEOMETRY ONLY (see §8).  Nebula's row is
+  `grainSize` **20** / 3 / 14 / regularity **0.15** / `sizeSpread` **0.6**
+  and NO `bondStrength`: the raggedest and most size-varied pattern in
+  the game, and the only one that opts out of the damage layer.  Its grain
+  size is the one number in the table set by a PERF measurement rather than
+  a look: see the nebula grain-size note in §8.  Metal is the
   fine-grained, near-honeycomb, hardest material and its grain size AND
   bond strength both track `densityTier`, so a plate's brightness reads
   its toughness; plastic is large-grained, loosely regular and DEFORMS
@@ -1842,6 +1857,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   whether there is anything to draw it for — the cycle cannot be a dev
   override that forces the layer on, because its shipped default is
   already 'dots' and that would make the material reveal free.
+  **ALL OF THAT IS LIVE IN A SHIPPED RUN** — `activeScanRevealAll` defaults
+  to FALSE, so a fresh run runs the discovery walk and the auto sweep and its
+  minimap fills in as the player meets things.  It BRIEFLY SHIPPED BYPASSED
+  (defaulting TRUE, drawing the whole map and skipping the periodic work) and
+  was put back (user call), and the reason is the thing to keep: revealing
+  everything takes away the half of the SCANNER module that makes a mark
+  worth buying, leaving it selling off-screen arrows and the pressed ping but
+  not the MAP.  Anything tuning scanner economics needs the reveal off, which
+  is now simply the default.
+  The DBG ▸ Visual ▸ "Scan off" row still switches the whole subsystem off in
+  exchange for a fully drawn minimap, and it is kept as a PERF A/B rather than
+  as a gameplay knob: the scanner does real continuous work, and a
+  frame-rate report needs a way to take all of it away without also taking
+  the minimap away.  `tests/helpers.ts` `useScanner(page)` remains the seam
+  every scanner suite calls — idempotent, so with the reveal off by default
+  it now checks and does nothing rather than flipping.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -2457,13 +2488,71 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   all).  `GRAIN_CHIP_DUST` restores it at the detach seam for EVERY grain
   material, tinted to the body's own colour (rock keeps
   `randomRockNebulaComposition` and the `fromRock` flag that lets its dust
-  condense back into a rock-shard).  Two things are deliberate: the
-  `CHANCE` gate exists because every detach now makes a chip and a puff on
-  each reads as a constant cloud trailing the player — the same note the
-  legacy per-hit path carries about its own gate — and `SIZE_FRACTION` is
-  of the CHIP, not the parent, because a grain is ~12 units on a 36px tile
-  and sizing off the parent (as the legacy per-hit puff did) makes the
-  dust bigger than the piece that shed it.
+  condense back into a rock-shard).  `SIZE_FRACTION` is of the material
+  that CAME OFF, never of the parent, because a grain is ~12 units on a
+  36px tile and sizing off the parent (as the legacy per-hit puff did)
+  makes the dust bigger than the piece that shed it.
+- **AND IT IS POOLED: LARGER, LESS OFTEN — BUT IT SHIPS AT 1** (user call).
+  Pooling exists and is the whole ladder; the play-test call was to start a
+  run at the per-chip end of it, so `CHIP_DUST_DEFAULT_INDEX` is 0 and the
+  shipped look is a small puff per chip.  Everything below still describes
+  what a step UP buys, and nothing about the mechanism is bypassed at 1: the
+  bank still fills and empties every chip, so the flush, the conservation and
+  the ladder's arithmetic are all live at the default rather than dormant.
+  The history is worth keeping because it is the reason the ladder exists.
+  The first version rolled a `CHANCE` per detach and sized the puff off that
+  ONE chip, and the result was a speck — reported as "the nebula shards
+  released from chipping are very small".  It got worse rather than better as the rest
+  of the nebula work landed: a puff used to draw a FULL-TILE sprite
+  whatever its size, so the rule that sizes a cloud off its own body (see
+  the nebula-sprite note above) is what made the specks visible as specks.
+  Each detach now BANKS its chip's footprint on the body
+  (`GameEntity.grainDustArea` / `grainDustChips`) and one larger puff is
+  thrown every `getChipDustPool()` chips.  Four things to know:
+  - **BANKING AN AREA IS WHY IT IS ONE KNOB.**  Pooling N chips
+    multiplies the puff's DIAMETER by √N and divides its FREQUENCY by N
+    ALONG THE LADDER, so "bigger" and "rarer" cannot be set to contradict
+    each other the way a size knob beside a frequency knob can.  Measured
+    over 24 rock tiles a side: 24 puffs averaging 17.2 units at the
+    shipped pool of 6 against 92 averaging 8.6 at pool 1, and the
+    SMALLEST pooled puff (11.9) beats the LARGEST per-chip one (12.2) —
+    the sharp way to say the two distributions do not overlap.
+    Conservation holds ALONG THE LADDER, which is what the regression
+    asserts and is NOT the same as "unchanged from what shipped before":
+    the 0.35-per-chip ROLL this replaced threw 0.35 of a puff where pool 1
+    throws a whole one.  So at the shipped step the world carries **2.9×
+    the dust MASS** of the pre-pooling build in the SAME number of puffs —
+    the roll is gone, and a chip that used to have a 35% chance of dust now
+    always throws some.  That, not the pooling, is what changed at the
+    default; the pooling is what the ladder above 1 buys.
+  - **A SMALL TILE THROWS ITS DUST AT THE BREAK, NOT MID-LIFE — ABOVE A
+    POOL OF ABOUT 4.**  A 36px rock tile sheds only 3-4 grains before it
+    dies (measured; the rest go at death through the shatter), so past that
+    it never fills a pool and every puff comes from the DEATH FLUSH in
+    `handleEntityDeath`'s STRUCTURE branch.  At the shipped 1 the flush is
+    a no-op and every puff is mid-life.  The mid-life path is for bodies that shed many
+    grains — a 160-unit boulder sheds ~11.5 and throws two puffs
+    averaging 56 units.  Both paths are live; neither is the common case
+    for both body sizes.
+  - **THE FLUSH IS GATED, AND THAT IS THE POINT.**  A body that dies
+    mid-pool is still owed the material it shed, but flushing a one-chip
+    remainder puts back exactly the speck the pooling exists to remove —
+    so `FLUSH_MIN_FRAC` (half a pool) drops the smallest remainders.  The
+    bank is per LIFE: `ShardSystem.completeRegen` clears it, since regen
+    reuses the entity object.
+  - **`CHIP_DUST_POOL_CYCLE` (DBG ▸ Grain & Fracture ▸ "Chip dust") IS
+    THE TABLE**, not a multiplier over an authored constant — a pool is a
+    COUNT, and 6 × 1.5 is not something a ledger can hold — so the
+    shipped value lives at `CHIP_DUST_DEFAULT_INDEX` and there is no
+    second copy of it to drift.  Its step **1 IS the per-chip behaviour**,
+    and it is what SHIPS — so the ladder's negative control is also its
+    default, and `tests/fracture.spec.ts` therefore dials BOTH arms of its
+    A/B to a named step rather than letting either read the default.  A
+    test that takes the shipped default as one of its two arms compares a
+    step against itself the day that default moves, which is exactly what
+    this move would have done to it.  It bumps no
+    fracture generation, for the `damageSpread` reason: this changes what
+    a detach THROWS, not how the pattern is BUILT.
 - **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
   things happen at the seam in `progressFracture`, and two of them were
   missing:
@@ -2629,12 +2718,58 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     no arc bookkeeping and no tail case.  It returns null for a non-ring
     (an eroded body split into islands) and the arc splice stays the
     fallback.
-  Every PLAYER damage path feeds the boundaries — projectile, lightning
-  chain, shockwave ring — each stamping its own contact point via the
-  shared `stampLocalImpact`, so splash and chain damage erode from where
-  they arrived.  PHYSICAL smashes (a boulder crash, the pressure trigger)
-  still take the whole body: they meter boulders, not weapons.  DBG ▸
-  Visual ▸ "Bnd strength" is the master multiplier over every material.
+  EVERY damage path feeds the boundaries — projectile, lightning chain,
+  shockwave ring, the bubble's bite, AND the three CRASH paths (player
+  into a tile, both `killStructureByImpact` sites, the tile-pressure
+  trigger) — each stamping its own contact point via the shared
+  `stampLocalImpact`, so splash, chain, bite and crush damage all erode
+  from where they arrived.  DBG ▸ Visual ▸ "Bnd strength" is the master
+  multiplier over every material.
+- **A CRUSH SPENDS ON THE BOUNDARIES TOO, AND IT SPENDS THE SAME FRACTION
+  IT ALWAYS DID** (`PhysicsSystem.crashBoundaryDamage` /
+  `crashContactOn`; step 2 of the unified-impact sequencing in
+  docs/PARKING_LOT.md).  The crash paths used to decrement `health`
+  DIRECTLY while the boundary model rewrote `maxHealth` to the derived
+  total at the first weapon hit, so the two spoke different units and the
+  same crash was worth a wildly different fraction of a tile depending on
+  its history: SHOOTING A TILE ONCE MADE IT 4-50× HARDER TO RAM THROUGH
+  (measured through the real collision branch, `perf/impact-audit.mjs`
+  §5 — rock 9 → 50 crashes, plastic 8 → 400, metal 120 → 468).  Nothing
+  about the tile got tougher; the unit it was counted in changed.  Four
+  things hold the fix up:
+  - **HOW MUCH a crash spends is deliberately NOT kinetic.**  Making
+    impact damage an energy is step 3 of that sequencing and re-prices
+    the whole weapon roster (the implied constant is not one: 9..90 KE
+    per point of damage across the shipped guns, a 10× spread).  This is
+    ROUTING only, so a crash spends one authored HP expressed in the
+    derived budget (`maxHealth / authoredMaxHealth`), which keeps every
+    ram count exactly what it shipped as and makes virgin and once-shot
+    identical.
+  - **THE CONTACT POINT IS ON THE HULL, not the impactor's centre.**
+    Both halves of the grain model read it — the spend pours from it and
+    the harvest orders its candidates by distance to it — and a 460-unit
+    boulder's centre sits a couple of hundred units outside the 36px tile
+    it is crushing.  `crashContactOn` puts it on the target's surface
+    along the MTV normal, and the SAME point is handed to `onDamage`,
+    where `progressFracture` re-stamps.
+  - **THE LAST CRASH OVERSPENDS.**  `spendOnBoundaries` saturates each
+    boundary exactly and returns only what it could absorb, so asking for
+    more than is left is harmless — and is the only way to land on a
+    clean zero.  A spend that lands exactly on the final boundary leaves
+    a one-ULP residue (measured 8.9e-16 on rock's ninth crash) and
+    `health <= 0` then reads false, costing one phantom extra ram.
+  - **A BODY WITH NO GRAIN MODEL STILL BREAKS.**  Indestructible, nebula
+    and every variant under the DBG legacy fracture A/B fall back to the
+    whole-body decrement.  This is where the crash paths differ from
+    `GameEngine.chipStructureAt`, which refuses such a body outright:
+    that is the chip path and may do nothing, a crash may not.
+  The GLASS rule (V9) is unchanged in meaning and now runs THROUGH the
+  model rather than around it: a hull or a boulder over the crash
+  threshold spends the pane's entire remaining boundary budget, so it
+  still dies in one and still shatters along the cells its cracks were
+  drawn from.  Score attribution is untouched — `killedByPlayer` is still
+  set only by the player's own crash, so ambient destruction pays
+  nothing.
 - **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
   "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
   the body-level penetration rule spent one charge to carry a bolt through
@@ -2941,6 +3076,264 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
   (angular momentum in the impulse solver, off-centre impact torque) are
   parked for their own session — docs/PARKING_LOT.md.
+- **A MATERIAL'S DRAG IS DECLARED ON ITS SPAWN SHAPE, or the material has
+  no drag at all.**  PhysicsSystem's custom-damping branch is gated on the
+  entity carrying a `linearDamping` FIELD, and a STRUCTURE without one
+  matches neither that branch nor the player/enemy/POI branch under it — so
+  it free-drifts with NO friction and NO rest-snap.  The generic child
+  recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the
+  fragment, which makes `SHARD_SPAWN_SHAPE_*` the ONE place a material says
+  how draggy it is.  `SHARD_SPAWN_SHAPE_NEBULA` used to NAME both damping
+  fields in its own comment without declaring them, and that was invisible
+  for as long as nebula shattered only through `shatterNebulaStyle` — which
+  hardcodes the same `NEBULA_CONSTANTS` locally, as the DropSystem dust path
+  still does.  Routing nebula through the shared voronoi recipe made every
+  puff undamped (measured: 311 of 311 live shards with `linearDamping ===
+  undefined`) and took the DBG "Neb damp" knob with it, since that knob is
+  read INSIDE the branch that was never entered.  The lesson generalises: a
+  knob applied at the read is only as live as the branch it is read in, so
+  "the knob does nothing" is first a question about whether the branch runs.
+- **NEBULA'S TWO DRAG KNOBS ARE SEPARATE BECAUSE THE COMPLAINTS ARE.**
+  `nebulaDampingFor` (DBG "Neb damp") and `nebulaSpinDampingFor` (DBG "Neb
+  spin damp") are both a multiplier on the per-step velocity LOSS — `1 - d`
+  going up, so the ladder is a plain number line and 2x really is twice the
+  drag — but linear drag decides how far a puff TRAVELS after a kick while
+  spin decay decides how long it TUMBLES where it sits, and a cloud that
+  slides to a halt still pinwheeling can only be diagnosed by moving them
+  apart.  The spin ladder's index 0 is `match`, which DEFERS to the linear
+  knob: that is the shipped behaviour (one knob moved both halves), so an
+  untouched build is unchanged and the first click is the A/B.
+- **EVERY PER-FRAME RENDER BUCKET IS POOLED, AND THE MINIMAP ONE WAS NOT.**
+  `RenderSystem.pushSlot` exists because pushing a fresh `{entity, rx, ry}`
+  literal per visible entity was measured as the dominant driver of the
+  periodic GC pauses that read as tail-frame hitches — the note beside the
+  pools says so.  `_minimapBuffer` was left out of it for a mundane reason:
+  its slot carries `{dx, dy, detect}` rather than `{rx, ry}`, so it did not
+  fit the shared helper, and it went on allocating a literal per entity per
+  frame.
+  That was survivable only because the buffer held DISCOVERED structures
+  alone.  It stopped being survivable during the window when the scan reveal
+  shipped ON, since every structure inside `MINIMAP_CONSTANTS.RANGE` then
+  reaches the buffer: measured on OVERWORLD **while flying**, 805 KB/frame
+  with the reveal up against 590 with it off — and the pauses that buys are
+  exactly the symptom the pooling was introduced to remove.  The reveal is
+  off again by default, so a shipped run is back to the lower figure, but the
+  pooling STAYS: the DBG row still puts the buffer under the higher one on
+  demand, and the rule below does not depend on which default is current.
+  `pushMinimapSlot` is the
+  same contract for that shape.  The rule generalises: a NEW per-frame bucket
+  is pooled, or it is a GC regression waiting for the day something makes it
+  hot.
+  Two things to know before chasing this further.  A HITCH is not a p99 —
+  `perf/capture.mjs` reports the steady state, and a healthy p99 can hide a
+  stall every second, so `perf/spike.mjs` reports the SERIES instead (outlier
+  frames, their spacing, and whether sim, render or the RESIDUAL dominates
+  them; residual is GC and rasterisation, which making the sim faster cannot
+  help).  And `hub-idle` cannot see any of it: a parked camera never
+  re-culls, never re-stamps the static tile cache and never scrolls the star
+  field, which is why `hub-move` exists.
+- **NEBULA'S GRAIN SIZE IS SET BY FRAME TIME, AND THE LEVER IS `grainSize`
+  RATHER THAN `grainCountMax`** (user call).  Giving nebula the voronoi
+  shatter cost frame time through sheer ENTITY COUNT, and the cost is
+  SUPERLINEAR: on the `nebula-storm` perf scene `sim/stp99` ran 3.60 at the
+  original `grainSize` 14 against 2.00 with the legacy shatter — +80% per
+  substep for +25% entities — with heap churn 676 vs 432 KB/frame.  Two
+  findings are worth keeping because both were counter-intuitive:
+  - **`grainCountMax` is the wrong knob.**  The cap rarely binds — the count
+    is really set by `grainSize` against body area — so dropping it 14 → 8
+    recovered almost nothing (3.60 → 3.35).
+  - **The uncadenced `PhysicsSystem.resolveNebulaShardTilePairs` is NOT the
+    cause**, which was the obvious suspicion since it is the one broadphase
+    pass with no PerfController cadence behind it.  Ablating it made things
+    slightly WORSE (4.45), because shards then stop being pushed clear of
+    tiles and the population grows.  Do not revive that theory without new
+    evidence.
+  `grainSize` 20 lands exactly on the legacy floor (2.00, 1358 ents) while
+  keeping most of what the voronoi change bought — 3.95 children per tile
+  and a 3.07× size spread, against 7.7 / 4.02× at 14 and ~2-3 children with
+  NO parent-related size variety at all on legacy.  26 buys nothing further,
+  so 20 is the knee.  Size VARIETY is `sizeSpread` and `regularity`, which
+  this does not touch; what a larger grain gives up is the NUMBER of pieces.
+  `perf/scenes.mjs` carries the scene and `perf/capture.mjs` the three
+  nebula ablations (`nebtilepass`, `nebshatterlegacy`, `nebbondoff`) that
+  sized each cause.
+  IT ALSO MOVED TWO TEST MARGINS, which is the part that was missed: the
+  nebula fracture suite asserted `min children > 3` and a `> 2.5` size
+  spread against the grain-14 yield (7.7 children, 4.02× spread), and at
+  grain 20 (3.95 / 3.07×) both sat ON the boundary — measured failing 3
+  runs in 8 with the product perfectly correct.  A default that moves a
+  measured quantity has to be walked past the assertions written against
+  it; a floor is not a claim unless there is margin under it.
+- **NEBULA'S VELOCITY STRETCH SHIPS AT THE TOP OF ITS LADDER, 0.10** (user
+  call).  `VEL_STRETCH_K_CYCLE` maps a shard's speed to how far its sprite
+  squashes along its own velocity; 0.085 used to ship and the play-tested
+  answer is the step above it, the most stretch the ladder offers, so a
+  moving puff reads as drawn out along its travel.  Because it is the TOP,
+  the cycle WRAPS to `off` on the first click — the A/B against no stretch
+  at all is one press away, which is the same property index 0 gives every
+  other ladder.  Presentation only: the squash axis follows velocity while
+  the sprite keeps its own rotation, and nothing in the sim reads it.
+- **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
+  call; `goo` is what SHIPS, and `off (old)` is one click away because the
+  cycle wraps, so the A/B against pre-feature nebula is still the first
+  press).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
+  the contact threshold and one new body appears — so at the shipped ~5 s
+  (scaled by pair size) the DBG "Neb bond" cohesion and break multipliers
+  barely get to act, and the harder they grip the sooner the pair holds
+  together well enough to vanish into a merge.  That is why the top step
+  read as changing nothing (user report).  `bondTimeMul` stretches the
+  THRESHOLD instead: the pair sticks and moves as one for as long as the
+  multiplier says, and then it still coalesces.  Plastic's `cohesionOnly`
+  was tried first and REVERSED — nebula's compose is also how its shards
+  transmute back into TILES, so suppressing it switches off the whole
+  self-coalesce loop, which is a much larger change than the fluid look
+  being asked for.  Four things go with it:
+  - **Applied AT THE READ, on the compose gate** (`bond.threshold ×
+    bondTimeMul`), never baked in at formation — so a click re-tunes pairs
+    already stuck together, and stepping back DOWN makes every long-held
+    bond instantly due and composes it.  That last property is the one that
+    proves merging was deferred rather than removed.
+  - **THE TOP OF THE LADDER IS SET BY WHAT A BOND SURVIVES, not by taste.**
+    A pair also breaks by DISTANCE, so the highest timer/threshold ratio a
+    live bond ever reaches saturates: at 40× the measured peak was 11.2
+    against 11.8 at 12× — the two were the SAME step, because no bond lives
+    long enough to spend a 40× timer.  The shipped ladder (1 / 2 / 5 / 12)
+    sits inside that ceiling and each step lands on its own multiplier
+    (measured maxRatio 0.44 / 1.84 / 4.88 / 11.76).
+  - **`goo` SHIPS, AND ITS PERF NUMBER IS "NO MEASURABLE COST"** (user
+    call).  The rule this note used to carry — *delaying merges costs
+    entity count, so anything above `firm` needs a perf number beside
+    it* — stands as a rule, and this is that number.  Measured on
+    `nebula-storm`, three A/B pairs, shipped against the `nebbondoff`
+    ablation (which walks the ladder back to `off (old)` in-page):
+
+    | | ents | sim/stp99 | heap KB/f |
+    |---|---|---|---|
+    | goo (ships) | 1332 / 1331 / 1396 | 1.95 / 2.10 / 2.55 | 462 / 484 / 511 |
+    | off (old) | 1436 / 1387 / 1367 | 2.50 / 2.55 / 2.40 | 497 / 521 / 522 |
+
+    Goo is marginally AHEAD on all three, but the ranges overlap (its worst
+    substep equals off's typical), so the honest reading is that the step
+    costs nothing here — not that it is faster.
+    THE OLD FIGURE IS NOT WRONG, IT IS NO LONGER THE SAME BUILD.  The
+    28 / 75 / 307 / 597 populations recorded across the four steps were
+    LIVE NEBULA SHARDS (not total entities) and were taken BEFORE
+    `grainSize` went to 20, which cut children per tile from 7.7 to 3.95 —
+    so the population goo was holding open was about twice what it holds
+    open now.  Two lessons: a cost measured against one population does not
+    survive a change to that population, and a ladder step's price has to be
+    re-measured after anything that moves entity count, not inherited.
+  - **The tell is NOT the bond COUNT.**  That churns hard as pairs form and
+    break (measured 15 → 150 → 19 → 58 → 21 → 13 on the off step), so a
+    count-based regression passes by coincidence and did, against a build
+    with the feature reverted.  What separates the steps is `timer /
+    threshold` on a LIVE bond: a bond is composed in the same iteration its
+    timer crosses `threshold` and the merge-budget deferral clamps to
+    `threshold - dt`, so under the shipped step a surviving bond can never
+    be past its base threshold.  Ratio ≤ 1 is therefore an invariant of
+    `off`, and a live overdue bond is exactly one the shipped step would
+    already have merged away.
+- **NEBULA TAKES THE VORONOI GEOMETRY AND NOT THE DAMAGE MODEL** (user
+  call).  `nebula-tile` and `nebula-shard` carry a `grain` block and
+  `shatter.kind: 'voronoi'`, so a broken tile hands back the cells its own
+  pattern says.  What they deliberately do NOT carry is `bondStrength` or
+  the `progressive` it requires — and that ABSENCE is what "boundary
+  strength zero" means here.  A literal `bondStrength: 0` would be the
+  opposite of harmless: derived HP is `Σ (edge length × strength)`, so
+  zero strength derives zero health and every cloud dies on sight.  With
+  the fields absent, `isProgressiveFracture` stays false for nebula,
+  `bondStrengthFor` returns null, and every consumer of the damage layer
+  — the crash paths, the pierce bore, the bubble's bite, the crack
+  overlay — skips nebula exactly as before.  `passThrough` is untouched:
+  still no collisions, on the tile or the shard.  Three consequences:
+  the tile keeps its 1-HP whole-body death (and `spawnShardHealth` names
+  nebula explicitly rather than letting it fall through the size-keyed
+  default, which is the mistake that gave metal a 1-HP grain); the
+  `nebula-shard` grain block is LATENT, because that variant's shatter is
+  deliberately `'none'`, and it is written down anyway so a material
+  cannot come to mean two patterns; and the legacy fracture A/B has to
+  dispatch on `shatter.style === 'nebula'` to send a nebula tile back to
+  its own rear-cone fan — the generic scatter reads the same
+  `countMin`/`countMax` and so produces the same COUNT, which is why the
+  regression for it asserts on the cloud payload instead.
+  MEASURED: a tile went from 2-3 children over a fixed 121-unit area
+  budget that ignored the parent entirely, to 6-8 cells that tile the
+  parent's own polygon (child area / parent area 0.85..1.05), with body
+  sizes spanning 4.99..20.2 — a 4× range.
+- **A NEBULA FRAGMENT ROLLS ITS OWN SPRITE** (user call), and
+  `randomNebulaSprite()` in `assets.ts` is the ONE definition three sites
+  share: the map-load tile factory, the shatter dust, and every fragment a
+  break produces.  The generic voronoi child recipe copies `parent.sprite`,
+  which is correct for every OTHER material — rock, glass, metal and plastic
+  draw polygons and carry no sprite worth varying — and wrong for the one
+  family whose whole look IS the sprite: a tile decomposing into its cells
+  handed back that many copies of one cloud image, so a burst read as the
+  same puff stamped out repeatedly rather than as a cloud coming apart.  The
+  roll therefore lives in `ShardSystem.stampNebulaChild` (which runs AFTER the
+  child literal, so it overwrites the inherited value) rather than in the
+  shared recipe.  Three things worth knowing:
+  - **The other two `sprite: parent.sprite` sites are deliberately left
+    alone.**  `spawnDetachedCell` and `shatterPowerlawStyle` cannot be reached
+    by nebula — the chip path requires the grain model nebula does not carry,
+    and the legacy fracture A/B dispatches nebula to its own rear-cone fan —
+    so randomising there would only touch materials that do not want it.
+  - **THE TELL IS PER PARENT, NOT POPULATION-WIDE.**  The parents already roll
+    random sprites at map load, so breaking thirty tiles yields ~16 distinct
+    child sprites EITHER WAY (measured 16 inherited vs 20 rolled) and a
+    population count cannot tell the builds apart.  What separates them is
+    whether ONE parent's children differ from each other: measured 1.0
+    distinct sprite per parent and 30/30 parents uniform before, 3.6 and 0/30
+    after.  A regression written the obvious way would pass on both.
+  - **It costs tint-cache entries**, since the store keys on
+    `spriteSrc|quantisedTint`: measured 9 entries before and 40 after over the
+    same thirty-tile break, against a 256 cap.  Anything that multiplies
+    nebula sprite variety again should re-check that number rather than assume
+    the headroom is still there.
+- **A NEBULA SPRITE IS SIZED FROM THE BODY IT BELONGS TO, and is always
+  bigger than it.**  `nebulaSpriteSize(entity)` (constants.ts) is the ONE
+  definition — the cloud sprite and the twinkle star placed inside its
+  footprint both call it, and they used to carry the formula twice.  The
+  base is `max(size.x, size.y, polygonDiameter)` and the multiplier is
+  `NEBULA_CONSTANTS.SPRITE_OVERSIZE` (2.727, calibrated so a full hex
+  tile still draws at the 120 world units it always did).  Three things
+  are load-bearing:
+  - **The polygon is the FLOOR, not the base.**  `size` is the
+    area-equivalent diameter every other system means by "how big is
+    this", but a Voronoi cell is ragged and its circumradius reaches
+    further: measured over 306 fresh grains the polygon was 1.68× the
+    body diameter on average and 2.4× at worst, so a flat overhang on
+    `size` alone left the raggedest few with a sprite SMALLER than their
+    own outline (0.95×).  A nebula sprite must never be smaller than the
+    shape it belongs to.
+  - **The rule it replaced had rotted invisibly.**  It was
+    `120 × sqrt(nebulaTileArea / HEX_AREA)`, and `nebulaTileArea` is set
+    at exactly ONE site — the map-load tile factory.  No shatter child
+    and no merge survivor ever set one, so every shard fell through the
+    `?? HEX_AREA` default and drew a FULL-TILE sprite whatever its size
+    (measured on the shipped build: 102 shards spanning 9.2..43.6 in body
+    size, every one drawing 120).  A sprite deliberately larger than its
+    body does not LOOK wrong when it stops tracking it — it looks like a
+    cloud, which is why this survived.
+  - **`_nebulaSpriteR` is cached and never invalidated**, and that is
+    safe rather than lazy: a nebula body's polygon is fixed for its life
+    — no dent policy, no progressive fracture, and its merge is
+    PAIR-CONSUMING (both inputs retire and a new body appears), so
+    nothing rewrites `polygonPoints` in place.
+  The visible consequence is that a shatter now leaves ~1.9× the tile's
+  own cloud instead of ~3.0× (three full-size sprites), so DBG ▸ Visual ▸
+  **"Neb sprite"** is the live A/B on the overhang — a MULTIPLIER over
+  the authored constant, the same relationship `SHARD_COAT_CYCLE` has
+  with a variant's `envelope`.  **IT SHIPS AT 1.25×** (user call): the
+  calibration above is what a full hex tile draws at **1×**, so a shipped
+  run draws that tile at 150 and every other body 25% larger in
+  proportion.  Anything asserting the 120 figure has to DIAL THE LADDER TO
+  1× rather than assume it — `tests/fracture.spec.ts` does, and the
+  assertion would otherwise have failed on the default instead of on the
+  rule it protects.  The "(ships)" marker is applied from
+  `NEBULA_SPRITE_DEFAULT_INDEX` rather than written into a step's name; it
+  WAS written in, and this move is exactly what would have left it on the
+  wrong step.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
@@ -3368,6 +3761,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   WRONG pose — nothing throws and nothing logs.  Exposing the pure
   resolver also lets `scripts/gen-ship-sheet.mjs` render placeholder art
   against the very table the engine indexes.
+  `__omniNebula` (the nebula sprite scale) joins on
+  identical terms, and its motive is the sharpest of the set: the sprite
+  is deliberately larger than the body under it, so a rule that stops
+  tracking the body does not look broken — it looks like a cloud, which
+  is exactly how the rule it replaced rotted unnoticed.
   `__omniHid` is the same idea with a sharper
   motive: those builders are the one place in the input layer that can be
   wrong with NO symptom to read (a pad discards a malformed report in

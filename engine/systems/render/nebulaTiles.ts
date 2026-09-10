@@ -24,9 +24,8 @@
  */
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity } from '../../../types';
-import { NEBULA_CONSTANTS, getActiveNebulaStretchK } from '../../../constants';
+import { NEBULA_CONSTANTS, getActiveNebulaStretchK, nebulaSpriteSize, getNebulaSpriteGen } from '../../../constants';
 import { blendCompositionToHex } from '../../NebulaColor';
-import { HEX_AREA } from '../../maps/TileGenerator';
 import { hexToRgb, densityTintForRender } from './drawUtils';
 
 /** FAST PATH for a steady-state nebula tile.  Returns true when it drew, so
@@ -73,6 +72,7 @@ export function drawNebulaTileCached(
         && entity.nebulaSpawnTimer === undefined
         && entity.regenPopTimer === undefined
         && entity.nebulaCachedTinted !== undefined
+        && entity.nebulaCachedGen === getNebulaSpriteGen()
         && entity.nebulaTwinkleNextAt !== undefined
         && perfNowSec < entity.nebulaTwinkleNextAt) {
         ctx.globalAlpha = 0.55;
@@ -123,12 +123,114 @@ export function drawNebulaTileCached(
  *  entity loop's own frame bookkeeping rather than part of drawing a
  *  nebula, so it stayed behind.
  */
+/** Draw a nebula SHARD from its per-entity cache — the shard counterpart of
+ *  `drawNebulaTileCached`.
+ *
+ *  Called from inside `renderEntities`' per-entity transform, so rotation is
+ *  already applied and this never touches it.  What it still does per frame
+ *  is exactly what genuinely changes per frame:
+ *
+ *   - the three alpha terms (fade-out, birth fade-in, speed translucency),
+ *     which is why a fading or newly-born shard is excluded from the cache
+ *     path at the call site above rather than handled here; and
+ *   - the velocity-aligned stretch, which is a function of the shard's
+ *     current velocity and cannot be cached by definition.
+ *
+ *  Everything else — the blended hex, the density tint, the tinted-canvas
+ *  lookup, the sprite centroid and the draw size — is read from the fields
+ *  the slow path left behind. */
+function drawNebulaShardFromCache(
+    rs: RenderSystem,
+    ctx: CanvasRenderingContext2D,
+    entity: GameEntity,
+): void {
+    const tinted = entity.nebulaCachedTinted;
+    if (tinted === undefined) return;
+    rs.lastNebulaFastCount++;
+
+    // Speed translucency — a fast shard reads a little thinner ("wind-torn
+    // cloud").  Speed² so no sqrt; the same curve the slow path uses.
+    const vx = entity.velocity.x, vy = entity.velocity.y;
+    const speedSq = vx * vx + vy * vy;
+    const speedMul = Math.max(
+        NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_MIN,
+        1 - speedSq * NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_K,
+    );
+
+    const stretchK = getActiveNebulaStretchK();
+    const stretching = stretchK > 0 && speedSq > NEBULA_CONSTANTS.VEL_STRETCH_REST_SPEED_SQ;
+    if (stretching) {
+        const stretch = Math.min(NEBULA_CONSTANTS.VEL_STRETCH_MAX, Math.sqrt(speedSq) * stretchK);
+        const delta = Math.atan2(vy, vx) - entity.rotation;
+        ctx.rotate(delta);
+        ctx.scale(1 + stretch, 1 - stretch * NEBULA_CONSTANTS.VEL_STRETCH_SQUASH_RATIO);
+        ctx.rotate(-delta);
+    }
+
+    const size = entity.nebulaCachedSize ?? 0;
+    ctx.globalAlpha = 0.45 * speedMul * (entity.nebulaAlphaMul ?? 1);
+    ctx.drawImage(tinted, entity.nebulaCachedDx ?? 0, entity.nebulaCachedDy ?? 0, size, size);
+    ctx.globalAlpha = 1.0;
+
+    // Undo the stretch so the caller's transform is handed back unchanged —
+    // `renderEntities` resets with setTransform per entity, but leaving a
+    // scaled frame behind would be a trap for anything drawn after this in
+    // the same frame (the debug outline below, for one).
+    if (stretching) {
+        const stretch = Math.min(NEBULA_CONSTANTS.VEL_STRETCH_MAX, Math.sqrt(speedSq) * stretchK);
+        const delta = Math.atan2(vy, vx) - entity.rotation;
+        ctx.rotate(delta);
+        ctx.scale(1 / (1 + stretch), 1 / (1 - stretch * NEBULA_CONSTANTS.VEL_STRETCH_SQUASH_RATIO));
+        ctx.rotate(-delta);
+    }
+
+    if (rs.debugMode && entity.polygonPoints && entity.polygonPoints.length > 0) {
+        const pts = entity.polygonPoints;
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+    }
+}
+
 export function drawNebulaEntity(
     rs: RenderSystem,
     ctx: CanvasRenderingContext2D,
     entity: GameEntity,
     perfNowSec: number,
 ): void {
+    // THE SHARD CACHE (user call).  A nebula TILE has had a one-drawImage
+    // fast path since Stage 5; a shard never did, and after the voronoi
+    // change a broken tile leaves 6-8 of them instead of 2-3, so the slow
+    // path became the dominant nebula cost (measured: 234 slow draws and a
+    // 27.1 ms median frame against 95 and 16.7 ms under the legacy shatter).
+    //
+    // A shard cannot take the TILE fast path — that one draws in world space
+    // with no transform, because a tile's rotation is always 0, while a shard
+    // spins, fades on speed and stretches along its velocity.  So this is the
+    // other half of the same idea: keep the per-frame work that genuinely
+    // varies (rotation is already in the caller's transform, plus alpha and
+    // the stretch) and cache the part that does not — the tint chain, the
+    // tinted-canvas lookup, the sprite centroid and the draw size.
+    //
+    // Validity is the single `nebulaCachedTinted` flag, invalidated at every
+    // site that moves an input (composition, density tier, neighbour count),
+    // exactly as for tiles.  A shard's SIZE cannot drift out from under it:
+    // nebula's merge is pair-consuming, so a shard is never resized in place.
+    if (entity.shardVariant === 'nebula-shard'
+        && entity.nebulaCachedTinted !== undefined
+        && entity.nebulaCachedGen === getNebulaSpriteGen()
+        && !entity.hitFlash
+        && entity.mergeFadeTimer === undefined
+        && entity.nebulaSpawnTimer === undefined) {
+        drawNebulaShardFromCache(rs, ctx, entity);
+        return;
+    }
     rs.lastNebulaSlowCount++;
     // Per-entity blended-hex cache: populated lazily on first render
     // and invalidated by NebulaSystem when composition mutates
@@ -220,20 +322,17 @@ export function drawNebulaEntity(
         }
         if (tinted) {
             const isTile = entity.shardVariant === 'nebula-tile';
-            // Sprite size is proportional to the effective nebula
-            // area the entity carries.  A fresh shard from a 5-way
-            // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
-            // half-merged shard draws ≈ 68; a full tile draws at
-            // the reference size (96).  Using sqrt keeps visual
-            // area (∝ sprite²) proportional to effective area, so
-            // what the player sees matches the conserved mass
-            // accounting used for merge → transmutation.  Legacy
-            // entities without nebulaTileArea fall back to a full
-            // tile sprite.
-            const effArea = entity.nebulaTileArea ?? HEX_AREA;
-            const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
-            const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                * Math.sqrt(areaRatio);
+            // THE SPRITE IS SIZED FROM THE BODY IT BELONGS TO — its own
+            // diameter times the authored overhang (see
+            // NEBULA_CONSTANTS.SPRITE_OVERSIZE, which also carries why the
+            // old `nebulaTileArea` rule was replaced: that field is set at
+            // exactly one site and no shard ever had one, so every shard
+            // drew a full-tile sprite whatever its size).  Since the
+            // shatter conserves size² across the pieces, visual area still
+            // tracks the mass accounting the merge → transmutation path
+            // uses — the same property the area rule was reaching for,
+            // now from an input that is always present.
+            const drawSize = nebulaSpriteSize(entity);
             // Content-centroid correction: shift the draw so the
             // sprite's visible-pixel centroid lands on the pivot.
             // Without this, asymmetric source PNGs appear to orbit
@@ -297,12 +396,15 @@ export function drawNebulaEntity(
             // fields are non-undefined, subsequent frames bypass
             // this whole slow path until NebulaSystem invalidates
             // them (composition / neighbour-count / area changes).
-            if (entity.shardVariant === 'nebula-tile') {
-                entity.nebulaCachedTinted = tinted;
-                entity.nebulaCachedDx = dx;
-                entity.nebulaCachedDy = dy;
-                entity.nebulaCachedSize = drawSize;
-            }
+            // Both variants now: the tile's cache feeds its world-space fast
+            // path above, the shard's feeds `drawNebulaShardFromCache`.  Same
+            // four fields and the same invalidation sites, so there is one
+            // cache to reason about rather than two.
+            entity.nebulaCachedTinted = tinted;
+            entity.nebulaCachedDx = dx;
+            entity.nebulaCachedDy = dy;
+            entity.nebulaCachedSize = drawSize;
+            entity.nebulaCachedGen = getNebulaSpriteGen();
         } else {
             // Fallback: procedural soft circle in the tint colour
             // while the nebula sprite is still loading.
@@ -382,13 +484,11 @@ export function drawNebulaEntity(
                     const star = rs.getTwinkleBitmap();
                     // Place the star within the sprite footprint —
                     // half-extent × placement-range keeps it inside.
-                    // Same area-proportional draw-size formula the
-                    // sprite render uses above, so the twinkle
-                    // scales with the shard/tile as it merges.
-                    const effArea = entity.nebulaTileArea ?? HEX_AREA;
-                    const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
-                    const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                        * Math.sqrt(areaRatio);
+                    // The SAME `nebulaSpriteSize` the sprite above draws
+                    // at, which is why that is a shared function: the two
+                    // sites carried the formula twice, so a change to one
+                    // silently put the star outside the puff.
+                    const drawSize = nebulaSpriteSize(entity);
                     const halfExtent = (drawSize / 2) * NEBULA_CONSTANTS.TWINKLE_PLACEMENT_RANGE;
                     const tx = (entity.nebulaTwinkleX ?? 0) * halfExtent;
                     const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;

@@ -84,6 +84,35 @@ const ABLATIONS = {
   // Same body, but with the per-shard lane jitter (the only branch in
   // applyFlow that WRITES a new property onto an entity) disabled.
   lanejitter0: `() => { window.__omniEngine.ffLaneJitter = 0; }`,
+  // Cut the UNCONDITIONAL nebula-shard vs nebula-tile collision pass.  It is
+  // the one broadphase pass with no PerfController cadence behind it — its
+  // siblings (`resolveShardPairs`, `resolveShardTilePairs`) both skip on
+  // off-frames — and it walks 9 static cells per nebula shard per SUBSTEP.
+  // On a map whose every tile is a nebula tile that is a lot of SAT calls,
+  // and nebula's voronoi shatter tripled the shard count feeding it.
+  // Difference = what cadencing (or narrowing) that pass would be worth.
+  nebtilepass: `() => { window.__omniEngine.physics.resolveNebulaShardTilePairs = () => {}; }`,
+  // Send nebula back to its legacy rear-cone shatter (2-3 children per tile
+  // instead of the voronoi decomposition's 6-8).  Difference = the cost of
+  // the ENTITY COUNT the voronoi change introduced, as distinct from any
+  // per-entity work.  Note this flips the fracture mode GLOBALLY, so read it
+  // only on a nebula-only scene.
+  nebshatterlegacy: `() => { window.__omniEngine.dbg.cycleFractureMode(); }`,
+  // Walk the nebula-bond ladder back to 'off (old)' — the pre-feature
+  // compose threshold.  Difference = what SHIPPING 'goo' costs, which is
+  // the number CLAUDE.md's nebula-bonding note requires beside any step
+  // above `firm`: stretching the threshold keeps pairs alive as pairs, and
+  // live shard population is frame time.  Reads the DBG readout rather
+  // than clicking a fixed number of times, so it survives a re-ordered
+  // ladder; give it a moment, since the readout arrives on a stats push.
+  nebbondoff: `() => {
+    const e = window.__omniEngine;
+    // Step until the ladder reports index 0 ('off (old)').  The RETURNED
+    // index is the only reading available inside one tick — __omniStats
+    // updates on the next stats push, so a loop reading it would wrap the
+    // ladder and land back on the shipped step.
+    for (let i = 0; i < 8 && e.dbg.cycleNebulaBond() !== 0; i++) {}
+  }`,
   // Keep React, cut the payload build: isolates the cost of assembling the
   // ~120-field stats object (and its nested snapshots) from the cost of
   // React consuming it.
@@ -223,6 +252,11 @@ const HOOK_API = `
     s._every[k] = now;
     return true;
   },
+  /* Per-run scratch, reset when the sample window opens.  A scene that has
+     to remember something across its during() calls (a saved original
+     method, a phase accumulator) keeps it here rather than on the engine.
+     No backticks in this block: HOOK_API is itself a template literal. */
+  get state() { return window.__perfCap.state; },
   once(key, cond) {
     const s = window.__perfCap.state;
     if (!s._once) s._once = {};

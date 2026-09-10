@@ -180,10 +180,16 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    bug. Spell the expected value out (`new Function('e', \`return … \${expected}\`)`),
    or pass it as an `arg` to `engine()`.
 
-   **Two independent sessions hit this and each wrote its own rule** — step 5
-   and the star-field gauntlet — costing two debugging cycles apiece before it
-   was written down here. That it was rediscovered rather than read is the
-   argument for this file.
+   **Three independent sessions hit this and each wrote its own rule** — step
+   5, the star-field gauntlet, and the nebula pass, which broke it while
+   fixing an unrelated flake and turned six green module tests red with
+   "timed out waiting for" on a condition that was true all along. That it
+   keeps being rediscovered rather than read is the argument for this file —
+   and the reason the note now sits on `waitForStats` itself, where someone
+   about to write the predicate will see it.
+
+   `waitForStatsKeyChange` is the Node-side comparison for the common shape
+   this trap catches: "the readout moved off whatever it was".
 10. **Respect the phase machine.** A boss's traits are a function of its
    health, and `updateBosses` stamps a phase one frame after the transition.
    Poll for `bossPhase` instead of reading traits in the same breath as
@@ -200,6 +206,44 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    than its claim, overpower it by a margin no pattern can close; where the
    derived number IS the claim, assert a range or read the entity's own
    `fractureBoundaryHp`.
+
+12. **A READOUT LAGS THE CLICK THAT CHANGES IT.** `__omniStats` is
+   republished by the rAF loop, so a value read in the same breath as
+   `e.dbg.cycleX()` can still be the pre-click one. Reading it once and
+   asserting is a race that passes locally and fails in a loaded full-suite
+   run; deciding the NEXT click from it is worse, because the dial
+   over-clicks and walks straight past the step you wanted. Every DBG dial
+   goes through `dialByName`, which waits for the readout to move before
+   clicking again and takes a PREDICATE as well as an exact label — several
+   readouts mark the shipped step with a suffix (`1 (ships)`), so a test
+   that wants a specific rung matches the number, not the caption.
+
+   **The same lag straddles `waitForEngine` and `stats`**, and that pairing
+   is the trap's nastiest form. `waitForEngine` polls the LIVE engine and
+   returns the instant its condition holds; `__omniStats` is a snapshot from
+   the last push. So "wait for the engine to reach X, then read the payload"
+   can read a payload from before X — and where a field is published
+   conditionally (`enemiesRemaining` is `undefined` unless `waveState ===
+   'active'`) the symptom is a matcher error about `undefined`, which reads
+   like a missing field rather than a one-frame lag. It passed locally and
+   failed in CI, because the slower the frames the wider the window. Wait on
+   the payload you are going to assert against.
+13. **MAKE THE PRECONDITION A SELECTION CRITERION, not the assertion.** A
+   test that grabs the first candidate it finds and asserts a property that
+   candidate need not have is asserting on the harness's luck. Four flakes
+   in one PR were this: a bubble bit a different tile than the harness
+   picked; a detach freed two chips where the momentum arithmetic assumed
+   one; a plastic grain came away barely dented, which the springback claims
+   say nothing about. Filter to candidates that satisfy the precondition and
+   assert the FILTERED SET IS NON-EMPTY — that keeps the regression caught
+   (the set goes empty if the property stops happening at all) while
+   removing the coin flip.
+
+   And the same move fixes its mirror: **a test must not read a shipped
+   DEFAULT as one arm of an A/B.** The chip-dust pooling test dialled one arm
+   and let the other take the default; when the default moved onto that step
+   it would have compared a step against itself and passed while measuring
+   nothing. Dial both.
 
 ## What is NOT covered
 

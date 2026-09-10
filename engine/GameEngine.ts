@@ -25,7 +25,8 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActivePierceSpeedRetainName, getActivePierceFalloffName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+  getActiveNebulaSpinDampName, getActiveNebulaBondName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActivePierceSpeedRetainName, getActivePierceFalloffName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -75,18 +76,35 @@ const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
  *  produced 3 nebula-shards under legacy and 0 under voronoi, while rock
  *  kept only its 3-5 death burst and lost every per-chip puff.
  *
- *  CHANCE is a gate, not a rounding error.  Every detach makes a chip
- *  now, and a puff on each one reads as a constant cloud trailing the
- *  player rather than as occasional dust kicks — which is the exact note
- *  the legacy per-hit path carries about its own gate.
+ *  IT IS POOLED, NOT PER-CHIP (user call).  The first version rolled a
+ *  CHANCE per detach and sized the puff off that one chip, which made a
+ *  speck: a grain is ~12 units where the body is ~36, and once a nebula
+ *  sprite was sized off the body it belongs to instead of always drawing
+ *  a full tile, those specks stopped reading as cloud at all (reported as
+ *  "the nebula shards released from chipping are very small").  Each
+ *  detach now BANKS its chip's footprint on the body
+ *  (`grainDustArea` / `grainDustChips`) and one larger puff is thrown
+ *  every `getChipDustPool()` chips.  Because the bank is an AREA,
+ *  pooling N chips multiplies the puff's diameter by sqrt(N) and divides
+ *  its frequency by N — bigger AND rarer from one number, and FEWER
+ *  entities than the per-chip roll produced.
  *
- *  SIZE_FRACTION is of the CHIP, not the parent: a grain is ~12 units
- *  where the body is ~36, so sizing off the parent (as the legacy per-hit
- *  puff did) would make the dust bigger than the piece that shed it. */
+ *  SIZE_FRACTION is of the POOLED footprint (sqrt of the banked area),
+ *  never of the parent — sizing off the parent, as the legacy per-hit
+ *  puff did, put a full-tile cloud behind every chip.  It stays at 0.7:
+ *  the number means what it always meant, how much of the material that
+ *  came off is vapour rather than solid piece, measured over the pool
+ *  rather than over one grain.
+ *
+ *  FLUSH_MIN_FRAC is what a dying body is still owed.  A body that sheds
+ *  fewer than a pool's worth of grains before it breaks would otherwise
+ *  throw no dust at all, so the death path flushes a partial bank — but
+ *  only above this fraction of a full pool, since flushing a one-chip
+ *  remainder puts back exactly the speck the pooling exists to remove. */
 const GRAIN_CHIP_DUST = {
-  CHANCE: 0.35,
   SIZE_FRACTION: 0.7,
   ALPHA_MUL: 0.5,
+  FLUSH_MIN_FRAC: 0.5,
 } as const;
 
 
@@ -1252,6 +1270,12 @@ export class GameEngine {
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
+      nebulaSpriteName:    getActiveNebulaSpriteName(),
+      chipDustPoolName:    getChipDustPoolName(),
+      scanRevealAll:       getScanRevealAll(),
+      nebulaDampName:      getActiveNebulaDampName(),
+      nebulaSpinDampName:  getActiveNebulaSpinDampName(),
+      nebulaBondName:      getActiveNebulaBondName(),
       shatterGraceName:   getActiveShatterGraceName(),
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
@@ -2385,6 +2409,12 @@ export class GameEngine {
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
+      nebulaSpriteName:    getActiveNebulaSpriteName(),
+      chipDustPoolName:    getChipDustPoolName(),
+      scanRevealAll:       getScanRevealAll(),
+      nebulaDampName:      getActiveNebulaDampName(),
+      nebulaSpinDampName:  getActiveNebulaSpinDampName(),
+      nebulaBondName:      getActiveNebulaBondName(),
       shatterGraceName:   getActiveShatterGraceName(),
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
@@ -3195,6 +3225,17 @@ export class GameEngine {
           if (entity.mass === Infinity && entity.found === true) {
               this.renderer.unstampMinimapTile(entity);
           }
+          // FLUSH THE CHIP-DUST BANK.  Dust is pooled now, so a body that
+          // breaks mid-pool is still owed the material it shed — and a
+          // body that never sheds a full pool's worth (a small shard, or
+          // any body killed in one big hit) would otherwise throw none at
+          // all.  Gated at FLUSH_MIN_FRAC of a pool because putting back a
+          // one-chip remainder is putting back the speck the pooling
+          // exists to remove.  Idempotent by the guard above, and the bank
+          // itself is cleared on regen revival (ShardSystem.completeRegen)
+          // so a revived tile starts empty.
+          this.throwGrainDust(entity, entity.position, Math.max(1,
+              Math.ceil(getChipDustPool() * GRAIN_CHIP_DUST.FLUSH_MIN_FRAC)));
       }
       const death = entity.isExploding ? { fx: null, sfx: null } : this.deathFx(entity);
       if (death.sfx) {
@@ -5404,6 +5445,47 @@ export class GameEngine {
       return true;
   }
 
+  /**
+   * Throw the dust a body has banked from its chips, and clear the bank —
+   * but only once at least `minChips` chips are in it.  Below that the
+   * bank is left alone, so the detach seam can call this on every chip
+   * and the pooling is the only gate there is.
+   *
+   * The puff's base size is the sqrt of the banked AREA, which is what
+   * makes pooling conserve material: N chips of diameter d bank N·d² and
+   * come out as one puff of diameter d·sqrt(N).
+   *
+   * Tinted to the BODY's own colour so this works for every grain
+   * material rather than only rock, and `fromRock` only for rock, since
+   * that flag is what makes the puff condense back into a rock-shard.
+   *
+   * Returns whether a puff was thrown.
+   */
+  private throwGrainDust(body: GameEntity, at: Vector2, minChips: number): boolean {
+      if ((body.grainDustChips ?? 0) < minChips) return false;
+      const banked = body.grainDustArea ?? 0;
+      body.grainDustChips = 0;
+      body.grainDustArea = 0;
+      if (banked <= 0 || !this.currentMap) return false;
+      const isRock = body.shardVariant === 'rock-shard'
+          || body.shardVariant === 'rock-tile';
+      const comp = isRock
+          ? randomRockNebulaComposition()
+          : [{ hex: body.color || COLORS.ROCK_SHARD, weight: 1 }];
+      this.drops.spawnColoredNebulaShard(
+          this.currentMap.entities,
+          { x: at.x, y: at.y },
+          Math.sqrt(banked),
+          comp[0].hex,
+          GRAIN_CHIP_DUST.SIZE_FRACTION,
+          body.lastImpactVelocity ?? body.velocity,
+          comp,
+          GRAIN_CHIP_DUST.ALPHA_MUL,
+          isRock,
+      );
+      return true;
+  }
+
   private progressFracture(target: GameEntity, impactWorldPos?: Vector2): boolean {
       if (!this.currentMap) return true;
       if (!target.active || (target.health ?? 0) <= 0) return true;
@@ -5631,27 +5713,16 @@ export class GameEngine {
           }
           // DUST.  A chip throws off pulverised material as well as the
           // solid piece — the look the legacy break paths carried and
-          // that the voronoi routing dropped.  Tinted to the BODY's own
-          // colour so it works for every grain material rather than only
-          // rock, and `fromRock` only for rock, since that flag is what
-          // makes the puff condense back into a rock-shard later.
-          if (chip !== null && Math.random() < GRAIN_CHIP_DUST.CHANCE) {
-              const isRock = target.shardVariant === 'rock-shard'
-                  || target.shardVariant === 'rock-tile';
-              const comp = isRock
-                  ? randomRockNebulaComposition()
-                  : [{ hex: target.color || COLORS.ROCK_SHARD, weight: 1 }];
-              this.drops.spawnColoredNebulaShard(
-                  this.currentMap.entities,
-                  { x: chip.position.x, y: chip.position.y },
-                  Math.max(chip.size.x, chip.size.y),
-                  comp[0].hex,
-                  GRAIN_CHIP_DUST.SIZE_FRACTION,
-                  target.lastImpactVelocity ?? target.velocity,
-                  comp,
-                  GRAIN_CHIP_DUST.ALPHA_MUL,
-                  isRock,
-              );
+          // that the voronoi routing dropped.  BANKED rather than thrown
+          // per chip (see GRAIN_CHIP_DUST): the puff comes out every
+          // `getChipDustPool()` chips, sized off everything banked since
+          // the last one, so it reads as a kick of dust instead of a
+          // speck.  Cheap either way — two number writes per detach.
+          if (chip !== null) {
+              const chipMax = Math.max(chip.size.x, chip.size.y);
+              target.grainDustArea = (target.grainDustArea ?? 0) + chipMax * chipMax;
+              target.grainDustChips = (target.grainDustChips ?? 0) + 1;
+              this.throwGrainDust(target, chip.position, getChipDustPool());
           }
           // RE-CENTRE ON THE NEW CENTRE OF AREA (mobile bodies only).
           // The remainder replaced `polygonPoints` and nothing moved
@@ -6338,7 +6409,13 @@ export class GameEngine {
       // TERRAIN and MATERIALS are discovered as OBJECTS, not as regions (user
       // call) — see `discoverStructures`.  Cadenced: pure bookkeeping with no
       // physical consequence.
-      if (this.perfController.shouldRun('discover')) {
+      // DBG "Scan off" takes this away — it is the expensive half (a
+      // 900-unit walk of the static grid PLUS the whole mobile-shard list,
+      // on the `discover` cadence), and the minimap reveals everything in
+      // exchange so the A/B is not measured blind.  The per-contact stamps
+      // above stay: they are a handful of O(1) checks and they are what the
+      // off-screen arrows read.
+      if (!getScanRevealAll() && this.perfController.shouldRun('discover')) {
           this.discoverStructures(px, py, SCANNER.ENCOUNTER_RANGE);
       }
   }
@@ -6386,7 +6463,8 @@ export class GameEngine {
    *  Gated on `SCANNER.AUTO.MIN_MARK`, so a Mk I ship is fully manual and
    *  auto-tracking is something a mark buys. */
   private updateAutoScan(dt: number) {
-      const eligible = this.autoScanEnabled
+      const eligible = !getScanRevealAll()
+          && this.autoScanEnabled
           && this.scannerMk >= SCANNER.AUTO.MIN_MARK
           && (this.scanRanges[1] ?? 0) > 0;
       if (!eligible) { this.autoPingRadius = 0; this.autoScanTimer = 0; return; }
@@ -6407,6 +6485,24 @@ export class GameEngine {
           this.autoPingRadius = 0.0001;
           this.autoPingMax = this.scanRanges[1] ?? 0;
       }
+  }
+
+  /** DBG "Scan off" — stop the scanner's periodic work and reveal the whole
+   *  map, as one switch (see `getScanRevealAll` for why the two halves belong
+   *  together).  Returns the new state.
+   *
+   *  Rebuilding the minimap terrain layer is not optional bookkeeping: that
+   *  canvas IS the discovered set, accumulated one stamp at a time, so
+   *  changing what counts as discovered has to re-derive it.  The rebuild
+   *  re-stamps `found` tiles when switching back, so a session's discovered
+   *  terrain survives a round trip through the switch. */
+  public toggleScanReveal(): boolean {
+      const on = toggleScanRevealAll();
+      if (this.currentMap) {
+          this.renderer.buildMinimapStaticLayer(
+              this.currentMap.entities, this.currentMap.width, this.currentMap.height);
+      }
+      return on;
   }
 
   /** The pause menu's auto-scan switch. */

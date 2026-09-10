@@ -21,7 +21,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, waitForStats } from './helpers';
+import { advanceSim, boot, dialByName, engine, startRun, waitForStats } from './helpers';
 
 /** Run one swirl step against a synthetic shard at (ox, oy) from a player
  *  moving along +x, and report the spin it picked up. */
@@ -95,6 +95,269 @@ test.describe('wake handedness', () => {
     const even = await swirl(page, { ox: 0, oy: 60, id: 'spin_probe_b', mode: 'random' });
     expect(odd.spin).toBeGreaterThan(0);
     expect(even.spin).toBeLessThan(0);
+
+    watch.assertClean();
+  });
+});
+
+/** Nebula DRAG — the DBG "Neb damp" / "Neb spin damp" knobs, and the spawn
+ *  gap that made the first of them dead on arrival.
+ *
+ *  PhysicsSystem's custom-damping branch is gated on the entity carrying a
+ *  `linearDamping` FIELD.  A STRUCTURE without one matches neither that
+ *  branch nor the player/enemy/POI branch below it, so it free-drifts with
+ *  NO drag at all — and the "Neb damp" multiplier is read INSIDE the branch
+ *  that never runs, so the knob goes with it.
+ *
+ *  `SHARD_SPAWN_SHAPE_NEBULA` used to name both damping fields in its own
+ *  comment without declaring them.  That was invisible for as long as nebula
+ *  shattered only through `shatterNebulaStyle`, which hardcodes the same
+ *  constants locally; routing nebula through the shared voronoi recipe —
+ *  which copies `childSpawn.linearDamping` like every other material — made
+ *  every puff undamped.  Measured at the time: 311 live shards, 311 of them
+ *  with `linearDamping === undefined`.
+ *
+ *  So the first test here is the one that matters, and it asserts on the
+ *  FIELD rather than on a speed: a speed assertion passes for whichever
+ *  reason and would not have caught this.
+ */
+test.describe('nebula drag', () => {
+  /** Break `count` nebula tiles through the REAL death path and hand back
+   *  the shards that exist afterwards. */
+  const breakTiles = (page: any, count: number) => engine(page, (e: any, n: number) => {
+    const tiles = e.currentMap.entities
+      .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, n);
+    for (const t of tiles) { t.health = 0; e.handleEntityDeath(t); }
+    return tiles.length;
+  }, count);
+
+  const shardStats = (page: any) => engine(page, (e: any) => {
+    const s = e.currentMap.entities
+      .filter((x: any) => x.active && x.shardVariant === 'nebula-shard');
+    const spin = s.map((x: any) => Math.abs(x.rotationSpeed ?? 0));
+    return {
+      n: s.length,
+      undamped: s.filter((x: any) => x.linearDamping === undefined).length,
+      meanSpin: spin.length ? spin.reduce((a: number, b: number) => a + b, 0) / spin.length : 0,
+    };
+  });
+
+  test('every voronoi nebula shard carries its damping fields', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+
+    expect(await breakTiles(page, 30)).toBeGreaterThan(0);
+    const got = await shardStats(page);
+
+    // The population is real, and not one member of it is undamped.  This is
+    // the assertion the regression is about: `undamped` was 100% of the list.
+    expect(got.n).toBeGreaterThan(20);
+    expect(got.undamped).toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('spin damping is its own knob, independent of the linear one', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+
+    /*  Both runs sit at the SAME linear step, so any difference in spin is
+     *  the spin ladder alone.  `match` (index 0) defers to the linear knob,
+     *  which is the shipped behaviour — so this is also the check that the
+     *  default is a no-op and only a deliberate click departs from it. */
+    const spinAfter = async (steps: number, label: string) => {
+      await dialByName(page, 'nebulaSpinDampName', label,
+        (e: any) => e.dbg.cycleNebulaSpinDamp(), steps);
+      await breakTiles(page, 30);
+      await advanceSim(page, 2);
+      return (await shardStats(page)).meanSpin;
+    };
+
+    const matched = await spinAfter(7, 'match');
+    const hard    = await spinAfter(7, '10x');
+
+    // 10× the per-step spin LOSS has to leave measurably less tumble than
+    // the shipped default does over the same two sim-seconds.
+    expect(hard).toBeLessThan(matched);
+
+    watch.assertClean();
+  });
+});
+
+/** Nebula BONDING — what the "Neb bond" steps actually buy.
+ *
+ *  A nebula bond's outcome is `compose`: after the contact threshold the
+ *  pair is CONSUMED and one new body appears.  At the shipped ~5 s (scaled
+ *  by pair size) that window is short enough that the cohesion and break
+ *  multipliers barely get to act — and the harder they grip, the sooner the
+ *  pair holds together well enough to vanish into a merge.  So "grip harder"
+ *  read as changing nothing (user report).
+ *
+ *  `bondTimeMul` stretches the threshold instead.  The pair sticks and moves
+ *  as one for as long as the multiplier says, and then it STILL coalesces —
+ *  which matters because compose is also how nebula shards transmute back
+ *  into tiles, so suppressing it outright would switch off the whole
+ *  self-coalesce loop.
+ *
+ *  WHAT THESE TESTS ASSERT, AND WHY IT IS NOT THE BOND COUNT.  The obvious
+ *  reading — "a stickier step should accumulate bonds" — was written first
+ *  and it does not discriminate: the live count churns hard as pairs form
+ *  and break (measured 15 → 150 → 19 → 58 → 21 → 13 on the OFF step), so a
+ *  tail-beats-head assertion passes by coincidence, and it did, against a
+ *  build with the feature reverted.  These read `timer / threshold` on live
+ *  bonds instead.  `bond.threshold` is the BASE stamped at formation and the
+ *  multiplier is applied at the read, so a live bond whose ratio exceeds 1
+ *  is precisely one the shipped step would already have merged away — a
+ *  direct read of the line that changed, with no population dynamics in it.
+ */
+test.describe('nebula bonding', () => {
+  const breakTiles = (page: any) => engine(page, (e: any) => {
+    const tiles = e.currentMap.entities
+      .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, 30);
+    for (const t of tiles) { t.health = 0; e.handleEntityDeath(t); }
+  });
+
+  /** Live nebula↔nebula bonds, as {n, maxRatio, overdue} where `overdue`
+   *  counts bonds already past their BASE compose threshold. */
+  const bondState = (page: any) => engine(page, (e: any) => {
+    const b = e.shards.liveBonds.filter((x: any) =>
+      x.a.shardVariant === 'nebula-shard' && x.b.shardVariant === 'nebula-shard');
+    const ratios = b.map((x: any) => x.timer / x.threshold);
+    return {
+      n: b.length,
+      maxRatio: ratios.length ? Math.max(...ratios) : 0,
+      overdue: ratios.filter((r: number) => r > 1).length,
+    };
+  });
+
+  test('a stretched threshold holds pairs the shipped step would have merged', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+
+    /*  OFF first.  A bond is composed in the same iteration its timer
+     *  crosses `threshold` — and the merge-budget deferral clamps to
+     *  `threshold - dt` — so no bond that is still ALIVE can ever be past
+     *  its base threshold.  That makes ratio ≤ 1 an invariant of the
+     *  shipped step, and the control for the assertion below. */
+    await dialByName(page, 'nebulaBondName', 'off (old)',
+      (e: any) => e.dbg.cycleNebulaBond(), 4);
+    await breakTiles(page);
+    await advanceSim(page, 6, 180_000);
+    const off = await bondState(page);
+    expect(off.n).toBeGreaterThan(0);
+    expect(off.overdue).toBe(0);
+
+    // GOO: 12× the threshold, so pairs sail past the base one and hold.
+    await dialByName(page, 'nebulaBondName', 'goo',
+      (e: any) => e.dbg.cycleNebulaBond(), 4);
+    await breakTiles(page);
+    await advanceSim(page, 6, 180_000);
+    const goo = await bondState(page);
+
+    expect(goo.n).toBeGreaterThan(0);
+    expect(goo.overdue).toBeGreaterThan(0);
+    expect(goo.maxRatio).toBeGreaterThan(1);
+
+    watch.assertClean();
+  });
+
+  test('merging is delayed, never removed — stepping down composes the held pairs', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+
+    /*  This is the property that separates a long timer from plastic's
+     *  `cohesionOnly`, and it is the whole reason nebula takes the former:
+     *  the pairs are not exempt from merging, only deferred.  Pile up bonds
+     *  past their base threshold under goo, then step back down — the
+     *  multiplier is read at the compose gate rather than stamped at
+     *  formation, so every one of them is instantly due and composes. */
+    await dialByName(page, 'nebulaBondName', 'goo',
+      (e: any) => e.dbg.cycleNebulaBond(), 4);
+    await breakTiles(page);
+    await advanceSim(page, 8, 180_000);
+
+    const held = await bondState(page);
+    expect(held.overdue).toBeGreaterThan(0);
+
+    await dialByName(page, 'nebulaBondName', 'off (old)',
+      (e: any) => e.dbg.cycleNebulaBond(), 4);
+    await advanceSim(page, 4, 180_000);
+
+    // Nothing overdue survives: each was consumed by the merge it was
+    // waiting on.  New bonds keep forming, so this is not "no bonds".
+    const after = await bondState(page);
+    expect(after.overdue).toBe(0);
+
+    watch.assertClean();
+  });
+});
+
+/** A nebula fragment gets its OWN sprite, not its parent's (user call).
+ *
+ *  The generic voronoi child recipe copies `parent.sprite`, which is right
+ *  for every other material — rock, glass, metal and plastic draw polygons
+ *  and carry no sprite worth varying — and wrong for the one family whose
+ *  whole look IS the sprite.  A tile decomposing into 6-8 cells handed back
+ *  6-8 copies of one cloud image, so a burst read as the same puff stamped
+ *  out repeatedly rather than as a cloud coming apart.
+ *
+ *  The assertion is PER PARENT rather than over the whole population,
+ *  because the population-wide count cannot tell the two builds apart: the
+ *  parents themselves already roll random sprites at map load, so breaking
+ *  thirty tiles yields ~16 distinct child sprites EITHER WAY (measured 16
+ *  inherited vs 20 rolled).  What separates them is whether one parent's
+ *  children differ from EACH OTHER — measured 1.0 distinct per parent and
+ *  30/30 parents uniform before, 3.6 and 0/30 after.
+ */
+test.describe('nebula fragment sprites', () => {
+  test('one tile’s children do not all wear the same sprite', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'NEBULA_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+
+    const r = await engine(page, (e: any) => {
+      const live = () => e.currentMap.entities
+        .filter((x: any) => x.active && x.shardVariant === 'nebula-shard');
+      const before = live().length;
+      const tiles = e.currentMap.entities
+        .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, 30);
+      for (const t of tiles) { t.health = 0; e.handleEntityDeath(t); }
+
+      // Children inherit their parent's grid coords (stampNebulaChild), which
+      // is what lets a fragment be traced back to the tile it came off.
+      const byParent = new Map<string, Set<string>>();
+      for (const k of live().slice(before)) {
+        const key = `${k.nebulaGridCol},${k.nebulaGridRow}`;
+        let set = byParent.get(key);
+        if (set === undefined) { set = new Set(); byParent.set(key, set); }
+        set.add(k.sprite);
+      }
+      const counts = [...byParent.values()].map(s => s.size);
+      return {
+        parents: byParent.size,
+        children: live().length - before,
+        uniformParents: counts.filter(n => n === 1).length,
+        meanDistinct: counts.length
+          ? counts.reduce((a, b) => a + b, 0) / counts.length : 0,
+        spritesSet: live().slice(before).every((k: any) => typeof k.sprite === 'string' && k.sprite.length > 0),
+      };
+    });
+
+    // The break has to have produced enough fragments for the question to
+    // mean anything — one child per parent is trivially uniform.
+    expect(r.parents).toBeGreaterThan(5);
+    expect(r.children).toBeGreaterThan(r.parents);
+    // EVERY fragment still HAS a sprite: falling back to no sprite would
+    // render a nebula body as a bare polygon outline, which would also
+    // trivially satisfy a "not the parent's" assertion.
+    expect(r.spritesSet).toBe(true);
+    // The property: parents whose whole brood shares one sprite. 30/30 before.
+    expect(r.uniformParents / r.parents).toBeLessThan(0.5);
+    expect(r.meanDistinct).toBeGreaterThan(1.5);
 
     watch.assertClean();
   });

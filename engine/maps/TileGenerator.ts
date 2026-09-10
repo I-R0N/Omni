@@ -2,7 +2,7 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, randomRockShade, rockHitCeiling } from '../../constants';
 import { ShardVariantId } from '../systems/ShardSystem.types';
-import { NEBULA_IMAGES } from '../../assets';
+import { randomNebulaSprite } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
 import { nextId } from '../systems/IdAllocator';
 
@@ -363,12 +363,10 @@ export class TileGenerator {
         { x: -w/2, y: -h/4 }
     ];
 
-    // Pick a random nebula sprite from the existing background-nebula asset
-    // set so they match the existing art style.  Fallback is the procedural
-    // puff marker used elsewhere in the codebase.
-    const sprite = NEBULA_IMAGES.length > 0
-        ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
-        : ASSETS.NEBULA_PUFF;
+    // A random nebula sprite from the active set, so tiles match the
+    // background art style.  Shared with the shatter children and the
+    // shatter dust — see `randomNebulaSprite`.
+    const sprite = randomNebulaSprite();
 
     return {
         id: nextId(`nebula_${r}_${c}`),

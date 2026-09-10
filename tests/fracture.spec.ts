@@ -37,7 +37,7 @@
  *  `quietScene` stops the fauna and the ladder; it does not touch shards or
  *  tiles, so no assertion here changes meaning. */
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
+import { boot, dialByName, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
@@ -2621,6 +2621,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
         for (let i = 0; i < p.length; i++) { const q = p[i], n = p[(i + 1) % p.length];
           a += q.x * n.y - n.x * q.y; } return Math.abs(a / 2); };
       const out: any[] = [];
+      const seen = new Set<string>();
       for (const t of ents.filter((x: any) => x.active
           && x.shardVariant === 'plastic-tile' && x.mass === Infinity).slice(0, 8)) {
         e.player.position.x = t.position.x + 6000;
@@ -2639,11 +2640,24 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
           const fresh = ents.filter((x: any) => x.active && !before.has(x.id)
-            && x.shardVariant === 'plastic-shard' && x.dentRecoverTimer !== undefined);
+            && x.shardVariant === 'plastic-shard' && x.dentRecoverTimer !== undefined
+            && !seen.has(x.id));
           if (fresh.length > 0) {
             const c = fresh[0];
+            seen.add(c.id);
             const atBreak = area(c.polygonPoints);
             const rest = area(c.dentRestPolygon);
+            // A DEFORMED fragment is the PRECONDITION, not the finding.  A
+            // grain can legitimately come away barely dented — nothing floors
+            // how much deformation a break must carry — and the springback
+            // claims below say nothing about such a piece.  Taking whichever
+            // fragment happened to appear first and asserting it was squashed
+            // is the premise error the bubbles and recoil flakes were: it
+            // failed 2 full-suite runs with the product perfectly correct.
+            // Skipping undeformed candidates cannot hide a regression, because
+            // "deformation never happens" then yields NO rows and the
+            // `r.length > 0` assertion catches it.
+            if (atBreak >= rest * 0.99) continue;
             const samples: number[] = [];
             for (let i = 0; i < 200; i++) {
               e.shards.update(ents, 1 / 60, e.physics, false);
@@ -2660,11 +2674,13 @@ test.describe('deformation is bounded, conserving and elastic', () => {
       return out;
     });
 
-    expect(r.length).toBeGreaterThan(0);
+    // Deformed fragments EXIST — before this, a fragment was spawned at the
+    // cut size no matter how squashed its grain was, so this count would be
+    // zero.  That is where the "it came away deformed" claim now lives; the
+    // per-row assertion moved into the selection above, since a fragment that
+    // is not deformed has no springback to make claims about.
+    expect(r.length, 'at least one fragment breaks off deformed').toBeGreaterThan(0);
     for (const row of r) {
-      // It came away DEFORMED — smaller than the shape its grain was cut
-      // at.  Before this the fragment was spawned at the cut size no
-      // matter how squashed the grain was.
       expect(row.atBreak).toBeLessThan(row.rest * 0.99);
       // ...and relaxes back, monotonically and in time order...
       expect(row.mid[0]).toBeGreaterThan(row.atBreak);
@@ -3454,10 +3470,23 @@ test.describe('fracture physics — recoil and re-centring', () => {
         }
         // Closed form: ejecting mass m at relative velocity (v - V) leaves
         // the remainder with -(m / M') of it.
+        //
+        // It is exact for ONE ejection and only for one.  A single hit can
+        // occasionally free TWO grains (measured 0.097% of detaches over
+        // 4117), and the recoils are then applied SEQUENTIALLY — each
+        // against the parent's velocity and mass at that moment, neither of
+        // which is observable from the end state.  So `kids` is recorded
+        // and the caller checks the closed form on the single-chip case and
+        // a weaker directional property on the rest.  Modelling a two-chip
+        // detach with kids[0] alone is what made this test flake ~1 in 20:
+        // `expected` counted one ejection while `actual` carried both.
         const k = Math.min(0.6, (kids[0].mass ?? 0) / Math.max(1e-3, t.mass));
+        let chipMomentum = 0;
+        for (const kd of kids) chipMomentum += (kd.mass ?? 0) * (kd.velocity.x - vBefore);
         detaches.push({
           expected: -k * (kids[0].velocity.x - vBefore),
           actual: t.velocity.x - vBefore,
+          kids: kids.length, chipMomentum,
           chipMass: kids[0].mass, parentMassBefore: mBefore,
         });
       }
@@ -3488,15 +3517,37 @@ test.describe('fracture physics — recoil and re-centring', () => {
     // relative).  A first draft asserted < 0.001, which passed only on the
     // runs that happened to land on exactly 0.
     expect(r!.worstTiling).toBeLessThan(0.5);
-    // (3) MOMENTUM: every detach matches the closed form.  Pre-fix this
-    // was 0 on every detach — the chip's momentum came from nowhere.
-    for (const d of r!.detaches) {
+    // (3) MOMENTUM.  Pre-fix the parent's velocity change was 0 on every
+    // detach — the chip's momentum came from nowhere — so the property under
+    // test is that a break pushes back at all, and by the right amount.
+    //
+    // Split by how many grains came away, because the closed form is exact
+    // for one ejection and underdetermined for more (see the note at the
+    // measurement).  Nearly every detach is single, so the precise check
+    // keeps its teeth; asserting it on multi-chip detaches is what made this
+    // flake.  A momentum-conservation check over the whole family was
+    // considered as a uniform replacement and REJECTED on measurement: chip
+    // mass and the parent's area-scaled mass disagree by up to 15% (p99
+    // 2.9%), so the invariant is not tight enough to assert on.
+    const single = r!.detaches.filter((d: any) => d.kids === 1);
+    const multi  = r!.detaches.filter((d: any) => d.kids > 1);
+    expect(single.length).toBeGreaterThan(1);
+
+    for (const d of single) {
       expect(Math.abs(d.actual)).toBeGreaterThan(1e-4);
       expect(Math.abs(d.actual - d.expected)).toBeLessThan(1e-3);
+    }
+    // Multi-chip detaches still have to RECOIL, and in the direction the
+    // ejected mass did not go — the half of the property that survives
+    // without the intermediate state.
+    for (const d of multi) {
+      expect(Math.abs(d.actual)).toBeGreaterThan(1e-4);
+      expect(Math.sign(d.actual)).toBe(-Math.sign(d.chipMomentum));
     }
 
     console.log(`[fracture physics] detaches ${r!.detaches.length},`
       + ` worst centroid ${r!.worstCentroid}, worst tiling gap ${r!.worstTiling},`
+      + ` single ${single.length} multi ${multi.length},`
       + ` recoil ${r!.detaches.map((d: any) => d.actual.toFixed(3)).join(' ')}`);
 
     watch.assertClean();
@@ -3566,7 +3617,7 @@ test.describe('per-material knob readouts', () => {
 });
 
 test.describe('chip dust', () => {
-  test('a chipping body throws small nebula dust, not just the solid piece',
+  test('a chipping body throws nebula dust, not just the solid piece',
     async ({ page }) => {
     test.setTimeout(180_000);
     const watch = await boot(page);
@@ -3619,15 +3670,22 @@ test.describe('chip dust', () => {
     expect(r).not.toBeNull();
     // The run has to have actually chipped, or "dust appeared" is vacuous.
     expect(r!.chips).toBeGreaterThan(10);
-    // THE BUG: pre-fix this was exactly 0.  Gated at 0.35 per chip, so
-    // assert a rate rather than a count — the gate exists because a puff
-    // on every chip reads as a cloud trailing the player.
+    // THE BUG: pre-fix this was exactly 0.  Assert a RATE rather than a
+    // count, and bound it only from ABOVE by the chip count — dust is
+    // banked per chip and thrown every `getChipDustPool()` chips, and the
+    // shipped pool is 1, so at the default there is about one puff per
+    // chip.  A tighter bound here would encode the shipped step, which is
+    // a play-test call that has already moved once; the pooling ARITHMETIC
+    // is pinned by its own test below, against explicit steps.
     expect(r!.dust).toBeGreaterThan(2);
-    expect(r!.dust).toBeLessThan(r!.chips);
-    // SMALL dust: sized off the CHIP, not the parent.  Sizing off the
-    // parent (as the legacy per-hit puff did) would make the dust bigger
-    // than the piece that shed it — a grain is ~12 units on a 36px tile.
-    expect(r!.maxDustSize).toBeLessThan(r!.tileSize * 0.5);
+    expect(r!.dust).toBeLessThanOrEqual(r!.chips);
+    // A PUFF IS SIZED OFF THE MATERIAL THAT CAME OFF, and can never
+    // exceed the body that shed it.  The bank is an area and it empties
+    // every pool, so even at the ladder's deepest step the biggest puff a
+    // 36px tile can throw is well under the tile.  Sizing off the PARENT
+    // (as the legacy per-hit puff did) is what this still catches: that
+    // put a full-tile cloud behind every chip.
+    expect(r!.maxDustSize).toBeLessThan(r!.tileSize * 0.8);
 
     console.log(`[chip dust] ${r!.tiles} glass tiles, ${r!.chips} chips ->`
       + ` ${r!.dust} dust, largest ${r!.maxDustSize.toFixed(1)}`
@@ -3783,6 +3841,466 @@ test.describe('grain knob ladders', () => {
     // And an untouched panel rests ON the defaults: nothing overridden.
     await waitForStats(page, s => s.grainOverrideCount === 0,
       'a clean panel to report zero overrides');
+
+    watch.assertClean();
+  });
+});
+
+/** NEBULA: THE VORONOI GEOMETRY, WITHOUT THE DAMAGE MODEL (user call).
+ *
+ *  Nebula is the fifth grain material and the only one that takes the
+ *  decomposition and NOT the boundary damage layer.  Its `grain` block
+ *  carries no `bondStrength` and no `progressive`, which is what "boundary
+ *  strength zero" means in practice — expressed as the model's own opt-out
+ *  rather than as a literal 0, which would derive a maxHealth of 0 and kill
+ *  every cloud on sight.
+ *
+ *  Three claims, and the third is the one that was actually broken before
+ *  any of this: a nebula sprite is deliberately larger than the body under
+ *  it, so a sizing rule that stops tracking the body does not LOOK wrong —
+ *  it looks like a cloud.  The old rule keyed off `nebulaTileArea`, a field
+ *  set at exactly one site (the map-load tile factory) that no shard ever
+ *  carried, so every shard fell through the `?? HEX_AREA` default and drew a
+ *  FULL-TILE sprite whatever its size.  Measured on the shipped build: 102
+ *  shards spanning 9.2..43.6 in body size, every one of them drawing 120.
+ */
+test.describe('nebula: voronoi geometry without the damage model', () => {
+  /** Break `n` real nebula tiles on the nebula showcase field and return the
+   *  children, with everything the claims below need read off them in ONE
+   *  page evaluation (`prepareFrameEntities` compacts the entity list on the
+   *  next frame, so nothing here survives a round trip). */
+  const breakTiles = (page: any, n: number) => engine(page, (e: any, count: number) => {
+    const ents = e.currentMap.entities;
+    const circumD = (pts: any[]) => {
+      if (!pts) return 0;
+      let m = 0;
+      for (const q of pts) m = Math.max(m, Math.hypot(q.x, q.y));
+      return m * 2;
+    };
+    const area = (pts: any[]) => {
+      if (!pts || pts.length < 3) return 0;
+      let a = 0;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+      }
+      return Math.abs(a) * 0.5;
+    };
+    const sprite = (window as any).__omniNebula.nebulaSpriteSize;
+    const tiles = ents.filter((x: any) => x.active && x.shardVariant === 'nebula-tile')
+      .slice(0, count);
+    if (tiles.length === 0) throw new Error('no nebula tiles on the field');
+    const parent = {
+      size: Math.max(tiles[0].size.x, tiles[0].size.y),
+      polyD: circumD(tiles[0].polygonPoints),
+      polyArea: area(tiles[0].polygonPoints),
+      sprite: sprite(tiles[0]),
+      maxHealth: tiles[0].maxHealth,
+    };
+    const perShatter: number[] = [];
+    const rows: any[] = [];
+    for (const t of tiles) {
+      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      const tArea = area(t.polygonPoints);
+      t.health = 0;
+      t.lastImpactVelocity = { x: 5, y: 0 };
+      t.lastImpactDamage = 2;
+      e.handleEntityDeath(t);
+      const kids = e.currentMap.entities.filter((x: any) => x.active && !before.has(x.id)
+        && x.shardVariant === 'nebula-shard');
+      perShatter.push(kids.length);
+      let childArea = 0;
+      for (const k of kids) {
+        childArea += area(k.polygonPoints);
+        rows.push({
+          size: Math.max(k.size.x, k.size.y),
+          polyD: circumD(k.polygonPoints),
+          sprite: sprite(k),
+          verts: k.polygonPoints ? k.polygonPoints.length : 0,
+          maxHealth: k.maxHealth,
+          // The grain DAMAGE model must never have engaged.
+          boundaryModel: k.fractureEdgeFill !== undefined,
+          comp: !!k.nebulaColorComposition,
+          fade: k.nebulaSpawnDuration ?? 0,
+          cooldown: k.nebulaMergeCooldown ?? 0,
+        });
+      }
+      if (kids.length > 0) rows[rows.length - 1].areaRatio = childArea / tArea;
+    }
+    return { parent, perShatter, rows };
+  }, n);
+
+  test('a tile breaks into its OWN cells — many varied pieces, not a flat 2-3',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 20);
+
+      // The old power-law path produced `2 + floor(random × 2)` children —
+      // 2 or 3 — from an area budget FIXED at 121 regardless of the parent.
+      //
+      // Asserted on the MEAN, not the minimum.  This read `min > 3` when
+      // nebula's `grainSize` was 14 and a tile shed ~7.7 pieces; the perf
+      // pass that took the grain to 20 (see the nebula grain-size note in
+      // CLAUDE.md §8) took the yield to ~3.95, so individual tiles now land
+      // on 3 legitimately and the floor was failing ~3 runs in 4 on a
+      // property nothing had broken.  The count is not the discriminating
+      // claim anyway — the old path could produce 3 as well — the TILING
+      // below is, since a budget fixed at 121 cannot add up to its parent.
+      const counts: number[] = r.perShatter;
+      const meanCount = counts.reduce((a, b) => a + b, 0) / counts.length;
+      expect(meanCount, 'a tile sheds more than the old maximum of 3 on average')
+        .toBeGreaterThan(3);
+      expect(Math.min(...counts), 'and never fewer than the old minimum')
+        .toBeGreaterThanOrEqual(2);
+
+      // Real cells, not the generated 4..6-gon blobs the old spawn shape made:
+      // a Voronoi decomposition of a hexagon contains triangles.
+      const verts = r.rows.map((x: any) => x.verts);
+      expect(Math.min(...verts), 'cells are real polygons').toBeGreaterThanOrEqual(3);
+
+      // AND THE SIZES VARY, which is the point.  The old path varied them too
+      // (a power law over a fixed budget); what it could not do is vary them
+      // against the parent, because it never looked at the parent.
+      const sizes = r.rows.map((x: any) => x.size);
+      expect(Math.max(...sizes) / Math.min(...sizes),
+        'the pieces differ several-fold in size').toBeGreaterThan(2.0);
+
+      // The cells TILE the parent: their areas add up to it.  This is the
+      // property the fixed-121 budget did not have at all.
+      const ratios = r.rows.filter((x: any) => x.areaRatio !== undefined)
+        .map((x: any) => x.areaRatio);
+      expect(ratios.length).toBeGreaterThan(5);
+      for (const q of ratios) expect(q).toBeGreaterThan(0.85);
+      for (const q of ratios) expect(q).toBeLessThan(1.05);
+
+      watch.assertClean();
+    });
+
+  test('the sprite is sized from the body, and is always bigger than its shape',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      // DIAL THE OVERSIZE LADDER TO 1x.  `SPRITE_OVERSIZE` is calibrated so
+      // a full hex tile draws 120 at 1x, and the DBG multiplier scales every
+      // sprite on the map — so the 120 assertion below is a claim about the
+      // CALIBRATION, not about whatever step happens to ship.  It shipped at
+      // 1x when this was written and now ships at 1.25x, which would have
+      // failed this on the default rather than on the rule.  Match the
+      // NUMBER: the readout marks the shipped step with a suffix.  Dialled
+      // through the shared helper, which waits for the readout to MOVE before
+      // clicking again — deciding the next click from a stale `__omniStats`
+      // over-clicks and walks straight past the wanted step.
+      await dialByName(page, 'nebulaSpriteName', (n: string) => /^1x\b/.test(n),
+        (e: any) => e.dbg.cycleNebulaSpriteSize(), 6);
+
+      const r: any = await breakTiles(page, 20);
+
+      // THE REGRESSION.  Every shard used to draw the same 120-unit sprite
+      // whatever its size, because the rule read a field no shard carried.
+      // The bug's signature is a ratio of exactly 1.0 — every shard drawing
+      // the same 120 — so any large spread catches it, and the OVERHANG
+      // assertion below is the precise one.  The bound is 2.0 rather than
+      // the 2.5 it was written at because grain size 20 measures 2.4-3.1
+      // (it was 4.02x at grain 14), which straddled the old figure.
+      const sprites = r.rows.map((x: any) => x.sprite);
+      expect(Math.max(...sprites) / Math.min(...sprites),
+        'sprite sizes vary as much as the bodies do').toBeGreaterThan(2.0);
+
+      // …and they vary WITH the body, not merely alongside it: the overhang
+      // over each body's own outline is one constant.
+      const overhang = r.rows.map((x: any) => x.sprite / x.polyD);
+      const lo = Math.min(...overhang), hi = Math.max(...overhang);
+      expect(hi - lo, 'the overhang is the same multiple on every body')
+        .toBeLessThan(0.05);
+      // THE USER'S STANDING REQUIREMENT: a nebula sprite still reads as a
+      // cloud around the shard, never as a chip.
+      expect(lo, 'and every sprite overhangs its own polygon').toBeGreaterThan(1.5);
+
+      // A full tile is UNCHANGED: `SPRITE_OVERSIZE` is calibrated so the hex
+      // tile still draws at the 120 world units it always did.
+      expect(r.parent.sprite, 'a full tile still draws at 120').toBeCloseTo(120, 0);
+
+      watch.assertClean();
+    });
+
+  test('the grain DAMAGE model never engages — nebula takes geometry only',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 12);
+
+      // No derived HP, no boundary fill, no crack budget: nebula carries a
+      // `grain` block for its CELLS and nothing else.  A literal
+      // `bondStrength: 0` would have produced the opposite — derived HP is
+      // `Σ(edge length × strength)`, so zero strength is zero health.
+      expect(r.parent.maxHealth, 'a tile is 1 HP, as it always was').toBe(1);
+      for (const row of r.rows) {
+        expect(row.boundaryModel, 'no boundary model was ever built').toBe(false);
+        expect(row.maxHealth, 'every shard spawns at 1 HP').toBe(1);
+      }
+
+      // The crash path added by the unified-impact work must skip nebula for
+      // the same reason — it asks `ensureBoundaryModel` and falls back to the
+      // whole-body decrement when it declines.
+      const crash: any = await engine(page, (e: any) => {
+        const t = e.currentMap.entities.find((x: any) => x.active
+          && x.shardVariant === 'nebula-tile' && x.mass === Infinity);
+        if (!t) throw new Error('no nebula tile left');
+        const rock: any = {
+          id: 'neb_crash_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
+          position: { x: t.position.x + t.size.x, y: t.position.y },
+          velocity: { x: -600, y: 0 }, rotation: 0,
+          size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+          health: 50, maxHealth: 50,
+        };
+        e.currentMap.entities.push(rock);
+        e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
+        const out = { boundaryModel: t.fractureEdgeFill !== undefined, maxHealth: t.maxHealth };
+        rock.active = false;
+        return out;
+      });
+      expect(crash.boundaryModel, 'a crush on a cloud builds no boundary model').toBe(false);
+      expect(crash.maxHealth, 'and leaves its HP alone').toBe(1);
+
+      watch.assertClean();
+    });
+
+  test('children carry the parent cloud with them — colour, fade-in, cooldown',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      const r: any = await breakTiles(page, 12);
+
+      // The voronoi child recipe is material-agnostic — geometry, mass, HP,
+      // motion — and nebula is the one family whose identity lives in none of
+      // those: its colour is per-BODY, its birth is a fade, and its merge
+      // pipeline reads a cooldown.  Without the stamp a fragment spawns the
+      // right shape in the wrong colour, pops in, and can re-merge on the
+      // frame it was born.
+      for (const row of r.rows) {
+        expect(row.comp, 'the palette composition came along').toBe(true);
+        expect(row.fade, 'and the birth fade-in').toBeGreaterThan(0);
+        expect(row.cooldown, 'and the post-shatter merge cooldown').toBeGreaterThan(0);
+      }
+
+      watch.assertClean();
+    });
+
+  test('the legacy A/B still gives nebula its OWN fan, not the generic scatter',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await startRun(page, 'NEBULA_FIELD');
+      await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+      await quietScene(page);
+
+      // A 'voronoi' variant under the legacy A/B falls back to the path it
+      // had BEFORE it was opted in.  For nebula that is `shatterNebulaStyle`
+      // — its rear-cone fan of 2-3 — and the dispatch has to say so, or it
+      // drops through to the generic scatter pipeline every other material
+      // uses.
+      const r: any = await engine(page, (e: any) => {
+        e.dbg.cycleFractureMode();                    // → legacy
+        try {
+          const ents = e.currentMap.entities;
+          const counts: number[] = [];
+          const payload: boolean[] = [];
+          for (const t of ents.filter((x: any) => x.active
+            && x.shardVariant === 'nebula-tile').slice(0, 10)) {
+            const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+            t.health = 0;
+            t.lastImpactVelocity = { x: 5, y: 0 };
+            t.lastImpactDamage = 2;
+            e.handleEntityDeath(t);
+            const kids = e.currentMap.entities.filter((x: any) => x.active
+              && !before.has(x.id) && x.shardVariant === 'nebula-shard');
+            counts.push(kids.length);
+            for (const k of kids) {
+              payload.push(!!k.nebulaColorComposition && (k.nebulaSpawnDuration ?? 0) > 0);
+            }
+          }
+          return { counts, payload };
+        } finally {
+          e.dbg.cycleFractureMode();                  // → back to voronoi
+        }
+      });
+
+      expect(r.counts.length).toBeGreaterThan(5);
+      for (const c of r.counts) {
+        expect(c, 'legacy keeps the 2-3 rear-cone fan').toBeGreaterThan(0);
+        expect(c).toBeLessThanOrEqual(3);
+      }
+      // The COUNT alone does not tell the two apart — the generic scatter
+      // reads the same `countMin`/`countMax` off the same variant, so it
+      // also hands back 2-3 (verified: this assertion passed with the
+      // dispatch removed).  What separates them is the CLOUD PAYLOAD: only
+      // `shatterNebulaStyle` carries the parent's palette and birth fade
+      // onto its children, so a nebula tile that fell through to the
+      // generic path spawns colourless shards that pop in.
+      expect(r.payload.length).toBeGreaterThan(5);
+      for (const ok of r.payload) {
+        expect(ok, 'legacy children are still real cloud, not generic debris').toBe(true);
+      }
+
+      watch.assertClean();
+    });
+});
+
+/** CHIP DUST IS POOLED (user call).
+ *
+ *  A grain detach throws pulverised material as well as the solid piece.
+ *  That puff used to be rolled per chip and sized off that one chip, which
+ *  made a speck — a grain is ~12 units where the tile is 36 — and once a
+ *  nebula sprite was sized off the body it belongs to instead of always
+ *  drawing a full tile, the specks stopped reading as cloud at all
+ *  (reported as "the nebula shards released from chipping are very small").
+ *
+ *  Dust is now BANKED as AREA on the body and thrown every
+ *  `getChipDustPool()` chips, which is what makes it ONE knob for both
+ *  halves of "larger, less frequently": pooling N chips multiplies the
+ *  puff's diameter by sqrt(N) and divides how often one appears by N,
+ *  while the TOTAL material thrown is unchanged.  That last property is
+ *  the one worth pinning — a size knob and a frequency knob set
+ *  independently can be made to contradict each other, and this cannot.
+ *
+ *  Pool 1 IS the per-chip behaviour this replaced, so the ladder carries
+ *  its own negative control and the A/B is the same scenario at pool 6 and
+ *  at pool 1, against fresh bodies, with nothing shared but the knob.
+ *  Chip dust is told apart from the OTHER nebula-shard spawns (the rock
+ *  death burst, dent debris) by its exact authored `sizeFraction` — every
+ *  other caller randomises one.
+ *
+ *  MEASURED on 24 rock tiles a side: 24 puffs averaging 17.2 units at the
+ *  shipped pool against 92 averaging 8.6 at pool 1, and the smallest
+ *  pooled puff (11.9) is bigger than the largest per-chip one (12.2). */
+test.describe('chip dust pools into fewer, bigger puffs', () => {
+  test('pooling trades frequency for size and conserves the material thrown', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'ASTEROID_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
+    await quietScene(page);
+
+    // The spy and the batch driver live on `window` so the two batches can
+    // straddle the evaluate boundary the DBG cycle needs: `__omniStats` is
+    // republished by the rAF loop, so "we landed on pool 1" can only be
+    // read after a frame.
+    await engine(page, () => {
+      const e: any = (window as any).__omniEngine;
+      const fr: any = (window as any).__omniFracture;
+      const w: any = window as any;
+      w.__dust = [];
+      const orig = e.drops.spawnColoredNebulaShard.bind(e.drops);
+      e.drops.spawnColoredNebulaShard = (...a: any[]) => {
+        w.__dust.push({ size: a[2], frac: a[4] });
+        return orig(...a);
+      };
+      // Break a batch of identical rock tiles; return the chip-dust puffs
+      // it produced as DIAMETERS (base size x the authored fraction),
+      // which is the quantity the look is judged on.
+      w.__dustBatch = (tag: string, n: number, row: number): number[] => {
+        const ents: any[] = e.currentMap.entities;
+        const W = 36;
+        const first = w.__dust.length;
+        for (let i = 0; i < n; i++) {
+          const pts: any[] = [];
+          for (let k = 0; k < 8; k++) {
+            const ang = (k / 8) * Math.PI * 2;
+            pts.push({ x: Math.cos(ang) * W * 0.5, y: Math.sin(ang) * W * 0.5 });
+          }
+          const tile: any = {
+            id: 'dust_' + tag + '_' + i, type: 'STRUCTURE', shardVariant: 'rock-tile',
+            position: { x: 400 + i * 300, y: row }, velocity: { x: 0, y: 0 },
+            rotation: 0, size: { x: W, y: W }, mass: Infinity, active: true,
+            color: '#8a8a8a', health: 20, maxHealth: 20, polygonPoints: pts,
+          };
+          tile.fractureOriginalArea = fr.polygonArea(pts);
+          tile.lastImpactVelocity = { x: -9, y: 0 };
+          ents.push(tile);
+          for (let h = 0; h < 60 && tile.active; h++) {
+            e.physics.resolveCollision(
+              {
+                id: 'sh_' + tag + i + '_' + h, type: 'PROJECTILE',
+                position: { x: tile.position.x + W * 0.5 + 4,
+                            y: tile.position.y + ((h % 5) - 2) * 4 },
+                velocity: { x: -900, y: 0 }, rotation: Math.PI,
+                size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+                damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+              },
+              tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
+            );
+          }
+        }
+        return w.__dust.slice(first)
+          .filter((p: any) => Math.abs(p.frac - 0.7) < 1e-9)
+          .map((p: any) => p.size * p.frac);
+      };
+    });
+
+    // BOTH batches dial to a NAMED step; neither relies on the shipped
+    // default.  The default is a play-test call that has already moved once
+    // (pooled → per-chip), and a test that reads it as one of its two arms
+    // silently compares a step against itself the day it moves again.
+    // The readout marks whichever step ships, so match the NUMBER, not the
+    // whole label.
+    const dialPool = (want: number) => dialByName(
+      page, 'chipDustPoolName',
+      (n: string) => new RegExp('^' + want + '\\b').test(n),
+      (e: any) => e.dbg.cycleChipDustPool(), 7);
+
+    const shippedName = (await stats(page)).chipDustPoolName;
+    await dialPool(6);
+    const pooled: number[] = await page.evaluate(
+      () => (window as any).__dustBatch('pooled', 24, 3000));
+
+    // Pool 1 IS the per-chip behaviour, and the ladder's own negative
+    // control for everything asserted below.
+    await dialPool(1);
+    const perChip: number[] = await page.evaluate(
+      () => (window as any).__dustBatch('perchip', 24, 5000));
+
+    const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+    // Material thrown is an AREA, so that is what conservation is measured
+    // in — the sum of the squared diameters, not of the diameters.
+    const area = (a: number[]) => a.reduce((x, y) => x + y * y, 0);
+
+    expect(shippedName, 'the shipped step is marked in the readout').toMatch(/\(ships\)/);
+    expect(shippedName, 'and the shipped step is a real rung of this ladder')
+      .toMatch(/^(1|2|4|6|9|14)\b/);
+    expect(pooled.length, 'the pooled batch still throws dust').toBeGreaterThan(10);
+    expect(perChip.length).toBeGreaterThan(10);
+
+    // FEWER, and BIGGER.  Both halves come from the one knob, so both are
+    // asserted: a change that moved only one of them would be a different
+    // feature wearing this one's name.
+    expect(perChip.length / pooled.length,
+      'a pool of 6 throws dust several times less often').toBeGreaterThan(2.5);
+    expect(mean(pooled) / mean(perChip),
+      'and each puff is about sqrt(6) times across').toBeGreaterThan(1.6);
+    // The sharp version of "bigger": the two size distributions do not
+    // overlap at all on this scenario.
+    expect(Math.min(...pooled),
+      'the smallest pooled puff beats the biggest per-chip one')
+      .toBeGreaterThan(Math.max(...perChip));
+
+    // CONSERVATION.  Banking area is what lets one number move size and
+    // frequency together without inventing or destroying material; the
+    // tolerance is loose because the per-tile grain count varies and a
+    // body that dies under half a pool drops its remainder by design.
+    const ratio = area(pooled) / area(perChip);
+    expect(ratio, `total dust area is preserved (pooled/perChip = ${ratio.toFixed(2)})`)
+      .toBeGreaterThan(0.6);
+    expect(ratio).toBeLessThan(1.6);
 
     watch.assertClean();
   });
