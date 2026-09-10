@@ -602,19 +602,17 @@ interface NebulaStretchStep {
 
 export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
   { name: 'off',   k: 0     },
-  { name: '0.010', k: 0.010 },
   { name: '0.05',  k: 0.05  },
   { name: '0.07',  k: 0.07  },
   { name: '0.085', k: 0.085 },
   { name: '0.10',  k: 0.10  },
 ] as const;
 
-// SHIPPED AT 0.010 (user call).  That is a NEW step, five times below what
-// was previously the ladder's softest non-zero value and an eighth of the
-// old default — a stretch you read as a body leaning into its drift rather
-// than as a smear.  `off` is still the step below it, so the ladder keeps a
-// true zero to A/B against.
-const VEL_STRETCH_DEFAULT_INDEX = 1; // 0.010
+// SHIPPED AT THE TOP OF THE LADDER, 0.10 (user call) — the most stretch the
+// ladder offers, so a moving puff reads as drawn out along its travel.
+// Because it is the top, the cycle WRAPS to `off` on the first click, which
+// makes the A/B against no stretch at all one press away.
+const VEL_STRETCH_DEFAULT_INDEX = 4; // 0.10
 let activeNebulaStretchKIndex = VEL_STRETCH_DEFAULT_INDEX;
 
 /** Active stretch multiplier K (in speed → stretch).  Read by

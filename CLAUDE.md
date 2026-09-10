@@ -3165,17 +3165,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   runs in 8 with the product perfectly correct.  A default that moves a
   measured quantity has to be walked past the assertions written against
   it; a floor is not a claim unless there is margin under it.
-- **NEBULA'S VELOCITY STRETCH SHIPS AT 0.010, WHICH IS OFF THE OLD LADDER**
-  (user call).  `VEL_STRETCH_K_CYCLE` maps a shard's speed to how far its
-  sprite squashes along its own velocity, and its softest non-zero step used
-  to be 0.05 with 0.085 shipping.  The play-tested answer is a NEW step five
-  times below that floor: at 0.010 a drifting puff leans into its travel
-  rather than smearing along it, which is the read the effect was after and
-  which the old range could not express — every step it offered was a smear
-  of some size.  `off` stays the step below it, so the ladder still carries
-  a true zero to A/B the effect against, and the four larger steps are kept
-  rather than dropped: a range whose top is not too far cannot show where
-  too far is.  Presentation only — the squash axis follows velocity while
+- **NEBULA'S VELOCITY STRETCH SHIPS AT THE TOP OF ITS LADDER, 0.10** (user
+  call).  `VEL_STRETCH_K_CYCLE` maps a shard's speed to how far its sprite
+  squashes along its own velocity; 0.085 used to ship and the play-tested
+  answer is the step above it, the most stretch the ladder offers, so a
+  moving puff reads as drawn out along its travel.  Because it is the TOP,
+  the cycle WRAPS to `off` on the first click — the A/B against no stretch
+  at all is one press away, which is the same property index 0 gives every
+  other ladder.  Presentation only: the squash axis follows velocity while
   the sprite keeps its own rotation, and nothing in the sim reads it.
 - **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
   call; `goo` is what SHIPS, and `off (old)` is one click away because the
