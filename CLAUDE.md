@@ -1857,17 +1857,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   whether there is anything to draw it for — the cycle cannot be a dev
   override that forces the layer on, because its shipped default is
   already 'dots' and that would make the material reveal free.
-  **ALL OF THAT NOW SHIPS BYPASSED** (user call): `activeScanRevealAll`
-  defaults to TRUE, so a fresh run draws the whole minimap and runs neither
-  the discovery walk nor the auto sweep.  The subsystem above is untouched
-  and still exactly what the DBG ▸ Visual ▸ "Scan off" row switches back to;
-  what moved is which side of the switch a run starts on.  The consequence
-  to know before changing it back: with the reveal up, the SCANNER module
-  still buys off-screen arrows and the pressed ping but no longer buys the
-  MAP, which is most of why a mark is worth its price — so anything tuning
-  scanner economics has to turn the reveal off first.  Every suite that
-  tests the scanner does exactly that, through `tests/helpers.ts`
-  `useScanner(page)`.
+  **ALL OF THAT IS LIVE IN A SHIPPED RUN** — `activeScanRevealAll` defaults
+  to FALSE, so a fresh run runs the discovery walk and the auto sweep and its
+  minimap fills in as the player meets things.  It BRIEFLY SHIPPED BYPASSED
+  (defaulting TRUE, drawing the whole map and skipping the periodic work) and
+  was put back (user call), and the reason is the thing to keep: revealing
+  everything takes away the half of the SCANNER module that makes a mark
+  worth buying, leaving it selling off-screen arrows and the pressed ping but
+  not the MAP.  Anything tuning scanner economics needs the reveal off, which
+  is now simply the default.
+  The DBG ▸ Visual ▸ "Scan off" row still switches the whole subsystem off in
+  exchange for a fully drawn minimap, and it is kept as a PERF A/B rather than
+  as a gameplay knob: the scanner does real continuous work, and a
+  frame-rate report needs a way to take all of it away without also taking
+  the minimap away.  `tests/helpers.ts` `useScanner(page)` remains the seam
+  every scanner suite calls — idempotent, so with the reveal off by default
+  it now checks and does nothing rather than flipping.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -3108,11 +3113,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   fit the shared helper, and it went on allocating a literal per entity per
   frame.
   That was survivable only because the buffer held DISCOVERED structures
-  alone.  It stopped being survivable the moment the scan reveal began
-  shipping ON, since every structure inside `MINIMAP_CONSTANTS.RANGE` then
-  reaches it: measured on OVERWORLD **while flying**, 805 KB/frame with the
-  reveal up against 590 with it off, and the pauses that buys are exactly the
-  symptom the pooling was introduced to remove.  `pushMinimapSlot` is the
+  alone.  It stopped being survivable during the window when the scan reveal
+  shipped ON, since every structure inside `MINIMAP_CONSTANTS.RANGE` then
+  reaches the buffer: measured on OVERWORLD **while flying**, 805 KB/frame
+  with the reveal up against 590 with it off — and the pauses that buys are
+  exactly the symptom the pooling was introduced to remove.  The reveal is
+  off again by default, so a shipped run is back to the lower figure, but the
+  pooling STAYS: the DBG row still puts the buffer under the higher one on
+  demand, and the rule below does not depend on which default is current.
+  `pushMinimapSlot` is the
   same contract for that shape.  The rule generalises: a NEW per-frame bucket
   is pooled, or it is a GC regression waiting for the day something makes it
   hot.

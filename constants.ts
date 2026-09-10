@@ -5003,14 +5003,18 @@ export function cycleNebulaBond(): number {
 // the snitch), because that is what feeds the off-screen ARROWS and
 // silently emptying the screen edge would make the A/B measure two things
 // at once.  A pressed scan still works too.
-// SHIPPED ON (user call).  The switch defaults to revealing everything and
-// skipping the scanner's periodic work, so a fresh run draws the whole
-// minimap and runs no discovery walk or auto sweep.  Consequence worth
-// knowing: this is the half of the SCANNER module that makes it worth
-// buying, so with this on a scanner buys arrows and the pressed ping but no
-// longer the map itself.  Clicking the DBG row restores the scanner
-// behaviour the module system was designed around.
-let activeScanRevealAll = true;
+// SHIPPED OFF (user call).  It shipped ON for a while and is back off: a
+// fresh run therefore RUNS the scanner — the discovery walk, the auto sweep,
+// and a minimap that fills in as the player meets things.  That is the
+// behaviour the module system was designed around, and the reason to prefer
+// it is what shipping ON cost: revealing everything takes away the half of
+// the SCANNER module that makes it worth buying, leaving a mark to sell
+// arrows and the pressed ping but not the map.
+//
+// It stays a switch rather than a deleted branch because it is a PERF A/B
+// first — the scanner does real continuous work, and a frame-rate report
+// needs a way to take all of it away without also taking the minimap away.
+let activeScanRevealAll = false;
 
 /** True while the DBG "Scan off" switch is on: skip the scanner's periodic
  *  work and draw every contact and every tile on the minimap. */
