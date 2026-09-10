@@ -3703,13 +3703,6 @@ export function cycleRollDamping(): number {
   return activeRollDampingIndex;
 }
 
-export const SHOOTING_STAR_CONSTANTS = {
-  MIN_TIMER: 300,
-  MAX_TIMER: 700,
-  SPEED_MIN: 300,
-  SPEED_MAX: 900
-};
-
 // ─── The star field ──────────────────────────────────────────────────────────
 //
 // DENSITY IS PER UNIT AREA, NOT A FIXED COUNT.  The star count used to be
