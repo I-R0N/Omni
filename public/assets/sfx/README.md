@@ -1,5 +1,12 @@
 # Recorded SFX takes
 
+## Licensing
+
+The WAV takes committed in this folder were created for Omni and are released
+under the repository's MIT license. Do not add third-party recordings unless
+their redistribution terms are compatible with MIT and their attribution is
+recorded here.
+
 Drop `.wav` files here. A file at `public/assets/sfx/foo.wav` is fetched by
 the game from `/assets/sfx/foo.wav` — `public/` is served at the site root,
 the same convention `assets.ts` uses for sprites.
