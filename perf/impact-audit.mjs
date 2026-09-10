@@ -253,9 +253,17 @@ for (const m of MATERIALS) {
   const r = await page.evaluate(({ tileV, speed }) => {
     const e = window.__omniEngine;
     const P = e.physics;
-    const pick = () => e.currentMap.entities.find(
+    // Pick by AUTHORED HP, not "the first tile".  Metal's authored HP is
+    // `24 × densityTier` over six tiers while its DERIVED HP is flat, so a
+    // first-match pick reports whichever tier happened to be nearest the
+    // start of the entity list — which is how the same audit read metal at
+    // 120 crashes once and 96 another time with nothing having changed.
+    const pick = (authored) => e.currentMap.entities.find(
       x => x.active && x.shardVariant === tileV && x.mass === Infinity && (x.health ?? 0) > 0
-        && !x.fractureEdgeFill);
+        && !x.fractureEdgeFill && (authored === undefined || x.maxHealth === authored));
+    const authoredTiers = [...new Set(e.currentMap.entities
+      .filter(x => x.active && x.shardVariant === tileV && x.mass === Infinity && (x.health ?? 0) > 0)
+      .map(x => x.maxHealth))].sort((a, b) => a - b);
     const crashTo = (t, preShoot) => {
       const p = e.player;
       p.position.x = t.position.x - t.size.x; p.position.y = t.position.y;
@@ -279,9 +287,21 @@ for (const m of MATERIALS) {
       p.velocity.x = 0; p.velocity.y = 0;
       return { crashes: n, hpBefore: hp0, maxBefore: max0 };
     };
-    const a = pick(); const virgin = a ? crashTo(a, false) : null;
-    const b = pick(); const shot   = b ? crashTo(b, true)  : null;
-    return { virgin, shot };
+    // The LOWEST authored tier is the deterministic reference row, so the
+    // virgin-vs-once-shot claim (step 2) is pinned against a stable number.
+    const a = pick(authoredTiers[0]); const virgin = a ? crashTo(a, false) : null;
+    const b = pick(authoredTiers[0]); const shot   = b ? crashTo(b, true)  : null;
+    // Every tier, so the spread the AUTHORED-HP conversion introduces is
+    // visible rather than sampled.  A crash spends one authored HP, so a
+    // material whose authored HP is tiered has a ram count that is tiered
+    // too — while its derived HP, which is what the grain model calls
+    // toughness, does not move at all.
+    const tiers = [];
+    for (const au of authoredTiers) {
+      const t = pick(au);
+      if (t) tiers.push({ authored: au, ...crashTo(t, false) });
+    }
+    return { virgin, shot, tiers };
   }, { tileV: m.tile, speed: 6 });
   crashCounts.push({ mat: m.mat, ...r });
 }
@@ -404,6 +424,24 @@ for (const c of crashCounts) {
     `${c.mat.padEnd(10)} ${(f(c.virgin.hpBefore,1)+'/'+f(c.virgin.maxBefore,1)).padStart(14)} `
     + `${String(c.virgin.crashes).padStart(8)}      `
     + `${(f(c.shot.hpBefore,1)+'/'+f(c.shot.maxBefore,1)).padStart(14)} ${String(c.shot.crashes).padStart(8)}`);
+}
+
+console.log('\n=== 5b. THE SAME TILE, EVERY AUTHORED TIER (what the conversion costs) ===\n');
+console.log('A crash spends ONE AUTHORED HP expressed in the derived budget, so a');
+console.log('material whose authored HP is tiered has a tiered ram count — while its');
+console.log('DERIVED HP, which is what the grain model calls toughness, does not move.\n');
+console.log('material   authored   crashes   derived HP   KE per derived HP');
+{
+  const CRASH_V = 6, PM = crashes.playerMass;
+  const crashKe = 0.5 * PM * CRASH_V * CRASH_V;
+  for (const c of crashCounts) {
+    const s = byMat[c.mat];
+    for (const t of (c.tiers || [])) {
+      console.log(
+        `${c.mat.padEnd(10)} ${f(t.authored, 0).padStart(8)} ${String(t.crashes).padStart(9)}   `
+        + `${f(s ? s.mean : null, 1).padStart(10)}   ${f(s ? t.crashes * crashKe / s.mean : null, 0).padStart(17)}`);
+    }
+  }
 }
 
 console.log('\n=== 6. HOW FAR APART THE TWO SIDES ARE ===\n');
