@@ -1,0 +1,15 @@
+{
+  "prompt": "TrackType: SFX, Energy splash \u2014 a filtered *whoosh* with a bright rim. Clearly *not* a hull hit; the player must be able to tell shield from health by ear, sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "Energy splash \u2014 a filtered *whoosh* with a bright rim. Clearly *not* a hull hit; the player must be able to tell shield from health by ear.",
+  "style": "sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 60428838,
+  "ms": 150,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "trim": "onset",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.shield.absorb"
+}

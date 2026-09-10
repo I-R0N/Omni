@@ -1,0 +1,15 @@
+{
+  "prompt": "TrackType: SFX, Soft breathy poof, almost pitchless, nearly silent. Passing through gas, not matter, soft breathy noise texture, unpitched, airy and diffuse, gentle swell and quick fade, dry and close",
+  "description": "Soft breathy poof, almost pitchless, nearly silent. Passing through gas, not matter.",
+  "style": "soft breathy noise texture, unpitched, airy and diffuse, gentle swell and quick fade, dry and close",
+  "style_kind": "custom",
+  "seed": 944668237,
+  "ms": 200,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "trim": "onset",
+  "take_seconds": 1.0,
+  "raw": false,
+  "peak_dbfs": -8.0,
+  "mono": true,
+  "id": "impact.tile.nebula"
+}

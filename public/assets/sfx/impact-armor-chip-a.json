@@ -1,0 +1,15 @@
+{
+  "prompt": "TrackType: SFX, Thick, dead clunk \u2014 an obviously *absorbed* hit. Pairs with the reduced damage number the game already shows, sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "Thick, dead clunk \u2014 an obviously *absorbed* hit. Pairs with the reduced damage number the game already shows.",
+  "style": "sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 851765006,
+  "ms": 100,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "trim": "loudest",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.armor.chip"
+}

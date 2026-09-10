@@ -1,0 +1,14 @@
+{
+  "prompt": "TrackType: SFX, Low metallic clonk with a short hum. The most tonal of the material hits \u2014 but a LOW tone, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "Low metallic clonk with a short hum. The most tonal of the material hits \u2014 but a LOW tone.",
+  "style": "crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 821438904,
+  "ms": 165,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.tile.metal"
+}

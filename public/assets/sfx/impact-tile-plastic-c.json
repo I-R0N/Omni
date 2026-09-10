@@ -1,0 +1,14 @@
+{
+  "prompt": "TrackType: SFX, Muted plasticky tock. Deadened, no ring at all, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "Muted plasticky tock. Deadened, no ring at all.",
+  "style": "crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 1979566557,
+  "ms": 70,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.tile.plastic"
+}
