@@ -200,6 +200,10 @@ export class AudioSystem {
   // ── Context (created on first gesture only) ──
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Category bus for all gameplay and interface effects. Keeping it separate
+   * from master leaves a clean route for music later without teaching every
+   * event definition about user preferences. */
+  private sfxBus: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
   /** Decoded recorded takes, per id.  Absent or all-null → synth draft. */
   private samples = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
@@ -225,6 +229,7 @@ export class AudioSystem {
   // ── Mixer state (in-memory only — see FOR-USER-REVIEW in the gauntlet
   //    log: durable preference storage is out of scope for this project) ──
   private _volume: number = AUDIO_CONSTANTS.DEFAULT_VOLUME;
+  private _sfxVolume = 1;
   private _muted = false;
   /** False while paused / docked / in the menu — i.e. whenever the sim is
    *  frozen.  Silences the WORLD (loops and positional one-shots) but
@@ -376,6 +381,9 @@ export class AudioSystem {
     this.master = this.ctx.createGain();
     this.master.gain.value = this._muted ? 0 : this._volume;
     this.master.connect(this.ctx.destination);
+    this.sfxBus = this.ctx.createGain();
+    this.sfxBus.gain.value = this._sfxVolume;
+    this.sfxBus.connect(this.master);
 
     // Shared white noise — one buffer for every noise-based voice in the
     // game, sampled at a random offset per voice so repeats don't phase.
@@ -535,6 +543,16 @@ export class AudioSystem {
   }
   public toggleMute() { this.setMuted(!this._muted); }
 
+  /** Effects-only trim. It is independent from master so a future music bus
+   * can retain its level when combat is made quieter. */
+  public get sfxVolume(): number { return this._sfxVolume; }
+  public setSfxVolume(v: number) {
+    this._sfxVolume = Math.max(0, Math.min(1, v));
+    if (this.sfxBus && this.ctx) {
+      this.sfxBus.gain.setTargetAtTime(this._sfxVolume, this.ctx.currentTime, 0.02);
+    }
+  }
+
   /** Paused / docked: kill loops and drop one-shots, but keep the context
    *  alive so the next resume is instant. */
   public setActive(a: boolean) {
@@ -665,7 +683,7 @@ export class AudioSystem {
       voiceGain.connect(panner);
       tail = panner;
     }
-    tail.connect(this.master);
+    tail.connect(this.sfxBus ?? this.master);
 
     // 5. Render.
     const s = this.scratch;
@@ -797,8 +815,9 @@ export class AudioSystem {
     // Fade in rather than snapping — a loop starting at full gain clicks.
     gain.gain.value = 0;
     gain.gain.setTargetAtTime(g, now, AUDIO_CONSTANTS.LOOP_RAMP);
-    if (panner) { gain.connect(panner); panner.connect(this.master); }
-    else gain.connect(this.master);
+    const bus = this.sfxBus ?? this.master;
+    if (panner) { gain.connect(panner); panner.connect(bus); }
+    else gain.connect(bus);
 
     const s = this.scratch;
     s.ctx = this.ctx; s.dest = gain; s.t0 = now;
