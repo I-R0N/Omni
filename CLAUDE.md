@@ -41,19 +41,97 @@ constants.ts              ~1000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + virtual:nebula-manifest plugin
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
-package.json              Scripts: dev, build, preview (no lint/test script)
+package.json              Scripts: dev, build, preview, typecheck, test
+                          (= test:smoke — boot + loop, the DEFAULT), plus
+                          test:smoke / test:full.  The smoke set is defined
+                          HERE and nowhere else; CI runs these same scripts
+                          (no lint script)
+playwright.config.ts      Test harness: one 390×844 project (the DESIGN
+                          TARGET; viewports.spec.ts overrides it per
+                          describe block), a webServer
+                          that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
+scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
+                          authoring angle table, --placeholder renders
+                          stand-in cells from the wireframe hull
+
+tests/                    Playwright smoke suites (roadmap 5b) — boot,
+                          loop, economy, attribution, traits, screens,
+                          plus input / help / minimap / maps (step 5),
+                          viewports / healthbars (5d), starfield,
+                          lighting (the
+                          PR #88 gauntlet) and the play-test follow-ups
+                          terrain / shake / knockback / deflect /
+                          flashlight / nebulaspin / roll / shipsprites /
+                          shardblend, fracture, bubbles (the Phase-A
+                          aggro timeout + the immovability fix, and
+                          the mouth-size / bite eating rules) and
+                          modules (the Phase-A module families:
+                          Penetration, Scanner, hex slots),
+                          helpers.ts (the shared harness over the debug
+                          handles) and README.md (suite map + the 13
+                          anti-flake rules — read 9, 12 and 13 before
+                          writing a DBG-knob test).  387 tests.  All run at
+                          390×844 EXCEPT viewports.spec.ts, which sets
+                          its own and covers six sizes plus a
+                          mid-session resize
 
 components/
+  menuNav.ts              GAMEPAD MENU NAVIGATION (G15) — the D-pad
+                          focus driver.  Drives DOM focus, not React
+                          state, and moves GEOMETRICALLY over whatever
+                          the live `[data-overlay]` panel renders, so a
+                          new screen is navigable the day it is added
+                          and no focus order is authored anywhere
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
-                          UI, dock affordance, death/run-summary screen;
-                          debug panel lives inside the pause menu)
+                          UI, dock affordance, death/run-summary screen,
+                          audio settings row; debug panel lives inside
+                          the pause menu)
 
 engine/
-  GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
-                          player entity, camera, map, regen queues, drop
-                          cache, and the rAF loop.
+  GameEngine.ts           Orchestrator (~4900 lines).  Owns the player
+                          entity, camera, map, regen queues, drop cache,
+                          and the rAF loop.  What is LEFT here after the
+                          5f decomposition is the frame itself —
+                          `loop` / `updatePhysics` / `updateGameLogic` /
+                          `handleEntityDeath` — plus run + map lifecycle,
+                          stations/portals, weapons, score and the stats
+                          push.  Concerns with a life of their own live
+                          in the sibling modules below; they are plain
+                          free functions taking `g: GameEngine`, so the
+                          engine calls them directly with no dispatch
+                          (see docs/GAUNTLET_5F_LOG.md, decision D1)
+  bosses.ts               Boss capstones: phase stamping, the live-boss
+                          HUD snapshot, the bounty + stage-clear beat,
+                          the module grant, the descent rift
+  explosions.ts           Shockwaves, the expanding AoE ring, and the
+                          direct player-blast path (the player is not in
+                          `currentMap.entities`, so the ring can never
+                          reach it — see §8)
+  outfitting.ts           Hex-slot machinery: the adjacency fixpoint,
+                          the fold into player stats, the derived gun
+                          loadout, tile move/swap, pricing,
+                          `statBreakdown`, the UI snapshots.  The
+                          COMMERCE API (moveModule / purchaseModule /
+                          sellModule / scrapModule) stays on GameEngine
+  debugControls.ts        `DebugControls` — every toggle and cycle behind
+                          pause ▸ Debug Menu, reached as `engine.dbg.*`.
+                          A class, not free functions, because the UI is
+                          the caller.  The flags it writes are still
+                          GameEngine fields; only the methods moved
+  roamers/                The engine-managed roamers — each a bespoke
+                          lifecycle the AISystem does not drive
+    dragons.ts            Stage-6 serpent: flow-weave roam, the Snake
+                          body it eats out of the terrain, sever/detach,
+                          portal entry + exit, kill payout
+    rivals.ts             Stage-7 privateers: score-cadence warp-in,
+                          cached hunt target, strafe, loot vacuum
+    snitch.ts             The persistent golden comet: burst/coast AI,
+                          per-catch speed ramp, the catch board-clear
+    bubbles.ts            Stage-5 ambient fauna + the eat/latch
+                          machinery it owns (Stage-3b consume-and-grow,
+                          Stage-3c attach)
   toroidal.ts             MAP_WIDTH/HEIGHT, wrap helpers, dimension-change
                           listener registry
   NebulaColor.ts          Palette-aware hex blending for nebula compositions
@@ -77,14 +155,89 @@ engine/
                           does NOT replace it
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
-    InputSystem.ts        Keyboard/mouse/touch state.  Pointer gestures
-                          engage game input ONLY when they start on the
-                          CANVAS — overlay-targeted events are skipped
-                          entirely so menus keep native touch scrolling
+    InputSystem.ts        Keyboard / mouse / touch / GAMEPAD state, plus
+                          the onscreen touch joystick (Pair C, c2).
+                          Pointer gestures engage game input ONLY when
+                          they start on the CANVAS — overlay-targeted
+                          events are skipped entirely so menus keep
+                          native touch scrolling.  The pad and the stick
+                          both feed the SAME movement vector / synthetic
+                          pointer / fire queues the mouse feeds, so
+                          nothing downstream knows which device is
+                          driving (see §8)
+    DualSenseHID.ts       DualSense ADAPTIVE TRIGGERS over WebHID (G12) —
+                          the CRC-32, the output-report builders and the
+                          device wrapper.  Output-only, opt-in behind a
+                          user gesture, inert where WebHID is absent
+                          (every mobile browser, and Safari), and imports
+                          nothing, so `constants.ts` can take the
+                          trigger-mode vocabulary from it without a
+                          cycle.  See §8
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
-    RenderSystem.ts       Canvas2D draw pass, tint cache, damage text,
-                          wave banner, minimap
+    RenderSystem.ts       Canvas2D draw pass (~1580 lines).  After the 5f
+                          split and the renderEntities decomposition that
+                          followed it, this is the WORLD pass — `render`,
+                          `renderEntities`, the sprite/tint/bitmap caches,
+                          the flow-field overlay — plus the frame
+                          orchestration that calls the render/ modules
+                          below.  `renderEntities` is now the per-entity
+                          FRAME: the guards, the glass-family static-tile
+                          fast path, the shared per-entity setTransform,
+                          the sprite path, and a 5-way `entity.type`
+                          dispatch into the four *Shapes modules
+    render/               Render sub-domains, split out of RenderSystem
+                          by what they draw.  Free functions; the ones
+                          taking the RenderSystem (`r`, or `rs` where the
+                          moved body already binds `r` as a radius) do so
+                          only for state that persists between frames
+      drawUtils.ts        The shared floor every direction imports so no
+                          two of them import each other: colour maths
+                          (hexToRgb / rgbToHex / liftCh / sinkCh /
+                          densityTintForRender), the seeded damage-crack
+                          overlay + its style table, the torus
+                          shiftX/shiftY, roundRectPath
+      enemyShapes.ts      Procedural enemy silhouettes — one drawn shape
+                          per archetype, boss aura, engine flame, damage
+                          cracks.  Takes no engine and no renderer
+      tileShapes.ts       The STRUCTURE arm: glass-family tile, material
+                          tile, regen ghost, asteroid / mobile shard +
+                          LOD chips — plus the helpers only terrain
+                          calls (tileFillColor + the materialAutomata*
+                          chain, overlayMaterialCracks, timedTileBloom /
+                          renderProximityBloom, drawMetalDebugOutline)
+      nebulaTiles.ts      The cloud layer, both doors: the cached
+                          fast path (one drawImage) and the slow path
+                          (tint chain, sprite, twinkle) that refills it
+      projectileShapes.ts The four shot silhouettes — lightning, bouncer
+                          head, charged fireball, standard glow — and
+                          the two unit-radius gradient caches
+      dropShapes.ts       Collectible drops (salvage / health / glass
+                          debris) and the proximity-interactable POIs
+                          (station, portal, snitch).  Like enemyShapes,
+                          takes no engine and no renderer
+      shipSprites.ts      SHIP TILT SHEETS — the player hull as
+                          PRE-RENDERED art, one authored pose per (tilt
+                          magnitude, tilt-axis azimuth).  The grid, the
+                          nearest-pose resolver, the mirror fold and the
+                          cell order.  Takes no engine and no renderer;
+                          docs/SHIP_SPRITE_SHEETS.md is GENERATED from
+                          its own `enumerateCells`
+      hud.ts              The SCREEN-SPACE layer: minimap + its static
+                          layer + its flow-streamline layer, off-screen
+                          indicators, loadout strip, player messages,
+                          wave banners, damage text, the touch
+                          joystick, fitFontPx
+      effects.ts          World-space ephemera: player + projectile
+                          trails, pooled particles, lightning arcs
+      shardBlend.ts   The bonded-pair "goo" layer: one metaball
+                      connector per live cohesion bond, filled
+                      UNDER both hulls so a stuck pair reads as
+                      one blob instead of two polygons touching.
+                      Presentation only — see §8
+      staticTileCache.ts  The pre-rendered immovable-terrain layer —
+                          budgeted stamping, per-tile erase, single-draw
+                          blit
     AISystem.ts           Per-enemy behavior-dispatch table (ENEMY_BEHAVIOR →
                           moveStrategies); idle/chase state machine,
                           reaction-time lag targets, pack-sync, stuck
@@ -101,9 +254,30 @@ engine/
                           COUNTED enemy is dead (clear-the-field;
                           `countsTowardWave !== false`); the clock just
                           grades the speed bonus.  Survivors carry over.
+                          `haltForBoss()` ENDS the ladder when a boss
+                          reaches the field and nothing but a map load
+                          restarts it (see §3)
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
+                          (+ ShardFracturePolicy, the voronoi gauntlet's
+                          per-variant fracture axis)
+    fracture.ts           PURE seeded Voronoi fracture core (voronoi
+                          gauntlet) — mulberry32, site placement, cell
+                          decomposition via robust polygon-line
+                          splitting, boundary-cell subtraction, the
+                          union-of-surviving-cells outline, interior
+                          edges.  Zero engine imports; pinned by
+                          tests/fracture.spec.ts via __omniFracture
+    fractureCache.ts      The entity-facing cache policy over fracture.ts
+                          — ensureFractureCells / ensureFractureEdges,
+                          shared by the SIM (shatter consumes cells at
+                          death) and the RENDER layer (cracks draw the
+                          interior edges), so the two cannot disagree.
+                          Also the GRAIN-BOUNDARY damage model (V15):
+                          stampLocalImpact / ensureBoundaryModel /
+                          applyBoundaryDamage / edgeBreakFraction — damage
+                          spent on boundaries, HP derived from them (§8)
     NebulaSystem.ts       Slim nebula adapter: neighbour-count refresh,
                           shard→tile transmutation, regen-completion hook,
                           salvage-drop roll
@@ -111,21 +285,62 @@ engine/
                           seeding only)
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
                           incremental tile-destroy patching
-    EntityIndex.ts        Per-frame filtered lists (enemies, asteroids, …)
-    BackgroundManager.ts  Parallax stars + nebula BG layers
+    EntityIndex.ts        Per-frame filtered lists (enemies, mobile
+                          shards, projectiles, …)
+    BackgroundManager.ts  Parallax stars + nebula BG layers.  The star
+                          field is DATA, not bitmaps: a struct-of-arrays
+                          of device-pixel positions/sizes sorted into
+                          fillStyle groups, drawn directly every frame by
+                          `renderStars` (one state change per group, zero
+                          allocation).  Count is derived from viewport
+                          AREA at a target density, so every screen size
+                          shows the same sky per unit area.  See §8 and
+                          docs/GAUNTLET_STARFIELD_LOG.md
     IdAllocator.ts        Monotonic nextId() for entity IDs
     PerfController.ts     Load-driven frame-skip coordinator for every
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
                           projectiles)
+    CellBuckets.ts        Allocation-free spatial-hash bucket store —
+                          flat array indexed by DENSE cell index, with
+                          recycled bucket arrays.  Backs the two
+                          per-substep broadphase grids (gauntlet 5c)
+    AudioSystem.ts        SFX manager — gesture-unlocked WebAudio,
+                          per-id polyphony caps + retrigger collapse,
+                          tier-thinned global voice ceiling, torus-
+                          wrapped pan/attenuation, synthesis primitives
+    SfxRegistry.ts        The procedural draft of every sound in
+                          docs/SFX_INVENTORY.md, keyed by its stable id
     PerfRecorder.ts       DBG in-game FPS/perf capture harness — records
                           the per-frame timing + PerfSnapshot stream over a
                           window and exports a copy-paste report (DBG panel
                           "Perf REC" section; iPhone-friendly, no devtools)
 
+perf/                     Headless capture harness (gauntlet 5c) —
+                          capture.mjs (scene matrix: worst-frame / p99 /
+                          allocation attribution), simbench.mjs (low-noise
+                          ms-per-sim-substep), probe.mjs (targeted in-page
+                          micro-probes), impact-audit.mjs (what a weapon's
+                          authored `damage` is worth in ENERGY and MOMENTUM
+                          against each material's DERIVED HP, and what the
+                          crash gates correspond to in the same units —
+                          step 1 of the unified-impact sequencing),
+                          scenes.mjs, README.md.
+                          Deliberately NOT part of `npm test`: runs take
+                          minutes and are noise-prone; the test suite is a
+                          merge gate.  Read perf/README.md before quoting
+                          any number out of it
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
-.github/workflows/        pr-preview, publish-standalone
+                          EXCEPT docs/SFX_INVENTORY.md, which IS current
+                          and IS the source of truth for sound (see §8),
+                          and docs/MATERIAL_GRAIN_SPEC.md, which is a
+                          PROPOSED design (explicitly not implemented) —
+                          the generalisation of V15's grain model into a
+                          material system with unified bonding
+.github/workflows/        pr-checks (the merge gate: typecheck + build +
+                          Playwright on every PR), pr-preview,
+                          publish-standalone
 ```
 
 ---
@@ -178,6 +393,72 @@ is now reachable only through that dropdown.
   placement changes).  Coming home used to dump the player at their base
   station across the hub, throwing the trip away.  No matching rift — a
   descent into a fresh arena, or a new run — falls back to `playerSpawn`.
+  AND THE PLAYER IS THROWN CLEAR (user call): `placePlayerAtSpawn` lands
+  the ship dead-stopped, which left it at rest INSIDE the exit rift's own
+  well, so the hole it had just come out of pulled it back in.  The
+  arrival now carries an outward velocity along the mouth→ship axis,
+  and that speed is SOLVED against the well rather than tuned beside it
+  (`playerEjectSpeed` in `constants.ts`).  It WAS a literal, and a
+  literal is what goes stale: retuning `GRAVITY_STRENGTH`/`RANGE` left
+  the old 12 px/step climbing a well half again as wide, which still
+  escaped on a clear run but reached the rim with almost nothing left,
+  so one clip of terrain on the way out stranded the ship in the throat.
+  What is written down now is the SPEC — `TRANSIT.PLAYER_CLEAR_SEC`, be
+  outside `GRAVITY_RANGE` within 0.75 s, capped at
+  `PLAYER_EJECT_CRUISE_FRAC` of the ship's own cruise so it can never
+  read as a launch — and the solve reads the DBG gravity knobs like
+  every other portal consumer, so an A/B on the well's strength carries
+  the way out with it.  A closed form is not available: a purely
+  ballistic escape needs only ~3.7 px/step and crawls out over seconds,
+  so FRICTION is what actually decides the trip, which makes the
+  criterion transcendental.  Forty bisection steps over a ~45-step
+  forward integration of the sim's own gravity arithmetic, once per
+  transit, is free at that call rate; at the shipped well it lands on
+  8.4 px/step, reaching the rim still doing ~7.6 against a ~42.5
+  cruise — and it RE-DERIVED itself when the well was tuned down (it was
+  20.7 against the old g6000/1050), which is the whole point of solving.  RADIAL, unlike
+  the debris' random headings: being spat sideways into the terrain you
+  arrived beside is not an arrival.  `exitMouthFor(fromId)` is the ONE
+  definition of "the rift you came out of" — where you land, which way
+  you are thrown and where your debris re-emerges must agree on it.
+  THE FLIGHT THROUGH is a short screen-space beat
+  (`PORTAL_CONSTANTS.WARP`, `engine/systems/render/portalWarp.ts`) armed
+  LAST in `transitionToMap`, once the destination is fully built — so it
+  is pure presentation over a world that is already correct, and the DBG
+  "off" step changes nothing but the look.  It reuses the STAGE-CLEAR
+  FREEZE (`portalWarpTimer > 0` short-circuits `loop`, and breaks the
+  substep drain when a transit is raised mid-frame): nothing may shoot
+  the player inside the tunnel, and a frozen sim is exactly what leaves
+  the WALL CLOCK free to drive the beat.  The tunnel IS THE REAL SKY (user call):
+  `BackgroundManager.renderWarpStars` sweeps the LIVE star field outward
+  — the same stars, bearings, colours and sizes already on screen, each
+  star's radius scaled 1 → `WARP.EXPAND` — so the opening frame is
+  structurally identical to the sky the player was looking at, and outer
+  stars move fastest (dr = r × dE), which is the forward-motion cue.
+  There are deliberately NO rings or arcs: a synthetic ring set drew a
+  tunnel the sky was not part of.  A depth model over the real stars was
+  tried and thrown away — mapping radius to depth and wrapping it as the
+  ship advanced made the wrapped depths converge and drew the whole
+  field as one solid disc.  Travel is a SMOOTHERSTEP, so the beat rolls
+  in slowly (user call: opening at full speed reads as a cut) and eases
+  out onto the arena, and streak length follows the derivative so the
+  acceleration is legible in the marks.  The PLAYER's own hull is
+  re-drawn above the veil through the real entity path
+  (`RenderSystem._playerDraw`), so the flight has something to hold onto
+  rather than reading as a cutaway.  The renderer owns no timer: `draw` pushes a
+  plain 0..1 `RenderSystem.portalWarp` and the whole effect is a pure
+  function of it, drawn after the fog and BEFORE the HUD.
+  DEBRIS TRAVELS WITH YOU (user call): mobile shards + collectible drops
+  within `PORTAL_CONSTANTS.TRANSIT.RADIUS` of the ship are captured out
+  of the departing map (nearest win the `MAX_ENTITIES` cap; enemies stay
+  behind — the portal clears the fight) and re-emerge from the exit
+  rift's mouth AFTER the player via the `portalTransit` queue
+  (`updatePortalTransit`, sim-time stagger over `DELAY_MIN..MAX`), each
+  flung on a random heading at a random speed with `GRACE_SEC` of
+  portal-gravity immunity (`portalGraceTimer`) so the exit well can't
+  re-swallow it.  Queued entities live NOWHERE but the queue;
+  `loadMapFresh` clears it, so a restart or second hop mid-drain means
+  the wormhole kept the stragglers.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
   Wave progress is FRESH per entry — `WaveSystem.init` zeroes
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
@@ -249,14 +530,38 @@ at FULL value (the snitch board-clear, minus the half-value scale), so
 the escort explodes, pays its kill points and sprays its salvage rather
 than being left to mop up after the fight is over — NEUTRAL third
 parties (`thirdParty`: bubbles, dragons) and RIVALS are spared, since
-they are not the boss's forces.  It also HALTS
-the arena's ladder (`WaveSystem.halted`) — no further wave starts there,
-so the choice between the two rifts is made in quiet.  It opens a DESCENT
-rift beside the wreck (`openDescentPortal`, `GameEntity.isDescent`, amber
-`PORTAL_CONSTANTS.DESCENT_COLOR`).  `dismissStageClear()` resumes the
-cleared arena; the CHOICE is then made IN THE WORLD by flying to a rift,
-which is why the screen offers no travel buttons: down the amber rift to
-stage N+1, or back through the arena's return rift to the hub.
+they are not the boss's forces.  The arena's ladder is already HALTED by
+then — see the paragraph below: it stops when the boss APPEARS, not when
+it dies.  `dismissStageClear()` resumes the cleared arena, and the way out
+is the arena's own return rift.
+
+**THE DESCENT RIFT IS SWITCHED OFF** (user call, pending a rework of the
+descent flow).  `openDescentPortal` still exists in `engine/bosses.ts`,
+verbatim and uncalled; `GameEntity.isDescent`, the amber
+`PORTAL_CONSTANTS.DESCENT_COLOR` and the whole
+`transitionToMap(id, {descend:true})` path — depth, `waveOffset`, the
+stage stride — are untouched and still tested.  What was removed is the
+one CALL that put a rift in the world.  So a cleared stage currently ends
+by flying home rather than deeper.
+
+**A BOSS ENDS THE LADDER** (user call).  Waves used to keep arriving while
+a boss was on the field and to resume after it died; a boss fight with a
+wave landing on top of it is two encounters at once.  `handleBossSpawn` —
+the ONE seam both the capstone wave's own spawn and the DBG warp-in pass
+through — calls `WaveSystem.haltForBoss()`, which sets `halted`, zeroes
+any grace countdown (so the HUD stops advertising a wave that is not
+coming) and, for a boss warped in MID-wave, drops the ordinary spawns
+still queued behind it.  A capstone's own escort (`BossDef.companions`)
+is deliberately kept: that is the boss's designed encounter, not the
+ladder — but only while the boss LIVES.  Killing it cancels the escort
+still queued in the spawn stream (`WaveSystem.cancelPendingSpawns`, called
+at the rout in `payBossBounty`): the rout wipes every enemy standing, and
+reinforcements must not keep warping into a fight that is over — queued
+escort streaming in after the kill read as "the waves kept coming".
+Nothing clears `halted` except `WaveSystem.init`, i.e. loading a
+map — so it does not resume when the boss dies, and a fresh arena runs its
+own ladder.  This is deliberately blunt while the wave/boss relationship
+is redesigned.
 `GameEngine.stageIndex` is 0-based DEPTH — incremented by
 `transitionToMap(id, {descend:true})`, zeroed on arrival at the HUB (the
 hub is the surface), and reset per run.  It drives
@@ -382,7 +687,15 @@ Key invariants:
   PhysicsSystem, not the subsystem that set it.
 - **Optional fields are optional on purpose** — follow the existing "set
   the field when needed; check before use" pattern rather than widening
-  the interface for one-off feature state.
+  the interface for one-off feature state.  This has been MEASURED and it
+  is the fast option, which is worth knowing because the opposite is the
+  intuitive conclusion: gauntlet 5c tested normalising every entity to a
+  single hidden class (to avoid megamorphic inline caches) and it came out
+  **1.9× SLOWER** on the real entity population — the union of keys across
+  one map's shards is ~41 properties, and an object that wide spills out of
+  V8's in-object slots, which costs more than the megamorphic access does.
+  Do not "fix" this pattern for performance without re-running
+  `perf/probe.mjs`.
 
 Notable existing field categories on `GameEntity`:
 
@@ -405,12 +718,31 @@ Notable existing field categories on `GameEntity`:
   (`'glass-tile' | 'plastic-tile' | 'metal-tile' |
   'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
   'glass-shard' | 'plastic-shard' | 'metal-shard' | 'nebula-shard'`),
-  `asteroidHitCount`, `asteroidHitTimer`, `asteroidHitCooldown`,
-  `regenProgress`, `regenPopTimer`.  Per-variant policy
-  (regen / merge / shatter / dent / repel / glow / automata /
-  passThrough) lives in `SHARD_VARIANTS` (see §5).  Shared
+  `tilePressureCount`, `tilePressureTimer`, `tilePressureCooldown`
+  (the tile PRESSURE accumulator — sub-threshold impacts ON a tile;
+  renamed from the `asteroidHit*` misnomer in the voronoi gauntlet's
+  V6), `regenProgress`, `regenPopTimer`.  Per-variant policy
+  (regen / merge / shatter / fracture / dent / repel / glow / automata /
+  passThrough) lives in `SHARD_VARIANTS` (see §5).  FRACTURE cache
+  (voronoi gauntlet): `fractureCells` (the seeded Voronoi decomposition,
+  computed lazily at first damage/death by
+  `fractureCache.ensureFractureCells`), `fractureEdges` (its interior
+  edges, impact-sorted, each knowing the cells it binds — the cracks),
+  `fractureOriginalArea` (the min-remainder death baseline, now only
+  read by LEGACY progressive variants — see the GRAIN BOUNDARY note in
+  §8).  GRAIN BOUNDARIES (V15): `fractureEdgeFill` (damage absorbed per
+  interior boundary, parallel to `fractureEdges`), `fractureBoundaryHp`
+  (Σ boundary strengths — the DERIVED HP) and `authoredMaxHealth` (the
+  HP the body spawned with, kept when the model rewrites `maxHealth`;
+  tile-destruction score reads it).  For
+  PROGRESSIVE variants (rock) the pattern is applied ONCE and FIXED:
+  a detach removes its cell from the cache and the survivors persist
+  (V8) — only compose/merge invalidates (and the dent pull stands down
+  under voronoi so nothing else mutates the polygon).  Non-progressive
+  fracture variants (plastic) still invalidate on dent/snap-back and
+  recompute on the deformed shape at death.  Shared
   merge/density bookkeeping: `mergeCount` (accumulated by
-  `composeEntities`; drives fragment count on asteroid-style
+  `composeEntities`; drives fragment count on powerlaw-style
   shatter), `densityTier` + `densityCachedTint` (tint cache —
   invalidate when tier or neighbour count mutates),
   `materialNeighborCount` (automata input, frozen at map-load
@@ -471,19 +803,205 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `CHUNK_SIZE`, `SPATIAL_GRID_SIZE`
 - `COLORS`, `CAMERA_CONSTANTS`, `SPRITE_CONSTANTS`
 - `AI_CONFIG`, `COLLISION_CONFIG`
-- `UI_CONSTANTS`, `LOADOUT_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`,
-  `INPUT_CONSTANTS`
+- `UI_CONSTANTS`, `LOADOUT_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`
+  (including `FLOW` — the minimap's streamline layer — and
+  `STATION_BLIP`; see §8), `INPUT_CONSTANTS`.  The latter grew two
+  nested blocks in step 5 (Pair C):
+  - `INPUT_CONSTANTS.GAMEPAD` — W3C standard-gamepad axis/button
+    indices per action, radial `STICK_DEADZONE` (rescaled, not just
+    clamped), `TRIGGER_THRESHOLD`, and `AIM_RADIUS`, the distance from
+    screen centre at which the pad parks its synthetic pointer.
+    `INPUT_CONSTANTS.RUMBLE` sits beside it — force feedback rides the
+    SCREEN SHAKE (see §8).
+    `AIM_RADIUS` must stay well ABOVE `SHIP_SELECT_RADIUS` — the ship
+    renders at screen centre and `claimTapNear` claims taps within that
+    radius, so a shot synthesised at the centre is silently eaten as a
+    dock tap.
+  - `INPUT_CONSTANTS.JOYSTICK` — the floating touch stick's zone
+    (left fraction, top fraction, bottom px), ring/knob geometry,
+    deadzone and fade.  The zone is defined by what it REFUSES; see §8.
+- `CONTROL_SCHEMES` / `CONTROL_SCHEME_RULES` / `controlSchemeDef()` — the
+  control-scheme picker (user directive, step 5 G9).  FIVE schemes chosen at
+  game start (and changeable from the pause menu, via a DROPDOWN there):
+  `touch` (drag to fly and aim, tap to shoot — the default),
+  `joystick-left` / `joystick-right` (floating stick + an onscreen FIRE
+  button, MIRRORED for handedness — stick left + fire right, or the reverse;
+  in both the ship AIMS WHERE IT FLIES, because the stick writes the
+  synthetic pointer and there is no second aim gesture to fight it),
+  `keyboard`, `gamepad`.  The axis that matters is the TOUCH
+  MODEL: the two touch schemes are mutually exclusive ways to drive the same
+  ship, because a floating stick and the drag-to-fly gesture otherwise fight
+  over the same finger.  `keyboard` and `gamepad` do NOT switch touch off —
+  they select the standard touch model AND stop the MOUSE from dragging the
+  ship, since on those schemes steering belongs to the keys or the stick and
+  a click should only shoot.  `CONTROL_SCHEME_RULES` is the one table every
+  read goes through (`joystick` / `fireButton` / `mouseDragMoves` /
+  `touchDragMoves` / `tapFires` / `pointerAims` / `stickSide` /
+  `triggerThrust` / `stickAims` / `fireFace`), so a scheme's
+  behaviour is a lookup rather than a name compared in five places.  Like DIFFICULTY it is a PREFERENCE:
+  it survives `restartGame()` and every map load.
+  `INPUT_CONSTANTS.FIRE_BUTTON` carries the button's geometry.
+- `ROCK_PALETTES` / `randomRockShade()` — per-instance rock body shades
+  (slate / rust / mineral, shipped `mixed`), rolled once at spawn like
+  the plastic palettes and inherited by shards.  `METAL_BRIGHT_TARGET`
+  — the steel-blue that metal's density brightening interpolates
+  TOWARD, replacing a per-channel scale that desaturated dense metal
+  toward white.
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
+- `PLAYER_ROLL_CONSTANTS` — the DIRECTIONAL TILT: the player ship
+  pitches and rolls into changing acceleration, full 360°.
+  `GameEngine.tickPlayerRoll` eases `player.visualRoll` +
+  `player.visualPitch` toward a tilt signal whose ROLL half has two
+  terms — the STRAFE term (the thrust input's component perpendicular
+  to the FACING axis) plus the TURN term (the smoothed rate the nose is
+  swinging × throttle, sign chosen so the terms agree; it exists
+  because the aim-locked schemes — touch / joystick / gamepad, where
+  the ship aims where it flies — put thrust along the nose by
+  construction, so a strafe-only signal never fired there (user
+  report)).  TWO PHYSICS TERMS refine the roll: the turn gate is
+  CENTRIPETAL — bank in a real turn is tan(bank) ∝ v·ω, so it scales
+  with measured speed, floored at `TURN_SPEED_FLOOR` so a standing
+  pivot still reads — and a SLIP term (`SLIP_GAIN`) reads the
+  velocity's lateral drift off the nose under power, so a hard turn
+  stays banked through its slide until the path catches up (throttle-
+  gated, keeping the "no input, no tilt" rule).  The PITCH half is
+  nose-line thrust DIRECTLY (the washout filter was removed — user
+  call): a held throttle holds the lean, cutting it settles level,
+  reverse thrust leans the other way (the cube hull shows the sign;
+  the sprite squash cannot).  Full signal is a full tilt (`MAX_ANGLE`; full
+  turn rate = 1/`YAW_GAIN` rad/s), the signal VECTOR is
+  magnitude-clamped so a diagonal cannot out-tilt the maximum, and no
+  signal settles back to a literal 0.  EASING IS A SECOND-ORDER SPRING
+  (user call): each component carries an angular velocity
+  (semi-implicit Euler, `SPRING_OMEGA`/`SPRING_ZETA`), underdamped on
+  purpose so a step overshoots ~13% and settles with one wobble — the
+  read of a hull with inertia — and the frequency divides by
+  √(player.mass / PLAYER_MASS), so a full outfit (~3× the lean mass)
+  tilts ~1.7× more ponderously with the same wobble character
+  (`MAX_TILT` caps the combined angle under π/2 so the cos-projection
+  can never mirror the sprite).  TUMBLE (DBG Ship Tilt ▸ "Tilt mode",
+  Lean/Tumble — a TEST mode, user call) turns the clamped signal into
+  angular RATE (`TUMBLE_RATE`, NEGATED so the hull rolls WITH its
+  travel — user call): the hull rolls CONTINUOUSLY about the axis
+  perpendicular to the thrust — end-over-end under throttle, a barrel
+  roll under strafe — and freezes where it stopped when thrust drops;
+  angles wrap ±π, the "Roll feel" presets scale the rate (Off stops
+  it), and the sprite squash clamps its tilt locally so tumble angles
+  cannot mirror it.  While tumbling the wireframe hides its white aim
+  marker (a face spinning with the hull reads as noise) and a small
+  fixed CHEVRON RETICLE ahead of the hull carries the aim instead —
+  drawn in the yaw frame, so it ignores the tumble.  Purely presentational:
+  RenderSystem combines both halves into ONE tilt toward the
+  acceleration and foreshortens the hull ALONG that direction by
+  cos(tilt), composed as R(facing) × R(φ) × scale(cos tilt, 1) × R(−φ)
+  × R(art offset) inside the player's single setTransform (φ = the
+  tilt direction in the ship frame; pure roll reduces it to the
+  scale(1, cos roll) it shipped with) — the squash sits BETWEEN the
+  facing rotation and the art-alignment offset because it is the ship
+  that tilts, not the sprite art's axes.  Physics, collision and aim
+  never read it.  Works on every input device for free, since the
+  signal is the shared movement vector.
+  `PLAYER_ROLL_CYCLE` is the DBG feel knob (Ship Tilt ▸ "Roll feel"):
+  named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
+  from the pause debug menu; `tickPlayerRoll` reads the active angle, so
+  Off levels out through the same easing rather than a separate branch.
+  THE WHOLE TILT SHIPS OFF (user call): `PLAYER_ROLL_CYCLE` defaults to
+  'Off' and `PLAYER_HULL_CYCLE` to 'Ship', so an untouched build renders
+  EXACTLY as it did before any of this existed — the legacy sprite, no
+  tilt, the renderer's plain-rotation path.  Off is a max angle of 0
+  rather than a bypass, so nothing is dead code: the signal is computed
+  and eased as always and simply converges on literal level.  Turning it
+  on is the first TWO rows of the debug menu's SHIP TILT section —
+  "Roll feel" onto a preset and "Hull" onto its next step — which is why the hull cycle is ordered
+  'Ship', 'Sheet', then the wireframes: the pre-rendered art is one step
+  from the default and the experimental shapes sit behind it.
+  THE PLAYER'S WIREFRAME HULLS (`PLAYER_HULL_CYCLE` /
+  `getActivePlayerHullMode` — DBG Ship Tilt ▸ "Hull"): `render/playerCube.ts` draws a 3D wire cube rotating FOR
+  REAL in the three axes the player rotates in — yaw stays on the
+  canvas transform (a Z-rotation commutes with the projection),
+  pitch/roll are real rotations inside the draw, and the projection is
+  ORTHOGRAPHIC (no perspective — user call).  The hulls are a SHAPE
+  TABLE (`HullDef`: unit-radius vertices + edge list + nose-marker
+  flags + per-shape scale), so a new shape is a table entry, never a
+  new draw path.  SIX wireframes today: 'Cube' (axis-aligned, so at
+  rest it is a FLAT SQUARE with the NOSE FACE
+  edge-on as the forward edge), 'Diamond' (the cube stood on a corner:
+  one corner straight up at the viewer, the adjacent corner's
+  projection dead forward — exact up AND exact forward is impossible,
+  adjacent cube corners subtend ~70.5° — a gem-cut hexagonal
+  silhouette with a point at the aim), 'Sphere' (three great circles +
+  a small nose RING around the forward pole — a sphere has no edges,
+  so the ring is what makes its spin readable), 'Dodeca' (a regular
+  dodecahedron rotated so a pentagonal FACE aims forward; its five
+  edges are the marker), and 'Rhombic' (the rhombic dodecahedron with
+  a degree-4 axis VERTEX forward — at rest a diamond silhouette; the
+  four edges meeting at that vertex are the marker), and 'Tri' (the
+  triangular DART ship — the one shape that is a ship rather than a
+  solid: nose far forward, two swept wingtips, a dorsal peak + ventral
+  keel for 3D depth; the four nose edges are the marker).  The aim marker
+  draws last in white; depth is cued by edge alpha.  'Sheet' is the
+  SPRITE answer to the same problem (see the tilt-sheet note in §8), and
+  the 'Ship' step
+  restores the sprite +
+  the cos-tilt squash as the A/B — the squash path is sprite-mode
+  only.  The shield/charge rings restore the plain rotation matrix
+  (art offset included, which the wireframe frame omits) before
+  drawing in EVERY mode.  `PLAYER_ROLL_DAMPING_CYCLE` (DBG Ship Tilt ▸
+  "Roll damp": Floaty ½× / Default / Stiff 2× / Snappy 4×) is one
+  multiplier over the spring's natural frequency, so every step keeps
+  the same overshoot-and-wobble character.  `LEAN_DIR_CYCLE` (DBG
+  Ship Tilt ▸ "Lean dir": Default / Reversed) is the direction A/B for
+  LEAN mode — one sign over both spring targets, so Reversed tips the
+  hull AWAY from the acceleration (nose rising under throttle) with
+  the same signal, easing and clamps; deliberately lean-only, since
+  Tumble's roll-with-the-travel sign was its own user call.  Under
+  Reversed the wireframe hulls also RE-BASE NOSE-UP (user call): the
+  nose feature faces the VIEWER at rest instead of the aim — a +90°
+  pitch of the geometry alone inside `drawPlayerCube`, applied before
+  the dynamic roll/pitch so both keep acting in the travel frame.
+  `TILT_SOURCE_CYCLE` (DBG Ship Tilt ▸ "Tilt src": Thrust / Velocity /
+  Average / Sum) chooses the SOURCE, and it reaches BOTH tilt modes:
+  Thrust (default)
+  reads the input vector — no input, no tilt — while Velocity reads
+  the ship's actual velocity normalised by the CRUISE speed — the real
+  terminal speed under held thrust (acc·f/(1−f), ~a third of the cap;
+  `lastCruiseSpeed`, cached in the movement block) — so a coasting
+  drift holds its lean, a wall bounce reads on the hull, and a tumble
+  rolls as long as the ship moves.  The slip term and the centripetal
+  gate read the SAME cruise normaliser: dividing velocity by the cap
+  ran all three ~3× weak in real flight (user report), since the cap
+  exists for knockback overshoot and level flight never nears it.  One
+  substitution at the top of `tickPlayerRoll`; every term downstream
+  is unchanged.  AVERAGE and SUM run BOTH sources and blend the
+  resulting ROTATION EFFECTS rather than the two input vectors (user
+  call) — the meaningful reading, since each source runs its own
+  throttle gate and slip weighting, and blending the vectors first
+  would gate both halves by one merged throttle and lose exactly the
+  difference the A/B exists to show.  `tiltSignalFrom` is the extracted
+  per-source pipeline both calls; Average is their midpoint and Sum
+  their total (so exactly 2× Average pre-clamp), which means Sum banks
+  SOONER and — because the magnitude clamp still applies once, after
+  the blend — never deeper.  `VEL_GAIN_CYCLE` (DBG Ship Tilt ▸ "Vel gain": 1× / 2× /
+  4× / 10×) is the Velocity source's SENSITIVITY step — the gain
+  multiplies the cruise-normalised vector BEFORE the magnitude clamp,
+  so each step moves WHERE the tilt saturates (2× = full at half
+  cruise; 10× = almost any motion reads full), never past the authored
+  maximum.  Thrust mode never reads it.
+  `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
+  hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
-  twinkle scheduling)
-- `SHARD_VARIANTS` — per-variant regen / merge / shatter / dent /
-  repel / glow / automata / passThrough / renderCache policy.
+  twinkle scheduling; `SPRITE_OVERSIZE` — how far a cloud sprite
+  overhangs the body it belongs to, with `nebulaSpriteSize()` beside it
+  as the ONE definition both render sites call, and
+  `NEBULA_SPRITE_CYCLE` as its live DBG A/B)
+- `SHARD_VARIANTS` — per-variant regen / merge / shatter / fracture /
+  dent / repel / glow / automata / passThrough / renderCache policy.
   Source of truth for the shard-family behaviour table.  11 variants
   today:
   glass-tile / plastic-tile / metal-tile / indestructible-tile /
@@ -492,17 +1010,98 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   supports per-partner `bondPartners` config (`cohesionOnly` flag +
   `strength: 'strong' | 'default'` tier); the `automata` block
   (`maxNeighbors` + `saturationBrightness` / `saturationOpacity`)
-  drives the aggregation-coloring rules.  See
-  `engine/systems/ShardSystem.types.ts` for the schema and
-  `docs/SHARD_SYSTEM.md` for the design rationale.
+  drives the aggregation-coloring rules.  The optional `blend` block
+  (`ShardBlendPolicy`) is the one PRESENTATION entry in the table — how
+  a live cohesion bond is DRAWN (today: plastic-shard; see §8).
+  The `grain` block (a
+  `GrainSpec` — the MATERIAL GRAIN SPEC's A1 rename of the voronoi
+  gauntlet's `fracture` / `ShardFracturePolicy`; see
+  docs/MATERIAL_GRAIN_SPEC.md) + `shatter.kind: 'voronoi'` opt a variant
+  into the SEEDED VORONOI CELL DECOMPOSITION of its own polygon, and its
+  `bondStrength` (V15) additionally opts it into the GRAIN-BOUNDARY
+  damage model — damage per PIXEL of interior boundary, from which the
+  body's HP is DERIVED rather than authored (see §8): the cells are
+  the fragments at death, the interior cell edges are the cracks it
+  shows as HP falls, and for rock a qualifying hit DETACHES the cell
+  nearest the impact off the entity (partial fracture; `FRACTURE_DETACH`
+  holds the min-remainder death rule).
+  SHIPPED GRAIN TABLE (user's play-tested defaults, one row per material,
+  shared by its tile and its shard) — `grainSize` / count min / count max
+  / `regularity` / `bondStrength`, with `damageSpread` 0 everywhere:
+  rock 14/3/16/0.5/0.4, glass 15/6/10/0.5/0.4, plastic 6/8/16/0.55/1.8,
+  metal 8/8/22/0.95/1.8.  TWO consequences are worth knowing because
+  neither is visible in the row: (1) grain size and bond strength
+  COMPOUND into derived HP — a finer grain is more boundary AND each
+  pixel costs more — so at 4 damage a hit a 36px tile now takes rock 14
+  hits, glass 13, plastic 96 and metal 118; and (2) plastic and metal are
+  both held by their `grainCountMax` before their `grainSize` is reached
+  (plastic wants 45 sites and gets 16, metal wants 25 and gets 22), so
+  their EFFECTIVE grain is 10.0 and 8.5 rather than the authored 6 and 8
+  — which is also why metal is still the finer material despite plastic
+  carrying the smaller number.
+  Opted in today: ALL FOUR
+  breakable materials — rock-tile / rock-shard and glass-tile /
+  glass-shard (V10, user call: glass takes rock's breaking behaviour),
+  plus metal-tile and plastic-tile / plastic-shard (A3) — and NEBULA,
+  which takes the GEOMETRY ONLY (see §8).  Nebula's row is
+  `grainSize` **20** / 3 / 14 / regularity **0.15** / `sizeSpread` **0.6**
+  and NO `bondStrength`: the raggedest and most size-varied pattern in
+  the game, and the only one that opts out of the damage layer.  Its grain
+  size is the one number in the table set by a PERF measurement rather than
+  a look: see the nebula grain-size note in §8.  Metal is the
+  fine-grained, near-honeycomb, hardest material and its grain size AND
+  bond strength both track `densityTier`, so a plate's brightness reads
+  its toughness; plastic is large-grained, loosely regular and DEFORMS
+  (`grainDent`, B1) before it breaks.  metal-SHARD keeps its composite
+  lattice for now (spec B2).  GLASS also carries a
+  DAMAGE LAYER (V9, user call): 20-HP tiles / `GLASS_SHARD_HP` (12)
+  shards — five / three base Blaster hits — webbing with BRIGHT
+  hairline cracks (`GLASS_CRACK_STYLE`, `MATERIAL_DAMAGE_CRACKS.glass`)
+  along the exact cells they break into; physical smashes (crash over
+  the momentum threshold, the pressure trigger) still take the whole
+  pane, because the layer meters weapons, not boulders.  A DAMAGED glass
+  tile leaves the static-tile cache and the hex-sprite fast path
+  (`tileShowsDamage`) — neither can express cracks or a chipped polygon.
+  CHIP DEPTH is three constants (V10): `ROCK_BREAK.MIN/MAX_HITS` (8/12
+  — the hits the pattern reveals across), `FRACTURE_DETACH
+  .REVEAL_COMPLETE_FRAC` (0.55 — finish revealing EARLY so the last
+  pieces can leave one by one instead of being dumped at death) and
+  `MIN_REMAINDER_FRAC` (0.10).  Rock's
+  fracture params are tuned to the GLASS look (impact-crowded radial
+  sites) per the same user call.  Metal keeps `decomposeMetalComposite`
+  as its fracture (the lattice IS its cell set — composite cracks stroke
+  the lattice edges); nebula and indestructible are excluded.  The DBG
+  SHAPE of the cells is four DBG knobs beside that A/B (V11, pause ▸
+  Debug Menu ▸ Visual): **Frac relax** (LLOYD RELAXATION rounds — the
+  regularity dial; each round moves every site to its own cell's
+  centroid, so 0 is raw ragged Poisson Voronoi and the shipped 2
+  measured cell-area CV 0.28 / roundness 0.77 against 0.53 / 0.69 at
+  zero, for no net cost since relaxation also stops the sliver-retirement
+  pass re-running), **Frac sep** (blue-noise site spacing before
+  relaxation), **Frac sites** (a multiplier on the variant's site count)
+  and **Frac bias** (force the impact crowding, which pulls AGAINST
+  regularity by construction).  All four bump a tuning GENERATION that
+  invalidates cached patterns, so a knob is visible on the next hit
+  rather than only on fresh terrain.  The
+  A/B (pause ▸ Debug Menu ▸ Visual ▸ Fracture) flips every opted-in
+  variant back to its shipped legacy break — powerlaw spray, dent
+  breakShards, the spawnGlassShards fan, ROCK_CHIP — pending the user's
+  call (`getActiveFractureMode`).  See
+  `engine/systems/ShardSystem.types.ts` for the schema,
+  `docs/SHARD_SYSTEM.md` for the design rationale, and
+  `docs/GAUNTLET_VORONOI_LOG.md` for the gauntlet ledger.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
-  count table.  Source of truth for rock-shard free-spawn counts
-  (read via `getRockShardFreeSpawn()`); per-map tile-cluster
-  entries are read by `MapClasses.populate()` for the nebula-cluster
-  sizing and the single-variant showcase maps.  Some natural maps
-  (UniverseMap, PocketMap, SevenRingsMap) still hardcode their own
-  tile-variant ratios; treat MAP_POPULATION as authoritative for
-  documentation but verify the relevant `MapClasses` subclass too.
+  count table, and since step 5 (G7) the ACTUAL authority rather than a
+  parallel description: every map's rock free-spawn
+  (`getRockShardFreeSpawn()`) and tile-variant mix comes from here.
+  The three natural maps that used to hardcode their own ratios read it
+  through two shared `BaseMapLayer` helpers — `populateTileClusters` and
+  `populateNebulaClusters` — and SevenRingsMap takes its per-ring
+  material from the optional `tileRings` field via `ringVariants()`.
+  Ring GEOMETRY (count, radii, thinning) deliberately stays on the map
+  class: that is the map's shape, not its population.  `tests/maps.spec.ts`
+  pins the resulting populations, so a change here is a visible rebalance
+  rather than a silent one.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
@@ -536,9 +1135,27 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   alive — seeded in `startGame`, topped up offscreen on a timer, suppressed
   while a DBG enemy-test forces another type).  Passive movement
   (`AISystem.updateBubble`) rides the asteroid flow field
-  (`flowField.sampleAsteroidFlow`), peeling OFF the flow to chase + eat the
+  (`flowField.sampleShardFlow`), peeling OFF the flow to chase + eat the
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
-  via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
+  via `GameEngine.updateConsumers`).  IT HAS A MOUTH SIZE (user call): a body
+  is SWALLOWED only while its own diameter is within `consume.swallowMaxFrac`
+  of the BUBBLE'S — it used to engulf whatever its membrane touched, so a
+  15-unit blob absorbed a 160-unit boulder in one action.  Anything bigger it
+  BITES instead (`consume.bite`): one chip off it per `bite.interval`, through
+  `GameEngine.chipStructureAt` — the SAME grain-fracture path a weapon hit
+  uses (stamp the contact, spend the damage on the boundaries nearest it,
+  harvest what that freed), so the cracks a body shows, the piece it sheds and
+  the HP it has left stay ONE model however the damage arrived.  The freed
+  grain is then ordinary mouth-sized food, so a big rock still feeds the
+  bubble — one mouthful at a time — and the mouth grows with the bubble.
+  `bite.tiles` extends it to STATIC tiles, which are never swallowable and are
+  absent from the shard index entirely, so before this a bubble could not
+  interact with terrain at all.  A body with no grain model — indestructible,
+  nebula, or any variant under the DBG legacy fracture mode — is REFUSED by
+  `chipStructureAt` having done nothing (deliberately no fallback: it is the
+  chip path, not a general damage entry point), and the tile walk arms the
+  cadence anyway so a bubble parked on unbreakable terrain cannot re-walk the
+  static grid every tick.  Eating is MASS/ENERGY CONSERVED
   (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
   scaled by size) take proportionally LONGER to digest
   (`DIGEST_DURATION × richness`) and give more growth + maxHealth + heal
@@ -555,8 +1172,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `PhysicsSystem.maybeBubbleCollisionAggro`) — stamps `aggroTargetId` to the
   attacker/collider (`proj.ownerId`, the AoE ring's `ownerId`, or the rammer's
   id) — so it retaliates against whoever last hit/rammed it, retargeting on each
-  new hit (`AISystem.resolveBubbleTarget`).  It LOSES aggro if the target flees
-  past `AGGRO_LOSE_RANGE` or when the attacker dies.  Once provoked it homes its
+  new hit (`AISystem.resolveBubbleTarget`).  Every one of those stamp sites
+  routes through the single `constants.stampBubbleAggro` seam, and every site
+  that drops aggro through `calmBubble` — so a target can never be set while
+  the timeout below is left unarmed, or cleared while it is left armed.
+  It LOSES aggro FOUR ways: the target flees
+  past `AGGRO_LOSE_RANGE`, the attacker dies, a latch detaches, or —
+  `AGGRO_TIMEOUT_SEC`, the NON-AGGRESSION TIMEOUT — it is simply LEFT ALONE
+  that long (`bubbleAggroTimer`, armed and REFRESHED by every fresh act of
+  aggression at the stamp seam, ticked on SIM time in `updateBubbles`, not
+  while latched since a bite owns its own ending).  Without it aggro had no
+  ending a disengaging player could reach: a hunter that never landed a bite
+  stayed hostile for life and the fauna read as permanently angry.  Expiry is
+  NOT a sick state — losing interest is not an injury — and it applies
+  identically whoever the target is (player, enemy, rival).  Once provoked it homes its
   target and, on contact, LATCHES (`attachedToId` → `updateAttachments`) for
   `LATCH_DURATION`, draining `LATCH_DPS × size/baseSize` (a bigger bubble bites
   harder); on the PLAYER it also EMPs weapon + shield (`'disable'`, re-applied at
@@ -569,7 +1198,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Locomotion: SLOW while passive (drift / shard-chase); only when
   HUNTING (provoked/aggro) does it move fast — a high sustained cap
   (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can
-  run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
+  run a fleeing enemy/player down.  THOSE CAPS BOUND PROPULSION, NEVER MOTION
+  (`AISystem.updateBubble`): each regime's `capSpeed` is floored at the speed
+  the bubble ARRIVED with, so the step can only ever clamp the thrust the AI
+  itself just added.  Applied to the TOTAL velocity — as it was — the cap
+  deleted the collision recoil the impulse solver had computed from both
+  masses, so the bubble never left the contact, the player re-collided on the
+  very next step, and each contact took ~35% of its speed: a dead stop in ~10
+  frames, reported as "the bubble is a wall".  SICK is the worst case (cap
+  0.66 against a 2.2 drift) and so the one that got noticed, but the bug was
+  never about being sick, and never about MASS — a bubble's `mass` is a
+  constant 9 for its whole life (its `consume` config sets no `massPerEat`, so
+  eating adds none) and its impulse arithmetic was correct throughout.  The
+  floor is monotone — an overshoot can never be topped back up by the AI — so
+  the shove bleeds off through the ordinary friction and flow relaxation every
+  other body uses.  Same rule the player's `overSpeedAllow` states for blast
+  knockback; reading the pre-thrust speed each step IS the decaying allowance,
+  so it needs no stored field.  Brightness tracks AGGRO only — feeding does
   NOT brighten the membrane (the held meal reads instead); calm bubbles render
   faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
   hit-flash always reads.  Renders with NO health bar; its off-screen
@@ -859,13 +1504,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
 - `MODULE_DEFS` / `moduleDef()` / `moduleFitsSlot()` /
-  `MODULE_SLOT_COUNT` / `WEAPON_GUN_SLOTS` / `INVENTORY_CAPACITY` /
+  `MODULE_SLOT_COUNT` / `MODULE_SLOT_UNLOCK` / `slotUnlockCost()` /
+  `WEAPON_GUN_SLOTS` / `INVENTORY_CAPACITY` /
   `MODULE_REQUIREMENTS` / `HEX_ADJACENCY` — the hex-slot outfitting
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
   Mk I/II/III varieties (own price ≈ the cumulative old level-curve
   cost, own fixed effect — no levels, no in-place upgrades), guns and
-  Shield/Overcharge are single varieties.  Purchases land in the
+  Shield/Overcharge/Light are single varieties.  The Mk families today
+  are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
+  (ship) and Gunnery / Autoloader / **Penetration** (weapon-mod).  Purchases land in the
   INVENTORY (12 tiles rendered as a honeycomb of hex tiles, duplicates
   allowed and stacking); outfitting is moving hex tiles between the
   inventory and the two 7-hex groups — SHIP and WEAPON.  GUN placement
@@ -913,7 +1561,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   inventory + catalog; inventory items carry `sellValue`/`scrapValue`)
   drives the station UI: two hex flowers, the
   inventory tile grid, pointer-based DRAG-AND-DROP (touch + mouse; a
-  <8px press falls through to tap-select), and the shop.  The PAUSE menu
+  <8px press falls through to tap-select), and the shop.
+  **The DOCKED screen is TABBED with a STICKY HEADER** (user call): it was
+  one long column with the balance at the top and the shop at the bottom,
+  so buying meant scrolling up to read the money and back down to spend
+  it.  The header never scrolls and carries the things every job on the
+  screen spends — `◈` balance, `⬢` cargo used/capacity, UNDOCK, and a
+  CONTEXTUAL repair button that appears only while there is damage to pay
+  for.  Under it, three tabs (`stationTab`, falling back to the first
+  offered when a station lacks the service): SHOP (catalog grids; a
+  purchase needs a free cargo tile, so the buttons disable and say so when
+  cargo is full), OUTFIT (the flowers + inventory + detail strip) and SHIP
+  (hull repair detail + `renderShipStatus()`).  Repair is a header action
+  rather than a fourth tab because four tabs do not clear the 40px tap
+  floor at 320px.  The panel is TOP-aligned, not `my-auto` like the other
+  overlays — a centred block puts a sticky header in the middle of the
+  screen.  The PAUSE menu
   hosts the same widgets as a CARGO panel: READ-ONLY flowers (tap to
   inspect; no drag source / drop target — outfitting stays drydock-only)
   + the fully live inventory honeycomb (drag-reorder + tap → a detail
@@ -930,8 +1593,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `applyModuleEffects` folds — the UI renders, it never recomputes, so
   the panel cannot disagree with the sim.  A contributor's `active`
   means "this amount is IN the total": false for an adjacency-OFFLINE
-  module (`requires` names the family it must touch) AND for shield
-  plating with no shield core (connected but with nothing to plate).  A
+  module (`requires` names the family it must touch), for shield
+  plating with no shield core (connected but with nothing to plate),
+  and for a SUPERSEDED scanner — marks do not stack, so every scanner
+  but the best one aboard reports `superseded` rather than a
+  `requires`, which is the adjacency vocabulary and would read as
+  nonsense on a module that is perfectly well connected.  A
   contributor with no `area`/`idx` is a DERIVED row with no hex behind
   it — today the SHIP-WEIGHT drag factor, which is MULTIPLICATIVE over
   the ship's total weight and so belongs to no hex, and the FIRE-RATE
@@ -960,6 +1627,252 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate
   (UPGRADE_DEFS / UNLOCK_DEFS / upgradeCost / upgradeLevels /
   unlockedWeapons) is DELETED.
+  **PENETRATION** (`piercing`, weapon-mod, A3) is the model MINOR module:
+  `+1 pierce per mark`, summed into `player.pierceBonus` by
+  `applyModuleEffects` and folded into the shot config by
+  `WeaponSystem.withPierceBonus` — the same channel `damageMult` and
+  `cooldownMult` take, so nothing downstream of the gun knows a module
+  exists.  The bonus applies to EVERY gun UNIFORMLY (guidance call):
+  Lightning and Cannon are `pierce: 0` because their identity is chain
+  and splash and they take it anyway with eyes open.  A burst SUB-shot
+  takes it too (`tickPlayerBurst` re-derives its config per shot), and
+  the sum is clamped to `MAX_PIERCE` — 99, a plain SANITY ceiling
+  against an authoring mistake and NOT anchored to any weapon.  It used
+  to be, and the anchor rotted: it was "the value the Laser already ships
+  as effectively infinite", and the Laser ships `pierce: 4` now.
+  WHAT A CHARGE BUYS is the part the first version got wrong (user
+  review, "option C").  Three rules replace "one charge, one body":
+  - **DAMAGE FALLS OFF PER HIT, AT A RATE — AND IT SHIPS OFF.**  Damage at
+    hit ordinal `n` is `base × (1 - PIERCE_FALLOFF_RATE)^n`, and the
+    shipped rate is **0**: every penetration hit lands FULL projectile
+    damage unless someone turns the knob up (user call — the decay is a
+    thing to be judged, not a balance statement to inherit).  Ordinal 0 —
+    the contact hit — is always 1, so a bolt with no penetration is
+    untouched by any of this.  A RATE, not the authored table it replaced:
+    the table could express an irregular shape but could not be TUNED IN
+    PLAY, and tuning is what this needs.  DBG ▸ Player ▸ "Pierce falloff"
+    sweeps it (off / 0.05 / 0.10 / 0.20 / 0.35 / 0.50).  The number matters
+    more than it looks once on, because the reachable stack is large (six
+    Penetration Mk III in the weapon flower is +18, and inside a grain
+    material every GRAIN spends a charge) and a geometric decay has no
+    floor — at 0.05 the 18th hit still lands 40%, at 0.20 under 2%.
+    EVERY WEAPON IS AFFECTED EQUALLY, and so is every damage path ONE HIT
+    produces: the direct bite, the Cannon's AoE splash and the Lightning
+    chain all take the same factor.  The splash and the chain are applied
+    in `GameEngine` from a callback that fires LATER in `resolveCollision`,
+    by which point the grain bore may already have advanced `pierceHits`
+    past this hit's ordinal — so the factor is STASHED on the projectile
+    (`GameEntity.hitFalloff`) and those consumers READ it rather than
+    re-deriving an ordinal that no longer means the same thing.  The
+    ordinal itself rides the projectile as `pierceHits` (a count UP, so
+    the curve is read forwards — `pierceCount` counts DOWN and would read
+    it backwards) and an optional per-weapon override
+    `WeaponConfig.pierceFalloffRate`, stamped at spawn on the SAME seam
+    `pierce` is (both spawn paths, and the pooled one clears the field
+    when the new config has none — a recycled shot must never inherit a
+    stale rate).  Nothing overrides it today.
+  - **INSIDE A GRAIN BODY A CHARGE BUYS A GRAIN, NOT A TILE** — the bore
+    track; see §8.
+  - **AN INDESTRUCTIBLE TILE STOPS THE BOLT DEAD** and costs it nothing.
+    It took no damage, so it may not take a charge either; the shipped
+    build let a bolt through it AND charged for the privilege, which was
+    the worst artifact of the body-level rule.
+  `PIERCE_SPEED_RETAIN` is the second axis, shipped at `1.0` (a no-op)
+  behind DBG ▸ Player ▸ "Pierce spd" so the user can feel a decaying
+  bolt against the falloff rate before either is tuned; one factor per
+  charge actually spent, so a four-grain bore slows four times.
+  THE LASER'S OWN BUDGET went 99 → 4 in the same pass (user call).
+  "Effectively infinite" pre-dated there being any COST to piercing;
+  with a falloff available at all a beam can be made to give up damage per
+  body, so an
+  unbounded budget just made the Laser the answer to every line of
+  targets.  A RICOCHET MAY RE-HIT what it already struck, with no cap —
+  bought by CLEARING `hitEntityIds` at the bounce site rather than by
+  weakening the `alreadyHit` guard in the projectile branch, which is
+  load-bearing for an unrelated reason (it is what stops a bolt in
+  SUSTAINED OVERLAP re-damaging a body every substep at 120Hz).  Pierce
+  therefore stays a LIFETIME budget: a bouncing beam still gets at most
+  `pierceCount` damage events across its whole flight however many times
+  it turns around, each stepping further down the curve.  Bounces buy
+  COVERAGE, not extra damage events.
+  **PURCHASABLE HEX SLOTS** (A5): how many hexes of each flower are
+  UNLOCKED is a run field (`GameEngine.shipSlotsUnlocked` /
+  `weaponSlotsUnlocked`, reset by `resetOutfit`), and
+  `purchaseSlot(group)` sells the next one — gated on the matching SHOP
+  being docked, priced by `slotUnlockCost` through the `modulePrice`
+  seam, capped at `MODULE_SLOT_COUNT`.  The reason this needed no change
+  to `HEX_ADJACENCY` or `computeActiveSlots` is the whole design: a
+  LOCKED hex is an EMPTY hex that cannot be filled, and an empty hex was
+  always invisible to the adjacency fixpoint — so the feature is ONE
+  destination guard in `moveModuleInternal` plus a skip in
+  `firstFreeSlotFor`, and the UI drawing those hexes inert (no
+  `data-tile`, so a drag cannot even land on one).
+  `MODULE_SLOT_UNLOCK.START` equals the cap TODAY, so nothing is locked
+  and a shipped run is unchanged: the count is the SEAM for the ship
+  catalog (the same way `SHIP_WEIGHT.HULL_BASE` is 0), and lowering it
+  for the current hull is a balance call for the economy pass.  DBG ▸
+  Modules ▸ "Lock slots" (7 / 5 / 4 / 3) is what makes the locked state
+  and the shop's "+1 Hex Slot" entry reachable in play.
+- `SCANNER` / `DETECT_TIER` / `detectTierFor()` / `scannerRangesFor()` /
+  `scannerMarkRange()` / `detectionAlpha()` / `isAlwaysCharted()` — the
+  SCANNER, reworked (user call) from A4's passive reveal into a TOOL the
+  player operates.  A4 shipped it as a gate that quietly widened two
+  readouts which were already full, and the play-test verdict was that
+  nothing about it read.  Four rules, every one a reversal of A4:
+  1. **THE MAP IS FOUND, NOT GIVEN.**  With no scanner the HUD carries NO
+     off-screen arrows at all — A4's rule was the exact opposite ("no
+     scanner degrades to today's behaviour exactly"), which is what made the
+     module invisible.  What a scannerless ship DOES get is what it has
+     actually met: `isRetainedContact` splits contacts in two (user call).
+     A FIXED LANDMARK — a station or a portal — is flagged
+     `GameEntity.found` the first time anything discovers it and stays on
+     the minimap for the life of the map instance; anything that MOVES is
+     tracked for a few seconds and drops off both readouts, because a stale
+     dot where an enemy used to be is worse than no dot.  `found` is seeded
+     at map load by `isAlwaysCharted` (the HOME station and the rift the
+     player ARRIVED THROUGH, off the same `exitMouthFor` that decides where
+     you land) and set thereafter by an encounter or a scan — a SEEDING rule
+     rather than a per-frame predicate, so "charted from the start" and
+     "charted by flying past" cannot drift into meaning two things.  Found
+     gets a MINIMAP mark and never an ARROW: arrows are transient by design,
+     since they say "something is there NOW".
+  1b. **NATURAL ENCOUNTER, and it covers TERRAIN and MATERIALS too** (user
+     call).  Anything within `SCANNER.ENCOUNTER_RANGE` is seen with the naked
+     eye — no scanner, no mark.  That is what makes the
+     scanner's value RANGE (finding a thing before you fly into it) rather
+     than sight itself, and it is why the minimap fills in as the player
+     plays.  The one exception is a CONCEALED POI (`poiTier` above
+     `ENCOUNTER_MAX_POI_TIER`), or "secret" and "hidden" would be words with
+     no mechanism.  It is a POI rule, NOT a tier rule: the tiers rank how
+     RARE a find is, and rarity is not visibility — a rival sits at tier 3
+     because it is uncommon, not because it is hard to see, and gating sight
+     on the tier made a rival parked beside the ship invisible.
+     TERRAIN and MATERIALS are tracked as OBJECTS, not as regions (user
+     call).  `GameEngine.discoverStructures` marks every static TILE and
+     every mobile shard at or above `SCANNER.TRACK_MIN_SHARD_SIZE` within
+     range as `found`, permanently for the life of the map instance, on the
+     cadenced `discover` task — and a completed scan runs the same pass over
+     its whole bubble, which is the instrument's navigational job.
+     A REGION model was built first and REPLACED: it remembered the GROUND
+     the player had crossed and drew whatever stood on it, so a drifting
+     shard appeared when it wandered into mapped space and went quiet when it
+     left.  That reads as "mapping areas I can track things in" rather than
+     as finding things (user report).  The flag now rides the OBJECT.
+     Three rules fall out.  A found TILE is STAMPED into the pre-rendered
+     terrain layer as it is found (`RenderSystem.stampMinimapTile`), so the
+     layer IS the discovered set and the minimap's blit stays one draw call
+     however much has been met — `buildMinimapStaticLayer` therefore builds
+     an EMPTY canvas at map load.  A destroyed tile is UNSTAMPED from the
+     death path, because the layer is now a record of specific objects and a
+     tracked tile must not outlive its rock (the layer used to be baked once
+     at map load and never touched, which did not show while it was an
+     all-or-nothing reveal).  And `found` SURVIVES A MERGE
+     (`ShardSystem.composeEntities`): a shard absorbing a tracked partner is
+     still that rock, only bigger, so the survivor inherits the flag —
+     without it a tracked boulder eating gravel could blink off the map,
+     which reads as the tracking failing when it is the merge doing its job,
+     and that confusion is exactly what prompted this rule.
+     The SIZE THRESHOLD is what keeps this affordable and legible: small
+     debris is not a landmark, there is a great deal of it, and the flag is
+     permanent.  Shards are additionally CULLED to `MINIMAP_CONSTANTS.RANGE`
+     in the buffer fill, since tracking accumulates and without the cull the
+     buffer would carry every found shard in the world every frame.  The
+     FLOW layer is the documented exception and stays gated on owning a
+     scanner: a streamline is an inferred FIELD rather than a set of seen
+     objects.
+  2. **A SCAN IS A PING.**  `GameEngine.fireScan()` sends a wavefront out
+     at `SCANNER.PING_SPEED`; `updateScan` advances it and stamps
+     `GameEntity.detectedAt` on whatever it crosses, and a mark holds for
+     `LINGER_SEC` and fades over the last `FADE_SEC` (`detectionAlpha`,
+     the ONE freshness definition both readouts call).  Freshness is
+     `simClock − detectedAt`, so there is NO per-entity countdown ticking
+     over the map — a stamp and a subtraction.  `GameEngine.simClock` is
+     MONOTONIC sim seconds and exists because `runTimeSec` deliberately
+     stops while dead, which would freeze every mark on the map.
+     CONTACTS are stamped individually (tens of them, and a stale mark
+     left by something that moved is the point); MATERIALS are not
+     (thousands of mobile shards) — tier 1 is revealed as a RADIUS the
+     minimap tests at draw time (`materialRevealAt` / `materialRevealRadius`
+     / `RenderSystem.materialRevealAlpha`).  The two halves differ because
+     the entity counts differ by three orders of magnitude, not because
+     they mean different things.
+  3. **MARKS STACK, IN RANGE ONLY.**  A tier's reach is the SUM of the
+     own-ranges of every ACTIVE scanner whose mark is at least that tier
+     (`scannerRangesFor`), so low tiers accumulate the whole rack and high
+     tiers only the few marks that reach them.  The user's worked example:
+     a Mk III plus two Mk I gives ~3× reach for Mk I features and ~1× for
+     Mk III ones.  CATEGORY does not stack — `scannerMk` stays the highest
+     mark aboard, so three scanners never add up to a Mk IV.  This
+     REVERSES A4's "marks do not stack", which was documented there as a
+     deliberate departure from summing; it is now the ordinary rule.
+  4. **FIVE MARKS, each adding a CATEGORY and ~10% of its own range.**
+     `DETECT_TIER` is the ONE table saying what finds what, and a mark
+     sees its own tier and every tier below: Mk I common POIs +
+     MATERIALS, Mk II uncommon POIs + ENEMIES (a boss is an enemy), Mk III
+     rare POIs + RIVALS + FAUNA, Mk IV secret POIs + DRAGONS, Mk V hidden
+     POIs + the SNITCH.  Range is the headline and stacking is how it
+     really grows; categories are what makes a specific mark worth buying.
+     The POI rungs are deliberately populated ahead of the things that will
+     fill them — `GameEntity.poiTier` lets a POI declare its own rung and
+     defaults to COMMON, so the phased plan's hidden wormholes (G4) become
+     a FIELD ON A PORTAL rather than a change here.
+  **AUTO-SCAN** (user call) is the QUIET half of the tool: a background sweep
+  every `SCANNER.AUTO.INTERVAL_SEC`, Mk II and above
+  (`SCANNER.AUTO.MIN_MARK` — Mk I stays fully manual, so auto-tracking is
+  something a mark buys), switched from the PAUSE menu rather than the debug
+  menu because it changes how the game plays.  It differs from a pressed
+  scan in three deliberate ways: it stamps `trackedAt` rather than
+  `detectedAt`, so it feeds the MINIMAP and can never put a chevron on screen
+  the player did not ask for; it skips RETAINED contacts, since a landmark is
+  `found` for good once discovered and re-finding it every few seconds is
+  work with no output; and its ring draws on the minimap ONLY, dimmer, since
+  a sweep painting the game screen every few seconds is exactly the nag the
+  manual button exists to avoid.  What the button still buys is arrows, the
+  on-screen ring, and discovering landmarks.
+  `RenderSystem.mapAlpha` is where the three routes onto the minimap meet —
+  `found` (permanent), `detectedAt` (a press or an encounter) and `trackedAt`
+  (the sweep), the last two taking whichever is fresher because they are the
+  same claim arriving differently.  The ARROWS read `detectAlpha` alone.
+  SCAN IS ITS OWN CONTROL on every device (user call): **Q**, the pad's
+  **L1 / Circle** (`INPUT_CONSTANTS.GAMEPAD.BUTTONS.SCAN`), and a HUD
+  button beside PAUSE that renders only with a scanner aboard.  It
+  deliberately did NOT join the ship-tap gesture — that is already
+  arbitrated between docking, portals and the Light tool, and a fourth
+  claimant would make "tap your ship" mean whatever happened to be
+  nearest.  The pad latch is DRAINED every step like INTERACT, so a press
+  made while docked cannot fire a scan on undock.
+  Two A4 rules SURVIVE unchanged: colours stay the
+  `UI_CONSTANTS.INDICATORS` type legend's (a scanner reveals more
+  contacts, never a new KIND of mark), and there is NO "discovered" state
+  anywhere in it — a stamp expires, so nothing here is persistence, which
+  belongs per NODE to the later work.  What is GONE with A4: the
+  `scannerShows*` predicates, `enemyIndicatorAlpha`'s distance ramp (the
+  detection stamp replaced the fade as the range gate) and the portal
+  arrow's `PORTAL_CONSTANTS.INDICATOR_RANGE` bracket — a rift you have
+  not scanned has no arrow at any distance, and the two rules that were
+  always about legibility rather than range are untouched (an on-screen
+  rift still suppresses its arrow; the arrow still carries a name and no
+  distance).  The DBG "Minimap mat" cycle and the scan now BOTH have to
+  say yes: the cycle picks WHICH material layer draws, the scan decides
+  whether there is anything to draw it for — the cycle cannot be a dev
+  override that forces the layer on, because its shipped default is
+  already 'dots' and that would make the material reveal free.
+  **ALL OF THAT IS LIVE IN A SHIPPED RUN** — `activeScanRevealAll` defaults
+  to FALSE, so a fresh run runs the discovery walk and the auto sweep and its
+  minimap fills in as the player meets things.  It BRIEFLY SHIPPED BYPASSED
+  (defaulting TRUE, drawing the whole map and skipping the periodic work) and
+  was put back (user call), and the reason is the thing to keep: revealing
+  everything takes away the half of the SCANNER module that makes a mark
+  worth buying, leaving it selling off-screen arrows and the pressed ping but
+  not the MAP.  Anything tuning scanner economics needs the reveal off, which
+  is now simply the default.
+  The DBG ▸ Visual ▸ "Scan off" row still switches the whole subsystem off in
+  exchange for a fully drawn minimap, and it is kept as a PERF A/B rather than
+  as a gameplay knob: the scanner does real continuous work, and a
+  frame-rate report needs a way to take all of it away without also taking
+  the minimap away.  `tests/helpers.ts` `useScanner(page)` remains the seam
+  every scanner suite calls — idempotent, so with the reveal off by default
+  it now checks and does nothing rather than flipping.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -979,7 +1892,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
   map portals (roadmap step (k)): rift size / colours (violet out, sky
   home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
-  burst.  `HUB_PORTAL_SITES` places one rift per full-game arena on the
+  burst — plus the WORMHOLE block: `GRAVITY_RANGE` / `GRAVITY_STRENGTH` /
+  `GRAVITY_PLAYER_SCALE` (the gravity well stamped onto every portal
+  entity by `addPortal`) and `LENS` (the background star warp — see the
+  portal-POI note in §8).  `HUB_PORTAL_SITES` places one rift per full-game arena on the
   Overworld (targets are DESCRIPTOR IDS, and the map's existing
   clearance filter drops terrain seeded on top of them);
   `RETURN_PORTAL_OFFSET` places each arena's single return rift relative
@@ -987,18 +1903,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   clear.  `USE_RANGE` sits just under the station's `DOCK_RANGE` so the
   shared-E nearest-wins arbitration has a clear winner at the boundary.
   `INDICATOR_RANGE` gates the off-screen indicator: a portal is a FIXED
-  landmark, so its arrow only appears once the player is within range,
-  and inside that range it is PERSISTENT (exempt from the
-  offscreen-only suppression) and labelled with the
-  destination name.  The ARROW is green (the type legend, §8); the rift's
-  own violet/sky colours still drive the world-space + minimap art.  Because the chevron is range-gated, the MINIMAP is
-  how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
+  landmark, so its arrow only appears once the player is within range.
+  Inside that range it now behaves like EVERY OTHER CONTACT (decision
+  #46b, step 5 G6): suppressed once the rift is on screen, and labelled
+  with the destination NAME but no distance readout.  The two rules
+  bracket the case the arrow is actually good for — close enough to
+  matter, not yet visible; approaching a rift used to give you the rift,
+  its own world-space tag AND an edge arrow naming the same place a
+  third time.  The ARROW is green (the type legend, §8); the rift's
+  own violet/sky colours still drive the world-space + minimap art.  Since the arrow is both range-gated and
+  suppressed on screen, the MINIMAP is how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
   ANOMALY — a spinning colour-filled diamond with an expanding radar
   ping — and, like an enemy blip, it CLAMPS to the minimap border when
   out of range instead of being culled the way other POI dots are.  The
   fill carries the portal colour, so an outbound rift (violet) and a
   return rift (sky) read differently at a glance.
-  Showcase maps get NO portals — they stay debug-only.
+  Showcase maps are reachable from the hub's TEST RACK
+  (`HUB_TEST_PORTAL_SITES`) — six portals in a column beside the home
+  station stepping the star-density range — and each therefore carries
+  a return rift too.  (They were menu-only before the star-field
+  gauntlet's S12; a reachable map with no way home is a trap.)
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -1018,6 +1942,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `METAL_AGGREGATION_BRIGHT_CEIL`, `METAL_BREAK_SHARDS_PER_TIER`
 - `PLASTIC_PALETTES`, `PLASTIC_SHARD_AUTOMATA`,
   `PLASTIC_DENT_RECOVERY`, `MATERIAL_GLOW_BRIGHTNESS_CYCLE`,
+  `SHARD_COAT_CYCLE`,
   `GLASS_GLOW_COLORS`
 
 Difficulty is a single `0..3` index that feeds both `DIFFICULTY_SCALES`
@@ -1096,9 +2021,9 @@ of `BaseMapLayer`:
 - Per-map gameplay knobs live in `PLAYER_MOVEMENT_CONFIG` (movement
   feel) and `MAP_POPULATION` (entity counts) in `constants.ts` —
   both are `Record<MapType, …>`, so adding a new MapType requires
-  entries in both.  Showcase maps (single-variant fields) read
-  cluster sizing directly from `MAP_POPULATION`; natural mixed maps
-  hardcode their per-variant ratios in their `MapClasses` subclass.
+  entries in both.  EVERY map — showcase and natural alike — now reads
+  its cluster sizing and variant mix from `MAP_POPULATION` (step 5 G7);
+  no `MapClasses` subclass hardcodes a ratio any more.
 
 Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add a row to `MAP_DESCRIPTORS` in `MapDescriptors.ts`, add
@@ -1121,9 +2046,101 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - `node scripts/inline-build.mjs` after a build → writes
   `omniverse-standalone.html`, a single-file portable build with CSS, JS,
   and referenced PNGs inlined as data URIs.
-- **No test runner or linter is configured.** Don't invent one unless the
-  user asks. There is no standalone `tsc --noEmit` script either; type
-  errors surface during `vite build`.
+- **THREE validation gates, and all three are expected to be green
+  before a commit** (roadmap 5b, decision #46a — this REPLACES the old
+  "no test runner is configured; don't invent one" stance, which held
+  until the repo went public and gained a collaborator with no session
+  history):
+  - `npm run build` — the bundle. Still the last-mile check.
+  - `npm run typecheck` — `tsc --noEmit`. Note that **`vite build` does
+    NOT type-check** (esbuild strips types without checking them), which
+    is how six type errors accumulated unseen before 5b; the build being
+    green says nothing about the types.
+  - `npm test` — **the SMOKE scope: `boot` + `loop`, ~1 minute.**  This is
+    the DEFAULT on purpose (user call): the full suite is ~13 minutes, and
+    a gate that expensive stops being run.  `npm run test:full` is the
+    whole net, and it belongs at the merge seams — see the scopes below.
+    Add the suites your change touches alongside the smoke
+    (`npx playwright test tests/bubbles.spec.ts`); that pair is the
+    per-commit gate, not the full suite.
+    The suites in `tests/` drive the
+    REAL engine in a REAL browser through the `window.__omniEngine` /
+    `window.__omniStats` debug handles; nothing is stubbed. The config's
+    `webServer` block runs `npm run build` itself and previews the
+    result, so `npm test` is one command from a clean clone — but it
+    means the browser must be present: `npx playwright install chromium`
+    once. See `tests/README.md` for the suite map and the harness rules.
+- **CI runs the gates in TWO SCOPES** (user call, 2026-08-21 — the full
+  suite costs ~12 minutes and was running on every push of every PR) —
+  `.github/workflows/pr-checks.yml`, job `validate`, in this order:
+  typecheck → build → install the Playwright browser → test:
+  - **SMOKE, on every PR push**: typecheck + build + the boot/loop canary
+    suites (~3 minutes end to end).  A type error, a broken bundle, or a
+    broken core loop still blocks every merge.
+  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
+    `claude/plan-completion` (immediately after a merge lands), on PRs
+    whose BASE is `main`, on any PR carrying the **`full-tests` label**
+    (the opt-in for pre-merge full validation), and on manual dispatch.
+  The check keeps ONE name (`typecheck · build · test`) in both scopes, so
+  branch protection points at one required check.  The honest trade: a
+  regression outside the smoke surfaces at the merge point rather than per
+  push — label the PR `full-tests` when it wants the whole net first.
+  BOTH SCOPES ARE THE npm SCRIPTS (`test:smoke` / `test:full`), so the
+  smoke set is defined ONCE — in `package.json` — and a bare `npm test`
+  on a contributor's machine runs exactly what the per-push gate runs.
+  It was a literal file list inside the workflow, which is how the two
+  halves drifted: CI had the cheap default from 2026-08-21 while `npm
+  test` still meant all 337 tests, so the fast gate existed on paper and
+  every local run still cost thirteen minutes.
+  LOCAL practice mirrors it, and WHO CALLS THE MOMENT matters (user
+  clarification, 2026-09-06 — the earlier wording said "before calling a
+  PR ready to merge", which reads as a judgement the session makes and
+  was over-applied to every push).  The rule is:
+  - **PUSHING TO A WORKING BRANCH mid-PR needs typecheck + build +
+    `npm test` (the SMOKE set) + the suites the change touches — NOT the
+    full suite.**  A PR branch is a place to iterate; a ~19-minute suite
+    per push buys nothing and costs the session's momentum.  CI's SMOKE
+    scope is the backstop on every push, which is exactly what it is for.
+  - **THE FULL SUITE RUNS WHEN THE USER SAYS THEY ARE READY TO MERGE** a
+    PR into its parent branch (not always `main`) — the same seam CI
+    reserves it for, alongside the `plan-completion` → `main` promotion
+    and a PR deliberately labelled `full-tests`.  That notice is the
+    trigger; the session does not decide it has arrived.  Also run it
+    after a base sync, since a merge can break what neither side broke.
+  So a red touched-suite blocks a push; a full-suite run without that
+  notice is optional diligence, not a gate to wait behind.  And in a
+  software-rendering container a full run is worse than merely slow: the
+  pixel-sampling and frame-counting suites (`fracture`, `lighting`) drop
+  a stray test on most long runs, and with `retries: 0` each one reads as
+  a failure that has to be chased.  The browser download is CACHED, keyed on the resolved
+  `@playwright/test` version plus the runner OS; on a cache hit the
+  workflow installs only the apt system libraries (`install-deps`),
+  because a restored browser with no libraries cannot launch.  A green
+  run is ~2.5 minutes.  Running them locally is still expected
+  (a red CI run is a slow way to learn something `npm run typecheck`
+  would have told you in five seconds); CI is the backstop that makes
+  green non-optional rather than remembered.  Rules that go with it:
+  - **Do not merge a PR while `PR checks` is pending or red.**  The
+    workflow is the merge gate; "it passed locally" does not substitute,
+    because local runs skip the clean-clone `npm ci` and the CI browser.
+  - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
+    on fork PRs.  Keep it that way — a merge gate that silently skips for
+    outside contributors is not a gate.
+  - It also runs on pushes to `main` AND to `claude/plan-completion`, so a
+    bad merge into either long-lived branch is visible immediately instead
+    of at the next PR opened against it.
+  - On failure the Playwright HTML report uploads as a run artifact
+    (`playwright-report-<run id>`, 7-day retention) — read that before
+    re-running, since the suites are timing-sensitive and the report
+    carries the trace.
+  - Making the check *blocking* at the GitHub level is a REPO SETTING,
+    not a file in this tree: branch protection on `main` must list
+    `typecheck · build · test` as a required status check.  The workflow
+    alone reports; branch protection is what refuses the merge button.
+- **Still no linter.**  Tiers 3–5 of the parking lot's "Automated test
+  suite" entry (unit tests, Node sim tests, visual regression) remain
+  parked deliberately; 5b adopted tiers 1–2, and tier 6 (CI gating) is
+  now the workflow above.
 
 ---
 
@@ -1140,9 +2157,28 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   pre-allocated `Vector2` buffers and `Float64Array` ring buffers.
   Allocating `{x,y}` inside per-frame loops is the #1 perf-regression
   pattern in this codebase.
-- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (built
-  once on map load) and a `dynamicGrid` (rebuilt every frame). Cell
-  size is `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
+- **The REFILL IDIOM (gauntlet 5c).**  `arr.length = 0` followed by
+  `push` is NOT a free way to refill a per-frame list: setting the
+  length down shrinks the backing store and the pushes re-grow it,
+  allocating on every refill.  Index-fill instead and truncate only
+  when the count actually shrank:
+  `for (…) arr[n++] = x;  if (arr.length !== n) arr.length = n;`
+  Measured 2.6× faster and 11× less heap churn over a 1300-element
+  list, and this idiom was the single largest allocator in the engine
+  before it was fixed (see `GameEngine.prepareFrameEntities`, which
+  carries the canonical comment, plus `EntityIndex.rebuild`).  Same
+  rule for per-frame closures: a function CONSTRUCTED inside a
+  per-substep path is rebuilt 120×/s — hoist it to a method and pass
+  its captures as parameters (`GameEngine.applyFlowTo`).
+- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (a `Map`,
+  built once on map load) and two per-substep `CellBuckets` grids
+  (`dynamicGrid`, `shardGrid`) — a FLAT ARRAY indexed by the dense cell
+  index `cx * SPATIAL_ROWS + cy`, with pooled bucket arrays, so a
+  steady-state field rebuilds them without allocating and every lookup
+  is an array index rather than a hash (the 3×3 neighbour scan does
+  nine per entity per substep).  All three are keyed on the same dense
+  index, so they agree cell for cell.  Cell size is
+  `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
   by `mass`: `Infinity` → static grid, finite → dynamic grid.  Don't
   branch on `EntityType` inside the broadphase.
 - **Static vs dynamic via mass.** Setting a tile's mass to a finite
@@ -1283,6 +2319,38 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   absorbing shards as invisible `metalExcessCells`; its `densityTier`
   (1 tier = 6 shards) drives brightness, HP (×tier), and break count
   (`METAL_BREAK_SHARDS_PER_TIER` × tier — deliberately lossy).
+- **THE LATTICE IS HOW METAL JOINS, NOT HOW METAL BREAKS.**  Metal is the
+  one material whose shards RE-BOND after a break, and under voronoi that
+  made it the last path still putting AUTHORED shapes into the world:
+  `decomposeMetalComposite` handed back one equilateral triangle per
+  lattice cell, so a field that shattered into true grains was a field of
+  identical triangles seconds later (measured on METAL_FIELD: 54 grains at
+  t=0, 6 triangles at t=10).  A dying composite now fractures its own
+  convex hull like any other body; the triangles survive only as the
+  internal look of an ASSEMBLED composite, and `decomposeMetalComposite`
+  stays as the legacy A/B.  Two things are load-bearing: the composite
+  route passes `skipSizeGate`, because a 2-cell composite measures ~30px
+  against the 28.3px mobile-parent floor and would otherwise vanish
+  without debris; and the tell for a regression is that the children are
+  a PATTERN rather than N copies of one template — counting three-sided
+  polygons fails on correct output (at metal's 0.95 regularity triangular
+  Voronoi cells are ordinary) and matching an absolute lattice size fails
+  too, since the lattice pitch scales with the shards that fused.
+- **ONE SPAWN-HP LADDER, AND METAL WAS NOT IN IT.**
+  `ShardSystem.spawnShardHealth` is the single ladder behind all three
+  fracture-spawn sites (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  `shatterPowerlawStyle`).  It existed as three near-copies and metal fell
+  through every one onto the `size > 30 ? 2 : 1` default — a value nothing
+  chose.  That is invisible through a gun and fatal everywhere else: the
+  grain model rewrites `maxHealth` to the DERIVED boundary total at first
+  WEAPON damage (measured spawned/derived/blaster-hits — rock 8/5.3/2,
+  glass 12/3.2/2, plastic 24/17.0/6, metal 1/16.2/6), but the crash and
+  tile-pressure paths in PhysicsSystem decrement `health` DIRECTLY rather
+  than spending on boundaries, so a 1-HP metal grain shrugged off six
+  blaster bolts and died to a single bump.  `METAL_SHARD_HP` is set to the
+  measured derived figure so the authored and derived numbers agree.
+  Glass's authored 12 against its derived 3.2 is a live BALANCE question,
+  not a missing branch — left as shipped.
 - **`mergeCount` drives shatter.** `composeEntities` accumulates
   `mergeCount` on every merge path; the asteroid-style shatter breaks
   a merged parent into ~`mergeCount` fragments (rock additionally
@@ -1295,6 +2363,31 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   map-load bake (`materialNeighborCount`); `densityCachedTint` must
   be invalidated at every site that mutates its inputs. Master DBG
   `Tile shade` toggle gates both compute and render.
+- **A body shatters at most ONCE, and only the death path breaks it.**
+  `ShardSystem.shatter` refuses a second call per entity
+  (`GameEntity.shattered`, cleared by `completeRegen`).  This is a
+  measured invariant, not padding: a legacy census sweep in
+  `updateGameLogic` used to shatter every rock-shard it found
+  deactivated, so a death that had already shattered through
+  `handleEntityDeath` spawned its fragment set TWICE (4 pieces became 8
+  one frame later), and on a quiet field it shattered FULL-HEALTH shards
+  that a merge had just absorbed.  That sweep now only counts the
+  rock-shard population for the free-spawn respawn target.
+- **EVERY structure death goes through `onDeath` — including collision
+  kills.**  `PhysicsSystem.killStructureByImpact` is the one path for a
+  tile/shard killed by a COLLISION (player crash, asteroid crash, asteroid
+  pressure): it stamps `lastImpactVelocity` + `lastImpactDamage`, drops the
+  static-grid entry, and calls `onDeath` so `handleEntityDeath` fans out
+  exactly as it does for a projectile kill.  The two asteroid sites used to
+  set `health = 0; active = false` WITHOUT the callback, so a tile crushed
+  by a drifting rock simply vanished — no shatter, no debris, no sound —
+  while the same tile shot broke normally (the player's own crash path did
+  call it, which is what made the asymmetry easy to miss).  The two stamps
+  are what make a shatter read as an impact: velocity gives the fragments a
+  direction, and damage (mapped 1..5 from how far over the threshold the
+  hit was) scales how many pieces and how fine.  `killedByPlayer` is passed
+  separately and only the player's crash sets it — ambient destruction
+  scores nothing.
 - **Death routing.** `PhysicsSystem` raises an on-death callback
   that `GameEngine.handleEntityDeath` dispatches: explosions for
   player/enemy, variant-driven shatter + regen-queue via
@@ -1303,7 +2396,559 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   enemies, salvage-drop roll via `NebulaSystem.handleDeath()` for nebula
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
-  and the variant isn't a nebula).
+  and the variant isn't a nebula).  A `shatter.kind: 'voronoi'` variant
+  under the voronoi fracture mode routes to `shatterVoronoiStyle` (its
+  cached cells become the fragments) and the legacy detours stand down
+  behind MIRRORED gates — the dent-breakShards spawn is gated at BOTH
+  `handleEntityDeath.isDentSpawn` and `DropSystem.spawnDrops`, and the
+  glass-tile `spawnGlassShards` fan likewise; under the DBG 'legacy'
+  mode every gate flips back and the shipped paths run verbatim.
+- **Cracks ARE the fracture pattern for voronoi materials.**
+  `overlayMaterialCracks` draws the interior cell edges of the cached
+  decomposition (impact-nearest first, revealed by the same
+  `MATERIAL_DAMAGE_CRACKS` freq/cap pacing) for any variant with a
+  `grain` block; everything else — metal tiles, single metal shards,
+  enemy hulls — keeps the seeded radial spokes (`drawDamageCracks`).
+  The metal COMPOSITE strokes its own lattice-cell outlines instead
+  (the exact `decomposeMetalComposite` seams).  The one ordering rule
+  that makes "cracks predict the break" TRUE: `applyDentStep` skips the
+  fracture-cache invalidation on the killing blow (health is
+  decremented before the dent), so the shatter consumes exactly the
+  decomposition whose edges were last drawn.
+- **GRAIN REGULARITY IS A MATERIAL PROPERTY** (material grain spec, A1).
+  A pattern's regularity comes from two knobs — Lloyd relaxation rounds
+  and blue-noise minimum site separation — and both used to be read from
+  GLOBAL DBG accessors, so every material on the map shared whatever the
+  debug knob said and "metal near-honeycomb, plastic ragged" could not be
+  expressed at all.  `GrainSpec.regularity` (0..1) is now the source and
+  the DBG cycles are OVERRIDES: their first entry, `material`, is the
+  default and defers to the table; the numbered entries force one value
+  everywhere so a setting can still be judged across a whole field.
+  `grainRelaxFor` / `grainSeparationFor` are the mapping, calibrated so
+  **regularity 0.5 reproduces the old globals exactly** (2 rounds, 0.45)
+  — which is why A1 was verified to generate BYTE-FOR-BYTE identical
+  patterns to the commit before it, and why rock and glass still carry
+  0.5.  A2 added `sizeSpread` (a POWER DIAGRAM — additive site weights
+  shifting each bisector, because varying a site's SEPARATION was
+  measured to barely move cell areas) and `bondSpread` (a seeded,
+  unbiased ±60% per-boundary wobble).  A3 is the first thing to USE the
+  axes: metal 0.95, plastic 0.55.
+  Vocabulary, since the words are close: a GRAIN is an internal cell of a
+  body's pattern, a SHARD is a mobile entity, and a grain BECOMES a shard
+  when it detaches — grains did not replace shards, and the spec applies
+  to tile and shard variants alike.
+- **DENSITY IS NOT A GRAIN PARAMETER, AND A MATERIAL'S GRAIN GEOMETRY IS
+  SHARED BY ITS TILE AND SHARD** (user call).  Grain size and bond
+  strength were briefly coupled to `densityTier`, so a bright metal plate
+  was finer-grained and harder.  That inverts the model: density is a
+  RESULT of grain size, grain count and regularity, not an input to them,
+  and coupling it made one material behave like several (metal ranged
+  123–384 HP by tier; it is 133 flat now).  Nothing in `GrainSpec` may
+  read `densityTier`.
+  For the same reason a material has ONE grain geometry — `grainSize`,
+  the count clamps, `regularity`, `sizeSpread`, `impactBias` — shared by
+  its tile and its shard rows: a shard is a smaller body of the same
+  stuff, not a different material.  `grainSize` is the GRAIN'S OWN
+  DIAMETER and the site count is `bodyArea / (π·(grainSize/2)²)`, i.e.
+  proportional to AREA.  Counting by DIAMETER instead makes count linear
+  in size, so grains GROW with the body: measured that way a rock tile's
+  grains were ~12.7 units across while the same material's shard had
+  ~8.4 — a shard was quietly a finer-grained material than its own tile.
+  Two documented exceptions bracket it: `grainCountMin` is a FLOOR,
+  because a body small enough to be one or two grains has almost no
+  internal boundary and so almost no derived HP, and `grainCountMax` is
+  a performance CEILING, because decomposition is superlinear in site
+  count.  Constant grain size holds BETWEEN them.  `radialSpeed` is the one deliberate
+  exception (how fast pieces fly apart is about being mobile, not about
+  the grain), and any other divergence needs a comment saying why.
+- **A BREAK CONSERVES, AND THE INVARIANT IS ENFORCED, NOT ASSUMED.**  When
+  a grain detaches, the area the body loses must equal the area the
+  fragment carries away.  `progressFracture` CHECKS that before
+  committing a detach (`|remainderArea − (polyArea − cell.area)|` against
+  a 2% tolerance) and refuses the piece when it fails — it leaves on a
+  later hit, or at death.  This is a check rather than a proof because
+  several geometric cases break conservation quietly and enumerating them
+  was tried twice and failed: an interior grain leaving would punch a
+  hole the outline cannot express, so the union walk traces the outer
+  ring, the body keeps its area, and a full-size shard appears from
+  nothing (measured: a tile GROWING by 9.5 while shedding 164).  Two
+  related rules hold it up: for a grain material the remainder is
+  `unionOfCells` ONLY (the arc splice reconstructs from the cell's
+  outline, which stops matching the body's boundary once grains deform),
+  and a deformed grain must report its LIVE area and centroid — carrying
+  the cut-time values across a dent is what let a shrivelled grain spawn
+  a full-size fragment (2.06× measured).
+- **A CHIP THROWS DUST AS WELL AS THE SOLID PIECE.**  The legacy break
+  paths puffed tinted nebula-shards as a body chipped — rock per hit
+  through `dent.perHitShard`, glass through `spawnGlassShards` — and BOTH
+  stand down under voronoi, so the dust went with them.  Measured over
+  eight tiles broken to nothing: glass produced 3 per tile under legacy
+  and **0** under voronoi; plastic and metal 0; rock kept only its 3-5
+  death burst (all of it big — 13.9-24.2 units — with no small dust at
+  all).  `GRAIN_CHIP_DUST` restores it at the detach seam for EVERY grain
+  material, tinted to the body's own colour (rock keeps
+  `randomRockNebulaComposition` and the `fromRock` flag that lets its dust
+  condense back into a rock-shard).  `SIZE_FRACTION` is of the material
+  that CAME OFF, never of the parent, because a grain is ~12 units on a
+  36px tile and sizing off the parent (as the legacy per-hit puff did)
+  makes the dust bigger than the piece that shed it.
+- **AND IT IS POOLED: LARGER, LESS OFTEN — BUT IT SHIPS AT 1** (user call).
+  Pooling exists and is the whole ladder; the play-test call was to start a
+  run at the per-chip end of it, so `CHIP_DUST_DEFAULT_INDEX` is 0 and the
+  shipped look is a small puff per chip.  Everything below still describes
+  what a step UP buys, and nothing about the mechanism is bypassed at 1: the
+  bank still fills and empties every chip, so the flush, the conservation and
+  the ladder's arithmetic are all live at the default rather than dormant.
+  The history is worth keeping because it is the reason the ladder exists.
+  The first version rolled a `CHANCE` per detach and sized the puff off that
+  ONE chip, and the result was a speck — reported as "the nebula shards
+  released from chipping are very small".  It got worse rather than better as the rest
+  of the nebula work landed: a puff used to draw a FULL-TILE sprite
+  whatever its size, so the rule that sizes a cloud off its own body (see
+  the nebula-sprite note above) is what made the specks visible as specks.
+  Each detach now BANKS its chip's footprint on the body
+  (`GameEntity.grainDustArea` / `grainDustChips`) and one larger puff is
+  thrown every `getChipDustPool()` chips.  Four things to know:
+  - **BANKING AN AREA IS WHY IT IS ONE KNOB.**  Pooling N chips
+    multiplies the puff's DIAMETER by √N and divides its FREQUENCY by N
+    ALONG THE LADDER, so "bigger" and "rarer" cannot be set to contradict
+    each other the way a size knob beside a frequency knob can.  Measured
+    over 24 rock tiles a side: 24 puffs averaging 17.2 units at the
+    shipped pool of 6 against 92 averaging 8.6 at pool 1, and the
+    SMALLEST pooled puff (11.9) beats the LARGEST per-chip one (12.2) —
+    the sharp way to say the two distributions do not overlap.
+    Conservation holds ALONG THE LADDER, which is what the regression
+    asserts and is NOT the same as "unchanged from what shipped before":
+    the 0.35-per-chip ROLL this replaced threw 0.35 of a puff where pool 1
+    throws a whole one.  So at the shipped step the world carries **2.9×
+    the dust MASS** of the pre-pooling build in the SAME number of puffs —
+    the roll is gone, and a chip that used to have a 35% chance of dust now
+    always throws some.  That, not the pooling, is what changed at the
+    default; the pooling is what the ladder above 1 buys.
+  - **A SMALL TILE THROWS ITS DUST AT THE BREAK, NOT MID-LIFE — ABOVE A
+    POOL OF ABOUT 4.**  A 36px rock tile sheds only 3-4 grains before it
+    dies (measured; the rest go at death through the shatter), so past that
+    it never fills a pool and every puff comes from the DEATH FLUSH in
+    `handleEntityDeath`'s STRUCTURE branch.  At the shipped 1 the flush is
+    a no-op and every puff is mid-life.  The mid-life path is for bodies that shed many
+    grains — a 160-unit boulder sheds ~11.5 and throws two puffs
+    averaging 56 units.  Both paths are live; neither is the common case
+    for both body sizes.
+  - **THE FLUSH IS GATED, AND THAT IS THE POINT.**  A body that dies
+    mid-pool is still owed the material it shed, but flushing a one-chip
+    remainder puts back exactly the speck the pooling exists to remove —
+    so `FLUSH_MIN_FRAC` (half a pool) drops the smallest remainders.  The
+    bank is per LIFE: `ShardSystem.completeRegen` clears it, since regen
+    reuses the entity object.
+  - **`CHIP_DUST_POOL_CYCLE` (DBG ▸ Grain & Fracture ▸ "Chip dust") IS
+    THE TABLE**, not a multiplier over an authored constant — a pool is a
+    COUNT, and 6 × 1.5 is not something a ledger can hold — so the
+    shipped value lives at `CHIP_DUST_DEFAULT_INDEX` and there is no
+    second copy of it to drift.  Its step **1 IS the per-chip behaviour**,
+    and it is what SHIPS — so the ladder's negative control is also its
+    default, and `tests/fracture.spec.ts` therefore dials BOTH arms of its
+    A/B to a named step rather than letting either read the default.  A
+    test that takes the shipped default as one of its two arms compares a
+    step against itself the day that default moves, which is exactly what
+    this move would have done to it.  It bumps no
+    fracture generation, for the `damageSpread` reason: this changes what
+    a detach THROWS, not how the pattern is BUILT.
+- **A DETACH IS A RIGID-BODY EVENT, NOT JUST A GEOMETRY EDIT.**  Three
+  things happen at the seam in `progressFracture`, and two of them were
+  missing:
+  (1) **RECOIL.**  The chip's velocity used to be created from nothing
+  while the parent's MASS was scaled down and its VELOCITY left alone, so
+  a break destroyed momentum twice over.  Ejecting mass m at relative
+  velocity `(v − V)` now leaves the remainder with `−(m/M′)` of it,
+  clamped by `RECOIL_MAX_RATIO` so a nearly-eroded body shedding a large
+  final piece takes a kick rather than a launch.  STATIC bodies are
+  exempt — a tile is bolted to the map and its infinite mass says so.
+  (2) **RE-CENTRING, MOBILE BODIES ONLY.**  The remainder replaced
+  `polygonPoints` and nothing moved `position` to match, so an eroding
+  shard's centre of area walked away from its own origin (measured −5.9 →
+  −12.3 over five detaches on a 160-unit shard).  The visible symptom is
+  not the offset: it is that the body then ROTATES ABOUT THE WRONG POINT,
+  so a spinning eroded shard orbits its old origin instead of spinning in
+  place.  `recentreFracturedBody` shifts EVERY piece of local-frame state
+  together — outline, surviving cells (live AND cut-time outlines), edge
+  endpoints and midpoints, and `lastImpactLocal` — and compensates
+  `position` in world terms.  Shifting only some of them would leave the
+  pattern no longer tiling the body, which is the invariant
+  `unionOfCells` depends on.  STATIC tiles are excluded because their
+  position IS the hex coordinate the static grid, regen and neighbour
+  counts key on (the dent contract).
+  (3) **THE SHIFT IS QUANTISED TO THE UNION'S OWN EPSILON.**
+  `unionOfCells` identifies coincident vertices by keying ABSOLUTE
+  coordinates (`round(p.x / eps)`), so translating the frame by an
+  arbitrary amount re-quantises which vertices merge and hands back a
+  different ring — measured as a 23.9-area disagreement between a body's
+  outline and the union of its own cells, where the pre-fix build had
+  none.  Moving by an exact multiple of `eps` shifts every key by the same
+  integer, so vertices that keyed together still do.  The pass computes
+  `eps` ONCE and both the union and the re-centre read it, because they
+  must be the same number.  The residual offset is under one eps.
+  The regression test's tiling assertion runs over SIX bodies, not one:
+  the re-quantisation only shows when a vertex sits near a key boundary,
+  and on a single shard the negative control passed.
+- **DEFORMATION IS FLOORED, AND ELASTIC MATERIALS SPRING BACK** (user
+  call).  A grain deforms to no less than `GRAIN_DENT_MIN_AREA_FRAC`
+  (two thirds) of the area it was cut at, or `GRAIN_DENT_MIN_AREA_PX2`,
+  whichever is greater.  A fragment breaks off CARRYING its deformed
+  outline; a material with `grain.dentRecoverSeconds` (plastic) then
+  relaxes back to the shape its grain was cut at, while one without it
+  (metal) keeps the dent for good.  The relaxation must be LINEAR IN TIME
+  — stepping a fraction of the REMAINING distance each tick compounds
+  into an exponential approach that reaches rest long before the timer,
+  making the authored duration a lie.
+- **A SHARD'S LOD BLOB MUST BE SILHOUETTE-NEUTRAL, AND THERE IS ONLY ONE
+  BLOB.**  `SHARD_LOD_CONSTANTS` collapses tiny mobile shards to a cached
+  bitmap instead of a polygon path, and that bitmap is a DISC — the only
+  cached shard silhouette there is.  It says "something small here" and
+  nothing about shape, which is the only honest thing to say at a few
+  pixels.  The rule was learned TWICE, from the same authored
+  equilateral-triangle bitmap:
+  (1) ROCK blitted it, so a tile shattering into 8 grains read as 8
+  identical equilateral chips — the exact Voronoi silhouette the fracture
+  model exists to show, replaced by another material's authored shape.
+  (2) METAL then kept a triangle branch of its own, at
+  `MIN_APPARENT_RADIUS_PX` (9px — THREE TIMES rock's chip gate), on the
+  grounds that a metal shard's spawn polygon genuinely WAS a lattice
+  triangle.  A3 gave metal Voronoi fracture and that stopped being true;
+  the branch stayed.  Measured on METAL_FIELD: a broken tile's 9 grains,
+  real 4-, 5- and 6-gons in the sim, sat at 3.5–4.5px apparent and took 9
+  triangle blits — every grain on screen wearing an authored shape.
+  Fixing the SIM path (a dying composite fractures its own hull, above)
+  did not touch this, which is why the triangles survived a round of
+  "fixed": the sim was correct throughout in BOTH cases, which is also
+  why no simulation test caught either.  The triangle bitmap is now
+  DELETED rather than restricted, so no material can borrow it again, and
+  both regression tests are RENDER tests asserting that a broken tile's
+  grains draw their real polygons rather than a cached blob.
+  `CHIP_LOD_RADIUS_PX` is **2**, and it is the ONE threshold for every
+  grain material.  It has been walked down twice for the same reason: the
+  original 6 was tuned when small rock-shards were the occasional
+  conservation chip, and V15 makes EVERY tile break produce `size/√cells`
+  fragments; 3 then still sat INSIDE the size range a material's own
+  grains occupy.  Measured across 160 rock grains from 20 tiles, sizes ran
+  7.4-18.1 units, so at 3 **12.5% of real grains** collapsed to circles
+  while their siblings drew polygons — visible as odd round pieces in a
+  burst, which is how it was reported.  At 2 the figure is 0% on all four
+  materials (smallest apparent radius: rock 2.22, glass 2.68, metal 2.97,
+  plastic 4.47), so the margin is real but not large — anything that makes
+  grains finer needs re-measuring against it.  The honest cost is that
+  small debris that used to blit now draws its polygon (rock 14%, glass
+  6%, metal 0.7% of grains).  Anything that raises this threshold, or points a grain
+  material at an authored bitmap again, undoes the fracture work at the
+  last step.
+- **DAMAGE LANDS ON GRAIN BOUNDARIES, AND HP IS DERIVED FROM THEM** (V15,
+  user call).  A variant carrying `grain.bondStrength` does not have
+  an HP pool that damage counts down.  Damage ACCUMULATES ON THE INTERIOR
+  BOUNDARIES of its cached decomposition — grain by grain, nearest the
+  contact first — and a cell breaks off exactly when every boundary still
+  binding it has been broken through.  `bondStrength` is damage per
+  PIXEL of boundary: ONE number per material (see the shipped grain table
+  in §5 — rock and glass 0.4, plastic and metal 1.8), and
+  deliberately NOT normalised by body size, because normalising cancels
+  scale and would force separate numbers for a material's tiles and its
+  shards.  Absolute length makes a bigger body tougher for free.
+  Two properties FALL OUT of this rather than being written, and both are
+  the reason to prefer it:
+  (1) **HP is derived** — `maxHealth` becomes `Σ (edge length × strength)`
+  over the body's OWN pattern at first damage, so a tile that decomposed
+  into more boundary is genuinely tougher and the number varies tile to
+  tile (a 36px glass pane measured 44.6–51.2 across sixteen runs — a SPREAD
+  wide enough to straddle a fixed damage figure, which is what made
+  `terrain.spec.ts`'s 50-damage shell flake 2 runs in 16 until it was
+  raised clear of the band).  The SPAWNED value is kept
+  as `authoredMaxHealth`, and anything meaning "how substantial is this
+  body" must read THAT — tile-destruction score does, since paying per
+  derived HP would price a tile by how finely it happened to decompose.
+  (2) **Nothing ends at a limit** — the damage needed to break every
+  boundary IS the derived HP, so "health hit zero" and "the last boundary
+  broke" are the same event by construction.  `FRACTURE_DETACH
+  .MIN_REMAINDER_FRAC` is skipped entirely for grain materials; it was the
+  arbitrary floor this model replaces.  A body also ends the moment
+  NOTHING BINDS ANYTHING (its last grains are held only by boundaries they
+  share with each other) — an ending, not another detach, because two
+  grains touching at a point are not a polygon SAT can carry.
+  Three things are load-bearing and easy to undo by accident:
+  - **SPILL.**  Damage finishing a boundary flows to the next unbroken
+    one.  Without it a hit's remainder is lost and the health readout
+    drifts from the boundary state, which breaks (2).
+  - **HOW WIDE THE SPEND IS, IS A MATERIAL PROPERTY** (A4).
+    `grain.damageSpread` picks between two spends.  0 (every material's
+    shipped value) is SEQUENTIAL: fill the nearest boundary, spill into
+    the next, repeat — so exactly ONE boundary carries partial damage at
+    any instant (measured, pinned at 1 for a body's whole life on both
+    rock and glass), a hit is a needle, and grains leave one at a time.
+    Set, it is a distance-weighted WATER-FILL: every unbroken boundary
+    takes a share `exp(-d / (damageSpread × bodyWidth))`, so a hit
+    pre-charges a whole annulus and the ring holding a group of grains
+    completes at once (measured at 0.2: partial boundaries 1 → 14, and
+    per-hit yields of 2 and 4 replacing a dribble of 1s).  Three things
+    hold it up.  The weight uses CELL distance, not edge-midpoint
+    distance, so every boundary of one grain fills at the same rate —
+    that is the V10 cell-grouping lesson carried into the weights.  The
+    weights are NORMALISED and surplus from a saturating boundary is
+    redistributed, so total absorbed is exactly the damage dealt and
+    derived HP is untouched — a single-pass allocation without
+    redistribution leaks (measured 0.275 HP per hit) and is what the
+    regression test's conservation assertion catches.  And the knob spans
+    a known-good end and a known-BAD one: large values approach the
+    uniform spread V10 measured as the failure mode, visible as pieces
+    arriving later and more of them dumping at death (at 0.8, five of
+    eight came off at death against two at 0.2).  Small values are the
+    useful ones.  DBG ▸ Grain & Fracture ▸ "Dmg spread" forces it
+    globally; "↳ dmg spread" sets one material.  Neither bumps the
+    fracture generation — this changes how damage is SPENT, not how the
+    pattern is BUILT, so a half-broken body keeps the boundaries it has
+    already earned.
+  - **SPEND ORDER IS CELL BY CELL**, nearest the contact first — never a
+    flat nearest-EDGE sort.  This is the V10 reveal-order lesson restated
+    in the damage layer: a flat sort spreads damage over many cells and
+    completes almost none until the end (measured: 3 pieces shed over a
+    rock tile's life, 5 dumped at death).
+  - **THE REMAINDER IS `unionOfCells`, not the arc splice.**
+    `subtractBoundaryCell` is exact where it applies but refuses once a
+    survivor's whole outline lies on the parent boundary — precisely the
+    tail, where instrumenting showed every boundary broken, every
+    remaining cell loose, and none of them able to leave.  Since the cells
+    TILE the original polygon, an edge shared by two survivors is interior
+    and everything else is boundary: walking that gives the outline with
+    no arc bookkeeping and no tail case.  It returns null for a non-ring
+    (an eroded body split into islands) and the arc splice stays the
+    fallback.
+  EVERY damage path feeds the boundaries — projectile, lightning chain,
+  shockwave ring, the bubble's bite, AND the three CRASH paths (player
+  into a tile, both `killStructureByImpact` sites, the tile-pressure
+  trigger) — each stamping its own contact point via the shared
+  `stampLocalImpact`, so splash, chain, bite and crush damage all erode
+  from where they arrived.  DBG ▸ Visual ▸ "Bnd strength" is the master
+  multiplier over every material.
+- **A CRUSH SPENDS ON THE BOUNDARIES TOO, AND IT SPENDS THE SAME FRACTION
+  IT ALWAYS DID** (`PhysicsSystem.crashBoundaryDamage` /
+  `crashContactOn`; step 2 of the unified-impact sequencing in
+  docs/PARKING_LOT.md).  The crash paths used to decrement `health`
+  DIRECTLY while the boundary model rewrote `maxHealth` to the derived
+  total at the first weapon hit, so the two spoke different units and the
+  same crash was worth a wildly different fraction of a tile depending on
+  its history: SHOOTING A TILE ONCE MADE IT 4-50× HARDER TO RAM THROUGH
+  (measured through the real collision branch, `perf/impact-audit.mjs`
+  §5 — rock 9 → 50 crashes, plastic 8 → 400, metal 120 → 468).  Nothing
+  about the tile got tougher; the unit it was counted in changed.  Four
+  things hold the fix up:
+  - **HOW MUCH a crash spends is deliberately NOT kinetic.**  Making
+    impact damage an energy is step 3 of that sequencing and re-prices
+    the whole weapon roster (the implied constant is not one: 9..90 KE
+    per point of damage across the shipped guns, a 10× spread).  This is
+    ROUTING only, so a crash spends one authored HP expressed in the
+    derived budget (`maxHealth / authoredMaxHealth`), which keeps every
+    ram count exactly what it shipped as and makes virgin and once-shot
+    identical.
+  - **THE CONTACT POINT IS ON THE HULL, not the impactor's centre.**
+    Both halves of the grain model read it — the spend pours from it and
+    the harvest orders its candidates by distance to it — and a 460-unit
+    boulder's centre sits a couple of hundred units outside the 36px tile
+    it is crushing.  `crashContactOn` puts it on the target's surface
+    along the MTV normal, and the SAME point is handed to `onDamage`,
+    where `progressFracture` re-stamps.
+  - **THE LAST CRASH OVERSPENDS.**  `spendOnBoundaries` saturates each
+    boundary exactly and returns only what it could absorb, so asking for
+    more than is left is harmless — and is the only way to land on a
+    clean zero.  A spend that lands exactly on the final boundary leaves
+    a one-ULP residue (measured 8.9e-16 on rock's ninth crash) and
+    `health <= 0` then reads false, costing one phantom extra ram.
+  - **A BODY WITH NO GRAIN MODEL STILL BREAKS.**  Indestructible, nebula
+    and every variant under the DBG legacy fracture A/B fall back to the
+    whole-body decrement.  This is where the crash paths differ from
+    `GameEngine.chipStructureAt`, which refuses such a body outright:
+    that is the chip path and may do nothing, a crash may not.
+  The GLASS rule (V9) is unchanged in meaning and now runs THROUGH the
+  model rather than around it: a hull or a boulder over the crash
+  threshold spends the pane's entire remaining boundary budget, so it
+  still dies in one and still shatters along the cells its cracks were
+  drawn from.  Score attribution is untouched — `killedByPlayer` is still
+  set only by the player's own crash, so ambient destruction pays
+  nothing.
+- **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
+  "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
+  the body-level penetration rule spent one charge to carry a bolt through
+  a whole 36px pane and pour its entire shot into the entry cell.  For a
+  body running the boundary model — the predicate is
+  `bondStrengthFor(e) !== null`, the same one the derived HP comes from —
+  the bolt instead walks its own CHORD, one `grainSpecFor(variant)
+  .grainSize` at a time, spending a charge and a falloff step per GRAIN.
+  Five things hold it up:
+  - **The step is read through `grainSpecFor`, never
+    `SHARD_VARIANTS[..].grain`** (the §5 rule): a DBG per-material
+    override that reached the pattern but not the track would step at a
+    pitch the decomposition is not built at.
+  - **Each step stamps its OWN contact point** (`stampLocalImpact`) before
+    spending (`applyBoundaryDamage`).  With every material's shipped
+    `damageSpread: 0` the spend runs sequentially outward from that point,
+    which is exactly what makes successive stamps erode successive grains
+    rather than saturating the entry cell — the bore is a consequence of
+    the damage-spread model, not a second mechanism beside it.
+  - **The walk runs in the body's LOCAL frame**, because `polygonPoints`
+    are stored unrotated and `pointInPolygon` has to be asked in those
+    coords; only the world stamp rotates back out.  The entry offset is
+    `wrapDelta`'d, so a body on the seam is not stepped a map-width away.
+  - **Out of charges INSIDE the body, the bolt stops there; out of BODY
+    with charges left, it flies on** and may strike the next thing.  That
+    is the whole difference from the body-level rule, and it is what makes
+    penetration read as depth rather than as a pass.
+  - **It allocates nothing and is bounded by the charges bought** — one
+    reused scratch point, and `charges` strictly decreases each iteration.
+  Bodies with no grain model (nebula, metal-shard composites, enemies,
+  the player) fall through to the single spend they always took, with the
+  falloff applied.  Measured on a 36px glass pane at 4 damage a hit: one
+  charge bores 2 grains and stops inside — 8.0 at the shipped rate (which
+  is 0, so both grains take full damage), or 7.8 with the decay cycled to
+  0.05 — where the body-level rule crossed the whole tile for one bite of
+  4.  The pane is ~3 grains deep on that chord, so 4+ charges bore 3 and
+  carry on: terrain costs about three charges per body, not a budget.
+- **Progressive fracture IS the rock damage model under voronoi** (V8 —
+  the boundary-highlight rework).  The decomposition is applied ONCE at
+  first damage and FIXED; each hit reveals more of the impact-sorted
+  edge list (`fractureCache.fractureRevealedEdgeCount` — the ONE
+  formula the crack render and the sim share, floor-paced so the last
+  boundary completes exactly at the hit ceiling), and a cell whose
+  BINDING edges are all revealed — its boundary fully highlighted —
+  BREAKS OFF as that piece (`GameEngine.progressFracture` →
+  `fracture.subtractBoundaryCell`, an exact arc-splice): the parent
+  keeps the spliced remainder (size and position untouched — the dent
+  contract — so the static grid never rebuilds) and the SURVIVING cells
+  of the same pattern stay cached for the next pieces.  An edge stops
+  binding when its partner cell has departed, so interior pieces free
+  up as neighbours leave.  There is NO chip-chance roll — the highlight
+  completing is the trigger — and progressive variants skip the dent
+  pull under voronoi (the pattern must stay stable; the highlight is
+  the damage read).  ONLY THE STRUCK PIECE LEAVES (V12, user call): the
+  damage path stamps the projectile's real contact point in entity-local
+  coords (`lastImpactLocal` — it also biases the pattern, replacing a
+  direction proxy), and a cell may detach only if it is the one that
+  point touches, measured to each cell's OWN OUTLINE (a shot stops at the
+  surface, so a centroid comparison would nominate a piece buried on the
+  far side).  When the struck cell is boundary-complete but not
+  spliceable off the current remainder, the search may walk to a
+  neighbour within `FRACTURE_DETACH.CONTACT_RADIUS_FRAC` (0.45 of the
+  body's size) — never across it, so a piece internal to a shard or
+  buried in a cluster cannot pop off a hit it never received.  Below
+  `FRACTURE_DETACH.MIN_REMAINDER_FRAC` (25%)
+  of the original area — or at the hit ceiling — the remaining cells
+  break through the normal death path.  `releaseRockChip` survives as
+  the DBG legacy path and as the fallback for degenerate polygons.
+- **A COLOUR MUST NEVER PARSE TO NaN.**  `hexToRgb` (render/drawUtils) feeds
+  its channels straight back into `rgb()`/`rgba()` strings for gradient
+  stops, and `addColorStop` THROWS on a colour it cannot parse — inside the
+  draw loop, where GameEngine's try/catch turns the throw into a LOST FRAME.
+  So one malformed colour anywhere in the world blanks the screen for as long
+  as it is on it.  Two ways in are closed: 3-digit CSS shorthand (`#fff`,
+  which parsed as `['ff','f','']` → `[255, 15, NaN]`) is expanded, and
+  anything else unparseable falls back to white — a wrong colour is a
+  cosmetic bug, a dropped frame is not.  Keep that guarantee if you touch the
+  helper; `rgbToHex` will happily format NaN back out as `#ff0fNaN`.
+- **A BONDED PAIR DRAWS AS ONE BLOB, and only draws** (`render/shardBlend.ts`).
+  A cohesion bond holds two bodies together, and for plastic that bond is
+  `cohesionOnly` — it NEVER matures into the single re-polygonised entity
+  every other variant's bond resolves to, so the pair stays two polygons
+  touching for as long as it lives.  The blend pass draws their union
+  underneath both hulls, so it reads as goo instead.  TWO PARTS, and the
+  policy asks for either or both: the COAT (`envelope`) envelops each goo
+  body in a rounded outward offset of its OWN hull — the polygon filled
+  and then stroked at twice the margin with round joins, which is exactly
+  the Minkowski sum with a disc, where scaling the polygon about its
+  centroid would thicken the far corners and starve the near faces — and
+  the BRIDGE is one metaball connector between those skins.  Bridge alone
+  reads as two bodies welded at a joint; with the coat they read as one
+  coated mass.  Seven things to know before touching it:
+  (1) **It is a PAIRWISE smooth-min, and that is exact rather than a
+  compromise** — bond formation is a MATCHING (both formation sites in
+  ShardSystem skip an entity that is already bonded), so a bond is never
+  one edge of a larger cluster and there is no third body a real sampled
+  distance field would blend in.  Cost is one path + one fill per visible
+  bond: no per-pixel work, no offscreen surface, no allocation.
+  (2) **PRESENTATION ONLY.**  Physics still resolves the two hulls as two
+  polygons; the sim never reads `blend`.  DBG ▸ Visual ▸ "Goo bond" takes
+  the drawing away and leaves the bond, which is the property the suite
+  pins.
+  (3) **A SOFT variant's silhouette is soft in two ways**, both draw-time
+  and both per-variant: `outline: false` drops the dark rim line (a rim
+  traces every notch and reads as a hard edge, which is exactly what goo
+  is not — rock-tile takes it too, for the brittle-dent reason its old
+  hardcoded `!== 'rock-tile'` branch used to state), and `cornerRounding`
+  blunts every corner via `roundedPolyPath`.  That is a FRACTION, not a
+  radius, because these hulls span a 20..200 diameter range: 0 is the
+  polygon as authored, 1 trims each corner to the midpoint of its shorter
+  adjacent edge — the most that can go before neighbouring fillets eat
+  each other — and the fillet is a QUADRATIC through the original vertex,
+  so a jittered corner keeps its own angle instead of being machined to a
+  constant arc.  NEITHER is written back to `polygonPoints`: the SAT hull
+  the solver sees is the sharp polygon it always was, and the coat traces
+  the same rounding so it cannot poke corners out past a rounded body.
+  (4) **A body is coated on ITS OWN policy, never its partner's**
+  (`coatMargin`, pure and exported for exactly this).  Plastic stuck to a
+  glass tile coats the plastic and leaves the tile alone; coating the
+  partner would repaint the tile's whole face in plastic green, which
+  says the tile is goo when it is the thing the goo is stuck to.  Each
+  body also wears its own SHADE, so a two-shade plastic pair stays two
+  shades; only the bridge has to pick one, and the larger body wins it.
+  `SHARD_COAT_CYCLE` (DBG Visual ▸ "Goo coat": 1× / 1.5× / 2× / 3× / 4× /
+  6×) MULTIPLIES the authored `envelope` rather than replacing it, so the
+  variant table stays the statement of how thick that material's goo is —
+  the same relationship `MATERIAL_GLOW_BRIGHTNESS_CYCLE` has with a
+  variant's `glow.peakAlpha`.  It cycles UP from the shipped value, and
+  its top step is past useful on purpose: a range whose top is not too
+  far cannot show where too far is.
+  (5) **The attach point is DIRECTIONAL, not a radius.**  A plastic shard
+  is a 4-gon with vertex radii jittered 0.65..1.10 of its base, so one
+  face stands nearly twice as far off the centroid as another; the first
+  draft anchored on a fixed radius and its bridges hung in open space.
+  `blendAttachRadius` ray-casts the hull along the line to the partner
+  (in the body's LOCAL frame — polygon points are stored unrotated), so
+  the goo starts at the face actually pointed at the partner, biased a
+  little inward so the body drawn over it covers the join.
+  (6) **The SPAN GATE is measured against the circumradii**, the same
+  quantity ShardSystem's contact test uses, so it means a multiple of
+  contact distance.  Against the attach radii it would drift with
+  `attachFraction` and drop pairs that had only just bonded.
+  (7) **ORDER IS THE WHOLE DESIGN**: the pass runs after the static-tile
+  blit and before `renderEntities`, so a bridge sits UNDER the mobile
+  hulls (which hide its ends) and OVER a static tile it is stuck to
+  (where it reads as goo on the face).  It also draws in WORLD space
+  outside `renderEntities`' per-entity `setTransform` — a two-body shape
+  has no single entity frame — and places the partner by `wrapDelta` from
+  the source rather than shifting each end on its own, since a bond can
+  straddle the seam and independent shifts draw a bridge across the map.
+- **A world-space health bar is a HIT REACTION, not a label** (gauntlet 5d,
+  U5).  `renderHealthBar` draws an enemy's bar only while
+  `GameEntity.healthBarTimer > 0`, fading over the last
+  `UI_CONSTANTS.HEALTH_BAR.FADE_DURATION` — so the bars on screen are exactly
+  the fights in progress rather than a label on every entity.  The timer is
+  stamped by `markDamaged(entity, flash)` (health) and `markShieldDamaged`
+  (a hit the SHIELD ate — without which the strip could only appear once the
+  shield had already failed) at every damage path, and ticked beside
+  `hitFlash` in PhysicsSystem.  It is a SEPARATE field from `hitFlash` on
+  purpose: that is a ~0.1–0.3s whiten-and-punch, and a bar living that long
+  would strobe rather than inform.  Three consequences worth knowing:
+  the shield strip draws for ANY shielded entity, not just the player;
+  `GameEntity.alwaysShowHealthBar` opts a priority target back into a
+  permanent bar (the dragon takes it, capstone bosses deliberately do NOT —
+  they have the dedicated HUD bar); and the PLAYER is the standing
+  EXCEPTION — see below.  DBG ▸ Visual ▸ "HP bars" restores the always-on
+  behaviour as the A/B.
+- **The PLAYER gets BOTH readouts, and they are different questions**
+  (user call, reversing U5's removal).  `renderPlayerVitalsBar` draws a
+  permanent hull bar under the ship — never damage-triggered, because your
+  own condition is the one thing you must not have to provoke into view —
+  with the shield strip under it only once `maxShield > 0` (an empty strip
+  is a permanent advert for a module you have not bought).  The HUD's
+  top-left chip stays, fed by `EngineStats.vitals` EVERY frame (unlike
+  `playerStats`, which is menu-only).  U5 removed the bar as "the same
+  number twice"; it is not — the bar is where the eye already is and the
+  chip is where the exact figure is.  Both read `player.health`, and both
+  wear the SAME three urgency bands (emerald > 50% / amber > 25% / rose),
+  which is the property that keeps them from reading as two opinions.
 - **Shield absorption is generalized.** The PhysicsSystem projectile-
   damage path (and the GameEngine shockwave-AoE path) absorb into
   `shield` for ANY entity with `shield`/`maxShield` > 0 — not just the
@@ -1312,15 +2957,66 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   A DIRECTIONAL arc shield (`shieldArcHalfWidth` set) only absorbs hits
   whose bearing falls in the covered sector — gated by the shot's TRAVEL
   direction, not its position, so a fast bolt that overshoots can't tunnel
-  past (`PhysicsSystem.shieldCoversHit`, toroidal).  A covered hostile shot
-  is DEFLECTED off the ring (`tryArcShieldIntercept`, broadphase reach
-  extended via `arcShieldReach`): its velocity reflects about the radial
-  normal and the shield drains by the shot's damage, so the bolt ricochets
-  away (and can hit other enemies) while the shield still wears down.
-  Open-side shots — and shots bigger than the remaining shield — fall
-  through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
+  past (`PhysicsSystem.shieldCoversHit`, toroidal).  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
+- **EVERY live shield DEFLECTS, and there is ONE deflection primitive.**
+  `PhysicsSystem.deflectProjectile(proj, nx, ny, opts?)` owns the mirror
+  (`v' = v − 2(v·n)n`), the rotation, the optional snap, and the rule that
+  a bolt already travelling outward (`v·n >= 0`) is NEVER deflected again —
+  which is what stops a ricochet re-triggering every step.  It takes a UNIT
+  OUTWARD normal and writes positions in the CALLER'S frame (the broadphase
+  shifts across a seam and re-wraps, so the helper must not wrap on its
+  own).  Both reflection sites go through it: `tryShieldDeflect` (radial
+  normal) and the bouncer's tile-face branch in `resolveCollision`
+  (axis-aligned normal, for which the general mirror reduces to negating one
+  component — so the fold changed no arithmetic).  `DeflectOptions` carries
+  `reownType`/`reownId` (a PARRY — clears `hitEntityIds` so the redirected
+  bolt can strike its new targets), `speedScale`, `spread`, `keepHoming`.
+  THE PLAYER'S DEFLECT IS A PARRY (user call): both deflect sites re-own a
+  bolt turned by the PLAYER's shield to `PLAYER`/`'player'`, so it stays
+  live against enemies, pays their kills (attribution rides ownership), and
+  a parried HOMING missile keeps homing — under player ownership the
+  owner-aware homing pass steers it at the nearest enemy, so the missile
+  turns on its makers with no new plumbing.  ENEMY shields deliberately do
+  NOT parry (a boss re-owning your own cannon shell would turn your gun on
+  you); their deflect keeps the bolt's owner, which already leaves a turned
+  player bolt live against other enemies.
+  Deflection was arc-only; ANY entity with a live pool now turns shots
+  away, so the player's own bubble and the bosses' shields ricochet instead
+  of swallowing.  The TWO SHIELD KINDS DEFLECT AT DIFFERENT PLACES, and
+  that is geometry rather than taste: an ARC ring stands OFF the hull
+  (`arcShieldReach`, 0.99×maxDim) so `tryShieldDeflect` must intercept it
+  BEFORE the body SAT or the bolt flies through the gap between ring and
+  hull; a NON-ARC pool's ring IS the shield-inflated collision shape, so it
+  deflects AT CONTACT, in `resolveCollision` immediately before the absorb
+  it replaces.  Do not "unify" these onto one pre-SAT radius test — that
+  was tried and shipped broken: `fillVertices` BOXES an entity with no
+  `polygonPoints`, and THE PLAYER HAS NONE, so its shield square reaches √2
+  further at the corners than the circle `shieldReach` describes.  Every
+  off-axis shot hit the square first and was absorbed by the body path
+  before the deflect could see it (measured: four absorbs per deflect), and
+  no circle can cover a square.  Reacting to the SAT contact instead makes
+  the property true BY CONSTRUCTION — the deflect runs at exactly the
+  moments the absorb would have.  One path per shield kind, so no pair is
+  charged twice, and a bolt already travelling outward relative to a
+  shielded target is neither deflected again nor absorbed.  THE ARITHMETIC
+  IS UNCHANGED:
+  a deflected shot drains exactly the damage the absorb path would have
+  absorbed, and a shot bigger than the pool still falls through to that path
+  and lands its remainder — a legibility change, not a shield buff.  Four
+  rules go with it, all of them consequences rather than choices: an
+  EMP'd shield (`systemsDisabled`) declines, because it is offline for
+  absorption too; a shot the target may not be hit by at all (own fire, an
+  ally's `sparesPlayer` bolt, a rival's `hitsEnemies` shot at a rival) may
+  not bounce off it either; a deflected bolt STOPS HOMING by default (the player's parry opts out
+  via `keepHoming`, safe exactly because a player-owned bolt cannot hit the
+  player), or an enemy missile — which homes on the player with no range
+  gate — would turn straight back into the shield and grind the pool down
+  in a loop; and a
+  deflect that empties the pool plays `impact.shield.break` rather than
+  `impact.shield.deflect`.  Uncovered arc bearings still fall through to the
+  normal body hit.
 - **Stage-3 reusable mechanics (all three now wired by the Stage-5 BUBBLE).**
   Three build-once primitives for the exotic enemies:
   (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
@@ -1348,7 +3044,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   This mirrors the LATCH (a held target processed over a timer); the bubble just
   can't engulf the too-big player/enemy, so that path clings to the hull
   (squash-cling render + EMP-arc crackle on the player) and drains instead.
-  Tiles (the future dragon) are eaten instantly (`consumeTile`).  The entity-COUNT
+  Tiles (the future dragon) are eaten instantly (`consumeTile`).  Food too big
+  for the consumer's `swallowMaxFrac` mouth is neither pulled nor swallowed:
+  it is BITTEN (`consume.bite` → `GameEngine.chipStructureAt`), the reusable
+  seam for "damage a structure at a point through the grain model" and the
+  ONE place a non-weapon source may drive the chip path.  The entity-COUNT
   cap for self-replication is a live-subtype census at the child-spawn site
   (`updateBubbles` for the bubble, `updateNests` for nest brood — both
   pattern-match `enforceTypeCap`).
@@ -1367,6 +3067,273 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   collateral onto nearby enemies/structures + the normal death-explosion.
   Bombers killed before they touch the player never set the flag, so they pop
   harmlessly — the kill-early counter.
+- **Nebula wake spin has a HANDEDNESS cycle** (user report: a starboard
+  pass should turn a shard clockwise; the shipped id-parity sign gave a
+  pass no consistent handedness at all).  DBG ▸ Visual ▸ "Neb spin":
+  `physical` (default — the ship's velocity crossed with the ship→shard
+  offset, so starboard → clockwise in this y-down world), `inverted` (the
+  A/B), `random` (the old parity vortices).  Below a small speed floor the
+  parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
+  (angular momentum in the impulse solver, off-centre impact torque) are
+  parked for their own session — docs/PARKING_LOT.md.
+- **A MATERIAL'S DRAG IS DECLARED ON ITS SPAWN SHAPE, or the material has
+  no drag at all.**  PhysicsSystem's custom-damping branch is gated on the
+  entity carrying a `linearDamping` FIELD, and a STRUCTURE without one
+  matches neither that branch nor the player/enemy/POI branch under it — so
+  it free-drifts with NO friction and NO rest-snap.  The generic child
+  recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the
+  fragment, which makes `SHARD_SPAWN_SHAPE_*` the ONE place a material says
+  how draggy it is.  `SHARD_SPAWN_SHAPE_NEBULA` used to NAME both damping
+  fields in its own comment without declaring them, and that was invisible
+  for as long as nebula shattered only through `shatterNebulaStyle` — which
+  hardcodes the same `NEBULA_CONSTANTS` locally, as the DropSystem dust path
+  still does.  Routing nebula through the shared voronoi recipe made every
+  puff undamped (measured: 311 of 311 live shards with `linearDamping ===
+  undefined`) and took the DBG "Neb damp" knob with it, since that knob is
+  read INSIDE the branch that was never entered.  The lesson generalises: a
+  knob applied at the read is only as live as the branch it is read in, so
+  "the knob does nothing" is first a question about whether the branch runs.
+- **NEBULA'S TWO DRAG KNOBS ARE SEPARATE BECAUSE THE COMPLAINTS ARE.**
+  `nebulaDampingFor` (DBG "Neb damp") and `nebulaSpinDampingFor` (DBG "Neb
+  spin damp") are both a multiplier on the per-step velocity LOSS — `1 - d`
+  going up, so the ladder is a plain number line and 2x really is twice the
+  drag — but linear drag decides how far a puff TRAVELS after a kick while
+  spin decay decides how long it TUMBLES where it sits, and a cloud that
+  slides to a halt still pinwheeling can only be diagnosed by moving them
+  apart.  The spin ladder's index 0 is `match`, which DEFERS to the linear
+  knob: that is the shipped behaviour (one knob moved both halves), so an
+  untouched build is unchanged and the first click is the A/B.
+- **EVERY PER-FRAME RENDER BUCKET IS POOLED, AND THE MINIMAP ONE WAS NOT.**
+  `RenderSystem.pushSlot` exists because pushing a fresh `{entity, rx, ry}`
+  literal per visible entity was measured as the dominant driver of the
+  periodic GC pauses that read as tail-frame hitches — the note beside the
+  pools says so.  `_minimapBuffer` was left out of it for a mundane reason:
+  its slot carries `{dx, dy, detect}` rather than `{rx, ry}`, so it did not
+  fit the shared helper, and it went on allocating a literal per entity per
+  frame.
+  That was survivable only because the buffer held DISCOVERED structures
+  alone.  It stopped being survivable during the window when the scan reveal
+  shipped ON, since every structure inside `MINIMAP_CONSTANTS.RANGE` then
+  reaches the buffer: measured on OVERWORLD **while flying**, 805 KB/frame
+  with the reveal up against 590 with it off — and the pauses that buys are
+  exactly the symptom the pooling was introduced to remove.  The reveal is
+  off again by default, so a shipped run is back to the lower figure, but the
+  pooling STAYS: the DBG row still puts the buffer under the higher one on
+  demand, and the rule below does not depend on which default is current.
+  `pushMinimapSlot` is the
+  same contract for that shape.  The rule generalises: a NEW per-frame bucket
+  is pooled, or it is a GC regression waiting for the day something makes it
+  hot.
+  Two things to know before chasing this further.  A HITCH is not a p99 —
+  `perf/capture.mjs` reports the steady state, and a healthy p99 can hide a
+  stall every second, so `perf/spike.mjs` reports the SERIES instead (outlier
+  frames, their spacing, and whether sim, render or the RESIDUAL dominates
+  them; residual is GC and rasterisation, which making the sim faster cannot
+  help).  And `hub-idle` cannot see any of it: a parked camera never
+  re-culls, never re-stamps the static tile cache and never scrolls the star
+  field, which is why `hub-move` exists.
+- **NEBULA'S GRAIN SIZE IS SET BY FRAME TIME, AND THE LEVER IS `grainSize`
+  RATHER THAN `grainCountMax`** (user call).  Giving nebula the voronoi
+  shatter cost frame time through sheer ENTITY COUNT, and the cost is
+  SUPERLINEAR: on the `nebula-storm` perf scene `sim/stp99` ran 3.60 at the
+  original `grainSize` 14 against 2.00 with the legacy shatter — +80% per
+  substep for +25% entities — with heap churn 676 vs 432 KB/frame.  Two
+  findings are worth keeping because both were counter-intuitive:
+  - **`grainCountMax` is the wrong knob.**  The cap rarely binds — the count
+    is really set by `grainSize` against body area — so dropping it 14 → 8
+    recovered almost nothing (3.60 → 3.35).
+  - **The uncadenced `PhysicsSystem.resolveNebulaShardTilePairs` is NOT the
+    cause**, which was the obvious suspicion since it is the one broadphase
+    pass with no PerfController cadence behind it.  Ablating it made things
+    slightly WORSE (4.45), because shards then stop being pushed clear of
+    tiles and the population grows.  Do not revive that theory without new
+    evidence.
+  `grainSize` 20 lands exactly on the legacy floor (2.00, 1358 ents) while
+  keeping most of what the voronoi change bought — 3.95 children per tile
+  and a 3.07× size spread, against 7.7 / 4.02× at 14 and ~2-3 children with
+  NO parent-related size variety at all on legacy.  26 buys nothing further,
+  so 20 is the knee.  Size VARIETY is `sizeSpread` and `regularity`, which
+  this does not touch; what a larger grain gives up is the NUMBER of pieces.
+  `perf/scenes.mjs` carries the scene and `perf/capture.mjs` the three
+  nebula ablations (`nebtilepass`, `nebshatterlegacy`, `nebbondoff`) that
+  sized each cause.
+  IT ALSO MOVED TWO TEST MARGINS, which is the part that was missed: the
+  nebula fracture suite asserted `min children > 3` and a `> 2.5` size
+  spread against the grain-14 yield (7.7 children, 4.02× spread), and at
+  grain 20 (3.95 / 3.07×) both sat ON the boundary — measured failing 3
+  runs in 8 with the product perfectly correct.  A default that moves a
+  measured quantity has to be walked past the assertions written against
+  it; a floor is not a claim unless there is margin under it.
+- **NEBULA'S VELOCITY STRETCH SHIPS AT THE TOP OF ITS LADDER, 0.10** (user
+  call).  `VEL_STRETCH_K_CYCLE` maps a shard's speed to how far its sprite
+  squashes along its own velocity; 0.085 used to ship and the play-tested
+  answer is the step above it, the most stretch the ladder offers, so a
+  moving puff reads as drawn out along its travel.  Because it is the TOP,
+  the cycle WRAPS to `off` on the first click — the A/B against no stretch
+  at all is one press away, which is the same property index 0 gives every
+  other ladder.  Presentation only: the squash axis follows velocity while
+  the sprite keeps its own rotation, and nothing in the sim reads it.
+- **NEBULA STICKS BY WAITING LONGER TO MERGE, NOT BY REFUSING TO** (user
+  call; `goo` is what SHIPS, and `off (old)` is one click away because the
+  cycle wraps, so the A/B against pre-feature nebula is still the first
+  press).  A nebula bond's outcome is `compose` — the pair is CONSUMED after
+  the contact threshold and one new body appears — so at the shipped ~5 s
+  (scaled by pair size) the DBG "Neb bond" cohesion and break multipliers
+  barely get to act, and the harder they grip the sooner the pair holds
+  together well enough to vanish into a merge.  That is why the top step
+  read as changing nothing (user report).  `bondTimeMul` stretches the
+  THRESHOLD instead: the pair sticks and moves as one for as long as the
+  multiplier says, and then it still coalesces.  Plastic's `cohesionOnly`
+  was tried first and REVERSED — nebula's compose is also how its shards
+  transmute back into TILES, so suppressing it switches off the whole
+  self-coalesce loop, which is a much larger change than the fluid look
+  being asked for.  Four things go with it:
+  - **Applied AT THE READ, on the compose gate** (`bond.threshold ×
+    bondTimeMul`), never baked in at formation — so a click re-tunes pairs
+    already stuck together, and stepping back DOWN makes every long-held
+    bond instantly due and composes it.  That last property is the one that
+    proves merging was deferred rather than removed.
+  - **THE TOP OF THE LADDER IS SET BY WHAT A BOND SURVIVES, not by taste.**
+    A pair also breaks by DISTANCE, so the highest timer/threshold ratio a
+    live bond ever reaches saturates: at 40× the measured peak was 11.2
+    against 11.8 at 12× — the two were the SAME step, because no bond lives
+    long enough to spend a 40× timer.  The shipped ladder (1 / 2 / 5 / 12)
+    sits inside that ceiling and each step lands on its own multiplier
+    (measured maxRatio 0.44 / 1.84 / 4.88 / 11.76).
+  - **`goo` SHIPS, AND ITS PERF NUMBER IS "NO MEASURABLE COST"** (user
+    call).  The rule this note used to carry — *delaying merges costs
+    entity count, so anything above `firm` needs a perf number beside
+    it* — stands as a rule, and this is that number.  Measured on
+    `nebula-storm`, three A/B pairs, shipped against the `nebbondoff`
+    ablation (which walks the ladder back to `off (old)` in-page):
+
+    | | ents | sim/stp99 | heap KB/f |
+    |---|---|---|---|
+    | goo (ships) | 1332 / 1331 / 1396 | 1.95 / 2.10 / 2.55 | 462 / 484 / 511 |
+    | off (old) | 1436 / 1387 / 1367 | 2.50 / 2.55 / 2.40 | 497 / 521 / 522 |
+
+    Goo is marginally AHEAD on all three, but the ranges overlap (its worst
+    substep equals off's typical), so the honest reading is that the step
+    costs nothing here — not that it is faster.
+    THE OLD FIGURE IS NOT WRONG, IT IS NO LONGER THE SAME BUILD.  The
+    28 / 75 / 307 / 597 populations recorded across the four steps were
+    LIVE NEBULA SHARDS (not total entities) and were taken BEFORE
+    `grainSize` went to 20, which cut children per tile from 7.7 to 3.95 —
+    so the population goo was holding open was about twice what it holds
+    open now.  Two lessons: a cost measured against one population does not
+    survive a change to that population, and a ladder step's price has to be
+    re-measured after anything that moves entity count, not inherited.
+  - **The tell is NOT the bond COUNT.**  That churns hard as pairs form and
+    break (measured 15 → 150 → 19 → 58 → 21 → 13 on the off step), so a
+    count-based regression passes by coincidence and did, against a build
+    with the feature reverted.  What separates the steps is `timer /
+    threshold` on a LIVE bond: a bond is composed in the same iteration its
+    timer crosses `threshold` and the merge-budget deferral clamps to
+    `threshold - dt`, so under the shipped step a surviving bond can never
+    be past its base threshold.  Ratio ≤ 1 is therefore an invariant of
+    `off`, and a live overdue bond is exactly one the shipped step would
+    already have merged away.
+- **NEBULA TAKES THE VORONOI GEOMETRY AND NOT THE DAMAGE MODEL** (user
+  call).  `nebula-tile` and `nebula-shard` carry a `grain` block and
+  `shatter.kind: 'voronoi'`, so a broken tile hands back the cells its own
+  pattern says.  What they deliberately do NOT carry is `bondStrength` or
+  the `progressive` it requires — and that ABSENCE is what "boundary
+  strength zero" means here.  A literal `bondStrength: 0` would be the
+  opposite of harmless: derived HP is `Σ (edge length × strength)`, so
+  zero strength derives zero health and every cloud dies on sight.  With
+  the fields absent, `isProgressiveFracture` stays false for nebula,
+  `bondStrengthFor` returns null, and every consumer of the damage layer
+  — the crash paths, the pierce bore, the bubble's bite, the crack
+  overlay — skips nebula exactly as before.  `passThrough` is untouched:
+  still no collisions, on the tile or the shard.  Three consequences:
+  the tile keeps its 1-HP whole-body death (and `spawnShardHealth` names
+  nebula explicitly rather than letting it fall through the size-keyed
+  default, which is the mistake that gave metal a 1-HP grain); the
+  `nebula-shard` grain block is LATENT, because that variant's shatter is
+  deliberately `'none'`, and it is written down anyway so a material
+  cannot come to mean two patterns; and the legacy fracture A/B has to
+  dispatch on `shatter.style === 'nebula'` to send a nebula tile back to
+  its own rear-cone fan — the generic scatter reads the same
+  `countMin`/`countMax` and so produces the same COUNT, which is why the
+  regression for it asserts on the cloud payload instead.
+  MEASURED: a tile went from 2-3 children over a fixed 121-unit area
+  budget that ignored the parent entirely, to 6-8 cells that tile the
+  parent's own polygon (child area / parent area 0.85..1.05), with body
+  sizes spanning 4.99..20.2 — a 4× range.
+- **A NEBULA FRAGMENT ROLLS ITS OWN SPRITE** (user call), and
+  `randomNebulaSprite()` in `assets.ts` is the ONE definition three sites
+  share: the map-load tile factory, the shatter dust, and every fragment a
+  break produces.  The generic voronoi child recipe copies `parent.sprite`,
+  which is correct for every OTHER material — rock, glass, metal and plastic
+  draw polygons and carry no sprite worth varying — and wrong for the one
+  family whose whole look IS the sprite: a tile decomposing into its cells
+  handed back that many copies of one cloud image, so a burst read as the
+  same puff stamped out repeatedly rather than as a cloud coming apart.  The
+  roll therefore lives in `ShardSystem.stampNebulaChild` (which runs AFTER the
+  child literal, so it overwrites the inherited value) rather than in the
+  shared recipe.  Three things worth knowing:
+  - **The other two `sprite: parent.sprite` sites are deliberately left
+    alone.**  `spawnDetachedCell` and `shatterPowerlawStyle` cannot be reached
+    by nebula — the chip path requires the grain model nebula does not carry,
+    and the legacy fracture A/B dispatches nebula to its own rear-cone fan —
+    so randomising there would only touch materials that do not want it.
+  - **THE TELL IS PER PARENT, NOT POPULATION-WIDE.**  The parents already roll
+    random sprites at map load, so breaking thirty tiles yields ~16 distinct
+    child sprites EITHER WAY (measured 16 inherited vs 20 rolled) and a
+    population count cannot tell the builds apart.  What separates them is
+    whether ONE parent's children differ from each other: measured 1.0
+    distinct sprite per parent and 30/30 parents uniform before, 3.6 and 0/30
+    after.  A regression written the obvious way would pass on both.
+  - **It costs tint-cache entries**, since the store keys on
+    `spriteSrc|quantisedTint`: measured 9 entries before and 40 after over the
+    same thirty-tile break, against a 256 cap.  Anything that multiplies
+    nebula sprite variety again should re-check that number rather than assume
+    the headroom is still there.
+- **A NEBULA SPRITE IS SIZED FROM THE BODY IT BELONGS TO, and is always
+  bigger than it.**  `nebulaSpriteSize(entity)` (constants.ts) is the ONE
+  definition — the cloud sprite and the twinkle star placed inside its
+  footprint both call it, and they used to carry the formula twice.  The
+  base is `max(size.x, size.y, polygonDiameter)` and the multiplier is
+  `NEBULA_CONSTANTS.SPRITE_OVERSIZE` (2.727, calibrated so a full hex
+  tile still draws at the 120 world units it always did).  Three things
+  are load-bearing:
+  - **The polygon is the FLOOR, not the base.**  `size` is the
+    area-equivalent diameter every other system means by "how big is
+    this", but a Voronoi cell is ragged and its circumradius reaches
+    further: measured over 306 fresh grains the polygon was 1.68× the
+    body diameter on average and 2.4× at worst, so a flat overhang on
+    `size` alone left the raggedest few with a sprite SMALLER than their
+    own outline (0.95×).  A nebula sprite must never be smaller than the
+    shape it belongs to.
+  - **The rule it replaced had rotted invisibly.**  It was
+    `120 × sqrt(nebulaTileArea / HEX_AREA)`, and `nebulaTileArea` is set
+    at exactly ONE site — the map-load tile factory.  No shatter child
+    and no merge survivor ever set one, so every shard fell through the
+    `?? HEX_AREA` default and drew a FULL-TILE sprite whatever its size
+    (measured on the shipped build: 102 shards spanning 9.2..43.6 in body
+    size, every one drawing 120).  A sprite deliberately larger than its
+    body does not LOOK wrong when it stops tracking it — it looks like a
+    cloud, which is why this survived.
+  - **`_nebulaSpriteR` is cached and never invalidated**, and that is
+    safe rather than lazy: a nebula body's polygon is fixed for its life
+    — no dent policy, no progressive fracture, and its merge is
+    PAIR-CONSUMING (both inputs retire and a new body appears), so
+    nothing rewrites `polygonPoints` in place.
+  The visible consequence is that a shatter now leaves ~1.9× the tile's
+  own cloud instead of ~3.0× (three full-size sprites), so DBG ▸ Visual ▸
+  **"Neb sprite"** is the live A/B on the overhang — a MULTIPLIER over
+  the authored constant, the same relationship `SHARD_COAT_CYCLE` has
+  with a variant's `envelope`.  **IT SHIPS AT 1.25×** (user call): the
+  calibration above is what a full hex tile draws at **1×**, so a shipped
+  run draws that tile at 150 and every other body 25% larger in
+  proportion.  Anything asserting the 120 figure has to DIAL THE LADDER TO
+  1× rather than assume it — `tests/fracture.spec.ts` does, and the
+  assertion would otherwise have failed on the default instead of on the
+  rule it protects.  The "(ships)" marker is applied from
+  `NEBULA_SPRITE_DEFAULT_INDEX` rather than written into a step's name; it
+  WAS written in, and this move is exactly what would have left it on the
+  wrong step.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
@@ -1399,19 +3366,148 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   own ship (tap/click, `INPUT_CONSTANTS.SHIP_SELECT_RADIUS`), plus E as
   the keyboard equivalent — so any new proximity-interactable must join
   `updateInteractables`' nearest-wins arbitration rather than adding a
-  second handler; otherwise two affordances fight over one gesture.  The
+  second handler; otherwise two affordances fight over one gesture.
+  The LIGHT TOOL is the gesture's FALLBACK (user call): with the
+  Light module installed (`flashlightEquipped`; catalog id
+  `flashlight_kit`), a ship-tap / E / pad-action in OPEN SPACE cycles the
+  light off → medium → high (`GameEngine.cycleShipLight`, levels in
+  `FLASHLIGHT_TOOL_LEVELS`).  BOTH on-levels wear the BEAM flashlight
+  style (the 80° cone); what separates them is the LIGHTING TIER (user
+  call): medium runs the light system at the 'medium' rung, high at
+  'high' — reach, occluder budget and penumbra all step, because the
+  tier override (`setLightingTierOverride`, set per frame in draw) wins
+  inside `getActiveLightingTier` for EVERY consumer.  A dock or portal
+  in range still wins the gesture.  The cone override is
+  `RenderSystem.playerLightToolHalfDeg`; null = tool off → the DBG
+  globals decide, and they ship flashlight 'off' / tier 'low' — a
+  module-less ship carries NO player beam, and the DBG rows stay the raw
+  dev overrides underneath.  Losing the module (adjacency-offline
+  included) zeroes the level in `applyModuleEffects`.  The
   ship-select tap is CLAIMED from the fire queue before the weapon tick
   drains it (sim step 5b runs ahead of step 7), which is why using a
-  portal doesn't also fire a shot.  There is NO HUD dock/enter button —
+  portal doesn't also fire a shot.  A portal is also a WORMHOLE GRAVITY
+  WELL: `addPortal` stamps `gravityRange`/`gravityStrength` (plus
+  `gravityPlayerScale` — the player feels only a fraction, so the mouth
+  is a tug, never a trap), and the EXISTING attractor machinery does the
+  rest — `initializeAttractors` caches it at map load, `applyGravity`
+  spirals shards/enemies/drops (and curves projectiles) in, the
+  close-attractor crush SWALLOWS a mobile shard under the visual horizon
+  (0.62 × r, silently — no damage popup, no shatter; the count-based
+  asteroid keeper replenishes the belt away from portals), and
+  RenderSystem's attractor bucket (`gravityStrength > 500`) feeds
+  `BackgroundManager`'s star lensing: background stars inside the lens
+  radius are pushed off the throat and SHEARED around it (screen-space,
+  applied per star in `renderStars`; the no-lens path is the original
+  untouched loop, and positions stay fractional / sizes integral so the
+  S3 no-resampling invariant holds).  THE LENS IS RELATIVE TO THE HOLE:
+  its radius is `LENS.RADIUS_MULT × portalHorizonRadius` and its push is
+  `PUSH_FRAC ×` that radius, so the warped patch HUGS the disc, inherits
+  the destination-span scaling, and keeps its shape at every rift size —
+  it used to be a multiple of the entity's `size` with an absolute pixel
+  push, which left a 600-unit void standing off a 52-unit hole.  **The
+  twist is BOUNDED, and that is load-bearing**: it was
+  `f² × (WIND + elapsed × SWIRL_RATE)`, an angle growing without bound
+  with wall-clock time, and since every 2π of accumulated twist is one
+  visible BAND of stars the field wound itself into ~4 bands a minute in
+  and ~10 after three — and scaling a 60-radian twist by 0.25 still left
+  ~15 radians, far past 2π, so the DBG Lens knob could not change the
+  band count and read as doing nothing (user report).  Total shear is
+  now capped below one turn (`TWIST + TWIST_SWING < 2π`), which makes
+  banding impossible BY CONSTRUCTION, and time BREATHES that bounded
+  shear (a sine at `SWIRL_RATE`) instead of accumulating it, so the warp
+  still lives without winding up.  `tests/starfield.spec.ts` pins the
+  knob's monotonic response off the pixels — the star coverage where the
+  lens piles stars up minus where it evacuates them, sampled ABOVE the
+  rift so the label and ship stay out of it.  HOW STRONG all of that is is a
+  live A/B (user report: the rift reads as too powerful, and strafing it
+  is dizzying) — DBG ▸ **Portals** carries five multipliers: rift SIZE,
+  gravity STRENGTH and RANGE, and the star lens split into AMOUNT and
+  SPIN.  Every one is applied AT THE READ (`getPortalSizeMult` et al. in
+  PhysicsSystem / BackgroundManager / dropShapes), never baked into the
+  portal entity, so the entity keeps `PORTAL_CONSTANTS` as its base and
+  a knob re-tunes the rifts already in the world with no map reload.
+  Two things are deliberate: SIZE moves the drawn mouth, the swallow
+  horizon and the lens radius TOGETHER (all three are `size.x` reads)
+  but never `USE_RANGE`, which is an interaction rule rather than a
+  look; and the lens is TWO knobs because the complaint is about MOTION
+  — "frozen" keeps the warp's shape while stopping its rotation, which
+  is what separates displacement from spin as the cause.  Index 0 of
+  every cycle is the shipped value, so the first click is always the
+  A/B — and when a tuning pass settles somewhere, that value is BAKED into
+  `PORTAL_CONSTANTS` and the knob returns to 1× rather than shipping a
+  standing multiplier: `1×` has to keep meaning "what ships", or the base
+  constants describe a rift nobody plays and every derivation written
+  against them (escape speeds, standoff radii) quietly goes wrong.  The
+  shipped well is `SIZE` 70 / `g1500` / range 525, which is what the
+  panel's live readout shows at defaults — play-tested DOWN from g6000 /
+  1050 (user call: too strong), A/B'd through the knobs at 0.25× strength
+  and 0.5× range and then baked, with both cycles re-centred so 1× still
+  means what ships and 4×/2× reproduces the old rift for comparison.  A RIFT ONLY EATS WHAT FITS IN ITS MOUTH (user call): an
+  object whose own radius reaches `EJECT.SIZE_FRACTION` of the horizon is
+  NOT swallowed — crossing the centre FLINGS it out along its own heading
+  at `EJECT.SPEED` (20, against a ~7.1 escape from the mouth — kept
+  unchanged through the well's retune, since the throw's absolute speed is
+  what it FEELS like and only its margin over escape moved) with
+  `GRACE_SEC` of immunity, so a boulder ploughs through a rift while
+  gravel still vanishes down it.  Sizing the rule against the HORIZON is
+  what makes it physics rather than a threshold — the same rock shoots
+  through Pocket's 18 and disappears into Deep Space's 52 — and it
+  inherits destination scaling and the DBG Size knob for free.  The
+  PLAYER and PROJECTILES are exempt (a ship enters on purpose and has its
+  own transit; a shot is not an object being thrown).  The throw carries
+  a shake scaled by the object's size and NO SPARKS (user call):
+  `handlePortalEject` used to spray rift-coloured particles, which is the
+  vocabulary of a COLLISION, and nothing collided — the rock never
+  touched anything, it was too big to fit down the hole and the well
+  threw it back.  Debris flying off it says it hit something solid, which
+  is the one reading a wormhole must not give.  Same argument as
+  stripping the idle rift to a bare disc.  ANYTHING THAT
+  STEERS ITSELF STEERS CLEAR: `avoidsPortals(e)` in `constants.ts` is the
+  ONE predicate — defaulting by TYPE (every ENEMY, which is what a
+  bubble, a dragon head and a rival all are, plus the snitch) so a future
+  roamer is covered the day it exists, overridable per entity via
+  `GameEntity.avoidsPortals` — and `applyGravity` gives those an outward
+  push inside `AVOID.RANGE`.  It lives there rather than in the AISystem
+  strategies, the dragon, the rivals and the bubbles, which are four
+  different movement machineries that would each have needed their own
+  copy.  The pull is deliberately NOT cancelled: they still drift in from
+  across the arena, the push just wins closer in (1.4 peak against a pull
+  clamped at 0.6 balances ~215 units out), so they hold off and slide
+  around the rift and a determined chaser can still push through.
+  Measured: with the rule off, an enemy dropped on a rift's centre sits
+  1.7 units from it indefinitely.  There is NO HUD dock/enter button —
   the ship prompt is the whole affordance (a pill on top of it was
   redundant), so `UIOverlay` has no `onDock`/`onEnterPortal` prop.  A CONTROLLER button is the third
   intended path and is deliberately NOT wired here — Pair C (c2) owns the
   gamepad layer in InputSystem; OR its button into the `selected` flag
   when it lands.  The prompt naming the control is drawn AT the ship
   (`GameEntity.interactPrompt`, stamped per step, rendered via
-  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  The idle rift is pure render-side
-  animation (zero particle cost); `openPortal` only fires on an actual
-  transit.
+  `RenderSystem.worldToScreen`) and echoed in the HUD pill.  THE IDLE RIFT IS A HOLE AND NOTHING ELSE (user call): the world art
+  is ONE black disc plus the destination tag.  The bloom, inspiral
+  arms, energy ring, photon ring, coloured rim, funnel throat, white
+  core and in-range halo were all deleted — the star LENS is what says
+  "wormhole", and the drawn ornament was a second louder voice saying
+  the same thing.  There is no animation left at all, so a portal costs
+  one fill and one string.  Its radius is `portalHorizonRadius(e)` in
+  `constants.ts` — the ONE definition the renderer AND
+  `PhysicsSystem.applyGravity` both call, so matter is swallowed
+  exactly where the hole is drawn — and it SCALES WITH THE
+  DESTINATION: a rift is a window onto the arena at the other end, so
+  `addPortal` stamps `portalDestSpan` from `MAP_SPANS` (built off the
+  map classes' own statics in `MapClasses.ts`, so there is no second
+  copy of a map's size) and the disc grows with it.  Every destination
+  draws SMALLER than the old fixed 0.62 disc, and a play-testing pass then
+  settled the shipped rift at a much smaller mouth again (`SIZE` 70, baked —
+  see below): Pocket 4k → 6, showcase 6k → 9, hub / Ring / Seven Rings
+  12k → 15, Deep Space 16k → 18.
+  The span is passed as DATA rather than looked up in `constants`
+  because the map classes import that module — a lookup there would be
+  an import cycle.  Note the LENS radius is still keyed to the entity's
+  own `size.x` (×`LENS.RADIUS_MULT`), NOT to this disc, so at full lens
+  strength the star void is much wider than the hole and the two read
+  as one dark shape; the destination-size variation is legible with the
+  DBG Lens knob dialled down.  `openPortal` still fires only on an
+  actual transit.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
   collapsible section) — the old floating top-left DBG button/panel is
   gone.  The 'Overlays' row inside is the old master toggle (renderer
@@ -1420,13 +3516,325 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
   feeds them.  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
   with its full phase table, each click stacking another (the Dragon-menu
+  pattern).  Step 5 added four rows: Player ▸ **Gamepad** + **↳ axes** (a
+  live READOUT — the pad has nothing to switch, and what a hardware check
+  needs to see is whether the axes reach the sim), and Visual ▸
+  **Joystick** (Touch / Forced — the widget is touch-only by design, so
+  this is the only way to check its layout on a desktop), **Minimap mat**
+  (Flow / Dots / Off) and **Rock palette** (mixed / slate / rust /
+  mineral).  The fracture / grain rows have their OWN section — **Grain &
+  Fracture** — rather than living at the bottom of Visual's ~60 rows: it
+  holds the five GLOBAL knobs (Fracture A/B, Frac relax, Bnd strength,
+  Frac sep, Frac sites, Frac bias) and, under them, the PER-MATERIAL
+  block described below.
+- **PER-MATERIAL GRAIN KNOBS ARE A SELECTOR PLUS FIVE ROWS, NOT TWENTY
+  ROWS.**  Six knobs across four materials is twenty-four values, and that many
+  rows would wreck a panel that already runs ~90.  Instead **Grain mat**
+  picks the material and the `↳` rows below it read and write whichever
+  one is selected — so the surface is a handful of rows and the existing
+  `ctrlRow` idiom is unchanged.  Four rules hold it up:
+  (1) **The key is the MATERIAL, not the variant.**  Writing `rock` moves
+  rock-tile and rock-shard together, because a material's grain geometry
+  is shared by its tile and its shard (see the grain-geometry rule above)
+  — a tile and its own debris decomposing from different patterns is not
+  one material, and is not a setting anyone can judge.
+  (2) **Overrides COMPOSE with the global knobs**, never replace them.
+  `Frac sites` still scales whatever count they produce and `Bnd
+  strength` still multiplies whatever strength they set, so a global
+  sweep keeps working while one material is being tuned.
+  (3) **A LADDER IS A NUMBER LINE WITH THE DEFAULT SPLICED INTO IT.**  The
+  readout shows the table's OWN NUMBER with a `(def)` note (user call) —
+  `0.4 (def)` rather than the word `table`, because a number you can read
+  beats a word — and the note preserves what the word carried: a default
+  and a value someone set to the same number still read differently,
+  since an explicit one shows bare.  `GRAIN_KNOBS` therefore holds only
+  the shared numeric STEPS, and `grainLadder(mat, knob)` inserts that
+  material's default at its sorted position, dropping any step equal to
+  it.  Before this the `null` entry was pinned at index 0, so a rock
+  grain-size cycle read 14 (def) → 6 → 8 → 10 → 13 → 15 — starting at the
+  default and jumping BELOW it before climbing back through, which reads
+  as an unordered list once the numbers are visible.  Ladder length is
+  therefore PER MATERIAL, so nothing may walk one by a fixed step count.
+  Ranges keep a step either side of every shipped default (`damageSpread`
+  excepted: 0 is its floor).  `↳ reset all` drops all twenty-four and
+  shows how many are currently off the table.
+  (4) **`grainSpecFor(variantId)` is the ONE seam** every read of a
+  `grain` block goes through — `ensureFractureCells`, `bondStrengthFor`,
+  the bond-variance read, the dent read.  Reaching into
+  `SHARD_VARIANTS[..].grain` directly would let an override be honoured
+  by one reader and ignored by another, which for this model means cracks
+  drawn from one pattern and a break taken from a different one.  It
+  returns the table object itself when nothing is overridden, so normal
+  play allocates nothing.  Every knob bumps the fracture tuning
+  GENERATION, so a change shows on the next hit rather than only on
+  terrain that spawns afterwards.
+- **The menus carry a CONTROLS & BASICS panel** (`renderHelpPanel`, Pair C
+  c1) — one function, hosted by both the main menu and the pause menu with
+  separate collapse keys, describing touch, keyboard/mouse, gamepad and the
+  run's basics.  It is a collapsible SECTION rather than a sixth
+  full-screen overlay on purpose.  Keep it accurate to what is BOUND: where
+  the game has no binding (there is no keyboard weapon-cycle or pause key),
+  the panel says nothing rather than inventing one.
+- **`window.__omniEngine` / `window.__omniStats` / `window.__omniHid` are
+  debug handles.**
+  `App.tsx` assigns the live engine, the latest `EngineStats` payload, and the
+  pure DualSense output-report builders to `window`.  NOTHING in the game reads them — they exist so the headless
   pattern).
-- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
+- **Sound goes through one id, and the id is the contract.**  Every
+  trigger site calls `audio.play('<inventory id>')` (or
+  `audio.loop(id, on, …)` for sustained sounds) and nothing else.
+  `docs/SFX_INVENTORY.md` is the source of truth for WHAT plays and with
+  what parameters — trigger site, mix tier, duration, sonic character,
+  frequency + envelope, variation, polyphony + throttle, mix level,
+  positional vs UI-flat.  `SfxRegistry` holds the procedural draft for
+  each id; replacing a draft with a recorded asset is a registry change
+  and NEVER a call-site change — any `.wav` dropped into
+  `public/assets/sfx/` and NAMED AFTER AN ID — dots as dashes, plus any
+  suffix (`crash.player.shard` ← `crash-player-shard-a.wav`) — is
+  discovered at build time by `sfxManifestPlugin` (the same virtual-module
+  trick the nebula images use) and matched to its id by longest-prefix, so
+  adding sound is adding FILES and never editing the registry.  Several
+  files for one id are variants, cycled round-robin; `SfxDef.sample` still
+  pins a filename for the exceptional case.  The draft stays as the
+  FALLBACK, so a missing or
+  undecodable file degrades to a different sound rather than to silence,
+  and the standalone build stays fully audible on the drafts.  That build
+  BAKES the recorded takes in as a filename→data-URI table
+  (`window.__omniSfxInline`), which the loader checks before fetching: a
+  single HTML file cannot fetch anything, so recordings were unreachable
+  there and WAV-only mode was silence rather than an A/B.  Everything after
+  the byte source is shared, so a baked take takes the same decode,
+  silent-file rejection and round-robin as a served one.  Files are fetched and DECODED ONCE
+  at unlock, never on first trigger: a `decodeAudioData` inside the frame
+  a collision lands in is the one way this path could cost frames.  Pitch
+  rides `playbackRate`, so the call site's existing `{gain, pitch}`
+  (shard size, impact speed) still spans one take from pebble-tap to
+  boulder-slam.  The synth drafts can be switched OFF wholesale
+  (`AudioSystem.draftsEnabled`, the pause menu's WAV-only button): an id
+  with no recording then makes NO sound — LOOPS INCLUDED, and switching it
+  off STOPS the ones already running, because `move.thrust` idles
+  continuously while the player is alive and would otherwise never be
+  re-asked; the always-on beds are precisely the sounds most likely to be
+  mistaken for a recording, which is the only honest way to
+  audition real assets — with a draft under every id, a sound that is
+  still synthetic is indistinguishable from one that landed.  A headless smoke parses the document
+  and asserts registry↔document parity in BOTH directions, so adding a
+  sound means adding its row first.  Systems that need to make a sound
+  expose ONE generic sink (`PhysicsSystem.sfx`, `ShardSystem.sfx`,
+  `DropSystem.sfx`, `WeaponSystem.onEnemyFire`) assigned once in the
+  GameEngine constructor — the same settable-field style as
+  `setPhysics` / `traitsEnabled` — so no system imports audio state and
+  adding a sound is a call rather than a signature change.  The engine
+  modules extracted in gauntlet 5f (`engine/roamers/*`, `engine/bosses.ts`,
+  `engine/explosions.ts`) need no sink at all: they are free functions
+  taking `g: GameEngine`, so a voice there is `g.audio.play(id, …)` — the
+  roamer/boss/AoE cues live beside the behaviour that causes them rather
+  than being routed back through the orchestrator.
+- **Audio is EVENT-DRIVEN; nothing audio-related runs per frame** except
+  `audio.setListener(camera)` and `audio.setActive(...)`, two number
+  writes and a boolean.  Voice lifetimes come from the duration each
+  synth returns and are pruned lazily inside `play()` — no timers, no
+  `onended` handlers.  Measured: `play()` costs ~0.3 µs, and a heavy
+  mass-death scene shows no frame-time difference between muted and
+  unmuted.  Three mechanisms keep a 400-death frame sane: per-id
+  polyphony caps, a per-id retrigger window that COLLAPSES simultaneous
+  triggers while bumping the survivor's gain (so bulk reads as HEAVIER,
+  not thinner or louder), and a global ceiling that thins tier 3 then
+  tier 2 — tier 1 always plays.  Positional pan and attenuation use
+  `wrapDeltaX`/`wrapDeltaY` (listener-first: `wrapDeltaX(from, to)`
+  returns `to - from`, so source-first inverts the stereo image).
+  A FROZEN SIM (paused / docked / menu) silences the WORLD — loops and
+  positional one-shots — but deliberately NOT flat/UI sounds, because
+  the station and pause screens are exactly where docking cues,
+  purchases and menu clicks have to be heard.  The AudioContext is
+  created on the FIRST USER GESTURE (AudioSystem arms its own
+  capture-phase window listeners rather than hooking InputSystem, which
+  only sees canvas-targeted events and so misses the menu tap that is
+  usually a phone session's first gesture).  Master volume + mute are
+  IN-MEMORY only, consistent with the project keeping no state across
+  reloads.
+- **Material chatter lives BELOW ~2 kHz, and Q matters as much as pitch.**
+  Sounds that fire in BULK (tile chips, shard breaks, tile snaps, merges)
+  are judged by what a hundred of them sound like, not one — up in the
+  fatiguing band a hundred is a whine however quiet each is.  A HIGH-Q
+  bandpass on noise rings, and ringing is what reads as whining, so
+  lowering Q turns the same filter into a knock.  Materials keep their
+  relative ORDER (glass brightest → metal → rock dullest) so they stay
+  tellable apart.  A headless smoke renders every material voice through
+  an OfflineAudioContext and asserts a dominant-frequency proxy stays
+  under the band AND that the ordering survives — so this is a guarded
+  invariant, not a one-off tuning.
+- **Sustained loops are judged far more harshly than one-shots, and the
+  POI beds are voiced APART.**  Every "whine" reported in playtest was a
+  LOOP or a bulk-fired chip, never a single event.  So every loop is low:
+  `portal.idle` is a TONAL 55 Hz beat, `poi.station.idle` a BROADBAND
+  ~300 Hz noise bed, `move.thrust` a 36 Hz rumble.  Portal and station are
+  deliberately opposite in CHARACTER (tonal vs broadband) rather than just
+  different in pitch, so the two POIs are tellable apart without looking;
+  a headless smoke measures both the dominant frequency and the
+  zero-crossing regularity to hold that.  Both are driven by the NEAREST
+  POI of their kind at ANY distance so volume swells on approach, and
+  `AudioSystem.loop` treats an out-of-earshot positional loop as OFF so a
+  far POI holds no oscillators.
+- **A hit's LOUDNESS and its SHAKE come from one number.**
+  `PhysicsSystem.impactStrength(self, other, velAlongNormal)` is the struck
+  body's own velocity step (see the shake note above); the camera reads it
+  through `COLLISION_CONFIG.SHAKE.IMPACT_*` and the `crash.*` voices read it
+  through `AUDIO_CONSTANTS.IMPACT_*` (`impactVoice`), so how hard a hit reads
+  to the eye and to the ear cannot drift apart.  GAIN is `clamp(dv / SPAN,
+  FLOOR, 1)` with the span and floor PER ROW, because the rows do not cover
+  the same range — the tile crash is gated at closing speed 4 and reaches
+  dv 30, the shard row is gated at 1.2 and tops out near 7, and one global
+  span pinned every shard contact to its floor.  The TILE span (18) is
+  load-bearing: it reproduces the shipped `impactSpeed / 12` curve exactly,
+  so the wall crash is unchanged and only lighter impactors get quieter.
+  PITCH comes from the impactor's MASS, not its on-screen size, because mass
+  is already the term inside the strength — so a 40px metal shard knocks
+  lower AND louder than a same-size rock.  `docs/SFX_INVENTORY.md` §4.4 is
+  the spec; the numbers there are worked, not estimated.
+- **Player contact is split by WHAT was hit, at two different speeds.**
+  `crash.player.tile` (static wall) fires above
+  `STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD`; `crash.player.shard`
+  (mobile shard) fires above the much lower `SHARD_CONTACT_SPEED`,
+  because a loose rock knocking off the hull is audible long before it is
+  destructive — sharing one voice at the break threshold made ordinary
+  shard bumping SILENT and hard shard hits sound like masonry.  The shard
+  voice is pitched by the shard's SIZE and gained by impact speed at the
+  call site (`PhysicsSystem.sfx` takes `{gain, pitch}`), so one id spans
+  pebble-tap to boulder-slam.
+- **Ambient shard chatter is NEAR-FIELD; the player's own shards are not.**
+  A dense field collides/merges/snaps constantly, so `destroy.shard.*`,
+  `move.tilesnap`, `move.merge` and `crash.shard.tile` carry only to
+  `AUDIO_CONSTANTS.SHARD_FAR_RADIUS` instead of the normal `FAR_RADIUS`.
+  The exception is the point: a shard destroyed BY the player is played at
+  the NORMAL radius, keyed off the `killedByPlayer` stamp that already
+  exists for scoring (set by the projectile / crash / lightning / AoE
+  paths) — so a shard you shot from range is still yours to hear.  Direct
+  player↔shard contact is covered by `crash.player.shard` (and
+  `crash.player.tile` for the static case), both at full range: the
+  near-field rule is about physics the player is not part of.  Radii resolve caller → def →
+  global default (`SfxDef.near`/`.far`, `play(id, {near, far})`).
+- **The engine loop IDLES; it does not switch on and off.**
+  `move.thrust` runs continuously while the player is alive and THROTTLE
+  MODULATES it (gain and filter cutoff together, both heavily smoothed) —
+  gating the loop on `throttle > 0` snapped the whole bed on and off with
+  the input and read as jarring.  It stops only on death, pause and dock.
+- **iOS needs three things desktop does not.**  (1) The ring/silent switch
+  silences WebAudio, because Safari puts it in the "ambient" session by
+  default — the game claims the `playback` session instead, via
+  `navigator.audioSession` on 16.4+ and, on older iOS, by playing a
+  detached-proof silent WAV data URI from an in-document
+  `<audio playsinline>` element (a data URI, so the standalone build is
+  still asset-free; it MUST be appended to the document or iOS ignores it).
+  (2) iOS uses a non-standard `'interrupted'` AudioContext state after a
+  call / Siri / app switch, so `unlock()` resumes on anything that is not
+  `'running'`, never on `'suspended'` alone.  (3) The gesture listeners are
+  NOT `once` — an interruption after the first gesture would otherwise
+  leave the game permanently silent — and `visibilitychange` re-unlocks on
+  tab return.  `audio.audible` (context exists AND running) is the honest
+  "can this be heard" check; `unlocked` alone is not.
+- **`window.__omniEngine` / `window.__omniStats` / `window.__omniHud` are
+  debug handles.**
   `App.tsx` assigns the live engine and the latest `EngineStats` payload to
-  `window`.  NOTHING in the game reads them — they exist so headless
-  Playwright smokes can drive the real engine in a real browser without a
-  test runner being added to the project (§7).  Two assignments, no
-  per-frame cost beyond the stats one already happening.
+  `window`.  `__omniHud` (gauntlet 5d, U4) adds the canvas HUD's PURE
+  layout functions — `fitFontPx`, `computeMinimapRect`,
+  `computeLoadoutHUDLayout`, `computeIndicatorRect`, and (A4)
+  `detectionAlpha` — on exactly the
+  `__omniHid` rationale: they are
+  pure, and they are WRONG IN A WAY NOTHING REPORTS.  A banner clipping at
+  320px, a minimap rect disagreeing with the tap handler that catches its
+  expand tap, a loadout strip off the viewport, an edge arrow drawn under
+  the chip stack: none throw, none log, and
+  none are visible at the one viewport the suites used to run at.  The
+  alternative was sampling pixels off a starfield.  NOTHING in the game reads them — they exist so the headless
+  Playwright suites in `tests/` can drive the real engine in a real browser
+  (§7; the "without a test runner being added" rationale is superseded —
+  roadmap 5b adopted one, and these handles are what it drives).  Two
+  assignments, no per-frame cost beyond the stats one already happening.
+  Note that `private` is compile-time only: at runtime a suite can read
+  engine internals (`runTimeSec`, `waves.waveOffset`) and call private
+  methods (`physics.resolveCollision`) straight off the handle.  That is
+  intended, and is what lets a test measure damage arithmetic in situ
+  instead of reimplementing it.  `__omniShip` (the tilt-sheet grid) joins them on identical terms: a cell
+  order that disagrees with the authoring guide, or a mirror that folds the
+  wrong half of the azimuth circle, draws a perfectly plausible ship in the
+  WRONG pose — nothing throws and nothing logs.  Exposing the pure
+  resolver also lets `scripts/gen-ship-sheet.mjs` render placeholder art
+  against the very table the engine indexes.
+  `__omniNebula` (the nebula sprite scale) joins on
+  identical terms, and its motive is the sharpest of the set: the sprite
+  is deliberately larger than the body under it, so a rule that stops
+  tracking the body does not look broken — it looks like a cloud, which
+  is exactly how the rule it replaced rotted unnoticed.
+  `__omniHid` is the same idea with a sharper
+  motive: those builders are the one place in the input layer that can be
+  wrong with NO symptom to read (a pad discards a malformed report in
+  silence), and they are pure with a published CRC test vector, so they are
+  pinnable without hardware.
+- **SHIP TILT SHEETS: yaw is FREE, pitch and roll are the art**
+  (`engine/systems/render/shipSprites.ts`, DBG Ship Tilt ▸ Hull ▸ 'Sheet').
+  The player hull can draw as PRE-RENDERED poses instead of the cos(tilt)
+  squash, and the whole design is one decomposition that is easy to get
+  expensively wrong: YAW is a rotation about the VIEW axis, so it commutes
+  with the orthographic projection and `ctx.rotate` reproduces it EXACTLY
+  — baking headings into art buys nothing but pixel crispness and costs
+  ×N cells plus a snapping reticle.  PITCH and ROLL are rotations about
+  IN-PLANE axes: they rotate depth into view, no 2D transform can produce
+  them, and they are the entire reason art exists here.  So a sheet is a
+  2D grid over the TILT ONLY.  It is POLAR — `theta` = tilt magnitude,
+  `psi` = tilt-axis azimuth measured in the deck plane from the nose —
+  because `tickPlayerRoll` magnitude-clamps the tilt VECTOR, so the
+  reachable set is a DISC and a square grid would spend cells on corners
+  that can never draw.  Azimuth counts GROW with the ring (the lean
+  direction only matters in proportion to sin(theta)), and a hull
+  symmetric about its nose axis authors only `psi` in [-90°, +90°] and
+  flips for the rest — a reflection maps azimuth `psi` to `180° - psi`,
+  making the two pure PITCHES the fixed points.  That is 35 authored cells
+  for the standard grid, 57 unmirrored.  Poses SNAP to the nearest cell
+  rather than cross-fading: a crossfade ghosts on a held lean, while a
+  snap is only ever half a grid step wrong in an angle the player has no
+  reference for.  A PARTIAL sheet is legal — a missing cell falls back to
+  the nearest authored pose, and a sheet with no art at all falls back to
+  the legacy squash, so the mode can never blank the ship.
+  `docs/SHIP_SPRITE_SHEETS.md` is the authoring guide and is GENERATED
+  from the module's own `enumerateCells` (`scripts/gen-ship-sheet.mjs
+  --table`), so the table an artist works from cannot drift from the table
+  the engine indexes; `--placeholder` renders stand-in cells from the
+  wireframe hull, which is what lets CI exercise the real blit path.
+- **The `ui` column in any PerfRecorder capture taken before
+  2026-08-16 is INVALID — it measured scheduling, not rendering.**  It was
+  fed `GameEngine.lastStatsPushMs`, a bracket around the `onStatsUpdate`
+  call.  But `onStatsUpdate` is a setState called from a rAF callback:
+  React 18/19 BATCHES it and does the reconciliation AFTER that callback
+  returns, so the bracket closed before the work it was captioned as
+  measuring had begun.  It was structurally incapable of containing the
+  cost, and read ~0 no matter how expensive the tree was.  Measured, it
+  understated by ~45×.  **Read every historical export's `ui avg` and
+  worst-frame `ui` column as ~0 and disregard them** — and note the
+  `other` residual beside them is correspondingly overstated, since
+  `other` is `frame − render − sim − ui`.
+  Live captures are fine: the column is now fed `PerfSnapshot.uiActualMs`,
+  measured by a React `<Profiler>` wrapped around `<UIOverlay>` in
+  `App.tsx`, which reports in through `GameEngine.noteUiRender()` as PLAIN
+  FIELD WRITES (never a setState — an instrument that re-renders the tree
+  it measures is its own load).  Two things go with it:
+  (1) **React's shipping `react-dom` compiles the profiler timers out**, so
+  in a normal build `onRender` never fires and the ui figures read exactly
+  0.00 — indistinguishable from "reconciliation is free".  A measurement
+  build keeps them: `OMNI_PROFILE_REACT=1 npx vite build` (an opt-in alias
+  to `react-dom/profiling` in `vite.config.ts`; the shipping bundle is
+  untouched).  `PerfSnapshot.uiProfiled` says which build you are reading,
+  and no ui number should be quoted without it.
+  (2) The figures are RAW PER-FRAME, not ring-averaged like the timers
+  beside them, and they lag those timers by ONE FRAME (React commits after
+  the rAF callback that scheduled the work).  Fine for medians and p95s,
+  wrong for "which single frame owned this".
+  `lastStatsPushMs` survives as `lastStatsScheduleMs` /
+  `PerfSnapshot.uiScheduleMs` — it does measure something real (the
+  `EngineStats` literal is built as the ARGUMENT to `onStatsUpdate`, so
+  payload construction plus scheduling both sit inside it, together ≤0.1 ms)
+  and it is the control that demonstrates the batching claim.  It is not
+  the React cost.  See `docs/GAUNTLET_REACT_LOG.md`.
 - **The player is NOT in `currentMap.entities`.** It is appended to
   `frameEntities` each step instead.  So the shockwave ring
   (`spawnShockwave` / `updateExplosionRings`, both of which walk
@@ -1443,17 +3851,339 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   join it rather than add a second path: when buying was discounted and
   sell-back was not, buy-then-sell netted `discount - (1 - SELL_FRACTION)`
   of cost per cycle — an infinite money pump above a 10% discount.
+- **THREE input devices, ONE set of inputs.**  Keyboard/mouse, touch and
+  gamepad all write the same three things — the movement vector, the
+  synthetic POINTER, and the fire/charge queues — so nothing downstream of
+  `InputSystem` branches on device.  Aiming and shooting on a pad work
+  because rotation is derived from the pointer and a shot's target IS a
+  pointer position; there is deliberately no second aim channel (step 5
+  G2).  Four rules go with it:
+  - **BODY-IMPACT SHAKE IS THE PLAYER'S OWN VELOCITY STEP** (user call).  It
+    used to be `min(impactSpeed, HEAVY) × CAP_MULTIPLIER` — SPEED ALONE, no
+    mass — while every other part of the collision code weighs mass (the
+    crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`; the impulse
+    solver splits by bias-compressed inverse mass).  So a 15px chip shook the
+    camera exactly as hard as a static wall at the same closing speed.  The
+    magnitude is now `(1 + ELASTICITY) × |v_n| × effInv_player /
+    (effInv_player + effInv_other)` — the step the solver is about to apply,
+    so it agrees with the physics by construction rather than modelling it
+    twice.  Three things fall out rather than being written: a STATIC body
+    has `effInv = 0` so the wall curve is IDENTICAL to the old one (the
+    change is isolated to light bodies); a light body attenuates by the true
+    mass ratio (at |v_n| = 20: wall 30, 40px metal 12.3, 15px glass 3.9, 8px
+    chip silent under `IMPACT_DV_MIN`); and a HEAVIER SHIP shrugs hits off,
+    because `player.mass` scales with ship weight.  Shake also carries a
+    DIRECTION now (`handleScreenShake(amount, {dirX, dirY, rumble})`): a
+    decaying oscillation along the impact axis instead of white noise, with
+    `DIR_JITTER` of isotropic noise on top.  Callers with no meaningful axis
+    — explosions, warp-ins, reward beats — pass a bare number and keep the
+    old isotropic jitter.
+  - **RUMBLE rides the screen shake.**  `GameEngine.handleScreenShake(amount)`
+    is the funnel every impact in the game already goes through with
+    magnitudes tuned against each other, so `InputSystem.rumble(amount)` hangs
+    off it rather than growing a second list of things that should buzz.  It
+    is called ABOVE the screen-shake toggle (camera lurch and hand buzz are
+    different preferences) and has its own DBG row.  `rumbleParamsFor` is pure
+    and takes `nowMs`, so the threshold, curve, throttle and interrupt rule are
+    all testable; only the actuator itself is stood in for.  The curve runs
+    TICK → THUMP: every event the game emits now buzzes (down to a shard
+    ping), riding a magnitude FLOOR so the smallest is felt, with the two
+    motors crossfading — small events lead with the high-frequency motor, a
+    crash with the low.  One event is haptic-ONLY (`GameEngine.handleRumble`,
+    no camera shake): the plain Blaster, because shaking the camera on the
+    fastest gun in the game would be unplayable.  Player weapon fire asks for
+    the `'trigger'` `RumbleKind`, which plays `trigger-rumble` — whose
+    parameters are a superset of `dual-rumble`'s, so ONE effect drives the
+    handles and the trigger — but ONLY when the actuator's `effects` list
+    offers it; everywhere else it falls back to the handle thump.  Adaptive
+    trigger RESISTANCE is a different thing again and is not reachable from
+    the Gamepad API at all — it is the WebHID path below.  Note `dual-rumble`
+    is the ONLY effect the Gamepad API exposes; the DualSense's voice-coil
+    haptics and light bar need raw HID reports (WebHID:
+    desktop Chromium/Edge only, never Safari or mobile), which this
+    deliberately does not do.  `playEffect` REJECTS on a browser that knows
+    the method but not the effect, so the rejection is swallowed and the pad
+    is asked exactly once — an unhandled rejection would fail every suite's
+    clean-console assertion.
+  - **ADAPTIVE TRIGGERS are a SECOND, OPTIONAL transport to the same pad**
+    (`engine/systems/DualSenseHID.ts`, G12) — and the only platform-specific
+    thing in the input layer, deliberately quarantined behind four rules so it
+    cannot become one.  It is **output-only** (input is always the Gamepad
+    API, which also sidesteps the hazard that opening a DualSense over
+    Bluetooth can flip its input-report mode), **opt-in behind a user gesture**
+    (`navigator.hid.requestDevice` requires a click and shows a device
+    picker), **inert where unsupported** (`isSupported()` is false on every
+    mobile browser and on Safari, and every method no-ops with no device
+    open), and **nothing in the sim may branch on it** — the pad plays
+    identically without it, which is why it is not a control scheme and why
+    the UI control renders only where `EngineStats.adaptiveTriggersSupported`
+    is true — in BOTH the main menu and the pause menu, because one copy at
+    the bottom of the pause menu's scroll reads as a missing feature.  `WEAPON_TRIGGERS` (per gun) and `CHARGE_TRIGGER` (while a
+    charged shot winds up) are the profile table; the sync sits beside the
+    charge-ring update in `updateGameLogic`, because what the trigger should
+    feel like is a function of what the player is holding RIGHT NOW and
+    "charging" fires no weapon-change event.  Precedence: no gun or EMP'd →
+    released (the disable made physical), charging → a hard wall, otherwise
+    the gun's own profile.  Profiles are authored in NORMALISED units (0..1 of
+    travel, 0..1 of strength) and converted at the wire, because the two
+    candidate ENCODINGS disagree about ranges while the design intent does
+    not.  The report FRAME matches the Linux kernel's
+    `dualsense_output_report_common` field for field — note the trigger blocks
+    are at data offsets **10 and 21**, not the 11 and 22 most samples quote:
+    those index a buffer whose byte 0 is the REPORT ID, which WebHID's
+    `sendReport(reportId, data)` does not carry, so a literal transcription
+    lands every field one byte late.  The Bluetooth report also pads 24
+    reserved bytes before the CRC; a short report is DROPPED, not truncated.
+    What is still open is the trigger EFFECT encoding: `'zones'` (modes
+    0x21/0x25, parameters packed into ten travel zones) and `'simple'` (modes
+    0x01/0x02, raw byte parameters) are both reported working on different
+    firmware, and a pad silently DISCARDS the one it does not understand — so
+    `'zones'` is CONFIRMED WORKING on hardware and is the default; `'simple'`
+    stays selectable at DBG ▸ "trig enc" because a pad silently discards an
+    effect it does not understand, so a firmware that disagrees would
+    otherwise present as a dead feature.  Only `'zones'` can express the three
+    richer SHAPES — `vibration` (a buzz at a frequency), `slope` (resistance
+    ramping between two strengths) and `texture` (a hand-authored force per
+    travel zone) — because all three are per-zone by nature; under `'simple'`
+    they degrade to their nearest constant wall rather than vanishing.  Two
+    profiles are STATE-DRIVEN rather than static, which is the thing an
+    adaptive trigger can say that no other output in the game can:
+    `chargeTrigger(t)` stiffens as the charge ring fills, and
+    `THRUST_TRIGGER(speed)` stiffens as the ship nears its cap.  Both are
+    QUANTISED by the caller — each distinct profile is an HID write, and the
+    pad's endpoint is not a frame buffer.  DBG ▸ "HID buzz" pulses the
+    pad's MOTORS through the same framing and CRC to bisect transport from
+    encoding.  `window.__omniHid` exposes the pure builders so
+    `tests/input.spec.ts` can pin CRC-32 against its published vector
+    (`0xCBF43926`), the corrected offsets, and both encodings' bytes.
+  - **MENU NAVIGATION is a D-pad and two buttons over DOM FOCUS** (G15,
+    `components/menuNav.ts`).  Five overlays and several hundred controls,
+    most of them generated (hex flowers, inventory honeycomb, debug rows), so
+    a hand-authored focus order per screen would be wrong within a week.
+    Three rules instead: focus IS DOM focus (the browser's job already —
+    survives re-renders, brings the focus ring and screen-reader behaviour,
+    and opens a `<select>` with the OS picker); movement is GEOMETRIC over the
+    live candidate set, since one rule then serves the 2-up grids, the chip
+    rows and the row columns that share a screen; and the driver scopes itself
+    by `[data-overlay]` CONTAINER, never by game state, so a new overlay is
+    navigable the day it is tagged.  It is installed from `App.tsx`, not
+    UIOverlay — it must not be rebuilt on every stats push.  CONFIRM clicks
+    whatever has focus and so needs no game knowledge; BACK is the one action
+    that differs per screen and lives on `GameEngine.menuBack()`, which
+    deliberately does NOTHING on the death and stage-clear screens (those are
+    decisions, and a button that quietly picks one is worse than no button).
+  - **The pad is POLLED once per rendered frame**, from
+    `GameEngine.pollGamepad` at the top of `loop` — above every freeze
+    short-circuit, so the pause button works from inside the paused state.
+    `navigator.getGamepads()` allocates per call, so never poll it inside
+    the sim substep loop.  Adoption is by polling too, not by trusting
+    `gamepadconnected`: the spec lets a browser withhold a pad until its
+    first button press, and Safari does.
+  - **The trigger's FIRE POINT is the adaptive profile's own break** (G14).
+    Reading the browser's `pressed` flag fires the gun as the trigger leaves
+    rest — Chrome sets it at a hair's deflection — so the snapshot carries
+    ANALOG button values and the fire test is `value >= padFirePoint()`.  That
+    point is derived from the live `TriggerProfile`, and which end of the
+    effect it takes depends on the shape: `weapon` and `slope` fire at the far
+    end (a click is felt when it GIVES WAY; a ramp's payoff is the top of the
+    pull), `texture` past its LAST notch, `resistance` and `vibration` at the
+    near end (neither has a break).  Clamped to
+    `GAMEPAD.FIRE_POINT_MIN/MAX`, because the SAME number has to feel right on
+    a pad with no WebHID and therefore no physical cue — branching on whether
+    the HID link is open would put an optional desktop-only transport
+    underneath the sim.
+  - **A DEDICATED fire control fires on PRESS; a POINTER gesture fires on
+    release** (G13).  The split is about the control, not the device: a tap
+    fires on release because it MUST — until the finger lifts, a tap and a
+    drag are the same gesture — while a pad trigger has no such ambiguity and
+    any delay between the pull and the shot reads as lag.  So the pad queues
+    its shot on the press, and a hold past `CHARGE_FULL` adds the CHARGED shot
+    on release (the release no longer owes an ordinary one, or every held shot
+    would double).  This is also what makes an adaptive `weapon` profile mean
+    something — its break point IS the shot now, where before the gun went off
+    after the clutch had already given way.  The onscreen FIRE button
+    deliberately still fires on release, pending a feel call: it is a thumb on
+    a small target, where a press that commits before the thumb has settled is
+    a different trade than a trigger.
+  - **FIRE is gated on the world; everything else is drained.**  A trigger
+    held through a station visit must not bank a shot that lands on
+    undock, and INTERACT / CYCLE are consumed every frame whether or not
+    they can be spent, so no press fires later out of context.
+  - **The pad's synthetic pointer sits `AIM_RADIUS` from screen centre**,
+    which must exceed `SHIP_SELECT_RADIUS` — see §5.
+  - **`gamepad-left` is the ONE-THUMB scheme** (user call).  The LEFT stick —
+    or the left D-PAD, which has always written the same movement vector —
+    carries heading, aim AND throttle together: the deflection's direction
+    steers and aims, its magnitude is the throttle, which is the ordinary
+    `gamepad` meaning of that stick, so only the AIM moves.  The right stick
+    is then IGNORED rather than left to fight for the pointer (two channels
+    writing one reticle is a fight the player feels as it snapping between
+    their thumbs), and the gun moves to the bottom FACE button with the left
+    face button still the action button.  Shares the `stickAims` and
+    `fireFace` rules with `gamepad-thrust`; what separates the two is that
+    this one KEEPS the stick's magnitude as the throttle where trigger-thrust
+    discards it.  Both leave the triggers slack (`usesFaceFire()` gates the
+    weapon profile off): a clutch on a control that fires nothing is just a
+    stiff trigger.
+  - **`gamepad-thrust` is the MINIMAL-PAD scheme** (G15/G16): a TRIGGER
+    supplies thrust magnitude and a STICK supplies direction.  Which trigger
+    and which stick is deliberately not specified — EITHER stick steers (and
+    aims: the ship aims where it flies, the joystick schemes' rule, because a
+    one-stick pad has no second stick to aim with) and EITHER trigger
+    throttles, larger deflection winning in both cases.  That is what lets a
+    cheap clip-on pad with one stick and one trigger play, WITHOUT any device
+    sniffing — a control the pad does not have simply reads zero forever.
+    It follows that the gun moves to the FACE button
+    (`GAMEPAD.BUTTONS.FIRE_FACE`): if either trigger may be the throttle, then
+    neither can be the trigger, or a one-trigger pad would shoot every time it
+    accelerated.  Its own scheme rather than a toggle because it changes what
+    a stick deflection MEANS — under `gamepad` the deflection IS the throttle
+    — and two answers to that cannot be live at once.  BOTH triggers carry the
+    speed-ramped `THRUST_TRIGGER` resistance here, so "already flat out" is
+    something the hand knows; every other scheme leaves the left trigger
+    RELEASED, since a clutch on a control that does nothing is just a stiff
+    trigger.
+  - **The CONTROL SCHEME decides which touch model is live** (G9).  The
+    joystick and the standard drag-to-fly gesture are mutually exclusive —
+    they compete for the same finger — so they are separate schemes rather
+    than layers, and `CONTROL_SCHEME_RULES` is where "what does this scheme
+    do" is answered.  Two consequences worth knowing before touching input:
+    a TAP only fires under a scheme with `tapFires` (it still reaches the
+    minimap toggle, the loadout slots and `claimTapNear`, which are not
+    weapons); a POINTER drag only aims under a scheme with `pointerAims`,
+    which the joystick schemes turn OFF because their stick already writes
+    the pointer; and DEVICE shots — the fire button and the pad trigger — go
+    into a SEPARATE queue (`getDeviceFireEvents`) that bypasses the tap
+    handler entirely, because a synthesised shot aimed at the world must not
+    be eaten by a HUD widget the aim happened to point at.
+  - **The touch joystick is a FLOATING left-thumb stick** whose zone is
+    defined by what it REFUSES: the ship-select disc at screen centre
+    (or docking by tap silently breaks), the LIVE minimap rect (pushed in
+    per frame by `GameEngine.tickJoystick`, because the map is 75px
+    collapsed and 280px expanded), the top and bottom HUD strips, and the
+    whole right half.  It exists only while a touch session is live —
+    `getJoystickState()` returns null otherwise, which is why checking its
+    layout on a desktop needs the DBG toggle.  When NO stick is down the
+    single-touch model is unchanged.  The stick's SIDE is the scheme's
+    (`stickSide`), and the fire button takes the other — on the left it also
+    sits higher, because the minimap already owns that corner.  Its scheme
+    also gets the FIRE BUTTON,
+    which — unlike the stick — is drawn from the first frame and accepts a
+    mouse press: a control that only appears once pressed cannot be found,
+    and in that scheme it is the only way to shoot.
+
+- **The STAR FIELD is drawn at whole DEVICE pixels, and its count comes
+  from AREA.**  Two invariants, both measured into place by the star-field
+  gauntlet (`docs/GAUNTLET_STARFIELD_LOG.md`), and both easy to undo by
+  accident:
+  (0) **Every map has its OWN density** (`STAR_DENSITY_BY_MAP`, 90–729), read
+  as ALTITUDE: high = deep space = dense distant sky, low = near a planet =
+  sparse sky.  Parallax spread is DERIVED from it inversely
+  (`parallaxForDensity`) rather than declared alongside — two hand-maintained
+  anti-correlated columns drift.  `BackgroundManager.setMapType` MUST
+  invalidate, since density, parallax and the generation seed all key off the
+  map.
+  (1) **Density is per CSS px², never an absolute count.**  The budget is
+  `(width × height / 10⁴) × STAR_DENSITY_CYCLE[i]`, split across
+  `STARFIELD_CONSTANTS.NUM_BANDS` depth layers.  A fixed count makes a
+  smaller window a denser sky — measured at 3.95× between a 390×844 phone
+  and a 1440×900 desktop, which put 26.9% of the phone's pixels inside a
+  star.  `tests/starfield.spec.ts` fails if the two disagree by >3%.
+  (2) **Stars are rasterized ONCE, SUB-PIXEL, under the IDENTITY transform.**  There is no intermediate canvas — a star's
+  position AND size are whole device pixels, so nothing can resample it.
+  Positions are deliberately FRACTIONAL: a pixel-snapped star cannot move in
+  less than whole-pixel steps, which froze 99% of the field per frame at low
+  ship speed and read as jitter (three milestones were spent learning this —
+  S8/S9/S10).  Snapping was never load-bearing for correctness; the
+  cross-browser bug was the `drawImage` BLIT FILTER on the old pre-rendered
+  band canvases, and S4 deleted those.  What is left is `fillRect` coverage
+  antialiasing on an axis-aligned rect, which is analytic and consistent
+  across engines.  Anything that reintroduces a pre-rendered layer blitted at
+  a fractional or dpr-scaled offset brings the browser-dependence back,
+  because the `drawImage` filter kernel is not specified.  SIZES stay
+  integral — a fractional size softens edges without buying any smoothness.
+  Star generation is SEEDED per map (`starRand`), so a regeneration
+  reproduces the same sky; an unseeded field makes every DBG star cycle an
+  unfair A/B, which is how a knob that changes nothing about star count came
+  to look like it did.  `effectiveDpr()` is a
+  GENERATION input here, not just a draw-time one, so `sceneDpr` is part of
+  the rebuild guard — a render-scale cap change must regenerate the field.
+  (3) **The sky is UNIFORM across a map, and per-map density is the only
+  spatial variation there is.**  A region field that varied density by where
+  in the map the camera sat was built and then REMOVED: gating stars by a
+  world-space field means stars arrive and leave in front of the player,
+  which reads as a rendering defect however smoothly it is faded.  Two facts
+  from it are worth keeping if anything ever varies the backdrop spatially
+  again — a field built from INTEGER wave vectors is exactly periodic over
+  the map and so seam-continuous on the torus, and those vectors must share
+  NO COMMON FACTOR or the same regions tile several times across it (that
+  shipped in a first draft and is invisible in any single frame).  Density
+  itself is DBG-cyclable well past `STAR_DENSITY_RANGE.MAX`, up to the
+  ~2700 the field carried before this gauntlet, so the top of the range can
+  be re-judged on a device rather than argued about.
+
+- **TWO canvas palettes, and they are different KINDS of thing** (gauntlet
+  5d, U3).  `UI_CONSTANTS.INDICATORS.COLORS` is the **TYPE LEGEND** — what a
+  contact IS, wherever it is drawn (edge arrow, minimap blip): red enemy /
+  indigo station / green portal / yellow rival / purple bubble / slate other,
+  with a boss in the shared enemy red and its SIZE and ring doing the
+  distinguishing.  `UI_CONSTANTS.HUD` is the **CHROME palette** — the four
+  named type sizes (MICRO 9 / BODY 11 / ROW 12 / LOUD 14, mirroring the DOM's
+  scale), the greys (`TEXT_COLOR` / `MUTED_COLOR` / `DIM_COLOR` /
+  `RULE_COLOR` / `PANEL_FILL`), the one text outline every canvas string
+  wears, and the accents (`ACCENT_COLOR` for banner subtext, the
+  `CHARGE_FULL` / `CHARGE_PART` pair the ship's ring and the fire button must
+  share).  Chrome carries no type meaning, so it must never read the legend
+  and the legend must never be used for text — nothing in the canvas layer
+  may introduce a third palette.  TWO DOCUMENTED EXEMPTIONS from the legend,
+  both deliberate: a PORTAL blip carries the rift's own violet/sky (so an
+  outbound rift and a return rift are tellable apart) while its ARROW is the
+  legend's green, and the SNITCH has its own gold.  Canvas HUD text stays
+  MONOSPACE against the DOM's sans — a world-vs-chrome distinction, not drift.
+- **The HUD hugs the top and bottom edges, and reads THROUGH** (user call).
+  The DOM overlay's root padding is `p-2` (the full-screen overlays carry
+  their own `p-4`, so this only tightens the in-game HUD), and the two
+  canvas widgets share one 8px baseline via
+  `LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN` with `MINIMAP_CONSTANTS.MARGIN` at
+  10.  Transparency is the same rule everywhere: the FILL is what goes
+  translucent (`HUD_CHIP` at `bg-slate-900/35`, the minimap ground at 0.55,
+  a resting loadout slot at 0.32) while the MARKS — text, strokes, pips,
+  blips — stay at full strength.  Legibility comes from the marks, not from
+  hiding the map, which is the same argument `OVERLAY_SCRIM` makes for its
+  deliberately tiny blur.
+- **ONE screen corner, one rect.**  `computeMinimapRect(height, expanded)`
+  (beside `computeLoadoutHUDLayout` in `constants.ts`) is the single
+  definition of the minimap's bottom-left rect, read by the renderer, the
+  fire-event handler that catches the expand tap, the joystick exclusion
+  zone, and the wave banner that has to clear it.  The banner is why this
+  exists: it reserved `MINIMAP_CONSTANTS.SIZE` (the COLLAPSED 75px)
+  unconditionally, so with the map open it drew inside the 280px expanded
+  one.  `minimapExpanded` is a banner PARAMETER now, never an assumption.
 - **Off-screen indicators are EDGE-anchored, size-coded and typed.**
   `RenderSystem.renderIndicators` draws one arrow glyph per contact on an
-  INSET VIEWPORT RECT (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) — the screen
-  edge, not the old fixed 120px centre ring.  DISTANCE is carried by SIZE
+  INSET VIEWPORT RECT (`computeIndicatorRect`) — the screen
+  edge, not the old fixed 120px centre ring.  That rect is ASYMMETRIC
+  (user call): the top and bottom edges clear the HUD's two bands
+  (`INDICATORS.TOP_INSET`, plus `BOSS_BAR_INSET` while a capstone bar is up
+  and `WRAP_INSET` below `NARROW_WIDTH` where the readout row wraps to two
+  lines; `BOTTOM_INSET` for the loadout strip + minimap), because a symmetric
+  inset put every near-vertical bearing — which is "directly ahead" and
+  "directly behind" — underneath the chip stack.  Each band is the MEASURED
+  widget height plus ~`SIZE_NEAR`, since an arrow is centred on the rect
+  edge.  `RenderSystem.bossBarActive` is the one input from the sim (a
+  boolean, set in `GameEngine.draw`); the canvas layer must never start
+  measuring React's layout.  DISTANCE is carried by SIZE
   (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
   ordinary enemies no longer print a distance number: a dozen little
   "1234m" strings were most of the old clutter, and the glyph already says
   it.  POIs keep the far-only readout; portals and bosses keep their
   self-labels (an unlabelled arrow is ambiguous the moment a second one is
   on the edge), and label LINES stack vertically — stacking them radially
-  puts line 2 on top of line 1 at a near-horizontal bearing.
+  puts line 2 on top of line 1 at a near-horizontal bearing.  PORTALS no
+  longer print a distance either, and no longer survive the on-screen
+  suppression (step 5 G6): they were the wordiest contact on the screen,
+  and both halves of that were redundant with the rift the arrow points
+  at.  There are now NO exemptions from the offscreen-only rule.
   COLOUR IS BY TYPE, never `entity.color` (`INDICATORS.COLORS`): red enemy
   / indigo station / green portal / yellow rival / purple bubble, plus
   slate for any other POI.  A rival or a bubble is only CONDITIONALLY
@@ -1468,6 +4198,74 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   indicated now (they used to be excluded as clutter) — the small separate
   budget is what keeps a bloom of fauna from starving the enemy arrows.
   Gnats (`diesOnContact`) stay excluded; the minimap still shows them.
+  EVERY ARROW ON THE EDGE IS TRANSIENT, AND NONE OF THEM COME FROM `found`
+  OR FROM THE AUTO SWEEP (scanner rework, §5).  An arrow says "something is
+  there NOW", so a charted landmark gets a map dot and no chevron, and the
+  background sweep feeds the minimap only.
+  The buffer is gated on `GameEntity.detectedAt`, so a scannerless ship
+  has NO arrows at all, and `item.detect` — `detectionAlpha(simClock −
+  detectedAt)`, pure and published on `__omniHud` — is the `globalAlpha`
+  each one draws at, so a mark going soft is what says the contact has had
+  time to move.  This REPLACED two range gates rather than joining them:
+  `enemyIndicatorAlpha`'s distance fade (enemy chevrons never culled, so
+  the fade WAS their range gate) and the portal arrow's
+  `PORTAL_CONSTANTS.INDICATOR_RANGE` bracket.  Detection range is now the
+  one range gate there is, and it is the scanner's to set.  The per-type
+  BUDGETS are untouched — a scanner decides WHAT is on the edge, never how
+  many.  The two portal-arrow rules that were always about legibility
+  rather than range survive verbatim: an on-screen rift still suppresses
+  its arrow, and the arrow still carries a name and no distance readout.
+
+- **The minimap shows TERRAIN, CONTACTS and a FLOW FIELD — not every
+  object, and NONE of it without a scanner.**  (The shipped material
+  default is DOTS, not flow — user call; flow is one step of the DBG
+  cycle away.  Screen shake likewise ships ON.)  The scanner rework (§5)
+  added a rule ABOVE the three below: with no scanner aboard the widget
+  draws neither the pre-rendered terrain layer nor any contact — only the
+  two `isAlwaysCharted` landmarks.  TERRAIN is gated on merely OWNING a
+  scanner.  TERRAIN IS NOW TRACKED TILE BY TILE (user call): the
+  pre-rendered layer starts EMPTY and accumulates each tile as the player
+  meets it, so the map fills in as they fly and a scan adds a whole bubble.
+  The FLOW layer keeps the owning-a-scanner gate, since it is an inferred
+  field rather than a set of seen objects.
+  Three rules under that, all decided in step 5 G5 (user directive,
+  decision #43):
+  1. **Nebula is off it entirely.**  Nebula tiles are skipped by
+     `buildMinimapStaticLayer` and nebula shards never enter the
+     per-frame buffer.  The map was drawing the softest thing in the
+     world as its hardest-edged marks.
+  2. **Material is a FLOW LAYER, not dots.**  `renderMinimapFlow` traces
+     short streamlines through the asteroid flow field
+     (`MINIMAP_CONSTANTS.FLOW`); the old per-shard dots are still
+     available behind the DBG cycle Visual ▸ "Minimap mat"
+     (Flow / Dots / Off), and in any mode but `dots` mobile shards are
+     not even collected into `_minimapBuffer`.  The SCAN is the second
+     gate (§5) and BOTH have to say yes — the cycle picks WHICH layer
+     draws, the scan decides whether there is anything to draw it for —
+     and the answer has exactly ONE definition,
+     `RenderSystem.minimapShardDots`, because TWO callers have to agree
+     on it: the per-entity buffer fill in `RenderSystem` and the draw in
+     `render/hud.ts`.  They used to agree by both calling
+     `getActiveMinimapMaterial()`; with a second input, the AND could not
+     stay duplicated.  Note the cycle canNOT be a dev override that
+     forces the layer on regardless: its shipped default is already
+     'dots', so that would make the material reveal free and Mk I
+     worthless.  Two things to know
+     before touching it: the streamline geometry is cached in WORLD
+     space and keyed on the seed CELL (panning must not retrace), and
+     the polyline needs a SEAM BREAK — per-point torus math is not
+     enough, because consecutive points either side of the wrap seam
+     draw a chord across the whole map.  Total line length must also
+     stay UNDER one lattice cell or the strokes stop reading as local
+     currents.
+  3. **Contacts wear the INDICATOR LEGEND's colours**, not
+     `entity.color` — red enemy, purple bubble, yellow rival, boss in
+     the shared red with its RING doing the distinguishing, indigo
+     SQUARE for a station (the only built, fixed, not-alive contact and
+     so the only rectilinear mark), the snitch in its own gold, portals
+     as the anomaly diamond.  A contact that is red on the screen edge
+     and teal on the map is two contacts as far as the player is
+     concerned.  Drops stay excluded entirely.
 
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
@@ -1479,6 +4277,37 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   font size, so it's ONE `measureText`, not a binary search in a draw path.
   Any new canvas string built from authored/variable content should go
   through it rather than hardcoding a px size.
+- **The DOM overlay has ONE NAMED CLASS VOCABULARY** (gauntlet 5d, U2), at
+  module scope in `components/UIOverlay.tsx` alongside `OVERLAY_SCRIM` and
+  `PANEL_OPAQUE`, which set the pattern: when more than one surface has to
+  look like the same thing, the class string becomes a constant so the
+  surfaces cannot drift apart.  Type scale `T_MICRO`/`T_NOTE`/`T_BODY`/
+  `T_ROW` — named for what each step is FOR rather than how big it is,
+  because "10px or 11px?" is the question that produced the drift.  Then
+  `PANEL` / `PANEL_ROW` / `panelAccent()` (an accent panel keeps the neutral
+  body and swaps only the BORDER), `HEADING` / `SCREEN_TITLE` /
+  `OUTCOME_TITLE`, `BTN_PRIMARY` / `BTN_SECONDARY` / `BTN_COMPACT`,
+  `CHIP_BASE` / `CHIP_OFF`, `HUD_CHIP`, `SECTION_TOGGLE`, and `TAP` (the
+  40px tap floor).  A constant is the DEFAULT and a call site that departs
+  from it says why in a comment; there are three such departures today
+  (START is the indigo `rounded-full` HERO rather than the shared emerald
+  PRIMARY, and the debug menu takes a smaller 22–24px floor because a
+  developer surface of ~90 diagnostic rows trades reach for density).
+- **The top HUD bar is a COLUMN of two things, and the second is ONE ROW.**
+  The boss capstone bar and the readout chips live in one flex column
+  (`data-testid="hud-top"`) so the layout engine owns the band they share —
+  as an `absolute` block beside a separate stack, the boss health bar landed
+  exactly on top of the Salvage chip.  Under it the readouts (hull · score ·
+  salvage · wave) run along the edge in ONE WRAPPING ROW rather than a
+  right-hand stack (user call): they are peers, and stacking them drove the
+  HUD band down the screen — which is also the band the chevrons' top safe
+  inset has to clear.  Two consequences: the row is WIDTH-BOUND at 390px, so
+  the chips are terse by necessity (`W1 · 6 · 12s`, and the vitals chip
+  carries no word label — the bar under each number is the label, and the
+  pause menu keeps the spelled-out version); and the pause button lives
+  OUTSIDE the wrapping band with `shrink-0`, because an unshrinkable middle
+  pushes the last item off the screen, which is how the pause button left the
+  viewport at 320px.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
   `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
   `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
@@ -1516,10 +4345,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 
 - Default branch: `main`.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
-- Two GitHub Actions: `pr-preview.yml` (Netlify deploy previews),
+- Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
+  build + Playwright on every PR and on pushes to `main` and
+  `claude/plan-completion`),
+  `pr-preview.yml` (Netlify deploy previews),
   `publish-standalone.yml` (releases the single-file standalone build).
-- No CI type-check or test gates today — local `npm run build` is the
-  last-mile validation.
+- **`PR checks` is the default gate on every PR and the final step before
+  a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
+  merge seams and on the `full-tests` label (§7).  Locally: typecheck +
+  build + the touched suites per commit AND per push to a working branch;
+  the FULL `npm test` when the USER gives notice they are ready to merge
+  the PR into its parent branch, not on the session's own judgement that
+  it looks ready (§7).  Never merge past a pending or failing
+  `typecheck · build · test`.  The other two workflows still gate
+  nothing — a preview build or a standalone release is not validation.
 
 ---
 

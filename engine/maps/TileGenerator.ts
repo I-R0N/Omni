@@ -1,8 +1,8 @@
 
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, rockHitCeiling } from '../../constants';
+import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, randomRockShade, rockHitCeiling } from '../../constants';
 import { ShardVariantId } from '../systems/ShardSystem.types';
-import { NEBULA_IMAGES } from '../../assets';
+import { randomNebulaSprite } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
 import { nextId } from '../systems/IdAllocator';
 
@@ -290,7 +290,14 @@ export class TileGenerator {
         // STRUCTURE_VARIANTS.  Mobile shards inherit `tile.color`
         // by default (see DropSystem.spawnDentShard, which re-rolls
         // plastic shards independently for further variation).
-        color: variant === 'plastic' ? randomPlasticShade() : cfg.color,
+        // Per-instance shade for the two materials that have a PALETTE
+        // rather than a single colour: plastic (amber families) and, since
+        // G7, rock (slate / rust / mineral — see ROCK_PALETTES).  Both are
+        // rolled once here and inherited by the shards the tile breaks into,
+        // so a cluster keeps its variation through the break/merge cycle.
+        color: variant === 'plastic' ? randomPlasticShade()
+             : variant === 'rock'    ? randomRockShade()
+             : cfg.color,
         active: true,
         // Rock tiles use the probabilistic break model: maxHealth is the
         // size-scaled hit ceiling (ROCK_BREAK), so a rock tile cracks on the
@@ -356,12 +363,10 @@ export class TileGenerator {
         { x: -w/2, y: -h/4 }
     ];
 
-    // Pick a random nebula sprite from the existing background-nebula asset
-    // set so they match the existing art style.  Fallback is the procedural
-    // puff marker used elsewhere in the codebase.
-    const sprite = NEBULA_IMAGES.length > 0
-        ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
-        : ASSETS.NEBULA_PUFF;
+    // A random nebula sprite from the active set, so tiles match the
+    // background art style.  Shared with the shatter children and the
+    // shatter dust — see `randomNebulaSprite`.
+    const sprite = randomNebulaSprite();
 
     return {
         id: nextId(`nebula_${r}_${c}`),

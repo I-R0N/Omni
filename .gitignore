@@ -25,3 +25,12 @@ dist-ssr
 
 # Local Netlify folder
 .netlify
+
+# Playwright output (roadmap 5b)
+test-results
+playwright-report
+blob-report
+playwright/.cache
+
+# Gauntlet 5c capture outputs — regenerable, machine-specific, and noisy.
+perf/out/

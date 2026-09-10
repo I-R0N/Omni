@@ -260,6 +260,53 @@ having ShardSystem read it; existing variants pick up the default.
 
 ---
 
+## 2b. The fracture axis (voronoi gauntlet, 2026-08)
+
+A later addition to the schema, kept to the same rule as everything
+above — a SHALLOW NAMED-FIELD block, never a callback bag:
+
+```ts
+fracture?: ShardFracturePolicy;   // on ShardVariantDef
+// { siteCountMin, siteCountMax, sizePerSite, impactBias, radialSpeed,
+//   minAreaFraction? }
+shatter.kind: 'none' | 'powerlaw' | 'voronoi';
+```
+
+A variant carrying `fracture` + `shatter.kind: 'voronoi'` owns a SEEDED
+VORONOI CELL DECOMPOSITION of its own polygon
+(`engine/systems/fracture.ts`, pure; `engine/systems/fractureCache.ts`,
+the entity-facing cache both the sim and the render layer read):
+
+- **Shatter** (`ShardSystem.shatterVoronoiStyle`): the cells become the
+  fragments — each child carries the CELL's polygon, Σ child size² =
+  parent size², density-tier mixing / dust / drops as before.
+- **Cracks** (`overlayMaterialCracks`): the decomposition's interior
+  edges, revealed nearest-impact-first as HP falls — the cracks ARE the
+  seams the entity breaks along (the killing blow deliberately does not
+  invalidate the cache, so the match is exact).
+- **Progressive fracture** (rock; `GameEngine.progressFracture`, V8):
+  the pattern is applied ONCE at first damage and FIXED; hits reveal the
+  impact-sorted edge list (the same count the crack render draws, via
+  the shared `fractureRevealedEdgeCount`), and a cell whose binding
+  edges are all revealed — its boundary fully highlighted — breaks off
+  via exact arc-splice subtraction (`subtractBoundaryCell`), the
+  surviving cells persisting for the next pieces.  No chance roll; the
+  dent pull stands down for progressive variants under voronoi.  The
+  min-remainder rule (or the hit ceiling) routes the last cells through
+  the full death path.
+
+Site count is a function of size + merge history ONLY (never the
+killing hit), because the decomposition is fixed at first damage and
+the cracks must predict the break — for progressive variants the
+cracks don't just predict it, they METER it: a piece leaves exactly
+when its boundary is fully highlighted.  A variant WITHOUT the block keeps
+the legacy behaviour end to end, and the DBG A/B (Visual ▸ Fracture)
+flips opted-in variants back to their shipped legacy paths.  Metal
+deliberately does not opt in: its `metalCells` lattice IS its cell set
+(`decomposeMetalComposite` stays the fracture; composite cracks stroke
+the lattice edges).  Nebula and indestructible are excluded.  Full
+ledger: `docs/GAUNTLET_VORONOI_LOG.md`.
+
 ## 3. The merge-rule resolver
 
 Resolving the outcome of a contact between entities A and B uses the

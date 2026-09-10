@@ -177,6 +177,16 @@ export interface ShardMergePolicy {
    *  rest = default). */
   bondPartners?: ReadonlyArray<BondPartnerConfig>;
 
+  /** Size-disparity gate on bond FORMATION.  When set (> 0), a pair
+   *  whose radii differ by less than this fraction of the larger radius
+   *  refuses to bond — forcing "smaller merges into larger" by rejecting
+   *  near-equal pairs.  Symmetric: applied regardless of which side is
+   *  the puller.  Read by ShardSystem's bond-formation pass; NO variant
+   *  sets it today (the plastic-shard use the reader's comment names was
+   *  tuned away), so the gate is inert until one does.  Declared here
+   *  rather than deleted so the lever stays available and typed. */
+  requireSizeDeltaFraction?: number;
+
   /** Per-pair outcome; falls back to defaultOutcome if no rule matches. */
   rules?: MergeRule[];
   defaultOutcome: MergeOutcome;
@@ -199,10 +209,84 @@ export interface BondPartnerConfig {
   strength?: 'strong' | 'default';
 }
 
+// ── Bonded-pair blend policy ────────────────────────────────────────
+// Purely PRESENTATIONAL: how a live cohesion bond is DRAWN.  Nothing in
+// the sim reads it — bonds form, cohere, mature and break exactly as
+// they did before, and turning the whole thing off changes no physics.
+//
+// 'fillet' draws the smooth-min union of the two bonded hulls the cheap
+// way: ONE metaball connector (two cubic curves waisted between the
+// bodies) filled UNDER both of them, so a stuck pair reads as one blob
+// of goo rather than two polygons touching.  It is a PAIRWISE
+// approximation of an SDF union rather than a sampled distance field —
+// which is exact here rather than a compromise, because bond formation
+// is a MATCHING: both formation sites skip any entity already bonded,
+// so a bond is never one edge of a larger cluster.
+
+export interface ShardBlendPolicy {
+  kind: 'fillet';
+  /** Which bond partners get a bridge.  Same selector grammar as
+   *  merge.bondsWith — a partner this does not select renders
+   *  unblended, exactly as it does today. */
+  appliesTo: VariantSelector;
+  /** Where on each body the bridge attaches, as a fraction of how far
+   *  that hull reaches TOWARD its partner.  1 anchors it exactly on the
+   *  facing surface, which can leave a hairline where the hull curves
+   *  away from the join; below 1 buries the join under the body drawn
+   *  over it.  A fixed radius is what this deliberately is NOT — plastic
+   *  shards are 4-gons with vertex radii jittered 0.65..1.10 of the
+   *  base, so one face stands nearly twice as far off the centroid as
+   *  another, and any single circle is wrong for most of them.  Default
+   *  0.9. */
+  attachFraction?: number;
+  /** Largest centre-to-centre gap that still draws, as a multiple of
+   *  the summed attach radii.  Past it the goo has stretched too thin
+   *  to read, and the bridge is dropped rather than drawn as a
+   *  filament — bonds stretch to 1.5× (6× on a 'strong' pair) of
+   *  contact distance before they snap, so a bond being live is not by
+   *  itself evidence the pair still looks joined.  Default 1.35. */
+  maxSpan?: number;
+  /** Waist softness, 0..1 — how far around each body the bridge wraps
+   *  before it necks in.  0 is a taut string between two tangent
+   *  points, 1 a nearly straight-sided weld.  Default 0.5. */
+  softness?: number;
+  /** How far the goo COAT extends past a hull, as a fraction of that
+   *  body's circumradius.  0 or absent draws the bridge alone, and the
+   *  pair still reads as two bodies welded at a joint; above 0 each
+   *  bonded body is also enveloped in a skin of goo that the bridge runs
+   *  into, so the pair reads as one coated mass.
+   *
+   *  The coat is a true rounded OUTWARD OFFSET of the hull (its polygon
+   *  filled, then stroked at twice the margin with round joins), not a
+   *  circle around it: a circumscribed disc would swallow a jittered
+   *  4-gon's silhouette entirely, and the shard's outline is what says
+   *  which material the goo is holding.
+   *
+   *  A body is coated only if ITS OWN variant declares a blend policy
+   *  selecting the partner — so plastic stuck to a glass tile coats the
+   *  plastic and leaves the tile alone.  Coating the partner would
+   *  repaint a tile's whole face in plastic, which says the tile is goo
+   *  when it is the thing the goo is stuck to. */
+  envelope?: number;
+  /** Fill alpha for the bridge and coat.  Default 1 (the goo is as solid
+   *  as the shard it belongs to).  Below 1 the coat's own overlaps — its
+   *  fill against its stroke, and both against the bridge — stop being
+   *  invisible and show as darker seams, so a translucent goo wants
+   *  `envelope` left at 0. */
+  alpha?: number;
+}
+
 // ── Shatter policy ──────────────────────────────────────────────────
 
 export interface ShardShatterPolicy {
-  kind: 'none' | 'powerlaw';
+  /** 'voronoi' (voronoi gauntlet, V2): on death the entity's cached
+   *  seeded Voronoi decomposition (see `GrainSpec` and
+   *  `engine/systems/fracture.ts`) becomes the children — each cell is a
+   *  fragment with the CELL's polygon.  While the DBG A/B lives
+   *  (`getActiveFractureMode()`), 'legacy' mode routes a 'voronoi'
+   *  variant through its OLD path instead: the powerlaw pipeline for
+   *  mobile shards, the dent breakShards spawn for dent tiles. */
+  kind: 'none' | 'powerlaw' | 'voronoi';
   /** Output count — for nebula today: 2..3, for asteroid: 2..5. */
   countMin: number;
   countMax: number;
@@ -221,19 +305,19 @@ export interface ShardShatterPolicy {
   /** Optional merge cooldown stamped on each child. */
   postShatterMergeCooldown?: number;
   /** Optional non-area-conservative sizing override.  When BOTH
-   *  min/max are set, shatterAsteroidStyle bypasses the power-law
+   *  min/max are set, shatterPowerlawStyle bypasses the power-law
    *  area distribution + MIN_SIZE filter and instead sizes each
    *  child as `parent.size.x × random(min, max)`.  Total child
    *  area can (and usually will) exceed parent area — used by
    *  plastic-shard so a break visibly produces a fixed count of
    *  visible-sized children regardless of parent area math.
    *  Termination comes from the parent-size floor at top of
-   *  shatterAsteroidStyle (parent < MIN_SIZE doesn't shatter),
+   *  shatterPowerlawStyle (parent < MIN_SIZE doesn't shatter),
    *  so a few generations of shrinking children die cleanly. */
   childSizeFractionMin?: number;
   childSizeFractionMax?: number;
   /** Optional size-keyed count override.  When set, shatter
-   *  AsteroidStyle picks `count` from the first entry whose
+   *  PowerlawStyle picks `count` from the first entry whose
    *  `maxSize` strictly exceeds `parent.size.x`.  Lets a variant
    *  scale shatter burst size by the parent's diameter — used
    *  today by plastic-shard for "bigger shards break into more
@@ -255,7 +339,151 @@ export interface ShardShatterPolicy {
    *
    *  Only meaningful when `kind === 'powerlaw'`.  Variants with
    *  `kind === 'none'` ignore this field. */
-  style?: 'asteroid' | 'nebula';
+  style?: 'scatter' | 'nebula';
+}
+
+// ── Voronoi fracture policy ─────────────────────────────────────────
+// The decomposition/crack/detach tuning for a fracture-capable variant
+// (voronoi gauntlet, D1).  Site count is a function of SIZE and MERGE
+// HISTORY only — deliberately NOT of the killing hit's damage, because
+// the decomposition is computed at FIRST damage and the cracks it draws
+// must be the seams the entity later breaks along.  The killing hit
+// still drives scatter speed and (via lastImpactVelocity at compute
+// time) the impact bias of the site distribution.
+
+export interface GrainSpec {
+  /** Site count = clamp(round(size / grainSize), min, max), raised to
+   *  the entity's mergeCount when it was composed from more pieces. */
+  grainCountMin: number;
+  grainCountMax: number;
+  /** The GRAIN's own diameter, in world units.  Site count is
+   *  `bodyArea / (pi * (grainSize/2)^2)`, i.e. proportional to AREA, so a
+   *  material's grains are the same size in a tile and in a shard.  (It
+   *  used to be pixels of body diameter per site, which made count linear
+   *  in size and therefore made grains GROW with the body.)  Bounded by
+   *  grainCountMin/Max — see the floor and ceiling in fractureCache. */
+  grainSize: number;
+  /** Fraction of sites biased toward the impact point (0..1). */
+  impactBias: number;
+  /** GRAIN REGULARITY (A1) — 0 = raw Poisson Voronoi (ragged outlines,
+   *  wildly uneven grain sizes), 1 = near-honeycomb.  ONE dial standing
+   *  for the two that produce the look: Lloyd relaxation rounds and
+   *  blue-noise minimum site separation, both resolved through
+   *  `grainRelaxFor` / `grainSeparationFor`.
+   *
+   *  This is a MATERIAL property and it could not be one before: the
+   *  relaxation and separation values were read from global DBG
+   *  accessors, so every material on the map shared whatever the debug
+   *  knob said.  Metal wanting near-perfect grains while plastic wants
+   *  ragged ones is not expressible without this field.  The DBG cycles
+   *  survive as an OVERRIDE (their 'material' entry, the default, defers
+   *  here).
+   *
+   *  0.5 reproduces the values the globals used to supply (2 relaxation
+   *  rounds, 0.45 separation) exactly, which is why the shipped
+   *  materials carry it and why A1 changes no behaviour. */
+  regularity: number;
+  /** GRAIN SIZE SPREAD (A2) — 0 = every grain the same size, 1 = a wide
+   *  mix of coarse and fine grains in ONE body.  Varies the spread
+   *  around the mean, never the mean itself (that is `grainSize`).
+   *  Optional: absent = 0 = the pre-A2 single-separation placement. */
+  sizeSpread?: number;
+  /** Outward fling along each cell's centroid direction at shatter, so
+   *  the pattern visibly flies apart along its own seams (added on top
+   *  of the shared impact-scatter term). */
+  radialSpeed: number;
+  /** Optional override of the sliver threshold (see fracture.ts). */
+  minAreaFraction?: number;
+  /** PROGRESSIVE FRACTURE (V8 — the user's correction of V4).  When
+   *  true, the decomposition is applied ONCE at first damage and then
+   *  FIXED for the entity's life: damage progressively highlights the
+   *  cell boundaries (the same impact-sorted edge reveal the crack
+   *  overlay draws), and a cell whose binding edges are all revealed —
+   *  its boundary fully highlighted — BREAKS OFF as that piece, the
+   *  parent keeping the spliced remainder and the surviving cells of
+   *  the same pattern.  No chip-chance roll, no recompute between
+   *  detaches; edges shared with departed cells stop binding, so
+   *  interior pieces free up as their neighbours leave.  Death (hit
+   *  ceiling or min-remainder) breaks the REMAINING cells.  Variants
+   *  with progressive fracture skip the dent polygon pull under
+   *  voronoi mode — the pattern must stay stable, and the highlight IS
+   *  the damage read.  Today: rock-tile + rock-shard. */
+  progressive?: boolean;
+  /** GRAIN BOUNDARIES (V15 — the user's model).  When set, damage is
+   *  no longer a countdown on a hand-authored HP pool: it ACCUMULATES
+   *  ON THE BOUNDARIES of the decomposition, nearest the impact first,
+   *  and a cell breaks off exactly when every boundary binding it has
+   *  been broken through.  This number is the damage needed to break a
+   *  boundary AS LONG AS THE BODY IS WIDE, so each edge costs
+   *  `bondStrength × (edgeLength / bodySize)` and a material's
+   *  toughness is ONE number.
+   *
+   *  The entity's HP is then DERIVED — `Σ edge strengths`, computed
+   *  from its own pattern the first time it is damaged — rather than
+   *  declared, so a body with more or longer internal boundaries is
+   *  genuinely tougher and nothing "shatters at an arbitrary limit":
+   *  health reaching zero and the last boundary breaking are the same
+   *  event by construction.  Requires `progressive`. */
+  bondStrength?: number;
+  /** BOND STRENGTH SPREAD (A2) — 0..1 seeded per-BOUNDARY variance
+   *  around `bondStrength`, so within one material some grains come away
+   *  early and some hold on.  Deterministic per (body seed, boundary
+   *  index), so a body's weak seams are a fixed property of that body
+   *  rather than re-rolled every hit.
+   *
+   *  This is the cheap 80% of per-grain composite materials: varied
+   *  breaking WITHIN a material, with no per-grain material id and no
+   *  pair matrix.  Derived HP stays exactly Σ boundary strengths because
+   *  the same function produces both. */
+  bondSpread?: number;
+  /** DAMAGE SPREAD (A4) — how deep a hit's damage reaches into the
+   *  pattern, as a fraction of the body's width.
+   *
+   *  Absent or 0 is SEQUENTIAL spend: damage fills the nearest boundary
+   *  to completion, spills into the next, and repeats, so only ever ONE
+   *  boundary carries partial damage (measured on both rock and glass:
+   *  the partial count is pinned at 1 for the body's whole life).  A hit
+   *  is a needle, and pieces come away one at a time.
+   *
+   *  Set, it becomes a WEIGHTED spend: every unbroken boundary takes a
+   *  share weighted `exp(-d / (damageSpread × bodyWidth))`, where `d` is
+   *  the distance from the contact to the nearest cell the boundary
+   *  binds.  Near boundaries still break first, but far ones accumulate,
+   *  so a whole annulus completes at once and a hit can free several
+   *  grains together.
+   *
+   *  The weights are NORMALISED and the spend is a water-fill, so the
+   *  total damage absorbed is exactly the damage dealt whatever the
+   *  value — this changes WHERE damage lands, never how much.  Derived
+   *  HP is therefore untouched.
+   *
+   *  The knob spans a known-good end and a known-bad one, which is why
+   *  it is a knob: 0 is the shipped behaviour, and a very LARGE value
+   *  approaches the uniform spread that V10 measured as the failure mode
+   *  (damage spread over every cell completes almost none of them, so a
+   *  rock tile shed 3 pieces over its life and dumped 5 at death).  The
+   *  useful settings are small. */
+  damageSpread?: number;
+  /** PER-GRAIN DEFORMATION (B1) — inward pull applied to the STRUCK
+   *  grain's own outline on each hit, as a fraction of that grain's
+   *  radius.  This is what makes a material read as ductile: a plastic
+   *  panel visibly warps where it is being shot before anything breaks
+   *  off, while rock and glass (which leave it unset) do not.
+   *
+   *  It replaces `dent` for grain materials — the old whole-body
+   *  `applyDentStep` pulls the entity's outline and stands down under
+   *  progressive fracture, so before B1 a material could be grained or
+   *  dentable but not both.
+   *
+   *  Only vertices ON THE BODY'S OUTLINE move, and they move in EVERY
+   *  grain that shares them, so the grains still tile the body exactly —
+   *  which is the invariant `unionOfCells` depends on. */
+  grainDent?: number;
+  /** Seconds for a fragment that broke off DEFORMED to relax back to the
+   *  shape its grain was cut at (user call: plastic is elastic and
+   *  should spring back slowly; metal keeps its dent).  Absent → the
+   *  deformation is permanent. */
+  dentRecoverSeconds?: number;
 }
 
 // ── Density compaction policy ───────────────────────────────────────
@@ -324,6 +552,53 @@ export interface ShardVariantDef {
    *  contact; the variant still takes damage and may shatter.  Only
    *  the nebula-tile variant uses this. */
   passThrough?: boolean;
+  /** Fraction of the unified light layer's contribution that passes
+   *  THROUGH this variant instead of being withheld behind it, 0..1.
+   *  Absent or 0 means opaque — the body casts a full shadow, which is
+   *  every variant's default and the whole of the pre-existing
+   *  behaviour.  Glass is the case this exists for: it is drawn as a
+   *  translucent panel, so a solid black umbra behind it contradicts
+   *  the art.
+   *
+   *  Distinct from `passThrough`, which is about COLLISION and is
+   *  binary: a nebula tile lets a striker pass and casts no shadow at
+   *  all, where glass stops a striker dead and casts a faint one. */
+  transmit?: number;
+  /** Fraction of the unified light layer's contribution that this variant
+   *  RE-EMITS, uniformly in every direction, when light falls on it — 0..1,
+   *  absent meaning inert.  Metal and glass carry it: one is specular and
+   *  one is translucent, and both read wrong as matte bodies that swallow
+   *  everything reaching them.
+   *
+   *  Only consulted while the DBG "Emissive" toggle is on, and it is a
+   *  SECOND light rather than a brighter body — see `renderLightLayer`. */
+  emits?: number;
+  /** Bonded-pair blend policy — how a live cohesion bond between this
+   *  variant and a partner is DRAWN.  Absent means today's behaviour:
+   *  two hulls that happen to be touching.  Today: plastic-shard. */
+  blend?: ShardBlendPolicy;
+  /** Draw the body's dark rim line.  Absent means true — the outline
+   *  every material has worn since the shard family existed.  False
+   *  drops it, which is what a SOFT material wants: a rim line traces
+   *  every notch and reads as a hard edge, so plastic (goo) and
+   *  rock-tile (whose brittle dent silhouette is cleaner unlined) turn
+   *  it off.  Read by the asteroid / mobile-shard branch, which is the
+   *  one that draws the rim; the material-tile and glass-family
+   *  branches have their own outline rules. */
+  outline?: boolean;
+  /** Corner rounding of the drawn silhouette, 0..1 — 0 (or absent) is
+   *  the hard-cornered polygon it has always been, 1 trims every corner
+   *  back to the midpoint of its shorter adjacent edge.  A FRACTION
+   *  rather than a radius because these hulls span a 20..200 diameter
+   *  range, and a fixed radius would round a big shard's corner subtly
+   *  while swallowing a small one whole.
+   *
+   *  PRESENTATION ONLY: the rounding is traced at draw time and never
+   *  written back into `polygonPoints`, so the SAT hull the physics
+   *  solver sees is the same sharp polygon it always was.  Rounding the
+   *  collision shape too would be a different (and much larger)
+   *  change. */
+  cornerRounding?: number;
   /** Render fast-path opt-in.  Today only nebula-tile populates the
    *  per-entity tinted-canvas cache (`nebulaCachedTinted`); the
    *  RenderSystem fast-path gating flips from EntityType-keyed to
@@ -426,6 +701,15 @@ export interface ShardVariantDef {
    *  see g3 material-interactions design), but still feels the
    *  metal-tile field for the queued attraction work. */
   repelImmuneFrom?: ShardVariantId[];
+  /** Seeded Voronoi fracture (voronoi gauntlet).  Present on variants
+   *  whose `shatter.kind === 'voronoi'` (and, later milestones, variants
+   *  whose CRACK RENDER rides the decomposition).  Shallow named fields
+   *  only — ShardSystem reads this, never callbacks.  The decomposition
+   *  itself is computed lazily (first damage / death) and cached on
+   *  `entity.fractureCells`; every site that mutates the polygon, the
+   *  size, or the merge count must invalidate that cache. */
+  grain?: GrainSpec;
+
   /** Pass-through-and-shatter rule (g3 material-interactions).  When
    *  this variant contacts an entity whose variant id is in `targets`,
    *  PhysicsSystem skips collision impulse on the pair (the carrier's
@@ -635,6 +919,18 @@ export interface TileClusterConfig {
 export interface PerMapVariantSpawn {
   freeSpawn?: FreeSpawnConfig;
   tileCluster?: TileClusterConfig;
+  /**
+   * Ring indices this variant occupies on a ring-shaped map (today:
+   * SevenRingsMap).  Added by gauntlet step 5 G7, when MAP_POPULATION
+   * became the authority for the natural maps' tile-variant mix: a ring
+   * map's "ratio" is not a cluster count, it is WHICH RING is made of
+   * what, and that is population data even though the geometry is not.
+   *
+   * The ring GEOMETRY (how many, how far out, how thinned) deliberately
+   * stays on the map class — that is the map's shape, not its population,
+   * and a map named Seven Rings does not get its ring count from a table.
+   */
+  tileRings?: readonly number[];
 }
 
 // ── Variant-specific completion hooks ──────────────────────────────

@@ -22,6 +22,14 @@ Prerequisite: Node.js.
 npm install
 npm run dev        # dev server on port 3000
 npm run build      # production build to dist/
+npm run typecheck  # tsc --noEmit
+npm test           # Playwright smoke suites (builds + previews first)
+```
+
+Before the first `npm test`, install the browser once:
+
+```
+npx playwright install chromium
 ```
 
 Optional single-file build (inlines all assets into one HTML file):
@@ -38,9 +46,18 @@ npm run build && node scripts/inline-build.mjs
 - `docs/PARKING_LOT.md` — deferred ideas. A scrapbook, not a
   commitment; some entries are stale by design.
 
-There is no test runner or linter; `npm run build` is the validation
-gate. Headless Playwright smokes drive the real engine via the
-`window.__omniEngine` debug handle when a change warrants it.
+- `tests/README.md` — the smoke suites: how to run them, what each
+  covers, and the harness rules that keep them from flaking.
+
+[![PR checks](https://github.com/I-R0N/Omni/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/I-R0N/Omni/actions/workflows/pr-checks.yml)
+
+Validation is three commands — `npm run build`, `npm run typecheck`,
+`npm test` — and all three are expected green before a commit. The
+Playwright suites drive the real engine in a real browser through the
+`window.__omniEngine` debug handle; nothing is stubbed. The same three
+run in CI on every pull request and on pushes to the long-lived
+branches (`.github/workflows/pr-checks.yml`), which is the gate before a
+merge. There is still no linter.
 
 ## Deploying
 

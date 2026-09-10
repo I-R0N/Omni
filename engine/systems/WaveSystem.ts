@@ -56,6 +56,11 @@ export class WaveSystem {
    *  is already on the field and then chooses a rift.  Cleared by init(), so
    *  the next arena starts its own ladder normally. */
   public halted: boolean = false;
+  /** Is the wave in progress the boss's OWN capstone wave?  Read by
+   *  `haltForBoss` to tell a capstone (whose escort IS the fight) from a
+   *  boss warped in mid-ladder by the debug menu (whose queued ordinary
+   *  spawns are not). */
+  private capstoneWave: boolean = false;
   /** The index the scaling / rotation tables see. */
   private get scaledIndex(): number { return this.waveIndex + this.waveOffset; }
   /** Ids of every enemy spawned by the current wave (dead ones included —
@@ -150,6 +155,7 @@ export class WaveSystem {
    *  it does not end the wave (completion does). */
   private startWave(index: number, ctx: WaveSpawnContext) {
     this.waveIndex = index;
+    this.capstoneWave = false;
     this.waveEnemyIds.clear();
     this.elapsedSec = 0;
     this.nextSpawnIdx = 0;
@@ -173,6 +179,7 @@ export class WaveSystem {
     this.scheduleSpawns(this.spawnList.length);
 
     this.waveState = 'active';
+    this.capstoneWave = !!boss;
     const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     if (boss) {
       this.spawnBoss(boss, ctx);
@@ -464,6 +471,58 @@ export class WaveSystem {
     });
     onCleared(this.waveIndex, this.elapsedSec, false);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
+  }
+
+  /**
+   * A BOSS IS ON THE FIELD — stop the ladder (user call).
+   *
+   * Waves used to keep coming while a boss was alive and to resume after it
+   * died: the ordinary stream ran underneath the capstone, and a boss warped
+   * in from the debug menu did not interrupt the ladder at all.  A boss
+   * fight with a wave arriving on top of it is two encounters at once, and
+   * neither reads.
+   *
+   * So the ladder ENDS here.  `halted` stops the next wave from ever
+   * starting — including after the boss dies, which is the second half of
+   * the complaint — and it is only cleared by `init`, i.e. by loading a map,
+   * which is the deliberate way to get a fresh ladder.
+   *
+   * The one thing NOT cancelled is a capstone's own escort: `BossDef.
+   * companions` is the boss's designed encounter, not the ladder. A boss
+   * warped in mid-wave is the opposite case — the ordinary enemies still
+   * queued behind it belong to a wave that is now over, so they are dropped
+   * and the wave ends when the field clears.
+   *
+   * This is deliberately blunt while the wave/boss relationship is being
+   * redesigned; it is the smallest change that makes a boss fight the only
+   * thing happening.
+   */
+  public haltForBoss() {
+    this.halted = true;
+    // `halted` alone would already stop the next wave (it is checked at the
+    // bottom of the countdown), but a live timer keeps the HUD advertising a
+    // wave that is not coming — and offering a "tap to skip" that does
+    // nothing.  Zero it.
+    this.waveGraceTimer = 0;
+    if (!this.capstoneWave && this.waveState === 'active') {
+      this.nextSpawnIdx = this.spawnList.length;
+    }
+  }
+
+  /**
+   * THE BOSS IS DEAD — cancel whatever is still queued behind it.
+   *
+   * `haltForBoss` deliberately KEEPS a capstone's escort queue: while the
+   * boss is alive, that escort is the designed encounter.  The moment it
+   * dies the rout wipes every enemy STANDING (payBossBounty), but the
+   * not-yet-spawned tail of the escort was still streaming in afterwards —
+   * reinforcements warping into a fight that is over, which the player
+   * reads as "the waves kept coming after I killed the boss" (playtest,
+   * U7 follow-up).  Ending the stream here lets the wave complete the
+   * normal way the moment the routed field is clear.
+   */
+  public cancelPendingSpawns() {
+    this.nextSpawnIdx = this.spawnList.length;
   }
 
   /** Tick down all active wave announcements and splice expired ones. */
