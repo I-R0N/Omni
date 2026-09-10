@@ -83,6 +83,7 @@ interface UIOverlayProps {
   // Audio settings (Phase 3 Pair B).  Deliberately the ONLY UI surface
   // this pass adds — Pair A owns the overlay's structural work.
   onSetVolume?: (v: number) => void;
+  onSetSfxVolume?: (v: number) => void;
   onToggleMute?: () => void;
   onToggleDrafts?: () => void;
   onToggleTileOutlines?: () => void;
@@ -411,6 +412,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleMergeRate,
   onToggleScreenShake,
   onSetVolume,
+  onSetSfxVolume,
   onToggleMute,
   onToggleDrafts,
   onToggleTileOutlines,
@@ -3243,9 +3245,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
               )}
             </div>
-            {/* Audio — master volume + mute.  One row by design: Pair A is
-                developing the overlay's structural UI in parallel, so this
-                pass keeps its footprint to a single settings strip. */}
+            {/* Audio — mute plus independent master and effects trims. */}
             <div className={`mx-auto w-full max-w-xs flex items-center gap-3 ${PANEL_ROW}`}>
               <button
                 onClick={onToggleMute}
@@ -3267,6 +3267,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               />
               <span className={`shrink-0 w-10 text-right text-slate-400 ${T_BODY} tabular-nums`}>
                 {stats.audio?.muted ? '—' : `${Math.round((stats.audio?.volume ?? 0.7) * 100)}%`}
+              </span>
+            </div>
+
+            <div className={`mx-auto w-full max-w-xs flex items-center gap-3 ${PANEL_ROW}`}>
+              <span className={`shrink-0 w-10 text-slate-400 ${T_BODY}`}>SFX</span>
+              <input
+                type="range" min={0} max={100} step={1}
+                value={Math.round((stats.audio?.sfxVolume ?? 1) * 100)}
+                onChange={e => onSetSfxVolume?.(Number(e.target.value) / 100)}
+                aria-label="Sound effects volume"
+                className={`pointer-events-auto cursor-pointer flex-1 accent-sky-400 ${TAP} disabled:opacity-40`}
+                disabled={stats.audio?.muted === true}
+              />
+              <span className={`shrink-0 w-10 text-right text-slate-400 ${T_BODY} tabular-nums`}>
+                {stats.audio?.muted ? '—' : `${Math.round((stats.audio?.sfxVolume ?? 1) * 100)}%`}
               </span>
             </div>
 
