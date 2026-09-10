@@ -363,6 +363,13 @@ const App: React.FC = () => {
       e.audio.toggleMute();
   };
 
+  const handleSetSfxVolume = (v: number) => {
+      const e = engineRef.current;
+      if (!e) return;
+      e.audio.unlock();
+      e.audio.setSfxVolume(v);
+  };
+
   // Synth drafts on/off — the audition switch for recorded takes.
   const handleToggleDrafts = () => {
       const e = engineRef.current;
@@ -934,6 +941,7 @@ const App: React.FC = () => {
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
         onSetVolume={handleSetVolume}
+        onSetSfxVolume={handleSetSfxVolume}
         onToggleMute={handleToggleMute}
             onToggleDrafts={handleToggleDrafts}
         onToggleTileOutlines={handleToggleTileOutlines}
