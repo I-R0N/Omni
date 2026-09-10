@@ -2456,7 +2456,7 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
       audio: {
-        volume: this.audio.volume, muted: this.audio.muted,
+        volume: this.audio.volume, sfxVolume: this.audio.sfxVolume, muted: this.audio.muted,
         state: this.audio.contextState, audible: this.audio.audible,
         drafts: this.audio.draftsEnabled,
         sampled: this.audio.sampledIds.length, total: this.audio.allIds.length,
