@@ -876,7 +876,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `IMPACT_DENSITY` / `massFor` / `HULL_DENSITY_CYCLE` — the one
   mass scale and its DBG ladder, `SIMULATION_CONSTANTS`,
   `LOCAL_GRAVITY_CONSTANTS`
-- `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
+- `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
 - `PLAYER_ROLL_CONSTANTS` — the DIRECTIONAL TILT: the player ship
   pitches and rolls into changing acceleration, full 360°.
