@@ -2221,7 +2221,7 @@ export interface EngineStats {
   // "no sound" is otherwise indistinguishable from "context never started",
   // "context interrupted", and "device mute switch is on".
   audio?: {
-    volume: number; muted: boolean; state: string | null; audible: boolean;
+    volume: number; sfxVolume: number; muted: boolean; state: string | null; audible: boolean;
     /** Synth drafts on/off.  Off = only recorded takes sound, so assets can
      *  be auditioned without a draft underneath being mistaken for one. */
     drafts: boolean;
