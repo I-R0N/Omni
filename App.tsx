@@ -317,8 +317,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleShardCoat();
   };
 
-  const handleCyclePierceSpeedRetain = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePierceSpeedRetain();
+  const handleCycleImpactVelocity = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleImpactVelocity();
   };
 
   const handleToggleShardBlend = () => {
@@ -958,8 +958,7 @@ const App: React.FC = () => {
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBlend={handleToggleShardBlend}
         onCycleShardCoat={handleCycleShardCoat}
-        onCyclePierceFalloff={() => engineRef.current?.dbg.cyclePierceFalloff()}
-        onCyclePierceSpeedRetain={handleCyclePierceSpeedRetain}
+        onCycleImpactVelocity={handleCycleImpactVelocity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}

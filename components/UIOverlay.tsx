@@ -130,8 +130,7 @@ interface UIOverlayProps {
   onToggleRepelPush?: () => void;
   onToggleShardBlend?: () => void;
   onCycleShardCoat?: () => void;
-  onCyclePierceFalloff?: () => void;
-  onCyclePierceSpeedRetain?: () => void;
+  onCycleImpactVelocity?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -464,8 +463,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleRepelPush,
   onToggleShardBlend,
   onCycleShardCoat,
-  onCyclePierceFalloff,
-  onCyclePierceSpeedRetain,
+  onCycleImpactVelocity,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -1584,12 +1582,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Which wire encoding the trigger effects are sent in. TWO conventions are in wide use and a DualSense silently discards the one its firmware does not understand, so this is a diagnostic rather than a preference. "zones" = modes 0x21/0x25, parameters packed into ten travel zones (what the console appears to use). "simple" = modes 0x01/0x02, raw byte parameters (what most samples send). If one gives no resistance, try the other.')}
                 {ctrlRow('  ↳ HID buzz', onTestTriggerLink, 'Test',
                   'Pulses the pad MOTORS through the HID output report — the same framing and CRC the trigger effects ride, but with an encoding that is not in dispute. If this buzzes and the triggers stay limp, the transport is fine and the effect encoding is wrong (try "trig enc"). If it does not buzz, nothing is reaching the pad at all — read the error on the triggers row.')}
-                {ctrlRow('Pierce falloff', onCyclePierceFalloff,
-                  stats.pierceFalloffName ?? 'off (full dmg, def)',
-                  'Per-hit DAMAGE decay on a piercing bolt. SHIPS OFF, so every penetration hit lands FULL projectile damage; the cycle steps off / 0.05 / 0.10 / 0.20 / 0.35 / 0.50. Damage at hit ordinal n is base x (1 - rate)^n, so the first contact is always full and only penetration hits decay. It reaches EVERY damage path a hit produces — the direct bite, the Cannon AoE splash and the Lightning chain all take the same factor — and every weapon equally. The reachable stack is large (six Penetration Mk III = +18, and inside a grain material every GRAIN spends a charge), so the rate mostly decides what a DEEP bore is worth: at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.')}
-                {ctrlRow('Pierce spd', onCyclePierceSpeedRetain,
-                  stats.pierceSpeedRetainName ?? '1.00x (def)',
-                  'Speed a PIERCING bolt keeps per hit (1.00 / 0.95 / 0.90 / 0.80x). Ships at 1.00, i.e. off — the second axis to feel against the damage falloff above. One factor per charge actually spent, so inside a grain material — where penetration is spent per GRAIN, not per tile — a bolt that drilled four grains slows four times. Indestructible tiles stop a bolt dead whatever it carries, and spend nothing.')}
+                {ctrlRow('Impact vel', onCycleImpactVelocity,
+                  stats.impactVelocityName ?? 'muzzle (def)',
+                  'WHICH VELOCITY a hit\'s damage is measured in. Damage is now KINETIC — a shot carries energy, not an authored number — and energy is frame-dependent, so this is the one judgement call in it. "muzzle" (ships) scores the bolt in its own launch frame: it lands its authored damage however the ship was moving, and still falls off through a bore because that is a real loss of the bolt\'s own speed. "relative" scores true CLOSING energy against the target, which finishes the unification (the crash paths already spend a relative velocity, so a weapon hit and a hull hit become the same formula) — but a charging ship then hits 2.2-5x harder at POCKET cruise and ~9.5x on the big maps, and a shot at a target fleeing at matched speed lands nothing.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

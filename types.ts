@@ -292,13 +292,13 @@ export interface WeaponConfig {
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
   pierce: number; // How many entities the projectile passes through after the first hit
-  // Per-hit damage falloff for a PIERCING shot, indexed by hit ordinal
-  // (0 = the first contact, so entry 0 is 1 by construction).  Absent →
-  // the shared falloff RATE.  Sits beside `pierce` because it is the same
-  // seam: per-weapon, stamped onto the projectile at spawn.  Absent → the
-  // live global rate (DBG "Pierce falloff"), which is what every weapon
-  // uses today.
-  pierceFalloffRate?: number;
+  // SECTIONAL DENSITY — the mass the sim flies for this shot.  Absent (every
+  // weapon today) → `constants.projectileMassFor` DERIVES it from `damage`
+  // and `speed`, so the authored damage figure is what the bolt carries at
+  // its own muzzle speed and the roster is numerically unchanged.  Set it
+  // only for a shot whose density is a deliberate statement; note that mass
+  // also decides the momentum a hit imparts to a mobile target.
+  mass?: number;
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
   // commitment; charged shots cost only the charge-time hold.
@@ -485,15 +485,19 @@ export interface GameEntity {
   // separate from `pierceCount`, which counts DOWN and would read the
   // table backwards.
   pierceHits?: number;
-  // The falloff table this shot flies with, copied from its WeaponConfig
-  // at spawn.  Absent → the shared curve.
-  /** The falloff factor actually applied to THIS hit, stashed by
-   *  PhysicsSystem so the on-hit consumers in GameEngine (the Cannon's AoE
-   *  splash, the Lightning chain) scale by the same number the direct
-   *  damage did.  They cannot re-derive it: the grain bore may have
-   *  advanced `pierceHits` before their callback runs. */
+  /** The bolt's world speed at spawn — its MUZZLE energy reference.  Damage
+   *  is kinetic (constants.kineticDamage), so under the shipped 'muzzle'
+   *  impact-velocity mode the hit is the authored figure scaled by how much
+   *  of this launch speed the bolt still has.  Stamped at spawn INCLUDING
+   *  any inherited shooter velocity, which is what makes that mode neutral
+   *  however the ship was moving when it fired. */
+  spawnSpeed?: number;
+  /** The factor actually applied to THIS hit relative to the shot's authored
+   *  damage, stashed by PhysicsSystem so the on-hit consumers in GameEngine
+   *  (the Cannon's AoE splash, the Lightning chain) scale by the same number
+   *  the direct damage did.  They cannot re-derive it: the bolt has already
+   *  shed the energy this hit cost by the time their callback runs. */
   hitFalloff?: number;
-  pierceFalloffRate?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
@@ -2014,8 +2018,7 @@ export interface EngineStats {
   /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
   shardCoatName?: string;
   // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
-  pierceSpeedRetainName?: string;
-  pierceFalloffName?: string;
+  impactVelocityName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.

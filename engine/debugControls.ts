@@ -31,7 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -982,23 +982,16 @@ export class DebugControls {
     cycleSnitchSpeed();
   }
 
-  /** Cycle the PIERCE SPEED DECAY (DBG "Pierce spd") — the per-hit
-   *  multiplier a piercing bolt's speed keeps as it bores through.  Ships
-   *  at 1.00 (a no-op), so this is the only way to feel a decaying bolt
-   *  against the falloff table before either is tuned. */
-  cyclePierceSpeedRetain() {
-    cyclePierceSpeedRetain();
-  }
-
-  /** Cycle the PENETRATION DAMAGE FALLOFF RATE (DBG "Pierce falloff") —
-   *  the per-hit decay every penetration hit after the first is scaled by,
-   *  as `(1 - rate)^ordinal`.  A RATE rather than the authored table it
-   *  replaced precisely so it can be swept from here (user call), and 0 is
-   *  a first-class step: every hit then lands full projectile damage,
-   *  which is the control for judging whether the decay earns its place.
-   *  Global — it applies to every weapon evenly for now. */
-  cyclePierceFalloff() {
-    cyclePierceFalloff();
+  /** Cycle WHICH VELOCITY a hit's kinetic damage is measured in (DBG
+   *  "Impact vel").  Damage is energy now, and energy is frame-dependent:
+   *  'muzzle' (what ships) scores the bolt in its own launch frame, so a
+   *  shot lands its authored damage however the ship was moving; 'relative'
+   *  scores true CLOSING energy, which finishes the unification — the crash
+   *  paths already spend a relative velocity — at the price of a charging
+   *  ship hitting several times harder.  Index 0 ships, so the first click
+   *  is the A/B. */
+  cycleImpactVelocity() {
+    cycleImpactVelocity();
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────

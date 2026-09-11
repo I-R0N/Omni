@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, MAX_PIERCE, PROJECTILE_CONSTANTS, projectileBite, speedAfterSpending, getActiveImpactVelocityMode } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
 import { nebulaDampingFor, nebulaSpinDampingFor } from '../../constants';
 import { pointInPolygon } from './fracture';
@@ -1364,6 +1364,66 @@ export class PhysicsSystem {
    * the remaining pierce count, which strictly decreases, so the loop is
    * as cheap as the charge the player bought.
    */
+  /**
+   * THE SPEED A BOLT'S DAMAGE IS MEASURED AT (unified impact physics, step 3).
+   *
+   * Damage is kinetic, so this is the whole of the "how big is this hit"
+   * question, and the DBG "Impact vel" ladder is the one judgement call in
+   * it — energy is FRAME-DEPENDENT and the two honest frames disagree by a
+   * lot, because a forward shot already inherits the ship's velocity
+   * (`PROJECTILE_CONSTANTS.INHERIT_SHOOTER_VELOCITY` is 1.0).
+   *
+   *  'muzzle' (ships) — the weapon's OWN launch speed, scaled by the fraction
+   *      of its launch speed the bolt still carries.  Neutral at spawn however
+   *      the ship was moving, and it still falls off through a bore, because
+   *      that is a real loss of the bolt's own speed.  The muzzle speed is
+   *      RE-DERIVED from the authored damage and the flown mass rather than
+   *      stored: `projectileMassFor` solved one from the other, so inverting
+   *      it cannot disagree with the mass the bolt is actually flying.
+   *  'relative' — true closing speed against the target.  Finishes the
+   *      unification (the crash paths already spend a relative velocity), and
+   *      means a shot at a target fleeing at matched speed lands nothing.
+   */
+  private static projectileBiteOn(proj: GameEntity, target: GameEntity): number {
+      const authored = proj.damage || 1;
+      const v = proj.velocity;
+      if (v === undefined) return authored;
+      // A bolt with no launch reference (a synthesised one, as the suites
+      // build) ADOPTS its current speed as that reference on first read, so
+      // its first hit lands the authored figure and its later hits still
+      // decay.  Without this the fallback would be a constant and the bore
+      // would not fall off at all — the property this whole step buys.
+      if (proj.spawnSpeed === undefined) proj.spawnSpeed = Math.hypot(v.x, v.y);
+      const spawn = proj.spawnSpeed;
+      let speed: number;
+      if (getActiveImpactVelocityMode() === 'relative') {
+          const tv = target.velocity;
+          speed = Math.hypot(v.x - (tv?.x ?? 0), v.y - (tv?.y ?? 0));
+      } else {
+          speed = Math.hypot(v.x, v.y);
+      }
+      return projectileBite(authored, speed, spawn);
+  }
+
+  /**
+   * Take `damage` worth of energy out of the bolt, leaving it slower.
+   *
+   * The spend is against the bolt's WORLD kinetic energy, which is the
+   * energy it physically has; under 'muzzle' that can exceed the energy the
+   * hit was MEASURED in, and deliberately so — a shot fired from a charging
+   * ship really is carrying more, it is only being scored in its own frame.
+   * Monotone and clamped at rest either way, so a bolt can never be left
+   * with negative energy or turned around by a spend.
+   */
+  private static spendProjectileEnergy(proj: GameEntity, mass: number, damage: number): void {
+      const v = proj.velocity;
+      if (v === undefined || !(damage > 0)) return;
+      const s = Math.hypot(v.x, v.y);
+      if (!(s > 0)) return;
+      const k = speedAfterSpending(mass, s, damage) / s;
+      v.x *= k; v.y *= k;
+  }
+
   private borePierceTrack(proj: GameEntity, target: GameEntity, baseDmg: number): number {
       this._boreExited = false;
       if ((proj.pierceCount ?? 0) <= 0) return 0;
@@ -1396,6 +1456,7 @@ export class PhysicsSystem {
       const cw = Math.cos(target.rotation), sw = Math.sin(target.rotation);
 
       const p = this._borePoint;
+      const mass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
       let ordinal = proj.pierceHits ?? 0;
       let charges = proj.pierceCount ?? 0;
       let steps = 0;
@@ -1403,13 +1464,23 @@ export class PhysicsSystem {
           p.x = target.position.x + (lx * cw - ly * sw);
           p.y = target.position.y + (lx * sw + ly * cw);
           stampLocalImpact(target, p);
-          if (!applyBoundaryDamage(target, baseDmg * pierceFalloffAt(ordinal, proj.pierceFalloffRate))) {
+          // ENERGY PER GRAIN (step 3).  The bite is re-measured from the
+          // bolt's CURRENT speed every grain, and the bolt is slowed by
+          // exactly what it just deposited — so the track decays on its own
+          // and `baseDmg` is only the first grain's bite.  That decay is the
+          // retired `PIERCE_FALLOFF_RATE`, now falling out of the physics
+          // instead of sitting beside it as a second knob.
+          const bite = steps === 0
+              ? baseDmg
+              : PhysicsSystem.projectileBiteOn(proj, target);
+          if (!applyBoundaryDamage(target, bite)) {
               // The model went away under us (an empty decomposition).
               // Nothing has been spent yet on the first step, so hand the
               // body back to the ordinary path rather than eating the hit.
               if (steps === 0) return 0;
               break;
           }
+          PhysicsSystem.spendProjectileEnergy(proj, mass, bite);
           ordinal++; steps++;
           // The body died under the drill — the bolt is through it.
           if ((target.health ?? 0) <= 0) { this._boreExited = true; break; }
@@ -3606,9 +3677,13 @@ export class PhysicsSystem {
           // and those consumers read it, rather than re-deriving an ordinal
           // that no longer means the same thing.  One number, one hit, three
           // damage paths.
-          const falloff = pierceFalloffAt(proj.pierceHits ?? 0, proj.pierceFalloffRate);
+          const projMass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
+          let projDmg = PhysicsSystem.projectileBiteOn(proj, target);
+          // `hitFalloff` keeps its meaning — this hit's size RELATIVE to the
+          // shot's authored damage — so the two consumers in GameEngine are
+          // untouched by damage becoming kinetic.
+          const falloff = (proj.damage || 1) > 0 ? projDmg / (proj.damage || 1) : 1;
           proj.hitFalloff = falloff;
-          let projDmg = (proj.damage || 1) * falloff;
           // Hoisted: the bore below must respect it too, so a bolt that
           // re-contacts a body it already pierced does not drill it again.
           const alreadyHit = proj.hitEntityIds?.includes(target.id) ?? false;
@@ -3767,6 +3842,9 @@ export class PhysicsSystem {
                       if (!applyBoundaryDamage(target, projDmg)) {
                           target.health -= isHitCounted ? 1 : projDmg;
                       }
+                      // One body, one spend — and the bolt pays for it in
+                      // speed, so a shot that pierces on arrives weaker.
+                      PhysicsSystem.spendProjectileEnergy(proj, projMass, projDmg);
                   }
                   // Dent-policy entities deform on every damage event,
                   // even the killing blow — the spawned mobile shard
@@ -3936,16 +4014,14 @@ export class PhysicsSystem {
               }
               if (!proj.hitEntityIds) proj.hitEntityIds = [];
               proj.hitEntityIds.push(target.id);
-              // SPEED DECAY — boring through matter costs momentum as well
-              // as damage.  Ships at 1.0 (a no-op); the DBG "Pierce spd"
-              // cycle is what makes it felt against the falloff curve.
-              // One factor per charge actually spent, so a bolt that drilled
-              // four grains slows four times.
-              const retain = getActivePierceSpeedRetain();
-              if (retain !== 1 && proj.velocity) {
-                  const k = Math.pow(retain, boredSteps > 0 ? boredSteps : 1);
-                  proj.velocity.x *= k; proj.velocity.y *= k;
-              }
+              // THE FALLOFF, AS ARITHMETIC RATHER THAN AS A KNOB.  A bolt
+              // that carries on has spent real energy getting through, so
+              // it leaves SLOWER — and because damage is kinetic, its next
+              // bite is smaller automatically and with the right curve.
+              // This is what `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
+              // were each half-describing; both are deleted.  The bore has
+              // already paid per grain, so only the single-spend path pays
+              // here.
               // Still impart momentum impulse even when piercing
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;

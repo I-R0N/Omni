@@ -5498,94 +5498,145 @@ export const DAMAGE_TEXT_CONSTANTS = {
 // balance statement should be read into the number.
 export const MAX_PIERCE = 99;
 
-// PENETRATION FALLOFF — a RATE, not a table (user call, superseding the
-// authored curve).  Damage at hit ordinal `n` is `base x (1 - rate)^n`, so
-// ONE number describes the whole decay and the DBG cycle below can sweep it
-// live.  The authored table it replaces could express an irregular shape but
-// could not be tuned in play, which is what the tuning actually needs.
+// ── KINETIC IMPACT DAMAGE (unified impact physics, step 3) ──────────────────
 //
-// RATE 0 IS A FIRST-CLASS SETTING (user call): every penetration hit then
-// deals full projectile damage, which is the control for judging whether the
-// decay is carrying its weight at all.
+// ONE QUANTITY CROSSES EVERY IMPACT SEAM: ENERGY.  A projectile's damage is
+// no longer an authored scalar that travels unchanged from muzzle to target —
+// it is the kinetic energy the bolt is CARRYING at the moment it lands,
+// converted at a single documented rate.  That rate is this constant, and it
+// is the ONE conversion docs/PARKING_LOT.md §4 demands between the structural
+// world (where `grain.bondStrength` is already a specific fracture energy, so
+// HP is derived rather than authored) and the ACTOR world (where enemies,
+// bosses and the player keep authored HP pools that the counterplay layer in
+// docs/WEAPONS_AMMO_PLAN.md §7 is built on).  Two conversions in two places
+// is the failure mode; this is the one.
 //
-// SHIPPED OFF (user call).  The decay is a knob to be judged, not a balance
-// statement to inherit: at 0 every penetration hit lands FULL projectile
-// damage, so what ships is the honest ceiling and the rate is what a tuning
-// pass turns up.  The step below it in the cycle is 0.05, which is the value
-// the retired table's tail worked out to at depth — a sensible first click.
+// WHY THE STEP-1 AUDIT SAID NO SINGLE CONSTANT FITS, AND WHY ONE DOES.
+// `perf/impact-audit.mjs` measured the implied constant at 9..90 KE per point
+// of damage across the roster — a 10x spread — and the parking lot recorded
+// that as the reason step 3 is a re-pricing rather than a refactor.  That
+// spread is real, but it is an ARTEFACT OF `PROJECTILE_CONSTANTS.MASS`: every
+// projectile in the game flew at mass 1, so all of the variation between a
+// Laser pulse and a Cannon shell had nowhere to live except in the constant.
 //
-// The number matters more than it looks once turned on, because the
-// reachable stack is large: six Penetration Mk III in the weapon flower is
-// +18, and inside a grain material every GRAIN spends a charge.  A geometric
-// decay has no floor, so the rate mostly decides what a DEEP bore is worth —
-// at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.
+// Free the mass and the constant IS constant.  `projectileMassFor` solves each
+// weapon's mass from the damage, muzzle speed and PIERCE it already authors,
+// so the spread moves into SECTIONAL DENSITY — a physical property of the shot
+// that was previously suppressed — and every damage number is unchanged on
+// day one.
 //
-// It applies to EVERY WEAPON EQUALLY (user call), and to every damage path a
-// hit produces: the direct bite, the Cannon's AoE splash and the Lightning
-// chain all take the same factor.  `WeaponConfig.pierceFalloffRate` is kept
-// as the per-weapon seam for when that changes; nothing overrides it today.
-export const PIERCE_FALLOFF_RATE = 0;
+// PIERCE IS PART OF THE SOLVE, and leaving it out is the one mistake this
+// model invites.  A bolt whose whole kinetic energy equals one bite of its
+// authored damage spends ITSELF on its first hit, so every weapon would stop
+// dead on contact and the Laser's `pierce: 4` would be unreachable.  Sizing
+// the budget at `(1 + pierce)` bites is what makes penetration affordable —
+// and it is the same statement as sectional density, which is precisely what
+// a penetrator has more of.
+//
+// WHAT FALLS OUT, AND IT IS THE WHOLE POINT.  A bolt that has spent energy is
+// slower, and damage is measured from speed, so the next bite is smaller with
+// no curve authored anywhere.  The decay rate is not a knob and is not global:
+// it is `1 - 1/(1 + pierce)`, DERIVED per weapon.  Measured over the shipped
+// roster, successive bites are
+//
+//   Blaster       4.00                          stops dead (pierce 0)
+//   Shotgun       3.00 1.50                     decay 0.50/hit
+//   Burst Rifle   5.00 3.33 2.22                decay 0.67/hit
+//   Laser         5.00 4.00 3.20 2.56 2.05      decay 0.80/hit
+//
+// so a beam built to rake a line gives up little per body and a pellet gives
+// up half.  That is why `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN` are
+// DELETED here rather than retuned: two knobs describing one phenomenon was
+// the clearest single symptom of the overlap this work exists to remove, and
+// it is also why the shipped falloff rate was 0 — nobody could say what the
+// right number was, because the number should not have existed.
+export const IMPACT_ENERGY_PER_DAMAGE = 32;
 
-/** DBG "Pierce falloff" — index 0 is what ships, so the first click is the
- *  A/B.  0 is the no-decay control; the top of the range is deliberately
- *  past useful, because a range whose top is not too far cannot show where
- *  too far is. */
-export const PIERCE_FALLOFF_CYCLE: ReadonlyArray<number> = [
-  PIERCE_FALLOFF_RATE, 0.05, 0.10, 0.20, 0.35, 0.50,
+/** The mass the sim flies for a shot from `cfg`.
+ *
+ *  DERIVED so the bolt launches with `(1 + pierce)` bites of its authored
+ *  damage in the bank — see the note above for why pierce belongs in the
+ *  solve.  `WeaponConfig.mass` overrides it for a shot whose density is a
+ *  deliberate statement; nothing sets it today.
+ *
+ *  Mass is NOT inert: `PhysicsSystem` reads it for the momentum a hit imparts
+ *  to a mobile target, so a Cannon shell (3.56) now shoves a shard harder
+ *  than a Laser pulse (1.78) does.  That is the intended physical content of
+ *  giving shots a real mass, and it is the one balance change step 3 ships. */
+export function projectileMassFor(cfg: { damage: number; speed: number; pierce?: number; mass?: number }): number {
+  if (cfg.mass !== undefined) return cfg.mass;
+  const v = cfg.speed;
+  if (!(v > 0)) return PROJECTILE_CONSTANTS.MASS;
+  const budget = 1 + Math.max(0, cfg.pierce ?? 0);
+  return (2 * IMPACT_ENERGY_PER_DAMAGE * cfg.damage * budget) / (v * v);
+}
+
+/** The damage one hit lands: the shot's authored figure scaled by the square
+ *  of the speed it is being measured at against the speed it launched with.
+ *  Quadratic because damage is kinetic — that IS the falloff, and there is no
+ *  second term anywhere.  A bolt still at its launch speed lands exactly its
+ *  authored damage, which is what makes the whole change day-one neutral. */
+export function projectileBite(authored: number, speed: number, spawnSpeed: number): number {
+  if (!(spawnSpeed > 0)) return authored;
+  const r = speed / spawnSpeed;
+  return authored * r * r;
+}
+
+/** The speed a body of `mass` is left with after spending `damage` worth of
+ *  energy — the whole of the penetration falloff, as arithmetic rather than
+ *  as a knob.  Clamped at rest: a bolt cannot be left with negative energy. */
+export function speedAfterSpending(mass: number, speed: number, damage: number): number {
+  if (!(mass > 0)) return speed;
+  const ke = 0.5 * mass * speed * speed - damage * IMPACT_ENERGY_PER_DAMAGE;
+  return ke <= 0 ? 0 : Math.sqrt((2 * ke) / mass);
+}
+
+// WHICH VELOCITY THE ENERGY IS MEASURED IN (user call, DBG "Impact vel").
+//
+// Energy is FRAME-DEPENDENT, and the two honest frames disagree by a lot,
+// because `PROJECTILE_CONSTANTS.INHERIT_SHOOTER_VELOCITY` is 1.0 — a forward
+// shot already carries the ship's velocity.  Measured on POCKET (cruise 15),
+// the energy a charging shot lands with against a still one: Laser 2.20x,
+// Lightning 2.48x, Cannon 3.22x, Blaster 3.73x, Seeker 5.04x — and cruise is
+// per-map, so on ASTEROID_FIELD (33.3) a Blaster reaches ~9.5x.  Retreating
+// costs nothing, because the per-weapon muzzle-speed floor clamps it.
+//
+//  'muzzle'   — the bolt's energy in its MUZZLE frame: damage is the authored
+//               figure, scaled by how much of its launch speed the bolt has
+//               since lost.  Neutral at spawn however the ship was moving, and
+//               it still carries the bore falloff, because that is a real loss
+//               of the bolt's own speed.  INDEX 0: what ships.
+//  'relative' — true closing energy, `1/2 m |v_proj - v_target|^2`.  The
+//               physically honest reading and the one that finishes the
+//               unification, since the crash paths already spend a RELATIVE
+//               velocity: under it a weapon hit and a hull hit are the same
+//               formula.  It also means a shot fired at a target fleeing at
+//               matched speed lands nothing, which is correct and is exactly
+//               why it is a step on a ladder rather than a default.
+export type ImpactVelocityMode = 'muzzle' | 'relative';
+
+export const IMPACT_VELOCITY_CYCLE: ReadonlyArray<ImpactVelocityMode> = [
+  'muzzle', 'relative',
 ] as const;
 
-let activePierceFalloffIndex = 0; // 0 — what ships: the decay is OFF
+/** Index 0 is what ships, so the first click is always the A/B. */
+const IMPACT_VELOCITY_DEFAULT_INDEX = 0;
+let activeImpactVelocityIndex = IMPACT_VELOCITY_DEFAULT_INDEX;
 
-export function getActivePierceFalloffRate(): number {
-  return PIERCE_FALLOFF_CYCLE[activePierceFalloffIndex];
+export function getActiveImpactVelocityMode(): ImpactVelocityMode {
+  return IMPACT_VELOCITY_CYCLE[activeImpactVelocityIndex];
 }
-export function getActivePierceFalloffName(): string {
-  const v = getActivePierceFalloffRate();
-  if (v === 0) return 'off (full dmg, def)';
-  return v.toFixed(2);
+export function getActiveImpactVelocityName(): string {
+  const v = IMPACT_VELOCITY_CYCLE[activeImpactVelocityIndex];
+  // The "(def)" marker is DERIVED from the default index rather than written
+  // into a step's name, so it cannot end up on the wrong step the day the
+  // default moves (CLAUDE.md §8, the nebula-sprite lesson).
+  return activeImpactVelocityIndex === IMPACT_VELOCITY_DEFAULT_INDEX ? `${v} (def)` : v;
 }
-export function cyclePierceFalloff(): number {
-  activePierceFalloffIndex =
-    (activePierceFalloffIndex + 1) % PIERCE_FALLOFF_CYCLE.length;
-  return activePierceFalloffIndex;
-}
-
-/** The damage multiplier for the `ordinal`-th hit of one bolt (0 = the
- *  first contact, always 1 — a bolt with no penetration is untouched by any
- *  of this).  `rate` is a weapon's own override (WeaponConfig
- *  .pierceFalloffRate, stamped onto the projectile at spawn); absent → the
- *  live DBG rate.  Rate 0 returns 1 at every depth. */
-export function pierceFalloffAt(ordinal: number, rate?: number): number {
-  if (ordinal <= 0) return 1;
-  const r = rate !== undefined ? rate : getActivePierceFalloffRate();
-  if (r <= 0) return 1;
-  return Math.pow(1 - r, ordinal);
-}
-
-// PIERCE SPEED DECAY.  A per-hit multiplier on a piercing bolt's speed —
-// boring through matter should cost momentum as well as damage.  SHIPPED
-// AT 1.0, i.e. no behaviour change: the falloff table is the change the
-// user asked for, and this is the second axis they want to FEEL against
-// it before either is tuned.  The DBG cycle below is how.
-export const PIERCE_SPEED_RETAIN = 1.0;
-
-export const PIERCE_SPEED_RETAIN_CYCLE: ReadonlyArray<number> = [
-  PIERCE_SPEED_RETAIN, 0.95, 0.9, 0.8,
-] as const;
-
-let activePierceSpeedRetainIndex = 0; // 1.0 — what ships
-
-export function getActivePierceSpeedRetain(): number {
-  return PIERCE_SPEED_RETAIN_CYCLE[activePierceSpeedRetainIndex];
-}
-export function getActivePierceSpeedRetainName(): string {
-  const v = getActivePierceSpeedRetain();
-  return v === PIERCE_SPEED_RETAIN ? `${v.toFixed(2)}x (def)` : `${v.toFixed(2)}x`;
-}
-export function cyclePierceSpeedRetain(): number {
-  activePierceSpeedRetainIndex =
-    (activePierceSpeedRetainIndex + 1) % PIERCE_SPEED_RETAIN_CYCLE.length;
-  return activePierceSpeedRetainIndex;
+export function cycleImpactVelocity(): number {
+  activeImpactVelocityIndex =
+    (activeImpactVelocityIndex + 1) % IMPACT_VELOCITY_CYCLE.length;
+  return activeImpactVelocityIndex;
 }
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
