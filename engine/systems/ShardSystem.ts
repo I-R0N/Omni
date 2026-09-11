@@ -58,7 +58,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
-import { ensureFractureCells } from './fractureCache';
+import { ensureFractureCells, estimateBoundaryHp } from './fractureCache';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -905,6 +905,29 @@ export class ShardSystem {
     dentOverride?: number,
   ): number {
     if (childVariantId === 'rock-shard') return rockHitCeiling(newSize, densityTier);
+    // A GRAIN MATERIAL DOES NOT AUTHOR AN HP ITS OWN MODEL CONTRADICTS
+    // (unified impact physics, step 3).  The boundary model rewrites
+    // `maxHealth` to Σ(edge length × bondStrength) at first damage, so a
+    // fixed spawn constant was a placeholder the first hit disagreed with —
+    // measured out by up to 3.7× (plastic 24 against a derived 59, metal 16
+    // against 50; only rock agreed, because `rockHitCeiling` already scales
+    // with size).  That gap was not cosmetic: a CRASH spends
+    // `derived / authored` of the budget, so the ratio was quietly setting
+    // how many rams a body took.
+    //
+    // `estimateBoundaryHp` predicts the same number from the same site-count
+    // rule, so the two cannot drift; null means this variant is not running
+    // the model and the authored value below stands.
+    //
+    // IT RUNS AHEAD OF THE DENT OVERRIDE, and that is the one judgement call
+    // here.  `dent.shardHealth` (plastic's 24) exists to decouple a released
+    // shard's life from the tile's brittle face — but a grain material gets
+    // that decoupling for free, since the shard derives its HP from its OWN
+    // pattern.  Left in front, the override was simply the stalest of the
+    // three figures: 24 against a measured 58.  It still stands for anything
+    // NOT running the model, which is what it was written for.
+    const derived = estimateBoundaryHp(childVariantId, newSize);
+    if (derived !== null) return Math.max(1, Math.round(derived));
     if (dentOverride !== undefined) return dentOverride;
     if (childVariantId === 'glass-shard') return GLASS_SHARD_HP;
     if (childVariantId === 'metal-shard') return METAL_SHARD_HP;

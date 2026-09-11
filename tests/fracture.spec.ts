@@ -980,6 +980,8 @@ test.describe('the glass damage layer (V9)', () => {
         edgeFills: (t.fractureEdgeFill ?? []).length,
         childCount: children.length,
         childHp: children.map((c: any) => c.maxHealth),
+        childSize: children.map((c: any) => c.size.x),
+        tileSize: t.size.x,
       };
     });
 
@@ -1008,8 +1010,20 @@ test.describe('the glass damage layer (V9)', () => {
     // And it does eventually go, leaving its cells behind.
     expect(r.dead).toBe(true);
     expect(r.childCount).toBeGreaterThanOrEqual(2);
-    // The debris carries the shard damage layer (V9: 8; V10: 12).
-    for (const hp of r.childHp) expect(hp).toBe(12);
+    // The debris carries the shard damage layer — but NOT as a literal any
+    // more.  A grain material's spawn HP is the boundary total its own
+    // pattern will derive (step 3), so it SCALES WITH THE FRAGMENT and a
+    // fixed figure is wrong by construction; V10's flat 12 was exactly the
+    // placeholder the first hit then contradicted.  What is pinned is the
+    // property that replaced it: every child is in the same band its own
+    // size implies, near the tile's per-unit rate rather than a constant.
+    const perUnit = r.derived / r.tileSize;
+    for (let i = 0; i < r.childHp.length; i++) {
+      const expected = perUnit * r.childSize[i];
+      expect(r.childHp[i], 'child HP tracks its own size, not a literal')
+        .toBeGreaterThan(expected * 0.6);
+      expect(r.childHp[i]).toBeLessThan(expected * 1.6);
+    }
 
     watch.assertClean();
   });
@@ -1264,13 +1278,20 @@ test.describe('materials through the cells (V5)', () => {
     expect(r.glassV.areaErr).toBeLessThan(0.02);
     expect(r.plasticV.count).toBeGreaterThanOrEqual(3);
     expect(r.plasticV.areaErr).toBeLessThan(0.02);
-    // Plastic children keep the dent contract's 24-HP durability.
-    for (const h of r.plasticV.healths) expect(h).toBe(24);
+    // Plastic children under VORONOI derive their HP from their own grain
+    // pattern (step 3), so the dent contract's flat 24 no longer applies to
+    // them — it was 2.4x under the 58 their own boundaries actually derive,
+    // and since a crash spends `derived / authored` that ratio was setting
+    // ram counts.  The decoupling the override existed for is kept for free:
+    // the shard's life comes from ITS pattern, not the tile's brittle face.
+    for (const h of r.plasticV.healths) expect(h).toBeGreaterThan(24);
     // Legacy A/B: the old fans still run (glass 2-12 fresh silhouettes,
     // plastic exactly the 8-12 breakShards burst at 24 HP).
     expect(r.glassL.count).toBeGreaterThanOrEqual(2);
     expect(r.plasticL.count).toBeGreaterThanOrEqual(8);
     expect(r.plasticL.count).toBeLessThanOrEqual(12);
+    // LEGACY is the A/B and keeps the authored dent figure verbatim — the
+    // estimate is gated on the grain model, which legacy mode turns off.
     for (const h of r.plasticL.healths) expect(h).toBe(24);
 
     watch.assertClean();
