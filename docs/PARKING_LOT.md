@@ -2133,12 +2133,13 @@ penetration path:
    — not of pierce charges, which are a purchased resource and should not
    be what decides whether matter behaves like matter.
 3. **Does the falloff RATE belong to the material rather than the
-   weapon?**  It is a global DBG knob today (`PIERCE_FALLOFF_RATE`,
-   shipped at 0 and applying to all weapons — and to all three damage
-   paths a hit produces — evenly, by user call) with a per-weapon seam
-   (`WeaponConfig.pierceFalloffRate`) that nothing uses.  A material-side
-   rate — how fast a given stuff absorbs an advancing shot — is a third
-   possibility and probably the physically honest one.
+   weapon?**  **PARTLY ANSWERED by step 3**: it belongs to neither as an
+   authored number.  The global knob and the unused per-weapon seam are
+   both deleted, and the rate is now DERIVED per weapon from its energy
+   bank (`1 - 1/(1 + pierce)`).  The material-side question survives in a
+   sharper form — a stuff's `bondStrength` already decides how much energy
+   an advancing shot gives up per grain, so a material-specific ABSORPTION
+   rate on top of that would need to say what it adds.
 4. **Interaction with `damageSpread`.**  The bore works as well as it does
    *because* every material ships `damageSpread: 0`, so each stamp spends
    sequentially outward from its own point.  A non-zero spread would
@@ -2291,16 +2292,21 @@ no track.
    is left).  The second is the real model; the first is a legacy the
    collision paths still speak.  Every new material inherits both.
 
-2. **TWO ENERGY MODELS, one real and one authored.**  Collisions already
+2. **TWO ENERGY MODELS, one real and one authored.**  **RESOLVED for the
+   WEAPON half in step 3 (damage is kinetic; see §9); the crash half is
+   step 4's, and it is now the only one left authored.**
+   Collisions already
    compute genuine mechanics — `impactStrength` is
    `(1+e)·|v_n|·effInv_self/(effInv_self+effInv_other)`, a real velocity
-   step, and the crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`.
+   step, and the crash gate is `mass × impactSpeed > SHARD_CRASH_MOMENTUM`.
    Weapons carry an authored `damage` number with no mass, no speed and no
    relation to either.  The same tile therefore answers to two different
    physics depending on what hit it.
 
 3. **THE FALLOFF IS A SECOND KNOB FOR SOMETHING THE FIRST SHOULD ALREADY
-   SAY.**  `PIERCE_FALLOFF_RATE` decays damage per hit, and
+   SAY.**  **RESOLVED in step 3 — both knobs are deleted and the decay is
+   derived per weapon as `1 - 1/(1 + pierce)`; see §9.**
+   `PIERCE_FALLOFF_RATE` decays damage per hit, and
    `PIERCE_SPEED_RETAIN` decays SPEED per hit — and ships at `1.0`, a no-op.
    If damage were kinetic (`½mv²`, or `mv`), the falloff would **fall out of
    the speed loss** rather than being authored beside it.  Two knobs
@@ -2308,7 +2314,11 @@ no track.
    and it is why the shipped falloff rate is 0: nobody could say what the
    right number was, because the number should not have existed.
 
-4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**  A shot
+4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**  Step 3
+   made it a physical one WITHOUT removing it — `pierce` now sizes the
+   bolt's energy bank at `(1 + pierce)` bites, so it reads as sectional
+   density rather than as a licence count.  Retiring the field itself is
+   still step 5's.  A shot
    gets N discrete charges regardless of what it hits — a 36px pane and a
    200-unit boulder each cost the same charge (the bore softened this
    *within* a body but not between bodies).  Under an energy model there is
@@ -2337,7 +2347,7 @@ area), which is precisely the physical constant this wants.  The proposal:
   user's first point, and it needs no new mechanism — only for path 3 to
   call what path 2 calls.
 - **The crash THRESHOLD becomes a consequence.**
-  `CRASH_VELOCITY_THRESHOLD` and `ASTEROID_CRASH_MOMENTUM` stop being
+  `CRASH_VELOCITY_THRESHOLD` and `SHARD_CRASH_MOMENTUM` stop being
   authored gates and become "did the impactor bring enough energy to break
   the first boundary" — which is automatically material-dependent, so metal
   resists a bump that shatters glass without a per-material threshold table.
@@ -2374,10 +2384,10 @@ PR.  The honest sequencing:
    and §7 below is its result.
 2. ~~**Route paths 3, 4 and 5 through `applyBoundaryDamage`**~~ — **SHIPPED
    (2026-09-07)**, see §8 below.
-3. **Make projectile damage kinetic**, retire the falloff rate and the speed
-   retain, and check the §7 counterplay table still holds.  **NOT STARTED,
-   and §7 below is the reason to be careful: the implied conversion constant
-   is not a constant.**
+3. ~~**Make projectile damage kinetic**, retire the falloff rate and the
+   speed retain~~ — **SHIPPED (2026-09-11)**, see §9 below.  §7's warning
+   that "the implied conversion constant is not a constant" turned out to be
+   an artefact of `PROJECTILE_CONSTANTS.MASS`, not a property of the roster.
 4. **Give hulls a bore track**, which is when the user's first point is
    actually delivered.  Not started.
 5. **Revisit `pierceCount`** last, since removing a budget changes what the
@@ -2460,9 +2470,9 @@ is `impactStrength`'s own output.
 — mass never enters, so a fully-outfitted ~3× heavier ship crosses it at the
 same 4 u/step.  The asteroid's is MOMENTUM, and over the live shard
 population on ASTEROID_FIELD (n=1200, mass 7.3..460.8) one momentum gate
-spans 43 → 2747 energy, a **63× spread**.  (Note the constant this entry and
-CLAUDE.md call `ASTEROID_CRASH_MOMENTUM` is named `SHARD_CRASH_MOMENTUM` in
-`constants.ts` — doc drift, no code impact.)
+spans 43 → 2747 energy, a **63× spread**.  (The constant this entry and CLAUDE.md
+used to call `ASTEROID_CRASH_MOMENTUM` is named `SHARD_CRASH_MOMENTUM` in
+`constants.ts`; both docs were corrected to the code name in step 3.)
 
 **How far apart the two sides are.**  Weapon side 9..90 KE per derived HP
 (10× spread); crash side on a virgin tile 37..459 (12.6× spread).  The two
@@ -2504,4 +2514,62 @@ Four decisions worth keeping:
 
 Pinned by `tests/terrain.spec.ts` ("a crush spends on grain boundaries"), all
 three claim-tests verified to FAIL with the routing removed.
+
+### 9. What step 3 SHIPPED (2026-09-11)
+
+**Projectile damage is kinetic.**  A bolt carries ENERGY, and what it lands is
+what that energy is worth at the speed it still has.
+`IMPACT_ENERGY_PER_DAMAGE` (32) is the ONE conversion §4 demands between the
+structural world and the actor world.
+
+**§7's blocker dissolved rather than being paid.**  The measured 9..90 KE per
+point of damage was an artefact of every projectile flying at `mass: 1` — with
+mass pinned, the variation between a Laser pulse and a Cannon shell had nowhere
+to live but the constant.  `projectileMassFor` solves mass from the damage,
+muzzle speed and pierce each weapon already authors, so **the constant is
+constant, the spread becomes SECTIONAL DENSITY, and the roster keeps every
+number it had.**  No re-pricing was needed and the §7 counterplay table is
+untouched by construction.
+
+| weapon | mass | | weapon | mass |
+|---|---|---|---|---|
+| Blaster | 1.00 | | Laser | 1.78 |
+| Shotgun | 0.96 | | Seeker | 3.56 |
+| Burst Rifle | 2.40 | | Cannon | 3.56 |
+| Lightning | 0.85 | | enemy bolt | 7.90 |
+
+**PIERCE BELONGS IN THE SOLVE**, and leaving it out is the mistake this
+invites — caught during implementation, not in review.  A bolt whose whole
+energy equals one bite spends itself on contact, so every weapon stops dead and
+the Laser's `pierce: 4` is unreachable.  The bank is `(1 + pierce)` bites, which
+is the same statement as sectional density.
+
+**The falloff is DERIVED, per weapon**: `1 - 1/(1 + pierce)` — Laser 0.80/hit,
+Burst 0.67, Shotgun 0.50, a non-piercing bolt stops dead.  `PIERCE_FALLOFF_RATE`
+and `PIERCE_SPEED_RETAIN` were the two halves of that one number and are
+deleted.  The Penetration module now buys ENERGY, not licences.
+
+**DBG "Impact vel"** is the one judgement call, because energy is
+frame-dependent and `INHERIT_SHOOTER_VELOCITY` is 1.0.  Index 0 `muzzle` ships
+(day-one neutral); `relative` scores true closing energy and finishes the
+unification, at 2.2–5× for a charging ship (POCKET cruise; ~9.5× on the big
+maps).
+
+**The spawn-HP mismatch is closed too.**  `estimateBoundaryHp` predicts what
+`ensureBoundaryModel` will derive, sharing the model's own site-count rule.
+Authored against derived went rock ×0.96 → ×0.96, glass ×1.32 → ×1.01, plastic
+×2.46 → ×0.95, metal ×3.15 → ×0.94.  That ratio was not cosmetic: a crash spends
+`derived / authored`, so it was a silent ram-count dial.
+
+**What step 4 now has to do is smaller than this entry assumed.**  Measured
+through the real player-crash branch: a ship ALREADY passes through terrain —
+below `CRASH_VELOCITY_THRESHOLD` it bounces (`vx` reverses, ×−0.5), at or above
+it the branch returns before any impulse and the ship ploughs on at ×0.65 the
+incoming speed, at every speed.  So the threshold is already a bounce/passage
+switch.  What is missing is that **the speed lost has no relation to what was
+broken**: from cruise, a ship crosses 5 tiles and decays 21.6 → 14.1 → 9.1 →
+5.9 → 3.9 **identically for glass, rock and metal** — glass shatters all five,
+metal (470 derived HP) loses none, and the ship cannot tell the difference.
+Step 4 is making that speed loss equal the energy actually spent, not adding
+passage.
 
