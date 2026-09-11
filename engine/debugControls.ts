@@ -31,7 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -992,6 +992,15 @@ export class DebugControls {
    *  is the A/B. */
   cycleImpactVelocity() {
     cycleImpactVelocity();
+  }
+
+  /** Cycle how much of a hull's energy reaches the bonds (DBG "Crash
+   *  energy") — a MULTIPLIER over the calibrated `CRASH_ENERGY_COUPLING`,
+   *  applied at the read so it re-tunes the terrain already in the world.
+   *  This is the dial for how permeable terrain is; a material's own
+   *  `bondStrength` is the same question asked of one material. */
+  cycleCrashEnergy() {
+    cycleCrashEnergy();
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────

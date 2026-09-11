@@ -131,6 +131,7 @@ interface UIOverlayProps {
   onToggleShardBlend?: () => void;
   onCycleShardCoat?: () => void;
   onCycleImpactVelocity?: () => void;
+  onCycleCrashEnergy?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -464,6 +465,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardBlend,
   onCycleShardCoat,
   onCycleImpactVelocity,
+  onCycleCrashEnergy,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -1585,6 +1587,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Impact vel', onCycleImpactVelocity,
                   stats.impactVelocityName ?? 'muzzle (def)',
                   'WHICH VELOCITY a hit\'s damage is measured in. Damage is now KINETIC — a shot carries energy, not an authored number — and energy is frame-dependent, so this is the one judgement call in it. "muzzle" (ships) scores the bolt in its own launch frame: it lands its authored damage however the ship was moving, and still falls off through a bore because that is a real loss of the bolt\'s own speed. "relative" scores true CLOSING energy against the target, which finishes the unification (the crash paths already spend a relative velocity, so a weapon hit and a hull hit become the same formula) — but a charging ship then hits 2.2-5x harder at POCKET cruise and ~9.5x on the big maps, and a shot at a target fleeing at matched speed lands nothing.')}
+                {ctrlRow('Crash energy', onCycleCrashEnergy,
+                  stats.crashEnergyName ?? '1x (def)',
+                  'How much of a HULL\'s kinetic energy reaches the grain bonds it hits (1 / 0.5 / 0.25 / 2 / 4x over the calibrated coupling). A crash now spends ENERGY like a weapon hit does, so twice the closing speed is four times the bite, and the speed the impactor loses IS what it broke. The coupling is calibrated on ROCK, whose ram count is unchanged at 9; every other material then differs by its own derived toughness rather than by an authored HP (metal used to take 24 to 144 rams across six tiles of identical toughness, because a crash spent one authored HP and metal authors 24 x densityTier). This is the dial for how permeable terrain is; a material\'s own bondStrength is the same question asked of one material.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

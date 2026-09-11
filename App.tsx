@@ -321,6 +321,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleImpactVelocity();
   };
 
+  const handleCycleCrashEnergy = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleCrashEnergy();
+  };
+
   const handleToggleShardBlend = () => {
       if (engineRef.current) engineRef.current.dbg.toggleShardBlend();
   };
@@ -959,6 +963,7 @@ const App: React.FC = () => {
         onToggleShardBlend={handleToggleShardBlend}
         onCycleShardCoat={handleCycleShardCoat}
         onCycleImpactVelocity={handleCycleImpactVelocity}
+        onCycleCrashEnergy={handleCycleCrashEnergy}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}

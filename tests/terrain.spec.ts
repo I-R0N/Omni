@@ -189,78 +189,90 @@ async function tileField(page: any, mapType: string) {
 }
 
 test.describe('a crush spends on grain boundaries, like every other damage path', () => {
-  test('a crush spends one authored HP WORTH of the derived budget, not one raw point',
+  test('a crush spends its KINETIC energy, so twice the speed is four times the bite',
     async ({ page }) => {
       const watch = await boot(page);
-      // Metal: the authored HP is high enough that several crushes are nowhere
+      // Metal: the derived HP is high enough that several crushes are nowhere
       // near lethal, so what is measured is unambiguously the spend and not
       // the break.  (Glass is the wrong subject here — its V9 rule takes the
       // whole pane on any qualifying smash, deliberately.)
       await tileField(page, 'METAL_FIELD');
 
-      const r = await engine(page, e => {
+      const r = await engine(page, (e, sp: any) => {
         const ents = e.currentMap.entities;
-        const t = ents.find((x: any) => x.active && x.type === 'STRUCTURE'
-          && x.mass === Infinity && !x.fractureEdgeFill);
-        if (!t) throw new Error('no untouched static tile on the metal field');
-        const at = { x: t.position.x, y: t.position.y };
-        const rock: any = {
-          id: 'crack_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
-          position: { x: at.x + t.size.x * 0.5 + 16, y: at.y },
-          velocity: { x: -600, y: 0 }, rotation: 0,
-          size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
-          health: 50, maxHealth: 50,
+        const pick = () => ents.find((x: any) => x.active && x.type === 'STRUCTURE'
+          && x.mass === Infinity && !x.fractureEdgeFill && !x.__crushed);
+        const run = (speed: number) => {
+          const t = pick();
+          if (!t) throw new Error('no untouched static tile on the metal field');
+          t.__crushed = true;
+          const at = { x: t.position.x, y: t.position.y };
+          const rock: any = {
+            id: 'crack_rock_' + speed, type: 'STRUCTURE', shardVariant: 'rock-shard',
+            position: { x: at.x + t.size.x * 0.5 + 16, y: at.y },
+            velocity: { x: -speed, y: 0 }, rotation: 0,
+            size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+            health: 50, maxHealth: 50,
+          };
+          ents.push(rock);
+          const authoredBefore = t.maxHealth;
+          const crush = () => {
+            rock.position.x = at.x + t.size.x * 0.5 + 16; rock.position.y = at.y;
+            rock.velocity.x = -speed; rock.velocity.y = 0;
+            // Points a → b, so -x: the rock is to the tile's right, heading left.
+            e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
+          };
+          // The FIRST crush is deliberately not the measurement: it is the one
+          // that converts the tile onto the derived budget.  The divergence is
+          // everything after it.
+          crush();
+          const converted = { hp: t.health, max: t.maxHealth };
+          crush(); const afterSecond = t.health;
+          crush(); const afterThird = t.health;
+          const fill = t.fractureEdgeFill;
+          let absorbed = 0;
+          if (fill) for (let i = 0; i < fill.length; i++) absorbed += fill[i];
+          rock.active = false;
+          return {
+            authoredBefore, converted, afterSecond, afterThird, absorbed,
+            alive: t.active === true,
+            authored: t.authoredMaxHealth,
+            edges: t.fractureEdges ? t.fractureEdges.length : 0,
+          };
         };
-        ents.push(rock);
-        const authoredBefore = t.maxHealth;
-        const crush = () => {
-          rock.position.x = at.x + t.size.x * 0.5 + 16; rock.position.y = at.y;
-          rock.velocity.x = -600; rock.velocity.y = 0;
-          // Points a → b, so -x: the rock is to the tile's right, heading left.
-          e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
-        };
-        // The FIRST crush is deliberately not the measurement: it is the one
-        // that converts the tile onto the derived budget, and both the old
-        // behaviour and the new spend exactly one authored HP's worth across
-        // that conversion (`ensureBoundaryModel` preserves the damage
-        // FRACTION).  The divergence is everything after it.
-        crush();
-        const converted = { hp: t.health, max: t.maxHealth };
-        crush(); const afterSecond = t.health;
-        crush(); const afterThird = t.health;
-        const fill = t.fractureEdgeFill;
-        let absorbed = 0;
-        if (fill) for (let i = 0; i < fill.length; i++) absorbed += fill[i];
-        rock.active = false;
-        return {
-          authoredBefore, converted, afterSecond, afterThird, absorbed,
-          alive: t.active === true,
-          authored: t.authoredMaxHealth,
-          edges: t.fractureEdges ? t.fractureEdges.length : 0,
-        };
-      });
+        return { slow: run(sp.slow), fast: run(sp.fast) };
+      }, { slow: 8, fast: 16 });
 
-      expect(r.alive, 'three crushes are not lethal to metal').toBe(true);
-      expect(r.edges, 'the tile carries a real decomposition to spend on')
+      expect(r.slow.alive, 'three crushes are not lethal to metal').toBe(true);
+      expect(r.slow.edges, 'the tile carries a real decomposition to spend on')
         .toBeGreaterThan(0);
-      expect(r.converted.max, 'the tile converted onto the derived boundary budget')
-        .toBeGreaterThan(r.authoredBefore);
-      expect(r.absorbed, 'the crushes landed on the grain boundaries').toBeGreaterThan(0);
+      expect(r.slow.converted.max, 'the tile converted onto the derived boundary budget')
+        .toBeGreaterThan(r.slow.authoredBefore);
+      expect(r.slow.absorbed, 'the crushes landed on the grain boundaries')
+        .toBeGreaterThan(0);
 
-      // THE CHANGE, and the reason it needed the two warm-up crushes above.
-      // Before it, a crush did `health -= 1` — one raw point off a budget the
-      // first weapon hit or the first harvest had already rewritten to the
-      // DERIVED total, so successive crushes cost 1 out of ~467.  A crush now
-      // spends the same fraction of the body it always did: one authored HP,
-      // expressed in the derived budget.
-      const unit = r.converted.max / (r.authored as number);
-      const dropSecond = r.converted.hp - r.afterSecond;
-      const dropThird = r.afterSecond - r.afterThird;
-      expect(unit, 'the derived budget is worth several points per authored HP')
-        .toBeGreaterThan(2);
-      expect(dropSecond, 'the second crush spends a whole unit, not one point')
-        .toBeCloseTo(unit, 6);
-      expect(dropThird, 'and so does the third').toBeCloseTo(unit, 6);
+      // Successive crushes at the SAME speed cost the same.
+      const dropSecond = r.slow.converted.hp - r.slow.afterSecond;
+      const dropThird = r.slow.afterSecond - r.slow.afterThird;
+      expect(dropThird, 'the same crush costs the same each time')
+        .toBeCloseTo(dropSecond, 6);
+
+      // THE CLAIM, and the one that separates step 4 from everything before
+      // it.  Step 2 spent one AUTHORED HP per crush, so the drop did not move
+      // with speed at all; a MOMENTUM model would double it.  Energy squares
+      // it, and that is what is asserted: the same rock at twice the speed
+      // takes four times the bite.
+      const dropFast = r.fast.converted.hp - r.fast.afterSecond;
+      expect(dropFast / dropSecond, 'twice the speed, four times the bite')
+        .toBeCloseTo(4, 3);
+
+      // And the authored HP is no longer consulted anywhere in that spend —
+      // which is what killed metal's ram-count lottery, where six tiles of
+      // identical toughness took 24 to 144 rams because authored HP is
+      // `24 x densityTier` while derived HP is flat.
+      const unit = r.slow.converted.max / (r.slow.authored as number);
+      expect(Math.abs(dropSecond - unit), 'the spend is NOT one authored HP')
+        .toBeGreaterThan(1e-6);
 
       watch.assertClean();
     });
@@ -287,7 +299,11 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
         const rock: any = {
           id: 'shed_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
           position: { x: at.x + t.size.x * 0.5 + 16, y: at.y },
-          velocity: { x: -600, y: 0 }, rotation: 0,
+          // A SANE closing speed.  Under step 4 a crash spends its kinetic
+          // energy, so the -600 this used to carry is 10.8M of it and
+          // obliterates any tile on contact — there is no "parent still
+          // standing" to observe.  8 u/step is twice the old crash gate.
+          velocity: { x: -8, y: 0 }, rotation: 0,
           size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
           health: 50, maxHealth: 50,
         };
@@ -306,7 +322,7 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
         while (t.active && hits < 40) {
           rock.position.x = at.x + t.size.x * 0.5 + 16;
           rock.position.y = at.y;
-          rock.velocity.x = -600; rock.velocity.y = 0;
+          rock.velocity.x = -8; rock.velocity.y = 0;
           e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
           hits++;
           if (t.active && area(t.polygonPoints) < area0 - 1) { shed = true; break; }

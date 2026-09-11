@@ -5571,6 +5571,116 @@ export function projectileMassFor(cfg: { damage: number; speed: number; pierce?:
   return (2 * IMPACT_ENERGY_PER_DAMAGE * cfg.damage * budget) / (v * v);
 }
 
+/** Damage a body of `mass` carries at `speed`, in the authored-damage units
+ *  every consumer downstream already speaks (`bondStrength` per pixel, actor
+ *  HP pools, the §7 trait thresholds).  The projectile side reaches this
+ *  through `projectileBite`; the CRASH side calls it directly, which is the
+ *  whole of "weapons and collisions stop speaking two different physics". */
+export function kineticDamage(mass: number, speed: number): number {
+  return (0.5 * mass * speed * speed) / IMPACT_ENERGY_PER_DAMAGE;
+}
+
+// HOW MUCH OF A HULL'S ENERGY REACHES THE BONDS (unified impact physics,
+// step 4).  A collision is not a focused penetrator: most of the energy goes
+// into the rebound, and only a fraction is spent breaking the interfaces at
+// the contact.  That fraction is this constant, and it is the one number
+// step 4 adds.
+//
+// CALIBRATED ON ROCK, on purpose.  Rock's shipped ram count is the anchor —
+// 9 crashes at 6 u/step through a 54.4-HP tile, player mass 100, so 6.04
+// damage per crash out of 1800 KE — which fixes the coupling at 0.1075 and
+// leaves rock EXACTLY where it shipped.  Every other material then differs
+// by its own derived toughness rather than by an authored HP that meant
+// nothing to the grain model:
+//
+//   rock      54.4 derived ->  9 crashes (unchanged, the anchor)
+//   glass     49.4         ->  1         (the V9 whole-pane rule still wins)
+//   plastic  389.8         -> 65         (was 8 -- its authored HP was 8)
+//   metal    470.5         -> 78         (was 24..144, by DENSITY TIER)
+//
+// The metal line is the clearest statement of what this fixes: its ram count
+// used to be a tier lottery, because a crash spent one AUTHORED HP and
+// metal's authored HP is `24 x densityTier` while its derived HP is flat.
+// Six tiles of identical toughness took 24 to 144 rams.  Now they take 78.
+export const CRASH_ENERGY_COUPLING = 0.1075;
+
+/** DBG "Crash energy" — a MULTIPLIER over the calibrated coupling, applied
+ *  at the read so it re-tunes without a map reload, and index 0 is what
+ *  ships so the first click is the A/B.  This is the dial for how permeable
+ *  terrain is: the user's own lever for the same question is a material's
+ *  `bondStrength`, which moves one material where this moves all of them. */
+export const CRASH_ENERGY_CYCLE: ReadonlyArray<number> = [
+  1, 0.5, 0.25, 2, 4,
+] as const;
+const CRASH_ENERGY_DEFAULT_INDEX = 0;
+let activeCrashEnergyIndex = CRASH_ENERGY_DEFAULT_INDEX;
+
+export function getCrashEnergyMult(): number {
+  return CRASH_ENERGY_CYCLE[activeCrashEnergyIndex];
+}
+export function getCrashEnergyName(): string {
+  const v = CRASH_ENERGY_CYCLE[activeCrashEnergyIndex];
+  return activeCrashEnergyIndex === CRASH_ENERGY_DEFAULT_INDEX
+    ? `${v}x (def)` : `${v}x`;
+}
+export function cycleCrashEnergy(): number {
+  activeCrashEnergyIndex = (activeCrashEnergyIndex + 1) % CRASH_ENERGY_CYCLE.length;
+  return activeCrashEnergyIndex;
+}
+
+/** What a crash at `speed` between bodies of these masses is worth in
+ *  boundary damage.
+ *
+ *  REDUCED MASS (`reducedMass`, shared with `PhysicsSystem.payForCrash` so
+ *  the damage and the speed the impactor pays for it can never be computed
+ *  against different masses) is the right term, and the reason this is one
+ *  function rather than a player case and a shard case: `m1 m2 / (m1 + m2)` is the energy
+ *  actually available in a collision, and it degrades to the impactor's own
+ *  mass against a STATIC body (infinite mass) for free.  So a shard hitting a
+ *  wall spends all of its energy, and the same shard hitting a loose rock of
+ *  its own size spends half — which is what makes the two authored gates
+ *  (`CRASH_VELOCITY_THRESHOLD`, pure SPEED, and `SHARD_CRASH_MOMENTUM`, pure
+ *  MOMENTUM) collapse into one quantity. */
+export function getCrashCoupling(): number {
+  return CRASH_ENERGY_COUPLING * getCrashEnergyMult();
+}
+
+/** The energy a crash COSTS its impactor, in damage units, for `absorbed`
+ *  worth of bonds actually broken.
+ *
+ *  The inverse of the coupling, and the half of it that is easy to get wrong.
+ *  `CRASH_ENERGY_COUPLING` is an EFFICIENCY, not a tap: a hull that deposits
+ *  6 damage into a tile did not lose 6 damage worth of speed and keep the
+ *  rest — it lost all of what it spent, and only ~11% of that did useful
+ *  breaking work.  The remainder goes where a real collision puts it, into
+ *  rebound and deformation.
+ *
+ *  Charging only the absorbed part instead was measured and is badly wrong:
+ *  a ship at cruise then crossed FORTY-ONE rock tiles losing 3% a tile,
+ *  because a tile's whole bond budget is a rounding error against a hull's
+ *  kinetic energy.  With the efficiency paid, the same ship crosses ~3 and
+ *  is stopped outright by plastic or metal, which is the behaviour the step
+ *  exists to produce. */
+export function crashEnergyCost(absorbed: number): number {
+  const k = getCrashCoupling();
+  return k > 0 ? absorbed / k : absorbed;
+}
+
+export function reducedMass(massA: number, massB: number): number {
+  const a = massA === Infinity ? Infinity : Math.max(1e-6, massA);
+  const b = massB === Infinity ? Infinity : Math.max(1e-6, massB);
+  if (a === Infinity && b === Infinity) return 0;
+  if (a === Infinity) return b;
+  if (b === Infinity) return a;
+  return (a * b) / (a + b);
+}
+
+export function crashDamageFor(massA: number, massB: number, speed: number): number {
+  const mu = reducedMass(massA, massB);
+  if (!(mu > 0)) return 0;
+  return kineticDamage(mu, speed) * getCrashCoupling();
+}
+
 /** The damage one hit lands: the shot's authored figure scaled by the square
  *  of the speed it is being measured at against the speed it launched with.
  *  Quadratic because damage is kinetic — that IS the falloff, and there is no

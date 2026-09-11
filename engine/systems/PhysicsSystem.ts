@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, MAX_PIERCE, PROJECTILE_CONSTANTS, projectileBite, speedAfterSpending, getActiveImpactVelocityMode } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, MAX_PIERCE, PROJECTILE_CONSTANTS, projectileBite, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
 import { nebulaDampingFor, nebulaSpinDampingFor } from '../../constants';
 import { pointInPolygon } from './fracture';
@@ -2461,6 +2461,57 @@ export class PhysicsSystem {
   }
 
   /**
+   * THE IMPACTOR PAYS FOR WHAT IT BROKE (unified impact physics, step 4).
+   *
+   * Takes the energy that breaking `absorbed` worth of bonds COST out of the
+   * impactor's velocity ALONG THE CONTACT NORMAL — `crashEnergyCost`, i.e.
+   * the absorbed damage divided by the coupling EFFICIENCY, not the absorbed
+   * damage itself.  See that function for the measurement that settles it — the same `speedAfterSpending` a bolt uses, so a hull and
+   * a bolt give up speed by one rule.  Normal-only rather than a scale of the
+   * whole vector, because a glancing blow should keep its tangential speed:
+   * the energy went into the bonds it actually met.
+   *
+   * This REPLACES `STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION` on the
+   * destructive path.  The flat 0.65 took the same 35% whatever was struck,
+   * which is the defect step 4 exists to remove — measured, a ship from
+   * cruise crossed five tiles decaying 21.6 -> 14.1 -> 9.1 -> 5.9 -> 3.9
+   * IDENTICALLY for glass, rock and metal, destroying all five glass panes
+   * and not scratching the metal.
+   *
+   * STATIC bodies are not exempt: an infinite mass contributes nothing to the
+   * reduced mass, so the impactor simply brought all the energy and pays all
+   * of it.  What IS skipped is a body that absorbed nothing.
+   */
+  private static payForCrash(
+      impactor: GameEntity, target: GameEntity, nx: number, ny: number, absorbed: number,
+  ): void {
+      if (!(absorbed > 0)) return;
+      const v = impactor.velocity;
+      if (v === undefined) return;
+      const vn = v.x * nx + v.y * ny;
+      const speed = Math.abs(vn);
+      if (!(speed > 0)) return;
+      // The SAME reduced mass `crashDamageFor` priced the hit with — shared
+      // rather than re-derived, or the impactor could be charged against a
+      // different mass than the damage was computed from.  Exact in the
+      // dominant case (a static target, where it degrades to the impactor's
+      // own mass and `speed` is simply its speed); against a MOBILE target it
+      // applies the whole relative-velocity change to the impactor, with the
+      // struck body's share arriving separately as the momentum transfer the
+      // crash sites already do.
+      const mu = reducedMass(impactor.mass, target.mass);
+      if (!(mu > 0)) return;
+      const after = speedAfterSpending(mu, speed, crashEnergyCost(absorbed));
+      const dv = speed - after;
+      if (!(dv > 0)) return;
+      // vn < 0 means the impactor is closing along the normal, so shedding
+      // speed means moving its normal component toward zero from below.
+      const sign = vn < 0 ? 1 : -1;
+      v.x += nx * dv * sign;
+      v.y += ny * dv * sign;
+  }
+
+  /**
    * Spend a CRASH on the target's grain boundaries — the same mechanism a
    * weapon hit and the bubble's bite use, so a crushed tile cracks and sheds
    * grains the way a shot one does.
@@ -2471,19 +2522,20 @@ export class PhysicsSystem {
    * a body outright, because it is the chip path — the crash paths MUST still
    * destroy it, so every caller falls back to the whole-body decrement.
    *
-   * HOW MUCH a crash spends is deliberately NOT kinetic.  Making impact
-   * damage an energy is step 3 of the unified-impact sequencing
-   * (docs/PARKING_LOT.md) and re-prices the whole weapon roster; this step is
-   * routing only.  So a crash spends the SAME FRACTION OF THE BODY it always
-   * did — one authored HP, expressed in the derived boundary budget the model
-   * replaced it with (`derived / authored`).  That keeps "how many crashes
-   * break this tile" exactly what it shipped as, and removes the defect that
-   * motivated the change: because the crash paths decremented `health`
-   * directly while the first weapon hit rewrote `maxHealth` to the derived
-   * total, SHOOTING A TILE ONCE used to make it 4-50x harder to ram through
-   * (measured, `perf/impact-audit.mjs` §5: rock 9 -> 50 crashes, plastic
-   * 8 -> 400, metal 120 -> 468).  Nothing about the tile got tougher; the
-   * unit it was counted in changed.
+   * HOW MUCH a crash spends is KINETIC (step 4).  `crashDamageFor` converts
+   * the REDUCED-MASS kinetic energy of the contact through the same
+   * `IMPACT_ENERGY_PER_DAMAGE` a weapon hit uses, scaled by
+   * `CRASH_ENERGY_COUPLING` — a collision is not a focused penetrator, so
+   * only a fraction of a hull's energy reaches the bonds.
+   *
+   * Step 2 deliberately spent one AUTHORED HP here instead, to keep every ram
+   * count exactly what it shipped as while the routing changed.  That was the
+   * documented seam this replaces, and it had a defect of its own: a crash
+   * spent `derived / authored`, so metal — whose authored HP is
+   * `24 x densityTier` while its derived HP is flat — took 24 to 144 rams
+   * across six tiles of IDENTICAL toughness.  Energy never consults an
+   * authored number, so that lottery is gone.  Rock is the calibration
+   * anchor and is unchanged at 9; see CRASH_ENERGY_COUPLING for the rest.
    *
    * `whole` is the glass rule (V9), unchanged in meaning: its damage layer
    * meters WEAPON hits, and a hull or a boulder over the crash threshold
@@ -2491,13 +2543,20 @@ export class PhysicsSystem {
    * boundary budget rather than a bypass, so the pane still dies THROUGH the
    * grain model and shatters along the cells its cracks were drawn from.
    */
-  private static crashBoundaryDamage(structure: GameEntity, contact: Vector2, whole: boolean): boolean {
+  private static crashBoundaryDamage(
+      structure: GameEntity, contact: Vector2, whole: boolean, damage: number,
+  ): number | null {
       // Stamp BEFORE the model is built: the pattern's impact bias is read at
       // cell-build time (V12), so a stamp afterwards biases nothing.
       stampLocalImpact(structure, contact);
-      if (ensureBoundaryModel(structure) === null) return false;
-      const authored = Math.max(1, structure.authoredMaxHealth ?? structure.maxHealth ?? 1);
-      const unit = (structure.maxHealth ?? 0) / authored;
+      if (ensureBoundaryModel(structure) === null) return null;
+      const unit = Math.max(0, damage);
+      // READ THE BUDGET AFTER THE MODEL IS BUILT.  `ensureBoundaryModel`
+      // rewrites `health` from the authored spawn value to the DERIVED
+      // boundary total, so a budget read by the CALLER beforehand is the
+      // stale number — measured, that charged a hull against plastic's
+      // authored 8 instead of its derived 390 and let a ship at cruise grind
+      // through twenty-three plastic tiles without breaking one of them.
       const budget = structure.health ?? 0;
       // THE LAST CRASH OVERSPENDS, on purpose.  `spendOnBoundaries`
       // saturates each boundary exactly and returns only what it could
@@ -2508,7 +2567,11 @@ export class PhysicsSystem {
       // reads false, costing one phantom extra ram.
       const spend = (whole || budget <= unit * (1 + 1e-9)) ? budget + 1 : unit;
       applyBoundaryDamage(structure, spend);
-      return true;
+      // What the body could actually TAKE, which is what the impactor pays
+      // for.  The last spend deliberately overshoots to land on a clean zero
+      // (see above), and a hull must not be charged for bonds that were not
+      // there to break.
+      return Math.min(spend, Math.max(0, budget));
   }
 
   /**
@@ -3842,9 +3905,6 @@ export class PhysicsSystem {
                       if (!applyBoundaryDamage(target, projDmg)) {
                           target.health -= isHitCounted ? 1 : projDmg;
                       }
-                      // One body, one spend — and the bolt pays for it in
-                      // speed, so a shot that pierces on arrives weaker.
-                      PhysicsSystem.spendProjectileEnergy(proj, projMass, projDmg);
                   }
                   // Dent-policy entities deform on every damage event,
                   // even the killing blow — the spawned mobile shard
@@ -4022,6 +4082,18 @@ export class PhysicsSystem {
               // were each half-describing; both are deleted.  The bore has
               // already paid per grain, so only the single-spend path pays
               // here.
+              //
+              // IT PAYS *HERE*, AFTER THE KNOCKBACK ABOVE, AND THAT ORDER IS
+              // LOAD-BEARING.  Momentum is imparted at CONTACT, at the
+              // incoming velocity; the energy is spent passing through.
+              // Paid earlier, the spend rewrites `proj.velocity` — which
+              // every momentum consumer above reads for its DIRECTION — so a
+              // bolt whose bite happened to exhaust its bank delivered a
+              // knockback of exactly zero.  Measured: every enemy in the
+              // knockback suite stopped moving, mass ordering and all.
+              if (boredSteps === 0) {
+                  PhysicsSystem.spendProjectileEnergy(proj, projMass, projDmg);
+              }
               // Still impart momentum impulse even when piercing
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;
@@ -4257,6 +4329,11 @@ export class PhysicsSystem {
               // Δp lands on the shard — so a killed rock's fragments
               // inherit real forward velocity instead of scattering
               // from rest, and a survivor gets knocked downrange.
+              // MOMENTUM to the struck body is unchanged — that is a
+              // separate quantity from the energy spent on its bonds, and it
+              // is what gives a knocked shard its downrange velocity.  What
+              // the PLAYER loses is no longer this flat retention; see the
+              // energy spend below.
               let retention = STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
               if (structure.mass !== Infinity) {
                   const lossFrac = (1 - retention)
@@ -4266,8 +4343,6 @@ export class PhysicsSystem {
                   structure.velocity.x += player.velocity.x * dvFactor;
                   structure.velocity.y += player.velocity.y * dvFactor;
               }
-              player.velocity.x *= retention;
-              player.velocity.y *= retention;
               structure.hitFlash = 0.1;
               if (isIndestructible || structure.dragonSegment === true) {
                   // Permanent wall — OR a dragon body segment, which only breaks
@@ -4287,9 +4362,21 @@ export class PhysicsSystem {
               // decrement this always was.
               const crashWhole = structure.shardVariant === 'glass-tile';
               const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
-              if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
-                  structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+              // THE HULL BRINGS ENERGY, AND PAYS FOR WHAT IT BREAKS (step 4).
+              // The flat CRASH_VELOCITY_RETENTION above used to take 35% of
+              // the ship's speed whatever it hit — measured, a ship from
+              // cruise crossed 5 tiles decaying through identical speeds
+              // whether they were glass, rock or metal, the last of which it
+              // could not even scratch.  Now the spend and the speed loss are
+              // the same number, so crossing metal costs what metal costs.
+              const crashDmg = crashDamageFor(player.mass, structure.mass, impactSpeed);
+              let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole, crashDmg);
+              if (absorbed === null) {
+                  const raw = crashWhole ? Math.max(1, structure.health) : 1;
+                  structure.health -= raw;
+                  absorbed = raw;
               }
+              PhysicsSystem.payForCrash(player, structure, nx, ny, absorbed);
               PhysicsSystem.applyDentStep(structure, player.position);
               // A crash is a hit too — let rock break early on the same
               // rising-odds roll as a blaster shot (no-op for other tiles).
@@ -4381,9 +4468,14 @@ export class PhysicsSystem {
                   // the player-crash site above — one mechanism, two callers.
                   const crashWhole = structure.shardVariant === 'glass-tile';
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
-                  if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
-                      structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+                  const crashDmg = crashDamageFor(asteroid.mass, structure.mass, impactSpeed);
+                  let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole, crashDmg);
+                  if (absorbed === null) {
+                      const raw = crashWhole ? Math.max(1, structure.health) : 1;
+                      structure.health -= raw;
+                      absorbed = raw;
                   }
+                  PhysicsSystem.payForCrash(asteroid, structure, nx, ny, absorbed);
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
                   if (structure.health <= 0) {
@@ -4423,9 +4515,24 @@ export class PhysicsSystem {
                   // still "dies in one" pressure trigger (V9).
                   const crashWhole = structure.shardVariant === 'glass-tile';
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
-                  if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
+                  // PRESSURE SPENDS WHAT THE WHOLE ACCUMULATOR BROUGHT, not
+                  // what its last nudge did.  The trigger IS the sum of
+                  // `TILE_PRESSURE_HITS` sub-threshold contacts, and charging
+                  // only the final one would make the mechanic nearly inert
+                  // under an energy spend: a 40-mass shard at half the old
+                  // gate carries ~0.4 damage against a 54-HP rock tile, so a
+                  // trigger that used to cost a full authored HP would need
+                  // well over a hundred of them.  This is the one crash site
+                  // whose damage is an accumulation rather than an impact.
+                  const crashDmg = crashDamageFor(asteroid.mass, structure.mass, impactSpeed)
+                      * STRUCTURE_CONSTANTS.TILE_PRESSURE_HITS;
+                  if (PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole, crashDmg) === null) {
                       structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
                   }
+                  // Pressure keeps its OWN damping rather than `payForCrash`:
+                  // the nudges that built the accumulator already each paid
+                  // through the ordinary bounce, so charging the energy again
+                  // at the trigger would bill the same contacts twice.
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);

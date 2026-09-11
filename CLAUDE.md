@@ -2791,6 +2791,71 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   drawn from.  Score attribution is untouched — `killedByPlayer` is still
   set only by the player's own crash, so ambient destruction pays
   nothing.
+- **A CRASH SPENDS ITS KINETIC ENERGY, AND THE IMPACTOR PAYS FOR WHAT IT
+  BROKE** (unified impact physics, step 4; `PhysicsSystem.crashDamageFor` /
+  `payForCrash` / `crashEnergyCost`).  Step 2 routed the crash paths through
+  `applyBoundaryDamage` but had them spend one AUTHORED HP, as a deliberate
+  seam until the roster question was settled; step 3 settled it, so a crash
+  now spends `crashDamageFor(massA, massB, |velAlongNormal|)` — the same
+  `IMPACT_ENERGY_PER_DAMAGE` a weapon hit uses, scaled by
+  `CRASH_ENERGY_COUPLING`.  Twice the closing speed is FOUR times the bite.
+  Five things hold it up, and three of them were measured into place:
+  - **REDUCED MASS is why this is one function** rather than a player case
+    and a shard case.  `m1 m2 / (m1 + m2)` is the energy actually available
+    in a contact and degrades to the impactor's own mass against a STATIC
+    body for free — which is what collapses the two authored gates that
+    disagreed about what a gate even was (`CRASH_VELOCITY_THRESHOLD`, pure
+    SPEED, so a 3× heavier outfitted ship crossed at the same 4 u/step, and
+    `SHARD_CRASH_MOMENTUM`, pure MOMENTUM, which spanned 43→2747 energy over
+    the live shard population).
+  - **THE COUPLING IS AN EFFICIENCY, NOT A TAP.**  A hull that deposits 6
+    damage did not lose 6 damage worth of speed and keep the rest; it lost
+    all of what it spent and only ~11% did useful breaking work, the
+    remainder going where a real collision puts it.  `crashEnergyCost`
+    divides by the coupling for exactly this reason, and charging only the
+    absorbed part instead was measured and badly wrong: a ship at cruise
+    crossed FORTY-ONE rock tiles losing 3% a tile, because a tile's whole
+    bond budget is a rounding error against a hull's kinetic energy.
+  - **IT IS CALIBRATED ON ROCK, whose ram count is unchanged at 9**, so the
+    anchor is a number someone played rather than one chosen here.  Every
+    other material then differs by its own DERIVED toughness instead of by
+    an authored HP: glass 1 (its V9 whole-pane rule still wins), plastic 8 →
+    65, metal 24..144 → 78.  That metal line is the clearest statement of
+    what this fixes — the old count was a DENSITY-TIER LOTTERY, because a
+    crash spent one authored HP and metal authors `24 × densityTier` against
+    a FLAT derived HP, so six tiles of identical toughness took 24 to 144
+    rams.  `perf/impact-audit.mjs` §5b measures the column that proves it
+    flat.
+  - **THE BUDGET IS READ AFTER THE MODEL IS BUILT.**  `ensureBoundaryModel`
+    rewrites `health` from the authored spawn value to the derived total, so
+    a budget the CALLER read beforehand is the stale one —
+    `crashBoundaryDamage` therefore RETURNS what was absorbed rather than a
+    boolean.  Measured with the caller reading it early: a ship charged
+    against plastic's authored 8 instead of its derived 390 ground through
+    twenty-three plastic tiles without breaking one.
+  - **THE SPEED LOSS IS ALONG THE CONTACT NORMAL**, and it REPLACES
+    `STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION` on the destructive path.
+    The flat 0.65 took the same 35% whatever was struck, which is the defect
+    this step exists to remove: measured, a ship from cruise crossed five
+    tiles decaying 21.6 → 14.1 → 9.1 → 5.9 → 3.9 **identically for glass,
+    rock and metal** — destroying all five glass panes, not scratching the
+    metal, and unable to tell the difference.  It now crosses 4 glass
+    (all destroyed) or 4 rock (3 destroyed) and is stopped DEAD inside the
+    first plastic or metal tile.  Momentum to the struck body is untouched:
+    that is a separate quantity, and it is what gives a knocked shard its
+    downrange velocity.
+  PRESENTATION IS NOT RE-DERIVED — shake, audio gain and rumble still come
+  from `impactStrength` alone, so how hard a hit reads to the eye and to the
+  ear cannot drift from each other or from this.  TILE PRESSURE is the one
+  site that spends an ACCUMULATION rather than an impact: it charges
+  `TILE_PRESSURE_HITS` × the nudge, because the trigger IS the sum of that
+  many sub-threshold contacts and billing only the last one would make the
+  mechanic inert (a 40-mass shard at half the old gate carries ~0.4 damage
+  against a 54-HP rock tile).  It keeps its own damping rather than
+  `payForCrash`, since those contacts each already paid through the ordinary
+  bounce.  DBG ▸ Player ▸ "Crash energy" is the permeability dial (a
+  multiplier over the coupling, index 0 ships); a material's own
+  `bondStrength` is the same question asked of one material.
 - **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
   "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
   the body-level penetration rule spent one charge to carry a bolt through

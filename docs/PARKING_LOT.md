@@ -2339,7 +2339,14 @@ area), which is precisely the physical constant this wants.  The proposal:
   three grains is slower, so its next bite is smaller, automatically and
   with the right curve.  `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
   collapse into one another and then into nothing.
-- **The player bores terrain by the same routine.**  `borePierceTrack`
+- ~~**The player bores terrain by the same routine.**~~  **DELIVERED in
+  SUBSTANCE, not in form (step 4, §10).**  The user's point was that a hull
+  should behave like a piercing bolt, and it now does in the way that
+  mattered: it spends kinetic energy on grain boundaries and pays for what it
+  breaks.  What it does NOT yet do is deposit along a CHORD — that is the
+  parked bore-track entry, and it is a geometry question rather than an
+  arithmetic one.
+  The original framing:  `borePierceTrack`
   already walks a chord in a body's local frame at `grainSize` steps; a hull
   sweeping through a tile is the same walk with a different energy budget
   and a wider track.  A fast heavy ship ploughs a channel and slows; a slow
@@ -2388,8 +2395,13 @@ PR.  The honest sequencing:
    speed retain~~ — **SHIPPED (2026-09-11)**, see §9 below.  §7's warning
    that "the implied conversion constant is not a constant" turned out to be
    an artefact of `PROJECTILE_CONSTANTS.MASS`, not a property of the roster.
-4. **Give hulls a bore track**, which is when the user's first point is
-   actually delivered.  Not started.
+4. ~~**Give hulls a bore track**~~ — **SHIPPED (2026-09-11) as an energy
+   spend rather than a track**, see §10 below.  The measurement changed what
+   this step had to be: a hull ALREADY passes through terrain, so what was
+   missing was not passage but that the speed it lost had nothing to do with
+   what it broke.  A per-grain hull track is still open, and is now purely a
+   DEPOSITION-GEOMETRY question — see the "Penetration bore tracks as a
+   FRACTURE MODEL" entry, which is where it belongs.
 5. **Revisit `pierceCount`** last, since removing a budget changes what the
    Penetration module *is*.  Not started.
 
@@ -2572,4 +2584,48 @@ broken**: from cruise, a ship crosses 5 tiles and decays 21.6 → 14.1 → 9.1 �
 metal (470 derived HP) loses none, and the ship cannot tell the difference.
 Step 4 is making that speed loss equal the energy actually spent, not adding
 passage.
+
+### 10. What step 4 SHIPPED (2026-09-11)
+
+**A crash spends its KINETIC energy**, through the same
+`IMPACT_ENERGY_PER_DAMAGE` a weapon hit uses, scaled by a new
+`CRASH_ENERGY_COUPLING`.  Twice the closing speed is four times the bite.
+Step 2's "one authored HP" was the documented seam this replaces.
+
+**REDUCED MASS collapses the two gates.**  `m1 m2 / (m1 + m2)` is the energy
+available in a contact and degrades to the impactor's own mass against a
+static body, so the SPEED gate and the MOMENTUM gate stop being two different
+ideas of what a gate is.
+
+**The coupling is an EFFICIENCY, not a tap**, and this is the thing that was
+got wrong first.  A hull that deposits 6 damage does not lose 6 damage worth
+of speed and keep the rest — it loses all of what it spent, and only ~11% of
+that does useful breaking work.  Charging only the absorbed part was measured:
+a ship at cruise crossed **41 rock tiles** losing 3% a tile.
+
+**Calibrated on ROCK, unchanged at 9 rams**, so the anchor is a played number.
+Everything else then differs by derived toughness: glass 1 (V9), plastic
+8 → 65, metal **24..144 → 78**.  Metal is the headline — its old count was a
+density-tier lottery, six tiles of identical toughness taking 24 to 144 rams,
+because a crash spent one authored HP and metal authors `24 × densityTier`
+against a flat derived HP.
+
+**The defect, measured before and after.**  From cruise, a ship used to cross
+five tiles decaying 21.6 → 14.1 → 9.1 → 5.9 → 3.9 IDENTICALLY for glass, rock
+and metal.  It now crosses 4 glass (all destroyed) or 4 rock (3 destroyed),
+and is stopped DEAD inside the first plastic or metal tile.
+
+**Two bugs worth keeping**, both found by measurement rather than review: the
+budget must be read AFTER `ensureBoundaryModel` rewrites `health` (reading it
+early charged a hull against plastic's authored 8 instead of its derived 390,
+and let a ship grind through 23 plastic tiles breaking none), and the energy
+must be spent AFTER the knockback, because every momentum consumer reads
+`proj.velocity` for its direction — paid earlier, a bolt whose bite exhausted
+its bank delivered a knockback of exactly zero, which took out the whole
+knockback suite.
+
+**What is NOT done**: the hull deposits at one contact point, not along a
+chord.  A per-grain hull track — and whether a wide track should free several
+grains as ONE fragment — stays parked under "Grain clusters" and "Penetration
+bore tracks as a FRACTURE MODEL".
 

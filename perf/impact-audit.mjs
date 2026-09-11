@@ -427,9 +427,10 @@ for (const c of crashCounts) {
 }
 
 console.log('\n=== 5b. THE SAME TILE, EVERY AUTHORED TIER (what the conversion costs) ===\n');
-console.log('A crash spends ONE AUTHORED HP expressed in the derived budget, so a');
-console.log('material whose authored HP is tiered has a tiered ram count — while its');
-console.log('DERIVED HP, which is what the grain model calls toughness, does not move.\n');
+console.log('Step 4 made a crash spend ENERGY, so the authored HP is no longer read at');
+console.log('all and this column should be FLAT per material.  It was not: a crash used');
+console.log('to spend one authored HP, and metal authors 24 x densityTier against a flat');
+console.log('derived HP, so six tiles of identical toughness took 24..144 rams.\n');
 console.log('material   authored   crashes   derived HP   KE per derived HP');
 {
   const CRASH_V = 6, PM = crashes.playerMass;

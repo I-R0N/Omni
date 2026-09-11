@@ -2019,6 +2019,7 @@ export interface EngineStats {
   shardCoatName?: string;
   // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
   impactVelocityName?: string;
+  crashEnergyName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
