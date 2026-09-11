@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run test:smoke",
     "test:smoke": "playwright test tests/boot.spec.ts tests/loop.spec.ts",
-    "test:full": "playwright test"
+    "test:full": "playwright test",
+    "test:audio": "playwright test tests/audio.spec.ts"
   },
   "dependencies": {
     "react": "^19.2.0",

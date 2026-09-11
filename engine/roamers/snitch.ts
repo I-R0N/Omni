@@ -52,7 +52,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
   }
 
   const s = g.snitch;
-  if (!s || !s.active) return;
+  if (!s || !s.active) { g.audio.loop('snitch.near', false); return; }
 
   // ── Burst/coast AI ──────────────────────────────────────────────────
   // The snitch is interactive prey, not a constant-speed rail rider:

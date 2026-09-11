@@ -1355,6 +1355,7 @@ export class GameEngine {
     if (this.gameState === GameState.PLAYING && !this.dockedAtStation
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
+        this.audio.setActive(false);
         this.audio.play('ui.back');
     }
   }
@@ -1704,6 +1705,7 @@ export class GameEngine {
   }
 
   public restartGame() {
+      this.audio.stopScene(true);
       // Returning to the main menu returns to the DEFAULT map: a run always
       // begins on the OVERWORLD hub (user call).  The menu no longer offers a
       // map choice — picking one is a DEBUG override that lasts for the run it
@@ -2494,6 +2496,7 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
       audio: {
+        sfxVolume: this.audio.sfxVolume, musicVolume: this.audio.musicVolume,
         volume: this.audio.volume, muted: this.audio.muted,
         state: this.audio.contextState, audible: this.audio.audible,
         drafts: this.audio.draftsEnabled,
@@ -3891,7 +3894,11 @@ export class GameEngine {
     if (this.currentMap) {
       const waveCtx = this.waveContext();
       if (waveCtx) {
+        const previousWave = this.waves.waveIndex;
+        const grace = this.waves.waveGraceTimer;
         this.waves.update(dt, waveCtx, this.handleWaveCleared);
+        if (this.waves.waveIndex !== previousWave) this.audio.play('wave.start');
+        else if (grace > 1 && this.waves.waveGraceTimer <= 1 && this.waves.waveGraceTimer > 0) this.audio.play('wave.grace');
       }
     }
 
@@ -4803,6 +4810,7 @@ export class GameEngine {
     if (this.gameState !== GameState.PLAYING) return false;
     if (this.dockedAtStation || !this.nearestStation || this.player.isExploding) return false;
     this.dockedAtStation = true;
+    this.audio.setActive(false);
     this.dockedStation = this.nearestStation;
     this.audio.play('poi.dock');
     this.player.velocity.x = 0;
@@ -6412,7 +6420,7 @@ export class GameEngine {
       this.scanPingRadius = 0.0001;
       this.scanPingMax = max;
       this.scanCooldown = SCANNER.COOLDOWN_SEC;
-      this.audio.play('ui.confirm');
+      this.audio.play('ability.scan');
       return true;
   }
 
@@ -7042,6 +7050,7 @@ export class GameEngine {
     // arena's own wave counter still restarts at 1 for the HUD.
     this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
     this.waves.init(ctx, this.wavesEnabled);
+    if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
 
 
@@ -7126,6 +7135,7 @@ export class GameEngine {
   }
 
   private loadMap(map: BaseMapLayer) {
+      this.audio.stopScene();
       // Push the new map's dimensions into the shared toroidal module
       // BEFORE the map initialises or any system rebuilds its static
       // state — initializeStaticGrid, initObstacles, buildShardFlowField
