@@ -29,7 +29,8 @@ import {
     NEBULA_CONSTANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS,
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
-    cycleNebulaPalette, cycleNebulaStretch, togglePlasticAutomataBrighten,
+    cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
+    cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
@@ -37,7 +38,7 @@ import {
     MODULE_SLOT_UNLOCK, cycleMinimapMaterial, cycleRockPalette, cycleFractureMode, cycleNebulaWakeSpin, cycleLightingMode, cycleLightingTier,
     cycleFractureRelax, cycleFractureSeparation, cycleFractureSiteScale, cycleFractureBias,
     cycleGrainMaterial, cycleGrainKnob, resetGrainOverrides, type GrainKnob,
-    cycleDamageSpread,
+    cycleDamageSpread, cycleChipDustPool,
     cycleBoundaryStrength,
     toggleShardShadows, cycleShadowSoftness, toggleRefraction, cycleRefractBrightness,
     cycleLightBrightness, toggleEmissive, cycleEmitBrightness, toggleEmitShadows,
@@ -447,6 +448,16 @@ export class DebugControls {
     cycleDamageSpread();
   }
 
+  /** DBG (Grain & Fracture): step how many chips' worth of dust bank into
+   *  one puff.  Pooling banks AREA, so the step moves the puff's size and
+   *  its frequency together — sqrt(N) bigger, 1/N as often — which is the
+   *  "larger, less frequently" the per-chip speck it replaced could not
+   *  give.  Read at the detach seam, so a click lands on the next chip off
+   *  any body, including one already half broken. */
+  cycleChipDustPool() {
+    cycleChipDustPool();
+  }
+
   cycleGrainMaterial() {
     cycleGrainMaterial();
   }
@@ -790,6 +801,83 @@ export class DebugControls {
    */
   cycleNebulaStretch() {
     cycleNebulaStretch();
+  }
+
+  /**
+   * DBG: how fast a nebula shard bleeds off speed (NEBULA_DAMP_CYCLE).
+   *
+   * A multiplier on the per-step velocity LOSS, applied where PhysicsSystem
+   * reads the damping factor — so a click slows every puff already drifting,
+   * not just the next shatter.  Nebula-only: the damping fields are generic
+   * and other shard families set them too.
+   */
+  cycleNebulaDamp() {
+    cycleNebulaDamp();
+  }
+
+  /**
+   * DBG: how fast a nebula shard bleeds off SPIN (NEBULA_SPIN_DAMP_CYCLE).
+   *
+   * Separate from `cycleNebulaDamp` because the two answer different
+   * complaints — linear drag decides how far a puff travels after a kick,
+   * spin decay decides how long it tumbles where it sits — and a cloud that
+   * slides to a halt while still pinwheeling can only be diagnosed by moving
+   * them apart.  Step 0 (`match`) defers to the linear knob, which is the
+   * shipped behaviour, so an untouched build is unchanged.
+   */
+  cycleNebulaSpinDamp() {
+    cycleNebulaSpinDamp();
+  }
+
+  /**
+   * DBG: how hard a touching pair of nebula shards grips (NEBULA_BOND_CYCLE).
+   *
+   * Named steps rather than one number, because three terms have to move
+   * together to produce a readable behaviour: the cohesion blend rate (does
+   * the pair come to a shared velocity), the break distance (does the bond
+   * survive), and an inner range inside which the self-gravity stops pulling
+   * so cohesion is not fighting it at contact — the last being the trick
+   * plastic already carries and nebula never had.  'strong' is plastic's own
+   * shipped pair, so the two materials can be compared at the same grip.
+   */
+  /** Returns the new ladder INDEX.  A caller that needs to land on a
+   *  specific step cannot read `__omniStats` to check: the readout arrives
+   *  on the next stats push, so a synchronous loop over it never sees its
+   *  own clicks (measured — it wraps the ladder and lands back where it
+   *  started).  The index is the only answer available in the same tick,
+   *  and `perf/capture.mjs`'s `nebbondoff` ablation is what needs it. */
+  cycleNebulaBond(): number {
+    return cycleNebulaBond();
+  }
+
+  /**
+   * DBG: stop the scanner's periodic work AND reveal the whole map.
+   *
+   * A perf A/B rather than a gameplay knob — `discoverStructures` walks a
+   * 900-unit radius of the static grid plus the entire mobile-shard list on
+   * the `discover` cadence, and that is the first thing to take away when a
+   * frame-rate report points at scanning.  The reveal half is what makes the
+   * measurement usable: without it you would be measuring a blind map.
+   */
+  toggleScanReveal() {
+    this.g.toggleScanReveal();
+  }
+
+  /**
+   * Cycle how far a nebula sprite overhangs the body it belongs to
+   * (NEBULA_SPRITE_CYCLE) — a MULTIPLIER over the authored
+   * NEBULA_CONSTANTS.SPRITE_OVERSIZE, so the constant stays the
+   * statement of how oversized a puff is and this is the live A/B on it.
+   *
+   * It exists because tying the sprite to the body's own size changed
+   * how much cloud a shatter leaves behind (a tile used to hand back
+   * three FULL-tile sprites; it now hands back pieces that add up to
+   * about one), and that is a judgement to make on a screen.  Both
+   * render sites read `nebulaSpriteSize` fresh each frame, so a click
+   * lands immediately on every cloud already in the world.
+   */
+  cycleNebulaSpriteSize() {
+    cycleNebulaSpriteSize();
   }
 
   /**

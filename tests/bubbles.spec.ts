@@ -395,7 +395,19 @@ test.describe('A2 — a bubble is a body, not a wall', () => {
  *  CONTACT, and an ambient bubble drifts — a lapse reads as "it declined to
  *  eat", which is the thing under test.  The pin sits WELL INSIDE contact
  *  rather than just touching it: the sim runs several substeps per animation
- *  frame, so a 2-unit margin (this had one) lapses between pins under load. */
+ *  frame, so a 2-unit margin (this had one) lapses between pins under load.
+ *
+ *  ON A TILE THE SUBJECT IS THE NEIGHBOURHOOD, NOT ONE TILE — and that is a
+ *  measured fix, not a widened assertion.  `biteNearbyTile` bites the NEAREST
+ *  biteable tile, and on a hex field a parked bubble is in contact with
+ *  several at once; which one is nearest flips as the solver nudges the
+ *  bubble between pins.  So the tile this function happened to pick first
+ *  won roughly one bite cycle in thirteen (measured: one 3-damage bite landed
+ *  on it after 15.5 s of a 30 s window, while its neighbours took the rest),
+ *  and the test failed 6-7 runs in 10 for a reason that was never about the
+ *  bite.  Watching every tile in contact asserts exactly the claim the test
+ *  makes — a bubble can gnaw terrain it cannot swallow — with no coin flip
+ *  in it. */
 function feed(page: any, opts: { pick: 'biggest-shard' | 'tile'; watchSec: number }) {
   return engine(page, async (e: any, o: any) => {
     const area = (pts: any[]) => {
@@ -434,26 +446,46 @@ function feed(page: any, opts: { pick: 'biggest-shard' | 'tile'; watchSec: numbe
     const targD = Math.max(target.size.x, target.size.y);
     const standoff = targD * 0.5;                   // deep contact, +x face
     const area0 = area(target.polygonPoints);
+    const parkX = target.position.x + standoff, parkY = target.position.y;
+
+    // Every tile the parked bubble is in contact with — the subject on a hex
+    // field (see the note above).  A single body stays a single subject.
+    const watched: any[] = [target];
+    if (o.pick === 'tile') {
+      for (const t of e.currentMap.entities) {
+        if (t === target || !t.active || t.mass !== Infinity || !t.shardVariant) continue;
+        const dx = t.position.x - parkX, dy = t.position.y - parkY;
+        if (Math.hypot(dx, dy) <= targD * 1.5) watched.push(t);
+      }
+    }
+    const firstBitten = () => {
+      for (const t of watched) if (absorbed(t) > 0) return t;
+      return null;
+    };
 
     const t0 = e.runTimeSec;
-    let bitten = false, armed = false;
+    let armed = false;
+    let hit: any = null;
     while (e.runTimeSec - t0 < o.watchSec) {
-      b.position.x = target.position.x + standoff; b.position.y = target.position.y;
+      b.position.x = parkX; b.position.y = parkY;
       b.velocity.x = 0; b.velocity.y = 0;
       if (target.mass !== Infinity) { target.velocity.x = 0; target.velocity.y = 0; }
-      if (!target.active) break;                      // eaten or broken outright
+      if (!target.active && o.pick !== 'tile') break;  // eaten or broken outright
       if ((b.bubbleBiteTimer ?? 0) > 0) armed = true;
       // Damage ABSORBED ON THE GRAIN BOUNDARIES is the honest read that a bite
       // landed.  Raw `health` is not: the boundary model converts authored HP
       // to the derived total on the FIRST damage, so a bitten body's health
       // JUMPS (measured 12 -> 183 on a rock shard) before it ever falls.
-      if (absorbed(target) > 0) { bitten = true; break; }
+      hit = firstBitten();
+      if (hit !== null) break;
       await new Promise(r => requestAnimationFrame(() => r(null)));
     }
+    const subject = hit ?? target;
     return {
-      built: true, bubD, targD, variant: target.shardVariant,
-      targetGone: !target.active, bitten, armed,
-      absorbed: absorbed(target), area0, areaNow: area(target.polygonPoints),
+      built: true, bubD, targD, variant: subject.shardVariant,
+      targetGone: !subject.active, bitten: hit !== null, armed,
+      watched: watched.length,
+      absorbed: absorbed(subject), area0, areaNow: area(target.polygonPoints),
       digesting: (b.bubbleDigestTimer ?? 0) > 0,
       elapsed: e.runTimeSec - t0,
     };

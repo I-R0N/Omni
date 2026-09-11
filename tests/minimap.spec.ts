@@ -20,7 +20,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats, quietScene } from './helpers';
+import { boot, engine, quietScene, startRun, stats, useScanner, waitForStats } from './helpers';
 
 /** Fit the widest scanner and complete ONE full ping.
  *
@@ -243,6 +243,9 @@ test.describe('minimap — material layer', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+    // this suite has to switch the subsystem it tests back on.
+    await useScanner(page);
 
     // The scene genuinely has thousands of mobile shards to draw.
     const mobile = await engine(page, e => e.currentMap.entities
@@ -301,6 +304,9 @@ test.describe('minimap — material layer', () => {
       // on a population that does not exist.
       await startRun(page, 'GLASS_FIELD');
       await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
       await page.waitForTimeout(500);
 
       // The flag rides the OBJECT, so the honest measure is how many objects
@@ -366,6 +372,9 @@ test.describe('minimap — material layer', () => {
       await startRun(page, 'ASTEROID_FIELD');
       await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
       await page.waitForTimeout(500);
+// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
+      // this suite has to switch the subsystem it tests back on.
+      await useScanner(page);
 
       const shards = () => engine(page, e => {
         let found = 0, bigUnfound = 0, smallFound = 0;

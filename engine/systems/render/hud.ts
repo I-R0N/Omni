@@ -29,7 +29,7 @@ import {
     INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
     computeMinimapRect, computeIndicatorRect,
     FOG,
-    SCANNER,
+    SCANNER, getScanRevealAll,
 } from '../../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
@@ -73,10 +73,25 @@ export function buildMinimapStaticLayer(r: RenderSystem, entities: GameEntity[],
     // charted-region memory, which is what made the map read as "areas I can
     // track entities in" rather than as objects I have found.
     //
-    // `entities` is still taken so the signature and the map-load call site
-    // are unchanged, and so a future pre-charted map (a hub you start knowing)
-    // is one loop away.
-    void entities;
+    // …with ONE exception and one re-derivation, both of which are why
+    // `entities` is taken.  This canvas is a CACHE of the discovered set, so
+    // it has to be rebuildable whenever that set changes out from under it:
+    //   - DBG "Scan off" reveals everything, so every tile goes on;
+    //   - otherwise the tiles already flagged `found` are re-stamped, so
+    //     rebuilding (a map load, or flipping that switch back) does not
+    //     silently forget terrain the player had met.
+    // A pre-charted map (a hub you start knowing) is now the same loop.
+    const revealAll = getScanRevealAll();
+    for (let i = 0; i < entities.length; i++) {
+        const e = entities[i];
+        if (!e.active || e.mass !== Infinity || e.shardVariant === undefined) continue;
+        if (!revealAll && e.found !== true) continue;
+        if (e.shardVariant === 'nebula-tile') continue;   // never on the map
+        const at = center + e.position.x * scale;
+        const ay = center + e.position.y * scale;
+        cx.fillStyle = e.color;
+        cx.fillRect(at, ay, 2, 2);
+    }
     r._minimapStaticCanvas = c;
 }
 

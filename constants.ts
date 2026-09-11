@@ -608,7 +608,12 @@ export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
   { name: '0.10',  k: 0.10  },
 ] as const;
 
-let activeNebulaStretchKIndex = 3; // 0.085
+// SHIPPED AT THE TOP OF THE LADDER, 0.10 (user call) — the most stretch the
+// ladder offers, so a moving puff reads as drawn out along its travel.
+// Because it is the top, the cycle WRAPS to `off` on the first click, which
+// makes the A/B against no stretch at all one press away.
+const VEL_STRETCH_DEFAULT_INDEX = 4; // 0.10
+let activeNebulaStretchKIndex = VEL_STRETCH_DEFAULT_INDEX;
 
 /** Active stretch multiplier K (in speed → stretch).  Read by
  *  RenderSystem nebula-shard render each frame. */
@@ -3127,6 +3132,53 @@ export function cycleDamageSpread(): number {
   return activeDamageSpreadIndex;
 }
 
+// ── CHIP-DUST POOLING (DBG "Chip dust", user call) ─────────────────
+// How many chips' worth of pulverised material accumulate into ONE dust
+// puff.  It exists because the per-chip puff it replaced was a SPECK: a
+// grain is ~12 units where the tile is 36, and once a nebula sprite was
+// sized off the body it belongs to (rather than always drawing a full
+// tile) those specks stopped reading as cloud at all — reported as
+// "the nebula shards released from chipping are very small".
+//
+// POOLING IS ONE KNOB FOR BOTH HALVES OF THE ASK.  Dust is banked as
+// AREA, so pooling N chips multiplies the puff's diameter by sqrt(N)
+// and divides how often one appears by N — "larger, less frequently"
+// falls out of the arithmetic instead of needing a size knob and a
+// frequency knob that can be set to contradict each other.
+//
+// The ladder is absolute counts rather than a multiplier over an
+// authored constant (the SHARD_COAT_CYCLE relationship) because a pool
+// is a COUNT: 6 x 1.5 is not a thing a ledger can hold, and the count
+// itself is the readable statement.  So this table IS the default, at
+// CHIP_DUST_DEFAULT_INDEX, and there is no second copy of 6 to drift.
+export const CHIP_DUST_POOL_CYCLE: ReadonlyArray<number> = [1, 2, 4, 6, 9, 14] as const;
+// SHIPPED AT 1 — the per-chip behaviour (user call, after play-testing the
+// pooled default).  Pooling stays fully live and is the rest of the ladder;
+// what moved is which side of the A/B a run starts on.  Everything the
+// pooling note in CLAUDE.md says still holds — a step up is sqrt(N) bigger
+// and 1/N as often — it just starts from the small, frequent end now.
+const CHIP_DUST_DEFAULT_INDEX = 0; // 1 — a puff per chip
+let activeChipDustIndex = CHIP_DUST_DEFAULT_INDEX;
+
+/** Chips' worth of dust banked into one puff. */
+export function getChipDustPool(): number {
+  return CHIP_DUST_POOL_CYCLE[activeChipDustIndex];
+}
+/** DBG row readout, with the shipped step marked. */
+export function getChipDustPoolName(): string {
+  const v = CHIP_DUST_POOL_CYCLE[activeChipDustIndex];
+  return activeChipDustIndex === CHIP_DUST_DEFAULT_INDEX ? v + ' (ships)' : String(v);
+}
+/** Advance the pool ladder by one, wrapping.  Returns the new index. */
+export function cycleChipDustPool(): number {
+  activeChipDustIndex = (activeChipDustIndex + 1) % CHIP_DUST_POOL_CYCLE.length;
+  // No fracture-generation bump, for the damage-spread reason above: this
+  // changes what a detach THROWS, not how the pattern is built.  It is read
+  // at the detach seam, so a click lands on the next chip off any body —
+  // including one already half broken.
+  return activeChipDustIndex;
+}
+
 // ── Per-material grain overrides (DBG) ──────────────────────────────
 // The four knobs above are GLOBAL: they force one value across every
 // material at once, which is what you want for judging a setting and
@@ -3145,11 +3197,21 @@ export function cycleDamageSpread(): number {
 // `Frac sites` still scales whatever count these produce, and
 // `Bnd strength` still multiplies whatever strength they set, so a
 // global sweep keeps working while one material is being tuned.
-export const GRAIN_MATERIALS = ['rock', 'glass', 'plastic', 'metal'] as const;
+// NEBULA IS IN THE LIST (user call) even though it is the one material that
+// takes the grain GEOMETRY without the grain DAMAGE model.  Everything these
+// knobs move — grain size, the count clamps, regularity, size spread — is
+// geometry, which nebula does use; and a material whose pattern cannot be
+// tuned from the panel is a material that has to be tuned by editing the
+// table and rebuilding.  The one row that does nothing for it is `bond str`:
+// nebula carries no `progressive`, so `isProgressiveFracture` stays false and
+// `bondStrengthFor` returns null however that knob is set.  That is the
+// honest behaviour rather than a special case — see the nebula rule in
+// CLAUDE.md §8.
+export const GRAIN_MATERIALS = ['rock', 'glass', 'plastic', 'metal', 'nebula'] as const;
 export type GrainMaterial = typeof GRAIN_MATERIALS[number];
 
 /** The material a shard-family variant belongs to, or null for the ones
- *  with no grain model (nebula, indestructible). */
+ *  that carry no grain block at all (indestructible). */
 export function grainMaterialOf(variantId: ShardVariantId): GrainMaterial | null {
   const dash = variantId.indexOf('-');
   const head = dash < 0 ? variantId : variantId.slice(0, dash);
@@ -3175,6 +3237,12 @@ export const GRAIN_KNOBS = {
   regularity:    [0, 0.25, 0.5, 0.75, 0.95, 1],
   bondStrength:  [0.05, 0.1, 0.16, 0.27, 0.4, 0.62, 0.85, 1.2, 1.8, 2.5, 3.5],
   damageSpread:  [0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2],
+  // The axis that varies grain AREA within one body — the one nebula
+  // actually uses (0.6), and parked at 0 on the other four pending a
+  // deliberate pass (docs/PARKING_LOT.md).  Tunable per material because
+  // "how mixed are the piece sizes" is exactly the question a cloud raises
+  // and a machined plate does not.
+  sizeSpread:    [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1],
 } as const satisfies Record<string, ReadonlyArray<number>>;
 export type GrainKnob = keyof typeof GRAIN_KNOBS;
 export const GRAIN_KNOB_LIST = Object.keys(GRAIN_KNOBS) as ReadonlyArray<GrainKnob>;
@@ -3211,14 +3279,16 @@ function defaultIndex(mat: GrainMaterial, knob: GrainKnob): number {
   return grainLadder(mat, knob).indexOf(null);
 }
 
-const startKnobIndices = (mat: GrainMaterial): GrainKnobIndices => ({
-  grainSize:     defaultIndex(mat, 'grainSize'),
-  grainCountMin: defaultIndex(mat, 'grainCountMin'),
-  grainCountMax: defaultIndex(mat, 'grainCountMax'),
-  regularity:    defaultIndex(mat, 'regularity'),
-  bondStrength:  defaultIndex(mat, 'bondStrength'),
-  damageSpread:  defaultIndex(mat, 'damageSpread'),
-});
+// Derived from GRAIN_KNOB_LIST rather than listed by hand: the hand-written
+// literal is what fell out of date the moment a knob was added, and a missing
+// entry here means that knob rests at index 0 (the ladder's LOWEST value)
+// instead of at the material's own default — a silent retune of every
+// material, not a compile error, if the type ever loosens.
+const startKnobIndices = (mat: GrainMaterial): GrainKnobIndices => {
+  const out = {} as GrainKnobIndices;
+  for (const knob of GRAIN_KNOB_LIST) out[knob] = defaultIndex(mat, knob);
+  return out;
+};
 
 // Built lazily: `grainTableValue` reads SHARD_VARIANTS, which is declared
 // further down this module, so filling these at module scope would run
@@ -4552,18 +4622,34 @@ export const NEBULA_CONSTANTS = {
   // 1 tile shatter produces ≤1 new tile via transmutation.  Clusters
   // can SHRINK (player kills shards mid-merge) but never GROW.
   TILE_REGEN_ENABLED: false,
-  // Reference sprite world size for a FULL nebula tile (effective area
-  // = HEX_AREA).  Every nebula sprite — tile or shard — is drawn at
-  //     drawSize = TILE_SPRITE_WORLD_SIZE × sqrt(nebulaTileArea / HEX_AREA)
-  // so visual size scales proportionally with the effective area the
-  // entity carries.  A fresh shard from a 3-way shatter draws at
-  //   120 × sqrt(1/3) ≈ 69 world units
-  // and grows as it merges:
-  //   half-merged → 120 × sqrt(0.5) ≈ 85
-  //   fully-merged (about to transmute) → 120
-  // Tune this one number to make nebula tiles visually bigger or smaller;
-  // shard sprites follow automatically.
-  TILE_SPRITE_WORLD_SIZE: 120,
+  // HOW MUCH BIGGER THE CLOUD DRAWS THAN THE BODY IT BELONGS TO.
+  //
+  // Every nebula sprite — tile or shard — is drawn at
+  //     drawSize = bodyExtent × SPRITE_OVERSIZE
+  // where `bodyExtent` is the larger of the entity's own diameter and
+  // its polygon's, so the cloud can never be smaller than the shape
+  // (`nebulaSpriteSize` below is the ONE definition; two render sites
+  // call it).  A nebula sprite is deliberately LARGER than the polygon
+  // underneath it — a cloud has no edge, and the puff has to overhang
+  // the shape it is drawn from or the body reads as a solid chip — so
+  // this number is that overhang, stated directly.  2.727 keeps a full
+  // hex tile (polygon circumradius HEX_SIZE = 22, so a 44-unit extent)
+  // drawing at the 120 world units it always did; tune it to make the
+  // whole cloud layer bigger or smaller and every shard follows.
+  //
+  // IT USED TO BE KEYED TO `nebulaTileArea` INSTEAD, and that quietly
+  // stopped working.  The rule was
+  //     drawSize = 120 × sqrt(nebulaTileArea / HEX_AREA)
+  // with the intent that a shard from a 3-way shatter drew at ≈69.  But
+  // `nebulaTileArea` is set at exactly ONE site — the map-load tile
+  // factory — and nothing on a shatter child or a merge survivor ever
+  // sets it, so every shard fell through the `?? HEX_AREA` default and
+  // drew at the FULL tile size.  Measured over 102 shards from real
+  // tile shatters: entity size ranged 9.2..43.6 and every single one
+  // drew a 120-unit sprite — 13× the small ones, 2.8× the large.  The
+  // body's own size is the honest input, it is always set, and it is
+  // what merges and fracture already move.
+  SPRITE_OVERSIZE: 2.727,
   // Cluster generation moved to MAP_POPULATION (Stage 7) — see the
   // 'nebula-tile' tileCluster entries per map for cluster counts +
   // size ranges.  Inner / outer split lives on the per-map record.
@@ -4640,6 +4726,349 @@ export const NEBULA_CONSTANTS = {
     { maxCount: 9999, interval: 16 },
   ] as const,
 };
+
+// ── Nebula sprite oversize (DBG "Neb sprite") ──────────────────────
+// A live A/B on how far the cloud overhangs the body, because tying the
+// sprite to `size` changed the total cloud a shatter leaves behind and
+// that is a judgement to make on a screen, not in a table.  It
+// MULTIPLIES `NEBULA_CONSTANTS.SPRITE_OVERSIZE` rather than replacing
+// it — the same relationship SHARD_COAT_CYCLE has with a variant's
+// authored `envelope` — so the constant stays the statement of how
+// oversized a nebula puff is.  Sorted as a number line with the shipped
+// value marked, and the cycle STARTS there (the grain-ladder lesson:
+// once the numbers are visible, an unordered list reads as noise).
+interface NebulaSpriteStep { readonly name: string; readonly mult: number; }
+
+export const NEBULA_SPRITE_CYCLE: ReadonlyArray<NebulaSpriteStep> = [
+  { name: '0.75x', mult: 0.75 },
+  { name: '1x',    mult: 1.0  },
+  { name: '1.25x', mult: 1.25 },
+  { name: '1.5x',  mult: 1.5  },
+  { name: '2x',    mult: 2.0  },
+];
+// The "(ships)" marker is applied from THIS index rather than written into a
+// step's name, so moving the default cannot leave the label on the old step.
+// It was written in, and this move is exactly what would have rotted it.
+//
+// SHIPPED AT 1.25x (user call).  Note what the base means: `SPRITE_OVERSIZE`
+// is calibrated so a full hex tile draws at 1x the 120 world units it always
+// did, so a shipped run now draws that tile at 150 and every other body 25%
+// larger in proportion.  Anything asserting the 120 calibration has to read
+// this multiplier out, not assume it — `tests/fracture.spec.ts` dials the
+// ladder to 1x for exactly that assertion.
+const NEBULA_SPRITE_DEFAULT_INDEX = 2; // 1.25x
+let activeNebulaSpriteIndex = NEBULA_SPRITE_DEFAULT_INDEX;
+
+/** Active oversize multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE. */
+export function getActiveNebulaSpriteMult(): number {
+  return NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].mult;
+}
+
+/** Active step name for the DBG row readout, with the shipped step marked. */
+export function getActiveNebulaSpriteName(): string {
+  const n = NEBULA_SPRITE_CYCLE[activeNebulaSpriteIndex].name;
+  return activeNebulaSpriteIndex === NEBULA_SPRITE_DEFAULT_INDEX ? n + ' (ships)' : n;
+}
+
+/** Bumped whenever anything that feeds a CACHED nebula draw size changes.
+ *  Both nebula fast paths stamp it alongside the cache and refuse a cache
+ *  whose stamp is stale — without which the oversize knob would move only
+ *  the clouds that happen to redraw slowly, and read as a knob that does
+ *  nothing on a settled field.  That is the whole promise of applying it
+ *  at the read. */
+let nebulaSpriteGen = 0;
+export function getNebulaSpriteGen(): number { return nebulaSpriteGen; }
+
+/** Advance the oversize A/B by one, wrapping.  Returns the new index. */
+export function cycleNebulaSpriteSize(): number {
+  activeNebulaSpriteIndex = (activeNebulaSpriteIndex + 1) % NEBULA_SPRITE_CYCLE.length;
+  nebulaSpriteGen++;
+  return activeNebulaSpriteIndex;
+}
+
+// ── NEBULA FEEL: DAMPING AND BONDING (user call) ───────────────────
+// Two knobs for one complaint — nebula shards read as a jittery swarm
+// rather than a fluid cloud — because MEASUREMENT says it has two causes
+// and they need separating on a device.
+//
+// What was measured, on NEBULA_FIELD with 40 tiles broken at the player:
+// shard speed does NOT settle.  Mean speed over 8 s went 2.25 -> 1.30 ->
+// 1.36 -> 1.53 -> 1.69 -> 1.70, with a MAX around 20 (the player's own
+// cruise is ~33).  Damping alone cannot be the whole story, because
+// something keeps putting the speed back: the variant's own self-gravity
+// (`attractedTo: 'self'`, strength 380 over a 380 range) accelerates every
+// puff toward its neighbours right up to the moment of contact.  Live bond
+// count over the same window went 7 -> 11 -> 13 -> 102 -> 42 -> 20: bonds
+// form in crowds and then snap, because a pair arriving at speed separates
+// past the break distance before its cohesion can pull it into step.
+//
+// PLASTIC ALREADY SOLVED THE SECOND HALF and nebula never got it.  Its
+// merge config carries `pullInnerRange: 80` with the comment "turns the
+// gravity OFF inside ~contact distance ... so bond cohesion takes over
+// cleanly at close range instead of fighting the pull", plus the strong
+// tier's cohesion and break-distance multipliers.  Nebula has no inner
+// range at all, so its pull and its cohesion fight all the way in.
+//
+// Hence: DAMP is the "how fast does a puff bleed off speed" dial, BOND is
+// the "does a touching pair behave as one body" dial, and they are
+// separate because the fix might be either or both.
+//
+// BOTH ARE APPLIED AT THE READ, never baked onto a shard at spawn — the
+// same rule the portal knobs follow — so a click re-tunes every puff
+// already drifting instead of only the next shatter.
+
+interface NebulaDampStep { readonly name: string; readonly lossMult: number; }
+
+// A multiplier on the per-step velocity LOSS, not on the retention factor:
+// damping is `v *= d^timeScale` with d = LINEAR_DAMPING, so the thing that
+// means "more damping" is (1 - d) going up.  Stated this way the ladder is
+// a plain number line — 2x really is twice the drag — where multiplying `d`
+// itself would be backwards and non-linear.
+export const NEBULA_DAMP_CYCLE: ReadonlyArray<NebulaDampStep> = [
+  { name: '1x (old)', lossMult: 1   },
+  { name: '1.5x',     lossMult: 1.5 },
+  { name: '2x',       lossMult: 2   },
+  { name: '3x',       lossMult: 3   },
+  { name: '5x',       lossMult: 5   },
+];
+let activeNebulaDampIndex = 0;
+
+export function getActiveNebulaDampMult(): number {
+  return NEBULA_DAMP_CYCLE[activeNebulaDampIndex].lossMult;
+}
+export function getActiveNebulaDampName(): string {
+  return NEBULA_DAMP_CYCLE[activeNebulaDampIndex].name;
+}
+export function cycleNebulaDamp(): number {
+  activeNebulaDampIndex = (activeNebulaDampIndex + 1) % NEBULA_DAMP_CYCLE.length;
+  return activeNebulaDampIndex;
+}
+
+/** The LINEAR damping factor a nebula shard actually gets, from the authored
+ *  base and the live knob.  Clamped above 0 so a large multiplier cannot
+ *  invert the sign of the retention factor and fling a puff backwards. */
+export function nebulaDampingFor(base: number): number {
+  const m = getActiveNebulaDampMult();
+  if (m === 1) return base;
+  return Math.max(0.001, 1 - (1 - base) * m);
+}
+
+// ── Nebula ROTATIONAL damping (DBG "Neb spin damp") ───────────────────
+//
+// Its own ladder rather than a share of "Neb damp", because the two are
+// different complaints with different answers: linear drag decides how far
+// a puff TRAVELS after a kick, spin decay decides how long it TUMBLES
+// where it sits.  A cloud that slides to a halt while still pinwheeling
+// reads as wrong in a way neither knob alone can diagnose, so tuning
+// needs to move them independently.  Same "multiplier on the LOSS"
+// statement as the linear ladder, so 2x is twice the drag on both.
+export const NEBULA_SPIN_DAMP_CYCLE: ReadonlyArray<NebulaDampStep> = [
+  { name: 'match',  lossMult: -1  },
+  { name: '1x',     lossMult: 1   },
+  { name: '1.5x',   lossMult: 1.5 },
+  { name: '2x',     lossMult: 2   },
+  { name: '3x',     lossMult: 3   },
+  { name: '5x',     lossMult: 5   },
+  { name: '10x',    lossMult: 10  },
+];
+let activeNebulaSpinDampIndex = 0;
+
+export function getActiveNebulaSpinDampName(): string {
+  return NEBULA_SPIN_DAMP_CYCLE[activeNebulaSpinDampIndex].name;
+}
+export function cycleNebulaSpinDamp(): number {
+  activeNebulaSpinDampIndex = (activeNebulaSpinDampIndex + 1) % NEBULA_SPIN_DAMP_CYCLE.length;
+  return activeNebulaSpinDampIndex;
+}
+/** The multiplier the spin ladder is on. Index 0 is `match`, which DEFERS
+ *  to the linear knob — that is the shipped behaviour (one knob moved both
+ *  halves together), so an untouched build is unchanged and the first click
+ *  is the A/B. */
+export function getActiveNebulaSpinDampMult(): number {
+  const m = NEBULA_SPIN_DAMP_CYCLE[activeNebulaSpinDampIndex].lossMult;
+  return m < 0 ? getActiveNebulaDampMult() : m;
+}
+
+/** The ANGULAR damping factor a nebula shard actually gets.  Same clamp and
+ *  same loss-multiplier arithmetic as the linear half; only the ladder it
+ *  reads differs. */
+export function nebulaSpinDampingFor(base: number): number {
+  const m = getActiveNebulaSpinDampMult();
+  if (m === 1) return base;
+  return Math.max(0.001, 1 - (1 - base) * m);
+}
+
+interface NebulaBondStep {
+  readonly name: string;
+  /** Multiplier on the cohesion blend rate — how fast a bonded pair comes
+   *  to a shared velocity.  This is the "behaves as one body" term. */
+  readonly cohesionMul: number;
+  /** Multiplier on the break distance — how far a bonded pair may separate
+   *  before the bond snaps. */
+  readonly breakMul: number;
+  /** Multiplier on the COMPOSE THRESHOLD — how long a bonded pair has to
+   *  stay in contact before it merges into one body.  This is what makes
+   *  the grip above legible.
+   *
+   *  A nebula bond's shipped outcome is `compose`: after the contact
+   *  threshold the pair is CONSUMED and one new body appears.  At the
+   *  shipped ~5 s (scaled by pair size) that window is short enough that
+   *  the cohesion and break multipliers barely get to act — and the louder
+   *  they are set, the sooner the pair holds together well enough to
+   *  vanish into a merge.  Measured: the live bond population churns
+   *  15 → 150 → 19 → 58 → 21 → 13 while the shard count collapses 311 → 93.
+   *  So "grip harder" read as changing nothing (user report).
+   *
+   *  Stretching the threshold is the fix that keeps the material intact:
+   *  the pair STICKS and moves as one for as long as the multiplier says,
+   *  which is the fluid, gooey read — and then it still coalesces.  That
+   *  matters because compose is also how nebula shards transmute back into
+   *  TILES, so suppressing it outright (plastic's `cohesionOnly`) would
+   *  quietly switch off nebula's whole self-coalesce loop.  A long timer
+   *  buys the look without buying that. */
+  readonly bondTimeMul: number;
+  /** Distance inside which the self-gravity stops pulling, so cohesion has
+   *  the close range to itself (plastic's `pullInnerRange` trick).  0 keeps
+   *  today's behaviour: pull all the way to contact. */
+  readonly pullInner: number;
+}
+
+// Named steps rather than a bare multiplier, because the three terms move
+// together and a pair of them alone does not produce a readable behaviour:
+// a long break distance with weak cohesion just means a pair that stays
+// nominally bonded while still jittering.  'strong' is deliberately
+// plastic's own shipped pair (3.0 / 4.0) so the two materials can be
+// compared at the same grip.
+// `bondTimeMul` stretches the compose threshold, whose base is ~5 s at a
+// ref-size pair and scales with (avgSize / 20)^1.5 — so a small pair sits
+// near 1.8 s and a large one well past 10 s before any multiplier.  The
+// ladder is geometric because the thing being judged is an ORDER of
+// magnitude ("does a clump hold together long enough to read as one blob"),
+// not a few seconds either way.  `off (old)` is exactly 1 on every term, so
+// the shipped build is untouched and the first click is the A/B.
+//
+// THE TOP OF THE RANGE IS SET BY WHAT A BOND SURVIVES, not by taste.  A
+// pair can also break by DISTANCE, and measured over a live field the
+// highest timer/threshold ratio any live bond reaches saturates around
+// 11-12 however high the multiplier goes: at 40x the observed peak was
+// 11.2, against 11.8 at 12x — i.e. the two were the same step, because no
+// bond lives long enough to spend a 40x timer.  Past ~12x the knob stops
+// buying stickiness and only makes the ladder read as broken.
+export const NEBULA_BOND_CYCLE: ReadonlyArray<NebulaBondStep> = [
+  { name: 'off (old)', cohesionMul: 1, breakMul: 1, pullInner: 0,   bondTimeMul: 1  },
+  { name: 'firm',      cohesionMul: 2, breakMul: 2, pullInner: 60,  bondTimeMul: 2  },
+  { name: 'strong',    cohesionMul: 3, breakMul: 4, pullInner: 80,  bondTimeMul: 5  },
+  { name: 'goo',       cohesionMul: 5, breakMul: 6, pullInner: 110, bondTimeMul: 12 },
+];
+// SHIPPED AT 'goo' (user call).  The step names are deliberately NOT
+// re-marked: `off (old)` already says which step is the pre-feature
+// behaviour, and it is one click away because the cycle wraps — so the A/B
+// against what nebula used to do is still the first press.
+//
+// KNOW THE COST BEFORE MOVING THIS.  Stretching the compose threshold keeps
+// pairs alive as pairs, and live shard population is frame time: measured
+// 28 / 75 / 307 / 597 across off / firm / strong / goo over one window.  See
+// the nebula-bonding note in CLAUDE.md §8 for the measurement and the scene
+// that produces it.
+const NEBULA_BOND_DEFAULT_INDEX = 3; // goo
+let activeNebulaBondIndex = NEBULA_BOND_DEFAULT_INDEX;
+
+export function getActiveNebulaBond(): NebulaBondStep {
+  return NEBULA_BOND_CYCLE[activeNebulaBondIndex];
+}
+export function getActiveNebulaBondName(): string {
+  return NEBULA_BOND_CYCLE[activeNebulaBondIndex].name;
+}
+export function cycleNebulaBond(): number {
+  activeNebulaBondIndex = (activeNebulaBondIndex + 1) % NEBULA_BOND_CYCLE.length;
+  return activeNebulaBondIndex;
+}
+
+// ── DBG: SCANNING OFF, EVERYTHING REVEALED ─────────────────────────
+// A perf A/B, not a gameplay knob.  The scanner does a lot of continuous
+// work — `discoverStructures` walks a 900-unit radius of the static grid
+// AND the whole mobile-shard list on the `discover` cadence, and the AUTO
+// sweep advances a wavefront over the contacts — and a frame-rate report
+// needs a way to take all of it away without also taking the minimap away,
+// or the game is unplayable while you measure.
+//
+// So this is ONE switch with TWO halves, and they belong together:
+//   - the scanning WORK stops (no discovery walk, no auto sweep), and
+//   - the minimap REVEALS EVERYTHING, so nothing is lost by stopping it.
+//
+// It deliberately does NOT touch the cheap per-contact encounter stamp
+// (a handful of O(1) distance checks for enemies, stations, portals and
+// the snitch), because that is what feeds the off-screen ARROWS and
+// silently emptying the screen edge would make the A/B measure two things
+// at once.  A pressed scan still works too.
+// SHIPPED OFF (user call).  It shipped ON for a while and is back off: a
+// fresh run therefore RUNS the scanner — the discovery walk, the auto sweep,
+// and a minimap that fills in as the player meets things.  That is the
+// behaviour the module system was designed around, and the reason to prefer
+// it is what shipping ON cost: revealing everything takes away the half of
+// the SCANNER module that makes it worth buying, leaving a mark to sell
+// arrows and the pressed ping but not the map.
+//
+// It stays a switch rather than a deleted branch because it is a PERF A/B
+// first — the scanner does real continuous work, and a frame-rate report
+// needs a way to take all of it away without also taking the minimap away.
+let activeScanRevealAll = false;
+
+/** True while the DBG "Scan off" switch is on: skip the scanner's periodic
+ *  work and draw every contact and every tile on the minimap. */
+export function getScanRevealAll(): boolean {
+  return activeScanRevealAll;
+}
+
+/** Flip the switch.  Returns the new state.  The caller must rebuild the
+ *  minimap terrain layer, which is a CACHE of what has been discovered and
+ *  so has to be re-derived when the definition of "discovered" changes. */
+export function toggleScanRevealAll(): boolean {
+  activeScanRevealAll = !activeScanRevealAll;
+  return activeScanRevealAll;
+}
+
+/** THE WORLD DIAMETER A NEBULA BODY'S SPRITE DRAWS AT — the ONE
+ *  definition, because TWO render sites have to agree on it: the cloud
+ *  sprite itself and the twinkle star placed inside its footprint.  They
+ *  used to carry the formula twice, so a change to one silently put the
+ *  star outside the puff.
+ *
+ *  The base is the body's OWN extent, and it takes the LARGER of two
+ *  readings of that.  `size` is the area-equivalent diameter every other
+ *  system means by "how big is this" — it is what merges move and what
+ *  `getCollisionR` reports — but a Voronoi cell is ragged, so its
+ *  circumradius reaches further than an area-equivalent radius: measured
+ *  over 306 fresh nebula grains the polygon was 1.68x the body diameter
+ *  on average and 2.4x at worst, which at a flat 2.87 overhang left the
+ *  raggedest 5% with a sprite SMALLER than their own outline (worst
+ *  0.95x).  A nebula sprite must never be smaller than the shape it
+ *  belongs to, so the polygon is the floor.
+ *
+ *  The polygon extent is cached on the entity and never invalidated,
+ *  which is safe because a nebula body's polygon is fixed for its life:
+ *  nebula has no dent policy, no progressive fracture, and its merge is
+ *  PAIR-CONSUMING (both inputs retire and a new body appears), so
+ *  nothing ever rewrites `polygonPoints` in place. */
+export function nebulaSpriteSize(e: GameEntity): number {
+  let polyR = e._nebulaSpriteR;
+  if (polyR === undefined) {
+    polyR = 0;
+    const pts = e.polygonPoints;
+    if (pts !== undefined) {
+      for (let i = 0; i < pts.length; i++) {
+        const d2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+        if (d2 > polyR) polyR = d2;
+      }
+      polyR = Math.sqrt(polyR);
+    }
+    e._nebulaSpriteR = polyR;
+  }
+  return Math.max(e.size.x, e.size.y, polyR * 2)
+    * NEBULA_CONSTANTS.SPRITE_OVERSIZE
+    * getActiveNebulaSpriteMult();
+}
+
 
 /**
  * Map an impact speed (px/frame) to a nebula fade rate scale in
@@ -8843,6 +9272,22 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   // angularDamping fields the shard reads as "cloud being shoved
   // aside" without slowing the striker.
   sizeToMass: () => 0.01,
+  // NEBULA'S DRAG IS DECLARED HERE, and it has to be: the generic child
+  // recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
+  // `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the
+  // fragment, and PhysicsSystem's custom-damping branch is gated on the
+  // FIELD being present — a STRUCTURE with no `linearDamping` matches
+  // neither that branch nor the player/enemy/POI one, so it free-drifts
+  // with NO drag whatsoever.  This block used to name the two fields in
+  // its own comment without declaring them, which was invisible for as
+  // long as nebula shattered ONLY through `shatterNebulaStyle` (which
+  // hardcodes the same constants locally).  Routing nebula through the
+  // shared voronoi recipe made every puff undamped — measured 311 of 311
+  // live shards with `linearDamping === undefined` — and took the DBG
+  // "Neb damp" knob with it, since that knob is read INSIDE the branch
+  // that was never entered.
+  linearDamping:  NEBULA_CONSTANTS.LINEAR_DAMPING,
+  angularDamping: NEBULA_CONSTANTS.ANGULAR_DAMPING,
 };
 
 // Plastic shards: 4-vertex polygon with mild jitter — distinct
@@ -8957,6 +9402,65 @@ export const NEBULA_CONDENSE: Record<
 // carrying the off-target "remainder" colours (which then seed other
 // materials), so mass and colour are conserved.
 export const NEBULA_CONDENSE_STALL_BONDS = 6;
+
+// ── Nebula's grain (user call: voronoi fractures for the cloud) ────
+// ONE spec, shared by `nebula-tile` and `nebula-shard`, because a
+// material has ONE grain geometry (CLAUDE.md §8) and a shard is a
+// smaller body of the same stuff.
+//
+// It is the odd one out of the five materials in TWO deliberate ways:
+//
+//  1. NO `bondStrength` AND NO `progressive`.  Those two are what opt a
+//     variant into the grain-BOUNDARY DAMAGE model, and nebula wants the
+//     GEOMETRY only — the cells as the fragments at death, and nothing
+//     else.  Their absence is what "boundary strength zero" means in
+//     practice: `isProgressiveFracture` stays false for nebula, so
+//     `bondStrengthFor` returns null and every consumer of the damage
+//     model (the crash paths, the pierce bore, the bubble's bite, the
+//     crack overlay) skips nebula exactly as it did before.  A literal
+//     `bondStrength: 0` would be the opposite of harmless: derived HP is
+//     `Sum(edge length x strength)`, so it would come out 0 and kill
+//     every cloud the moment anything touched it.
+//
+//  2. THE RAGGEDEST SETTINGS IN THE GAME, on purpose.  Regularity 0.15
+//     against rock/glass 0.5 and metal 0.95 puts nebula at the raw
+//     Poisson end (0 Lloyd rounds, minimum blue-noise separation), where
+//     cell areas are wildly uneven — which for cloud is the point, not a
+//     defect.  `sizeSpread` 0.6 stacks the power diagram on top: measured
+//     on a 10-grain body it takes cell-area CV from 0.19 to 0.44 and the
+//     biggest/smallest ratio from 2.0 to 5.0, with the MEAN grain size
+//     unmoved.  That axis is parked at 0 for the other four materials
+//     pending a deliberate pass over all of them (docs/PARKING_LOT.md);
+//     this is nebula's own authored value and does not pre-empt that
+//     pass, since nebula is not one of the four it is about.
+//
+// `grainSize` 14 against a full hex tile's ~1257 area gives ~8 sites, so
+// a tile breaks into a handful of unevenly sized puffs rather than the
+// flat 2-3 the old power-law budget produced.  `radialSpeed` is the
+// lowest of any material: cloud drifts apart, it does not spall.
+const NEBULA_GRAIN: GrainSpec = {
+  grainCountMin: 3,
+  grainCountMax: 14,
+  // 20, not the 14 this shipped at, and the number is MEASURED (user call).
+  // The voronoi shatter cost frame time through sheer entity count, and the
+  // cost is superlinear: on the `nebula-storm` perf scene sim/stp99 ran 3.60
+  // at 14 against 2.00 with the legacy shatter, for +25% entities.
+  //
+  // grainSize is the lever, NOT grainCountMax — the cap rarely binds, and
+  // dropping it 14 -> 8 recovered almost nothing.  At 20 the scene lands
+  // exactly on the legacy floor (2.00, 1358 ents) while keeping most of what
+  // the voronoi change bought: 3.95 children per tile and a 3.07x size
+  // spread, against 7.7 / 4.02x at 14 and ~2-3 children with no
+  // parent-related size variety at all on legacy.  26 buys nothing further,
+  // so 20 is the knee.  Size VARIETY — the thing actually asked for — lives
+  // in `sizeSpread` and `regularity` below and is untouched.
+  grainSize: 20,
+  impactBias: 0.5,        // crowd toward the striker that punched through
+  regularity: 0.15,       // the raggedest material in the game
+  sizeSpread: 0.6,        // a wide mix of coarse and fine puffs in one body
+  radialSpeed: 0.5,       // drifts apart; every other material is 0.8..1.5
+};
+
 
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
@@ -9377,8 +9881,27 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       attractedTo: 'none', bondsWith: 'none',
       defaultOutcome: 'compose',
     },
+    // NEBULA IS A GRAIN MATERIAL FOR ITS GEOMETRY ONLY (user call).  The
+    // `grain` block + `shatter.kind: 'voronoi'` opt it into the seeded
+    // cell decomposition, so a broken tile hands back the pieces its own
+    // pattern says rather than 2-3 shards drawn from a power-law over a
+    // budget that ignored the parent entirely.  What it deliberately does
+    // NOT opt into is the GRAIN-BOUNDARY DAMAGE MODEL: `bondStrength`
+    // (and the `progressive` it requires) are ABSENT, which is what
+    // "boundary strength zero" means here — expressed as the model's own
+    // opt-out rather than as a 0 that would derive a maxHealth of 0 and
+    // kill every cloud on sight.  `isProgressiveFracture` therefore stays
+    // false for nebula, so `bondStrengthFor` returns null and the crash
+    // paths, the pierce bore and the bubble's bite all leave nebula on
+    // its 1-HP whole-body death exactly as before.  `passThrough` is
+    // untouched: still no collisions.
+    grain: NEBULA_GRAIN,
     shatter: {
-      kind: 'powerlaw',
+      // 'voronoi': the cached decomposition becomes the children.  The
+      // powerlaw fields below STAY — they are the DBG 'legacy' A/B path,
+      // and `style: 'nebula'` is what routes that fallback back to
+      // `shatterNebulaStyle` rather than the generic scatter pipeline.
+      kind: 'voronoi',
       style: 'nebula',
       countMin: 2, countMax: 3,                 // count = 2 + floor(rand*2)
       alphaMin: 1.0, alphaMax: 1.0,
@@ -9837,6 +10360,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
     },
+    // A MATERIAL HAS ONE GRAIN GEOMETRY, shared by its tile and its
+    // shard (CLAUDE.md §8) — a shard is a smaller body of the same
+    // stuff.  Nebula's is LATENT on this row today, because the shatter
+    // below is deliberately 'none', and it is written down anyway so the
+    // material cannot come to mean two different patterns the day a
+    // shard does break.  Like the tile's, it carries no `bondStrength`
+    // and no `progressive`: geometry only, no damage model.
+    grain: NEBULA_GRAIN,
     // No-op shatter: nebula-shards are indestructible from the
     // player's perspective.  They glide past the ship under the
     // applyNebulaPlayerPull gravity field; contact does not destroy

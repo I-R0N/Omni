@@ -119,6 +119,7 @@ interface UIOverlayProps {
   onCycleFractureSiteScale?: () => void;
   onCycleFractureBias?: () => void;
   onCycleDamageSpread?: () => void;
+  onCycleChipDustPool?: () => void;
   onCycleGrainMaterial?: () => void;
   onCycleGrainKnob?: (knob: GrainKnob) => void;
   onResetGrainOverrides?: () => void;
@@ -143,6 +144,11 @@ interface UIOverlayProps {
   onCycleNebulaPalette?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
+  onCycleNebulaSpriteSize?: () => void;
+  onToggleScanReveal?: () => void;
+  onCycleNebulaDamp?: () => void;
+  onCycleNebulaSpinDamp?: () => void;
+  onCycleNebulaBond?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
@@ -450,6 +456,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFractureSiteScale,
   onCycleFractureBias,
   onCycleDamageSpread,
+  onCycleChipDustPool,
   onCycleGrainMaterial,
   onCycleGrainKnob,
   onResetGrainOverrides,
@@ -474,6 +481,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaPalette,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
+  onCycleNebulaSpriteSize,
+  onToggleScanReveal,
+  onCycleNebulaDamp,
+  onCycleNebulaSpinDamp,
+  onCycleNebulaBond,
   onCycleShatterGrace,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
@@ -562,7 +574,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, tilt: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
-    portal: true,
+    portal: true, nebula: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -1855,9 +1867,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Frac bias', onCycleFractureBias,
                   stats.fractureBiasName ?? 'variant',
                   'Impact bias: the fraction of sites crowded toward the hit point, which is what makes the pattern radiate from the impact the way real glass does. VARIANT uses each material\'s own value (rock and glass ship 0.75). Pulls AGAINST Frac relax by design - crowding sites is precisely what makes cell sizes uneven - so 0 plus relaxation gives the most uniform chunks, and 1 plus relax 0 the most chaotic.')}
+                {ctrlRow('Chip dust', onCycleChipDustPool,
+                  stats.chipDustPoolName ?? '1 (ships)',
+                  'How many chips\u2019 worth of pulverised material bank into ONE dust puff (1 ships / 2 / 4 / 6 / 9 / 14). Dust is banked as AREA, so this moves both halves at once: pooling N chips makes each puff sqrt(N) times bigger and one appear 1/N as often \u2014 larger and less frequent from one number, and FEWER entities than a puff per chip. 1 is a puff per chip: small and constant, which is what ships. Step up for bigger, rarer kicks of dust. A body that breaks before it fills a pool flushes what it has banked, so short-lived debris still throws dust.')
+                }
                 {ctrlRow('Grain mat', onCycleGrainMaterial,
                   stats.grainMaterialName ?? 'rock',
-                  'Which MATERIAL the five knob rows below read and write. The knobs above are GLOBAL - they force one value across every material at once, which is what you want for judging a setting and exactly wrong for tuning one material against another. Selecting a material changes nothing on its own. The key is the MATERIAL, not the variant: writing rock moves rock-tile and rock-shard TOGETHER, because a material\u0027s grain geometry is shared by its tile and its shard (a shard is a smaller body of the same stuff, not a different material) - a tile and its own debris drawn from two different patterns is not something that can be judged.')}
+                  'Which MATERIAL the knob rows below read and write. NEBULA is in the list and every geometry knob reaches it; only \u2018bond str\u2019 does nothing there, because nebula takes the grain GEOMETRY without the grain DAMAGE model. The knobs above are GLOBAL - they force one value across every material at once, which is what you want for judging a setting and exactly wrong for tuning one material against another. Selecting a material changes nothing on its own. The key is the MATERIAL, not the variant: writing rock moves rock-tile and rock-shard TOGETHER, because a material\u0027s grain geometry is shared by its tile and its shard (a shard is a smaller body of the same stuff, not a different material) - a tile and its own debris drawn from two different patterns is not something that can be judged.')}
                 {ctrlRow('  ↳ grain size', () => onCycleGrainKnob?.('grainSize'),
                   stats.grainKnobNames?.grainSize ?? '—',
                   'GRAIN DIAMETER in world units, for the selected material. Site count is bodyArea / (π·(size/2)²), i.e. proportional to AREA, so grains stay the same size whatever body they are in - a tile and its shards are the same material. Smaller means more, finer grains: more interior boundary, so the body is TOUGHER as well as more finely broken, since HP is derived from boundary. A value marked (def) is the variant table\u0027s own; cycling off it shows the number bare, so a default and a deliberately-equal setting still read differently.')}
@@ -1873,6 +1889,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('  ↳ bond str', () => onCycleGrainKnob?.('bondStrength'),
                   stats.grainKnobNames?.bondStrength ?? '—',
                   'Damage to break through ONE PIXEL of grain boundary, for this material alone. Under the grain model a body has no authored HP: its health is DERIVED as the sum of (edge length × strength) over its own pattern, so raising this makes the material tougher AND makes each grain harder to pop off, and a bigger body is tougher for free because it has more boundary. Deliberately NOT normalised by size, which is what lets one number serve a material\u0027s tiles and its shards. Shipped: rock 0.27, glass 0.16, plastic 0.62, metal 0.85. Bnd strength above multiplies whatever this sets.')}
+                {ctrlRow('  ↳ size spread', () => onCycleGrainKnob?.('sizeSpread'),
+                  stats.grainKnobNames?.sizeSpread ?? '—',
+                  'How much grain SIZES VARY within one body, 0..1 — a power diagram that shifts each cell boundary off the midpoint, so a body carries a mix of coarse and fine grains instead of one size. Varies the SPREAD around the mean, never the mean itself (that is grain size). NEBULA is the only material that ships it on, at 0.6, which is what makes a broken cloud read as unevenly torn; rock, glass, plastic and metal are parked at 0 pending a deliberate pass over all four together. Measured on a 10-grain body: cell-area CV 0.19 → 0.44 and biggest/smallest 2.0 → 5.0 across 0 → 0.6, with mean grain size unmoved.')}
                 {ctrlRow('  ↳ dmg spread', () => onCycleGrainKnob?.('damageSpread'),
                   stats.grainKnobNames?.damageSpread ?? '—',
                   'Damage spread for the selected material alone - see Dmg spread above for what it does. Every material ships 0 (sequential) — shown as \u00270 (def)\u0027 — so this is the row to turn up first when judging the effect. Dmg spread above OVERRIDES this when it is not on MATERIAL, the same way Frac relax and Frac sep override regularity. Changing it does NOT rebuild cached patterns: it changes how damage is spent, not how the pattern is built, so a half-broken body keeps the boundaries it has already earned.')}
@@ -1880,10 +1899,49 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   `${stats.grainOverrideCount ?? 0} off table`,
                   'Drop every per-material override at once and go back to the variant table. The readout counts how many of the twenty values (four materials × five knobs) are currently overridden - with a panel this size there is otherwise no way to tell whether what you are looking at is the shipped tuning or something left set three sessions ago.')}
               </>)}
+              {/* ── Nebula ─────────────────────────────────────────── */}
+              {/* Its OWN section, for the reason the Grain & Fracture section
+                  exists: these rows were scattered across the bottom of Visual
+                  and Shards & Physics, where nobody found them.  Ordered by
+                  what a nebula pass actually tunes — how a cloud LOOKS, then
+                  how it MOVES, then what it is made of.  COLLAPSED by default
+                  like every other section (user call): a named header in the
+                  list is enough to find it, and the panel already runs ~90
+                  rows without one section holding itself open. */}
+              {renderSectionHeader('nebula', 'Nebula')}
+              {!collapsed.nebula && (<>
+                {ctrlRow('Neb sprite', onCycleNebulaSpriteSize,
+                  stats.nebulaSpriteName ?? '1.25x (ships)',
+                  'Cycle how far a nebula sprite overhangs the body it belongs to — a multiplier over NEBULA_CONSTANTS.SPRITE_OVERSIZE (0.75× / 1× / 1.25× ships / 1.5× / 2×). The constant is calibrated so a full hex tile draws 120 world units at 1×, so the shipped step draws it at 150. Every puff is drawn at its own size × this, so the whole cloud layer scales together and a click lands on clouds already in the world.')}
+                {ctrlRow('Neb damp', onCycleNebulaDamp,
+                  stats.nebulaDampName ?? '1x (old)',
+                  'How fast a nebula shard bleeds off speed \u2014 a multiplier on the per-step velocity LOSS (1x / 1.5x / 2x / 3x / 5x). Applied where the damping factor is read, so a click slows every puff already drifting. Measured baseline: shard speed does not settle, hovering ~1.3-1.7 with a max near 20.')}
+                {ctrlRow('Neb spin damp', onCycleNebulaSpinDamp,
+                  stats.nebulaSpinDampName ?? 'match',
+                  'How fast a nebula shard bleeds off SPIN \u2014 its own ladder, separate from \u201cNeb damp\u201d, because linear drag decides how far a puff travels and spin decay decides how long it tumbles where it sits. \u201cmatch\u201d (the shipped default) defers to the linear knob, so the first click is the A/B.')}
+                {ctrlRow('Neb bond', onCycleNebulaBond,
+                  stats.nebulaBondName ?? 'goo',
+                  'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (off 1x / firm 2x / strong 5x / goo 12x). GOO ships; \u2018off (old)\u2019 is one click away because the cycle wraps, so the A/B against pre-feature nebula is still the first press. Stretching the timer is what makes the grip legible \u2014 at the base ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles. It COSTS entity count, which is frame time: live shard population measured 28 / 75 / 307 / 597 across the four steps.')}
+                {ctrlRow('Neb stretch', onCycleNebulaStretch,
+                  stats.nebulaStretchName ?? '0.10',
+                  'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10 ships. The squash axis aligns to velocity while the sprite keeps its own rotation. The shipped step is the TOP of the ladder, so the cycle wraps to OFF on the first click \u2014 the A/B against no stretch at all is one press away.')}
+                {ctrlRow('Neb spin', onCycleNebulaWakeSpin,
+                  stats.nebulaWakeSpinName ?? 'physical',
+                  'Which way the player\'s wake spins a passing nebula shard. PHYSICAL: the wake shear — a shard passed on the STARBOARD side turns clockwise, port-side counter-clockwise. INVERTED: the same cross product negated (the A/B). RANDOM: the old per-shard id-parity vortices, with no consistent handedness. Proper rotational mechanics are parked for their own session.')}
+                {ctrlRow('Neb collide', onToggleNebulaShardCollisions,
+                  stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off',
+                  'Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag). Default OFF. A/B-test whether forcing nebula pairs to bounce breaks up large gather-piles.')}
+                {ctrlRow('Nebula', onCycleNebulaPalette,
+                  stats.nebulaPaletteName ?? 'sky',
+                  'Cycle the glass-side nebula palette through the same 11-entry list. Governs glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition). Main background nebula tiles + shards, BG puffs, and NebulaSystem colour drift all stay on the legacy default palette and are NOT affected. Rock-side dust (rock tile original + regenerated + shards) is fixed at white. Default sky.')}
+              </>)}
 
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
+                {ctrlRow('Scan off', onToggleScanReveal,
+                  stats.scanRevealAll === true ? 'REVEALED' : 'Off',
+                  'PERF A/B, and it SHIPS OFF \u2014 a fresh run runs the scanner. Stops the scanner\u2019s periodic work \u2014 the discovery walk (a 900-unit sweep of the static grid plus the whole mobile-shard list, on the discover cadence) and the auto sweep \u2014 and reveals every tile and contact on the minimap in exchange, so you are not measuring blind. Off-screen arrows and a pressed scan still work.')}
                 {ctrlRow('Star density', onCycleStarDensity, stats.starDensityName ?? 'Auto',
                   'Star density in stars per 10,000 CSS px². AUTO (default) uses THIS MAP\u0027s own density and shows it beside the label — every map has its own sky, from 90 near a planet up to 729 in deep space (STAR_DENSITY_BY_MAP). The other steps are overrides for comparing two settings on one map. 1200/1800/2700 run PAST the top of the per-map range on purpose — 2700 is roughly the density the field carried before it was derived from area, so the ceiling can be judged by looking at it on a device rather than argued about. The count is DERIVED from viewport area, so a phone and a desktop show the same sky per unit area. Regenerates immediately.')}
                 {ctrlRow('Star size', onCycleStarSize, stats.starSizeName ?? 'Device px',
@@ -1924,9 +1982,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Rock palette', onCycleRockPalette,
                   stats.rockPaletteName ?? 'mixed',
                   'Rock body colour family. Mixed (default): mostly slate with rust and mineral running through it, so a field reads as ROCK with variation. Slate: the old single flat grey. Rust / mineral: the pure warm and cool families, kept for regional-identity work and for judging them side by side. Shades are rolled per instance AT SPAWN — reload the map to repaint a whole field.')}
-                {ctrlRow('Neb spin', onCycleNebulaWakeSpin,
-                  stats.nebulaWakeSpinName ?? 'physical',
-                  'Which way the player\'s wake spins a passing nebula shard. PHYSICAL: the wake shear — a shard passed on the STARBOARD side turns clockwise, port-side counter-clockwise. INVERTED: the same cross product negated (the A/B). RANDOM: the old per-shard id-parity vortices, with no consistent handedness. Proper rotational mechanics are parked for their own session.')}
                 {ctrlRow('Minimap mat', onCycleMinimapMaterial,
                   stats.minimapMaterialName ?? 'Flow',
                   'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.')}
@@ -2019,9 +2074,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
-                {ctrlRow('Nebula', onCycleNebulaPalette,
-                  stats.nebulaPaletteName ?? 'sky',
-                  'Cycle the glass-side nebula palette through the same 11-entry list. Governs glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition). Main background nebula tiles + shards, BG puffs, and NebulaSystem colour drift all stay on the legacy default palette and are NOT affected. Rock-side dust (rock tile original + regenerated + shards) is fixed at white. Default sky.')}
               </>)}
 
               {/* ── Shards & Physics ───────────────────────────────── */}
@@ -2045,9 +2097,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Bonding', onToggleShardBonding,
                   stats.shardBondingEnabled === false ? 'Off' : 'On',
                   'Toggle shard↔shard bond formation + cohesion. OFF drops existing bonds and prevents new ones — nebula self-compose and cross-variant absorb stop.')}
-                {ctrlRow('Neb collide', onToggleNebulaShardCollisions,
-                  stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off',
-                  'Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag). Default OFF. A/B-test whether forcing nebula pairs to bounce breaks up large gather-piles.')}
                 {ctrlRow('Plr↔neb', onTogglePlayerNebulaCollision,
                   stats.playerNebulaCollisionEnabled === false ? 'Off' : 'On',
                   'Player ↔ nebula-shard hard collision. On (default): the ship physically parts/scatters the cloud (bypasses nebula passThrough → SAT impulse). Off: glide-through with only the applyNebulaPlayerPull swirl.')}
@@ -2066,9 +2115,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Grace', onCycleShatterGrace,
                   stats.shatterGraceName ?? '0.6s',
                   'Cycle the hot-spot-collapse grace delay (0.6 → 3.6s, 0.6s steps). Freshly-shattered rock/glass shards are exempt from the overlap-collapse pass for this long so debris scatters instead of re-condensing. Applies to tiles destroyed after the change.')}
-                {ctrlRow('Neb stretch', onCycleNebulaStretch,
-                  stats.nebulaStretchName ?? '0.07',
-                  'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10. The squash axis aligns to velocity while the sprite keeps its own rotation.')}
                 {ctrlRow('Shard↔tile', onToggleShardTileCollisions,
                   stats.shardTileCollisionsEnabled === true ? 'On' : 'Off',
                   'Toggle the mobile-shard ↔ static-tile collision pass.')}

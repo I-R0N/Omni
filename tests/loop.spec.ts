@@ -362,7 +362,17 @@ test.describe('the run', () => {
       60_000,
     );
 
-    const mid = await stats(page);
+    // WAIT FOR THE PUBLISHED PAYLOAD, don't read it once.  The wait above
+    // polls the LIVE ENGINE, so it returns the instant a counted enemy
+    // exists — while `__omniStats` can still hold the payload from a frame
+    // when `waveState` was not yet 'active', and `enemiesRemaining` is
+    // published as `undefined` in that state.  Reading once then gives
+    // "Matcher error: received value must be a number", which reads like a
+    // missing field rather than a one-frame lag.  Failed in CI (green
+    // locally) — the slower the frames, the wider that window.
+    const mid = await waitForStats(page,
+      s => s.waveNumber === 1 && (s.enemiesRemaining ?? 0) > 0,
+      'the published stats to show wave 1 with counted enemies');
     expect(mid.waveNumber).toBe(1);
     expect(mid.enemiesRemaining).toBeGreaterThan(0);
 

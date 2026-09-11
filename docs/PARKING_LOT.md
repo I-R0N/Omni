@@ -751,6 +751,54 @@ Knobs: `PERF_TASKS` (`consume`), `PhysicsSystem` grids, `EXPLOSION_CONSTANTS` /
 
 ---
 
+## Edge vs Safari frame pacing on iOS — is any of it ours? (parked 2026-09-09)
+
+**A reported "severe periodic frame drop" turned out to be the BROWSER, not
+the game.** The same build on the same device ran silky smooth in Safari and
+hitched badly in Edge (user finding, after four Perf REC captures).
+
+What the captures established before that came out, worth keeping because it
+is all still true and bounds any future investigation:
+
+| candidate | test | result |
+|---|---|---|
+| render path | every capture | **1.90–2.73 ms avg**, and only 1–3 ms on the spike frames themselves |
+| sim / substeps | Sim rate 120 → 60 Hz | spike period **unchanged** (~1.05 s) |
+| cadenced tasks | PerfController tier idle → light | period **unchanged** |
+| `EngineStats` payload | HUD rate 60 → 15 Hz | period **unchanged**, p99 51 vs 53 ms |
+| static tile stamping | every capture | `0 tiles · 0.00 ms` |
+| React hand-off | every capture | 0.00 (correct for a non-profiling build) |
+
+The pauses sat **entirely in `other`** (48–63 ms of a 67 ms frame, with render
+2–3 and sim 1–3), i.e. outside every bracket the engine instruments — which is
+exactly the shape a browser-level stall has, and why no engine knob could
+move it.
+
+TWO observations survive and are the actual open questions:
+
+1. **The rate scaled with activity**: ~1.05 s period while flying, ~2.1 s
+   parked, and the pauses were bigger while moving (p99 51–53 vs 31 ms).
+   Something the game does feeds it even if the game is not the one stalling.
+   A GC in a browser whose collector is tuned differently would do that.
+2. **The tint cache tracked movement exactly**: 0 misses parked, 41–62 while
+   flying (`peak 3–6 ms`). Each miss allocates a tinted canvas. Cheap on a
+   256-entry cache, but it IS movement-scaled heap churn and the one engine
+   contribution the captures actually caught.
+
+So the question to answer is narrow: does Edge's collector (or its canvas
+compositor) turn our ordinary per-frame churn into visible stalls where
+Safari's does not — and if so, is the churn worth reducing anyway for the
+worst-case browser? The decisive instrument is a **Safari Web Inspector
+timeline attached to the device**, which marks GC events explicitly; the
+container harness is NOT adequate (measured ±40% run-to-run on `heapKB/f`,
+enough that a 4× reduction in stats-payload allocation came back *higher*).
+
+Do NOT start from the engine again without new evidence. In particular the
+5c-gauntlet residual (`applyGravity`, `handleEntityCollisions`,
+`PhysicsSystem.update`, `EntityIndex.rebuild`) was NOT shown to be the cause,
+and CLAUDE.md §4 records that the intuitive fix there — normalising entity
+hidden classes — measured **1.9× slower** on the real population.
+
 ## Physics / shard broadphase at high entity counts (separate perf pass)
 
 **Partly addressed on the `physics-shard-broadphase` branch (PR #70).** What
@@ -1715,12 +1763,20 @@ mean and the comparison was tighter than the physical claim it is written to
 make.  It compares green to green now.  That is weaker by exactly that 7.7%,
 and it is the comparison the sentence above it describes.
 
-## Grain `sizeSpread` and `bondSpread` — parked at 0 (user call)
+## Grain `sizeSpread` and `bondSpread` — parked at 0 for the four (user call)
 
-Both axes are implemented, tested and wired end to end; every material is
-authored at **0**, which is the exact identity in both cases
-(`siteWeightsFor` returns null, `bondVariance` returns 1), so the game
-today behaves as if neither existed.
+Both axes are implemented, tested and wired end to end; all four of the
+materials this entry is about — rock, glass, plastic, metal — are authored at
+**0**, which is the exact identity in both cases (`siteWeightsFor` returns
+null, `bondVariance` returns 1), so those four behave as if neither existed.
+
+**One material does use `sizeSpread`, and it is not one of the four: NEBULA,
+at 0.6** (2026-09-07, added with the nebula voronoi work).  It is authored
+deliberately rather than inherited: a cloud wants the widest possible mix of
+puff sizes in one body, which is precisely what this axis is for, and nebula
+is not part of the ordering question below — that is about four materials
+whose relative heterogeneity has to be decided together.  `bondSpread` stays
+unused everywhere, nebula included (it carries no `bondStrength` at all).
 
 - **`sizeSpread`** varies grain AREA within one body, via a POWER DIAGRAM:
   each site carries an additive weight and the divider between two sites
@@ -1965,12 +2021,30 @@ outline-to-outline bond rule, and a weld-strength entry in `GrainSpec`.
 
 ---
 
-## Fracture: the erosion cascade (design question)
+## Fracture: the erosion cascade — SETTLED (2026-09-07) — user call
 
-**Status:** the three MECHANICAL defects found alongside this were fixed
-(detach recoil, centre-of-area re-centring, and the crack gate — see
-CLAUDE.md §8 "A DETACH IS A RIGID-BODY EVENT").  What remains is a design
-question, deliberately left to the user.
+**Status: DECIDED, and shipped as it stood.  EROSION KEEPS CASCADING AT THE
+FIRST BREAK, and that is the wanted behaviour.**  A glue line stops holding a
+grain once the grain on its other side has left, so the rim of an existing
+hole is permanently cheaper to remove than untouched material, and drilling
+one hole beats spraying.  It is both the physically honest answer for brittle
+matter and the better aim incentive.  The alternative — requiring a grain to
+have lost a minimum number of its OWN original boundaries, so a departed
+neighbour grants no discount — was considered and REJECTED.  Do not implement
+it, and do not re-open the question below; it is kept for the measurements
+around it, which are still the record of what was tried.
+
+Two things it touched remain LIVE and are not settled by this: a WIDE
+(hull-sized) track undercutting a group of grains at once is the "Grain
+clusters: several grains leaving as ONE fragment (A4-B)" entry, and OLD CRACKS
+NEVER FADING is a RENDERING question — the overlay draws every boundary at its
+own accumulated fill, so a first-struck face stays visibly cracked forever
+while fresh damage elsewhere adds only faint lines — untouched by this
+decision.
+
+The three MECHANICAL defects found alongside this were fixed (detach recoil,
+centre-of-area re-centring, and the crack gate — see CLAUDE.md §8 "A DETACH IS
+A RIGID-BODY EVENT").
 
 ### What was measured
 
@@ -2002,7 +2076,7 @@ overlay draws every boundary at its own fill, so the heavily-cracked
 first side stays heavily cracked forever while new far-side damage adds
 only a few faint lines.
 
-### The question
+### The question — ANSWERED
 
 Should a fresh wound on the far side COMPETE with the old one, or should
 erosion keep cascading at the first break?  Real materials do both
@@ -2010,7 +2084,11 @@ depending on toughness, so either is defensible.  If competition is
 wanted, the lever is the detach rule rather than the damage spend: a cell
 could require a minimum number of ITS OWN boundaries broken (rather than
 merely all of its still-binding ones) so a freed neighbour does not hand
-it a discount.  Answer this before touching the harvest loop.
+it a discount.
+
+**The answer is the cascade** (user call, 2026-09-07 — see the status note at
+the top).  The competition lever described above is explicitly not wanted and
+must not be built.
 
 ---
 
@@ -2075,7 +2153,9 @@ beside them, and several of them are the same question from other angles:
 - **Grain clusters: several grains leaving as ONE fragment (A4-B)** — the
   bore currently frees grains one at a time; a track that undercuts a
   group is exactly the case that entry is about.
-- **The erosion cascade / do old cracks compete with new wounds** — a bore
+- **The erosion cascade** (SETTLED 2026-09-07: it cascades, and that is
+  wanted) / **do old cracks compete with new wounds**, which is a RENDERING
+  question and still open — a bore
   track IS a concentrated wound, so it sharpens that entry's open
   question rather than sitting apart from it.
 - **Polygonal face bonding for metal** — a bore through a bonded composite
@@ -2180,9 +2260,9 @@ Nine paths, and they do NOT share a model:
 |---|---|---|---|
 | 1 | projectile hit | authored `WeaponConfig.damage` | `resolveCollision` projectile branch |
 | 2 | pierce bore | the same, per grain, × a falloff RATE | `borePierceTrack` |
-| 3 | player crash into a tile | `health -= 1` (a whole pane for glass) | `resolveCollision` player branch |
-| 4 | asteroid crash into a tile | same, plus a momentum gate | two `killStructureByImpact` sites |
-| 5 | tile pressure | a COUNT of sub-threshold impacts | `tilePressureCount` |
+| 3 | player crash into a tile | ~~`health -= 1`~~ → boundary damage (§8) | `resolveCollision` player branch |
+| 4 | asteroid crash into a tile | ~~same~~ → boundary damage, plus a momentum gate | two `killStructureByImpact` sites |
+| 5 | tile pressure | a COUNT of sub-threshold impacts, then boundary damage (§8) | `tilePressureCount` |
 | 6 | AoE shockwave ring | authored splash damage | `updateExplosionRings` |
 | 7 | lightning chain | authored chain damage | `fireLightningChainFromImpact` |
 | 8 | bubble bite | boundary damage, on a cadence | `chipStructureAt` |
@@ -2190,12 +2270,19 @@ Nine paths, and they do NOT share a model:
 
 **Paths 1, 2, 6, 7 and 8 spend on GRAIN BOUNDARIES** (V15) — the physically
 grounded model, where HP is *derived* from `Σ (boundary length ×
-bondStrength)`.  **Paths 3, 4, 5 and 9 do not**: they decrement `health`
-directly or delete the body.  CLAUDE.md states that split as a deliberate
+bondStrength)`.  **Paths 3, 4, 5 and 9 did not**: they decremented `health`
+directly or deleted the body.  CLAUDE.md stated that split as a deliberate
 simplification ("PHYSICAL smashes still take the whole body: they meter
-boulders, not weapons"), and it is exactly the asymmetry the user is
-pointing at.  A bolt bores a pane grain by grain; a hull at speed takes the
-whole pane in one event and leaves no track.
+boulders, not weapons"), and it was exactly the asymmetry the user was
+pointing at.
+
+**STEP 2 CLOSED MOST OF IT — see §8.**  Paths 3, 4 and 5 now spend on
+boundaries too, so eight of the nine share one model and only path 9 (the
+dragon's `consumeTile`, which deletes the tile outright) stands outside it —
+as a swallow rather than a hit, which is arguably correct.  What remains open
+is the OTHER half of the asymmetry, and it is step 4's: a bolt bores a pane
+grain by grain, while a hull at speed still deposits at ONE point and leaves
+no track.
 
 ### 2. The four overlaps
 
@@ -2283,21 +2370,18 @@ Named explicitly, because a unification that swallows these will be wrong:
 This is a multi-session change and should not be started inside a feature
 PR.  The honest sequencing:
 
-1. **Measure first.**  Establish what a shipped weapon's authored `damage`
-   is worth in energy terms against each material's derived HP, so the
-   conversion constant is fitted to the game that exists rather than chosen.
-   Without this the whole roster re-balances silently.
-2. **Route paths 3, 4 and 5 through `applyBoundaryDamage`** — the smallest
-   change with the biggest honesty gain, and independently testable: a
-   crushed tile should crack and shed grains the way a shot one does.
-   `chipStructureAt` (the bubble's bite) is the proof this works: it is
-   already a non-weapon caller of the grain model.
+1. ~~**Measure first.**~~  **DONE (2026-09-07)** — `perf/impact-audit.mjs`,
+   and §7 below is its result.
+2. ~~**Route paths 3, 4 and 5 through `applyBoundaryDamage`**~~ — **SHIPPED
+   (2026-09-07)**, see §8 below.
 3. **Make projectile damage kinetic**, retire the falloff rate and the speed
-   retain, and check the §7 counterplay table still holds.
+   retain, and check the §7 counterplay table still holds.  **NOT STARTED,
+   and §7 below is the reason to be careful: the implied conversion constant
+   is not a constant.**
 4. **Give hulls a bore track**, which is when the user's first point is
-   actually delivered.
+   actually delivered.  Not started.
 5. **Revisit `pierceCount`** last, since removing a budget changes what the
-   Penetration module *is*.
+   Penetration module *is*.  Not started.
 
 ### 6. Related entries — this is the hub
 
@@ -2305,10 +2389,119 @@ PR.  The honest sequencing:
   half of the same question.
 - **Grain clusters: several grains leaving as ONE fragment (A4-B)** — what a
   wide (hull-sized) track should free.
-- **Fracture: the erosion cascade** — whether old wounds compete with new.
+- **Fracture: the erosion cascade** — SETTLED 2026-09-07: erosion keeps
+  cascading at the first break, and that is the wanted behaviour.  What is
+  still live beside it is a RENDERING question (old cracks never fade).
 - **Polygonal face bonding for metal** — bonded composites have no defined
   bore behaviour.
 - **Rotational mechanics for shards and asteroids** — a track is off-centre
   by construction and therefore implies a torque the solver does not model.
 - `docs/MATERIAL_GRAIN_SPEC.md` — the PROPOSED unified bonding system, which
   this entry is the impact-side counterpart to.
+
+### 7. What step 1 MEASURED (2026-09-07)
+
+`perf/impact-audit.mjs` reads all of this out of the REAL engine in a real
+browser: derived HP through `applyBoundaryDamage`'s own model build, weapon
+numbers off a LIVE spawned projectile, the velocity step from
+`PhysicsSystem.impactStrength` itself, and the ram counts through the real
+player-crash branch of `resolveCollision`.  Re-run it rather than quoting
+these numbers after any grain or weapon change.
+
+**Derived HP per material** (n=60 bodies each, 36.2-unit tiles):
+
+| material | tile derived (mean) | tile band | shard derived | shard band | shard AUTHORED |
+|---|---|---|---|---|---|
+| rock | 54.3 | ±6.5% | 7.7 | ±27% | 8 |
+| glass | 49.7 | ±11% | 15.8 | ±38% | 12 |
+| plastic | 391.3 | ±3.3% | 59.0 | ±27% | 24 |
+| metal | 469.6 | ±2.1% | 50.3 | ±17% | 16 |
+
+Two things the shipped grain table does not say.  **Shard bands are 3-6×
+wider than tile bands** — a fixed damage figure asserted against a shard is
+inside that band, which is `tests/README.md` rule 11's flake class.  And
+**`ShardSystem.spawnShardHealth`'s authored numbers disagree with the derived
+ones by up to 3.7×** (plastic 24 vs 59.0, metal 16 vs 50.3); only rock agrees.
+Also worth knowing: **no map populates `rock-tile` except ROCK_FIELD** — rock
+in a real arena is mobile shards only.
+
+**The weapon side.**  Every projectile has `mass: 1`; only speed varies.
+
+| weapon | dmg | speed | KE=½mv² | p=mv | KE/dmg | p/dmg |
+|---|---|---|---|---|---|---|
+| Blaster | 4 | 16 | 128 | 16 | 32.0 | 4.00 |
+| Burst Rifle | 5 | 20 | 200 | 20 | 40.0 | 4.00 |
+| Shotgun | 3 (×6) | 20 | 200 | 20 | 66.7 | 6.67 |
+| Laser | 5 (×3) | 30 | 450 | 30 | **90.0** | 6.00 |
+| Lightning | 9 | 26 | 338 | 26 | 37.6 | 2.89 |
+| Seeker | 8 | 12 | 72 | 12 | **9.0** | 1.50 |
+| Plasma Cannon | 18 | 18 | 162 | 18 | **9.0** | 1.00 |
+
+**The implied constant is not a constant: 9 → 90 KE per point of damage, a
+10× spread** (momentum 1.00 → 6.67, 6.7×).  The Seeker and the Cannon sit at
+the cheap end by construction — slow shells that hit hard — and the Laser at
+the expensive end, so ANY single conversion in step 3 re-prices those against
+each other by an order of magnitude.  That is the roster re-balance,
+quantified.
+
+**The crash side.**  Player mass 100 (lean outfit), cruise 33.3 u/step; `dv`
+is `impactStrength`'s own output.
+
+| path | at | m | v | dv | KE | p |
+|---|---|---|---|---|---|---|
+| player → static tile | gate (`CRASH_VELOCITY_THRESHOLD` 4) | 100 | 4.00 | 6.00 | 800 | 400 |
+| player → static tile | cruise | 100 | 33.26 | 49.89 | 55302 | 3326 |
+| shard → static tile | `SHARD_CRASH_MOMENTUM` 200, m=40 | 40 | 5.00 | 7.50 | 500 | 200 |
+| shard → static tile | same gate, m=100 | 100 | 2.00 | 3.00 | 200 | 200 |
+| shard → static tile | same gate, m=400 | 400 | 0.50 | 0.75 | 50 | 200 |
+| tile pressure (×5) | m=40, half gate | 40 | 2.50 | 3.75 | 625 | 500 |
+
+**The two gates disagree about what a gate is.**  The player's is pure SPEED
+— mass never enters, so a fully-outfitted ~3× heavier ship crosses it at the
+same 4 u/step.  The asteroid's is MOMENTUM, and over the live shard
+population on ASTEROID_FIELD (n=1200, mass 7.3..460.8) one momentum gate
+spans 43 → 2747 energy, a **63× spread**.  (Note the constant this entry and
+CLAUDE.md call `ASTEROID_CRASH_MOMENTUM` is named `SHARD_CRASH_MOMENTUM` in
+`constants.ts` — doc drift, no code impact.)
+
+**How far apart the two sides are.**  Weapon side 9..90 KE per derived HP
+(10× spread); crash side on a virgin tile 37..459 (12.6× spread).  The two
+ranges barely overlap and each is internally spread ~10×.  **So the energy
+proposal's SUBSTRATE holds — `bondStrength` really is a specific fracture
+energy and the derived HP behaves as one — but NO SINGLE CONSTANT FITS
+TODAY'S GAME.**  Step 3 is a deliberate re-pricing, not a refactor.
+
+### 8. What step 2 SHIPPED (2026-09-07)
+
+Paths 3, 4 and 5 now spend on grain boundaries
+(`PhysicsSystem.crashBoundaryDamage` / `crashContactOn`; CLAUDE.md §8 carries
+the rule).  A crushed tile cracks and sheds grains the way a shot one does.
+
+The DEFECT it removed was larger than the entry anticipated, and was measured
+rather than argued: because the crash paths decremented `health` directly
+while the first weapon hit rewrote `maxHealth` to the derived total,
+**shooting a tile once made it 4-50× harder to ram through** — rock 9 → 50
+crashes, plastic 8 → 400, metal 120 → 468.  Nothing about the tile got
+tougher; the unit it was counted in changed.  Virgin and once-shot counts are
+now identical.
+
+Four decisions worth keeping:
+
+- **The spend is NOT kinetic, deliberately.**  Making it so is step 3 and
+  re-prices the roster (§7).  A crash spends one authored HP expressed in the
+  derived budget (`maxHealth / authoredMaxHealth`), which keeps every ram
+  count exactly what it shipped as.  Step 3 replaces that conversion with an
+  energy; until then it is the documented seam.
+- **The contact point is on the HULL**, not the impactor's centre — a
+  460-unit boulder's centre is a couple of hundred units outside the 36px
+  tile it is crushing, and both halves of the grain model read that point.
+- **A body with no grain model still breaks**, by falling back to the
+  whole-body decrement.  This is where the crash paths differ from
+  `chipStructureAt`, which refuses such a body outright.
+- **`damageSpread: 0` is preserved**: each crash stamps its own point and
+  spends sequentially outward from it, so a crush erodes a face rather than
+  blurring the whole body.
+
+Pinned by `tests/terrain.spec.ts` ("a crush spends on grain boundaries"), all
+three claim-tests verified to FAIL with the routing removed.
+

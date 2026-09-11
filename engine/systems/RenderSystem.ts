@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, JoystickHUDState, FireButtonHUDState } from '../../types';
-import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, SCANNER, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
+import { COLORS, ASSETS, getActivePlayerHullMode, getActiveTiltMode, getActiveLeanDirSign, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActivePlasticGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, effectiveDpr, STATIC_TILE_STAMPS_PER_FRAME, getActiveMinimapMaterial, detectionAlpha, SCANNER, getScanRevealAll, cycleLightingMode, setActiveLightingMode, getActiveLightingMode, cycleLightingTier, getActiveLightingTier, LightingMode, toggleShardShadows, getShardShadowsEnabled, cycleShadowSoftness, getShadowSoftnessName, toggleRefraction, getRefractionEnabled, cycleRefractBrightness, getRefractBrightnessName, cycleLightBrightness, getLightBrightnessName, toggleEmissive, getEmissiveEnabled, cycleEmitBrightness, getEmitBrightnessName, toggleEmitShadows, getEmitShadowsEnabled, cycleEmitShadowTier, getEmitShadowTier, cycleEmitFade, getEmitFadeName, cycleCausticFade, getCausticFadeName, cycleFlashlight, getFlashlightName, cycleLightColor, getLightColorName, cycleTintMix, getTintMixName, cycleFog, getFogName, toggleWorldLights, getWorldLightsEnabled, toggleDepthAmbient, getDepthAmbientEnabled} from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import type { Renderer } from './Renderer';
 import type { RendererDiagnostics } from './RendererDiagnostics';
@@ -167,6 +167,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  a permanent dot and never a chevron, and the background sweep never puts
    *  a chevron on screen at all. */
   public mapAlpha(e: GameEntity): number {
+    // DBG "Scan off": the switch that stops the scanner's periodic work also
+    // hands the map everything, so measuring the cost of scanning does not
+    // mean measuring it blind.
+    if (getScanRevealAll()) return 1;
     if (e.found === true) return 1;
     const a = this.detectAlpha(e.detectedAt);
     const b = this.detectAlpha(e.trackedAt);
@@ -542,6 +546,19 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   private _nebulaShardPool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _trailPool: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particlePool: { entity: GameEntity, rx: number, ry: number }[] = [];
+  /** Pool behind `_minimapBuffer`.  Its own because the minimap slot carries
+   *  `{dx, dy, detect}` rather than the `{rx, ry}` every render bucket uses —
+   *  which is exactly why this bucket was left out of the pooling above and
+   *  went on allocating a literal per entity per frame.
+   *
+   *  That was survivable while the buffer held only DISCOVERED structures,
+   *  and stopped being survivable when the scan reveal started shipping ON:
+   *  every structure within minimap range now reaches it, so the one
+   *  unpooled bucket became the largest allocator in the frame.  Measured on
+   *  OVERWORLD while flying: 805 KB/frame with the reveal up against 590 with
+   *  it off — and the pauses that buys are the "periodic large drops" this
+   *  pooling was introduced to kill in the first place (see the note above). */
+  private _minimapPool: { entity: GameEntity, dx: number, dy: number, detect: number }[] = [];
 
   /**
    * Append `entity` to a live render bucket by reusing a pooled slot.
@@ -559,6 +576,20 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     if (s === undefined) { s = { entity, rx, ry }; pool[n] = s; }
     else { s.entity = entity; s.rx = rx; s.ry = ry; }
     live.push(s);
+  }
+
+  /**
+   * `pushSlot` for the minimap bucket.  Same contract exactly — `live` and
+   * `pool` stay index-aligned, `live` is appended only through here and
+   * cleared only via `.length = 0`, and the pool keeps every slot it has
+   * handed out — but for the `{entity, dx, dy, detect}` shape.
+   */
+  private pushMinimapSlot(entity: GameEntity, dx: number, dy: number, detect: number): void {
+    const n = this._minimapBuffer.length;
+    let s = this._minimapPool[n];
+    if (s === undefined) { s = { entity, dx, dy, detect }; this._minimapPool[n] = s; }
+    else { s.entity = entity; s.dx = dx; s.dy = dy; s.detect = detect; }
+    this._minimapBuffer.push(s);
   }
 
   // ── Pre-rendered static minimap layer ─────────────────────────────────
@@ -979,6 +1010,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // Whether the minimap wants per-shard dots this frame (G5).  Hoisted out
     // of the loop: it is one lookup for the whole pass, not one per entity.
     const minimapDots = this.minimapShardDots;
+    // Hoisted like `minimapDots`: ONE lookup for the whole entity pass.
+    const revealAllScan = getScanRevealAll();
 
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
@@ -1115,11 +1148,16 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             let detect: number;
             if (entity.type === EntityType.STRUCTURE) {
                 const mmR = MINIMAP_CONSTANTS.RANGE;
-                detect = entity.found === true && dx * dx + dy * dy <= mmR * mmR ? 1 : 0;
+                // The reveal reaches mobile shards too, but the RANGE cull
+                // stays: it is what bounds the buffer, and without it "reveal
+                // everything" would put every shard on the map every frame —
+                // a cost of its own, inside the measurement.
+                detect = (revealAllScan || entity.found === true)
+                    && dx * dx + dy * dy <= mmR * mmR ? 1 : 0;
             } else {
                 detect = this.mapAlpha(entity);
             }
-            if (detect > 0) this._minimapBuffer.push({ entity, dx, dy, detect });
+            if (detect > 0) this.pushMinimapSlot(entity, dx, dy, detect);
         }
 
         if (rx < left || rx > right || ry < top || ry > bottom) {

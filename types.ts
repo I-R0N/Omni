@@ -1185,6 +1185,10 @@ export interface GameEntity {
   // Cached polygon area (used as merge target for shards).  Shards inherit
   // this from their parent tile so they know the reassembly threshold.
   nebulaTileArea?: number;
+  /** Cached polygon circumradius, for `nebulaSpriteSize` only.  Never
+   *  invalidated: a nebula body's polygon is fixed for its life (no dent
+   *  policy, no progressive fracture, and a pair-consuming merge). */
+  _nebulaSpriteR?: number;
   // Hex grid coordinate (odd-r offset) of the source tile — preserved on
   // shards so coalescence can snap back to the same column/row layout.
   nebulaGridCol?: number;
@@ -1208,6 +1212,10 @@ export interface GameEntity {
   // regenerated), or tile area (merge).  Mirrors the same per-entity
   // caching pattern `nebulaBlendedHex` already uses.
   nebulaCachedTinted?: HTMLCanvasElement;
+  /** The `getNebulaSpriteGen()` value the cached draw size was computed at.
+   *  A cache whose stamp is stale is refused, so the DBG oversize knob
+   *  reaches clouds already on screen. */
+  nebulaCachedGen?: number;
   nebulaCachedDx?: number;
   nebulaCachedDy?: number;
   nebulaCachedSize?: number;
@@ -1429,6 +1437,16 @@ export interface GameEntity {
   // built under (V11).  A DBG cycle bumps the global counter, so a stale
   // value here forces one recompute; untouched in normal play.
   fractureGen?: number;
+
+  // CHIP-DUST BANK (user call).  Dust from grain detaches is POOLED
+  // rather than thrown per chip — see GRAIN_CHIP_DUST — so the body
+  // carries the footprint AREA it has shed since the last puff and the
+  // number of chips that went into it.  Area because pooling then
+  // conserves material: N chips of diameter d bank N·d² and come out as
+  // one puff of diameter d·sqrt(N).  Cleared when a puff is thrown, and
+  // again on regen revival, which reuses the entity object.
+  grainDustArea?: number;
+  grainDustChips?: number;
 
   // Polygon area at the FIRST partial-fracture detach (V4) — the
   // baseline the min-remainder death rule measures against
@@ -2030,8 +2048,21 @@ export interface EngineStats {
   // tile/shard blend alphas.  Default true.
   plasticBlendEnabled?: boolean;
   // DBG stiffness step for the nebula-shard velocity stretch
-  // (VEL_STRETCH_K_CYCLE name).  off → soft → med → firm → stiff.
+  // (VEL_STRETCH_K_CYCLE name): off / 0.05 / 0.07 / 0.085 /
+  // 0.10 (ships, the top step).
   nebulaStretchName?: string;
+  /** DBG readout: the nebula sprite-oversize A/B step (NEBULA_SPRITE_CYCLE). */
+  nebulaSpriteName?: string;
+  /** DBG readout: chips banked per dust puff (CHIP_DUST_POOL_CYCLE). */
+  chipDustPoolName?: string;
+  /** DBG readout: true while scanning is off and the whole map is revealed. */
+  scanRevealAll?: boolean;
+  /** DBG readout: the nebula damping step (NEBULA_DAMP_CYCLE). */
+  nebulaDampName?: string;
+  /** DBG "Neb spin damp" step name (NEBULA_SPIN_DAMP_CYCLE). */
+  nebulaSpinDampName?: string;
+  /** DBG readout: the nebula bonding step (NEBULA_BOND_CYCLE). */
+  nebulaBondName?: string;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards
   // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
   shatterGraceName?: string;

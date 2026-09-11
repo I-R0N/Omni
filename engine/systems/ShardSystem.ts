@@ -33,7 +33,7 @@ import {
   HOTSPOT_COLLAPSE,
   METAL_ASSEMBLY,
   METAL_MAX_DENSITY_TIER,
-  getActiveShatterGraceDelay,
+  getActiveShatterGraceDelay, getActiveNebulaBond,
   getActiveFractureMode,
   GLASS_SHARD_HP,
   METAL_SHARD_HP,
@@ -44,6 +44,7 @@ import {
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
+import { randomNebulaSprite } from '../../assets';
 import {
   wrapDeltaX, wrapDeltaY, wrapPosition, wrapX, wrapY,
   MAP_WIDTH, MAP_HEIGHT,
@@ -731,6 +732,9 @@ export class ShardSystem {
     entity.regenProgress = undefined;
     entity.deathDispatched = undefined; // revived — killable again (V9)
     entity.shattered = undefined;       // ...and breakable again (V13)
+    // The chip-dust bank is per LIFE: a revived tile has shed nothing.
+    entity.grainDustArea = undefined;
+    entity.grainDustChips = undefined;
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +
@@ -852,6 +856,14 @@ export class ShardSystem {
       }
       const dent = variant.dent;
       if (dent !== undefined && dent.breakShards.length > 0) return;
+      // A 'voronoi' variant under the legacy A/B falls back to the path it
+      // had BEFORE it was opted in, which for nebula is its own rear-cone
+      // fan — not the generic scatter pipeline.  `style` is what says so,
+      // and it is why nebula keeps carrying its powerlaw fields.
+      if (variant.shatter.style === 'nebula') {
+        this.shatterNebulaStyle(parent, variant, entities);
+        return;
+      }
       this.shatterPowerlawStyle(parent, variant, entities);
       return;
     }
@@ -896,6 +908,14 @@ export class ShardSystem {
     if (dentOverride !== undefined) return dentOverride;
     if (childVariantId === 'glass-shard') return GLASS_SHARD_HP;
     if (childVariantId === 'metal-shard') return METAL_SHARD_HP;
+    // Nebula is 1 HP by design, at every size: a cloud shard is
+    // indestructible from the player's side (`shatter.kind: 'none'`) and
+    // dies only to the contact-shatter path, which does not read a pool.
+    // Named here rather than left to the size-keyed default below —
+    // falling through that default with no branch is exactly what gave
+    // metal a 1-HP grain, and a 2-HP nebula shard would make it eligible
+    // for a damage-crack overlay it has no way to draw.
+    if (childVariantId === 'nebula-shard') return 1;
     const baseHp = newSize > 30 ? 2 : 1;
     return densityTier !== undefined
       ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
@@ -1024,7 +1044,7 @@ export class ShardSystem {
       }
 
       const maxSpin = 2.0 / (Math.max(newSize, 4) / 20);
-      entities.push({
+      const child: GameEntity = {
         id:            nextId('shard'),
         type:          EntityType.STRUCTURE,
         shardVariant:  childVariant.id,
@@ -1051,10 +1071,60 @@ export class ShardSystem {
         restSpeed:      childSpawn.restSpeed,
         restSpin:       childSpawn.restSpin,
         collapseGraceTimer: getActiveShatterGraceDelay(),
-      });
+      };
+      if (childVariant.id === 'nebula-shard') {
+        ShardSystem.stampNebulaChild(parent, child, parentVariant, impactSpeed);
+      }
+      entities.push(child);
     }
 
     this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
+  }
+
+  /**
+   * Carry a nebula parent's OWN state onto a voronoi fragment.
+   *
+   * The voronoi child recipe above is deliberately material-agnostic —
+   * geometry, mass, HP, motion — and nebula is the one family whose
+   * identity does not live in any of those: its colour is per-BODY
+   * (`nebulaColorComposition`, blended from a palette rather than
+   * declared by the variant), its birth is a FADE rather than a pop, and
+   * its merge pipeline reads a cooldown and a grid coordinate.  Without
+   * this stamp a fragment would spawn the right shape in the wrong
+   * colour, pop in, and be eligible to re-merge on the frame it was born.
+   *
+   * The fade duration is scaled by the impact exactly as
+   * `shatterNebulaStyle` scales it, so a fast smash still fades in fast:
+   * the parent's own fade-OUT rate is scaled the same way in
+   * PhysicsSystem, and the two crossfade.
+   */
+  private static stampNebulaChild(
+    parent: GameEntity,
+    child: GameEntity,
+    parentVariant: ShardVariantDef,
+    impactSpeed: number,
+  ): void {
+    const composition = parent.nebulaColorComposition;
+    if (composition !== undefined) {
+      child.nebulaColorComposition = cloneComposition(composition);
+      child.color = blendCompositionToHex(composition) || child.color;
+    }
+    // A FRAGMENT GETS ITS OWN SPRITE (user call).  The generic child recipe
+    // copies `parent.sprite`, which is right for every other material — rock,
+    // glass, metal and plastic draw polygons and carry no sprite worth
+    // varying — and wrong for the one family whose whole look IS the sprite:
+    // a tile broken into 6-8 cells produced 6-8 copies of one cloud image,
+    // so a burst read as the same puff stamped out repeatedly rather than as
+    // a cloud coming apart.  Rolled per child from the ACTIVE set, the same
+    // way the map-load tile factory and the shatter dust already roll theirs.
+    child.sprite = randomNebulaSprite();
+    const fadeInBase = parentVariant.shatter.fadeInSeconds ?? NEBULA_CONSTANTS.FADE_IN_DURATION;
+    const duration = fadeInBase / nebulaFadeRateScale(impactSpeed);
+    child.nebulaSpawnTimer = duration;
+    child.nebulaSpawnDuration = duration;
+    child.nebulaMergeCooldown = parentVariant.shatter.postShatterMergeCooldown ?? 0;
+    child.nebulaGridCol = parent.nebulaGridCol;
+    child.nebulaGridRow = parent.nebulaGridRow;
   }
 
   /**
@@ -1641,7 +1711,7 @@ export class ShardSystem {
         maxHealth:       1,
         mass:            childSpawn.sizeToMass(size),
         polygonPoints:   points,
-        sprite:          parent.sprite,
+        sprite:          randomNebulaSprite(),   // per-child, see stampNebulaChild
         nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
         nebulaGridCol:   parent.nebulaGridCol,
         nebulaGridRow:   parent.nebulaGridRow,
@@ -1734,7 +1804,16 @@ export class ShardSystem {
       // Per-bond break-factor multiplier — 'strong' tier partners
       // (set at formation time) tolerate larger separation before
       // the bond snaps.
-      const breakFactor = BREAK_FACTOR * (bond.breakFactorMul ?? 1);
+      //
+      // DBG "Neb bond" rides on top, AT THE READ rather than at formation:
+      // the per-bond multipliers above are stamped when a bond forms, so a
+      // knob that only wrote them would leave every bond already in the
+      // world at the old grip and take a full shatter to show.  A
+      // nebula-to-nebula pair is the only thing it touches.
+      const nebPair = a.shardVariant === 'nebula-shard' && b.shardVariant === 'nebula-shard';
+      const nebBond = nebPair ? getActiveNebulaBond() : null;
+      const breakFactor = BREAK_FACTOR * (bond.breakFactorMul ?? 1)
+          * (nebBond !== null ? nebBond.breakMul : 1);
       if (dist > contactDist * breakFactor) continue; // bond broken
 
       // Velocity cohesion: nudge both toward shared momentum centre.
@@ -1748,7 +1827,8 @@ export class ShardSystem {
       // bleeds toward zero (the tile's "shared velocity").  The
       // mass-weighted formula would NaN with ∞, so we branch.
       if (applyCohesion) {
-        const cohesionRate = COHESION * (bond.cohesionMul ?? 1);
+        const cohesionRate = COHESION * (bond.cohesionMul ?? 1)
+            * (nebBond !== null ? nebBond.cohesionMul : 1);
         const blend        = Math.min(1, cohesionRate * dt);
         if (a.mass === Infinity && b.mass !== Infinity) {
           b.velocity.x += (0 - b.velocity.x) * blend;
@@ -1770,6 +1850,12 @@ export class ShardSystem {
       // Cohesion-only bonds (today: plastic-shard) skip the merge
       // pipeline entirely — no timer accumulation, no compose call.
       // Re-push and continue.
+      //
+      // Nebula deliberately does NOT take this route even at the top "Neb
+      // bond" step: compose is how its shards transmute back into TILES, so
+      // suppressing it would switch off the whole self-coalesce loop.  It
+      // stretches the THRESHOLD instead (see the bondTimeMul read below),
+      // which buys the same stuck-together read and still coalesces.
       if (bond.cohesionOnly) {
         this.bonds[writeIdx++] = bond;
         continue;
@@ -1792,14 +1878,23 @@ export class ShardSystem {
       }
       bond.timer += dt * bondRate;
 
-      if (bond.timer >= bond.threshold) {
+      // DBG "Neb bond" stretches the compose threshold for a nebula pair.
+      // Applied HERE, at the read, rather than baked into `bond.threshold`
+      // at formation — so a click re-tunes the pairs already stuck together
+      // and stepping back down lets a long-held bond compose immediately,
+      // the same at-the-read rule the cohesion and break multipliers follow.
+      const threshold = nebBond !== null
+          ? bond.threshold * nebBond.bondTimeMul
+          : bond.threshold;
+
+      if (bond.timer >= threshold) {
         // Per-frame merge budget — surplus bonds defer to next tick
         // so a cluster of bonds whose timers all elapse in the same
         // frame compacts visibly over several frames instead of in
         // one.  Defer by clamping timer just below threshold so the
         // bond stays alive and re-checks next tick.
         if (mergeBudget <= 0) {
-          bond.timer = bond.threshold - dt;
+          bond.timer = threshold - dt;
           this.bonds[writeIdx++] = bond;
           continue;
         }
@@ -2038,7 +2133,13 @@ export class ShardSystem {
             if (wantsPull && bVariantId !== null) {
               const pullRange  = aVariant!.merge.pullRange ?? CELL;
               const pullRangeSq = pullRange * pullRange;
-              const pullInner    = aVariant!.merge.pullInnerRange ?? 0;
+              // DBG "Neb bond" can hand nebula the inner range plastic already
+              // has: inside it the self-gravity stops pulling, so cohesion
+              // owns the close range instead of fighting a pull that is still
+              // accelerating the pair together at the moment they touch.
+              const nebPull = a.shardVariant === 'nebula-shard'
+                  ? getActiveNebulaBond().pullInner : 0;
+              const pullInner    = Math.max(aVariant!.merge.pullInnerRange ?? 0, nebPull);
               const pullInnerSq  = pullInner * pullInner;
               const targetCooldownOk = (b.nebulaMergeCooldown ?? 0) <= 0;
               const matchesPull = aVariant!.merge.attractedTo !== 'none'
