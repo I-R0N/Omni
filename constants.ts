@@ -5886,6 +5886,22 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     explosionRadius: 110,   // world units of radial AoE on impact
     explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
+    // A HEAVY SHELL IS NOT A CONTACT MINE (user call).  The Cannon was always
+    // meant to be a heavy round with ONE blast at the end of it, and the
+    // penetration system quietly made it something else: `applyExplosionAoE`
+    // fires on EVERY hit, so a shell carrying N pierce detonated N+1 times.
+    // Universal penetration (step 5) would have made that far worse — a full
+    // blast on every pebble it passed through.
+    //
+    // So only an ACTOR trips the charge.  Against STRUCTURES the shell stays a
+    // projectile and spends its energy boring, which is exactly what its mass
+    // is for: it should cross small and medium shards rather than being
+    // stopped and wasted by the first chip of gravel it clips.
+    detonateOn: 'enemy',
+    // ~0.42 s at muzzle speed is a little over 900 units of flight — well
+    // beyond the AoE radius, so a shell that meets nothing still ends in a
+    // blast instead of expiring silently, without becoming a delayed mine.
+    fuseSeconds: 0.42,
   },
 };
 

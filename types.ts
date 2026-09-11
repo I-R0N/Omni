@@ -312,6 +312,21 @@ export interface WeaponConfig {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // WHAT SETS THE CHARGE OFF.  Absent / 'impact' → any contact detonates it,
+  // which is what every AoE shot did before penetration became universal.
+  // 'enemy' → only an ACTOR (enemy, boss, fauna, the player) trips it, and a
+  // STRUCTURE does not: the shell keeps flying, spending energy on the grains
+  // it bores exactly like any other round.  That is what lets a heavy shell
+  // BE heavy — it should punch through gravel, not be stopped and wasted by
+  // the first pebble in its path.
+  detonateOn?: 'impact' | 'enemy';
+  // Seconds of flight before the charge goes off on its own, so a shell that
+  // never meets an actor still ends as a blast rather than silently expiring.
+  // The FALLBACK half of `detonateOn: 'enemy'`; absent → no self-detonation.
+  // TIME rather than distance on purpose: the projectile already carries a
+  // ticked `lifetime`, so a fuse is one subtraction and no new state, and at
+  // a fixed muzzle speed the two are the same quantity anyway.
+  fuseSeconds?: number;
   // Render hint: when true the projectile draws a larger, brighter radial
   // bloom (used to telegraph heavy / status enemy shots — Tank, Orbiter,
   // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
@@ -485,6 +500,13 @@ export interface GameEntity {
   // separate from `pierceCount`, which counts DOWN and would read the
   // table backwards.
   pierceHits?: number;
+  /** Counts DOWN to a self-detonation for a shell whose charge is not tripped
+   *  by structures (`WeaponConfig.detonateOn: 'enemy'`).  Absent → the shot
+   *  has no fuse and simply expires. */
+  fuseTimer?: number;
+  /** Copied from the weapon at spawn so the on-hit path can ask what trips
+   *  this shell without reaching back to its config. */
+  detonateOn?: 'impact' | 'enemy';
   /** The bolt's world speed at spawn — its MUZZLE energy reference.  Damage
    *  is kinetic (constants.kineticDamage), so under the shipped 'muzzle'
    *  impact-velocity mode the hit is the authored figure scaled by how much

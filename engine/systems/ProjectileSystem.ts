@@ -208,6 +208,11 @@ export class ProjectileSystem {
         pooled.isBouncer = isBnc;
         pooled.bouncesRemaining = bouncesRem;
         pooled.explosionRadius = config.explosionRadius;
+        // Unconditional, like every other config-derived field on this path:
+        // a recycled shell that kept a previous gun's fuse would detonate on
+        // a timer it never armed.
+        pooled.detonateOn = config.detonateOn;
+        pooled.fuseTimer = config.fuseSeconds;
         pooled.explosionDamage = config.explosionDamage;
         pooled.explosionKnockback = config.explosionKnockback;
         pooled.glow = config.glow;
@@ -256,6 +261,8 @@ export class ProjectileSystem {
           explosionRadius: config.explosionRadius,
           explosionDamage: config.explosionDamage,
           explosionKnockback: config.explosionKnockback,
+          detonateOn: config.detonateOn,
+          fuseTimer: config.fuseSeconds,
           glow: config.glow,
           chainCount: config.chainCount,
           chainRange: config.chainRange,

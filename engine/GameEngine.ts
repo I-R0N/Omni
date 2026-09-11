@@ -4157,6 +4157,7 @@ export class GameEngine {
 
     this.updateHomingProjectiles(dt);
     this.updateLightningGravity(dt);
+    this.updateProjectileFuses(dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup.  Expired texts return to the pool for reuse
@@ -4423,7 +4424,17 @@ export class GameEngine {
     // Cannon AoE: every entity within proj.explosionRadius takes
     // proj.explosionDamage and a knockback impulse.  Direct-hit target
     // is excluded (it already took config.damage in PhysicsSystem).
-    if (proj.explosionRadius && proj.explosionRadius > 0) {
+    //
+    // WHAT TRIPS THE CHARGE (user call).  A shell marked `detonateOn:
+    // 'enemy'` is not set off by terrain: it stays a projectile through
+    // structures and spends its energy boring them, which is the whole point
+    // of being heavy.  Before this, `applyExplosionAoE` fired on EVERY hit,
+    // so a shell carrying N penetration detonated N+1 times — and universal
+    // penetration would have made that a full blast per pebble.  An ACTOR
+    // (enemy, boss, fauna, the player) still trips it on contact, and
+    // `updateProjectileFuses` covers the shell that meets nothing.
+    if (proj.explosionRadius && proj.explosionRadius > 0
+        && (proj.detonateOn !== 'enemy' || target.type !== EntityType.STRUCTURE)) {
         applyExplosionAoE(this, impactPos, proj, target, hitFalloff);
     }
   };
@@ -5983,6 +5994,36 @@ export class GameEngine {
   spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
       if (!this.currentMap) return;
       this.projectiles.spawn(this.currentMap.entities, shooter, target, config, ownerType);
+  }
+
+  /**
+   * THE FUSE — the fallback half of `detonateOn: 'enemy'`.
+   *
+   * A shell that is not tripped by terrain has to end somewhere, or a Cannon
+   * round fired into empty space would simply expire and the shot would be
+   * wasted with no blast at all.  So it carries a countdown and detonates in
+   * place when that runs out, wherever it has got to.
+   *
+   * TIME rather than distance, deliberately: the projectile is already ticked,
+   * so this is one subtraction and no new state, and at a fixed muzzle speed
+   * the two are the same quantity anyway.  Walks the projectile INDEX rather
+   * than the master list, like the homing and lightning passes beside it.
+   */
+  private updateProjectileFuses(dt: number) {
+      const list = this.entityIndex.projectiles;
+      for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          if (p.fuseTimer === undefined || !p.active) continue;
+          p.fuseTimer -= dt;
+          if (p.fuseTimer > 0) continue;
+          p.fuseTimer = undefined;
+          // Detonate where it is.  `undefined` target: nothing was struck, so
+          // there is no direct hit to exclude from the ring.
+          if (p.explosionRadius && p.explosionRadius > 0) {
+              applyExplosionAoE(this, p.position, p, undefined, p.hitFalloff ?? 1);
+          }
+          p.active = false;
+      }
   }
 
   private updateHomingProjectiles(dt: number) {

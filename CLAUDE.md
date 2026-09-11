@@ -68,11 +68,13 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           aggro timeout + the immovability fix, and
                           the mouth-size / bite eating rules) and
                           modules (the Phase-A module families:
-                          Penetration, Scanner, hex slots),
+                          Penetration, Scanner, hex slots), weapons (what a
+                          shot does beyond its damage — today the Plasma
+                          Cannon's fuse),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  387 tests.  All run at
+                          writing a DBG-knob test).  390 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1327,7 +1329,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   per-hit hit-stun below `stunDamage` and takes a scaled-down knockback, so
   chip fire can neither lock a boss up nor shove it off its line; a plain
   archetype field, NOT a boss branch).
-- `WEAPONS`, `WEAPON_LIST`.  Ammo is DELETED as a system (pivot 1b): no
+- `WEAPONS`, `WEAPON_LIST`.  **A HEAVY SHELL IS NOT A CONTACT MINE** (user
+  call, unified impact physics step 5a).  `WeaponConfig.detonateOn`
+  (`'impact'` | `'enemy'`) says what trips an AoE charge and `fuseSeconds`
+  is its fallback; the Plasma Cannon is `'enemy'` + 0.42 s.  It was always
+  meant to be a heavy round with ONE blast at the end of it, and the
+  penetration system quietly made it something else — `applyExplosionAoE`
+  fires on EVERY hit, so a shell carrying N penetration detonated N+1
+  times, and universal penetration would have made that a full blast on
+  every pebble it passed through.  Against a STRUCTURE the shell now stays a
+  projectile and spends its energy boring, which is what its mass is for;
+  an ACTOR still trips it on contact, and `GameEngine.updateProjectileFuses`
+  covers the shell that meets nothing so a shot into open space ends in a
+  blast rather than expiring silently.  TIME rather than distance because
+  the projectile is already ticked, so the fuse is one subtraction and no
+  new state — and at a fixed muzzle speed the two are the same quantity.
+  Pinned by `tests/weapons.spec.ts`, whose terrain claim is verified to FAIL
+  with the gate removed.  Ammo is DELETED as a system (pivot 1b): no
   drops, pool, per-shot costs, HUD strip, select gating, or dry-fallback —
   weapon pressure is cooldown + the 2-SLOT EQUIP LOADOUT.
   `GameEngine.equippedWeapons` holds exactly 2 slots — DERIVED from the

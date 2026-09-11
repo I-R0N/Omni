@@ -237,7 +237,10 @@ export function updateExplosionRings(g: GameEngine) {
  *  DIRECT damage (PhysicsSystem stashes it on the projectile).  Passing it in
  *  keeps every weapon affected equally by the falloff rate: a pierced shot's
  *  fourth blast is as weakened as its fourth bite.  1 when nothing pierced. */
-export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity, falloff: number = 1) {      if (!g.currentMap) return;
+/** `directTarget` is undefined for a FUSE detonation — the shell went off in
+ *  flight having struck nothing, so there is no direct hit to exclude from
+ *  the ring and nothing to compare the owner against. */
+export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity | undefined, falloff: number = 1) {      if (!g.currentMap) return;
 // Compact splash blast — deliberately not the boss-death boom, since
 // a Cannon build fires this several times a fight.
 g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
@@ -266,7 +269,7 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         color: WEAPONS[WeaponType.CANNON].color,
         ownerType: proj.ownerType,
         ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
-        excludeIds: [directTarget.id, 'player'],
+        excludeIds: directTarget ? [directTarget.id, 'player'] : ['player'],
     });
 
     // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
