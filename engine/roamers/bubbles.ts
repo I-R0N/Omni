@@ -47,6 +47,8 @@ export function updateBubbles(g: GameEngine, dt: number) {
     if (!g.currentMap) return;
     const p = g.player;
     const enemies = g.entityIndex.enemies;
+    g.audio.loop('bubble.drain', enemies.some(e => e.active && !e.isExploding &&
+      e.enemySubtype === EnemySubtype.BUBBLE && e.attachedToId === p.id));
     const B = BUBBLE_CONSTANTS;
     const baseSize = ENEMY_VARIANTS[EnemySubtype.BUBBLE].size;
     // Terrain-slam window (player smacked a tile/asteroid fast) ticks down here.
