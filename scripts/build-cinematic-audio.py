@@ -10,6 +10,7 @@ from scipy import signal
 
 ROOT=Path(sys.argv[1]); OUT=Path('public/assets/audio'); OUT.mkdir(parents=True,exist_ok=True)
 SR=44100; cache={}
+GUN_CUES={'weapon.blaster.fire','weapon.burst.fire','weapon.burst.sub'}
 
 def sample(pack,name,v,rate=1):
     files=sorted((ROOT/pack/'Audio').glob(name+'*.ogg'))
@@ -31,6 +32,13 @@ def recipe(id):
     f=lambda name,rate=1,amp=1,delay=0: ('scifi',name,rate,amp,delay)
     i=lambda name,rate=1,amp=1,delay=0: ('impacts',name,rate,amp,delay)
     if id.startswith('weapon.') or id.startswith('enemy.shot.'):
+        if id in GUN_CUES:
+            # Pressure crack, low punch and a restrained bolt/clack. No laser
+            # or thruster layer: sustained pitched energy reads as buzzing.
+            burst=id!='weapon.blaster.fire'
+            return [f('explosionCrunch',1.9 if burst else 1.55,.72),
+                    i('impactPunch_heavy',.95 if burst else .78,.60),
+                    i('impactMetal_light',1.3,.16,.032)],.24 if burst else .36,.025
         if any(s in id for s in ['ready','cycle','reject']):
             return [i('impactPlate_light',.85,.7),f('doorClose',1.3,.22,.035)],.26,.05
         if 'cannon' in id or 'charged.release' in id or 'boss' in id:
@@ -86,6 +94,11 @@ for id in ids:
         n=round(duration*SR); out=np.zeros(n); rng=np.random.default_rng(int.from_bytes(hashlib.sha256((id+str(v)).encode()).digest()[:4],'little'))
         for pack,name,rate,amp,delay in layers:
             x=sample(pack,name,v,rate*(1+(v-1)*.022)); offset=round((delay+(rng.uniform(0,.008) if delay else 0))*SR)
+            if id in GUN_CUES:
+                # Fast pressure decay and tightly damped metal prevent ringing
+                # from accumulating when the three burst rounds overlap.
+                decay=(.035 if name=='impactMetal_light' else .045 if 'burst' in id else .070)
+                x=x*np.exp(-np.arange(len(x))/(SR*decay))
             length=min(len(x),n-offset)
             if length>0: out[offset:offset+length]+=x[:length]*amp
         # Early reflections spread texture through the tail without a metallic
@@ -100,12 +113,12 @@ for id in ids:
         cutoff=1800 if group=='impacts' else 5200
         out=signal.sosfilt(signal.butter(2,cutoff,fs=SR,output='sos'),out)
         out=signal.sosfilt(signal.butter(2,32,fs=SR,btype='highpass',output='sos'),out)
-        out=np.tanh(out*1.2)
+        out=out if id in GUN_CUES else np.tanh(out*1.2)
         # Remove input latency but retain room/body decay. Length caps are
         # authored per event, not a blanket 250ms crop.
         active=np.flatnonzero(abs(out)>max(abs(out))*.008)
         if len(active): out=np.pad(out[max(0,active[0]-44):],(0,max(0,active[0]-44)))
-        attack=min(88,len(out)); release=min(round(.065*SR),len(out)//3)
+        attack=min(22 if id in GUN_CUES else 88,len(out)); release=min(round(.065*SR),len(out)//3)
         out[:attack]*=np.linspace(0,1,attack);out[-release:]*=np.linspace(1,0,release)
         peak=max(abs(out));out*=.48/max(peak,1e-6)
         start=offsets[group]; manifests[group].setdefault(id,[]).append([start/SR,len(out)/SR])
