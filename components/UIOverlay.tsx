@@ -82,6 +82,9 @@ interface UIOverlayProps {
   onToggleScreenShake?: () => void;
   // Audio settings (Phase 3 Pair B).  Deliberately the ONLY UI surface
   // this pass adds — Pair A owns the overlay's structural work.
+  onAudioCue?: (id: 'ui.nav' | 'ui.drag.pick' | 'ui.drag.drop') => void;
+  onSetSfxVolume?: (v: number) => void;
+  onSetMusicVolume?: (v: number) => void;
   onSetVolume?: (v: number) => void;
   onToggleMute?: () => void;
   onToggleDrafts?: () => void;
@@ -416,6 +419,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardLod,
   onToggleMergeRate,
   onToggleScreenShake,
+  onAudioCue,
+  onSetSfxVolume,
+  onSetMusicVolume,
   onSetVolume,
   onToggleMute,
   onToggleDrafts,
@@ -650,6 +656,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       const d = dragRef.current;
       setDragging(null);
       if (!d || !d.moved) return;
+      onAudioCue?.('ui.drag.drop');
       // A real drag happened — swallow the click that follows pointerup.
       suppressClickRef.current = true;
       setTimeout(() => { suppressClickRef.current = false; }, 0);
@@ -763,6 +770,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       // Cargo (inventory) tiles drag anywhere; installed hexes only at a
       // docked drydock.
       if (area !== 'inventory' && !canEditInstalled) return;
+      onAudioCue?.('ui.drag.pick');
       setDragging({ area, idx, label, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, moved: false });
     };
   /** One 7-hex flower.  `interactive: false` (pause menu) renders a
@@ -2283,7 +2291,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         only tightens the HUD.  The top stack gains 8px of headroom and the
         chevrons' top safe band (UI_CONSTANTS.INDICATORS.TOP_INSET) is sized
         against the result. */
-    <div className="absolute inset-0 pointer-events-none p-2 flex flex-col justify-between">
+    <div className="absolute inset-0 pointer-events-none p-2 flex flex-col justify-between"
+      onFocusCapture={e => { if ((e.target as HTMLElement).matches('button, input, select')) onAudioCue?.('ui.nav'); }}
+      onClickCapture={e => { if ((e.target as HTMLElement).closest('button')) onAudioCue?.('ui.nav'); }}>
 
       {!overlayUp && (<>
 
@@ -3316,31 +3326,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </span>
             </div>
 
-            {/* Recorded-take audition.  Turning the synth DRAFTS off is the
-                only way to judge real assets honestly: with a draft under
-                every id, a sound that is still synthetic is indistinguishable
-                from one that landed, and the coverage count says how much of
-                the game goes quiet when they are off. */}
-            <div className={`mx-auto w-full max-w-xs flex items-center gap-3 ${PANEL_ROW}`}>
-              <button
-                onClick={onToggleDrafts}
-                aria-label={stats.audio?.drafts ? 'Turn synth drafts off' : 'Turn synth drafts on'}
-                className={`pointer-events-auto cursor-pointer shrink-0 px-2 ${TAP} rounded-md ${T_BODY}
-                            font-semibold border ${stats.audio?.drafts
-                              ? 'bg-slate-800/80 border-slate-600/60 text-slate-200'
-                              : 'bg-emerald-900/60 border-emerald-500/50 text-emerald-200'}`}
-              >
-                {stats.audio?.drafts ? 'Drafts ON' : 'WAV only'}
-              </button>
-              <span className={`flex-1 ${T_BODY} leading-tight text-slate-400`}>
-                {stats.audio?.drafts
-                  ? 'Synth drafts fill every sound with no .wav yet.'
-                  : 'Only recorded .wav files sound. Everything else is silent.'}
-              </span>
-              <span className={`shrink-0 text-right text-slate-300 ${T_BODY} tabular-nums`}>
-                {stats.audio?.sampled ?? 0}/{stats.audio?.total ?? 0}
-              </span>
-            </div>
+            {(['SFX', 'Music'] as const).map(category => {
+              const value = category === 'SFX' ? stats.audio?.sfxVolume : stats.audio?.musicVolume;
+              return <label key={category} className={`mx-auto w-full max-w-xs flex items-center gap-3 ${PANEL_ROW}`}>
+                <span className={`w-12 text-slate-300 ${T_BODY}`}>{category}</span>
+                <input type="range" min={0} max={100} step={1}
+                  aria-label={`${category} volume`} value={Math.round((value ?? 1) * 100)}
+                  onChange={e => (category === 'SFX' ? onSetSfxVolume : onSetMusicVolume)?.(Number(e.target.value) / 100)}
+                  className={`min-w-0 flex-1 pointer-events-auto accent-sky-400 ${TAP}`} />
+                <span className={`w-10 text-right text-slate-400 ${T_BODY}`}>{Math.round((value ?? 1) * 100)}%</span>
+              </label>;
+            })}
+            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music: <a href="https://opengameart.org/content/space-ambient" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Space ambient — Osmic</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a></p>
 
             {/* Output-latency READOUT (playtest: "sounds feel slightly
                 delayed").  The engine side is measured tight — tap → play()

@@ -12,32 +12,20 @@ const SHARD_RANGE = {
   far:  AUDIO_CONSTANTS.SHARD_FAR_RADIUS,
 } as const;
 
-/**
- * SfxRegistry — the procedural draft of every sound in
- * `docs/SFX_INVENTORY.md`, keyed by that document's stable ids.
- *
- * One entry per inventory row, in inventory order, with the row's
- * `tier` / `mix` / `poly` / throttle / variation / positional values
- * transcribed directly.  The inventory quotes milliseconds; `ms()`
- * converts at the boundary so a def can be read line-by-line against its
- * row.
- *
- * These are DRAFTS.  Replacing one with a recorded asset is a change to
- * its `render` function and nothing else — no trigger site knows how a
- * sound is produced.  Inventory §9 ranks which drafts are worth
- * replacing first.
+/** Authored event recipes and mix definitions. SfxVoicing adds production
+ * detail; AudioSystem caches three finished takes for every unsampled ID.
+ * Existing WAV takes are discovered by dashed ID prefix and take precedence.
+ * Sustained sounds stay live so throttle, charge and proximity remain responsive.
  */
-// RECORDED TAKES ARE NOT DECLARED HERE.  Any .wav dropped into
-// `public/assets/sfx/` named after an id — dots as dashes, plus any suffix —
-// is discovered at build time and replaces that id's draft:
-//
-//     crash.player.shard  ->  crash-player-shard-a.wav, -b.wav, -rice02.wav
-//
-// So adding sound is adding files, not editing this file.  `SfxDef.sample`
-// still exists to PIN a specific filename when one id needs an exception.
-// The drafts below stay as the fallback for every id with no take, and are
-// what the standalone build plays.
 export function registerSfx(a: AudioSystem) {
+  a.register('ability.scan', {
+    tier: 1, gain: 0.36, poly: 1, minInterval: ms(500),
+    render: s => Math.max(
+      tone(s, { f0: 420, f1: 840, attack: ms(4), decay: ms(130), gain: 0.3 }),
+      tone(s, { f0: 630, f1: 1260, attack: ms(4), decay: ms(150), gain: 0.15, delay: ms(65) }),
+      noise(s, { f0: 650, f1: 1600, q: 0.7, attack: ms(12), decay: ms(160), gain: 0.08 }),
+    ),
+  });
   registerWeapons(a);
   registerEnemyWeapons(a);
   registerImpacts(a);

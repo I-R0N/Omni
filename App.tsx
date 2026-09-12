@@ -968,6 +968,9 @@ const App: React.FC = () => {
         onToggleShardLod={handleToggleShardLod}
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
+        onAudioCue={id => engineRef.current?.audio.play(id)}
+        onSetSfxVolume={v => { engineRef.current?.audio.unlock(); engineRef.current?.audio.setSfxVolume(v); }}
+        onSetMusicVolume={v => { engineRef.current?.audio.unlock(); engineRef.current?.audio.setMusicVolume(v); }}
         onSetVolume={handleSetVolume}
         onToggleMute={handleToggleMute}
             onToggleDrafts={handleToggleDrafts}
