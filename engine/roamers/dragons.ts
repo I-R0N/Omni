@@ -22,6 +22,7 @@ import { GameEntity, EntityType, EnemySubtype, Vector2, WeaponType, WeaponConfig
 import {
     DRAGON_CONSTANTS, PLAYER_MOVEMENT_CONFIG, getActivePlayerThrustMult,
     ENEMY_VARIANTS, COLLISION_CONFIG, StructureVariant,
+  scaledMass,
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
@@ -226,7 +227,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         health: v.health,
         maxHealth: v.health,
         maxSpeed: v.maxSpeed,
-        mass: v.mass,
+        mass: scaledMass(v.mass),
         contactDamage: v.contactDamage,
         enemyShape: 'dragon',
         // A PRIORITY target the player tracks rather than reacts to, so it

@@ -470,6 +470,48 @@ export const PLASTIC_SHARD_AUTOMATA = {
 // catches them.  Rock / glass / metal / nebula stay on the baseline.
 export const PLASTIC_SHARD_FLOW_MULT = 5;
 
+/** THE MASS SCALE FACTOR (user call): every mass in the game is ten times
+ *  what it was, with every SIZE and AREA unchanged — so every body is ten
+ *  times denser and nothing about the world's geometry moved.
+ *
+ *  This is a UNIT CHANGE, not a balance change, and that distinction is the
+ *  whole reason the constant exists rather than the numbers simply being
+ *  retyped.  Mass appears in this engine in three shapes, and only one of
+ *  them is invariant under a uniform scale:
+ *
+ *  1. RATIOS — the impulse solver's inverse-mass split, the body-impact
+ *     shake, the roll spring's `player.mass / PLAYER_MASS`, the ship-weight
+ *     normalisation.  A uniform factor cancels; these needed nothing.
+ *  2. ABSOLUTE THRESHOLDS — `SHARD_CRASH_MOMENTUM`, `TILE_PRESSURE_MIN_MASS`,
+ *     `FLOW_VARIABILITY.MASS_REF`, the audio pitch reference, the two
+ *     knockback divisors in PhysicsSystem.  Each compares a mass against a
+ *     NUMBER, so each must move WITH the scale or it silently re-prices: at
+ *     10x mass and an unmoved `SHARD_CRASH_MOMENTUM`, ten times as many
+ *     shards would qualify as destructive impactors.
+ *  3. THE ENERGY CONVERSION — `IMPACT_ENERGY_PER_DAMAGE`, which every impact
+ *     divides by.  Every impact in this engine is worth `mass / C`, so C
+ *     scales too and the whole combat model lands exactly where it did.
+ *     THAT IS THE LOAD-BEARING CHOICE HERE: leaving C at 32 would have made
+ *     every crash and every round's energy bank ten times larger, which is a
+ *     balance change nobody asked for — a ram that took nine goes would take
+ *     one.  If impacts SHOULD hit harder, that is this one constant or the
+ *     DBG "Crash energy" ladder, deliberately kept separate from how heavy
+ *     things are.
+ *
+ *  Anything added later that compares a mass against a literal belongs in
+ *  category 2 and must carry this factor.
+ */
+export const MASS_SCALE = 10;
+
+/** One mass, scaled.  The seam every AUTHORED mass passes through — enemies,
+ *  projectiles, the roamers, the POIs — so a table keeps stating the number
+ *  someone chose while the world runs on the scaled one.  Masses DERIVED
+ *  from `IMPACT_DENSITY` do NOT call this: the factor is already baked into
+ *  that table, which is what keeps its density column honest. */
+export function scaledMass(m: number): number {
+  return m * MASS_SCALE;
+}
+
 // ── Flow-field per-entity variability ──────────────────────────────
 // Inverse-mass scaling applied to BOTH the correction blend rate
 // (how fast an entity locks onto the flow direction) AND the
@@ -494,7 +536,7 @@ export const FLOW_VARIABILITY = {
    *  (baseline flow response).  Picked at the median spawn mass of
    *  base shards (~7 for rock at 20 px) so a fresh chip is neutral
    *  and merged / condensed shards skew below it. */
-  MASS_REF: 7,
+  MASS_REF: 7 * MASS_SCALE,
   /** Floor on the mass divisor.  Clamps the effective minimum at
    *  MASS_REF × MIN_MASS_FRACTION so ultralight outliers don't
    *  produce runaway massScale values. */
@@ -1446,12 +1488,12 @@ export const IMPACT_DENSITY = {
   // The MATERIAL reference, and the reason the scale has a unit at all: the
   // four shard spawn ladders ARE these numbers, so glass : rock : metal
   // stays 1 : 1.8 : 3 and every other class can be read against it.
-  GLASS:   0.010,
-  PLASTIC: 0.013,
-  ROCK:    0.018,
-  METAL:   0.030,
+  GLASS:   0.10,
+  PLASTIC: 0.13,
+  ROCK:    0.18,
+  METAL:   0.30,
   // The player's hull.  25x glass and 8x rock, on purpose — see above.
-  HULL:    0.25,
+  HULL:    2.50,
 } as const;
 
 /** Mass from a body's diameter and its density — the ONE derivation, so a
@@ -4288,7 +4330,7 @@ export const STRUCTURE_CONSTANTS = {
   // asteroid plows through a tile permanently.  At 200 a cruising
   // size-100 merged cluster just barely crashes, while a 20-mass
   // shard at drift speed doesn't.
-  SHARD_CRASH_MOMENTUM: 200,
+  SHARD_CRASH_MOMENTUM: 200 * MASS_SCALE,   // mass x speed — carries the scale
   // Pressure accumulator — sustained sub-crash-momentum impacts from
   // "large enough" asteroids also break a tile permanently, simulating
   // repeated-impact pressure without a full stress model.  A tile
@@ -4299,7 +4341,7 @@ export const STRUCTURE_CONSTANTS = {
   // substep re-hits from a single bouncing rock.
   TILE_PRESSURE_HITS: 5,
   TILE_PRESSURE_WINDOW: 2.0,
-  TILE_PRESSURE_MIN_MASS: 40,
+  TILE_PRESSURE_MIN_MASS: 40 * MASS_SCALE,
   TILE_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
@@ -5305,7 +5347,7 @@ export const PROJECTILE_CONSTANTS = {
   SIZE: 8,
   COLOR: '#facc15', // Yellow
   LIFETIME: 1.5, // Seconds
-  MASS: 1, // Light projectile
+  MASS: 1 * MASS_SCALE, // Light projectile
   // Fraction of the shooter's velocity added to the muzzle velocity at
   // spawn (1.0 = full inheritance).  Keeps a moving shooter from
   // outrunning its own shots: forward shots lead the ship and strafing
@@ -5331,7 +5373,7 @@ export const ENEMY_CONSTANTS = {
   VISION_RANGE: 2500,
   ACCELERATION: 100,
   MAX_SPEED: 200,
-  MASS: 10
+  MASS: 10 * MASS_SCALE
 };
 
 // Enemy death dust: on death an enemy releases a handful of nebula-shards
@@ -5580,7 +5622,12 @@ export const HIT_FEEDBACK = {
    * unchanged: 12 / PHYSICS_CONSTANTS.PLAYER_MASS (100) = the old 0.12 per
    * damage point.  Only a laden hull differs, and it differs the way the
    * screen shake already does — more ship, less shove. */
-  PLAYER_KICK_IMPULSE_PER_DMG: 12,
+  // An IMPULSE per damage (mass x velocity), so it carries MASS_SCALE:
+  // the kick is `impulse / mass`, and without the factor a 10x heavier
+  // world would take a tenth of the shove from the same hit — measured,
+  // that put the NPC kick an order of magnitude below the shard push
+  // the two are supposed to agree with.
+  PLAYER_KICK_IMPULSE_PER_DMG: 12 * MASS_SCALE,
   // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
   // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
   // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
@@ -5658,7 +5705,7 @@ export const DAMAGE_TEXT_CONSTANTS = {
 // tile punches through four one-HP gnats.  Depth is emergent on both sides of
 // the seam, which is what let the Penetration module be deleted rather than
 // replaced (step 5).
-export const IMPACT_ENERGY_PER_DAMAGE = 32;
+export const IMPACT_ENERGY_PER_DAMAGE = 32 * MASS_SCALE;
 
 /** The mass the sim flies for a shot from `cfg`.
  *
@@ -5674,7 +5721,7 @@ export const IMPACT_ENERGY_PER_DAMAGE = 32;
  *  Laser pulse (1.78) does.  That is the physical content of giving shots a
  *  real mass, and it is the one balance change step 3 shipped. */
 export function projectileMassFor(cfg: { damage: number; speed: number; mass?: number }): number {
-  if (cfg.mass !== undefined) return cfg.mass;
+  if (cfg.mass !== undefined) return scaledMass(cfg.mass);
   const v = cfg.speed;
   if (!(v > 0)) return PROJECTILE_CONSTANTS.MASS;
   return (2 * IMPACT_ENERGY_PER_DAMAGE * cfg.damage) / (v * v);
@@ -6811,7 +6858,7 @@ export const AUDIO_CONSTANTS = {
   IMPACT_SPAN_TILE: 18,
   IMPACT_SPAN_SHARD: 6,
   IMPACT_SPAN_ENEMY: 12,
-  IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
+  IMPACT_PITCH_REF_MASS: 25 * MASS_SCALE,   // (REF / mass) ^ EXP
   IMPACT_PITCH_EXP: 0.25,
   /** The clamps are set to the MEASURED extremes of everything that actually
    *  reaches a mass-pitched row, so the curve can reach its own ends.
@@ -6966,7 +7013,7 @@ export function cycleCollapseMode(): CollapseMode {
 // spawns a fresh one.
 export const SNITCH_CONSTANTS = {
   SIZE: 14,              // core diameter (world units)
-  MASS: 2,               // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
+  MASS: 2 * MASS_SCALE,  // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
   // ── Burst/coast AI ────────────────────────────────────────────────────
   // The snitch alternates between two states instead of flying flat-out:
   //   coast — lazy drift along the flow at COAST_SPEED_FRACTION of the
@@ -8779,7 +8826,7 @@ export const DRAGON_CONSTANTS = {
   // segment, spaced SEGMENT_SPACING apart, up to MAX_SEGMENTS.
   SEGMENT_SPACING: 36,     // world units between body segments
   MAX_SEGMENTS: 28,        // body length cap (further tiles are just devoured)
-  SEGMENT_MASS: 6,         // finite mass so a segment is dynamic + shootable
+  SEGMENT_MASS: 6 * MASS_SCALE,  // finite mass so a segment is dynamic + shootable
   START_SEGMENTS: 10,      // body tiles it spawns with (a coherent random material)
   SEGMENTS: 16,            // body segments at base size (grows with size)
   SEG_PER_SIZE: 7,         // +1 segment per this many size-units grown
@@ -8819,7 +8866,7 @@ export const RIVAL_CONSTANTS = {
   // (rivals draw 1:1, so hull == hitbox).  Movement (thrust/friction/top speed)
   // is NOT tuned here — rivals fly with the player's map movement config, so
   // they handle like a baseline player ship.
-  HEALTH: 120, MASS: 11, SIZE: 38, MAX_SPEED: 5.4,
+  HEALTH: 120, MASS: 11 * MASS_SCALE, SIZE: 38, MAX_SPEED: 5.4,
   VISION: 760,               // target-acquisition range
   FIRE_RANGE: 520,           // opens fire within this of its target
   PREFERRED_DIST: 300,       // strafes to hold roughly this gap from its target
@@ -9574,7 +9621,7 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   // vs. today's `mass = size` (~8–44).  Combined with linearDamping /
   // angularDamping fields the shard reads as "cloud being shoved
   // aside" without slowing the striker.
-  sizeToMass: () => 0.01,
+  sizeToMass: () => 0.01 * MASS_SCALE,
   // NEBULA'S DRAG IS DECLARED HERE, and it has to be: the generic child
   // recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
   // `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the

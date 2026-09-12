@@ -41,7 +41,13 @@ import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, w
  *  constant it is checking pins nothing).  A round's MASS and SPEED fix the
  *  ENERGY it launches with; its authored `damage` is the BITE one contact
  *  deposits.  Gunnery scales both, which is what "a heavier round" means. */
-const ENERGY_PER_DAMAGE = 32;
+// Written out rather than imported (the weapons.spec rule).  The SCALE half
+// is the point: every mass is 10x (`constants.MASS_SCALE`) and every impact
+// is worth `mass / C`, so the conversion carries the same factor and the
+// model lands where it did.  Spelling out the product is what makes a move
+// to either half show up here instead of passing in silence.
+const MASS_SCALE = 10;
+const ENERGY_PER_DAMAGE = 32 * MASS_SCALE;
 /** The bank, in bites of the authored damage. */
 const bankInBites = (damage: number, speed: number, mass: number) =>
   (0.5 * mass * speed * speed) / ENERGY_PER_DAMAGE / damage;

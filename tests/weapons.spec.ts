@@ -48,8 +48,17 @@ import { boot, dialByName, engine, quietScene, startRun, stats, waitForStats } f
  */
 
 /** The energy model, written out rather than imported (harness rule: a test
- *  that imports the constant it is checking pins nothing). */
-const ENERGY_PER_DAMAGE = 32;
+ *  that imports the constant it is checking pins nothing).
+ *
+ *  Both factors are spelled out, and the SCALE half is why this suite is
+ *  worth having: every mass in the game is 10x (`constants.MASS_SCALE`),
+ *  and because every impact is worth `mass / C`, the conversion carries the
+ *  same factor so that nothing re-prices.  Writing the product longhand is
+ *  what made that visible — this file went red the moment the scale landed
+ *  and said, correctly, that the model it describes had moved.  An imported
+ *  constant would have tracked the change in silence and asserted nothing. */
+const MASS_SCALE = 10;
+const ENERGY_PER_DAMAGE = 32 * MASS_SCALE;
 /** A bolt's bank, in bites of its own authored damage. */
 const bankInBites = (damage: number, speed: number, mass: number) =>
   (0.5 * mass * speed * speed) / ENERGY_PER_DAMAGE / damage;

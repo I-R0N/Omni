@@ -2888,3 +2888,73 @@ between arms does NOT reset its `fractureEdgeFill`, so the second arm
 reports ACCUMULATED erosion (measured 21.3 / 31.9 / 37.2 as the hull got
 *lighter*, which is a running total, not a heavier bite).  One contact, one
 fresh tile.
+
+---
+
+### 15. Every mass x10, and why that is a unit change (2026-09-12)
+
+**ASKED**: "Mass of the player should increase by a factor of ten for
+default ... do the same increase to projectiles and everything else as well
+— 10x", with "areas and sizes of objects should stay constant".
+
+Done as `MASS_SCALE`.  The interesting part is not the factor, it is that a
+uniform mass scale is **not** automatically neutral, and the ways it leaks
+are all silent.
+
+**MASS APPEARS IN THREE SHAPES**, and only one is invariant:
+
+1. **Ratios** — the impulse solver's inverse-mass split, the body-impact
+   shake, the roll spring's `player.mass / PLAYER_MASS`, the ship-weight
+   normalisation.  A uniform factor cancels.  These needed nothing, and
+   *every ratio-shaped test in the suite passed unchanged*, which is both
+   the proof the scale is uniform and the reason the leaks below are so
+   easy to miss.
+2. **Absolute thresholds** — `SHARD_CRASH_MOMENTUM`,
+   `TILE_PRESSURE_MIN_MASS`, `FLOW_VARIABILITY.MASS_REF`, the audio
+   `IMPACT_PITCH_REF_MASS`, and two knockback divisors buried in
+   PhysicsSystem (`/ Math.max(1, target.mass / 10)` and
+   `/ Math.max(1, target.mass)` — literals, not named constants, and the
+   hardest of the set to find).  Each compares a mass against a *number*.
+   Left alone, `SHARD_CRASH_MOMENTUM` would have admitted ten times as many
+   drifting shards as destructive impactors.
+3. **The energy conversion** — `IMPACT_ENERGY_PER_DAMAGE`.  Every impact in
+   this engine is worth `mass / C`, so C carries the factor too.
+
+**(3) IS THE ONE THAT MATTERS AND THE ONE THAT WOULD HAVE GONE UNNOTICED.**
+Measured with C left at 32 against 10× masses: a rock tile fell from **nine
+rams to two**, every round's energy bank grew ten-fold, and the build was
+perfectly playable.  No exception, no log, no ratio test.  A ten-fold combat
+re-price presenting as "the ship feels punchier now".
+
+**The general lesson, worth more than the change**: when a quantity is
+rescaled globally, the risk is never the quantity — it is every *other*
+number it is compared against. Ratios announce nothing when they are right
+*and* when they are wrong; only the comparisons break, and they break
+quietly. The audit's own §7 proved the point on itself: it read
+`ENEMY_VARIANTS` directly rather than through the `scaledMass` seam, so it
+under-reported every enemy by the full factor while the classes beside it,
+which route through the seam, read correctly.
+
+**KEPT AS A SEPARATE LEVER**: if impacts *should* hit harder, that is
+`IMPACT_ENERGY_PER_DAMAGE` or the DBG "Crash energy" ladder — deliberately
+not tangled with how heavy things are, which is the whole reason the two are
+different constants.
+
+**TWO NEAR-MISSES, both caught by measurement rather than by reading**, and
+both worth keeping as patterns:
+
+- **A `/ literal` next to a mass is only a threshold if the mass is on the
+  other side of a comparison.**  `PhysicsSystem`'s shard push,
+  `0.20 / Math.max(1, target.mass / 10)`, reads as "a mass gate at 10" and
+  is really `min(0.20, 2 / mass)` — an inverse-mass term with a cap on the
+  *result*.  Scaling the 10 put it a full order of magnitude away from the
+  enemy path it is required to agree with (ratio 0.1125 against 1.125).
+  Left alone, the two agree at every mass, because both are `k / mass` and
+  ratios of inverse-mass terms are scale-free.
+- **A value converted out of authored units must never be written back into
+  an authored field.**  `withGunnery` set `mass: projectileMassFor(config)
+  * mult` — the converted, already-scaled figure — into `WeaponConfig.mass`,
+  whose contract is the authored number.  The next conversion scaled it
+  again: a Gunnery mark multiplied the round's mass by 13.6 against its
+  bite's 1.36.  The fix is to stay in authored units (`config.mass * mult`)
+  and let the one converter do its job once.

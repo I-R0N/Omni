@@ -3,7 +3,7 @@
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
-import { nebulaDampingFor, nebulaSpinDampingFor } from '../../constants';
+import { nebulaDampingFor, nebulaSpinDampingFor, MASS_SCALE } from '../../constants';
 import { pointInPolygon } from './fracture';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
@@ -4183,6 +4183,18 @@ export class PhysicsSystem {
                   // are filtered out by the finite-mass check.
                   //
                   if (isDentEntity && target.mass !== Infinity && proj.velocity) {
+                      // THIS `/ 10` LOOKS LIKE A MASS THRESHOLD AND IS NOT, which
+                      // is why it does NOT carry MASS_SCALE.  Read it as
+                      // `min(0.20, 2 / mass)`: the division is an INVERSE-MASS
+                      // term, matching the enemy path's `projMass / targetMass`
+                      // exactly, and the `max(1, …)` is a cap on the RESULT
+                      // rather than a gate on the mass.  Scaling it was tried
+                      // and measured wrong — it put this path a full 10x below
+                      // the enemy path the suite requires it to agree with
+                      // (ratio 0.1125 against 1.125); left alone, the two agree
+                      // at every mass, which is scale-invariance by
+                      // construction.  The cap now binds only under mass 10,
+                      // i.e. a one-unit body, which is the honest cost.
                       const pushFactor = 0.20 / Math.max(1, target.mass / 10);
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
@@ -4253,8 +4265,9 @@ export class PhysicsSystem {
                       const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
                       // Same impulse rule, so a laden hull is shoved less —
                       // normalised to leave the lean ship exactly as it was.
+                      // The `1` floor is an absolute mass, so it scales too.
                       const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_IMPULSE_PER_DMG
-                          / Math.max(1, target.mass);
+                          / Math.max(MASS_SCALE, target.mass);
                       target.velocity.x += (proj.velocity.x / vmag) * kick;
                       target.velocity.y += (proj.velocity.y / vmag) * kick;
                       markDamaged(target, Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012)));

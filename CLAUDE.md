@@ -67,8 +67,9 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           shardblend, fracture, bubbles (the Phase-A
                           aggro timeout + the immovability fix, and
                           the mouth-size / bite eating rules) and
-                          mass (the impact density scale and the
-                          hull-density ladder),
+                          mass (the impact density scale, the 10x
+                          MASS_SCALE unit change and the hull-density
+                          ladder),
                           modules (Gunnery, Scanner, hex slots, and
                           that the deleted Penetration family is gone
                           from every surface), weapons (what a SHOT
@@ -78,7 +79,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  405 tests.  All run at
+                          writing a DBG-knob test).  408 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -856,7 +857,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   TOWARD, replacing a per-channel scale that desaturated dense metal
   toward white.
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
-  see §8), `IMPACT_DENSITY` / `massFor` / `HULL_DENSITY_CYCLE` — the one
+  see §8), `MASS_SCALE` / `scaledMass` — every mass is 10x with sizes
+  unchanged, and it is a UNIT change: the energy conversion and every
+  absolute mass threshold carry the factor, so nothing re-prices (§8),
+  `IMPACT_DENSITY` / `massFor` / `HULL_DENSITY_CYCLE` — the one
   mass scale and its DBG ladder, `SIMULATION_CONSTANTS`,
   `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
@@ -2935,7 +2939,59 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   bounce.  DBG ▸ Player ▸ "Crash energy" is the permeability dial (a
   multiplier over the coupling, index 0 ships); a material's own
   `bondStrength` is the same question asked of one material.
-- **MASS IS STATED AS A DENSITY, ON ONE SCALE** (`IMPACT_DENSITY` /
+- **EVERY MASS IS 10x, AND THAT IS A UNIT CHANGE** (`MASS_SCALE` /
+  `scaledMass` in `constants.ts`; user call: "mass of the player should
+  increase by a factor of ten ... do the same increase to projectiles and
+  everything else as well").  Sizes and areas are UNCHANGED, so the factor
+  lands entirely in density: the hull reads 2.50 and masses 1000, the
+  material band is 0.10 / 0.13 / 0.18 / 0.30, and every relative
+  relationship in the table below is exactly what it was.
+  MASS APPEARS IN THREE SHAPES and only one survives a uniform scale
+  untouched, which is why this is a named constant rather than retyped
+  numbers:
+  1. **RATIOS** — the impulse solver's inverse-mass split, the body-impact
+     shake, the roll spring's `player.mass / PLAYER_MASS`, the ship-weight
+     normalisation.  A uniform factor cancels; these needed nothing.
+  2. **ABSOLUTE THRESHOLDS** — `SHARD_CRASH_MOMENTUM`,
+     `TILE_PRESSURE_MIN_MASS`, `FLOW_VARIABILITY.MASS_REF`, the audio
+     `IMPACT_PITCH_REF_MASS`, and the two knockback divisors in
+     PhysicsSystem.  Each compares a mass against a NUMBER, so each must
+     move WITH the scale or it silently re-prices — an unscaled
+     `SHARD_CRASH_MOMENTUM` would admit ten times as many shards as
+     destructive impactors, and no ratio test anywhere can see it.
+  3. **THE ENERGY CONVERSION** — `IMPACT_ENERGY_PER_DAMAGE`, which every
+     impact divides by.  Every impact in this engine is worth `mass / C`,
+     so C carries the factor (32 → 320) and the whole combat model lands
+     exactly where it did.  THIS IS THE LOAD-BEARING CHOICE: measured with
+     C left at 32, a rock tile fell from NINE rams to **two**, and the
+     build is perfectly playable — a ten-fold combat re-price with no
+     exception, no log and no symptom.  If impacts should hit harder, that
+     is this constant or the DBG "Crash energy" ladder, deliberately kept
+     separate from how heavy things are.
+  TWO THINGS LOOKED LIKE CATEGORY 2 AND WERE NOT, both found by measuring
+  rather than by reading: `PhysicsSystem`'s shard push,
+  `0.20 / max(1, mass / 10)`, reads as a mass gate and is really
+  `min(0.20, 2 / mass)` — the division is an INVERSE-MASS term matching the
+  enemy path's `projMass / targetMass`, and the `max` caps the RESULT.
+  Scaling it put the two paths a full 10x apart (ratio 0.1125 against the
+  1.125 they agree at); left alone they agree at every mass.  And
+  `withGunnery` wrote `projectileMassFor(config) * mult` back into
+  `WeaponConfig.mass`, whose contract is AUTHORED units — so the round
+  scaled twice (a mark multiplied the mass by 13.6 against the bite's 1.36).
+  The rule that falls out: a `/ literal` beside a mass is only a threshold
+  if the mass is on the OTHER side of a comparison; and a value converted
+  out of authored units must never be written back into an authored field.
+  Anything added later that compares a mass against a literal is category 2
+  and must carry the factor.  `scaledMass()` is the seam every AUTHORED
+  mass passes through (enemies at `WaveSystem.buildEnemy`, the dragon head,
+  projectiles via `projectileMassFor`, the roamer/POI constants), so a table
+  keeps stating the number someone chose; masses DERIVED from
+  `IMPACT_DENSITY` do not call it, because the factor is already in that
+  table — which is what keeps its density column honest.  `perf/impact-audit
+  .mjs` §7 therefore has to apply `scaledMass` to ENEMY_VARIANTS itself, and
+  did not at first: it under-read every enemy by the full factor while the
+  classes beside it read right.
+- **AND THE SCALE ITSELF IS STATED AS A DENSITY** (`IMPACT_DENSITY` /
   `massFor` in `constants.ts`; user call).  Mass used to be an IMPULSE term
   and nothing else, so its numbers only had to be right relative to each
   other inside the solver.  The energy model changed that — mass is half of
@@ -2943,17 +2999,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   and that made four unrelated ladders into one balance surface that
   nothing made readable.
   MEASURED (`perf/impact-audit.mjs` §7, the mass-scale section added for
-  this): in mass per d², the four shard ladders span 0.0100..0.0300 — a
-  coherent 3× band reading exactly as material density, and the natural
-  reference; ENEMIES sit inside it at 0.0102..0.0400; PROJECTILES run
-  0.0139..0.0960; and the PLAYER sat alone at **0.2500**, 25× glass, 8×
-  rock and twice the dragon.  A 20-unit hull massing 100 was as dense as
-  nothing else in the game and nothing said so.
+  this), in mass per d² and BEFORE the 10× above — multiply each by ten for
+  today's figures: the four shard ladders span 0.0100..0.0300 — a coherent
+  3× band reading exactly as material density, and the natural reference;
+  ENEMIES sit inside it at 0.0102..0.0400; PROJECTILES run 0.0139..0.0960;
+  and the PLAYER sat alone at **0.2500**, 25× glass, 8× rock and twice the
+  dragon.  A 20-unit hull massing 100 was as dense as nothing else in the
+  game and nothing said so.  Those RATIOS are what the scale preserved, and
+  they are what the section still reports.
   THE HULL IS DELIBERATELY THE DENSEST THING HERE (user call) — a ship is a
   machine, not a rock, and should plow through gravel rather than be batted
   about by it.  What changed is that 100 is now DERIVED
-  (`massFor(PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL)`, exactly 100, so nothing
-  re-priced) with the material band beside it, and the four shard
+  (`massFor(PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL)` — exactly the literal it
+  replaced, so nothing re-priced, and 100 × `MASS_SCALE` today) with the
+  material band beside it, and the four shard
   `sizeToMass` ladders read the same table, so glass : rock : metal is 1 :
   1.8 : 3 in ONE place.  `HULL_DENSITY_CYCLE` (DBG ▸ Player ▸ "Hull
   density", index 0 ships) is the live A/B, and it is a ladder rather than a

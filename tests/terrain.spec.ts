@@ -77,7 +77,13 @@ function breakATile(page: any, how: 'shot' | 'crush') {
       id: 'terrain_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
       position: { x: at.x + t.size.x * 0.5 + 16, y: at.y },
       velocity: { x: -600, y: 0 }, rotation: 0,
-      size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+      size: { x: 40, y: 40 },
+            // DERIVED from the real spawn ladder, never a literal: a 40px
+            // rock shard weighs what the material table says it weighs, so
+            // this cannot fall behind a change to the mass scale (it did —
+            // a hardcoded 60 stopped clearing SHARD_CRASH_MOMENTUM once
+            // every mass went 10x, and the crush silently did nothing).
+            mass: (window as any).__omniMass.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40), active: true, color: '#8a8a8a',
       health: 50, maxHealth: 50,
     } : null;
     if (rock) ents.push(rock);
@@ -227,7 +233,13 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
             id: 'crack_rock_' + speed, type: 'STRUCTURE', shardVariant: 'rock-shard',
             position: { x: at.x + t.size.x * 0.5 + 16, y: at.y },
             velocity: { x: -speed, y: 0 }, rotation: 0,
-            size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+            size: { x: 40, y: 40 },
+            // DERIVED from the real spawn ladder, never a literal: a 40px
+            // rock shard weighs what the material table says it weighs, so
+            // this cannot fall behind a change to the mass scale (it did —
+            // a hardcoded 60 stopped clearing SHARD_CRASH_MOMENTUM once
+            // every mass went 10x, and the crush silently did nothing).
+            mass: (window as any).__omniMass.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40), active: true, color: '#8a8a8a',
             health: 50, maxHealth: 50,
           };
           ents.push(rock);
@@ -320,7 +332,13 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
           // obliterates any tile on contact — there is no "parent still
           // standing" to observe.  8 u/step is twice the old crash gate.
           velocity: { x: -8, y: 0 }, rotation: 0,
-          size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+          size: { x: 40, y: 40 },
+            // DERIVED from the real spawn ladder, never a literal: a 40px
+            // rock shard weighs what the material table says it weighs, so
+            // this cannot fall behind a change to the mass scale (it did —
+            // a hardcoded 60 stopped clearing SHARD_CRASH_MOMENTUM once
+            // every mass went 10x, and the crush silently did nothing).
+            mass: (window as any).__omniMass.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40), active: true, color: '#8a8a8a',
           health: 50, maxHealth: 50,
         };
         ents.push(rock);
@@ -442,7 +460,13 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
             id: 'legacy_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
             position: { x: t.position.x + t.size.x * 0.5 + 16, y: t.position.y },
             velocity: { x: -600, y: 0 }, rotation: 0,
-            size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+            size: { x: 40, y: 40 },
+            // DERIVED from the real spawn ladder, never a literal: a 40px
+            // rock shard weighs what the material table says it weighs, so
+            // this cannot fall behind a change to the mass scale (it did —
+            // a hardcoded 60 stopped clearing SHARD_CRASH_MOMENTUM once
+            // every mass went 10x, and the crush silently did nothing).
+            mass: (window as any).__omniMass.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40), active: true, color: '#8a8a8a',
             health: 50, maxHealth: 50,
           };
           ents.push(rock);

@@ -112,7 +112,14 @@ function withGunnery(config: WeaponConfig, player: GameEntity): WeaponConfig {
   return {
     ...config,
     damage: config.damage * mult,
-    mass: projectileMassFor(config) * mult,
+    // AUTHORED UNITS, because that is what `WeaponConfig.mass` means and
+    // `projectileMassFor` is what converts it — writing its already-scaled
+    // RESULT back into this field made the round scale twice (measured: a
+    // Gunnery mark multiplied the mass by 13.6 against the bite's 1.36).
+    // Left undefined it stays undefined on purpose: the derived branch is
+    // proportional to `damage`, which is already multiplied above, so the
+    // bank follows the mark for free.
+    mass: config.mass !== undefined ? config.mass * mult : undefined,
     explosionDamage: config.explosionDamage !== undefined
       ? config.explosionDamage * mult : config.explosionDamage,
   };

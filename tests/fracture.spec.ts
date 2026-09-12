@@ -392,7 +392,7 @@ test.describe('cracks are the pattern (V3)', () => {
           id: 'v3_shell', type: 'PROJECTILE',
           position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
           velocity: { x: -900, y: 0 }, rotation: Math.PI,
-          size: { x: 6, y: 6 }, mass: 1 / 12656.25, active: true, color: '#fff',
+          size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 1, speed: 900 }), active: true, color: '#fff',
           damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
         },
         t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
@@ -652,7 +652,7 @@ test.describe('partial fracture (V4)', () => {
             id: 'v15_bolt_' + (shotN++), type: 'PROJECTILE',
             position: { x: hitAt.x + 4, y: hitAt.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 4 / 12656.25, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff',
             damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -813,7 +813,7 @@ test.describe('death is dispatched once (V9 regression)', () => {
             id: 'v9_shell_' + hit, type: 'PROJECTILE',
             position: { x: tile.position.x + w * 0.5 + 4, y: tile.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 40 / 12656.25, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 40, speed: 900 }), active: true, color: '#fff',
             damage: 40, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           tile, { x: 0, y: 0 },
@@ -1143,7 +1143,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
             id: 'v10_shot_' + hits, type: 'PROJECTILE',
             position: { x: contactX(), y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 1 / 12656.25, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 1, speed: 900 }), active: true, color: '#fff',
             damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -1207,7 +1207,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
             id: 'v10_glass_' + hits, type: 'PROJECTILE',
             position: { x: contactX(), y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 4 / 12656.25, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff',
             damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -1378,7 +1378,7 @@ test.describe('only the struck piece chips (V12)', () => {
           { id: 'v12_' + Math.random(), type: 'PROJECTILE',
             position: { x: cx + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
+            mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff', damage: 4,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         hits++;
@@ -1813,7 +1813,7 @@ test.describe('grain boundaries (V15)', () => {
           { id: 'v15_scale_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.001 / 12656.25, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 0.001, speed: 900 }), active: true, color: '#fff',
             damage: 0.001, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
         );
@@ -2185,7 +2185,7 @@ test.describe('grain size and bond spread (A2)', () => {
             { id: 'a2c_' + Math.random(), type: 'PROJECTILE',
               position: { x: contactX() + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff', damage: 4,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -2279,7 +2279,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
           { id: 'm_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
+            mass: (window as any).__omniMass.projectileMassFor({ damage: 0.001, speed: 900 }), active: true, color: '#fff', damage: 0.001,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         const cells = t.fractureCells ?? [];
@@ -2315,7 +2315,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
             { id: 'p_' + Math.random(), type: 'PROJECTILE',
               position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 0.001, speed: 900 }), active: true, color: '#fff', damage: 0.001,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           const cells = t.fractureCells ?? [];
@@ -2368,7 +2368,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
           { id: 'd_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
+            mass: (window as any).__omniMass.projectileMassFor({ damage: 0.001, speed: 900 }), active: true, color: '#fff', damage: 0.001,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         const tier = t.densityTier ?? 0;
@@ -2627,7 +2627,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             { id: 'cons_' + Math.random(), type: 'PROJECTILE',
               position: { x: contactX() + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff', damage: 4,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -2698,7 +2698,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             { id: 'el_' + Math.random(), type: 'PROJECTILE',
               position: { x: contactX() + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff', damage: 4,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -2785,7 +2785,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             { id: 'shp_' + Math.random(), type: 'PROJECTILE',
               position: { x: sh.position.x + sh.size.x * 0.5 + 4, y: sh.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 0.001, speed: 900 }), active: true, color: '#fff', damage: 0.001,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             sh, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           rows.push({ size: sh.size.x, cells: (sh.fractureCells ?? []).length,
@@ -2857,7 +2857,7 @@ test.describe('grain size is a material constant', () => {
             { id: 'gs_' + Math.random(), type: 'PROJECTILE',
               position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 0.001, speed: 900 }), active: true, color: '#fff', damage: 0.001,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           const n = (t.fractureCells ?? []).length;
@@ -3236,7 +3236,7 @@ test.describe('per-material grain overrides (DBG)', () => {
         { id: 'grainknob_' + Math.random(), type: 'PROJECTILE',
           position: { x: t.position.x + t.size.x * 0.5, y: t.position.y },
           velocity: { x: -900, y: 0 }, rotation: Math.PI,
-          size: { x: 6, y: 6 }, mass: 1 / 12656.25, active: true, color: '#fff',
+          size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 1, speed: 900 }), active: true, color: '#fff',
           damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
         t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
       );
@@ -3398,7 +3398,7 @@ test.describe('damage spread (A4)', () => {
           { id: 'a4_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 3 / 12656.25, active: true, color: '#fff', damage: 3,
+            mass: (window as any).__omniMass.projectileMassFor({ damage: 3, speed: 900 }), active: true, color: '#fff', damage: 3,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         hits++;
@@ -3714,7 +3714,7 @@ test.describe('chip dust', () => {
             { id: 'dust_' + Math.random(), type: 'PROJECTILE',
               position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 3 / 12656.25, active: true, color: '#fff', damage: 3,
+              mass: (window as any).__omniMass.projectileMassFor({ damage: 3, speed: 900 }), active: true, color: '#fff', damage: 3,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -4128,7 +4128,13 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
           id: 'neb_crash_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
           position: { x: t.position.x + t.size.x, y: t.position.y },
           velocity: { x: -600, y: 0 }, rotation: 0,
-          size: { x: 40, y: 40 }, mass: 60, active: true, color: '#8a8a8a',
+          size: { x: 40, y: 40 },
+            // DERIVED from the real spawn ladder, never a literal: a 40px
+            // rock shard weighs what the material table says it weighs, so
+            // this cannot fall behind a change to the mass scale (it did —
+            // a hardcoded 60 stopped clearing SHARD_CRASH_MOMENTUM once
+            // every mass went 10x, and the crush silently did nothing).
+            mass: (window as any).__omniMass.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40), active: true, color: '#8a8a8a',
           health: 50, maxHealth: 50,
         };
         e.currentMap.entities.push(rock);
@@ -4303,7 +4309,7 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
                 position: { x: tile.position.x + W * 0.5 + 4,
                             y: tile.position.y + ((h % 5) - 2) * 4 },
                 velocity: { x: -900, y: 0 }, rotation: Math.PI,
-                size: { x: 6, y: 6 }, mass: 4 / 12656.25, active: true, color: '#fff',
+                size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 4, speed: 900 }), active: true, color: '#fff',
                 damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
               },
               tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,

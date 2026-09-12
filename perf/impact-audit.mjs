@@ -320,7 +320,12 @@ const scale = await page.evaluate(() => {
   push('player', 'player (lean)', e.player.size.x, e.player.mass);
 
   for (const [k, v] of Object.entries(C.ENEMY_VARIANTS))
-    push('enemy', k.toLowerCase(), v.size, v.mass);
+    // ENEMY_VARIANTS states the AUTHORED mass; what actually flies is that
+    // number through `scaledMass` (the MASS_SCALE seam), so this must scale
+    // it too or the column reports a world nobody plays — measured, it
+    // under-read every enemy by the full factor while the classes beside
+    // it, which derive or route through the seam already, read right.
+    push('enemy', k.toLowerCase(), v.size, C.scaledMass(v.mass));
 
   for (const w of C.WEAPON_LIST) {
     const cfg = C.WEAPONS[w];
@@ -332,7 +337,7 @@ const scale = await page.evaluate(() => {
     const sp = C.SHARD_VARIANTS[v].spawn;
     for (const d of [12, 36, 160]) push('shard', `${v} d=${d}`, d, sp.sizeToMass(d));
   }
-  return rows;
+  return { rows, massScale: C.MASS_SCALE };
 });
 
 await browser.close();
@@ -512,11 +517,12 @@ console.log('');
 //  and a boulder differ in size by design, and only density says whether one
 //  of them is made of a fundamentally different substance.
 console.log('\n=== 7. THE MASS SCALE (mass / size², the implied areal density) ===\n');
+console.log(`  every mass carries MASS_SCALE = ${scale.massScale}x; sizes are unscaled.\n`);
 {
   // (gathered above, before the browser closed)
 
   const byCls = {};
-  for (const r of scale) (byCls[r.cls] ||= []).push(r);
+  for (const r of scale.rows) (byCls[r.cls] ||= []).push(r);
   console.log('class        body                        size     mass    mass/size²');
   for (const cls of ['player', 'enemy', 'projectile', 'shard']) {
     for (const r of byCls[cls] ?? [])
@@ -528,7 +534,7 @@ console.log('\n=== 7. THE MASS SCALE (mass / size², the implied areal density) 
   console.log('\n  density range per class:');
   for (const c of ['player', 'enemy', 'projectile', 'shard'])
     console.log(`    ${c.padEnd(12)} ${rng(c)}`);
-  const all = scale.map(r => r.dens);
+  const all = scale.rows.map(r => r.dens);
   console.log(`\n  ACROSS ALL CLASSES: ${f(Math.min(...all),4)} .. ${f(Math.max(...all),4)}`
     + `  (${f(Math.max(...all)/Math.min(...all),1)}× spread)`);
 }

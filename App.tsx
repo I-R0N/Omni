@@ -10,7 +10,10 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          nebulaSpriteSize,
          ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
          projectileMassFor, PHYSICS_CONSTANTS,
-         IMPACT_DENSITY, massFor, hullDensity } from './constants';
+         IMPACT_DENSITY, massFor, hullDensity,
+         MASS_SCALE, scaledMass, IMPACT_ENERGY_PER_DAMAGE,
+         STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
+         PROJECTILE_CONSTANTS, HIT_FEEDBACK } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -168,7 +171,13 @@ const App: React.FC = () => {
       // hull really is the table's number and that the shard ladders really
       // read from it — the two claims that make this ONE scale rather than
       // a comment beside five unrelated literals.
-      IMPACT_DENSITY, massFor, hullDensity,
+      IMPACT_DENSITY, massFor, hullDensity, MASS_SCALE, scaledMass,
+      // The three shapes mass takes (see tests/mass.spec.ts): the energy
+      // conversion it is measured against, and the absolute thresholds it
+      // is compared to.  Both must carry MASS_SCALE, and both are wrong
+      // with no symptom if they stop.
+      IMPACT_ENERGY_PER_DAMAGE, STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
+      PROJECTILE_CONSTANTS, HIT_FEEDBACK,
     };
 
     // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid

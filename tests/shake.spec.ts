@@ -26,6 +26,12 @@
  */
 
 import { test, expect } from '@playwright/test';
+
+/** Every mass in the game carries `constants.MASS_SCALE`; the stand-in
+ *  shard masses below are `size² × density` off the real material table and
+ *  carry it too.  Written out rather than imported, on the weapons.spec
+ *  rule. */
+const MASS_SCALE = 10;
 import { boot, engine, startRun, waitForStats } from './helpers';
 
 /** COLLISION_CONFIG.SHAKE, hard-coded rather than imported (harness rule 7). */
@@ -84,10 +90,14 @@ test.describe('shake magnitude follows the impact, not the speed', () => {
     // ONE closing speed throughout: under the old rule every one of these
     // produced the identical maximum, which is the whole complaint.
     const V = 20;
+    // Each figure is `size² × density` off the real material table, and each
+    // carries MASS_SCALE because every mass in the game does — a stand-in
+    // left at its pre-scale value stops reading as the shard it names, and
+    // here it also drops under `IMPACT_DV_MIN` and shakes nothing at all.
     const wall  = await impact(page, null, V);
-    const heavy = await impact(page, 48, V);   // ~40px metal shard
-    const mid   = await impact(page, 11.2, V); // ~25px rock shard
-    const chip  = await impact(page, 0.64, V); // ~8px glass chip
+    const heavy = await impact(page, 48 * MASS_SCALE, V);   // ~40px metal shard (40² × 0.30)
+    const mid   = await impact(page, 11.2 * MASS_SCALE, V); // ~25px rock shard (25² × 0.18)
+    const chip  = await impact(page, 0.64 * MASS_SCALE, V); // ~8px glass chip (8² × 0.10)
 
     expect(wall.intensity, 'a wall is the hardest hit there is').toBe(IMPACT_MAX);
     expect(heavy.intensity).toBeLessThan(wall.intensity);
@@ -135,7 +145,7 @@ test.describe('shake magnitude follows the impact, not the speed', () => {
     // Player mass scales with ship weight (SHIP_WEIGHT), so this falls out of
     // the formula rather than being written: the same rock against a laden
     // hull moves it less, and moving less is what shake now measures.
-    const lean = await impact(page, 48, 20);
+    const lean = await impact(page, 48 * MASS_SCALE, 20);
     await engine(page, e => { e.player.mass *= 3; });
     const laden = await impact(page, 48, 20);
     expect(laden.intensity).toBeLessThan(lean.intensity);
