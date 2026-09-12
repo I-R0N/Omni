@@ -50,15 +50,12 @@ import { boot, dialByName, engine, quietScene, startRun, stats, waitForStats } f
 /** The energy model, written out rather than imported (harness rule: a test
  *  that imports the constant it is checking pins nothing).
  *
- *  Both factors are spelled out, and the SCALE half is why this suite is
- *  worth having: every mass in the game is 10x (`constants.MASS_SCALE`),
- *  and because every impact is worth `mass / C`, the conversion carries the
- *  same factor so that nothing re-prices.  Writing the product longhand is
- *  what made that visible — this file went red the moment the scale landed
- *  and said, correctly, that the model it describes had moved.  An imported
- *  constant would have tracked the change in silence and asserted nothing. */
-const MASS_SCALE = 10;
-const ENERGY_PER_DAMAGE = 32 * MASS_SCALE;
+ *  It is deliberately NOT multiplied by `constants.MASS_SCALE`.  Every mass
+ *  in the game is 10x and this conversion is what turns mass into damage, so
+ *  scaling it too would cancel the whole thing — bigger numbers, identical
+ *  game.  Impacts are meant to be ten times harder; this constant staying
+ *  put is how. */
+const ENERGY_PER_DAMAGE = 32;
 /** A bolt's bank, in bites of its own authored damage. */
 const bankInBites = (damage: number, speed: number, mass: number) =>
   (0.5 * mass * speed * speed) / ENERGY_PER_DAMAGE / damage;
@@ -360,15 +357,23 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
       const beam = await walk('BOUNCER');
       const burst = await walk('BURST');
       expect(bankInBites(beam.damage, beam.speed, beam.mass),
-        'the Laser launches with five bites').toBeCloseTo(5, 3);
+        'the Laser launches with fifty bites — five, times MASS_SCALE')
+        .toBeCloseTo(5 * 10, 2);
       expect(bankInBites(burst.damage, burst.speed, burst.mass),
-        'the Burst Rifle with three').toBeCloseTo(3, 3);
+        'the Burst Rifle with thirty — three, times MASS_SCALE')
+        .toBeCloseTo(3 * 10, 2);
 
       const beamDecay = beam.bites[1] / beam.bites[0];
       const burstDecay = burst.bites[1] / burst.bites[0];
-      expect(beamDecay, '5 bites: a fifth of the bank went on contact')
-        .toBeCloseTo(4 / 5, 5);
-      expect(burstDecay, '3 bites: a third of it did').toBeCloseTo(2 / 3, 5);
+      // The decay is `1 - bite/bank`, so a 10x bank under `MASS_SCALE` makes
+      // every round fall off far more gently — 49/50 and 29/30 where it used
+      // to be 4/5 and 2/3.  The CLAIM is untouched and is the line below:
+      // the rate comes out of the round's OWN mass, so the two differ.  That
+      // is exactly what the retired global `PIERCE_FALLOFF_RATE` could not
+      // say, and it survives the rescale unchanged.
+      expect(beamDecay, '50 bites: a fiftieth of the bank went on contact')
+        .toBeCloseTo(49 / 50, 4);
+      expect(burstDecay, '30 bites: a thirtieth of it did').toBeCloseTo(29 / 30, 4);
       // The claim the retired global rate could not make at all.
       expect(beamDecay, 'a beam gives up LESS per body than a burst round')
         .toBeGreaterThan(burstDecay);

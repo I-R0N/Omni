@@ -858,8 +858,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   toward white.
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
   see §8), `MASS_SCALE` / `scaledMass` — every mass is 10x with sizes
-  unchanged, and it is a UNIT change: the energy conversion and every
-  absolute mass threshold carry the factor, so nothing re-prices (§8),
+  unchanged, and IMPACTS HIT 10x HARDER: the energy conversion is
+  deliberately NOT scaled with it, because that is the point (§8),
   `IMPACT_DENSITY` / `massFor` / `HULL_DENSITY_CYCLE` — the one
   mass scale and its DBG ladder, `SIMULATION_CONSTANTS`,
   `LOCAL_GRAVITY_CONSTANTS`
@@ -1081,9 +1081,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   on any qualifying hit, which pre-dated the energy model and left glass
   the one material whose crash outcome was a THRESHOLD rather than an
   amount.  It now cracks under a crash and shatters when enough energy
-  arrives, like everything else — measured 1 ram to 9, landing beside
-  rock's 9, which is what it should be since the two share `bondStrength`
-  0.4 and derive 50.0 and 54.7 HP (see §8).  A DAMAGED glass
+  arrives, like everything else — and it lands beside ROCK, which is what
+  it should be since the two share `bondStrength` 0.4 and derive 50.0 and
+  54.7 HP.  (The counts were 1 → 9 when that landed; `MASS_SCALE` has since
+  made impacts 10x harder, so both are back near 1 at the audit's ram speed
+  — the point is that they AGREE, not the number.  See §8.)  A DAMAGED glass
   tile leaves the static-tile cache and the hex-sprite fast path
   (`tileShowsDamage`) — neither can express cracks or a chipped polygon.
   CHIP DEPTH is three constants (V10): `ROCK_BREAK.MIN/MAX_HITS` (8/12
@@ -2864,7 +2866,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   shatters on energy like everything else: measured 1 ram to **9**, landing
   beside rock's 9, and the audit's "KE per derived HP" column went FLAT
   across all four materials (296 / 324 / 286 / 299) where glass had been
-  the one breaking it.  How tough glass is is now said ONLY by its
+  the one breaking it.  (Those counts pre-date `MASS_SCALE`; at 10x impact
+  energy every material's count is a tenth of the figure quoted here, and
+  what survives is that glass and rock agree.)  How tough glass is is now said ONLY by its
   `grain.bondStrength` and its own derived boundary total.  Two things go
   with it: the non-grain FALLBACK loses its glass branch too, so a body
   under the legacy fracture A/B takes a plain 1 HP a crush (its regression
@@ -2939,58 +2943,67 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   bounce.  DBG ▸ Player ▸ "Crash energy" is the permeability dial (a
   multiplier over the coupling, index 0 ships); a material's own
   `bondStrength` is the same question asked of one material.
-- **EVERY MASS IS 10x, AND THAT IS A UNIT CHANGE** (`MASS_SCALE` /
+- **EVERY MASS IS 10x, AND IMPACTS HIT 10x HARDER** (`MASS_SCALE` /
   `scaledMass` in `constants.ts`; user call: "mass of the player should
   increase by a factor of ten ... do the same increase to projectiles and
   everything else as well").  Sizes and areas are UNCHANGED, so the factor
   lands entirely in density: the hull reads 2.50 and masses 1000, the
   material band is 0.10 / 0.13 / 0.18 / 0.30, and every relative
-  relationship in the table below is exactly what it was.
-  MASS APPEARS IN THREE SHAPES and only one survives a uniform scale
-  untouched, which is why this is a named constant rather than retyped
-  numbers:
-  1. **RATIOS** — the impulse solver's inverse-mass split, the body-impact
-     shake, the roll spring's `player.mass / PLAYER_MASS`, the ship-weight
-     normalisation.  A uniform factor cancels; these needed nothing.
-  2. **ABSOLUTE THRESHOLDS** — `SHARD_CRASH_MOMENTUM`,
-     `TILE_PRESSURE_MIN_MASS`, `FLOW_VARIABILITY.MASS_REF`, the audio
-     `IMPACT_PITCH_REF_MASS`, and the two knockback divisors in
-     PhysicsSystem.  Each compares a mass against a NUMBER, so each must
-     move WITH the scale or it silently re-prices — an unscaled
-     `SHARD_CRASH_MOMENTUM` would admit ten times as many shards as
-     destructive impactors, and no ratio test anywhere can see it.
-  3. **THE ENERGY CONVERSION** — `IMPACT_ENERGY_PER_DAMAGE`, which every
-     impact divides by.  Every impact in this engine is worth `mass / C`,
-     so C carries the factor (32 → 320) and the whole combat model lands
-     exactly where it did.  THIS IS THE LOAD-BEARING CHOICE: measured with
-     C left at 32, a rock tile fell from NINE rams to **two**, and the
-     build is perfectly playable — a ten-fold combat re-price with no
-     exception, no log and no symptom.  If impacts should hit harder, that
-     is this constant or the DBG "Crash energy" ladder, deliberately kept
-     separate from how heavy things are.
-  TWO THINGS LOOKED LIKE CATEGORY 2 AND WERE NOT, both found by measuring
-  rather than by reading: `PhysicsSystem`'s shard push,
-  `0.20 / max(1, mass / 10)`, reads as a mass gate and is really
-  `min(0.20, 2 / mass)` — the division is an INVERSE-MASS term matching the
-  enemy path's `projMass / targetMass`, and the `max` caps the RESULT.
-  Scaling it put the two paths a full 10x apart (ratio 0.1125 against the
-  1.125 they agree at); left alone they agree at every mass.  And
-  `withGunnery` wrote `projectileMassFor(config) * mult` back into
-  `WeaponConfig.mass`, whose contract is AUTHORED units — so the round
-  scaled twice (a mark multiplied the mass by 13.6 against the bite's 1.36).
-  The rule that falls out: a `/ literal` beside a mass is only a threshold
-  if the mass is on the OTHER side of a comparison; and a value converted
-  out of authored units must never be written back into an authored field.
-  Anything added later that compares a mass against a literal is category 2
-  and must carry the factor.  `scaledMass()` is the seam every AUTHORED
-  mass passes through (enemies at `WaveSystem.buildEnemy`, the dragon head,
-  projectiles via `projectileMassFor`, the roamer/POI constants), so a table
-  keeps stating the number someone chose; masses DERIVED from
-  `IMPACT_DENSITY` do not call it, because the factor is already in that
-  table — which is what keeps its density column honest.  `perf/impact-audit
-  .mjs` §7 therefore has to apply `scaledMass` to ENEMY_VARIANTS itself, and
-  did not at first: it under-read every enemy by the full factor while the
-  classes beside it read right.
+  relationship is exactly what it was.
+  **THE HARDER IMPACTS ARE THE POINT**, and it is worth saying plainly
+  because the obvious "safe" move is to undo them.  Every impact in this
+  engine is worth `mass / IMPACT_ENERGY_PER_DAMAGE`, so scaling that
+  conversion alongside the masses makes the whole change a NO-OP — bigger
+  numbers, identical game.  It shipped that way once and it was wrong: the
+  mass scale exists to make collisions carry more energy.  C stays at 32.
+  MEASURED, at the audit's 6 u/step ram: rock 9 rams → **1**, glass 9 → 1,
+  plastic 65 → 7, metal 78 → 8.  A round's energy BANK is 10x too, so the
+  Blaster punches twelve gnats instead of four and every weapon's falloff
+  is far gentler (the Laser 49/50 a hit against its old 4/5).
+  NOTHING ELSE IS COMPENSATED EITHER, and each is a consequence rather than
+  an oversight: `SHARD_CRASH_MOMENTUM` and `TILE_PRESSURE_MIN_MASS` are
+  gates on `mass × speed` and mass, so ten times as many drifting shards now
+  clear them; `PLAYER_KICK_IMPULSE_PER_DMG` is an impulse over mass, so a
+  hull ten times heavier is shoved ten times less by the same bolt;
+  `FLOW_VARIABILITY.MASS_REF` makes heavier shards ride the current more
+  sluggishly; `AUDIO_CONSTANTS.IMPACT_PITCH_REF_MASS` makes heavier bodies
+  knock lower.
+  WHAT IS INVARIANT, for free, is every RATIO — the impulse solver's
+  inverse-mass split, the body-impact shake, the roll spring's
+  `player.mass / PLAYER_MASS`, the ship-weight normalisation.  A uniform
+  factor cancels in all of them, which is why the ship still handles like
+  itself while hitting far harder, and why a ratio-shaped test cannot see
+  any of this.
+  THE DIAL, if ten is too much, is `CRASH_ENERGY_COUPLING` (DBG ▸ Player ▸
+  "Crash energy") or a material's own `bondStrength` — never
+  `IMPACT_ENERGY_PER_DAMAGE`, which is the conversion the whole model is
+  calibrated against.
+  `scaledMass()` is the seam every AUTHORED mass passes through (enemies at
+  `WaveSystem.buildEnemy`, the dragon head, projectiles via
+  `projectileMassFor`, the roamer/POI constants), so a table keeps stating
+  the number someone chose; masses DERIVED from `IMPACT_DENSITY` do not call
+  it, because the factor is already in that table — which is what keeps its
+  density column honest.  `perf/impact-audit.mjs` §7 therefore has to apply
+  `scaledMass` to ENEMY_VARIANTS itself, and did not at first: it under-read
+  every enemy by the full factor while the classes beside it read right.
+  TWO THINGS LOOKED LIKE MASS THRESHOLDS AND WERE NOT, both found by
+  measuring: `PhysicsSystem`'s shard push, `0.20 / max(1, mass / 10)`, is
+  really `min(0.20, 2 / mass)` — an INVERSE-MASS term with a cap on the
+  result, matching the enemy path's `projMass / targetMass`, and scaling it
+  put the two a full 10x apart.  And `withGunnery` wrote
+  `projectileMassFor(config) * mult` back into `WeaponConfig.mass`, whose
+  contract is AUTHORED units, so the round scaled twice (a mark multiplied
+  the mass by 13.6 against the bite's 1.36).  The rule: a `/ literal` beside
+  a mass is only a threshold if the mass is on the OTHER side of a
+  comparison, and a value converted out of authored units must never be
+  written back into an authored field.
+  **KNOWN OPEN**: at this energy a hull occasionally LEAPS a glass tile —
+  `tests/terrain.spec.ts`'s `ghosted` counter catches it about 1 run in 6 on
+  the glass charge.  The sweep resolves the EARLIEST contact in a step and
+  refuses later ones (its documented backward-only rule); destroying a tile
+  outright and keeping most of the speed is a case that rule was not built
+  for.  It is the `sweepRewind` fix's gap rather than the mass work's, and
+  it needs its own pass.
 - **AND THE SCALE ITSELF IS STATED AS A DENSITY** (`IMPACT_DENSITY` /
   `massFor` in `constants.ts`; user call).  Mass used to be an IMPULSE term
   and nothing else, so its numbers only had to be right relative to each

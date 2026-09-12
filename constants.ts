@@ -472,34 +472,37 @@ export const PLASTIC_SHARD_FLOW_MULT = 5;
 
 /** THE MASS SCALE FACTOR (user call): every mass in the game is ten times
  *  what it was, with every SIZE and AREA unchanged — so every body is ten
- *  times denser and nothing about the world's geometry moved.
+ *  times denser, and **impacts hit ten times harder**.
  *
- *  This is a UNIT CHANGE, not a balance change, and that distinction is the
- *  whole reason the constant exists rather than the numbers simply being
- *  retyped.  Mass appears in this engine in three shapes, and only one of
- *  them is invariant under a uniform scale:
+ *  THAT IS THE POINT, and it is worth saying plainly because the obvious
+ *  "safe" move is to undo it.  Every impact in this engine is worth
+ *  `mass / IMPACT_ENERGY_PER_DAMAGE`, so scaling that conversion alongside
+ *  the masses makes the whole change a no-op — bigger numbers, identical
+ *  game.  It was written that way once, and it was wrong: the mass scale
+ *  EXISTS to make collisions carry more energy.  `IMPACT_ENERGY_PER_DAMAGE`
+ *  stays at 32 and every impact is worth ten times what it was.
  *
- *  1. RATIOS — the impulse solver's inverse-mass split, the body-impact
- *     shake, the roll spring's `player.mass / PLAYER_MASS`, the ship-weight
- *     normalisation.  A uniform factor cancels; these needed nothing.
- *  2. ABSOLUTE THRESHOLDS — `SHARD_CRASH_MOMENTUM`, `TILE_PRESSURE_MIN_MASS`,
- *     `FLOW_VARIABILITY.MASS_REF`, the audio pitch reference, the two
- *     knockback divisors in PhysicsSystem.  Each compares a mass against a
- *     NUMBER, so each must move WITH the scale or it silently re-prices: at
- *     10x mass and an unmoved `SHARD_CRASH_MOMENTUM`, ten times as many
- *     shards would qualify as destructive impactors.
- *  3. THE ENERGY CONVERSION — `IMPACT_ENERGY_PER_DAMAGE`, which every impact
- *     divides by.  Every impact in this engine is worth `mass / C`, so C
- *     scales too and the whole combat model lands exactly where it did.
- *     THAT IS THE LOAD-BEARING CHOICE HERE: leaving C at 32 would have made
- *     every crash and every round's energy bank ten times larger, which is a
- *     balance change nobody asked for — a ram that took nine goes would take
- *     one.  If impacts SHOULD hit harder, that is this one constant or the
- *     DBG "Crash energy" ladder, deliberately kept separate from how heavy
- *     things are.
+ *  NOTHING ELSE IS COMPENSATED EITHER, and each of these is a consequence
+ *  rather than an oversight:
+ *  - `SHARD_CRASH_MOMENTUM` and `TILE_PRESSURE_MIN_MASS` are gates on
+ *    `mass x speed` and mass.  Left alone, ten times as many drifting
+ *    shards now clear them — heavier debris is destructive debris.
+ *  - `PLAYER_KICK_IMPULSE_PER_DMG` is an impulse over mass, so a hull ten
+ *    times heavier is shoved ten times less by the same bolt.
+ *  - `FLOW_VARIABILITY.MASS_REF` is the flow-drift reference, so heavier
+ *    shards ride the current more sluggishly.
+ *  - `AUDIO_CONSTANTS.IMPACT_PITCH_REF_MASS` pitches by mass, so heavier
+ *    bodies knock lower.
  *
- *  Anything added later that compares a mass against a literal belongs in
- *  category 2 and must carry this factor.
+ *  What IS invariant, for free, is every RATIO: the impulse solver's
+ *  inverse-mass split, the body-impact shake, the roll spring's
+ *  `player.mass / PLAYER_MASS`, the ship-weight normalisation.  A uniform
+ *  factor cancels in all of them, which is why the ship still handles like
+ *  itself while hitting far harder.
+ *
+ *  THE DIAL, if ten turns out to be too much, is `CRASH_ENERGY_COUPLING`
+ *  (DBG ▸ Player ▸ "Crash energy") or a material's own `bondStrength` —
+ *  never this constant, which is what "how heavy is everything" means.
  */
 export const MASS_SCALE = 10;
 
@@ -536,7 +539,7 @@ export const FLOW_VARIABILITY = {
    *  (baseline flow response).  Picked at the median spawn mass of
    *  base shards (~7 for rock at 20 px) so a fresh chip is neutral
    *  and merged / condensed shards skew below it. */
-  MASS_REF: 7 * MASS_SCALE,
+  MASS_REF: 7,
   /** Floor on the mass divisor.  Clamps the effective minimum at
    *  MASS_REF × MIN_MASS_FRACTION so ultralight outliers don't
    *  produce runaway massScale values. */
@@ -4330,7 +4333,7 @@ export const STRUCTURE_CONSTANTS = {
   // asteroid plows through a tile permanently.  At 200 a cruising
   // size-100 merged cluster just barely crashes, while a 20-mass
   // shard at drift speed doesn't.
-  SHARD_CRASH_MOMENTUM: 200 * MASS_SCALE,   // mass x speed — carries the scale
+  SHARD_CRASH_MOMENTUM: 200,
   // Pressure accumulator — sustained sub-crash-momentum impacts from
   // "large enough" asteroids also break a tile permanently, simulating
   // repeated-impact pressure without a full stress model.  A tile
@@ -4341,7 +4344,7 @@ export const STRUCTURE_CONSTANTS = {
   // substep re-hits from a single bouncing rock.
   TILE_PRESSURE_HITS: 5,
   TILE_PRESSURE_WINDOW: 2.0,
-  TILE_PRESSURE_MIN_MASS: 40 * MASS_SCALE,
+  TILE_PRESSURE_MIN_MASS: 40,
   TILE_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
@@ -5622,12 +5625,7 @@ export const HIT_FEEDBACK = {
    * unchanged: 12 / PHYSICS_CONSTANTS.PLAYER_MASS (100) = the old 0.12 per
    * damage point.  Only a laden hull differs, and it differs the way the
    * screen shake already does — more ship, less shove. */
-  // An IMPULSE per damage (mass x velocity), so it carries MASS_SCALE:
-  // the kick is `impulse / mass`, and without the factor a 10x heavier
-  // world would take a tenth of the shove from the same hit — measured,
-  // that put the NPC kick an order of magnitude below the shard push
-  // the two are supposed to agree with.
-  PLAYER_KICK_IMPULSE_PER_DMG: 12 * MASS_SCALE,
+  PLAYER_KICK_IMPULSE_PER_DMG: 12,
   // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
   // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
   // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
@@ -5705,7 +5703,7 @@ export const DAMAGE_TEXT_CONSTANTS = {
 // tile punches through four one-HP gnats.  Depth is emergent on both sides of
 // the seam, which is what let the Penetration module be deleted rather than
 // replaced (step 5).
-export const IMPACT_ENERGY_PER_DAMAGE = 32 * MASS_SCALE;
+export const IMPACT_ENERGY_PER_DAMAGE = 32;
 
 /** The mass the sim flies for a shot from `cfg`.
  *
@@ -6858,7 +6856,7 @@ export const AUDIO_CONSTANTS = {
   IMPACT_SPAN_TILE: 18,
   IMPACT_SPAN_SHARD: 6,
   IMPACT_SPAN_ENEMY: 12,
-  IMPACT_PITCH_REF_MASS: 25 * MASS_SCALE,   // (REF / mass) ^ EXP
+  IMPACT_PITCH_REF_MASS: 25,   // (REF / mass) ^ EXP
   IMPACT_PITCH_EXP: 0.25,
   /** The clamps are set to the MEASURED extremes of everything that actually
    *  reaches a mass-pitched row, so the curve can reach its own ends.

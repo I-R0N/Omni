@@ -249,32 +249,37 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
 
 ## A global rescale breaks the tests that were RIGHT
 
-When `MASS_SCALE` landed (every mass 10x, sizes unchanged), nine tests went
-red and the pattern is worth keeping, because it is the opposite of the
-usual one: **the suites that failed were the suites doing it properly.**
+`MASS_SCALE` (every mass 10x, sizes unchanged, impacts ten times harder)
+turned twenty-odd tests red across two passes, and the pattern is the
+opposite of the usual one: **the suites that failed were mostly the suites
+doing it properly.**
 
-- `weapons.spec.ts` writes `ENERGY_PER_DAMAGE` out longhand rather than
-  importing it, on the rule that a test importing the constant it is
-  checking pins nothing.  That is exactly why it went red and said so: the
-  model it describes had moved.  An imported constant would have tracked the
-  change in silence and asserted nothing.  Fix the number, keep the longhand.
-- The tests that hand-build an entity with a LITERAL mass — `mass: 60` for a
-  40px rock, `mass: 4 / 12656.25` for a bolt carrying one bite — are the
-  hazard.  Some FAILED (the rock stopped clearing `SHARD_CRASH_MOMENTUM`, so
-  the crush silently did nothing and the decomposition was never built), and
-  the rest were worse: they PASSED while flying a tenth of the energy they
-  claim to.
-- The fix is to DERIVE, not to retype.  A synthetic rock now takes
-  `SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40)` and a synthetic bolt
-  takes `projectileMassFor({ damage, speed })` — the production seams, which
-  say exactly what the literals meant and cannot fall behind the scale.
-- Where a stand-in mass genuinely has to be a number (`knockback.spec.ts`
-  names ENEMY_VARIANTS figures), spell the factor out — `mass: 140 *
-  MASS_SCALE` — so it reads as the real enemy it stands for.
-
-The generalisation: a global rescale is never dangerous in the quantity
-itself.  It is dangerous in every OTHER number that quantity is compared
-against — and ratio-shaped assertions stay green through all of it.
+- `weapons.spec.ts` and `modules.spec.ts` write `ENERGY_PER_DAMAGE` out
+  longhand rather than importing it, on the rule that a test importing the
+  constant it is checking pins nothing.  That is exactly why they went red
+  and said the model had moved.  An imported constant would have tracked
+  the change in silence and asserted nothing.
+- Hand-built entities with LITERAL masses are the hazard.  Some FAILED
+  loudly (a `mass: 60` rock stopped clearing `SHARD_CRASH_MOMENTUM`, so the
+  crush silently did nothing and no decomposition was ever built), and the
+  rest were worse: they PASSED while flying a tenth of the energy they
+  claim.  DERIVE instead of retyping — `SHARD_VARIANTS[…].spawn.sizeToMass`
+  for a synthetic shard, `projectileMassFor({ damage, speed })` for a bolt
+  meant to carry exactly N bites.  Where a stand-in genuinely has to be a
+  number, spell the factor out (`mass: 140 * MASS_SCALE`).
+- **Tests calibrated on an energy level need re-aiming, not relaxing.**  A
+  dozen terrain/weapon assertions were tuned to speeds and counts that made
+  sense at the old energy: a 12 u/step ram that "holds" now breaks, a wall
+  that "stops" a hull now only slows it, a bank of "five bites" is fifty.
+  Each was re-aimed at the same CLAIM in the new regime — a slower ram for
+  the holds case, a tougher material for the stops case, `5 * 10` for the
+  bank — and the comment says what moved and why.  The one thing never to
+  do is widen a bound until it passes; that is how a suite stops meaning
+  anything.
+- **Ratio-shaped assertions stay green through all of it**, including
+  through a version of the change that was completely wrong.  That is worth
+  remembering: they are the cheapest tests to write and the blindest to a
+  rescale.
 
 ## What is NOT covered
 

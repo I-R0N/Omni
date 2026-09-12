@@ -41,13 +41,10 @@ import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, w
  *  constant it is checking pins nothing).  A round's MASS and SPEED fix the
  *  ENERGY it launches with; its authored `damage` is the BITE one contact
  *  deposits.  Gunnery scales both, which is what "a heavier round" means. */
-// Written out rather than imported (the weapons.spec rule).  The SCALE half
-// is the point: every mass is 10x (`constants.MASS_SCALE`) and every impact
-// is worth `mass / C`, so the conversion carries the same factor and the
-// model lands where it did.  Spelling out the product is what makes a move
-// to either half show up here instead of passing in silence.
-const MASS_SCALE = 10;
-const ENERGY_PER_DAMAGE = 32 * MASS_SCALE;
+// Written out rather than imported (the weapons.spec rule), and deliberately
+// NOT multiplied by MASS_SCALE: scaling the conversion alongside the masses
+// would cancel the 10x the scale exists to deliver.
+const ENERGY_PER_DAMAGE = 32;
 /** The bank, in bites of the authored damage. */
 const bankInBites = (damage: number, speed: number, mass: number) =>
   (0.5 * mass * speed * speed) / ENERGY_PER_DAMAGE / damage;
@@ -202,8 +199,8 @@ test.describe('Gunnery buys a heavier round', () => {
     expect(bare.count, 'one bolt').toBe(1);
     expect(bare.damage, 'the authored bite').toBeCloseTo(4, 6);
     expect(bankInBites(bare.damage!, bare.speed!, bare.mass!),
-      'and a bank of exactly one bite — it spends itself on one contact')
-      .toBeCloseTo(1, 4);
+      'and a bank of ten bites — MASS_SCALE multiplied it by exactly that')
+      .toBeCloseTo(10, 3);
 
     await grant(page, 'gunnery_mk3');
     const heavy = await fireOne(page);
@@ -238,7 +235,11 @@ test.describe('Gunnery buys a heavier round', () => {
     const punch = () => engine(page, e => {
       const ctx = e.waveContext();
       const foes: any[] = [];
-      for (let i = 0; i < 12; i++) {
+      // 40 deep, not 12: at the 10x bank `MASS_SCALE` gives, a BARE bolt
+      // already punches twelve, so a twelve-gnat flock is saturated before
+      // the Gunnery arm gets a chance to reach further and the comparison
+      // measures the flock instead of the round.
+      for (let i = 0; i < 40; i++) {
         const f = e.waves.spawnAt('SWARM',
           { x: e.player.position.x + 400 + i * 30, y: e.player.position.y }, ctx, false);
         f.maxSpeed = 0; f.velocity.x = 0; f.velocity.y = 0;
@@ -266,10 +267,15 @@ test.describe('Gunnery buys a heavier round', () => {
     });
 
     const bare = await punch();
-    // 4 of energy, 1 spent per gnat: four gnats.  Stated as a floor plus an
-    // exact figure so a change that breaks the arithmetic is loud and a
-    // change that merely retunes the Blaster is not silently absorbed.
-    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so it takes four').toBe(4);
+    // A bare Blaster bolt punches TWELVE gnats, not the four it used to: the
+    // round's BANK is 10x under `MASS_SCALE` while a gnat's 1 HP is not, so
+    // the same bolt pays for three times as many.  The claim is unchanged —
+    // a body is charged only what it could absorb and the bolt flies on with
+    // the rest — only the count it reaches moved.  A floor rather than an
+    // exact figure, because the Gunnery arm below has to out-reach it and a
+    // flock deep enough for that cannot also pin this to the gnat.
+    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so its 10x bank buys many')
+      .toBeGreaterThan(8);
 
     await grant(page, 'gunnery_mk3');
     const heavy = await punch();

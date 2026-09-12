@@ -2891,70 +2891,63 @@ fresh tile.
 
 ---
 
-### 15. Every mass x10, and why that is a unit change (2026-09-12)
+### 15. Every mass x10, so impacts hit ten times harder (2026-09-12)
 
 **ASKED**: "Mass of the player should increase by a factor of ten for
 default ... do the same increase to projectiles and everything else as well
-— 10x", with "areas and sizes of objects should stay constant".
+— 10x", with "areas and sizes of objects should stay constant."
 
-Done as `MASS_SCALE`.  The interesting part is not the factor, it is that a
-uniform mass scale is **not** automatically neutral, and the ways it leaks
-are all silent.
+**AND THE FIRST ATTEMPT GOT IT EXACTLY BACKWARDS**, which is the entry worth
+keeping.  Every impact in this engine is worth `mass / IMPACT_ENERGY_PER_DAMAGE`,
+so the "careful" move looked like scaling that conversion alongside the
+masses — preserving every ram count and every weapon number.  That makes the
+whole change a **no-op**: bigger numbers, identical game.  The user's
+response was blunt and correct: *"I legitimately don't understand what the
+point of increasing the mass ten times and then scaling impacts back just as
+much is."*
 
-**MASS APPEARS IN THREE SHAPES**, and only one is invariant:
+The lesson is not about physics.  It is that **"nothing changed" is a
+suspicious outcome for a change someone deliberately asked for.**  Energy
+collisions had been the session's whole subject; a mass increase inside that
+work could only have been about making collisions carry more.  Preserving
+the old balance was defensible in the abstract and wrong in context, and no
+amount of measurement would have caught it because the measurement confirmed
+exactly what the mistaken intent predicted.
 
-1. **Ratios** — the impulse solver's inverse-mass split, the body-impact
-   shake, the roll spring's `player.mass / PLAYER_MASS`, the ship-weight
-   normalisation.  A uniform factor cancels.  These needed nothing, and
-   *every ratio-shaped test in the suite passed unchanged*, which is both
-   the proof the scale is uniform and the reason the leaks below are so
-   easy to miss.
-2. **Absolute thresholds** — `SHARD_CRASH_MOMENTUM`,
-   `TILE_PRESSURE_MIN_MASS`, `FLOW_VARIABILITY.MASS_REF`, the audio
-   `IMPACT_PITCH_REF_MASS`, and two knockback divisors buried in
-   PhysicsSystem (`/ Math.max(1, target.mass / 10)` and
-   `/ Math.max(1, target.mass)` — literals, not named constants, and the
-   hardest of the set to find).  Each compares a mass against a *number*.
-   Left alone, `SHARD_CRASH_MOMENTUM` would have admitted ten times as many
-   drifting shards as destructive impactors.
-3. **The energy conversion** — `IMPACT_ENERGY_PER_DAMAGE`.  Every impact in
-   this engine is worth `mass / C`, so C carries the factor too.
+**WHAT SHIPS**: `MASS_SCALE = 10` multiplies mass SOURCES only.  Nothing is
+compensated — not the energy conversion, not the crash gates, not the flow
+reference, not the audio pitch, not the kick impulse.
 
-**(3) IS THE ONE THAT MATTERS AND THE ONE THAT WOULD HAVE GONE UNNOTICED.**
-Measured with C left at 32 against 10× masses: a rock tile fell from **nine
-rams to two**, every round's energy bank grew ten-fold, and the build was
-perfectly playable.  No exception, no log, no ratio test.  A ten-fold combat
-re-price presenting as "the ship feels punchier now".
+Measured at the audit's 6 u/step ram: rock **9 → 1**, glass 9 → 1, plastic
+65 → 7, metal 78 → 8.  A round's energy bank is 10x too, so a Blaster bolt
+punches twelve gnats instead of four and the Laser's falloff is 49/50 a hit
+against its old 4/5.
 
-**The general lesson, worth more than the change**: when a quantity is
-rescaled globally, the risk is never the quantity — it is every *other*
-number it is compared against. Ratios announce nothing when they are right
-*and* when they are wrong; only the comparisons break, and they break
-quietly. The audit's own §7 proved the point on itself: it read
-`ENEMY_VARIANTS` directly rather than through the `scaledMass` seam, so it
-under-reported every enemy by the full factor while the classes beside it,
-which route through the seam, read correctly.
+**RATIOS ARE INVARIANT AND THAT IS WHY THIS WAS EASY TO GET WRONG**: the
+impulse split, the body-impact shake, the roll spring, the ship-weight
+normalisation all cancel a uniform factor, so the ship still handles like
+itself — and *every ratio-shaped test in the suite stayed green through
+both the wrong version and the right one.*  Only the comparisons move.
 
-**KEPT AS A SEPARATE LEVER**: if impacts *should* hit harder, that is
-`IMPACT_ENERGY_PER_DAMAGE` or the DBG "Crash energy" ladder — deliberately
-not tangled with how heavy things are, which is the whole reason the two are
-different constants.
-
-**TWO NEAR-MISSES, both caught by measurement rather than by reading**, and
-both worth keeping as patterns:
+**TWO THINGS LOOKED LIKE MASS THRESHOLDS AND WERE NOT**, both caught by
+measuring rather than reading:
 
 - **A `/ literal` next to a mass is only a threshold if the mass is on the
   other side of a comparison.**  `PhysicsSystem`'s shard push,
-  `0.20 / Math.max(1, target.mass / 10)`, reads as "a mass gate at 10" and
-  is really `min(0.20, 2 / mass)` — an inverse-mass term with a cap on the
-  *result*.  Scaling the 10 put it a full order of magnitude away from the
-  enemy path it is required to agree with (ratio 0.1125 against 1.125).
-  Left alone, the two agree at every mass, because both are `k / mass` and
-  ratios of inverse-mass terms are scale-free.
+  `0.20 / Math.max(1, target.mass / 10)`, reads as "a gate at 10" and is
+  really `min(0.20, 2 / mass)` — an inverse-mass term with a cap on the
+  *result*.  Scaling the 10 put it an order of magnitude from the enemy path
+  it must agree with (0.1125 against 1.125).
 - **A value converted out of authored units must never be written back into
   an authored field.**  `withGunnery` set `mass: projectileMassFor(config)
-  * mult` — the converted, already-scaled figure — into `WeaponConfig.mass`,
-  whose contract is the authored number.  The next conversion scaled it
-  again: a Gunnery mark multiplied the round's mass by 13.6 against its
-  bite's 1.36.  The fix is to stay in authored units (`config.mass * mult`)
-  and let the one converter do its job once.
+  * mult` into `WeaponConfig.mass`, whose contract is the authored number,
+  so the next conversion scaled it again: a Gunnery mark multiplied the
+  round's mass by 13.6 against its bite's 1.36.
+
+**STILL OPEN**: at this energy a hull occasionally LEAPS a glass tile —
+about 1 run in 6 on the full-speed glass charge, caught by
+`tests/terrain.spec.ts`'s `ghosted` counter.  `sweepRewind` resolves the
+EARLIEST contact in a step and refuses later ones (its documented
+backward-only rule); a tile destroyed outright by a hull that keeps most of
+its speed is a case that rule was not built for.  That belongs to the sweep,
+not to the mass work, and needs its own pass.

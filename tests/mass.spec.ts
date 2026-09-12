@@ -193,15 +193,20 @@ test.describe('the hull-density ladder moves the ship, at the read', () => {
       // ACCUMULATED erosion rather than this arm's bite.  Measured that way
       // the arms read 21.3 / 31.9 / 37.2 as the hull got LIGHTER, which is
       // the running total climbing, not a heavier bite.
+      // METAL, not rock: at the 10x impact energy the scale delivers, a
+      // full-density ram DESTROYS a rock tile outright and the fraction
+      // saturates at 1.0 for both arms, which measures nothing.  Metal's
+      // derived HP (~470 against rock's ~54) leaves room for a half-density
+      // hull to land visibly less without either arm breaking through.
       const ramDamage = async () => {
-        await startRun(page, 'ROCK_FIELD');
-        await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock field');
+        await startRun(page, 'METAL_FIELD');
+        await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
         return engine(page, (e: any) => {
           const P: any = e.physics, DT = 1 / 120;
           const t = e.currentMap.entities.find((x: any) => x.active
-            && x.shardVariant === 'rock-tile' && x.mass === Infinity
+            && x.shardVariant === 'metal-tile' && x.mass === Infinity
             && x.fractureEdgeFill === undefined);
-          if (!t) throw new Error('no untouched rock tile');
+          if (!t) throw new Error('no untouched metal tile');
           for (const x of e.currentMap.entities) if (x !== t) x.active = false;
           t.position.x = 400; t.position.y = 0; t.active = true;
           // Build the model at zero damage so `health` is already the
@@ -257,28 +262,23 @@ test.describe('the hull-density ladder moves the ship, at the read', () => {
     });
 });
 
-/** THE 10x SCALE IS A UNIT CHANGE, NOT A BALANCE CHANGE (user call: every
- *  mass 10x, every size and area constant).
+/** THE 10x SCALE EXISTS TO MAKE IMPACTS HARDER (user call: every mass ten
+ *  times, every size and area constant).
  *
- *  Mass appears in this engine in three shapes and only one survives a
- *  uniform scale untouched:
- *    1. RATIOS (the impulse split, the shake, the roll spring) — cancel.
- *    2. ABSOLUTE THRESHOLDS (`SHARD_CRASH_MOMENTUM`, `TILE_PRESSURE_MIN_MASS`,
- *       `FLOW_VARIABILITY.MASS_REF`, the audio pitch reference, two knockback
- *       divisors) — each compares a mass against a NUMBER, so each must move
- *       with the scale or it silently re-prices.
- *    3. THE ENERGY CONVERSION (`IMPACT_ENERGY_PER_DAMAGE`) — every impact in
- *       the game is worth `mass / C`, so C carries the factor too.
+ *  This block used to assert the OPPOSITE — that the scale was a unit change
+ *  and nothing re-priced — because `IMPACT_ENERGY_PER_DAMAGE` had been
+ *  scaled alongside the masses.  That made the whole change a no-op: every
+ *  impact in this engine is worth `mass / C`, so scaling C cancels it
+ *  exactly, and the result is bigger numbers and an identical game.  The
+ *  point of making everything heavier is that collisions carry more energy.
  *
- *  (3) is the load-bearing one and is WRONG IN A WAY NOTHING REPORTS: leaving
- *  C at its old value gives a perfectly playable game in which every crash
- *  and every round's energy bank is TEN TIMES larger.  Measured that way, a
- *  rock tile fell from nine rams to one — and no exception, no log and no
- *  ratio test anywhere would have mentioned it.  That is what this describe
- *  block exists for.
+ *  So C stays at 32 and every impact is worth TEN TIMES what it was.  What
+ *  is pinned here is that multiplier — at the constant, and end to end on a
+ *  ram count, because a compensation anywhere in the chain would restore the
+ *  old numbers while every ratio-shaped test in the suite stayed green.
  */
-test.describe('the mass scale is a unit, so nothing re-prices', () => {
-  test('the energy conversion carries the scale, so mass/C is invariant',
+test.describe('the mass scale makes impacts harder — that is what it is for', () => {
+  test('the energy conversion does NOT carry the scale, so mass/C is 10x',
     async ({ page }) => {
       const watch = await boot(page);
       await leanRun(page);
@@ -288,67 +288,75 @@ test.describe('the mass scale is a unit, so nothing re-prices', () => {
         const C = M.IMPACT_ENERGY_PER_DAMAGE;
         return {
           scale: M.MASS_SCALE, C,
-          // What a body of each class is WORTH in an impact: mass / C is the
-          // quantity every crash and every projectile bank is measured in,
-          // so it is the thing that must not have moved.
+          // What a body of each class is WORTH in an impact.  `mass / C` is
+          // the quantity every crash and every projectile bank is measured
+          // in, so it is the thing that had to MOVE.
           hullWorth: M.PHYSICS_CONSTANTS.PLAYER_MASS / C,
           rockWorth: M.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(36) / C,
           boltWorth: M.projectileMassFor(M.WEAPONS[M.WEAPON_LIST[0]]) / C,
         };
       });
 
-      // C is 32 x the scale.  Both halves are asserted, because a C that
-      // stopped tracking the factor is exactly the silent 10x re-price.
-      expect(r.C, 'the conversion carries the factor').toBe(32 * r.scale);
-      // The PRE-SCALE worths, which are what the whole combat model was
-      // tuned against: a 100-mass hull and a 32 conversion gave 3.125, a
-      // 36px rock shard 0.729, a Blaster bolt 0.03125.  These numbers are
-      // the balance, and they are unchanged.
-      expect(r.hullWorth, 'a hull is worth what it always was').toBeCloseTo(3.125, 6);
-      expect(r.rockWorth, 'and so is a rock shard').toBeCloseTo(0.729, 6);
-      expect(r.boltWorth, 'and so is a bolt').toBeCloseTo(0.03125, 6);
+      // The conversion is untouched.  This is the single assertion that
+      // fails if anyone "fixes" the scale by cancelling it again.
+      expect(r.C, 'the conversion does not carry the factor').toBe(32);
+      // Each worth is its PRE-SCALE value times the scale: a 100-mass hull
+      // against a 32 conversion gave 3.125, a 36px rock shard 0.729, a
+      // Blaster bolt 0.03125.  Every one of them is now ten times that.
+      expect(r.hullWorth, 'a hull carries 10x the energy')
+        .toBeCloseTo(3.125 * r.scale, 5);
+      expect(r.rockWorth, 'and so does a rock shard')
+        .toBeCloseTo(0.729 * r.scale, 5);
+      expect(r.boltWorth, 'and so does a bolt')
+        .toBeCloseTo(0.03125 * r.scale, 5);
 
       watch.assertClean();
     });
 
-  test('every absolute mass threshold carries the scale too',
+  test('and nothing else compensates it either',
     async ({ page }) => {
       const watch = await boot(page);
       await leanRun(page);
 
       const r = await engine(page, () => {
         const M = (window as any).__omniMass;
-        const S = M.STRUCTURE_CONSTANTS, F = M.FLOW_VARIABILITY, A = M.AUDIO_CONSTANTS;
+        const S = M.STRUCTURE_CONSTANTS, F = M.FLOW_VARIABILITY;
+        const A = M.AUDIO_CONSTANTS, H = M.HIT_FEEDBACK;
         return {
-          scale: M.MASS_SCALE,
           shardCrash: S.SHARD_CRASH_MOMENTUM,
           tilePressure: S.TILE_PRESSURE_MIN_MASS,
           flowRef: F.MASS_REF,
           pitchRef: A.IMPACT_PITCH_REF_MASS,
+          kick: H.PLAYER_KICK_IMPULSE_PER_DMG,
         };
       });
 
-      // Each of these compares a mass against a number.  Left unscaled, each
-      // would quietly admit ten times as much: SHARD_CRASH_MOMENTUM is the
-      // gate deciding which drifting shards destroy terrain at all, and
-      // TILE_PRESSURE_MIN_MASS which ones can grind a tile down by leaning
-      // on it.  A ratio test cannot see either.
-      expect(r.shardCrash, 'the destructive-impactor gate').toBe(200 * r.scale);
-      expect(r.tilePressure, 'the pressure-accumulator gate').toBe(40 * r.scale);
-      expect(r.flowRef, 'the flow-drift mass reference').toBe(7 * r.scale);
-      expect(r.pitchRef, 'the impact-pitch reference').toBe(25 * r.scale);
+      // Every one of these reads a mass, and every one is left where it was
+      // — each is a CONSEQUENCE of the heavier world rather than an
+      // oversight.  The gates now admit ten times as much (heavier debris is
+      // destructive debris); the kick is an impulse over mass, so a hull ten
+      // times heavier is shoved ten times less; the flow reference makes
+      // heavier shards ride the current more sluggishly; the pitch reference
+      // makes heavier bodies knock lower.  Scaling any of them would undo
+      // part of what the mass change is for.
+      expect(r.shardCrash, 'the destructive-impactor gate').toBe(200);
+      expect(r.tilePressure, 'the pressure-accumulator gate').toBe(40);
+      expect(r.flowRef, 'the flow-drift mass reference').toBe(7);
+      expect(r.pitchRef, 'the impact-pitch reference').toBe(25);
+      expect(r.kick, 'the player kick impulse').toBe(12);
 
       watch.assertClean();
     });
 
-  test('a ram still takes the same number of goes, which is the whole claim',
+  test('a ram really does hit about ten times harder, end to end',
     async ({ page }) => {
       const watch = await boot(page);
 
-      // The end-to-end statement, driven through the real collision branch:
-      // rock is the material `CRASH_ENERGY_COUPLING` was calibrated on and
-      // its ram count is the one number a person actually played.  If the
-      // scale had leaked into the energy model this reads 1, not 9.
+      // The end-to-end statement, driven through the real collision branch.
+      // Rock is the material `CRASH_ENERGY_COUPLING` was calibrated on: at
+      // the audit's 6 u/step it used to take NINE goes, and at ten times the
+      // energy it takes one.  A compensation anywhere in the chain restores
+      // the nine, which is exactly the failure this exists to catch.
       await startRun(page, 'ROCK_FIELD');
       await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock field');
 
@@ -379,10 +387,13 @@ test.describe('the mass scale is a unit, so nothing re-prices', () => {
         return n;
       });
 
-      // A band rather than exactly 9: derived HP varies tile to tile by
-      // construction.  What matters is that it is nowhere near 1.
-      expect(rams, 'rock still takes real punishment').toBeGreaterThan(5);
-      expect(rams, 'and not dramatically more either').toBeLessThan(16);
+      // Stated as a CEILING well under the old nine rather than as exactly
+      // one: derived HP varies tile to tile by construction, so a tough
+      // outlier may take two.  What must not happen is a return to the
+      // pre-scale count, which is what a re-compensation looks like.
+      expect(rams, 'a ram at ten times the energy is not a nine-goes job')
+        .toBeLessThan(4);
+      expect(rams, 'but it is still a real contact').toBeGreaterThan(0);
 
       watch.assertClean();
     });
