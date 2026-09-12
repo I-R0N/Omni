@@ -10,7 +10,6 @@ export const AUDIO_MIX = {
 } as const;
 
 export function busFor(id: string, tier: number): AudioBus {
-  if (/^(wave\.|boss\.(intro|death)$)/.test(id)) return 'music';
   if (/^(ui\.|poi\.(?!station)|portal.transit$|destroy.player$)/.test(id)) return 'ui';
   return tier === 1 ? 'feedback' : 'world';
 }

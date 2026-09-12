@@ -1,4 +1,9 @@
-# Omni sound assets
+# Legacy recovery sound assets
+
+The primary soundtrack now lives in `../audio/`: 304 sample-based takes and
+a ten-minute background score. See `../audio/AUDIO_CREDITS.md` and
+`docs/CINEMATIC_AUDIO.md`. These WAVs and synthesis are recovery sources only.
+The remaining notes describe the earlier pass.
 
 66 mono, 44.1 kHz, 16-bit PCM WAV takes cover 22 event IDs. Files use the
 registered ID with dots replaced by dashes and a variant suffix. Longest-ID
