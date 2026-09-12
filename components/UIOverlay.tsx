@@ -132,6 +132,7 @@ interface UIOverlayProps {
   onCycleShardCoat?: () => void;
   onCycleImpactVelocity?: () => void;
   onCycleCrashEnergy?: () => void;
+  onCycleBlastEnergy?: () => void;
   onCycleHullDensity?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
@@ -467,6 +468,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleShardCoat,
   onCycleImpactVelocity,
   onCycleCrashEnergy,
+  onCycleBlastEnergy,
   onCycleHullDensity,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
@@ -1592,6 +1594,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Crash energy', onCycleCrashEnergy,
                   stats.crashEnergyName ?? '1x (def)',
                   'How much of a HULL\'s kinetic energy reaches the grain bonds it hits (1 / 0.5 / 0.25 / 2 / 4x over the calibrated coupling). A crash now spends ENERGY like a weapon hit does, so twice the closing speed is four times the bite, and the speed the impactor loses IS what it broke. The coupling is calibrated on ROCK, whose ram count is unchanged at 9; every other material then differs by its own derived toughness rather than by an authored HP (metal used to take 24 to 144 rams across six tiles of identical toughness, because a crash spent one authored HP and metal authors 24 x densityTier). This is the dial for how permeable terrain is; a material\'s own bondStrength is the same question asked of one material.')}
+                {ctrlRow('Blast energy', onCycleBlastEnergy,
+                  stats.blastEnergyName ?? '1x (def)',
+                  'How much of a SHELL\'s kinetic energy becomes its BLAST (a multiplier over BLAST_ENERGY_COUPLING). The splash was the last damage number in the roster still authored as a flat scalar: the direct bite went kinetic in step 3, the crash in step 4 and the bore in step 5, while explosionDamage sat at 10 as every round\'s bank grew tenfold and terrain started deriving ~50 HP a tile — so the blast shrank into a light show (measured: a bystander at half the radius lost 2.7). It is now a fraction of the shell\'s own energy, which means it rides GUNNERY and the charge for free (both buy a heavier round), and a shell that spent its bank boring through terrain blasts weaker, because the AoE call site already scales by the fraction of launch energy left. The sibling of "Crash energy": a hull couples ~11% of a contact into breaking work, a shaped charge couples this much into the blast.')}
                 {ctrlRow('Hull density', onCycleHullDensity,
                   stats.hullDensityName ?? '0.250 / m100 (def)',
                   'How heavy the SHIP is, as a density (mass per unit of d\u00b2) and the mass it derives — a multiplier over IMPACT_DENSITY.HULL, index 0 what ships. Mass used to be an impulse term and nothing else; under the energy model it is half of what every impact SPENDS, so one number moves crash damage, knockback, the body-impact shake and the roll spring together. Read it against the MATERIAL band, which is the scale it is stated in: glass 0.010, plastic 0.013, rock 0.018, metal 0.030. The hull ships at 0.250 — 25x glass and 8x rock, deliberately, because a ship is a machine rather than a rock and should plow through gravel instead of being batted about by it. The steps walk DOWN toward that band (and one up), because the question worth judging in play is whether the hull should sit that far above it at all. Lower = you ram for less and get shoved more.')}

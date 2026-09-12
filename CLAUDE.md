@@ -79,7 +79,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  408 tests.  All run at
+                          writing a DBG-knob test).  412 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -333,7 +333,9 @@ perf/                     Headless capture harness (gauntlet 5c) —
                           crash gates correspond to in the same units —
                           step 1 of the unified-impact sequencing; §7 is
                           the MASS SCALE, every class's mass as a density
-                          so the four ladders read against each other),
+                          so the four ladders read against each other; §8 is
+                          PENETRATION and the BLAST, both fired through the
+                          real resolver because neither is authored any more),
                           scenes.mjs, README.md.
                           Deliberately NOT part of `npm test`: runs take
                           minutes and are noise-prone; the test suite is a
@@ -856,6 +858,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   — the steel-blue that metal's density brightening interpolates
   TOWARD, replacing a per-channel scale that desaturated dense metal
   toward white.
+- `BASE_BANK_DIVISOR` / `GUNNERY_MK3_DAMAGE_FRAC` — the base shot BANK is
+  today's divided by what three Gunnery Mk III grant (see WEAPONS below);
+  `BLAST_ENERGY_COUPLING` / `blastDamageFor` — a shell's blast is a
+  fraction of its own kinetic energy, not an authored scalar
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
   see §8), `MASS_SCALE` / `scaledMass` — every mass is 10x with sizes
   unchanged, and IMPACTS HIT 10x HARDER: the energy conversion is
@@ -1695,6 +1701,37 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   spreading a player gun must RESTATE the mass when it overrides `damage` or
   `speed`, or it inherits a bank sized for numbers it no longer has (measured:
   the Reaver's scattergun would have flown with a third of one bite).
+  **THE BASE BANK IS A THIRD OF A FULLY-GUNNED ONE** (user call): the reach
+  the shipped round had is what three Gunnery Mk III should buy, not what a
+  starter Blaster carries.  `MASS_SCALE` multiplied every bank by ten along
+  with every mass and penetration is bank-shaped, so a base bolt punched
+  THIRTY-ONE one-HP gnats where the pre-scale round managed four (measured,
+  `perf/impact-audit.mjs` §8).  Every player gun's authored `mass` is now
+  divided by `BASE_BANK_DIVISOR` — `1 + 3 × GUNNERY_MK3_DAMAGE_FRAC` = 2.08,
+  written as `3.5556 / BASE_BANK_DIVISOR` in the table so the original solve
+  stays readable — and `withGunnery` multiplies the bank straight back, so
+  the two ends meet by construction.  Measured base → 3× Mk III: Blaster
+  31 → 15 → 36, Burst 121 → 58 → 136, Laser 201 → 97 → 226, Cannon
+  171 → 82 → 176; every weapon's before/after ratio lands on 2.05..2.09.
+  TWO things make this the right lever and both are easy to get backwards.
+  **Only the BANK moves** — `damage`, the BITE, is untouched at every mark,
+  so no enemy takes longer to kill and no §7 trait threshold shifts.  And
+  **scaling both would have been a NO-OP**: the falloff is `1 - bite/energy`,
+  so halving bite and bank together leaves the ratio, and the count, exactly
+  where they were.  The 0.36 is a literal because `MODULE_DEFS` is declared
+  AFTER the weapon table; `tests/weapons.spec.ts` pins it against the real
+  catalog, which is what stops a Gunnery retune drifting the base round.
+
+  **AND A CHARGED SHOT WAS FLYING TEN TIMES TOO HEAVY.**
+  `chargedConfigOf` wrote `projectileMassFor(config) * K` back into
+  `WeaponConfig.mass`, whose contract is the AUTHORED figure — so the next
+  conversion applied `MASS_SCALE` again and a charged Blaster carried a 2000
+  bank against its intended 200.  This is the identical authored-units bug
+  that was found and fixed in `withGunnery` during the mass work; it lived in
+  this second site the whole time, invisible because an over-penetrating
+  charge looks like a strong charge.  `chargedMass()` is the one helper both
+  intentions now go through.
+
   Four rules describe what a round can afford:
   - **DAMAGE IS KINETIC, AND THE FALLOFF IS NO LONGER A KNOB** (unified
     impact physics, step 3).  A bolt does not carry an authored damage
@@ -1789,6 +1826,34 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   fallback so a shell fired into open space still ends in a blast rather than
   being silently wasted.  Measured: a Cannon shell passes through 18 of 18
   tiny/small/medium rock shards without detonating.
+  **THE BLAST IS THE SHELL'S OWN ENERGY** (user call).  `explosionDamage` was
+  the last damage number in the roster still authored as a flat scalar: the
+  direct bite went kinetic in step 3, the crash in step 4 and the bore in
+  step 5, while `10` sat unchanged as every round's bank grew tenfold and
+  terrain started deriving ~50 HP a tile — so the charge quietly shrank into
+  a light show (measured: a bystander at half the radius lost 5.2).  It is
+  now `blastDamageFor(mass, speed)` — `kineticDamage` over the shell's OWN
+  flown mass, times `BLAST_ENERGY_COUPLING` (0.2), which is the sibling of
+  `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
+  work, a shaped charge couples a fifth of its remaining energy into the
+  blast.  At the shipped numbers the peak is ~17.3 against the Cannon's 18
+  direct bite — "the charge is worth about one more hit" is the statement
+  that picks the coupling.  Measured bystander 5.2 → 10.4.
+  THREE properties FALL OUT rather than being written: it rides GUNNERY for
+  free (a mark buys a heavier round and the blast reads the round's mass);
+  a CHARGED shell blasts harder by being heavier (the charge premium is
+  `chargedMass(config, 1.5)` now, not a scalar on a field the Cannon no
+  longer authors); and a shell that spent its bank BORING blasts weaker,
+  because the `× hitFalloff` already at the AoE call site is exactly the
+  fraction of launch energy it has left — peak × (E/E₀) is the energy it
+  still carries, with no second curve anywhere.
+  ABSENT MEANS DERIVED, a value means authored: `BOSS_WEAPONS.SIEGE` keeps
+  its own `explosionDamage: 6`, because a designed encounter's splash is a
+  number someone chose and deriving it would have tripled the Bastion's
+  shells as a side effect of fixing the player's gun.  `withGunnery` must
+  NOT scale it — the mass it reads is already multiplied, so a mark would
+  otherwise reach the blast twice.
+
   **PURCHASABLE HEX SLOTS** (A5): how many hexes of each flower are
   UNLOCKED is a run field (`GameEngine.shipSlotsUnlocked` /
   `weaponSlotsUnlocked`, reset by `resetOutfit`), and
@@ -3882,6 +3947,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   as one dark shape; the destination-size variation is legible with the
   DBG Lens knob dialled down.  `openPortal` still fires only on an
   actual transit.
+- **DBG ▸ Player carries the impact model's four dials**, all index-0-ships:
+  "Impact vel" (which velocity a hit is measured in), "Crash energy" (how
+  permeable terrain is to a HULL), "Hull density" (how heavy the ship is) and
+  "Blast energy" (how much of a SHELL's energy becomes its blast).  The last
+  two are the pair worth reading together: hull density decides what a ram
+  spends, blast energy what a charge spends, and both are efficiencies over a
+  kinetic energy rather than authored damage numbers.
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
   collapsible section) — the old floating top-left DBG button/panel is
   gone.  The 'Overlays' row inside is the old master toggle (renderer

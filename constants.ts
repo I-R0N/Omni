@@ -5846,6 +5846,66 @@ export function projectileBite(authored: number, speed: number, spawnSpeed: numb
   return authored * r * r;
 }
 
+// ── THE BLAST IS THE SHELL'S OWN ENERGY (user call) ──────────────────────────
+//
+// A shaped charge was the LAST damage number in the roster still authored as a
+// flat scalar.  The direct bite became kinetic in step 3, the crash in step 4
+// and the bore in step 5 — but `explosionDamage: 10` sat unchanged while every
+// round's bank went up tenfold and terrain started deriving ~50 HP a tile, so
+// the blast quietly shrank into a light show (measured: a bystander at half
+// the radius lost 2.7).
+//
+// So the blast is now a FRACTION OF THE SHELL'S KINETIC ENERGY, converted
+// through the same `IMPACT_ENERGY_PER_DAMAGE` everything else uses.  Three
+// properties fall out rather than being written:
+//   - it scales with GUNNERY for free, because a mark buys a heavier round
+//     and the blast reads the round's own mass;
+//   - a shell that has spent its bank boring through terrain blasts WEAKER,
+//     because the existing `× hitFalloff` at the AoE call site is exactly the
+//     fraction of launch energy it has left — peak × (E/E₀) is the energy it
+//     still carries, with no second curve anywhere;
+//   - a charged shell blasts harder by being heavier, which is the same
+//     repricing step 5 gave the Blaster's charge.
+//
+// THE COUPLING IS AN EFFICIENCY, and it is the sibling of
+// `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
+// work, a shaped charge couples this much of its remaining energy into the
+// blast.  At 0.2 the shipped Cannon's peak blast is ~17 against its 18 direct
+// bite — "the charge is worth about one more hit" — which is the statement
+// that picks the number.  DBG ▸ Player ▸ "Blast energy" is the live A/B.
+export const BLAST_ENERGY_COUPLING = 0.2;
+
+export const BLAST_ENERGY_CYCLE: ReadonlyArray<number> = [
+  1, 0.5, 2, 4,
+] as const;
+const BLAST_ENERGY_DEFAULT_INDEX = 0;
+let activeBlastEnergyIndex = BLAST_ENERGY_DEFAULT_INDEX;
+/** The live coupling: the constant above times the DBG multiplier.  Read at
+ *  the point a shell is spawned, so a click re-tunes the next shot rather
+ *  than needing a map reload. */
+export function getBlastCoupling(): number {
+  return BLAST_ENERGY_COUPLING * BLAST_ENERGY_CYCLE[activeBlastEnergyIndex];
+}
+export function getActiveBlastEnergyName(): string {
+  const m = BLAST_ENERGY_CYCLE[activeBlastEnergyIndex];
+  const label = `${m}×`;
+  // The "(def)" marker is DERIVED from the default index, never written into a
+  // step's name — the nebula-sprite lesson (CLAUDE.md §8).
+  return activeBlastEnergyIndex === BLAST_ENERGY_DEFAULT_INDEX ? `${label} (def)` : label;
+}
+export function cycleBlastEnergy(): number {
+  activeBlastEnergyIndex = (activeBlastEnergyIndex + 1) % BLAST_ENERGY_CYCLE.length;
+  return activeBlastEnergyIndex;
+}
+
+/** The PEAK damage a shell's charge deposits, from the round the sim actually
+ *  flies.  `mass` is the SCALED mass (what `projectileMassFor` returns), not
+ *  the authored figure — the authored-units rule that bit `withGunnery` and
+ *  `chargedConfigOf` cuts both ways, and this one wants the flown number. */
+export function blastDamageFor(mass: number, speed: number): number {
+  return kineticDamage(mass, speed) * getBlastCoupling();
+}
+
 /** The speed a body of `mass` is left with after spending `damage` worth of
  *  energy — the whole of the penetration falloff, as arithmetic rather than
  *  as a knob.  Clamped at rest: a bolt cannot be left with negative energy. */
@@ -5903,6 +5963,35 @@ export function cycleImpactVelocity(): number {
   return activeImpactVelocityIndex;
 }
 
+// ── THE BASE SHOT BANK: what three Gunnery marks buy back ────────────────────
+//
+// A round's BANK (`mass`, with `speed`) is what decides how far it gets — how
+// many actors it punches through and how many grains it bores — because every
+// contact is charged out of it.  Step 5 authored those banks at exactly the
+// numbers its `(1 + pierce)` solve produced, and then MASS_SCALE multiplied
+// every mass by ten, which multiplied every bank by ten with it: a base
+// Blaster bolt punched THIRTY-ONE one-HP gnats (measured, audit §8) where the
+// pre-scale round managed four.
+//
+// THE USER'S CALIBRATION, and it is a statement about PROGRESSION rather than
+// a number picked here: *today's* penetration is what a fully-gunned ship
+// should have, so the BASE round is today's divided by what three Gunnery
+// Mk III modules multiply it by.  `withGunnery` scales the bank by
+// `1 + Σ damageFrac` and a Mk III contributes 0.36, so three of them are
+// x2.08 — and dividing the authored banks by that makes the two ends meet by
+// construction.  `tests/weapons.spec.ts` pins the round trip against the real
+// MODULE_DEFS catalog, which is what stops this drifting if Gunnery is
+// retuned; the 0.36 below is written out because MODULE_DEFS is declared
+// AFTER this table and cannot be read from here.
+//
+// ONLY THE BANK MOVES.  `damage` — the BITE one contact deposits — is
+// untouched at every Gunnery level, so no enemy takes longer to kill and no
+// §7 trait threshold shifts.  Scaling both would have been a NO-OP for
+// penetration anyway: the falloff is `1 - bite/energy`, so halving both ends
+// leaves the ratio, and the count, exactly where it was.
+export const GUNNERY_MK3_DAMAGE_FRAC = 0.36;   // statMks('gunnery', … 0.12 * mk)
+export const BASE_BANK_DIVISOR = 1 + 3 * GUNNERY_MK3_DAMAGE_FRAC;   // = 2.08
+
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 //
 // Stat budgeting (d2 weapon overhaul):
@@ -5933,7 +6022,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     // can hurt.  Depth is still not zero — overkill carries through, so a
     // bolt worth 4 punches four one-HP gnats (measured) and is stopped dead
     // by one rock tile, which charges 5.6 a grain.
-    mass: 1,
+    mass: 1 / BASE_BANK_DIVISOR,
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
@@ -5947,7 +6036,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 1,
     recoil: 0.3,
-    mass: 2.4,         // 3 bites; decay 0.67/hit
+    mass: 2.4 / BASE_BANK_DIVISOR,         // solve: 3 bites (decay 0.67/hit) before the
+                                           // divisor above and MASS_SCALE below it
     burstCount: 3,
     burstDelay: 0.04,
   },
@@ -5963,7 +6053,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 6,
     spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
-    mass: 0.96,        // 2 bites; decay 0.50/hit — a pellet gives up half
+    mass: 0.96 / BASE_BANK_DIVISOR,        // solve: 2 bites, decay 0.50/hit — a pellet gave up half
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
@@ -5986,7 +6076,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     // "effectively infinite pierce" the Laser used to carry, repriced — an
     // unbounded budget made it the answer to every line of targets, and an
     // energy bank spends down instead.
-    mass: 1.7778,      // 5 bites; decay 0.80/hit
+    mass: 1.7778 / BASE_BANK_DIVISOR,      // solve: 5 bites, decay 0.80/hit
     bounceCount: 15,   // 3 -> 15 (user call): reflects up to 15 times off tiles
                        // before dissipating.  Bounces buy COVERAGE, never extra
                        // damage — the energy above is a LIFETIME bank that a
@@ -6007,7 +6097,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 3,
     recoil: 0.3,
-    mass: 0.8521,      // one bite — it stops on first hit, then chains
+    mass: 0.8521 / BASE_BANK_DIVISOR,      // solve: one bite — it stopped on first hit, then chains
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -6022,7 +6112,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 10,
     recoil: 0.5,
-    mass: 3.5556,      // one bite, but a HEAVY one: a slow 8-damage round is
+    mass: 3.5556 / BASE_BANK_DIVISOR,      // one bite, but a HEAVY one: a slow 8-damage round is
                        // dense, so a Seeker shoves a shard hard on contact
     homing: true,
   },
@@ -6038,12 +6128,15 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 0,
     recoil: 4.0,       // halved from 8.0 — a slower ROF + AoE makes huge recoil punitive
-    mass: 3.5556,      // the heaviest round in the game alongside the Seeker,
+    mass: 3.5556 / BASE_BANK_DIVISOR,      // the heaviest round in the game alongside the Seeker,
                        // and with 18 of energy behind it: against rock (5.6 a
                        // grain) the shell bores three grains deep rather than
                        // being spent by the chip it clipped
     explosionRadius: 110,   // world units of radial AoE on impact
-    explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
+    // explosionDamage is DERIVED — see `blastDamageFor`.  Absent means "work
+    // it out from the shell's own energy"; a value here is an authored
+    // override, which is what BOSS_WEAPONS.SIEGE still carries so a designed
+    // encounter keeps the splash someone chose for it.
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
     // A HEAVY SHELL IS NOT A CONTACT MINE (user call).  The Cannon was always
     // meant to be a heavy round with ONE blast at the end of it, and the

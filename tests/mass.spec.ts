@@ -294,6 +294,7 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
           hullWorth: M.PHYSICS_CONSTANTS.PLAYER_MASS / C,
           rockWorth: M.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(36) / C,
           boltWorth: M.projectileMassFor(M.WEAPONS[M.WEAPON_LIST[0]]) / C,
+          divisor: M.BASE_BANK_DIVISOR,
         };
       });
 
@@ -307,8 +308,13 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
         .toBeCloseTo(3.125 * r.scale, 5);
       expect(r.rockWorth, 'and so does a rock shard')
         .toBeCloseTo(0.729 * r.scale, 5);
-      expect(r.boltWorth, 'and so does a bolt')
-        .toBeCloseTo(0.03125 * r.scale, 5);
+      // A BOLT IS THE ONE EXCEPTION, and it is deliberate rather than a leak:
+      // the base shot BANK is additionally divided by what three Gunnery
+      // Mk III grant, so a fully-gunned round is the one carrying the full
+      // 10x.  Read live, because this is a relationship between two
+      // constants rather than a number.
+      expect(r.boltWorth, 'a BASE bolt carries 10x over the base-bank divisor')
+        .toBeCloseTo(0.03125 * r.scale / r.divisor, 5);
 
       watch.assertClean();
     });

@@ -198,9 +198,17 @@ test.describe('Gunnery buys a heavier round', () => {
     const bare = await fireOne(page);
     expect(bare.count, 'one bolt').toBe(1);
     expect(bare.damage, 'the authored bite').toBeCloseTo(4, 6);
+    // The bank is the authored ONE bite, times MASS_SCALE, over the base-bank
+    // divisor — a BASE round is deliberately a fraction of a fully-gunned
+    // one, which is the whole point of the re-base.  Read live rather than
+    // written as a product: it has already moved twice.
+    const k = await engine(page, () => {
+      const M: any = (window as any).__omniMass;
+      return { scale: M.MASS_SCALE, divisor: M.BASE_BANK_DIVISOR };
+    });
     expect(bankInBites(bare.damage!, bare.speed!, bare.mass!),
-      'and a bank of ten bites — MASS_SCALE multiplied it by exactly that')
-      .toBeCloseTo(10, 3);
+      'and a bank of one authored bite, scaled and re-based')
+      .toBeCloseTo(k.scale / k.divisor, 3);
 
     await grant(page, 'gunnery_mk3');
     const heavy = await fireOne(page);

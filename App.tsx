@@ -13,7 +13,9 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          IMPACT_DENSITY, massFor, hullDensity,
          MASS_SCALE, scaledMass, IMPACT_ENERGY_PER_DAMAGE,
          STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
-         PROJECTILE_CONSTANTS, HIT_FEEDBACK } from './constants';
+         PROJECTILE_CONSTANTS, HIT_FEEDBACK,
+         BASE_BANK_DIVISOR, GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
+         blastDamageFor, BLAST_ENERGY_COUPLING } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -178,6 +180,15 @@ const App: React.FC = () => {
       // with no symptom if they stop.
       IMPACT_ENERGY_PER_DAMAGE, STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
       PROJECTILE_CONSTANTS, HIT_FEEDBACK,
+      // The BANK re-base and the DERIVED blast, on the same terms as the rest
+      // of this handle: both are relationships between two tables that no
+      // symptom reports if they drift apart.  `BASE_BANK_DIVISOR` is only
+      // correct relative to what a Gunnery Mk III actually grants, so
+      // MODULE_DEFS is here to be read rather than restated; `blastDamageFor`
+      // is here because a blast that silently stopped deriving still draws a
+      // perfectly good explosion.
+      BASE_BANK_DIVISOR, GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
+      blastDamageFor, BLAST_ENERGY_COUPLING,
     };
 
     // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
@@ -357,6 +368,10 @@ const App: React.FC = () => {
 
   const handleCycleCrashEnergy = () => {
       if (engineRef.current) engineRef.current.dbg.cycleCrashEnergy();
+  };
+
+  const handleCycleBlastEnergy = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleBlastEnergy();
   };
 
   const handleCycleHullDensity = () => {
@@ -1002,6 +1017,7 @@ const App: React.FC = () => {
         onCycleShardCoat={handleCycleShardCoat}
         onCycleImpactVelocity={handleCycleImpactVelocity}
         onCycleCrashEnergy={handleCycleCrashEnergy}
+        onCycleBlastEnergy={handleCycleBlastEnergy}
         onCycleHullDensity={handleCycleHullDensity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}

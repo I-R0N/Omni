@@ -356,24 +356,37 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
       // can separate their decay.
       const beam = await walk('BOUNCER');
       const burst = await walk('BURST');
+      // The authored SOLVE (5 bites / 3 bites), times MASS_SCALE, over the
+      // base-bank divisor — three factors now, so both are read live rather
+      // than written as one product that silently means the wrong thing the
+      // next time any of them moves.
+      const k = await engine(page, () => {
+        const M: any = (window as any).__omniMass;
+        return { scale: M.MASS_SCALE, divisor: M.BASE_BANK_DIVISOR };
+      });
       expect(bankInBites(beam.damage, beam.speed, beam.mass),
-        'the Laser launches with fifty bites — five, times MASS_SCALE')
-        .toBeCloseTo(5 * 10, 2);
+        'the Laser launches with the solve\'s five bites, scaled and re-based')
+        .toBeCloseTo(5 * k.scale / k.divisor, 2);
       expect(bankInBites(burst.damage, burst.speed, burst.mass),
-        'the Burst Rifle with thirty — three, times MASS_SCALE')
-        .toBeCloseTo(3 * 10, 2);
+        'the Burst Rifle with three, likewise')
+        .toBeCloseTo(3 * k.scale / k.divisor, 2);
 
       const beamDecay = beam.bites[1] / beam.bites[0];
       const burstDecay = burst.bites[1] / burst.bites[0];
-      // The decay is `1 - bite/bank`, so a 10x bank under `MASS_SCALE` makes
-      // every round fall off far more gently — 49/50 and 29/30 where it used
-      // to be 4/5 and 2/3.  The CLAIM is untouched and is the line below:
-      // the rate comes out of the round's OWN mass, so the two differ.  That
-      // is exactly what the retired global `PIERCE_FALLOFF_RATE` could not
-      // say, and it survives the rescale unchanged.
-      expect(beamDecay, '50 bites: a fiftieth of the bank went on contact')
-        .toBeCloseTo(49 / 50, 4);
-      expect(burstDecay, '30 bites: a thirtieth of it did').toBeCloseTo(29 / 30, 4);
+      // The decay is `1 - bite/bank`, so it follows the bank wherever the
+      // bank goes: MASS_SCALE made it far gentler, the base-bank divisor
+      // pulled some of that back.  DERIVED from the same two constants as
+      // the banks above rather than restated as a fraction, because a decay
+      // written as `49/50` is a claim about a bank that has now moved twice.
+      // The CLAIM is untouched and is the line below: the rate comes out of
+      // the round's OWN mass, so the two weapons differ — which is exactly
+      // what the retired global `PIERCE_FALLOFF_RATE` could not say.
+      const beamBites = 5 * k.scale / k.divisor;
+      const burstBites = 3 * k.scale / k.divisor;
+      expect(beamDecay, 'the beam gave up one bite out of its own bank')
+        .toBeCloseTo((beamBites - 1) / beamBites, 4);
+      expect(burstDecay, 'and the burst round one out of its smaller one')
+        .toBeCloseTo((burstBites - 1) / burstBites, 4);
       // The claim the retired global rate could not make at all.
       expect(beamDecay, 'a beam gives up LESS per body than a burst round')
         .toBeGreaterThan(burstDecay);
@@ -797,6 +810,204 @@ test.describe('how far a round gets is what it can afford', () => {
       // ENERGY IS A LIFETIME BANK: bounces buy COVERAGE, not extra damage.
       // A beam that turns around still lands only what it can afford.
       expect(r.secondBite, 'the bounce did not refill the bank').toBeLessThan(5);
+
+      watch.assertClean();
+    });
+});
+
+/** THE BASE BANK, AND THE BLAST THAT IS NOW DERIVED FROM IT.
+ *
+ *  Two user calls, one model.  MASS_SCALE multiplied every round's BANK by
+ *  ten along with every mass, and penetration is bank-shaped — so a base
+ *  Blaster bolt punched thirty-one one-HP gnats where the pre-scale round
+ *  managed four (audit §8).  The call was that TODAY'S reach is what a
+ *  fully-gunned ship should have, so the base round is today's divided by
+ *  what three Gunnery Mk III multiply it by.
+ *
+ *  And the blast was the last damage number in the roster still authored as
+ *  a flat scalar while everything around it went kinetic, so it shrank into
+ *  a light show.  It is a fraction of the shell's own energy now.
+ *
+ *  Four claims, each independently checkable and each wrong in a way nothing
+ *  else reports:
+ *
+ *   1. THE DIVISOR IS THE GUNNERY RELATIONSHIP, read off the real catalog —
+ *      the whole calibration is a claim about two tables agreeing, and
+ *      `BASE_BANK_DIVISOR` is a literal that cannot see MODULE_DEFS.
+ *   2. THREE MARKS PUT THE BANK BACK, measured on the round the sim flies.
+ *   3. ONLY THE BANK MOVED — the BITE is untouched at every mark, so no
+ *      enemy takes longer to kill and no §7 threshold shifted.
+ *   4. THE BLAST IS DERIVED from the flown round, and rides the mark with it
+ *      exactly ONCE (scaling it in `withGunnery` as well would double it —
+ *      the authored-units bug this file already pins for `mass`).
+ */
+test.describe('the base bank, and the blast derived from it', () => {
+  test('the divisor IS what three Gunnery Mk III grant', async ({ page }) => {
+    const watch = await boot(page);
+    await quietField(page);
+
+    const r = await engine(page, () => {
+      const M: any = (window as any).__omniMass;
+      // Read the GRANT off the real catalog rather than restating it: the
+      // constant is a literal (MODULE_DEFS is declared after the weapon
+      // table and cannot be read from there), so this is the only thing
+      // standing between a Gunnery retune and a silently wrong base round.
+      const mk3 = M.MODULE_DEFS.find((m: any) =>
+        m.family === 'gunnery' && m.mark === 3);
+      return {
+        catalogFrac: mk3 ? mk3.effect.damageFrac : null,
+        constFrac: M.GUNNERY_MK3_DAMAGE_FRAC,
+        divisor: M.BASE_BANK_DIVISOR,
+      };
+    });
+
+    expect(r.catalogFrac, 'a Gunnery Mk III is in the catalog').not.toBeNull();
+    expect(r.constFrac, 'and the constant matches what it actually grants')
+      .toBeCloseTo(r.catalogFrac as number, 9);
+    expect(r.divisor, 'so the divisor is three of them')
+      .toBeCloseTo(1 + 3 * (r.catalogFrac as number), 9);
+
+    watch.assertClean();
+  });
+
+  test('three marks put the bank back, and move only the bank', async ({ page }) => {
+    const watch = await boot(page);
+    await quietField(page);
+
+    /*  Measured on the round the sim FLIES, not on the table: the authored
+     *  figure passes through `projectileMassFor` (which applies MASS_SCALE)
+     *  and through `withGunnery`, and the whole point of the re-base is that
+     *  those two compose back to one. */
+    const r = await engine(page, () => {
+      const e: any = (window as any).__omniEngine;
+      const M: any = (window as any).__omniMass;
+      const p = e.player;
+      const fire = (type: string, mult: number) => {
+        p.velocity.x = 0; p.velocity.y = 0;
+        p.currentWeapon = type; p.weaponCooldown = 0; p.damageMult = mult;
+        const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+          { x: p.position.x + 500, y: p.position.y });
+        const shot = e.currentMap.entities.find(
+          (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+        const out = { mass: shot ? shot.mass : null, damage: shot ? shot.damage : null };
+        for (const x of e.currentMap.entities) if (!before.has(x.id)) x.active = false;
+        p.damageMult = 1;
+        return out;
+      };
+      const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
+      const types = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
+      return types.map(t => ({ type: t, base: fire(t, 1), gunned: fire(t, g3), g3 }));
+    });
+
+    for (const w of r) {
+      // (2) the bank comes back to exactly what the pre-rebase solve flew.
+      expect(w.gunned.mass! / w.base.mass!, `${w.type}: three marks restore the bank`)
+        .toBeCloseTo(w.g3, 6);
+      // (3) and the BITE is the mark's ordinary effect, untouched by any of
+      // this — the re-base must not have quietly nerfed damage.
+      expect(w.gunned.damage! / w.base.damage!, `${w.type}: the bite is the mark's own`)
+        .toBeCloseTo(w.g3, 6);
+    }
+
+    watch.assertClean();
+  });
+
+  test('the blast is derived from the shell, and rides a mark exactly once',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+
+      const r = await engine(page, () => {
+        const e: any = (window as any).__omniEngine;
+        const M: any = (window as any).__omniMass;
+        const p = e.player;
+        const fire = (mult: number) => {
+          p.velocity.x = 0; p.velocity.y = 0;
+          p.currentWeapon = 'CANNON'; p.weaponCooldown = 0; p.damageMult = mult;
+          const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+          e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+            { x: p.position.x + 500, y: p.position.y });
+          const shot = e.currentMap.entities.find(
+            (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+          const out = {
+            mass: shot ? shot.mass : null,
+            blast: shot ? shot.explosionDamage : null,
+            speed: shot ? Math.hypot(shot.velocity.x, shot.velocity.y) : null,
+          };
+          for (const x of e.currentMap.entities) if (!before.has(x.id)) x.active = false;
+          p.damageMult = 1;
+          return out;
+        };
+        const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
+        return {
+          authored: M.WEAPONS.CANNON.explosionDamage ?? null,
+          base: fire(1), gunned: fire(g3), g3,
+          coupling: M.BLAST_ENERGY_COUPLING,
+          perDamage: M.IMPACT_ENERGY_PER_DAMAGE,
+        };
+      });
+
+      // (4a) the config authors NO splash — absent is what "derive it" means.
+      expect(r.authored, 'the player Cannon authors no explosionDamage').toBeNull();
+
+      // (4b) the shell flies a blast derived from its OWN energy.
+      const expected = 0.5 * r.base.mass! * r.base.speed! * r.base.speed!
+        / r.perDamage * r.coupling;
+      expect(r.base.blast!, 'the blast is a fraction of the shell\'s energy')
+        .toBeCloseTo(expected, 4);
+
+      // (4c) a mark reaches it exactly ONCE, through the round's mass.  The
+      // bank grows by g3 and the blast is linear in mass, so the blast grows
+      // by g3 too — g3² would be `withGunnery` scaling it a second time.
+      expect(r.gunned.blast! / r.base.blast!, 'a mark reaches the blast once')
+        .toBeCloseTo(r.g3, 6);
+
+      watch.assertClean();
+    });
+
+  test('a charged shell is heavier in AUTHORED units, not scaled twice',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+
+      /*  `WeaponConfig.mass` is the AUTHORED figure and `projectileMassFor`
+       *  is what converts it, so writing that function's RESULT back into the
+       *  field makes the next conversion scale it again.  `withGunnery` had
+       *  exactly this bug and it was fixed; `chargedConfigOf` had it too and
+       *  kept it, so every charged shot flew MASS_SCALE times too heavy —
+       *  invisible except as a charge that punched through the world. */
+      const r = await engine(page, () => {
+        const e: any = (window as any).__omniEngine;
+        const p = e.player;
+        // A charged shot needs the Overcharge unlock, or `chargedConfigOf`
+        // never runs and both arms measure the same ordinary round.
+        p.overchargeUnlocked = true;
+        const fire = (type: string, charged: boolean) => {
+          p.velocity.x = 0; p.velocity.y = 0;
+          p.currentWeapon = type; p.weaponCooldown = 0;
+          const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+          // `charged` is the FIFTH argument — onShake sits between.
+          e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+            { x: p.position.x + 500, y: p.position.y }, undefined, charged);
+          const shot = e.currentMap.entities.find(
+            (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+          const mass = shot ? shot.mass : null;
+          for (const x of e.currentMap.entities) if (!before.has(x.id)) x.active = false;
+          return mass;
+        };
+        return {
+          blasterBase: fire('BLASTER', false), blasterCharged: fire('BLASTER', true),
+          homingBase: fire('HOMING', false), homingCharged: fire('HOMING', true),
+        };
+      });
+
+      // The authored multipliers are 20 (Blaster) and 2 (Seeker).  Scaled
+      // twice they would read 200 and 20 — which is what shipped.
+      expect(r.blasterCharged! / r.blasterBase!, 'a charged Blaster is 20x, not 200x')
+        .toBeCloseTo(20, 6);
+      expect(r.homingCharged! / r.homingBase!, 'a charged Seeker is 2x, not 20x')
+        .toBeCloseTo(2, 6);
 
       watch.assertClean();
     });

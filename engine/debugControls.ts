@@ -31,7 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity, cycleBlastEnergy,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -1002,6 +1002,15 @@ export class DebugControls {
    *  `bondStrength` is the same question asked of one material. */
   cycleCrashEnergy() {
     cycleCrashEnergy();
+  }
+
+  /** Cycle how much of a shell's energy becomes its BLAST (DBG "Blast
+   *  energy") — a MULTIPLIER over `BLAST_ENERGY_COUPLING`, read when a shell
+   *  is spawned so a click re-tunes the next shot.  The blast is derived from
+   *  the round's own mass now, so this is the one number that moves it
+   *  without also moving how far the shell gets. */
+  cycleBlastEnergy() {
+    cycleBlastEnergy();
   }
 
   /** Cycle the ship's HULL DENSITY (DBG "Hull density") — a multiplier over

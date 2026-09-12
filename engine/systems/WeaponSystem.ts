@@ -38,6 +38,17 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
  * mass so a gun that authors none still gets a coherent number, and so Gunnery
  * (applied after this) composes rather than overwrites.
  */
+/** Authored-units multiply for a charged shot's BANK.
+ *
+ *  `WeaponConfig.mass` is the AUTHORED figure and `projectileMassFor` is what
+ *  converts it, so writing that function's RESULT back into the field makes
+ *  the next conversion scale it again — MASS_SCALE twice over, a 10x heavier
+ *  charge than intended.  `withGunnery` carries the same note for the same
+ *  reason; this path had the identical bug and kept it. */
+function chargedMass(config: WeaponConfig, k: number): number | undefined {
+  return config.mass !== undefined ? config.mass * k : undefined;
+}
+
 function chargedConfigOf(config: WeaponConfig): WeaponConfig {
   switch (config.type) {
     case WeaponType.BLASTER:
@@ -46,15 +57,15 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
       return {
         ...config,
         damage: config.damage * 5,
-        mass: projectileMassFor(config) * 20,   // 5 bite-multiples × 4 bites
+        mass: chargedMass(config, 20),          // 5 bite-multiples × 4 bites
         recoil: 0,
         size: config.size * 2.6,  // 6 → ~16
         isCharged: true,
       };
     case WeaponType.BURST:
-      return { ...config, mass: projectileMassFor(config) * (4 / 3), burstCount: 5 };
+      return { ...config, mass: chargedMass(config, 4 / 3), burstCount: 5 };
     case WeaponType.SHOTGUN:
-      return { ...config, count: 12, spread: 25, mass: projectileMassFor(config) * 1.5 };
+      return { ...config, count: 12, spread: 25, mass: chargedMass(config, 1.5) };
     case WeaponType.BOUNCER:
       // Omnidirectional nova — 8 beams equally spaced around 360°
       // (every 45°).  ProjectileSystem.spawn handles the equal-angle
@@ -73,12 +84,19 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
         chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2
       };
     case WeaponType.HOMING:
-      return { ...config, count: 4, spread: 30, mass: projectileMassFor(config) * 2, homingStrength: 0.5 };
+      return { ...config, count: 4, spread: 30, mass: chargedMass(config, 2), homingStrength: 0.5 };
     case WeaponType.CANNON:
+      // The charge premium is a HEAVIER SHELL, which under the energy model
+      // raises the blast (derived from the round's own mass) and its reach
+      // together — the same repricing the Blaster's charge took in step 5.
+      // Scaling `explosionDamage` here would have been scaling a field the
+      // player Cannon no longer authors.
       return {
         ...config,
+        mass:               chargedMass(config, 1.5),
         explosionRadius:    (config.explosionRadius    ?? 0) * 2,
-        explosionDamage:    (config.explosionDamage    ?? 0) * 1.5,
+        explosionDamage:    config.explosionDamage !== undefined
+                              ? config.explosionDamage * 1.5 : undefined,
         explosionKnockback: (config.explosionKnockback ?? 0) * 1.5,
       };
   }
@@ -120,8 +138,11 @@ function withGunnery(config: WeaponConfig, player: GameEntity): WeaponConfig {
     // proportional to `damage`, which is already multiplied above, so the
     // bank follows the mark for free.
     mass: config.mass !== undefined ? config.mass * mult : undefined,
-    explosionDamage: config.explosionDamage !== undefined
-      ? config.explosionDamage * mult : config.explosionDamage,
+    // NOT scaled: a DERIVED blast reads the round's own mass, which the line
+    // above already multiplied, so touching it here would apply the mark
+    // twice.  An authored override (a boss shell) is a designed number and
+    // is deliberately left alone.
+    explosionDamage: config.explosionDamage,
   };
 }
 

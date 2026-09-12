@@ -340,6 +340,133 @@ const scale = await page.evaluate(() => {
   return { rows, massScale: C.MASS_SCALE };
 });
 
+// ── 8. PENETRATION AND THE BLAST (gathered before the browser closes) ───────
+//  What a shot gets THROUGH, and what its charge is worth when it goes off.
+//  Both are EMERGENT under the energy model — there is no authored pierce
+//  count, and since the blast became energy-derived there is no authored
+//  splash either — so the only honest way to report them is to fire real
+//  shots through the real collision resolver and count.
+const pen = await page.evaluate(() => {
+  const e = window.__omniEngine;
+  e.restartGame(); e.setMapType('POCKET'); e.startGame();
+  const p = e.player;
+  const ctx = e.waveContext();
+  const TYPES = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
+
+  /** Fire ONE real shot from a stationary player and hand back the live
+   *  projectile — mass and muzzle speed are the numbers the sim flies. */
+  const shotOf = (type, mult) => {
+    p.velocity.x = 0; p.velocity.y = 0;
+    p.currentWeapon = type;
+    p.weaponCooldown = 0;
+    p.damageMult = mult;
+    const before = new Set(e.currentMap.entities.map(x => x.id));
+    e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+      { x: p.position.x + 500, y: p.position.y });
+    const shot = e.currentMap.entities.find(x => !before.has(x.id) && x.type === 'PROJECTILE');
+    for (const x of e.currentMap.entities) if (!before.has(x.id) && x !== shot) x.active = false;
+    p.damageMult = 1;
+    return shot;
+  };
+
+  /** Walk a live bolt through fresh bodies via the REAL resolver — the same
+   *  call the broadphase makes — until it can no longer kill one.  That is
+   *  what penetration IS now: a bank spending itself one contact at a time. */
+  const punchThrough = (shot, makeBody, limit) => {
+    if (!shot) return 0;
+    let n = 0;
+    for (let i = 0; i < limit; i++) {
+      if (!shot.active || Math.hypot(shot.velocity.x, shot.velocity.y) < 1e-6) break;
+      const body = makeBody(i);
+      shot.hitEntityIds = [];
+      e.physics.resolveCollision(shot, body, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
+      const dead = !body.active || body.health <= 0;
+      body.active = false;
+      if (!dead) break;
+      n++;
+    }
+    shot.active = false;
+    return n;
+  };
+
+  const gnat = () => {
+    const f = e.waves.spawnAt('SWARM',
+      { x: p.position.x + 400, y: p.position.y }, ctx, false);
+    f.maxSpeed = 0; f.velocity.x = 0; f.velocity.y = 0;
+    f.health = f.maxHealth = 1; f.shield = 0; f.maxShield = 0;
+    return f;
+  };
+
+  const out = { rows: [], blast: null };
+  // statMks('gunnery', … mk => ({ damageFrac: 0.12 * mk })) — Mk III is 0.36.
+  out.mk3Frac = 0.36;
+  const g3 = 1 + 3 * out.mk3Frac;
+  out.g3 = g3;
+
+  // ACTOR penetration, at base and at three Gunnery Mk III.
+  for (const mult of [1, g3]) {
+    for (const t of TYPES) {
+      const shot = shotOf(t, mult);
+      out.rows.push({
+        type: t, mult,
+        mass: shot ? shot.mass : null,
+        gnats: punchThrough(shot, gnat, 400),
+      });
+    }
+  }
+
+  // THE BLAST, ISOLATED.  A DIRECT hit at a known point rather than the fuse:
+  // the fuse detonates ~450 units downrange after a flight the shot's own
+  // spread randomises, which moves the detonation tens of units run to run.
+  // The direct-hit target is excluded from its own ring, so what the
+  // BYSTANDER loses is purely the shockwave — and the sweep is over in
+  // ~0.35 s, so the run is too short for the two bodies to drift together
+  // (which is what contaminated the first attempt at this).
+  {
+    const OFF = 55;
+    const mk = (dx, dy) => {
+      const f = e.waves.spawnAt('RAMMER_1',
+        { x: p.position.x + dx, y: p.position.y + dy }, ctx, false);
+      f.maxSpeed = 0; f.velocity.x = 0; f.velocity.y = 0;
+      f.health = f.maxHealth = 1e6; f.shield = 0; f.maxShield = 0;
+      return f;
+    };
+    const direct = mk(400, 0);
+    const bystander = mk(400, OFF);
+    const shot = shotOf('CANNON', 1);
+    const cfg = e.weapons.getConfig('CANNON');
+    const shotMass = shot ? shot.mass : null;
+    const shotBlast = shot ? shot.explosionDamage : null;
+    if (shot) {
+      shot.position.x = direct.position.x;
+      shot.position.y = direct.position.y;
+      shot.hitEntityIds = [];
+      e.physics.resolveCollision(shot, direct, { x: 0, y: 0 }, undefined,
+        e.handleEntityDeath, undefined, e.handleProjectileHit);
+      shot.active = false;              // the charge is spent
+      // Just long enough for the ring to reach the rim (lifetime 0.35 s).
+      for (let i = 0; i < 50; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+      }
+    }
+    out.blast = {
+      authoredInConfig: cfg.explosionDamage === undefined ? null : cfg.explosionDamage,
+      shotBlast, shotMass, offset: OFF,
+      radius: cfg.explosionRadius ?? null,
+      muzzleSpeed: cfg.speed,
+      sentinelLost: 1e6 - bystander.health,
+      // What the model says it should be: peak x the ring's own linear
+      // distance falloff.  Printed beside the measurement so the two can be
+      // compared rather than the number being taken on trust.
+      predicted: shotBlast !== null && shotBlast !== undefined
+        ? shotBlast * (1 - OFF / (cfg.explosionRadius ?? 1)) : null,
+    };
+    direct.active = false; bystander.active = false;
+  }
+  return out;
+});
+
+
 await browser.close();
 
 // ── Report ────────────────────────────────────────────────────────────────
@@ -537,5 +664,32 @@ console.log(`  every mass carries MASS_SCALE = ${scale.massScale}x; sizes are un
   const all = scale.rows.map(r => r.dens);
   console.log(`\n  ACROSS ALL CLASSES: ${f(Math.min(...all),4)} .. ${f(Math.max(...all),4)}`
     + `  (${f(Math.max(...all)/Math.min(...all),1)}× spread)`);
+}
+console.log('');
+
+// ── 8. PENETRATION AND THE BLAST ───────────────────────────────────────────
+console.log('\n=== 8. PENETRATION AND THE BLAST (fired, not derived) ===\n');
+{
+  console.log(`  Gunnery Mk III damageFrac ${f(pen.mk3Frac, 3)} -> three of them = x${f(pen.g3, 3)}`);
+  console.log('  A bolt is charged only what a body could ABSORB, so 1-HP gnats measure the');
+  console.log('  BANK directly: each costs one damage however big the bite is.  The base');
+  console.log('  round is sized so three Gunnery Mk III put it back where it was.\n');
+  console.log('weapon          base   3x Mk III    ratio     base mass');
+  const mults = [...new Set(pen.rows.map(r => r.mult))];
+  const at = (t, m) => pen.rows.find(x => x.type === t && x.mult === m);
+  for (const t of [...new Set(pen.rows.map(r => r.type))]) {
+    const a = at(t, mults[0]), b = at(t, mults[1]);
+    console.log(`${t.padEnd(14)} ${String(a ? a.gnats : '-').padStart(5)} ${String(b ? b.gnats : '-').padStart(11)} `
+      + `${f(a && b && a.gnats ? b.gnats / a.gnats : null, 2).padStart(8)} ${f(a ? a.mass : null, 2).padStart(13)}`);
+  }
+  const b = pen.blast;
+  if (b) {
+    console.log('\n  THE BLAST — direct hit; what a BYSTANDER in the radius loses:');
+    console.log(`    shell mass ${f(b.shotMass, 2)}   muzzle ${f(b.muzzleSpeed, 1)} u/step   radius ${f(b.radius, 0)}`);
+    console.log(`    explosionDamage authored in the config   ${b.authoredInConfig === null ? 'none — DERIVED' : f(b.authoredInConfig, 2)}`);
+    console.log(`    explosionDamage the shell actually flew  ${f(b.shotBlast, 2)}`);
+    console.log(`    a bystander ${f(b.offset,0)} off the centre lost       ${f(b.sentinelLost, 2)}`);
+    console.log(`    the model predicts                      ${f(b.predicted, 2)}`);
+  }
 }
 console.log('');

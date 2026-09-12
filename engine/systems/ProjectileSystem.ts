@@ -7,6 +7,7 @@ import {
   HOMING_ACQUIRE_RANGE,
   MAX_PROJECTILES,
   projectileMassFor,
+  blastDamageFor,
 } from '../../constants';
 import { nextId } from './IdAllocator';
 import { enforceTypeCap } from './enforceCap';
@@ -167,6 +168,15 @@ export class ProjectileSystem {
       // that mode land the authored damage however the ship was moving.
       const projMass = projectileMassFor(config);
       const muzzleSpeed = Math.hypot(vx, vy);
+      // THE BLAST IS DERIVED unless a config authors one.  Absent means "work
+      // it out from the shell's own energy" (`blastDamageFor`), which is what
+      // makes a Gunnery mark, a charge and MASS_SCALE all reach the splash
+      // without any of them naming it; an authored value is a designed
+      // override and wins (BOSS_WEAPONS.SIEGE).  Computed ONCE here so the
+      // pooled and fresh arms below cannot disagree about it.
+      const blastDamage = config.explosionRadius && config.explosionRadius > 0
+        ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed))
+        : config.explosionDamage;
       const isLight = config.type === WeaponType.LIGHTNING || undefined;
       const isBnc   = config.type === WeaponType.BOUNCER || undefined;
       const bouncesRem = config.type === WeaponType.BOUNCER ? config.bounceCount : undefined;
@@ -212,7 +222,7 @@ export class ProjectileSystem {
         // a timer it never armed.
         pooled.detonateOn = config.detonateOn;
         pooled.fuseTimer = config.fuseSeconds;
-        pooled.explosionDamage = config.explosionDamage;
+        pooled.explosionDamage = blastDamage;
         pooled.explosionKnockback = config.explosionKnockback;
         pooled.glow = config.glow;
         pooled.chainCount = config.chainCount;
@@ -257,7 +267,7 @@ export class ProjectileSystem {
           isBouncer: isBnc,
           bouncesRemaining: bouncesRem,
           explosionRadius: config.explosionRadius,
-          explosionDamage: config.explosionDamage,
+          explosionDamage: blastDamage,
           explosionKnockback: config.explosionKnockback,
           detonateOn: config.detonateOn,
           fuseTimer: config.fuseSeconds,

@@ -2951,3 +2951,94 @@ EARLIEST contact in a step and refuses later ones (its documented
 backward-only rule); a tile destroyed outright by a hull that keeps most of
 its speed is a case that rule was not built for.  That belongs to the sweep,
 not to the mass work, and needs its own pass.
+
+### 16. Penetration is re-based, and the blast joins the model (2026-09-12)
+
+**REPORTED**: "the weapons penetrate too much at base level right now.  This
+current level of damage from weapons should occur at roughly 3 MkIII gunnery
+modules.  Additionally the cannon blast effect no longer does much damage.
+This needs to be aligned with the new model."
+
+**TWO ASKS, AND THE FIRST ONE HAS A TRAP IN IT.**  The obvious reading of
+"too much damage at base" is to scale the round down — both its numbers.
+That does not work, and the arithmetic says why in one line: the falloff is
+`1 - bite/energy`, so dividing the BITE and the BANK by the same factor
+leaves the ratio untouched and a round punches exactly as many bodies as
+before.  **Penetration is bank-shaped.**  Only `mass` moves.
+
+That also makes the change safe in the way the user implicitly asked for:
+`damage` is untouched at every Gunnery level, so no enemy takes longer to
+kill, no §7 trait threshold shifts, and the §7 weapon×trait table still
+holds.
+
+**THE CALIBRATION IS THE USER'S**, and it is a statement about progression
+rather than a number chosen here: today's reach is what a fully-gunned ship
+should have.  So the base bank is today's over what three Gunnery Mk III
+multiply it by — `BASE_BANK_DIVISOR = 1 + 3 × 0.36 = 2.08` — and
+`withGunnery` multiplies it straight back, so the two ends meet by
+construction rather than by tuning.
+
+MEASURED through the real resolver (`perf/impact-audit.mjs` §8, added for
+this — 1-HP gnats measure the bank directly, since a bolt is charged only
+what a body could absorb):
+
+| weapon | base before | base after | 3× Mk III after |
+|---|---|---|---|
+| Blaster | 31 | 15 | 36 |
+| Burst | 121 | 58 | 136 |
+| Shotgun | 41 | 20 | 51 |
+| Laser | 201 | 97 | 226 |
+| Lightning | 81 | 39 | 86 |
+| Seeker | 71 | 34 | 76 |
+| Cannon | 171 | 82 | 176 |
+
+Every before/after ratio lands on 2.05..2.09 against the 2.08 divisor, and
+the fully-gunned column sits just above the old base — "roughly", which is
+what was asked for.
+
+**A SECOND AUTHORED-UNITS BUG, IN THE SITE NOBODY LOOKED AT.**  The mass
+work found and fixed `withGunnery` writing `projectileMassFor(config) * mult`
+back into `WeaponConfig.mass` — a field whose contract is the AUTHORED
+figure, so the next conversion applied `MASS_SCALE` again.  `chargedConfigOf`
+had the identical bug at four call sites and kept it: every charged shot flew
+ten times too heavy (a charged Blaster carried a 2000 bank against its
+intended 200).  It survived because an over-penetrating charge looks exactly
+like a strong charge.  **The lesson generalises past this bug**: when a unit
+error is found at one site, the question is not "is it fixed" but "how many
+other sites convert the same way", and the answer here was four.
+
+**THE BLAST.**  `explosionDamage: 10` was the last damage number in the
+roster still authored as a flat scalar while everything around it became
+kinetic — and it did not merely fall behind, it was scaled by a `hitFalloff`
+that only started meaning something in step 3, so the same constant got
+quietly weaker.  It is now `blastDamageFor(mass, speed)`: the shell's own
+kinetic energy times `BLAST_ENERGY_COUPLING` (0.2), the sibling of
+`CRASH_ENERGY_COUPLING` — a hull couples ~11% of a contact into breaking
+work, a shaped charge a fifth of its energy into the blast.  Measured on a
+bystander at half the radius: **5.2 → 10.4**, with a peak of 17.3 against
+the Cannon's 18 direct bite.
+
+Three properties fall out rather than being written: it rides GUNNERY for
+free, a CHARGED shell blasts harder by being heavier, and a shell that spent
+its bank boring blasts weaker — because the `× hitFalloff` already at the
+call site IS the fraction of launch energy left, so peak × (E/E₀) is the
+energy it still carries with no second curve anywhere.
+
+**ABSENT MEANS DERIVED; A VALUE MEANS AUTHORED.**  `BOSS_WEAPONS.SIEGE`
+keeps its own `explosionDamage: 6`.  Deriving it would have tripled the
+Bastion's splash as a side effect of fixing the player's gun, which is a
+boss rebalance nobody asked for — and a designed encounter's number is one
+someone chose.
+
+**WHAT THE TESTS COULD NOT SEE, AND WHY THREE OF THEM MOVED.**  Three
+existing assertions stated the bank as a product (`5 * 10` bites, `49/50`
+decay, `10` bites) — all correct, all now wrong by exactly the divisor.  They
+are rewritten to READ `MASS_SCALE` and `BASE_BANK_DIVISOR` live and compute,
+because that bank has now moved twice and a product written out is a claim
+about whichever build wrote it.  Same rule the nebula grain-size default
+taught: a default that moves a measured quantity has to be walked past every
+assertion written against it.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
+by this.
+

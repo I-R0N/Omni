@@ -2037,6 +2037,8 @@ export interface EngineStats {
   impactVelocityName?: string;
   // DBG "Crash energy" — the crash-coupling multiplier, as shown.
   crashEnergyName?: string;
+  /** DBG "Blast energy" readout — the multiplier over BLAST_ENERGY_COUPLING. */
+  blastEnergyName?: string;
   // DBG "Hull density" — the ship's live hull density and the mass it
   // derives, as shown.  Under the energy model the hull's mass is half of
   // what its every ram spends as well as how little it is shoved, so this
