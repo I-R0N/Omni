@@ -2741,3 +2741,57 @@ sweep a corridor and it does not deposit along the chord it cut.  Both belong
 to the parked "Penetration bore tracks as a FRACTURE MODEL" entry, which is
 the same geometry question asked of the hull.
 
+
+---
+
+### 13. The second step-5 follow-up: a ram that held did no damage and stopped dead (2026-09-12)
+
+**REPORTED**: "the player ship colliding still does not do damage like
+projectiles.  This appears to have regressed severely."
+
+**TWO DEFECTS, ONE SYMPTOM**, both in the player-vs-structure branch of
+`PhysicsSystem.resolveCollision`, and — this is the part worth keeping —
+**neither of them moved a ram COUNT**.  `perf/impact-audit.mjs` §5 and §5b
+read exactly the same before and after the fix (rock 9, glass 1, plastic 65,
+metal flat 78), because both defects were about who was BILLED and whether
+the ship came off, not about how much a crash spends.  An audit that measures
+"how many rams to break this" is structurally blind to "and what happened to
+the ship each time".
+
+1. **IT NEVER BOUNCED.**  Every path through the branch `return`ed before the
+   impulse at the bottom of the function.  The indestructible path did so on
+   the strength of a comment saying "the player already shed velocity above"
+   — that was `CRASH_VELOCITY_RETENTION`, which step 4 deleted, so the comment
+   documented a line that no longer existed.  **A deleted mechanism leaves its
+   justifications behind**, and they read as current.
+
+2. **A SURVIVING BODY WAS CHARGED THE WHOLE SWING.**  `payForCrash` bills
+   `absorbed / CRASH_ENERGY_COUPLING`.  A body that HOLDS absorbs exactly
+   `crashDamageFor` = coupling × KE, so the divide hands the bill straight
+   back as the ship's ENTIRE normal-direction kinetic energy.  Not "too
+   much" — algebraically all of it, every time, independent of the tile.
+   The coupling is an EFFICIENCY (only ~11% of a contact does breaking work);
+   dividing it out is only correct where the absorbed figure is a REMAINING
+   BUDGET rather than the full offer, which is to say only where the body
+   actually broke.
+
+**THE SYMPTOM**, measured on a 55-HP rock tile at 12 u/step: 21 damage dealt
+and the ship stopped DEAD, embedded, with no bounce — three standing starts
+to break one rock.  Which reads exactly as "colliding does no damage", because
+what the player sees is a ship that stops and a tile that is still there.
+
+**FIXED** by deciding both questions off one test — did the wall hold?
+Broke through → charge and carry on.  Held → charge nothing and FALL THROUGH
+to the impulse, bouncing like any other collision with something solid.  The
+mobile path keeps its own early return (the momentum hand-off above already
+shoved it; letting the impulse run too would shove it twice).
+
+**MEASURED AFTER**: v5 / v8 / v12 into rock deal 3 / 8.8 / 21.3 and come off
+at −0.3 / −0.5 / −0.8; v20 breaks through and carries on at ~7 (against 19.3
+with the break-path charge removed, which is the negative control for the
+other half); v40 into metal deals 258.7 and throws the ship back at −12.9.
+
+**THE ENERGY IS NOT LOST BY NOT CHARGING IT.**  The bounce is where it goes.
+That is the invariant to keep in mind if anything ever reintroduces a
+velocity tax on this path: a crash has exactly two sinks, the break and the
+rebound, and billing both is billing twice.

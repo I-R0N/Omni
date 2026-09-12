@@ -76,7 +76,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  395 tests.  All run at
+                          writing a DBG-knob test).  398 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -2969,6 +2969,37 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `PhysicsSystem.sweptRewinds` is a diagnostic counter — nothing in the sim
   reads it — and it is the one way a test can tell "the fast path never
   fired" from "it fired and did nothing".
+- **A RAM THAT DOES NOT BREAK THROUGH BOUNCES, AND PAYS NOTHING FOR THE
+  PRIVILEGE** (user report: "the player ship colliding still does not do
+  damage like projectiles ... this appears to have regressed severely").
+  Two defects with one symptom, both in the player-vs-structure branch of
+  `resolveCollision`, and neither visible in a ram COUNT — which is why the
+  step-4 audit read clean while the crash felt broken:
+  - **IT NEVER BOUNCED.**  Every path through the branch `return`ed before
+    the impulse at the bottom of the function, the indestructible one on the
+    strength of a comment saying "the player already shed velocity above" —
+    that was `CRASH_VELOCITY_RETENTION`, which step 4 deleted.  So a ship met
+    a permanent wall and sailed on, and met a rock tile and stopped dead
+    inside it.  A wall you cannot break is a wall: the branch signals the hit
+    and FALLS THROUGH, and one collision rule covers walking pace and a
+    charge alike.
+  - **A SURVIVING BODY WAS CHARGED THE WHOLE SWING.**  `payForCrash` bills
+    `absorbed / CRASH_ENERGY_COUPLING`, and a body that HOLDS absorbs exactly
+    `crashDamageFor` = coupling x KE — so the divide handed the bill straight
+    back as the ship's entire normal-direction energy, every time.  Measured
+    on a 55-HP rock tile at 12 u/step: 21 damage dealt and a full stop, so
+    breaking one rock took three standing starts.  The charge now runs only
+    where something actually broke (or was shoved, on the mobile path, which
+    keeps the early return it always had).
+  THE ENERGY IS NOT LOST BY NOT CHARGING IT — the BOUNCE is where it goes,
+  and `CRASH_ENERGY_COUPLING` was always the statement that only ~11% of a
+  contact does breaking work.  Measured after: v5 / v8 / v12 against rock
+  deal 3 / 8.8 / 21.3 and come off at -0.3 / -0.5 / -0.8; v20 breaks through
+  and carries on at ~7 (against 19.3 with the break-path charge removed);
+  v40 into metal deals 258.7 and throws the ship back at -12.9.  Ram counts
+  are UNCHANGED (`perf/impact-audit.mjs` §5b: rock 9, glass 1, plastic 65,
+  metal flat 78), which is the point — what was wrong was never how much a
+  crash spends, only who was billed and whether the ship came off.
 - **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
   "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
   the body-level penetration rule spent one charge to carry a bolt through

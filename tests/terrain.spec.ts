@@ -124,6 +124,18 @@ function breakATile(page: any, how: 'shot' | 'crush') {
   }, how);
 }
 
+/** A FRESH FIELD per measurement.  A run through a wall destroys some of it,
+ *  so the second arm of an A/B cannot reuse the first arm's tiles — it would
+ *  be comparing a full wall against whatever survived one.  Module scope
+ *  because both the tunnelling describe and the bounce describe below need
+ *  it, and a helper duplicated per describe is a helper that drifts. */
+const freshField = async (page: any, map: string) => {
+  await startRun(page, map);
+  const onMap = new Function('s', `return s.currentMapType === '${map}'`) as (s: any) => boolean;
+  await waitForStats(page, onMap, map);
+  await quietScene(page);
+};
+
 test.describe('a tile breaks the same way whatever killed it', () => {
   test('a SHOT tile leaves debris — the reference behaviour', async ({ page }) => {
     const watch = await boot(page);
@@ -473,16 +485,6 @@ test.describe('a fast ship cannot fly through terrain', () => {
    *  the speed it really starts.
    */
 
-  /** A FRESH FIELD per charge.  A run through the wall destroys some of it,
-   *  so the second arm of an A/B cannot reuse the first arm's tiles — it
-   *  would be comparing a full wall against whatever survived one. */
-  const freshField = async (page: any, map: string) => {
-    await startRun(page, map);
-    const onMap = new Function('s', `return s.currentMapType === '${map}'`) as (s: any) => boolean;
-    await waitForStats(page, onMap, map);
-    await quietScene(page);
-  };
-
   /** Fly the ship at a WALL of ten tiles butted edge to edge and report what
    *  is left of both.  `sweep: false` stubs the fix out in place, which is
    *  the control: the claim is not "the ship stops" but "the ship stops
@@ -602,6 +604,133 @@ test.describe('a fast ship cannot fly through terrain', () => {
       expect(stubbed.escaped).toBe(false);
       expect(swept.ghosted).toBe(0);
       expect(stubbed.ghosted).toBe(0);
+
+      watch.assertClean();
+    });
+});
+
+test.describe('a ram that cannot break through BOUNCES', () => {
+  /*  THE REPORT: "the player ship colliding still does not do damage like
+   *  projectiles — this has regressed severely."
+   *
+   *  Two defects, one symptom.  A player-vs-tile crash above the threshold
+   *  RETURNED before the impulse at the bottom of `resolveCollision`, so the
+   *  ship never bounced off anything; and `payForCrash` charged
+   *  `absorbed / CRASH_ENERGY_COUPLING`, which for a body that SURVIVES is
+   *  exactly the ship's whole normal-direction kinetic energy — because the
+   *  amount absorbed is `crashDamageFor` = coupling x KE, and the cost
+   *  divides that same coupling straight back out.
+   *
+   *  So every ram that failed to break through stopped the ship DEAD, inside
+   *  the tile, having chipped it.  Measured on a 55-HP rock tile at 12
+   *  u/step: 21 damage and a full stop — three standing starts to break one
+   *  rock.  The energy is not lost by not charging it: the BOUNCE is where it
+   *  goes, and the coupling was always the statement that only ~11% of a
+   *  contact does breaking work.
+   *
+   *  The claim here is the user's own words — a crash resolves as the
+   *  collision it is: the tile takes damage AND the ship pays in speed.
+   */
+
+  /** Ram ONE isolated tile once and report what happened to both.  The
+   *  boundary model is built first so `health` is already the DERIVED total
+   *  — otherwise the first contact's "damage" also contains the rewrite from
+   *  the authored spawn value, which is not damage at all. */
+  const ramOne = (page: any, variant: string, speed: number) =>
+    engine(page, (e: any, a: any) => {
+      const p = e.player, P: any = e.physics, DT = 1 / 120;
+      const t = e.currentMap.entities.find((x: any) => x.active
+        && x.shardVariant === a.variant && x.mass === Infinity);
+      if (!t) throw new Error('no ' + a.variant);
+      // ONE body in the world: nothing else may touch the ship, and no
+      // debris from the break can absorb what the tile was meant to take.
+      for (const x of e.currentMap.entities) if (x !== t) x.active = false;
+      t.position.x = 400; t.position.y = 0; t.active = true;
+      e.chipStructureAt(t, { x: t.position.x, y: t.position.y }, 0);
+      t.health = t.maxHealth;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.health = p.maxHealth = 1e9;   // the hull is not what is measured
+      p.position.x = 0; p.position.y = 0;
+      p.velocity.x = a.speed; p.velocity.y = 0;
+      const hp0 = t.health;
+      for (let i = 0; i < 2000; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(DT); p.velocity.y = 0;
+        if (!t.active) break;
+        if (Math.abs(p.velocity.x) < 0.05) break;
+        if (p.position.x > t.position.x + 80) break;
+      }
+      return {
+        max: hp0, dealt: hp0 - Math.max(0, t.health),
+        alive: t.active === true, vOut: p.velocity.x,
+      };
+    }, { variant, speed });
+
+  test('a rock tile that holds takes real damage and throws the ship back',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await freshField(page, 'ROCK_FIELD');
+
+      // 12 u/step is over the crash gate and well under what breaks a rock
+      // tile, which is the band the whole defect lived in.
+      const r = await ramOne(page, 'rock-tile', 12);
+
+      expect(r.alive, 'the tile holds at this speed').toBe(true);
+      // IT IS DAMAGED, and by an amount worth a weapon's attention: a base
+      // Blaster bolt lands 4, so one ram at this speed is worth about five
+      // of them.  Stated as a floor rather than the measured 21.3 so a
+      // re-tune of the coupling does not read as this defect returning.
+      expect(r.dealt, 'and it is really damaged').toBeGreaterThan(10);
+      expect(r.dealt, 'but not destroyed').toBeLessThan(r.max);
+      // AND THE SHIP BOUNCES.  This is the half that was missing: the crash
+      // branch returned before the impulse, so the ship neither passed
+      // through nor came off — it stopped dead where it hit.
+      expect(r.vOut, 'the ship comes off the tile, not to a dead stop')
+        .toBeLessThan(-0.1);
+
+      watch.assertClean();
+    });
+
+  test('a ram that DOES break through carries the ship on', async ({ page }) => {
+    const watch = await boot(page);
+    await freshField(page, 'ROCK_FIELD');
+
+    // Fast enough that one contact spends the tile's whole budget.
+    const r = await ramOne(page, 'rock-tile', 20);
+
+    expect(r.alive, 'the tile breaks').toBe(false);
+    // THE OTHER SIDE OF THE SAME RULE: the wall is gone, so the ship is not
+    // bounced by it — it carries on, having paid the energy the break cost.
+    // That charge is real: `payForCrash` still runs on this path, and
+    // `absorbed` here is the body's remaining budget rather than the whole
+    // swing, so a weak tile is cheap and a tough one is not.
+    expect(r.vOut, 'and the ship goes through it, still heading in')
+      .toBeGreaterThan(0.1);
+    // AND THE CHARGE IS REAL.  The ceiling is what makes this an assertion
+    // rather than a restatement of the line above: measured, the ship comes
+    // off a broken rock tile at 6.5-7.6 having paid, and at 19.25 with the
+    // `payForCrash` on this path removed — so anything under about 13
+    // separates the two with room on both sides.  The tile's DERIVED HP
+    // varies 52-56 run to run, and the bill varies with it, which is why
+    // this is a band and not a number.
+    expect(r.vOut, 'having paid for the break').toBeLessThan(13);
+
+    watch.assertClean();
+  });
+
+  test('an INDESTRUCTIBLE tile bounces the ship and takes nothing',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await freshField(page, 'INDESTRUCTIBLE_FIELD');
+
+      // The same rule at its limit.  This branch returned early too, on a
+      // comment that said "the player already shed velocity above" — which
+      // was the flat retention step 4 deleted, so the ship sailed straight
+      // on through a permanent wall.
+      const r = await ramOne(page, 'indestructible-tile', 20);
+
+      expect(r.alive, 'a permanent wall is permanent').toBe(true);
+      expect(r.dealt, 'and takes no damage at all').toBe(0);
+      expect(r.vOut, 'but it still throws the ship back').toBeLessThan(-0.1);
 
       watch.assertClean();
     });

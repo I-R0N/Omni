@@ -4609,12 +4609,15 @@ export class PhysicsSystem {
               structure.hitFlash = 0.1;
               if (isIndestructible || structure.dragonSegment === true) {
                   // Permanent wall — OR a dragon body segment, which only breaks
-                  // when SHOT, not by crashing into it.  Signal the hit (flash /
-                  // shake / the player already shed velocity above) but leave its
-                  // health alone and queue no destruction.
+                  // when SHOT, not by crashing into it.  Signal the hit and leave
+                  // its health alone.  It does NOT return: a wall you cannot
+                  // break is a wall, and the ship has to BOUNCE off it, which is
+                  // the impulse at the bottom of this function.  It used to
+                  // return here on the strength of a comment saying "the player
+                  // already shed velocity above" — that was the flat retention,
+                  // which step 4 deleted, so the ship simply sailed on.
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
-                  return;
-              }
+              } else {
               // A CRASH SPENDS ON THE GRAIN BOUNDARIES, like every other
               // damage path (unified impact physics, step 2).  Glass is
               // BRITTLE to physical smashes (V9): its damage layer meters
@@ -4639,7 +4642,6 @@ export class PhysicsSystem {
                   structure.health -= raw;
                   absorbed = raw;
               }
-              PhysicsSystem.payForCrash(player, structure, nx, ny, absorbed);
               PhysicsSystem.applyDentStep(structure, player.position);
               // A crash is a hit too — let rock break early on the same
               // rising-odds roll as a blaster shot (no-op for other tiles).
@@ -4651,15 +4653,49 @@ export class PhysicsSystem {
               // harvest's candidates from a point outside the tile and
               // disagree with the spend above.
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
+              // DID THE WALL HOLD?  That is the whole question, and it decides
+              // both what the ship pays and whether it gets through — the two
+              // halves of a crash that step 4 left tangled together.
+              //
+              // BROKE THROUGH: the wall is gone, so the ship carries on and
+              // pays the ENERGY the break cost (`payForCrash`).  `absorbed` is
+              // the body's remaining budget here, not the whole swing, so a
+              // weak tile is cheap and a tough one is not.
+              //
+              // HELD: the ship pays nothing here and FALLS THROUGH to the
+              // impulse at the bottom of this function — it bounces off, like
+              // any other collision with something solid.  Charging it instead
+              // was the reported defect, and the arithmetic made it total: a
+              // surviving body absorbs exactly `crashDamageFor` = coupling x
+              // KE, and `crashEnergyCost` divides that coupling straight back
+              // out, so the bill was ALWAYS the ship's entire normal-direction
+              // energy.  Measured on a 55-HP rock tile at 12 u/step: 21 damage
+              // dealt and the ship stopped DEAD, embedded, with no bounce —
+              // three standing starts to break one rock, which is what "the
+              // ship colliding does not do damage" describes.  The energy is
+              // not lost by leaving it out: the bounce is where it goes, and
+              // the coupling was always the statement that only ~11% of a
+              // contact does breaking work.
               if (structure.health <= 0) {
+                  PhysicsSystem.payForCrash(player, structure, nx, ny, absorbed);
                   // Same helper as the two asteroid sites, so all three
                   // collision kills break identically; only the attribution
                   // differs (a crash IS the player's kill, and scores).
                   const over = impactSpeed / STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD - 1;
                   const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
                   this.killStructureByImpact(structure, player, impactDamage, true, onDeath);
+                  return;
               }
-              return;
+              // A MOBILE body that held is not a wall — it was shoved, and the
+              // momentum hand-off above already did that.  Letting the impulse
+              // run too would push it twice, so this path keeps the energy
+              // charge and the early return it always had.
+              if (structure.mass !== Infinity) {
+                  PhysicsSystem.payForCrash(player, structure, nx, ny, absorbed);
+                  return;
+              }
+              }
+              // STATIC and still standing: fall through and bounce.
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               // Light bump — tile doesn't break, but the player takes
               // environmental damage proportional to the impact speed.
