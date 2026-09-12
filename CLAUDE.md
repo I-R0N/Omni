@@ -76,7 +76,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  390 tests.  All run at
+                          writing a DBG-knob test).  395 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -2911,6 +2911,64 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   bounce.  DBG ▸ Player ▸ "Crash energy" is the permeability dial (a
   multiplier over the coupling, index 0 ships); a material's own
   `bondStrength` is the same question asked of one material.
+- **A BODY MAY NOT FLY THROUGH SOMETHING IT HIT** (user report: "the player
+  now literally passes through tiles at high impact energy";
+  `PhysicsSystem.sweepRewind`).  Every contact in this engine is tested at
+  the END of a step, so a body moving further in one step than the thing it
+  is hitting is wide can be clear on both sides of it and never test as
+  touching — no damage, no speed loss, no sound, nothing.  A ship's contact
+  window against a 36-unit tile is ±28 units and a substep is `velocity ×
+  dt × 60` = half the velocity, so the hole opens around 90 u/step — INSIDE
+  the ship's own 120 cap (`PLAYER_MOVEMENT_CONFIG`), and blast knockback
+  goes past that.
+  STEP 4 MADE IT VISIBLE RATHER THAN CAUSING IT, which is the part worth
+  keeping: the flat 35%-per-tile `CRASH_VELOCITY_RETENTION` it replaced bled
+  a ship below the tunnelling speed within a tile or two, so nothing could
+  stay fast enough to fall in the hole.  Spending real energy lets a ship
+  that broke something cheap keep almost all its speed, and it then outruns
+  the test.  Measured through the engine's own physics step against a
+  ten-tile wall at the ship's 120 cap: it came out the far side still doing
+  114.1 with SEVEN tiles whole and unmarked behind it (rock; glass 114.5,
+  metal escaped at 160).
+  THE FIX IS TO PUT THE BODY BACK WHERE IT HIT, not to add a second contact
+  rule.  If the body's PATH this step passed within the pair's combined
+  reach, it is rewound along that path to the moment of entry and the
+  ordinary broadphase, SAT, MTV, crash spend and `payForCrash` all run
+  exactly as they do at walking pace — "the same type of damage as any other
+  collision" (user call).  After: stopped dead, nothing crossed untouched,
+  on all three materials at 60 / 90 / 120 / 160.  Five things hold it up:
+  - **IT RUNS AHEAD OF THE BROADPHASE DISTANCE TEST**, which reads the end of
+    the step too and so misses exactly the contacts this exists to catch — a
+    body that stepped clean over another is far away at BOTH ends of its
+    step.
+  - **THE EARLY-OUT IS THE WHOLE COST IN NORMAL PLAY.**  A step no longer
+    than the pair's contact window cannot have skipped it, so the common
+    case is one multiply and a compare; measured, a ship at 60 u/step never
+    reaches the quadratic and the run is unchanged.  The gates after it are
+    written out rather than expressed as closures — a function built inside
+    a 120 Hz path is rebuilt 120×/s (§8's refill rule).
+  - **ENTRY, NEVER CLOSEST APPROACH.**  At the deepest point of the path the
+    relative position is PERPENDICULAR to the relative velocity, so
+    `velAlongNormal` there is ~0 and `resolveCollision` would refuse the
+    contact as "already moving apart" — the same mis-read this removes.  The
+    first root of the entry quadratic is a closing contact by construction,
+    and `SWEEP_ENTRY_DEPTH` presses it slightly further in so SAT on the real
+    hulls agrees with the circle test that found it.
+  - **THE PATH IS RECORDED, NOT RE-DERIVED.**  `position − velocity ×
+    timeScale` gives the start of a step only while the body is still at the
+    end of it; one rewind makes it false, so a second sweep in the same step
+    would solve against a path the body never took (measured: a ship at 130
+    u/step still crossing a rock wall keeping 107.9).  `sweepPaths` records
+    origin and displacement the first time a sweep looks at a body and reuses
+    it, so repeated rewinds place it at an ABSOLUTE point along the same
+    path — and only ever further back, which is what `tNow` enforces.  Pooled
+    and cleared per step; a step with no fast body in it allocates nothing.
+  - **NOT PROJECTILES.**  The fastest shot travels 15 units a substep against
+    that same ±28 window, so no bolt can tunnel, and the pierce bore already
+    owns what a shot does inside a body.
+  `PhysicsSystem.sweptRewinds` is a diagnostic counter — nothing in the sim
+  reads it — and it is the one way a test can tell "the fast path never
+  fired" from "it fired and did nothing".
 - **A PIERCING BOLT BORES A TRACK THROUGH A GRAIN BODY** (user call,
   "option C"; `PhysicsSystem.borePierceTrack`).  A tile is ONE entity, so
   the body-level penetration rule spent one charge to carry a bolt through

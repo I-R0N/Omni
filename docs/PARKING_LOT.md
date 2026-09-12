@@ -2700,3 +2700,44 @@ rather than along a chord (unchanged from §10), and the bore is a line rather
 than a track with width — both still parked under "Penetration bore tracks as
 a FRACTURE MODEL" and "Grain clusters".
 
+### 12. The step-5 follow-up: a fast ship was flying through terrain (2026-09-12)
+
+**REPORTED**: "the player now literally passes through tiles at high impact
+energy — this was explicitly not the intent."  Correct, and it was a real
+defect rather than a tuning question.
+
+**THE CAUSE IS OLDER THAN THE ENERGY MODEL.**  Every contact is tested at the
+END of a step, so a body moving further in one step than its target is wide is
+clear on both sides of it and never tests as touching.  The ship's contact
+window against a 36-unit tile is ±28 units and a substep moves half the
+velocity, so the hole opens near 90 u/step — inside the ship's own 120 cap.
+
+**STEP 4 IS WHAT MADE IT REACHABLE.**  The flat 35%-per-tile retention it
+replaced bled a ship below the tunnelling speed within a tile or two, so
+nothing could stay fast enough to fall in.  Spending real energy lets a ship
+that broke something cheap keep nearly all its speed, and it then outruns the
+test.  This is the general lesson worth keeping: **removing a blunt damper can
+expose a latent hole rather than create one**, and the symptom will be
+attributed to the change that exposed it.
+
+**MEASURED**, through the engine's own physics step against a ten-tile wall at
+the ship's 120 cap — before: out the far side still doing 114.1 with seven
+tiles whole and unmarked behind it (rock; glass 114.5; metal escaped at 160).
+After: stopped dead with nothing crossed untouched, on all three materials at
+60 / 90 / 120 / 160.
+
+**FIXED** by `PhysicsSystem.sweepRewind` — a body whose PATH crossed something
+is put back where it met it, and the ordinary broadphase, SAT, MTV, crash
+spend and `payForCrash` then run exactly as they do at walking pace.  See
+CLAUDE.md §8 for the five rules that hold it up; the two that were measured
+into place are that the rewind must target ENTRY rather than closest approach
+(closest approach reads as "already moving apart" and is refused), and that
+the step's path must be RECORDED rather than re-derived, since a rewind
+invalidates the obvious reconstruction.
+
+**STILL OPEN, and deliberately**: this is contact recovery, not continuous
+collision detection.  A body is rewound to where it met ONE thing; it does not
+sweep a corridor and it does not deposit along the chord it cut.  Both belong
+to the parked "Penetration bore tracks as a FRACTURE MODEL" entry, which is
+the same geometry question asked of the hull.
+

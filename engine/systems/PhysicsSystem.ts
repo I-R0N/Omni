@@ -117,6 +117,35 @@ export class PhysicsSystem {
   // staticGrid stores immovable geometry (Tiles) and is calculated ONLY on map load.
   // dynamicGrid stores moving entities (Player, Enemies, Projectiles) and is cleared every frame.
   private staticGrid: Map<number, GameEntity[]> = new Map();
+  /** The `dt x 60` of the step in progress — see `update` and `sweepRewind`. */
+  private lastTimeScale = 1;
+  /** How far INSIDE the contact circle `sweepRewind` places a rewound body.
+   *  Entry alone leaves the hulls exactly touching, where SAT on the real
+   *  polygons can still read no overlap; a little depth makes the circle test
+   *  that found the contact and the SAT that resolves it agree. */
+  private static readonly SWEEP_ENTRY_DEPTH = 0.85;
+  /** How many contacts the swept rewind has recovered this run.  Diagnostic
+   *  only — nothing in the sim reads it — but it is the one way a test can
+   *  tell "the fast path never fired" from "it fired and did nothing". */
+  public sweptRewinds = 0;
+  /** The PATH each fast body took this step — where it started and how far it
+   *  went — recorded the first time a sweep looks at it and reused for every
+   *  later sweep in the same step.
+   *
+   *  This exists because a rewind INVALIDATES the obvious reconstruction.
+   *  `position - velocity x timeScale` gives the start of the step only while
+   *  the body is still at the end of it; once one contact has pulled it back,
+   *  a second sweep computing the same way solves its geometry against a path
+   *  the body never took.  Measured with that defect in place, a ship at 130
+   *  u/step crossed a rock wall keeping 107.9 of it.  Recording the path
+   *  instead makes repeated rewinds coherent — each one places the body at an
+   *  absolute point ALONG THE SAME path, and only ever further back.
+   *
+   *  The records are pooled and the map is cleared per step, so a steady state
+   *  allocates nothing; both stay empty on any step with no fast body in it. */
+  private sweepPaths: Map<GameEntity, { ox: number; oy: number; dx: number; dy: number }> = new Map();
+  private sweepPool: { ox: number; oy: number; dx: number; dy: number }[] = [];
+  private sweepPoolUsed = 0;
   // The two PER-SUBSTEP grids are CellBuckets, not plain Maps: they are
   // rebuilt at 120 Hz, and allocating a fresh array per occupied cell each
   // time was the engine's second-largest allocator (see CellBuckets' header).
@@ -395,6 +424,12 @@ export class PhysicsSystem {
     // Time-Corrected Friction: Ensure friction effect is consistent per SECOND, not per tick.
     // Normalized to 60Hz. If dt is 1/120, exponent is 0.5.
     const timeScale = dt * 60;
+    // REMEMBERED FOR THE NARROWPHASE.  `sweepRewind` reconstructs the step a
+    // body just took as `velocity x timeScale` rather than storing a previous
+    // position on every entity — one field on the system against two on every
+    // body, and no change to any entity's hidden class (CLAUDE.md section 4).
+    this.lastTimeScale = timeScale;
+    if (this.sweepPaths.size > 0) { this.sweepPaths.clear(); this.sweepPoolUsed = 0; }
     const friction = Math.pow(baseFriction, timeScale);
 
     // Apply Planetary/Stellar Gravity (Scaled by time).
@@ -3067,6 +3102,160 @@ export class PhysicsSystem {
       return (aNeb ? bv : av) !== undefined;
   }
 
+  /**
+   * A BODY MAY NOT FLY THROUGH SOMETHING IT HIT (user report: "the player now
+   * literally passes through tiles at high impact energy").
+   *
+   * Every contact in this engine is tested at the END of a step, so a body
+   * that moves further in one step than the thing it is hitting is wide can
+   * be clear on both sides of it and never test as touching.  Measured on
+   * ROCK_FIELD through the real physics step, a ship's contact window against
+   * a 36-unit tile is +/-28 units, and at 140 u/step (70 units of travel per
+   * substep) it crossed a TEN-TILE WALL with `resolveCollision` never called
+   * once: ten tiles crossed alive and untouched, 137.9 of 140 speed kept.  At
+   * 80 it lost four of them the same way.  Step 4 is what made this visible
+   * rather than what caused it — the flat 35%-per-tile retention it replaced
+   * bled a ship below the tunnelling speed within a tile or two, so the hole
+   * was there all along and nothing could stay fast enough to fall in it.
+   *
+   * THE FIX IS TO PUT THE BODY BACK WHERE IT HIT, not to add a second contact
+   * rule.  If the body's PATH this step passed within the pair's combined
+   * reach, it is rewound along its own step to the moment of entry and the
+   * caller carries on into the ordinary broadphase, SAT, MTV, crash spend and
+   * `payForCrash`.  Nothing downstream learns a new case: a fast hit resolves
+   * through exactly the code a slow one does, which is the whole point of the
+   * user's "the same type of damage as any other collision".
+   *
+   * Four things are load-bearing:
+   *  - **ENTRY, never CLOSEST APPROACH.**  The deepest point of the path is
+   *    where the relative position is PERPENDICULAR to the relative velocity,
+   *    so `velAlongNormal` there is ~0 and `resolveCollision` would refuse the
+   *    contact as "moving away" — the same mis-read this exists to remove.
+   *    The first root of the entry quadratic is a closing contact by
+   *    construction, and `ENTRY_DEPTH` presses it slightly further in so SAT
+   *    on the real hulls agrees with the circle test that found it.
+   *  - **IT IS AN EARLY-OUT FIRST.**  A step shorter than the combined reach
+   *    cannot have skipped the contact, so the common case is one compare and
+   *    no work at all; a body at ordinary speed never reaches the quadratic.
+   *  - **ONLY THE MOVER IS REWOUND.**  With both bodies moving, the geometry
+   *    is solved in the RELATIVE step (which is exact) and the correction is
+   *    applied to the faster one (which is an approximation, and the honest
+   *    one: it is the body that outran the test).
+   *  - **NOT PROJECTILES.**  The fastest shot in the roster travels 15 units a
+   *    substep against that same +/-28 window, so no bolt can tunnel, and the
+   *    pierce bore already owns what a shot does inside a body.
+   *
+   * Returns true when it moved something, so the caller can re-read the pair.
+   */
+  private sweepRewind(a: GameEntity, b: GameEntity, reach: number): boolean {
+      // THE EARLY-OUT COMES FIRST, and it is the whole cost in normal play: a
+      // step no longer than the pair's own contact window cannot have stepped
+      // over it, so the end-position test the caller is about to do is already
+      // sound.  Measured, a ship at 60 u/step against 36-unit tiles never gets
+      // past this line.  Velocities rather than the recorded paths, because
+      // reaching for a path would mean recording one for every pair that ever
+      // comes close.
+      const ts = this.lastTimeScale;
+      const rsx = (a.velocity.x - b.velocity.x) * ts;
+      const rsy = (a.velocity.y - b.velocity.y) * ts;
+      if (rsx * rsx + rsy * rsy <= reach * reach) return false;
+
+      // WHO CAN OUTRUN THE TEST: a ship or a loose rock against terrain.
+      // Everything else either cannot move fast enough or has a deliberate
+      // pass-through rule this must not override.  No closures — this is a
+      // 120 Hz path, and a function built inside one is rebuilt 120x a second
+      // (CLAUDE.md section 8's refill rule, same reasoning).
+      if (a.phasesTerrain === true || b.phasesTerrain === true) return false;
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return false;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return false;
+      // At least one side has to be terrain — this is about bodies crossing
+      // the world, not about two ships missing each other.
+      if (a.type !== EntityType.STRUCTURE && b.type !== EntityType.STRUCTURE) return false;
+      const aMoves = PhysicsSystem.sweepable(a), bMoves = PhysicsSystem.sweepable(b);
+      if (!aMoves && !bMoves) return false;
+
+      const pa = aMoves ? this.sweepPathOf(a) : null;
+      const pb = bMoves ? this.sweepPathOf(b) : null;
+      const adx = pa ? pa.dx : 0, ady = pa ? pa.dy : 0;
+      const bdx = pb ? pb.dx : 0, bdy = pb ? pb.dy : 0;
+      // The step the pair took RELATIVE to each other — the only quantity the
+      // geometry depends on.  Re-derived from the recorded paths rather than
+      // reusing the pre-check above, which reads live velocities that a
+      // resolve earlier this step may already have changed.
+      const sx = adx - bdx, sy = ady - bdy;
+      const stepSq = sx * sx + sy * sy;
+      if (stepSq <= reach * reach) return false;
+
+      // Offset from a to b at the START of the step; the offset at parameter
+      // t (0 = start, 1 = end) is `p0 - t*s`.
+      const p0x = wrapDeltaX(pa ? pa.ox : a.position.x, pb ? pb.ox : b.position.x);
+      const p0y = wrapDeltaY(pa ? pa.oy : a.position.y, pb ? pb.oy : b.position.y);
+
+      // First root of |p0 - t*s| = R — the moment the gap closed to R.
+      const R = reach * PhysicsSystem.SWEEP_ENTRY_DEPTH;
+      const pdots = p0x * sx + p0y * sy;
+      const disc = pdots * pdots - stepSq * (p0x * p0x + p0y * p0y - R * R);
+      if (disc < 0) return false;                 // the path never came close
+      const t = (pdots - Math.sqrt(disc)) / stepSq;
+      if (!(t > 0) || t >= 1) return false;       // entry is not inside this step
+
+      // The MOVER is the one that outran the test — with both moving, the
+      // faster one.
+      const mover = (pa && pb)
+          ? (adx * adx + ady * ady >= bdx * bdx + bdy * bdy ? a : b)
+          : (pa ? a : b);
+      const path = mover === a ? pa! : pb!;
+      const mSq = path.dx * path.dx + path.dy * path.dy;
+      if (!(mSq > 0)) return false;
+      // BACKWARD ONLY.  Where the body sits on its own path right now — a
+      // projection rather than an assumption, because an earlier sweep this
+      // step may already have pulled it back.  A later contact must never
+      // push it forward again.
+      const tNow = ((mover.position.x - path.ox) * path.dx
+                  + (mover.position.y - path.oy) * path.dy) / mSq;
+      if (t >= tNow) return false;
+      // ABSOLUTE placement along the recorded path, so repeated rewinds
+      // compose instead of stacking approximations.
+      mover.position.x = path.ox + path.dx * t;
+      mover.position.y = path.oy + path.dy * t;
+      wrapPosition(mover.position);
+      return true;
+  }
+
+  /** Can this body outrun the end-of-step contact test?  A ship, an enemy or
+   *  a loose shard — anything with finite mass that steers itself across the
+   *  world.  Deliberately NOT projectiles: the fastest shot in the roster
+   *  travels 15 units a substep against a 28-unit contact window, so no bolt
+   *  can tunnel, and the pierce bore already owns what a shot does inside a
+   *  body. */
+  private static sweepable(e: GameEntity): boolean {
+      return (e.type === EntityType.PLAYER || e.type === EntityType.ENEMY
+              || e.type === EntityType.STRUCTURE) && e.mass !== Infinity;
+  }
+
+  /** The step `e` took this substep, recorded once and reused — see
+   *  `sweepPaths` for why the obvious reconstruction cannot be redone. */
+  private sweepPathOf(e: GameEntity) {
+      let r = this.sweepPaths.get(e);
+      if (r === undefined) {
+          r = this.sweepPool[this.sweepPoolUsed];
+          if (r === undefined) {
+              r = { ox: 0, oy: 0, dx: 0, dy: 0 };
+              this.sweepPool[this.sweepPoolUsed] = r;
+          }
+          this.sweepPoolUsed++;
+          const ts = this.lastTimeScale;
+          r.dx = e.velocity.x * ts;
+          r.dy = e.velocity.y * ts;
+          // Valid precisely because nothing has rewound this body yet: the
+          // first sweep to ask is the only one that may reconstruct.
+          r.ox = e.position.x - r.dx;
+          r.oy = e.position.y - r.dy;
+          this.sweepPaths.set(e, r);
+      }
+      return r;
+  }
+
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
@@ -3117,6 +3306,16 @@ export class PhysicsSystem {
           if ((a.shield ?? 0) > 0 && (a.maxShield ?? 0) > 0) rA = Math.max(rA, PhysicsSystem.shieldReach(a));
           if ((b.shield ?? 0) > 0 && (b.maxShield ?? 0) > 0) rB = Math.max(rB, PhysicsSystem.shieldReach(b));
       }
+      // A FAST BODY IS PUT BACK WHERE IT HIT, before anything asks where it
+      // is.  This has to run AHEAD of the distance test below, because that
+      // test reads the END of the step too and so misses exactly the contacts
+      // the sweep exists to catch — a body that stepped clean over the other
+      // is far away at both ends of its step.  No-ops (one compare) for every
+      // body moving less than the pair's own contact window.
+      if (this.sweepRewind(a, b, rA + rB)) {
+          this.sweptRewinds++;
+      }
+
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;

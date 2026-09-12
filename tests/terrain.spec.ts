@@ -449,3 +449,160 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
       watch.assertClean();
     });
 });
+
+test.describe('a fast ship cannot fly through terrain', () => {
+  /*  THE REPORT: "the player now literally passes through tiles at high
+   *  impact energy".  Every contact in this engine is tested at the END of a
+   *  step, so a ship moving further in one step than a tile is wide can be
+   *  clear on both sides of it and never test as touching — no damage to the
+   *  tile, no speed off the hull, no sound, nothing.
+   *
+   *  Step 4 is what made it VISIBLE rather than what caused it.  The flat
+   *  35%-per-tile retention it replaced bled a ship below the tunnelling
+   *  speed within a tile or two, so nothing could stay fast enough to fall in
+   *  the hole; spending real energy lets a ship that broke something cheap
+   *  keep almost all of its speed, and then it outruns the test.
+   *
+   *  `PhysicsSystem.sweepRewind` puts a body back where its PATH met the
+   *  thing it hit, so the ordinary broadphase, SAT, MTV, crash spend and
+   *  `payForCrash` all run exactly as they do at walking pace.  That is the
+   *  claim here, and it is driven through the engine's OWN physics step
+   *  rather than a hand-rolled one — an earlier draft of this measurement
+   *  stepped the ship by a full `velocity` per iteration and so double-counted
+   *  the `dt x 60` the integrator applies, which reports tunnelling at half
+   *  the speed it really starts.
+   */
+
+  /** A FRESH FIELD per charge.  A run through the wall destroys some of it,
+   *  so the second arm of an A/B cannot reuse the first arm's tiles — it
+   *  would be comparing a full wall against whatever survived one. */
+  const freshField = async (page: any, map: string) => {
+    await startRun(page, map);
+    const onMap = new Function('s', `return s.currentMapType === '${map}'`) as (s: any) => boolean;
+    await waitForStats(page, onMap, map);
+    await quietScene(page);
+  };
+
+  /** Fly the ship at a WALL of ten tiles butted edge to edge and report what
+   *  is left of both.  `sweep: false` stubs the fix out in place, which is
+   *  the control: the claim is not "the ship stops" but "the ship stops
+   *  BECAUSE of this", and without it the same run escapes. */
+  const chargeWall = (page: any, variant: string, speed: number, sweep: boolean) =>
+    engine(page, (e: any, a: any) => {
+      const p = e.player, P: any = e.physics, DT = 1 / 120;
+      const all = e.currentMap.entities.filter((x: any) => x.active
+        && x.shardVariant === a.variant && x.mass === Infinity);
+      const wall = all.slice(0, 10);
+      if (wall.length < 10) throw new Error('not enough tiles to build a wall');
+      const w = wall[0].size.x;
+      // Everything else off the board, so nothing but the wall can stop it.
+      for (const t of all.slice(10)) t.active = false;
+      wall.forEach((t: any, i: number) => {
+        t.position.x = 400 + i * w; t.position.y = 0;
+        t.health = t.maxHealth; t.active = true;
+      });
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.position.x = 0; p.position.y = 0;
+      p.velocity.x = a.speed; p.velocity.y = 0;
+      p.health = p.maxHealth = 1e9;   // the hull is not what is being measured
+      P.sweptRewinds = 0;
+      const realSweep = P.sweepRewind.bind(P);
+      if (!a.sweep) P.sweepRewind = () => false;
+      const hp0: any = {};
+      for (const t of wall) hp0[t.id] = t.health;
+      const wallEnd = wall[wall.length - 1].position.x + w;
+      for (let i = 0; i < 2000; i++) {
+        e.prepareFrameEntities();
+        e.updatePhysics(DT);
+        p.velocity.y = 0;               // hold the heading; friction is not the subject
+        if (Math.abs(p.velocity.x) < 0.05) break;
+        if (p.position.x > wallEnd + 100) break;
+      }
+      P.sweepRewind = realSweep;
+      const past = (t: any) => p.position.x > t.position.x + w * 0.5;
+      return {
+        endSpeed: Math.abs(p.velocity.x),
+        escaped: p.position.x > wallEnd,
+        destroyed: wall.filter((t: any) => !t.active).length,
+        // A tile the ship is BEYOND that is still whole and never lost a
+        // point of health: it was flown through.
+        ghosted: wall.filter((t: any) => t.active && past(t)
+          && Math.abs(t.health - hp0[t.id]) < 1e-9).length,
+        rewinds: P.sweptRewinds,
+      };
+    }, { variant, speed, sweep });
+
+  for (const [map, variant] of [
+    ['ROCK_FIELD', 'rock-tile'],
+    ['GLASS_FIELD', 'glass-tile'],
+    ['METAL_FIELD', 'metal-tile'],
+  ] as const) {
+    test(`a ship charging ${variant} at speed is STOPPED by it, and pays on the way`,
+      async ({ page }) => {
+        const watch = await boot(page);
+        await freshField(page, map);
+
+        // 120 is the ship's OWN top speed (`PLAYER_MOVEMENT_CONFIG`), so this
+        // is not a synthetic velocity — it is what a boosted hull actually
+        // carries, and blast knockback goes past it.
+        const swept = await chargeWall(page, variant, 120, true);
+
+        expect(swept.ghosted, 'no tile is flown through untouched').toBe(0);
+        expect(swept.escaped, 'and the wall stops the ship').toBe(false);
+        expect(swept.endSpeed, 'which means dead, not merely slowed').toBeLessThan(1);
+        expect(swept.destroyed, 'it broke its way in, rather than bouncing off the face')
+          .toBeGreaterThan(0);
+        expect(swept.rewinds, 'and the swept path is what caught the contacts')
+          .toBeGreaterThan(0);
+
+        watch.assertClean();
+      });
+  }
+
+  test('the control: with the swept path stubbed out, the same charge escapes',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await freshField(page, 'ROCK_FIELD');
+
+      // THE DEFECT, reproduced.  Measured at 120: the ship came out the far
+      // side still doing 114.1 with SEVEN of the ten tiles whole and
+      // unmarked behind it.  Asserted as a band rather than that figure,
+      // since the point is "kept nearly all of it", not the exact number.
+      const before = await chargeWall(page, 'rock-tile', 120, false);
+      expect(before.escaped, 'it flies out the far side').toBe(true);
+      expect(before.endSpeed, 'having kept nearly all its speed').toBeGreaterThan(100);
+      expect(before.ghosted, 'and left most of the wall untouched behind it')
+        .toBeGreaterThan(3);
+
+      // The SAME scene, one flag apart — rebuilt, since the run above broke
+      // part of the wall it was measuring.
+      await freshField(page, 'ROCK_FIELD');
+      const after = await chargeWall(page, 'rock-tile', 120, true);
+      expect(after.escaped).toBe(false);
+      expect(after.ghosted).toBe(0);
+
+      watch.assertClean();
+    });
+
+  test('an ordinary approach speed is untouched — the sweep is an early-out',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await freshField(page, 'ROCK_FIELD');
+
+      // THE COST OF THE FIX, stated as a claim.  A step shorter than the
+      // pair's own contact window cannot have skipped it, so the sweep
+      // returns on one compare and the run is bit-for-bit the old one.  At 60
+      // (30 units a substep against a +/-28 window) that is already true, so
+      // ordinary flight never reaches the quadratic.
+      const swept = await chargeWall(page, 'rock-tile', 60, true);
+      await freshField(page, 'ROCK_FIELD');
+      const stubbed = await chargeWall(page, 'rock-tile', 60, false);
+
+      expect(swept.escaped, 'the wall stops it either way').toBe(false);
+      expect(stubbed.escaped).toBe(false);
+      expect(swept.ghosted).toBe(0);
+      expect(stubbed.ghosted).toBe(0);
+
+      watch.assertClean();
+    });
+});
