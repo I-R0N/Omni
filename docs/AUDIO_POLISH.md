@@ -1,5 +1,9 @@
 # Audio production pass
 
+The sample-based revision in [CINEMATIC_AUDIO.md](CINEMATIC_AUDIO.md) supersedes
+the sound sources, duration targets and music routing described below.
+This document preserves the initial architecture audit and event-hook history.
+
 Base: `claude/plan-completion`. This change is confined to sound design,
 audio lifecycle, sound-event hooks, audio settings and validation.
 

@@ -27,6 +27,7 @@ const mimeFor = (ext) => {
     case '.svg': return 'image/svg+xml';
     case '.gif': return 'image/gif';
     case '.wav': return 'audio/wav';
+    case '.mp3': return 'audio/mpeg';
     default: return 'application/octet-stream';
   }
 };
@@ -101,6 +102,13 @@ const sfxTag = Object.keys(sfxInline).length
   ? `<script>window.__omniSfxInline=${JSON.stringify(sfxInline)};</script>`
   : '';
 
+const audioDir = resolve(publicAssetsDir, 'audio');
+const audioInline = {};
+if (existsSync(audioDir)) for (const file of readdirSync(audioDir)) {
+  if (/\.mp3$/i.test(file)) audioInline[file] = toDataUri(resolve(audioDir, file));
+}
+const audioTag = `<script>window.__omniAudioInline=${JSON.stringify(audioInline)};</script>`;
+
 const finalHtml = `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -114,6 +122,7 @@ const finalHtml = `<!DOCTYPE html>
   <body>
     <div id="root"></div>
     ${sfxTag}
+    ${audioTag}
     <script type="module">${jsSource}</script>
   </body>
 </html>

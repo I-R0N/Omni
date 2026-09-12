@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { boot, engine, startRun } from './helpers';
 
-test('all recorded takes decode; production cache is finite, audible and bounded', async ({ page }) => {
+test('all cinematic cues decode with full coverage and bounded memory', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.prepared, null, { timeout: 90000 });
@@ -9,8 +9,8 @@ test('all recorded takes decode; production cache is finite, audible and bounded
     const a = e.audio;
     const bad: string[] = [];
     let bytes = 0;
-    for (const [id, set] of a.synthesized) {
-      if (set.bufs.length !== 3) bad.push(id + ': missing variants');
+    for (const [id, set] of a.samples) {
+      if (set.bufs.length !== (a.loopIds.includes(id) ? 1 : 3)) bad.push(id + ': missing variants');
       for (const buf of set.bufs) {
         const data = buf.getChannelData(0);
         let peak = 0;
@@ -18,20 +18,22 @@ test('all recorded takes decode; production cache is finite, audible and bounded
           if (!Number.isFinite(sample)) bad.push(id + ': nonfinite');
           peak = Math.max(peak, Math.abs(sample));
         }
-        if (peak < 0.001 || buf.duration > 4) bad.push(id + ': signal/duration');
+        if (peak < 0.001 || buf.duration > 4.1) bad.push(id + ': signal/duration');
         bytes += data.byteLength;
       }
     }
     return { bad, bytes, recorded: a.sampleCount, rejected: a.rejectedSampleCount,
       unmatched: a.unmatchedFiles, cached: a.synthesized.size, oneShots: a.defs.size,
-      sampled: a.sampledIds.length };
+      sampled: a.sampledIds.filter((id: string) => a.defs.has(id)).length, failures: a.bankFailures, total: a.allIds.length, covered: a.sampledIds.length };
   });
   expect(result.bad).toEqual([]);
-  expect(result.recorded).toBe(66);
+  expect(result.failures).toEqual([]);
+  expect(result.recorded).toBe(304);
+  expect(result.covered).toBe(result.total);
   expect(result.rejected).toBe(0);
   expect(result.unmatched).toEqual([]);
   expect(result.cached + result.sampled).toBe(result.oneShots);
-  expect(result.bytes).toBeLessThan(30 * 1024 * 1024);
+  expect(result.bytes).toBeLessThan(96 * 1024 * 1024);
   watch.assertClean();
 });
 
@@ -39,7 +41,7 @@ test('mix controls, variation inspection, torus pan and pause cleanup', async ({
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page);
-  await page.waitForFunction(() => window.__omniEngine.audio.sampleCount === 66);
+  await page.waitForFunction(() => window.__omniEngine.audio.sampleCount === 304);
   const result = await engine(page, e => {
     const a = e.audio;
     a.stopScene(true); a.setActive(true); a.setListener(100, 100);
@@ -120,4 +122,49 @@ test('burst load stays bounded and critical player feedback displaces background
   expect(result.ceiling).toBeLessThanOrEqual(24);
   expect(result.cleanup).toBe(0);
   watch.assertClean();
+});
+
+
+test('streamed background music keeps its place, obeys music/mute, and survives pause', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.playing);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.currentTime > 0.2);
+  const before = await engine(page, e => e.audio.music.currentTime);
+  await engine(page, e => { e.audio.setSfxVolume(0); e.pauseGame(); });
+  await expect.poll(() => engine(page, e => e.audio.music.currentTime)).toBeGreaterThan(before);
+  await engine(page, e => e.audio.setMusicVolume(0));
+  await page.waitForFunction(() => !window.__omniEngine.audio.music.playing);
+  const pausedAt = await engine(page, e => e.audio.music.currentTime);
+  await engine(page, e => e.audio.setMusicVolume(0.7));
+  await page.waitForFunction(() => window.__omniEngine.audio.music.playing);
+  expect(await engine(page, e => e.audio.music.currentTime)).toBeGreaterThanOrEqual(pausedAt);
+  await engine(page, e => e.audio.setMuted(true));
+  await page.waitForFunction(() => !window.__omniEngine.audio.music.playing);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
+test('long player tails do not suppress the next attack', async ({ page }) => {
+  await boot(page);
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.prepared);
+  await startRun(page);
+  const result = await engine(page, async e => {
+    const a = e.audio;
+    a.stopScene(true); a.setActive(true);
+    const id = 'weapon.cannon.fire';
+    const duration = a.samples.get(id).bufs[0].duration;
+    const before = a.playsOf(id);
+    // Real event cadence: a long 2.3s cannon tail must not block a later shot.
+    for (let i = 0; i < 4; i++) {
+      a.play(id);
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    return { duration, played: a.playsOf(id) - before, voices: a.liveVoicesOf(id) };
+  });
+  expect(result.duration).toBeGreaterThan(2);
+  expect(result.played).toBe(4);
+  expect(result.voices).toBeLessThanOrEqual(2);
 });

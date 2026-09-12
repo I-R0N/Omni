@@ -3337,7 +3337,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <span className={`w-10 text-right text-slate-400 ${T_BODY}`}>{Math.round((value ?? 1) * 100)}%</span>
               </label>;
             })}
-            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music adjusts wave and boss musical cues.</p>
+            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music: <a href="https://opengameart.org/content/space-ambient" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Space ambient — Osmic</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a></p>
 
             {/* Output-latency READOUT (playtest: "sounds feel slightly
                 delayed").  The engine side is measured tight — tap → play()

@@ -1,3 +1,5 @@
+import CINEMATIC_BANKS from './CinematicBank.json';
+import { BackgroundMusic } from './BackgroundMusic';
 import { finishVoice } from './SfxVoicing';
 import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
 import SFX_MANIFEST from 'virtual:sfx-manifest';
@@ -176,6 +178,9 @@ export class AudioSystem {
   // ── Context (created on first gesture only) ──
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  public music: BackgroundMusic | null = null;
+  private cinematicIds = new Set<string>();
+  public bankFailures: string[] = [];
   private noiseBuf: AudioBuffer | null = null;
   private buses = new Map<AudioBus, GainNode>();
   private sfxBus: GainNode | null = null;
@@ -195,6 +200,7 @@ export class AudioSystem {
   public setMusicVolume(v: number) {
     if (!Number.isFinite(v)) return;
     this._musicVolume = Math.max(0, Math.min(1, v));
+    this.music?.setEnabled(!this._muted && this._musicVolume > 0);
     if (this.ctx) this.buses.get('music')?.gain.setTargetAtTime(AUDIO_MIX.music * this._musicVolume, this.ctx.currentTime, 0.02);
   }
   /** Decoded recorded takes, per id.  Absent or all-null → procedural voice. */
@@ -290,7 +296,7 @@ export class AudioSystem {
     // Returning to the tab is the other moment iOS hands the audio session
     // back — resume there too, so a backgrounded phone recovers by itself.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { this.stopScene(); void this.ctx?.suspend(); }
+      if (document.hidden) { this.stopScene(); this.music?.suspend(); void this.ctx?.suspend(); }
       else if (this.ctx) this.unlock();
     });
   }
@@ -345,6 +351,7 @@ export class AudioSystem {
    *  false when audio is unavailable. */
   public unlock(): boolean {
     if (this.ctx) {
+      this.music?.resume();
       // NOT just 'suspended': iOS also uses a non-standard 'interrupted'
       // state (phone call, Siri, another app). Resume on anything that is
       // not already running, or the game stays silent for the rest of the
@@ -390,6 +397,9 @@ export class AudioSystem {
       this.buses.set(name, bus);
     }
 
+    this.music = new BackgroundMusic(this.ctx, this.buses.get('music')!);
+    this.music.setEnabled(!this._muted && this._musicVolume > 0);
+
     // Shared white noise — one buffer for every noise-based voice in the
     // game, sampled at a random offset per voice so repeats don't phase.
     const len = Math.floor(this.ctx.sampleRate * AUDIO_CONSTANTS.NOISE_BUFFER_SEC);
@@ -416,9 +426,11 @@ export class AudioSystem {
   private async preloadSamples(): Promise<void> {
     if (!this.ctx || this.samplesRequested) return;
     this.samplesRequested = true;
+    await this.preloadCinematicBanks();
     const discovered = this.discoverSamples();
     const jobs: Promise<void>[] = [];
     for (const [id, def] of this.defs) {
+      if (this.hasSample(id)) continue;
       const found = discovered.get(id);
       // An explicit `sample` on the def WINS, so a one-off can always be
       // pinned by name; otherwise the folder decides.  With neither, the id
@@ -462,6 +474,38 @@ export class AudioSystem {
       });
     }
     await Promise.all(jobs);
+  }
+
+  /** Decode one compressed bank at a time, then retain only cue buffers.
+   * MP3 gapless metadata is honored by decodeAudioData; offsets are in seconds
+   * so AudioContext resampling cannot shift cue boundaries. */
+  private async preloadCinematicBanks() {
+    const inline = (globalThis as { __omniAudioInline?: Record<string, string> }).__omniAudioInline;
+    for (const bank of CINEMATIC_BANKS) {
+      try {
+        const response = await fetch(inline?.[bank.file] ?? `/assets/audio/${bank.file}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await this.ctx!.decodeAudioData(await response.arrayBuffer());
+        if (Math.abs(buffer.duration - bank.frames / bank.sampleRate) > 0.04) throw new Error('Bank timing mismatch');
+        for (const [id, regions] of Object.entries(bank.cues)) {
+          if (!this.has(id)) continue;
+          const bufs = regions.map(([offset, duration]) => {
+            const length = Math.round(duration * buffer.sampleRate);
+            const cue = this.ctx!.createBuffer(1, length, buffer.sampleRate);
+            const start = Math.round(offset * buffer.sampleRate);
+            cue.copyToChannel(buffer.getChannelData(0).subarray(start, start + length), 0);
+            if (peakOf(cue) < AUDIO_CONSTANTS.SAMPLE_MIN_PEAK) throw new Error(`Silent cue ${id}`);
+            return cue;
+          });
+          this.samples.set(id, { bufs, next: -1 });
+          this.cinematicIds.add(id);
+          this.samplesLoaded += bufs.length;
+        }
+      } catch (error) {
+        this.bankFailures.push(`${bank.file}: ${String(error)}`);
+        // Legacy files/recipes remain a recovery path for network/codec failure.
+      }
+    }
   }
 
   /**
@@ -576,6 +620,7 @@ export class AudioSystem {
   public get muted(): boolean { return this._muted; }
   public setMuted(m: boolean) {
     this._muted = m;
+    this.music?.setEnabled(!m && this._musicVolume > 0);
     if (m) this.stopScene(true);
     this.applyMaster();
   }
@@ -586,6 +631,7 @@ export class AudioSystem {
   public setActive(a: boolean) {
     if (this._active === a) return;
     this._active = a;
+    this.music?.setActive(a);
     if (!a) this.stopScene();
   }
   public get active(): boolean { return this._active; }
@@ -690,7 +736,14 @@ export class AudioSystem {
 
     // 2. Per-id polyphony.  Prune retired voices first (lazy — no timers).
     this.prune(st.ends, now);
-    if (st.ends.length >= def.poly * cm.poly) { this.counts.dropped++; return; }
+    if (st.ends.length >= def.poly * cm.poly) {
+      // Let a new player action replace its own oldest tail, rather than
+      // dropping the attack because a richer sample lasts longer.
+      const oldest = def.tier === 1 && this.cinematicIds.has(id)
+        ? [...this.live].find(v => v.id === id) : undefined;
+      if (oldest) this.retire(oldest);
+      else { this.counts.dropped++; return; }
+    }
 
     // 3. Global ceiling, thinned by tier.  Tier 1 always plays.
     this.pruneGlobal(now);
@@ -725,7 +778,7 @@ export class AudioSystem {
     s.ctx = this.ctx;
     s.dest = voiceGain;
     s.t0 = now;
-    s.pitch = Math.max(0.25, Math.min(4, Number.isFinite(opts?.pitch) ? opts!.pitch! : 1)) * (def.jitter ? 1 + (Math.random() * 2 - 1) * def.jitter : 1);
+    s.pitch = Math.max(0.25, Math.min(4, Number.isFinite(opts?.pitch) ? opts!.pitch! : 1)) * (def.jitter ? 1 + (Math.random() * 2 - 1) * Math.min(def.jitter, this.cinematicIds.has(id) ? 0.035 : 1) : 1);
     s.param = opts?.param ?? 0;
     s.noise = this.noiseBuf;
     // A decoded take REPLACES the draft; otherwise the draft plays.  One
@@ -861,10 +914,32 @@ export class AudioSystem {
     const s = this.scratch;
     s.ctx = this.ctx; s.dest = gain; s.t0 = now;
     s.pitch = 1; s.param = param; s.noise = this.noiseBuf;
-    const voice = def.start(s);
+    const recorded = this.takeSample(id);
+    const voice = recorded ? this.startRecordedLoop(id, recorded, s) : def.start(s);
     this.loops.set(id, { voice, gain, panner, param });
     this.counts.played++;
     this.perId.set(id, (this.perId.get(id) ?? 0) + 1);
+  }
+
+  private startRecordedLoop(id: string, buffer: AudioBuffer, s: SynthCtx): LoopVoice {
+    const source = s.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = s.ctx.createBiquadFilter();
+    filter.type = 'lowpass'; filter.Q.value = 0.65;
+    const level = s.ctx.createGain();
+    const set = (param: number, now: number) => {
+      const p = Math.max(0, Math.min(1, param));
+      const thrust = id === 'move.thrust', charge = id === 'weapon.charge.loop';
+      source.playbackRate.setTargetAtTime(charge ? 0.8 + p * 0.35 : thrust ? 0.92 + p * 0.12 : 1, now, 0.08);
+      filter.frequency.setTargetAtTime(thrust ? 180 + p * 950 : charge ? 220 + p * 800 : 1600, now, 0.08);
+      level.gain.setTargetAtTime(thrust ? 0.13 + p * 0.87 : charge ? (p >= 0.99 ? 0.08 : 0.2 + p * 0.6) : 0.65, now, 0.08);
+    };
+    level.gain.value = 0;
+    source.connect(filter); filter.connect(level); level.connect(s.dest);
+    set(s.param, s.t0);
+    source.start(s.t0);
+    return { set, stop: now => { try { source.stop(now + 0.05); } catch { /* already stopped */ } } };
   }
 
   private retire(v: LiveVoice) {
