@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, MAX_PIERCE, PROJECTILE_CONSTANTS, projectileBite, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
 import { nebulaDampingFor, nebulaSpinDampingFor } from '../../constants';
 import { pointInPolygon } from './fracture';
@@ -1331,6 +1331,12 @@ export class PhysicsSystem {
   }
 
   // ── PENETRATION: THE BORE TRACK ─────────────────────────────────────
+  /** Below this a bolt has nothing left worth depositing and stops. */
+  private static readonly SPENT_EPSILON = 1e-6;
+  /** Belt-and-braces bound on the bore walk — the chord leaving the body and
+   *  the energy running out both bound it first. */
+  private static readonly MAX_BORE_STEPS = 128;
+
   // Scratch for `borePierceTrack`.  One reused point, never a fresh
   // {x,y} per step — the walk runs inside the collision path.
   private readonly _borePoint: Vector2 = { x: 0, y: 0 };
@@ -1340,30 +1346,6 @@ export class PhysicsSystem {
    *  nothing. */
   private _boreExited = false;
 
-  /**
-   * OPTION C — PENETRATION IS SPENT PER GRAIN, NOT PER BODY.
-   *
-   * A tile is ONE entity, so the body-level rule ("one charge, one
-   * target") let a single pierce charge carry a bolt through a whole
-   * 36px pane.  For a body running the GRAIN-BOUNDARY model (a variant
-   * whose `grain` block carries `bondStrength` — rock, glass, plastic,
-   * metal today) the bolt instead BORES A TRACK: it walks its own chord
-   * through the body a grain diameter at a time, spending one charge and
-   * one falloff step per grain, and comes out the far side only if it
-   * still has charges when the chord runs out.
-   *
-   * Each step stamps its own contact point and spends through
-   * `applyBoundaryDamage`, which with every material's shipped
-   * `damageSpread: 0` fills boundaries sequentially outward from that
-   * point — so successive stamps erode successive grains rather than
-   * pouring the whole shot into the entry cell.
-   *
-   * Returns the number of grain steps taken; 0 means this body is not
-   * running the model (or the bolt has no charges), and the caller
-   * applies the ordinary single-body spend it always did.  Bounded by
-   * the remaining pierce count, which strictly decreases, so the loop is
-   * as cheap as the charge the player bought.
-   */
   /**
    * THE SPEED A BOLT'S DAMAGE IS MEASURED AT (unified impact physics, step 3).
    *
@@ -1406,6 +1388,24 @@ export class PhysicsSystem {
   }
 
   /**
+   * THE BOLT'S REMAINING ENERGY, in the damage units everything downstream
+   * spends in.
+   *
+   * NOT the same quantity as `projectileBiteOn`, and conflating the two is
+   * the mistake this exists to prevent: a BITE is what one hit lands
+   * (`authored x (v/v0)^2`), while the ENERGY is the whole bank the round's
+   * authored MASS bought it.  Capping a bore step at the bite instead of the
+   * energy let a bolt bore for ever without running out, so depth fell back
+   * to the CHORD (body width / grainSize) and finer-grained plastic measured
+   * DEEPER than pricier, coarser glass — exactly backwards.
+   */
+  private static projectileEnergyLeft(proj: GameEntity): number {
+      const v = proj.velocity;
+      if (v === undefined) return 0;
+      return kineticDamage(proj.mass ?? PROJECTILE_CONSTANTS.MASS, Math.hypot(v.x, v.y));
+  }
+
+  /**
    * Take `damage` worth of energy out of the bolt, leaving it slower.
    *
    * The spend is against the bolt's WORLD kinetic energy, which is the
@@ -1424,9 +1424,35 @@ export class PhysicsSystem {
       v.x *= k; v.y *= k;
   }
 
+  /**
+   * A ROUND BORES A TRACK THROUGH A GRAIN BODY, AND ITS ENERGY DECIDES HOW FAR.
+   *
+   * A tile is ONE entity, so a body-level penetration rule carried a bolt
+   * through a whole 36px pane for the price of one body.  For a body running
+   * the GRAIN-BOUNDARY model (a variant whose `grain` block carries
+   * `bondStrength` — rock, glass, plastic, metal today) the bolt instead walks
+   * its own chord a grain diameter at a time, and each grain costs that
+   * material's own price: `grainSize x bondStrength`.  Glass charges 6.0 a
+   * grain, rock 5.6, plastic 10.8, metal 14.4, so the SAME round goes twice as
+   * deep into glass as into metal with nothing authored per weapon.
+   *
+   * The bolt slows by exactly what it deposited (`spendProjectileEnergy`), so
+   * the track decays on its own and ends when the bank is empty — or comes out
+   * the far side if the chord runs out first, which is the one thing that
+   * makes penetration read as DEPTH rather than as a pass.
+   *
+   * Each step stamps its own contact point and spends through
+   * `applyBoundaryDamage`, which with every material's shipped
+   * `damageSpread: 0` fills boundaries sequentially outward from that point —
+   * so successive stamps erode successive grains rather than pouring the whole
+   * shot into the entry cell.  The bore is therefore a consequence of the
+   * damage-spread model, not a second mechanism beside it.
+   *
+   * Returns the number of grain steps taken; 0 means this body is not running
+   * the model, and the caller applies the ordinary single-body spend.
+   */
   private borePierceTrack(proj: GameEntity, target: GameEntity, baseDmg: number): number {
       this._boreExited = false;
-      if ((proj.pierceCount ?? 0) <= 0) return 0;
       if (target.shardVariant === undefined) return 0;
       // The one honest predicate for "this body runs the boundary model"
       // — the same one fractureCache derives its HP from.
@@ -1457,22 +1483,29 @@ export class PhysicsSystem {
 
       const p = this._borePoint;
       const mass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
+      // WHAT ONE GRAIN OF THIS MATERIAL COSTS TO GET THROUGH.  `bondStrength`
+      // is damage per PIXEL of boundary and `grainSize` is the grain's own
+      // diameter, so their product is what a grain-length of interface
+      // charges — the price the material sets, in the units the bolt pays in.
+      // Glass 15x0.4 = 6.0, rock 14x0.4 = 5.6, plastic 6x1.8 = 10.8,
+      // metal 8x1.8 = 14.4.  THAT ratio is the whole of step 5: depth becomes
+      // `energy / price`, so the same shell crosses glass and stops in metal
+      // without either being written down anywhere.
+      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0));
       let ordinal = proj.pierceHits ?? 0;
-      let charges = proj.pierceCount ?? 0;
       let steps = 0;
       for (;;) {
           p.x = target.position.x + (lx * cw - ly * sw);
           p.y = target.position.y + (lx * sw + ly * cw);
           stampLocalImpact(target, p);
-          // ENERGY PER GRAIN (step 3).  The bite is re-measured from the
-          // bolt's CURRENT speed every grain, and the bolt is slowed by
-          // exactly what it just deposited — so the track decays on its own
-          // and `baseDmg` is only the first grain's bite.  That decay is the
-          // retired `PIERCE_FALLOFF_RATE`, now falling out of the physics
-          // instead of sitting beside it as a second knob.
-          const bite = steps === 0
-              ? baseDmg
-              : PhysicsSystem.projectileBiteOn(proj, target);
+          // THE BOLT PAYS THE MATERIAL'S PRICE, OR EVERYTHING IT HAS LEFT.
+          // `projectileBiteOn` reads the bolt's CURRENT speed, so this is its
+          // remaining energy in damage units; capping the offer at one
+          // grain's price is what makes the walk a TRACK rather than a
+          // crater, and what makes its length depend on the material.
+          const remaining = PhysicsSystem.projectileEnergyLeft(proj);
+          if (remaining <= PhysicsSystem.SPENT_EPSILON) break;  // spent; stops inside
+          const bite = Math.min(remaining, grainCost);
           if (!applyBoundaryDamage(target, bite)) {
               // The model went away under us (an empty decomposition).
               // Nothing has been spent yet on the first step, so hand the
@@ -1484,15 +1517,19 @@ export class PhysicsSystem {
           ordinal++; steps++;
           // The body died under the drill — the bolt is through it.
           if ((target.health ?? 0) <= 0) { this._boreExited = true; break; }
-          // Out of charges: the bolt stops HERE, inside the body.
-          if (charges <= 0) break;
-          charges--;
           lx += ldx * grain; ly += ldy * grain;
           if (!pointInPolygon(lx, ly, poly)) { this._boreExited = true; break; }
-          if (steps > MAX_PIERCE) break; // belt and braces; charges already bound it
+          // Belt and braces only: the walk is already bounded twice over, by
+          // the chord leaving the polygon and by the energy running out.
+          if (steps > PhysicsSystem.MAX_BORE_STEPS) break;
       }
       proj.pierceHits = ordinal;
-      proj.pierceCount = charges;
+      // A bolt that walked out of the far side with nothing left has not
+      // exited in any sense that matters — it stops at the surface.
+      if (this._boreExited
+          && PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON) {
+          this._boreExited = false;
+      }
       return steps;
   }
 
@@ -3704,13 +3741,12 @@ export class PhysicsSystem {
                   // simply refills after the bounce, so same-contact dedup is
                   // preserved on both legs of the flight.
                   //
-                  // The semantics this produces are the intended reading:
-                  // pierce stays a LIFETIME budget, so a bouncing beam still
-                  // gets at most `pierceCount` damage events across its whole
-                  // flight however many times it reflects, each one stepping
-                  // further down the falloff curve.  Bounces buy COVERAGE,
-                  // not extra damage events — do not "fix" that by refreshing
-                  // pierce on bounce.
+                  // The semantics this produces are the intended reading: the
+                  // bolt's ENERGY is a lifetime bank, so a bouncing beam lands
+                  // only what it can still afford however many times it turns
+                  // around, each bite further down the curve its own mass
+                  // sets.  Bounces buy COVERAGE, not extra damage — do not
+                  // "fix" that by refilling the bank on a bounce.
                   //
                   // Length-reset, not a fresh array (CLAUDE.md §8's refill
                   // rule): this runs inside the collision path.
@@ -3724,12 +3760,12 @@ export class PhysicsSystem {
               }
           }
 
-          // PENETRATION FALLOFF (option C): the SECOND body a bolt passes
-          // through takes less than the first, the third less again.  The
-          // ordinal is a count UP (`pierceHits`), never the count-down
-          // `pierceCount`, so the curve is read forwards whatever the
-          // shot's capacity is.  Ordinal 0 is 1 by construction, so a
-          // non-piercing bolt is untouched by this.
+          // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
+          // less than the first, the third less again — and it is measured,
+          // never tabulated.  `projectileBiteOn` reads the bolt's CURRENT
+          // speed against its muzzle reference, so a shot that has spent
+          // nothing bites exactly its authored damage and one that has
+          // spent half its energy bites half.
           //
           // EVERY WEAPON IS AFFECTED EQUALLY (user call).  The falloff is
           // not direct-damage-only: the Cannon's AoE splash and the
@@ -3747,6 +3783,14 @@ export class PhysicsSystem {
           // untouched by damage becoming kinetic.
           const falloff = (proj.damage || 1) > 0 ? projDmg / (proj.damage || 1) : 1;
           proj.hitFalloff = falloff;
+          // The bite as LAUNCHED at this body, kept because `projDmg` is
+          // whittled down below (a shield eats part of it, a plate scales it)
+          // while the energy the bolt is charged for is the whole of it.
+          const biteFull = projDmg;
+          // Set by the two reductions below.  A plate or armour that turns a
+          // shot aside has STOPPED it, so such a hit is never refunded — see
+          // the overkill rule at the spend site.
+          let reducedByPlate = false;
           // Hoisted: the bore below must respect it too, so a bolt that
           // re-contacts a body it already pierced does not drill it again.
           const alreadyHit = proj.hitEntityIds?.includes(target.id) ?? false;
@@ -3848,12 +3892,14 @@ export class PhysicsSystem {
           if (this.traitsEnabled && target.frontShield && projDmg > 0
               && PhysicsSystem.frontShieldCoversHit(target, proj)) {
               projDmg *= (1 - target.frontShield.reduction);
+              reducedByPlate = true;
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
           }
           // Armored enemies shrug off small per-hit "chip" damage — demands
           // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
           if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
               projDmg *= (1 - target.armor.reduction);
+              reducedByPlate = true;
               // A thick, dead clunk: the audible half of the reduced
               // damage number this path already shows.
               this.sfx?.('impact.armor.chip', target.position.x, target.position.y);
@@ -3892,12 +3938,12 @@ export class PhysicsSystem {
                   // FIRST so the pattern is biased by, and the damage poured
                   // from, where the shot actually landed.
                   //
-                  // OPTION C: with charges in hand and a grain body under
-                  // the muzzle, the bolt bores a TRACK — one charge and
-                  // one falloff step per grain — instead of spending the
-                  // whole shot on the entry cell for the price of one
-                  // charge.  It returns 0 for everything else (nebula,
-                  // metal-shard composites, enemies), which is the
+                  // THE BORE.  With energy in hand and a grain body under
+                  // the muzzle, the bolt walks its own chord — paying that
+                  // material's price per GRAIN and slowing by exactly what
+                  // it deposited — instead of spending the whole shot on
+                  // the entry cell.  It returns 0 for everything else
+                  // (nebula, metal-shard composites, enemies), which is the
                   // single-spend path this always was.
                   if (!alreadyHit) boredSteps = this.borePierceTrack(proj, target, projDmg);
                   if (boredSteps === 0) {
@@ -4048,7 +4094,7 @@ export class PhysicsSystem {
           // consecutive frames.
           //
           // (1) IMPENETRABLE.  An indestructible tile stops the bolt DEAD
-          //     however much penetration it carries, and spends nothing —
+          //     however much energy it carries, and spends nothing —
           //     it took no damage, so it may not cost a charge either.
           //     THIS IS THE SEAM a future ricochet would replace: the user
           //     may later have these turn EVERY projectile away, which is
@@ -4060,16 +4106,44 @@ export class PhysicsSystem {
           // (3) Everything else: one charge per body, as it always was.
           const impenetrable = target.type === EntityType.STRUCTURE
               && target.shardVariant === 'indestructible-tile';
-          const pierce = proj.pierceCount ?? 0;
+          // PENETRATION IS WHAT THE BOLT CAN STILL AFFORD (step 5b).  The
+          // single-spend path pays for the body it just struck HERE, and
+          // whether it carries on is then simply whether anything is left —
+          // no count, no budget.  It cannot pay any earlier than this: the
+          // knockback above reads `proj.velocity` for its DIRECTION, and a
+          // spend that zeroed it would deliver a shove of exactly nothing
+          // (step 3's lesson, and it took out the whole knockback suite).
+          // An IMPENETRABLE tile is the documented exception — it took no
+          // damage, so it may not take any energy either.
+          if (boredSteps === 0 && !alreadyHit && !impenetrable) {
+              // OVERKILL CARRIES THROUGH — the actor-side half of step 4's
+              // "pay for what you broke".  A body cannot absorb more than it
+              // had, so a 4-damage bolt through a 1-HP gnat is charged 1 and
+              // flies on with 3: penetration falls out of the arithmetic for
+              // ACTORS exactly as the bore makes it fall out for terrain, and
+              // a bolt through a swarm is the visible case.  The waste is
+              // read off the target's own overdrawn health, so it is zero by
+              // construction everywhere a body cannot go negative — a
+              // saturating boundary spend, a hit-counted tile, a rock break
+              // that zeroes health — and needs no branch per target kind.
+              // A PLATE IS NOT OVERKILL: armour and the front shield stop a
+              // round rather than run out of room, so a reduced hit pays in
+              // full however little reached the hull.
+              const wasted = reducedByPlate ? 0 : Math.max(0, -(target.health ?? 0));
+              PhysicsSystem.spendProjectileEnergy(proj, projMass,
+                  Math.max(0, biteFull - wasted));
+          }
+          const spentOut =
+              PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON;
           const carriesOn = impenetrable ? false
               : boredSteps > 0 ? this._boreExited
-              : (!alreadyHit && pierce > 0);
+              : (!alreadyHit && !spentOut);
 
           if (carriesOn && !target.isExploding) {
               if (boredSteps === 0) {
-                  proj.pierceCount = pierce - 1;
-                  // One body, one step down the falloff curve.  The bore
-                  // advances the ordinal itself, once per grain.
+                  // A plain count of what this bolt has struck — diagnostic
+                  // now rather than load-bearing, since the falloff comes
+                  // from speed.  The bore advances it once per grain.
                   proj.pierceHits = (proj.pierceHits ?? 0) + 1;
               }
               if (!proj.hitEntityIds) proj.hitEntityIds = [];
@@ -4083,17 +4157,7 @@ export class PhysicsSystem {
               // already paid per grain, so only the single-spend path pays
               // here.
               //
-              // IT PAYS *HERE*, AFTER THE KNOCKBACK ABOVE, AND THAT ORDER IS
-              // LOAD-BEARING.  Momentum is imparted at CONTACT, at the
-              // incoming velocity; the energy is spent passing through.
-              // Paid earlier, the spend rewrites `proj.velocity` — which
-              // every momentum consumer above reads for its DIRECTION — so a
-              // bolt whose bite happened to exhaust its bank delivered a
-              // knockback of exactly zero.  Measured: every enemy in the
-              // knockback suite stopped moving, mass ordering and all.
-              if (boredSteps === 0) {
-                  PhysicsSystem.spendProjectileEnergy(proj, projMass, projDmg);
-              }
+
               // Still impart momentum impulse even when piercing
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;

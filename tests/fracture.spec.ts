@@ -36,6 +36,21 @@
  *  anything else breaking bodies beside it is contamination by definition.
  *  `quietScene` stops the fauna and the ladder; it does not touch shards or
  *  tiles, so no assertion here changes meaning. */
+/* WHY EVERY SYNTHESISED BOLT BELOW CARRIES `mass: <its damage> / 12656.25`.
+ *
+ * Damage is KINETIC (unified impact physics, step 3) and penetration depth is
+ * ENERGY divided by what the material charges per grain (step 5b), so a
+ * bolt's mass is no longer decoration — it IS its budget.  These bolts used
+ * to carry a flat `mass: 0.1` at speed 900, which is an energy of ~1265
+ * against an authored damage of 4: harmless while mass meant nothing, and
+ * wildly wrong once it became the thing that decides how deep a shot bores.
+ *
+ * 12656.25 is `v^2 / (2 * IMPACT_ENERGY_PER_DAMAGE)` at the speed 900 they all
+ * fly at, so the solve gives each bolt an energy equal to its own damage —
+ * a NON-PIERCING round, which is what every test here means by "one hit".
+ * Written out rather than imported, per the harness rule that a test which
+ * imports the constant it is checking pins nothing. */
+
 import { test, expect } from '@playwright/test';
 import { boot, dialByName, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
 
@@ -377,7 +392,7 @@ test.describe('cracks are the pattern (V3)', () => {
           id: 'v3_shell', type: 'PROJECTILE',
           position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
           velocity: { x: -900, y: 0 }, rotation: Math.PI,
-          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+          size: { x: 6, y: 6 }, mass: 1 / 12656.25, active: true, color: '#fff',
           damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
         },
         t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
@@ -514,7 +529,7 @@ test.describe('partial fracture (V4)', () => {
             id: 'v8_bolt_' + (shotN++), type: 'PROJECTILE',
             position: { x: hitAt.x + 4, y: hitAt.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: dmg / 12656.25, active: true, color: '#fff',
             damage: dmg, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -637,7 +652,7 @@ test.describe('partial fracture (V4)', () => {
             id: 'v15_bolt_' + (shotN++), type: 'PROJECTILE',
             position: { x: hitAt.x + 4, y: hitAt.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: 4 / 12656.25, active: true, color: '#fff',
             damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -777,25 +792,38 @@ test.describe('death is dispatched once (V9 regression)', () => {
       ents.push(tile);
       tile.lastImpactVelocity = { x: -9, y: 0 };
       tile.fractureOriginalArea = fr.polygonArea(pts);
-      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       // REAL projectile kill path: onDamage (progressFracture -> death)
       // runs BEFORE the outer health<=0 block — the exact double-dispatch
       // shape of the bug.
-      e.physics.resolveCollision(
-        {
-          id: 'v9_shell', type: 'PROJECTILE',
-          position: { x: tile.position.x + w * 0.5 + 4, y: tile.position.y },
-          velocity: { x: -900, y: 0 }, rotation: Math.PI,
-          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-          damage: 9999, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        },
-        tile, { x: 0, y: 0 },
-        // The REAL damage-feedback hook — the chip/progressFracture site
-        // lives inside it, and the bug was exactly its death racing the
-        // outer health<=0 dispatch.
-        e.spawnDamageText.bind(e),
-        e.handleEntityDeath,
-      );
+      //
+      // SHOT REPEATEDLY RATHER THAN ONCE.  The original landed a single
+      // 9999-damage shell, which under the energy model (step 5b) no longer
+      // ends a body at all: a bolt pays the material's price per grain and
+      // carries the rest of its energy out the far side, so an oversized shot
+      // drills a clean track instead of obliterating the tile.  What the test
+      // needs is only that the kill land INSIDE the damage hook, so hit until
+      // it does and read the children of the KILLING hit — snapshotting
+      // before each shot, or the earlier shots' chips would be counted as
+      // duplicates of nothing.
+      let before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+      for (let hit = 0; hit < 64 && tile.active; hit++) {
+        before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
+        e.physics.resolveCollision(
+          {
+            id: 'v9_shell_' + hit, type: 'PROJECTILE',
+            position: { x: tile.position.x + w * 0.5 + 4, y: tile.position.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 40 / 12656.25, active: true, color: '#fff',
+            damage: 40, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          tile, { x: 0, y: 0 },
+          // The REAL damage-feedback hook — the chip/progressFracture site
+          // lives inside it, and the bug was exactly its death racing the
+          // outer health<=0 dispatch.
+          e.spawnDamageText.bind(e),
+          e.handleEntityDeath,
+        );
+      }
       const children = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
       // Duplicate detector: under the bug every fragment spawned twice at
@@ -944,7 +972,7 @@ test.describe('the glass damage layer (V9)', () => {
             id: 'v9_blaster_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: dmg / 12656.25, active: true, color: '#fff',
             damage: dmg, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
@@ -1115,7 +1143,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
             id: 'v10_shot_' + hits, type: 'PROJECTILE',
             position: { x: contactX(), y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: 1 / 12656.25, active: true, color: '#fff',
             damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -1179,7 +1207,7 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
             id: 'v10_glass_' + hits, type: 'PROJECTILE',
             position: { x: contactX(), y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: 4 / 12656.25, active: true, color: '#fff',
             damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
           },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
@@ -1350,7 +1378,7 @@ test.describe('only the struck piece chips (V12)', () => {
           { id: 'v12_' + Math.random(), type: 'PROJECTILE',
             position: { x: cx + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 0.1, active: true, color: '#fff', damage: 4,
+            mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         hits++;
@@ -1626,7 +1654,7 @@ test.describe('grain boundaries (V15)', () => {
           { id: 'v15_' + (n++) + '_' + Math.random(), type: 'PROJECTILE',
             position: { x: contactX() + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: dmg / 12656.25, active: true, color: '#fff',
             damage: dmg, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
         );
@@ -1785,7 +1813,7 @@ test.describe('grain boundaries (V15)', () => {
           { id: 'v15_scale_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            size: { x: 6, y: 6 }, mass: 0.001 / 12656.25, active: true, color: '#fff',
             damage: 0.001, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
         );
@@ -2157,7 +2185,7 @@ test.describe('grain size and bond spread (A2)', () => {
             { id: 'a2c_' + Math.random(), type: 'PROJECTILE',
               position: { x: contactX() + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 4,
+              mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -2208,7 +2236,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
         e.physics.resolveCollision(
           { id:'a3t_'+Math.random(), type:'PROJECTILE',
             position:{x:contactX()+4,y:t.position.y}, velocity:{x:-900,y:0}, rotation:Math.PI,
-            size:{x:6,y:6}, mass:0.1, active:true, color:'#fff', damage:dmg,
+            size:{x:6,y:6}, mass:dmg/12656.25, active:true, color:'#fff', damage:dmg,
             ownerType:'PLAYER', ownerId:'player', hitEntityIds:[] },
           t,{x:0,y:0}, e.spawnDamageText.bind(e), e.handleEntityDeath);
         out.hits++;
@@ -2251,7 +2279,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
           { id: 'm_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 0.1, active: true, color: '#fff', damage: 0.001,
+            mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         const cells = t.fractureCells ?? [];
@@ -2287,7 +2315,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
             { id: 'p_' + Math.random(), type: 'PROJECTILE',
               position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 0.001,
+              mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           const cells = t.fractureCells ?? [];
@@ -2340,7 +2368,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
           { id: 'd_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 0.1, active: true, color: '#fff', damage: 0.001,
+            mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         const tier = t.densityTier ?? 0;
@@ -2370,8 +2398,18 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     const watch = await boot(page);
 
     for (const c of [
-      { map: 'METAL_FIELD', tile: 'metal-tile', minHits: 25 },
-      { map: 'PLASTIC_FIELD', tile: 'plastic-tile', minHits: 8 },
+      // `dmg` IS THE BOLT'S ENERGY, and that is why it is a case field now.
+      // Depth is energy divided by what the material charges per grain
+      // (step 5b), so a bolt driven here with the old flat `mass: 0.1` carried
+      // ~1265 of budget against an authored 4 and bored the whole chord on
+      // every hit — metal died in 8 hits with no dent recorded at all, which
+      // reads as B1 being broken when it is the DRIVER that stopped being
+      // honest.  With the header's mass rule applied, 4 buys one bite of 4
+      // against metal's 14.4-a-grain and plastic's 10.8, which is the
+      // sub-grain hit B1 is named for.  Measured: metal 118-121 hits,
+      // plastic 93-98 — the figures the shipped grain table states.
+      { map: 'METAL_FIELD', tile: 'metal-tile', minHits: 25, dmg: 4 },
+      { map: 'PLASTIC_FIELD', tile: 'plastic-tile', minHits: 8, dmg: 4 },
     ]) {
       await startRun(page, c.map);
       const onMap = new Function('s', `return s.currentMapType === '${c.map}'`) as (s: any) => boolean;
@@ -2385,10 +2423,10 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
         for (const t of ents.filter((x: any) => x.active && x.shardVariant === arg.tile
             && x.mass === Infinity).slice(0, 4)) {
           e.player.position.x = t.position.x + 6000;
-          rows.push(drive(e, t, 4, 250));
+          rows.push(drive(e, t, arg.dmg, 250));
         }
         return rows;
-      }, { tile: c.tile, src: DRIVE_SRC });
+      }, { tile: c.tile, src: DRIVE_SRC, dmg: c.dmg });
 
       for (const row of r) {
         // It deforms: hits that landed without anything coming off still
@@ -2470,13 +2508,17 @@ test.describe('a fragment is drawn as its own shape (LOD)', () => {
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       // One big hit: the whole pattern arrives in a single frame, which is
       // what made the uniformity unmistakable in the first place.
-      e.physics.resolveCollision(
-        { id: 'lod_' + Math.random(), type: 'PROJECTILE',
-          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
-          velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-          mass: 0.1, active: true, color: '#fff', damage: 500,
-          ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
-        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+      // BREAK IT THROUGH THE DEATH PATH, not with one enormous bolt.
+      // This test wants the whole fragment pattern in a single frame; it does
+      // not care how the tile died.  Under the energy model (step 5b) a huge
+      // shot no longer obliterates a body — it drills a track, pays the
+      // material's price per grain and carries the rest of its energy out the
+      // far side, which is the point of the change.  The two stamps are what
+      // make the shatter read as an impact (CLAUDE.md §8).
+      t.health = 0;
+      t.lastImpactVelocity = { x: -4, y: 0 };
+      t.lastImpactDamage = 3;
+      e.handleEntityDeath(t);
 
       const debris = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
@@ -2585,7 +2627,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             { id: 'cons_' + Math.random(), type: 'PROJECTILE',
               position: { x: contactX() + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 4,
+              mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -2656,7 +2698,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             { id: 'el_' + Math.random(), type: 'PROJECTILE',
               position: { x: contactX() + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 4,
+              mass: 4 / 12656.25, active: true, color: '#fff', damage: 4,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -2743,7 +2785,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
             { id: 'shp_' + Math.random(), type: 'PROJECTILE',
               position: { x: sh.position.x + sh.size.x * 0.5 + 4, y: sh.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 0.001,
+              mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             sh, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           rows.push({ size: sh.size.x, cells: (sh.fractureCells ?? []).length,
@@ -2815,7 +2857,7 @@ test.describe('grain size is a material constant', () => {
             { id: 'gs_' + Math.random(), type: 'PROJECTILE',
               position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 0.001,
+              mass: 0.001 / 12656.25, active: true, color: '#fff', damage: 0.001,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           const n = (t.fractureCells ?? []).length;
@@ -3194,7 +3236,7 @@ test.describe('per-material grain overrides (DBG)', () => {
         { id: 'grainknob_' + Math.random(), type: 'PROJECTILE',
           position: { x: t.position.x + t.size.x * 0.5, y: t.position.y },
           velocity: { x: -900, y: 0 }, rotation: Math.PI,
-          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+          size: { x: 6, y: 6 }, mass: 1 / 12656.25, active: true, color: '#fff',
           damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
         t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
       );
@@ -3270,13 +3312,15 @@ test.describe('metal grains are DRAWN as themselves', () => {
       e.player.position.x = t.position.x; e.player.position.y = t.position.y;
       e.camera.position.x = t.position.x; e.camera.position.y = t.position.y;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      e.physics.resolveCollision(
-        { id: 'metallod_' + Math.random(), type: 'PROJECTILE',
-          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
-          velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-          mass: 0.1, active: true, color: '#fff', damage: 500,
-          ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
-        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+      // BREAK IT THROUGH THE DEATH PATH, not with one enormous bolt — this
+      // test wants the whole grain pattern in a single frame and does not
+      // care how the tile died.  Under the energy model (step 5b) a huge shot
+      // drills a track and carries the rest of its energy out the far side
+      // instead of obliterating the body, which is the point of the change.
+      t.health = 0;
+      t.lastImpactVelocity = { x: -4, y: 0 };
+      t.lastImpactDamage = 3;
+      e.handleEntityDeath(t);
 
       const debris = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'metal-shard' && x.mass !== Infinity);
@@ -3354,7 +3398,7 @@ test.describe('damage spread (A4)', () => {
           { id: 'a4_' + Math.random(), type: 'PROJECTILE',
             position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
             velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-            mass: 0.1, active: true, color: '#fff', damage: 3,
+            mass: 3 / 12656.25, active: true, color: '#fff', damage: 3,
             ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
           t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
         hits++;
@@ -3670,7 +3714,7 @@ test.describe('chip dust', () => {
             { id: 'dust_' + Math.random(), type: 'PROJECTILE',
               position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
               velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-              mass: 0.1, active: true, color: '#fff', damage: 3,
+              mass: 3 / 12656.25, active: true, color: '#fff', damage: 3,
               ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
             t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
           hits++;
@@ -3754,13 +3798,17 @@ test.describe('chip LOD gate', () => {
       // ONE overwhelming hit, the way a charged or burst shot lands — the
       // whole pattern arrives at once, which is what makes an odd circle
       // among polygons unmistakable.
-      e.physics.resolveCollision(
-        { id: 'lodgate_' + Math.random(), type: 'PROJECTILE',
-          position: { x: t.position.x + t.size.x * 0.5 + 4, y: t.position.y },
-          velocity: { x: -900, y: 0 }, rotation: Math.PI, size: { x: 6, y: 6 },
-          mass: 0.1, active: true, color: '#fff', damage: 120,
-          ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [] },
-        t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath);
+      // BREAK IT THROUGH THE DEATH PATH, not with one enormous bolt.
+      // This test wants the whole fragment pattern in a single frame; it does
+      // not care how the tile died.  Under the energy model (step 5b) a huge
+      // shot no longer obliterates a body — it drills a track, pays the
+      // material's price per grain and carries the rest of its energy out the
+      // far side, which is the point of the change.  The two stamps are what
+      // make the shatter read as an impact (CLAUDE.md §8).
+      t.health = 0;
+      t.lastImpactVelocity = { x: -4, y: 0 };
+      t.lastImpactDamage = 3;
+      e.handleEntityDeath(t);
 
       const grains = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard');
@@ -4255,7 +4303,7 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
                 position: { x: tile.position.x + W * 0.5 + 4,
                             y: tile.position.y + ((h % 5) - 2) * 4 },
                 velocity: { x: -900, y: 0 }, rotation: Math.PI,
-                size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+                size: { x: 6, y: 6 }, mass: 4 / 12656.25, active: true, color: '#fff',
                 damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
               },
               tile, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,

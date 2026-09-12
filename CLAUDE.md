@@ -67,10 +67,12 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           shardblend, fracture, bubbles (the Phase-A
                           aggro timeout + the immovability fix, and
                           the mouth-size / bite eating rules) and
-                          modules (the Phase-A module families:
-                          Penetration, Scanner, hex slots), weapons (what a
-                          shot does beyond its damage — today the Plasma
-                          Cannon's fuse),
+                          modules (Gunnery, Scanner, hex slots, and
+                          that the deleted Penetration family is gone
+                          from every surface), weapons (what a SHOT
+                          does: the Plasma Cannon's fuse, and the whole
+                          energy model — falloff, the grain bore,
+                          overkill carry-through, the far side),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
@@ -709,7 +711,7 @@ Notable existing field categories on `GameEntity`:
 - AI: `enemySubtype`, `aiState`, `aiTimer`, `visionRange`, `maxSpeed`,
   `aggroTimer`, `orbitRadius`/`orbitSpin`/`preferredDistance`
 - Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,
-  `targetEntityId`, `pierceCount`, `hitEntityIds`, `isBouncer`,
+  `targetEntityId`, `mass`, `spawnSpeed`, `hitEntityIds`, `isBouncer`,
   `isLightningProjectile`, `isLightningArc`, `arcPoints`
 - Drop / reward: `dropType` (`'health' | 'glass' | 'salvage'`),
   `dropValue`, `dropWeapon`, `powerupWeapon`, `salvagePickupFlash`,
@@ -1535,7 +1537,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   cost, own fixed effect — no levels, no in-place upgrades), guns and
   Shield/Overcharge/Light are single varieties.  The Mk families today
   are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
-  (ship) and Gunnery / Autoloader / **Penetration** (weapon-mod).  Purchases land in the
+  (ship) and **Gunnery** / Autoloader (weapon-mod).  Purchases land in the
   INVENTORY (12 tiles rendered as a honeycomb of hex tiles, duplicates
   allowed and stacking); outfitting is moving hex tiles between the
   inventory and the two 7-hex groups — SHIP and WEAPON.  GUN placement
@@ -1649,21 +1651,33 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate
   (UPGRADE_DEFS / UNLOCK_DEFS / upgradeCost / upgradeLevels /
   unlockedWeapons) is DELETED.
-  **PENETRATION** (`piercing`, weapon-mod, A3) is the model MINOR module:
-  `+1 pierce per mark`, summed into `player.pierceBonus` by
-  `applyModuleEffects` and folded into the shot config by
-  `WeaponSystem.withPierceBonus` — the same channel `damageMult` and
-  `cooldownMult` take, so nothing downstream of the gun knows a module
-  exists.  The bonus applies to EVERY gun UNIFORMLY (guidance call):
-  Lightning and Cannon are `pierce: 0` because their identity is chain
-  and splash and they take it anyway with eyes open.  A burst SUB-shot
-  takes it too (`tickPlayerBurst` re-derives its config per shot), and
-  the sum is clamped to `MAX_PIERCE` — 99, a plain SANITY ceiling
-  against an authoring mistake and NOT anchored to any weapon.  It used
-  to be, and the anchor rotted: it was "the value the Laser already ships
-  as effectively infinite", and the Laser ships `pierce: 4` now.
-  WHAT A CHARGE BUYS is the part the first version got wrong (user
-  review, "option C").  Three rules replace "one charge, one body":
+  **PENETRATION IS DELETED AS A MODULE** (unified impact physics, step 5;
+  user call).  The `piercing` family, `pierceBonus`, `withPierceBonus`,
+  `MAX_PIERCE`, `WeaponConfig.pierce` and `GameEntity.pierceCount` are all
+  GONE, and so is the Ship Status panel's Penetration row.  The reason is
+  not that penetration stopped mattering — it is that penetration stopped
+  being a THING TO SELL: it is emergent from a round's energy against what
+  the target charges, so a module granting "+N bodies" was selling a
+  quantity the sim no longer has.  GUNNERY ABSORBED IT: `damageFrac` now
+  scales the round's BITE and its MASS together (`WeaponSystem.withGunnery`),
+  so a mark buys a DENSER round — it bites harder AND carries further, which
+  under the energy model is one statement rather than two.  Scaling only the
+  bite would make a Gunnery round hit harder and stop SOONER (fewer, bigger
+  contacts out of a fixed bank), which is the opposite of a heavier shell and
+  is the failure `tests/modules.spec.ts` pins.
+  A ROUND CARRIES TWO NUMBERS and they answer different questions.  `damage`
+  is the BITE — what one contact deposits, at the muzzle.  `mass` is the BANK
+  — with `speed` it fixes the energy the round launches with, and so how many
+  bites it can pay for.  Step 3 DERIVED the bank from the bite times an
+  authored `pierce`; step 5 AUTHORS it (every player gun states a `mass`, at
+  exactly the numbers that solve produced, so the roster rebalanced nothing)
+  and deletes `pierce`, because a count of bodies is not a property a
+  projectile has.  Charged shots took the same repricing — the Blaster's
+  charge is a 20× heavier round rather than "pierce 3" — and a boss weapon
+  spreading a player gun must RESTATE the mass when it overrides `damage` or
+  `speed`, or it inherits a bank sized for numbers it no longer has (measured:
+  the Reaver's scattergun would have flown with a third of one bite).
+  Four rules describe what a round can afford:
   - **DAMAGE IS KINETIC, AND THE FALLOFF IS NO LONGER A KNOB** (unified
     impact physics, step 3).  A bolt does not carry an authored damage
     scalar from muzzle to target — it carries ENERGY, and what it lands is
@@ -1672,33 +1686,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     structural world (where `grain.bondStrength` is already a specific
     fracture energy) and the ACTOR world (authored HP pools, the §7 trait
     thresholds) — the single conversion docs/PARKING_LOT.md §4 demands.
-    `projectileMassFor` solves each weapon's MASS from the damage, muzzle
-    speed and PIERCE it already authors, so the roster keeps every number
-    it had and the step-1 audit's "the implied constant is not a constant"
-    (9..90 KE per point of damage) dissolves: that 10× spread was an
-    artefact of every projectile flying at `mass: 1`, and freeing the mass
-    moves it into SECTIONAL DENSITY (Laser 1.78, Blaster 1.00, Cannon and
-    Seeker 3.56, enemy bolt 7.90).
-    PIERCE BELONGS IN THE SOLVE and leaving it out is the mistake this
-    invites: a bolt whose whole energy equals one bite spends itself on
-    contact, so every weapon would stop dead and the Laser's `pierce: 4`
-    would be unreachable.  The bank is `(1 + pierce)` bites — the same
-    statement as sectional density, which is what a penetrator has more of.
+    The step-1 audit's "the implied constant is not a constant" (9..90 KE
+    per point of damage) dissolves: that 10× spread was an artefact of every
+    projectile flying at `mass: 1`, and freeing the mass moves it into
+    SECTIONAL DENSITY (Laser 1.78, Blaster 1.00, Cannon and Seeker 3.56,
+    enemy bolt 7.90).
     WHAT FALLS OUT is the point: a bolt that has spent energy is slower
     (`speedAfterSpending`), and damage is measured from speed, so the next
     bite is smaller with no curve authored anywhere.  The decay is
-    `1 - 1/(1 + pierce)`, DERIVED PER WEAPON — Laser 0.80/hit, Burst
-    0.67, Shotgun 0.50, a non-piercing bolt stops dead.  `PIERCE_FALLOFF_RATE`
-    (shipped at 0) and `PIERCE_SPEED_RETAIN` (shipped at 1.0) were the two
-    halves of that one number and are DELETED rather than retuned; two
-    knobs describing one phenomenon was the clearest symptom of the overlap
-    this work exists to remove, and it is also why the shipped rate was 0 —
-    nobody could say what the right number was, because the number should
-    not have existed.  `GameEntity.hitFalloff` survives unchanged in
-    MEANING (this hit's size relative to the shot's authored damage), so
-    the Cannon's AoE splash and the Lightning chain still read it rather
-    than re-deriving; `GameEntity.spawnSpeed` is the launch reference the
-    measurement divides by.
+    `1 - bite/energy` at the muzzle — Laser 0.80/hit, Burst 0.67, Shotgun
+    0.50, a one-bite round stops dead.  `PIERCE_FALLOFF_RATE` (shipped at 0)
+    and `PIERCE_SPEED_RETAIN` (shipped at 1.0) were the two halves of that
+    one number and are DELETED rather than retuned; two knobs describing one
+    phenomenon was the clearest symptom of the overlap this work exists to
+    remove, and it is also why the shipped rate was 0 — nobody could say what
+    the right number was, because the number should not have existed.
+    `GameEntity.hitFalloff` survives unchanged in MEANING (this hit's size
+    relative to the shot's authored damage), so the Cannon's AoE splash and
+    the Lightning chain still read it rather than re-deriving;
+    `GameEntity.spawnSpeed` is the launch reference the measurement divides
+    by.
     WHICH VELOCITY the energy is measured in is the one judgement call, and
     it is a DBG ladder (▸ Player ▸ "Impact vel") because energy is
     FRAME-DEPENDENT and `INHERIT_SHOOTER_VELOCITY` is 1.0 — a forward shot
@@ -1711,29 +1718,59 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     formula — at the price of a charging ship hitting 2.2–5× harder
     (measured at POCKET cruise 15; ~9.5× at ASTEROID_FIELD's 33.3) and a
     shot at a target fleeing at matched speed landing nothing.
-  - **INSIDE A GRAIN BODY A CHARGE BUYS A GRAIN, NOT A TILE** — the bore
-    track; see §8.  Each grain is re-measured from the bolt's CURRENT
-    speed and the bolt is slowed by exactly what it deposited, so the
-    track decays on its own.
+  - **INSIDE A GRAIN BODY THE TARGET SETS THE PRICE** — the bore track; see
+    §8.  A round walks its own chord a grain at a time and each grain costs
+    `grainSize × bondStrength`: glass 6.0, rock 5.6, plastic 10.8, metal
+    14.4.  So the SAME round gets three times as far into glass as into
+    metal with no per-weapon depth authored anywhere, and a round stops when
+    it can no longer afford the next grain.  ONE CONSEQUENCE IS WORTH
+    KNOWING because it is easy to read as a bug: no single shot can destroy
+    a grain tile however much energy it carries, because the deposit is
+    capped by the chord — a 36px glass pane is ~3 grains deep, so one
+    contact can leave at most ~18 against a derived HP near 49.  That is
+    "passage, not gouge" (user call) doing exactly what it says: a
+    hyper-energetic round punches a clean hole and flies on rather than
+    dumping its whole bank into the entry cell.
+  - **AN ACTOR IS CHARGED ONLY WHAT IT COULD ABSORB** — overkill carries
+    through, the actor-side half of step 4's "pay for what you broke".  A
+    body cannot take more than it had, so a 4-damage Blaster bolt is charged
+    1 by a 1-HP gnat and flies on with 3: it punches FOUR of them (measured)
+    where it is stopped dead by one rock tile.  The waste is read off the
+    target's own overdrawn health, so it is zero by construction wherever a
+    body cannot go negative (a saturating boundary spend, a hit-counted tile,
+    a rock break that zeroes health) and needs no branch per target kind.  A
+    PLATE IS NOT OVERKILL: armour and the front shield STOP a round rather
+    than run out of room, so a reduced hit pays in full however little
+    reached the hull.
   - **AN INDESTRUCTIBLE TILE STOPS THE BOLT DEAD** and costs it nothing.
-    It took no damage, so it may not take a charge either; the shipped
+    It took no damage, so it may not take any energy either; the shipped
     build let a bolt through it AND charged for the privilege, which was
     the worst artifact of the body-level rule.
-  THE LASER'S OWN BUDGET went 99 → 4 in the same pass (user call).
+  THE LASER'S OWN BUDGET went 99 → 4 bites in the same pass (user call),
+  and is now simply its authored mass (1.7778 against a 5 bite).
   "Effectively infinite" pre-dated there being any COST to piercing;
   with a falloff in play at all a beam gives up damage per body, so an
   unbounded budget just made the Laser the answer to every line of
-  targets.  Under the energy model the budget is also literally what it
-  buys: `pierce` sizes the bolt's energy bank, so 99 would have been 100
-  bites of fuel.  A RICOCHET MAY RE-HIT what it already struck, with no cap —
+  targets — and under the energy model 99 would have been 100 bites of fuel.
+  A RICOCHET MAY RE-HIT what it already struck, with no cap —
   bought by CLEARING `hitEntityIds` at the bounce site rather than by
   weakening the `alreadyHit` guard in the projectile branch, which is
   load-bearing for an unrelated reason (it is what stops a bolt in
-  SUSTAINED OVERLAP re-damaging a body every substep at 120Hz).  Pierce
-  therefore stays a LIFETIME budget: a bouncing beam still gets at most
-  `pierceCount` damage events across its whole flight however many times
-  it turns around, each stepping further down the curve.  Bounces buy
-  COVERAGE, not extra damage events.
+  SUSTAINED OVERLAP re-damaging a body every substep at 120Hz).  ENERGY is
+  therefore a LIFETIME bank: a bouncing beam lands only what it can still
+  afford however many times it turns around, each bite further down the
+  curve its own mass sets.  Bounces buy COVERAGE, not extra damage.
+  **THE PLASMA CANNON IS A HEAVY ROUND, NOT A CONTACT MINE** (user call,
+  step 5a).  `applyExplosionAoE` used to fire on EVERY hit, so a shell
+  carrying N penetration detonated N+1 times — and making penetration
+  universal would have meant a full blast on every pebble it passed through.
+  `WeaponConfig.detonateOn: 'enemy'` now says only an ACTOR trips the charge;
+  against STRUCTURES the shell stays a projectile and spends its energy
+  boring, which is what its 3.56 mass is for.  `fuseSeconds` (0.42, ticked by
+  `GameEngine.updateProjectileFuses` off `GameEntity.fuseTimer`) is the
+  fallback so a shell fired into open space still ends in a blast rather than
+  being silently wasted.  Measured: a Cannon shell passes through 18 of 18
+  tiny/small/medium rock shards without detonating.
   **PURCHASABLE HEX SLOTS** (A5): how many hexes of each flower are
   UNLOCKED is a run field (`GameEngine.shipSlotsUnlocked` /
   `weaponSlotsUnlocked`, reset by `resetOutfit`), and

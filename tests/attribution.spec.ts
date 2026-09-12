@@ -144,12 +144,14 @@ test.describe('stat attribution', () => {
 
     // The FULL row set, in order.  Pinned exactly rather than loosely,
     // because a line that quietly stops being built is invisible in play —
-    // the panel just shows one fewer row.  `pierce` and `scanner` are the
-    // Phase-A module families (A3 / A4); both are always present, reading
-    // '+0' / 'None' on a ship carrying neither.
+    // the panel just shows one fewer row.  `scanner` is always present,
+    // reading 'None' on a ship carrying none.  `pierce` is deliberately
+    // ABSENT: the Penetration family was deleted in step 5 (penetration is
+    // emergent from the round's own energy now), and a stat row for a module
+    // nobody can buy is the exact kind of leftover this list catches.
     const expected = [
       'hull', 'shield', 'shieldRegen', 'damage', 'cooldown',
-      'speed', 'accel', 'weight', 'pierce', 'scanner', 'overcharge',
+      'speed', 'accel', 'weight', 'scanner', 'overcharge',
     ];
     expect(docked).toEqual(expected);
     // Same widget, same rows — a divergence here means the two call sites

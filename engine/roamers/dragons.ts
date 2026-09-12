@@ -273,7 +273,7 @@ function fireDragonMissile(g: GameEngine, d: GameEntity) {
     const cfg = {
         type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
         speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
-        count: 1, spread: 0, recoil: 0, pierce: 0,
+        count: 1, spread: 0, recoil: 0,
         homing: true, homingStrength: M.homingStrength, glow: true,
     } as WeaponConfig;
     g.spawnProjectileFromConfig(d, g.player.position, cfg, EntityType.ENEMY);

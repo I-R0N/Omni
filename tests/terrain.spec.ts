@@ -85,26 +85,30 @@ function breakATile(page: any, how: 'shot' | 'crush') {
     const before = { debris: debris(), score: e.score, alive: t.active === true };
 
     if (mode === 'shot') {
-      // The shell is deliberately far OVERPOWERED, and that is not laziness:
-      // under the V15 grain model a tile's HP is DERIVED from its own Voronoi
-      // pattern (Σ boundary length × bondStrength), so it varies tile to tile
-      // — a 36px glass pane measures 44.6..51.2 across runs.  A 50-damage
-      // shell sits INSIDE that band, so it killed the tile ~7 runs in 8 and
-      // left it standing on the other one (measured: 2 failures in 16
-      // repetitions, both with derived HP just over 50).  Killing the tile is
-      // this test's PRECONDITION, not its claim — the claim is the debris
-      // parity below — so the shell must clear the band by a margin no
-      // pattern can close.
-      e.physics.resolveCollision(
-        {
-          id: 'terrain_shell', type: 'PROJECTILE',
-          position: { x: at.x + t.size.x * 0.5 + 4, y: at.y },
-          velocity: { x: -900, y: 0 }, rotation: Math.PI,
-          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-          damage: 500, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        },
-        t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
-      );
+      // SHOTS UNTIL IT DIES, not one overpowered shell — because no single
+      // shot can kill a grain tile any more, however much energy it carries.
+      // A round bores its own CHORD and pays the material's price per grain
+      // (unified impact physics, step 5), so the most one contact can deposit
+      // into a 36px glass pane is about three grains' worth against a derived
+      // HP near 49.  The old shell leaned on the retired rule that poured a
+      // bolt's whole authored damage into the entry cell; at `damage: 500` it
+      // now deposits 18 and the tile stands.
+      //
+      // Killing the tile is this test's PRECONDITION, not its claim — the
+      // claim is the debris parity below — so it is driven to death and the
+      // caller asserts it got there.
+      for (let i = 0; i < 40 && t.active; i++) {
+        e.physics.resolveCollision(
+          {
+            id: 'terrain_shell_' + i, type: 'PROJECTILE',
+            position: { x: at.x + t.size.x * 0.5 + 4, y: at.y },
+            velocity: { x: -900, y: 0 }, rotation: Math.PI,
+            size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
+            damage: 500, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
+          },
+          t, { x: 0, y: 0 }, undefined, e.handleEntityDeath,
+        );
+      }
     } else {
       // A REAL mtv, not {0,0}: `resolveCollision` bails before the crash
       // branch when the separation vector is degenerate, and the normal it
@@ -370,7 +374,7 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
               position: { x: t.position.x - t.size.x * 0.5 - 2, y: t.position.y },
               velocity: { x: 16, y: 0 }, rotation: 0, size: { x: 6, y: 6 }, mass: 1,
               active: true, color: '#fff', damage: 4, ownerType: 'PLAYER',
-              ownerId: 'player', hitEntityIds: [], pierceCount: 0, pierceHits: 0,
+              ownerId: 'player', hitEntityIds: [], pierceHits: 0,
             }, t, { x: -1, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
           }
           const p = e.player;

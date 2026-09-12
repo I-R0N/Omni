@@ -1651,7 +1651,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
                   ['engine', 'Engine'], ['thrusters', 'Thrusters'],
                   ['gunnery', 'Gunnery'], ['autoloader', 'Autoloader'],
-                  ['piercing', 'Penetration'],
                   // The scanner is the one family with FIVE marks — each adds a
                   // detection tier — so its row is derived from the catalog
                   // rather than from a hardcoded [1,2,3] like the rest.

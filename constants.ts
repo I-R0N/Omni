@@ -5487,17 +5487,6 @@ export const DAMAGE_TEXT_CONSTANTS = {
   DAMAGE_FONT_SCALE: 0.8, // damage chips render small vs. points popups
 };
 
-// PIERCE CEILING (A3).  The Penetration module adds +1 pierce per mark to
-// EVERY gun uniformly (guidance call), and this clamps the sum.
-//
-// It is a plain SANITY ceiling against an authoring mistake, and nothing
-// more — it is deliberately NOT anchored to any weapon.  It used to be, and
-// the anchor rotted: 99 was "the ceiling the Laser already defines", and the
-// Laser now ships `pierce: 4`.  The largest reachable stack today is that 4
-// plus Penetration Mk III's +3 = 7, so nothing comes near this and no
-// balance statement should be read into the number.
-export const MAX_PIERCE = 99;
-
 // ── KINETIC IMPACT DAMAGE (unified impact physics, step 3) ──────────────────
 //
 // ONE QUANTITY CROSSES EVERY IMPACT SEAM: ENERGY.  A projectile's damage is
@@ -5519,27 +5508,25 @@ export const MAX_PIERCE = 99;
 // projectile in the game flew at mass 1, so all of the variation between a
 // Laser pulse and a Cannon shell had nowhere to live except in the constant.
 //
-// Free the mass and the constant IS constant.  `projectileMassFor` solves each
-// weapon's mass from the damage, muzzle speed and PIERCE it already authors,
-// so the spread moves into SECTIONAL DENSITY — a physical property of the shot
-// that was previously suppressed — and every damage number is unchanged on
-// day one.
+// Free the mass and the constant IS constant: the spread moves into SECTIONAL
+// DENSITY — a physical property of the shot that was previously suppressed —
+// and every damage number is unchanged on day one.
 //
-// PIERCE IS PART OF THE SOLVE, and leaving it out is the one mistake this
-// model invites.  A bolt whose whole kinetic energy equals one bite of its
-// authored damage spends ITSELF on its first hit, so every weapon would stop
-// dead on contact and the Laser's `pierce: 4` would be unreachable.  Sizing
-// the budget at `(1 + pierce)` bites is what makes penetration affordable —
-// and it is the same statement as sectional density, which is precisely what
-// a penetrator has more of.
+// A ROUND CARRIES TWO NUMBERS, AND THEY ARE DIFFERENT QUESTIONS.  `damage` is
+// the BITE — what one contact deposits, at the muzzle.  `mass` is the BANK —
+// with `speed` it fixes the energy the round launches with, and therefore how
+// many bites it can pay for before it is spent.  Step 3 DERIVED the bank from
+// the bite times an authored `pierce` count; step 5 authors it directly and
+// deletes `pierce`, because a count of bodies is not a property a projectile
+// has.  A round has a mass; how far it gets is arithmetic.
 //
 // WHAT FALLS OUT, AND IT IS THE WHOLE POINT.  A bolt that has spent energy is
 // slower, and damage is measured from speed, so the next bite is smaller with
 // no curve authored anywhere.  The decay rate is not a knob and is not global:
-// it is `1 - 1/(1 + pierce)`, DERIVED per weapon.  Measured over the shipped
-// roster, successive bites are
+// it is `1 - bite/energy` at the muzzle, a consequence of the two numbers
+// above.  Measured over the shipped roster, successive bites are
 //
-//   Blaster       4.00                          stops dead (pierce 0)
+//   Blaster       4.00                          stops dead (bank = 1 bite)
 //   Shotgun       3.00 1.50                     decay 0.50/hit
 //   Burst Rifle   5.00 3.33 2.22                decay 0.67/hit
 //   Laser         5.00 4.00 3.20 2.56 2.05      decay 0.80/hit
@@ -5550,25 +5537,34 @@ export const MAX_PIERCE = 99;
 // the clearest single symptom of the overlap this work exists to remove, and
 // it is also why the shipped falloff rate was 0 — nobody could say what the
 // right number was, because the number should not have existed.
+//
+// AND THE BODY COUNT IS NOT A BUDGET EITHER.  A round stops when it can no
+// longer afford what it is hitting: terrain charges per GRAIN
+// (`grainSize x bondStrength`) and an actor charges only what it could
+// actually absorb, so the same Blaster bolt that is stopped dead by one rock
+// tile punches through four one-HP gnats.  Depth is emergent on both sides of
+// the seam, which is what let the Penetration module be deleted rather than
+// replaced (step 5).
 export const IMPACT_ENERGY_PER_DAMAGE = 32;
 
 /** The mass the sim flies for a shot from `cfg`.
  *
- *  DERIVED so the bolt launches with `(1 + pierce)` bites of its authored
- *  damage in the bank — see the note above for why pierce belongs in the
- *  solve.  `WeaponConfig.mass` overrides it for a shot whose density is a
- *  deliberate statement; nothing sets it today.
+ *  AUTHORED where a round's density is a statement — every player gun states
+ *  one, and the numbers are exactly what step 3's `(1 + pierce)` solve
+ *  produced, so retiring the vocabulary rebalanced nothing.  The FALLBACK is
+ *  the bank that makes a round spend itself on one contact, which is what
+ *  every weapon with nothing to say about penetration means; the enemy guns
+ *  take it rather than carrying a second table.
  *
  *  Mass is NOT inert: `PhysicsSystem` reads it for the momentum a hit imparts
- *  to a mobile target, so a Cannon shell (3.56) now shoves a shard harder
- *  than a Laser pulse (1.78) does.  That is the intended physical content of
- *  giving shots a real mass, and it is the one balance change step 3 ships. */
-export function projectileMassFor(cfg: { damage: number; speed: number; pierce?: number; mass?: number }): number {
+ *  to a mobile target, so a Cannon shell (3.56) shoves a shard harder than a
+ *  Laser pulse (1.78) does.  That is the physical content of giving shots a
+ *  real mass, and it is the one balance change step 3 shipped. */
+export function projectileMassFor(cfg: { damage: number; speed: number; mass?: number }): number {
   if (cfg.mass !== undefined) return cfg.mass;
   const v = cfg.speed;
   if (!(v > 0)) return PROJECTILE_CONSTANTS.MASS;
-  const budget = 1 + Math.max(0, cfg.pierce ?? 0);
-  return (2 * IMPACT_ENERGY_PER_DAMAGE * cfg.damage * budget) / (v * v);
+  return (2 * IMPACT_ENERGY_PER_DAMAGE * cfg.damage) / (v * v);
 }
 
 /** Damage a body of `mass` carries at `speed`, in the authored-damage units
@@ -5755,7 +5751,7 @@ export function cycleImpactVelocity(): number {
 //   Each weapon owns a distinct tactical niche.  ROF spans ~10× across the
 //   lineup (Blaster 7/s vs Cannon ~0.7/s); damage trades inversely with ROF
 //   so per-shot damage spans ~5× (Blaster 4 vs Cannon 18).  Each weapon
-//   composes existing primitives (homing / pierce / bounce / lightning /
+//   composes existing primitives (homing / mass / bounce / lightning /
 //   spread / burst) plus the new `explosionRadius` AoE primitive on the
 //   Cannon.  Charged-shot variants (held mouse for the full INPUT_CONSTANTS
 //   .CHARGE_FULL window then released) cost only the charge time — ammo was
@@ -5775,7 +5771,11 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 2,
     recoil: 0.5,
-    pierce: 0,
+    // BANK = one bite: the starter round spends itself on the first thing it
+    // can hurt.  Depth is still not zero — overkill carries through, so a
+    // bolt worth 4 punches four one-HP gnats (measured) and is stopped dead
+    // by one rock tile, which charges 5.6 a grain.
+    mass: 1,
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
@@ -5789,7 +5789,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 1,
     recoil: 0.3,
-    pierce: 2,
+    mass: 2.4,         // 3 bites; decay 0.67/hit
     burstCount: 3,
     burstDelay: 0.04,
   },
@@ -5805,7 +5805,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 6,
     spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
-    pierce: 1,
+    mass: 0.96,        // 2 bites; decay 0.50/hit — a pellet gives up half
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
@@ -5823,21 +5823,18 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 3,          // 3-beam forward fan
     spread: 30,        // ±15° cone
     recoil: 0.5,
-    // 99 → 4 (user call, penetration rework).  "Effectively infinite" was a
-    // number that pre-dated any cost to piercing: with the shared
-    // falloff rate in place a beam already gives up damage per body,
-    // so an unbounded budget just made the Laser the answer to every line of
-    // targets.  Four DAMAGE EVENTS is the budget for the whole flight —
-    // bounces do not refresh it (see the reflection branch in
-    // PhysicsSystem) — and it runs the SHARED falloff table: no
-    // `pierceFalloffRate` override here, deliberately.
-    pierce: 4,
+    // THE DENSEST ROUND IN THE ROSTER for its speed: 25 of energy against a
+    // 5 bite, so it rakes a line giving up only 0.80 a body.  This is the
+    // "effectively infinite pierce" the Laser used to carry, repriced — an
+    // unbounded budget made it the answer to every line of targets, and an
+    // energy bank spends down instead.
+    mass: 1.7778,      // 5 bites; decay 0.80/hit
     bounceCount: 15,   // 3 -> 15 (user call): reflects up to 15 times off tiles
                        // before dissipating.  Bounces buy COVERAGE, never extra
-                       // damage — `pierce` above is a LIFETIME budget of damage
-                       // events that a reflection does not refresh — so a beam
-                       // that ricochets this much still lands at most 4 hits,
-                       // each further down the shared falloff curve.
+                       // damage — the energy above is a LIFETIME bank that a
+                       // reflection does not refill — so a beam that ricochets
+                       // this much still lands what it can afford, each bite
+                       // further down the curve its own mass sets.
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -5852,7 +5849,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 3,
     recoil: 0.3,
-    pierce: 0,         // stops on first hit, then chains
+    mass: 0.8521,      // one bite — it stops on first hit, then chains
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -5867,7 +5864,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 10,
     recoil: 0.5,
-    pierce: 0,
+    mass: 3.5556,      // one bite, but a HEAVY one: a slow 8-damage round is
+                       // dense, so a Seeker shoves a shard hard on contact
     homing: true,
   },
   [WeaponType.CANNON]: {
@@ -5882,7 +5880,10 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 0,
     recoil: 4.0,       // halved from 8.0 — a slower ROF + AoE makes huge recoil punitive
-    pierce: 0,
+    mass: 3.5556,      // the heaviest round in the game alongside the Seeker,
+                       // and with 18 of energy behind it: against rock (5.6 a
+                       // grain) the shell bores three grains deep rather than
+                       // being spent by the chip it clipped
     explosionRadius: 110,   // world units of radial AoE on impact
     explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
@@ -6033,7 +6034,11 @@ export const ENEMY_WEAPON: WeaponConfig = {
   count: 1,
   spread: 4,
   recoil: 0,
-  pierce: 0,
+  // No `mass`: the fallback in `projectileMassFor` gives an enemy bolt the
+  // bank that spends itself on one contact, which is what a weapon with
+  // nothing to say about penetration means.  Keeping enemy fire off the
+  // authored table is deliberate — one place states densities, and it is the
+  // player's roster.
 };
 
 // ── Boss weapons ((h)) ────────────────────────────────────────────────────────
@@ -6061,7 +6066,12 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
     speed: 15,
     lifetime: 0.95,
     recoil: 0,         // enemies take no recoil
-    pierce: 0,
+    // RE-SOLVED, not inherited.  The spread above copies the player Shotgun's
+    // `mass`, which was authored against the player's 3 damage at speed 20; at
+    // a boss's 5 at speed 15 that bank is a THIRD of one bite, and a round
+    // that cannot afford its own bite lands nothing.  Anything overriding
+    // `damage` or `speed` off a player gun has to restate the mass with it.
+    mass: 1.4222,      // one bite at damage 5, speed 15
   },
   // Bastion's siege battery — the player Plasma Cannon, AoE and all: the same
   // purple heavy slug that splashes on impact.  Halved damage and a much
@@ -6079,7 +6089,7 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
     explosionDamage: 6,     // splash (player: 10)
     explosionKnockback: 5,
     recoil: 0,
-    pierce: 0,
+    mass: 4.7603,      // one bite at damage 9, speed 11 — see SCATTER
   },
 };
 
@@ -6191,7 +6201,7 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'piercing' | 'overcharge'
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge'
   | 'utility' | 'scanner';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
@@ -6205,7 +6215,6 @@ export interface ModuleEffect {
   accelFrac?: number;       // thrusters
   damageFrac?: number;      // gunnery
   cooldownFrac?: number;    // autoloader
-  pierceBonus?: number;     // piercing — +N projectile penetrations (A3)
   // scanner — the MARK of one Scanner module (A4).  Summed nowhere: the
   // ship's scanner TIER is the highest active mark, so two Mk I do not add
   // up to a Mk II.  See applyModuleEffects.
@@ -6329,7 +6338,6 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   capacitor:  ['shield'],
   gunnery:    ['gun'],
   autoloader: ['gun'],
-  piercing:   ['gun'],
   overcharge: ['gun'],
   utility:    ['hull'],
   scanner:    ['hull'],
@@ -6576,9 +6584,14 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000, weight: 2.0 },
   { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000, weight: 2.5 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
-  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
+  // GUNNERY IS THE HEAVIER ROUND, and that is what absorbed the deleted
+  // Penetration module (step 5).  `damageFrac` scales the bite AND the bank
+  // together (WeaponSystem), so a mark buys a denser shot: it bites harder AND
+  // carries further, which under the energy model is the same statement.
+  // Penetration existed to sell depth separately; depth is no longer a
+  // separate thing to sell.
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% shot mass`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
   ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
-  ...statMks('piercing', 'weapon', 'weapon-mod', 'Penetration', mk => `+${mk} shot penetration`, [9000, 22500, 43000], mk => ({ pierceBonus: mk }), 0.2),
   { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 

@@ -2314,11 +2314,11 @@ no track.
    and it is why the shipped falloff rate is 0: nobody could say what the
    right number was, because the number should not have existed.
 
-4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**  Step 3
-   made it a physical one WITHOUT removing it — `pierce` now sizes the
-   bolt's energy bank at `(1 + pierce)` bites, so it reads as sectional
-   density rather than as a licence count.  Retiring the field itself is
-   still step 5's.  A shot
+4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**
+   **RESOLVED in step 5 — `pierce`, `pierceCount` and `MAX_PIERCE` are all
+   deleted and a round authors its `mass` directly; see §11.**  Step 3 made
+   the budget physical without removing it (`pierce` sized the energy bank at
+   `(1 + pierce)` bites); step 5 removed the count.  A shot
    gets N discrete charges regardless of what it hits — a 36px pane and a
    200-unit boulder each cost the same charge (the bore softened this
    *within* a body but not between bodies).  Under an energy model there is
@@ -2358,10 +2358,12 @@ area), which is precisely the physical constant this wants.  The proposal:
   authored gates and become "did the impactor bring enough energy to break
   the first boundary" — which is automatically material-dependent, so metal
   resists a bump that shatters glass without a per-material threshold table.
-- **A Penetration module stops buying charges** and starts buying what a
-  penetrator actually has: sectional density, or a smaller contact patch —
-  i.e. it concentrates the same energy on less boundary. That is a better
-  story for the item as well as a truer one.
+- ~~**A Penetration module stops buying charges**~~ — **RESOLVED in step 5,
+  and the answer was to DELETE the module (user call).**  It was to start
+  buying sectional density instead; what the measurement showed is that
+  sectional density is exactly what GUNNERY already buys once `damageFrac`
+  scales the mass as well as the bite, so a second module selling the same
+  physical property had nothing left of its own to sell.  See §11.
 
 ### 4. What must NOT be unified
 
@@ -2402,8 +2404,10 @@ PR.  The honest sequencing:
    what it broke.  A per-grain hull track is still open, and is now purely a
    DEPOSITION-GEOMETRY question — see the "Penetration bore tracks as a
    FRACTURE MODEL" entry, which is where it belongs.
-5. **Revisit `pierceCount`** last, since removing a budget changes what the
-   Penetration module *is*.  Not started.
+5. ~~**Revisit `pierceCount`**~~ — **SHIPPED (2026-09-12)**, see §11 below.
+   Removing the budget did change what the Penetration module *is*, and the
+   user's call was that it is nothing: penetration is emergent, so the module
+   is deleted and Gunnery absorbs it.
 
 ### 6. Related entries — this is the hub
 
@@ -2628,4 +2632,71 @@ knockback suite.
 chord.  A per-grain hull track — and whether a wide track should free several
 grains as ONE fragment — stays parked under "Grain clusters" and "Penetration
 bore tracks as a FRACTURE MODEL".
+
+### 11. What step 5 SHIPPED (2026-09-12)
+
+**PENETRATION IS EMERGENT, AND THE MODULE THAT SOLD IT IS DELETED** (user
+call).  The brief for this step was "make penetration a natural effect that
+comes out for all impacts", and the module followed from that rather than the
+other way round: once depth is energy divided by what the target charges,
+there is no count left for an item to grant.
+
+**`pierce` is gone; a round authors its `mass`.**  `WeaponConfig.pierce`,
+`GameEntity.pierceCount`, `MAX_PIERCE`, `pierceBonus` and `withPierceBonus`
+are all deleted.  A round now carries two numbers that answer different
+questions: `damage` is the BITE one contact deposits, `mass` with `speed` is
+the BANK.  The authored masses are EXACTLY what step 3's `(1 + pierce)` solve
+produced (Blaster 1.0, Burst 2.4, Shotgun 0.96, Laser 1.7778, Lightning
+0.8521, Seeker and Cannon 3.5556), so retiring the vocabulary rebalanced
+nothing — `perf/impact-audit.mjs` §2 measures the banks back out at 1/3/2/5/1/1/1
+bites.
+
+**GUNNERY ABSORBED IT.**  `damageFrac` scales the bite AND the mass together,
+so a mark buys a denser round: it bites harder and carries further, which
+under the energy model is one statement.  Scaling only the bite — which is
+what the module did while mass was derived FROM damage — would make a Gunnery
+round hit harder and stop SOONER, out of a fixed bank.
+
+**THREE THINGS FELL OUT, and two of them were not planned.**
+
+1. **Depth is the TARGET's price, not the weapon's.**  A grain costs
+   `grainSize × bondStrength`: glass 6.0, rock 5.6, plastic 10.8, metal 14.4.
+   Measured with an energy-bound round (12 of energy): rock 3 grains, glass 2,
+   plastic 2, metal 1 — the price ordering exactly, with the SAME total energy
+   spent in every case.
+2. **Overkill carries through on ACTORS** — the actor-side half of step 4's
+   "pay for what you broke".  A body absorbs only what it had, so a 4-damage
+   Blaster bolt is charged 1 by a 1-HP gnat and punches FOUR of them
+   (measured) while one rock tile still stops it dead.  A PLATE is not
+   overkill: armour and the front shield stop a round rather than run out of
+   room, so a reduced hit pays in full.
+3. **No single shot can destroy a grain tile**, however much energy it
+   carries, because the deposit is capped by the CHORD.  A 36px glass pane is
+   ~3 grains deep, so one contact leaves at most ~18 against a derived HP near
+   49.  This is "passage, not gouge" doing what it says — a hyper-energetic
+   round punches a clean hole and flies on — but it is the one consequence
+   most likely to be read as a bug, and it invalidated a terrain test whose
+   setup one-shot a tile with a `damage: 500` shell.
+
+**THE CANNON NEEDED ITS OWN RULE (5a, user call).**  `applyExplosionAoE` fired
+on EVERY hit, so a shell carrying N penetration detonated N+1 times; universal
+penetration would have made that a full blast per pebble.  `detonateOn:
+'enemy'` means only an ACTOR trips the charge, with `fuseSeconds` (0.42) as
+the fallback so a shell that meets nothing still ends in a blast.  Measured: a
+shell passes through 18 of 18 tiny/small/medium rock shards without
+detonating.
+
+**TWO MEASUREMENT TRAPS, both of which produced a confidently wrong answer
+first.**  Capping a bore step at the BITE rather than the remaining ENERGY let
+a bolt bore for ever, so depth fell back to `bodyWidth / grainSize` and
+finer-grained plastic measured DEEPER than pricier, coarser glass.  And
+comparing depth at HIGH energy measures the chord rather than the price — at
+20 bites metal took 5 steps to glass's 3, exactly backwards — so the
+regression drives an energy-bound round and asserts `alive === false` to prove
+it is not chord-bound.
+
+**What is still NOT done**: the hull still deposits at one contact point
+rather than along a chord (unchanged from §10), and the bore is a line rather
+than a track with width — both still parked under "Penetration bore tracks as
+a FRACTURE MODEL" and "Grain clusters".
 

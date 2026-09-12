@@ -157,7 +157,7 @@ const weapons = await page.evaluate(() => {
     const shot = e.currentMap.entities.find(x => !before.has(x.id) && x.type === 'PROJECTILE');
     out.push({
       type: t, name: cfg.name,
-      damage: cfg.damage, pierce: cfg.pierce, count: cfg.count, cooldown: cfg.cooldown,
+      damage: cfg.damage, count: cfg.count, cooldown: cfg.cooldown,
       cfgSpeed: cfg.speed,
       mass: shot ? shot.mass : null,
       speed: shot ? Math.hypot(shot.velocity.x, shot.velocity.y) : null,
@@ -274,7 +274,7 @@ for (const m of MATERIALS) {
           position: { x: t.position.x - t.size.x * 0.5 - 2, y: t.position.y },
           velocity: { x: 16, y: 0 }, rotation: 0, size: { x: 6, y: 6 }, mass: 1,
           active: true, color: '#fff', damage: 4, ownerType: 'PLAYER',
-          ownerId: 'player', hitEntityIds: [], pierceCount: 0, pierceHits: 0,
+          ownerId: 'player', hitEntityIds: [], pierceHits: 0,
         }, t, { x: -1, y: 0 }, undefined, e.handleEntityDeath);
       }
       const hp0 = t.health, max0 = t.maxHealth;
@@ -343,13 +343,16 @@ for (const m of materials) {
 }
 
 console.log('\n=== 2. WEAPONS: authored damage vs the shot it actually flies ===\n');
-console.log('weapon           dmg  count  pierce   mass   speed      KE=½mv²    p=mv    KE/dmg   p/dmg');
+// `bites` is the BANK in bites of the authored damage — energy / damage.
+// Step 5 deleted `pierce`; this is the same number, measured off the shot the
+// sim actually flies rather than read off a field.
+console.log('weapon           dmg  count   bites   mass   speed      KE=½mv²    p=mv    KE/dmg   p/dmg');
 for (const w of weapons) {
   const ke = w.mass !== null ? 0.5 * w.mass * w.speed * w.speed : null;
   const p = w.mass !== null ? w.mass * w.speed : null;
   console.log(
     `${w.name.padEnd(16)} ${f(w.damage, 1).padStart(4)} ${String(w.count).padStart(5)} `
-    + `${String(w.pierce).padStart(7)}  ${f(w.mass, 1).padStart(5)}  ${f(w.speed, 2).padStart(6)}   `
+    + `${f(ke !== null ? ke / 32 / w.damage : null, 2).padStart(7)}  ${f(w.mass, 1).padStart(5)}  ${f(w.speed, 2).padStart(6)}   `
     + `${f(ke, 1).padStart(9)} ${f(p, 1).padStart(7)}  ${f(ke / w.damage, 1).padStart(7)} ${f(p / w.damage, 2).padStart(7)}`);
 }
 

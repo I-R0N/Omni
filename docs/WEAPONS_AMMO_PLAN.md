@@ -67,6 +67,17 @@ fire rate under the (now-removed) shared-pool model.
 | Seeker Missiles | 50,000 | 10 (15) | 15.4 | 1.5/s | 6 dmg, homing | 4-missile volley, weak tracking |
 | Plasma Cannon | 60,000 | 12 (18) | 8.6 | 0.7/s | 18 + 110r AoE (10 + knockback) | 2× radius, 1.5× AoE dmg |
 
+> **STALE VOCABULARY (2026-09-12).**  The `pierce` column above is a
+> historical snapshot: ammo was deleted in pivot 1b, and `WeaponConfig.pierce`
+> was deleted in unified impact physics step 5.  A round now authors its
+> `mass`, and how many bodies it gets through is energy against what each
+> target charges.  The equivalent figures, in BITES of the round's own
+> authored damage: Blaster 1, Burst 3, Shotgun 2, Laser 5, Lightning 1,
+> Seeker 1, Cannon 1 — which is `1 + pierce` of the column above, except the
+> Laser, whose 99 became 4 in the same rework.  Charged effects were repriced
+> the same way (the Blaster's charge is a 20× heavier round, not "pierce 3").
+> `perf/impact-audit.mjs` §2 measures all of it off live shots.
+
 Per-ammo efficiency vs a single target ran Burst 7.5 → Shotgun 4.5 →
 Lightning ~3 → Bouncer 2.5 → Cannon ~1.5 → **Seeker 0.6** dmg/ammo.
 
@@ -297,6 +308,25 @@ evasive enemy real dodge behavior vs straight projectiles, make the
 front-shield entity punish face-tanking (the Bulwark arc-shield already
 prototypes this), and tune regen thresholds against Shotgun/Cannon
 burst windows.
+
+**RE-CHECKED AGAINST UNIFIED IMPACT PHYSICS (steps 3–5, 2026-09-12).**  Five
+of the six columns are UNCHANGED, and that is by construction rather than by
+luck: damage became kinetic but is DAY-ONE NEUTRAL — a bolt at its launch
+speed still lands exactly the number the weapon authors — so every threshold
+this table turns on is the number it was.  `armor`'s chipThreshold 6 still
+splits the roster the same way (Blaster 4 and Shotgun 3/pellet plink;
+Lightning 9, Seeker 8 and Cannon 18 punch through); `evasive` is AI-side;
+`front-shield` is geometry; `regen`'s fixed bucket counts applied damage,
+which has not moved.
+
+The one column that DID move is **crowds / swarm**, and it moved in every
+row: overkill carries through on actors, so a round is charged only what the
+body could absorb and flies on with the rest.  A plain Blaster bolt now
+punches FOUR 1-HP gnats (measured) where it used to stop on the first — so
+"—" in that column no longer means "cannot", it means "not its speciality".
+Whether the cone and chain weapons still need to be the designated crowd
+answers is a live balance question for the step-6 economy pass, not something
+this table can settle on its own.
 
 ---
 

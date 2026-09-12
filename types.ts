@@ -291,13 +291,13 @@ export interface WeaponConfig {
   count: number; // Number of projectiles per shot
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
-  pierce: number; // How many entities the projectile passes through after the first hit
-  // SECTIONAL DENSITY — the mass the sim flies for this shot.  Absent (every
-  // weapon today) → `constants.projectileMassFor` DERIVES it from `damage`
-  // and `speed`, so the authored damage figure is what the bolt carries at
-  // its own muzzle speed and the roster is numerically unchanged.  Set it
-  // only for a shot whose density is a deliberate statement; note that mass
-  // also decides the momentum a hit imparts to a mobile target.
+  // SECTIONAL DENSITY — the mass the sim flies for this shot, and with `speed`
+  // the ENERGY it launches with: its BANK, against `damage` as the BITE one
+  // contact deposits.  How many bodies it gets through is therefore arithmetic
+  // rather than an authored count, which is why `pierce` is gone (step 5).
+  // Absent → `constants.projectileMassFor` derives the bank that spends itself
+  // on one contact; every player gun states one.  Mass also decides the
+  // momentum a hit imparts to a mobile target.
   mass?: number;
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
@@ -494,11 +494,9 @@ export interface GameEntity {
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
-  pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
   // How many bodies (or GRAINS — see the bore track in PhysicsSystem) this
-  // bolt has already struck.  The index into the falloff table, so it is
-  // separate from `pierceCount`, which counts DOWN and would read the
-  // table backwards.
+  // bolt has already struck.  DIAGNOSTIC since step 5: the falloff comes from
+  // the bolt's remaining speed, so nothing reads this to decide anything.
   pierceHits?: number;
   /** Counts DOWN to a self-detonation for a shell whose charge is not tripped
    *  by structures (`WeaponConfig.detonateOn: 'enemy'`).  Absent → the shot
@@ -532,7 +530,7 @@ export interface GameEntity {
   burstTimer?: number; // Timer for next burst shot
   // Set on the trigger pull that started the current burst — true if the
   // burst was a charged shot.  Read by tickPlayerBurst so sub-shots inherit
-  // the charged config (pierce 3 instead of 2, etc.).
+  // the charged config.
   burstCharged?: boolean;
 
   // Charge-shot progress: 0 (not charging) … 1 (full).  Updated each frame
@@ -556,10 +554,6 @@ export interface GameEntity {
   //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
   damageMult?: number;
   cooldownMult?: number;
-  //  - pierceBonus: extra projectile penetrations from Penetration modules
-  //    (A3), added to the weapon's own `pierce` in WeaponSystem and clamped
-  //    to MAX_PIERCE; default 0.
-  pierceBonus?: number;
   shieldRechargeRate?: number;
   // Unlock + loadout gating (player only; set by GameEngine
   // .syncUnlocksToPlayer):
@@ -2039,8 +2033,9 @@ export interface EngineStats {
   shardBlendCount?: number;
   /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
   shardCoatName?: string;
-  // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
+  // DBG "Impact vel" — which velocity a hit's energy is measured in, as shown.
   impactVelocityName?: string;
+  // DBG "Crash energy" — the crash-coupling multiplier, as shown.
   crashEnergyName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken

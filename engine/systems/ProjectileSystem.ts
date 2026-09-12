@@ -194,7 +194,6 @@ export class ProjectileSystem {
         pooled.homingStrength = config.homingStrength;
         pooled.ownerType = ownerType;
         pooled.ownerId = shooter.id; // for third-party retaliation (Stage 5)
-        pooled.pierceCount = config.pierce;
         // A recycled shot that kept a previous shot's hit count would start
         // part-way down a curve it never fired through, so both halves of
         // the penetration state are assigned unconditionally.  `mass` and
@@ -252,7 +251,6 @@ export class ProjectileSystem {
           homingStrength: config.homingStrength,
           ownerType,
           ownerId: shooter.id, // for third-party retaliation (Stage 5)
-          pierceCount: config.pierce,
           pierceHits: 0,
           trail: [],
           isLightningProjectile: isLight,
